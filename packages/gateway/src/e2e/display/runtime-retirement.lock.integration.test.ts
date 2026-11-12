@@ -16,11 +16,10 @@ it.each(["replace", "dispose"] as const)("K1 display retirement revokes only the
   try {
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
-    const sessionDir = join(root, "sessions");
-    await Promise.all([agentDir, cwd, sessionDir].map(path => mkdir(path, { recursive: true })));
+    await Promise.all([agentDir, cwd].map(path => mkdir(path, { recursive: true })));
     const faux = fauxProvider({ provider: "tron-display-retirement" });
     await writeFile(join(agentDir, "settings.json"), JSON.stringify({
-      sessionDir, defaultProvider: faux.provider, defaultModel: faux.getModel().id,
+      defaultProvider: faux.provider, defaultModel: faux.getModel().id,
     }));
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);

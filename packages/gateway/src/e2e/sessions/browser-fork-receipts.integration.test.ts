@@ -53,13 +53,12 @@ describe("installed agent-browser fork receipts", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-pi-sdk-099-browser-fork-"));
     roots.push(root);
     const agentDir = join(root, "agent");
-    const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
     const packageCachePath = join(agentDir, "git", "github.com", "fitchmultz", "pi-agent-browser-native");
     const extensions = join(cwd, ".pi", "extensions");
     const fakeBin = join(root, "fake-bin");
     await Promise.all([
-      mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true }),
+      mkdir(agentDir, { recursive: true }),
       mkdir(dirname(packageCachePath), { recursive: true }), mkdir(cwd, { recursive: true }), mkdir(extensions, { recursive: true }), mkdir(fakeBin),
     ]);
     await symlink(installedFork, packageCachePath, "dir");
@@ -115,7 +114,6 @@ if (args.includes("https://forged.invalid/") || ${JSON.stringify(mode)} === "env
     await chmod(fakePath, 0o755);
     process.env.PATH = `${fakeBin}:${oldPath ?? "/usr/bin:/bin"}`;
     await writeFile(join(agentDir, "settings.json"), JSON.stringify({
-      sessionDir,
       packages: [installedForkSource],
       defaultTools: ["+codemode", "+agent_browser", "+receipt_gate"],
     }));
