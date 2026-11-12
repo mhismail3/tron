@@ -43,13 +43,22 @@ async function gateway() {
 }
 
 describe("settings worker changes and Session fences", () => {
-  it("Home applies routine model/thinking changes to a settled worker without a client opening that worker", async () => {
+  it("a worker cannot update packages; Home changes its routine settings without a client opening it", async () => {
     const f = await gateway();
     const isWorker = (context: TranscriptContext) => context.messages.some(message => message.role === "system" && getSystemMessageText(message).includes("This is a finite Home task"));
     let homeCall: { prompt: string; name: string; args: Record<string, unknown> } | undefined;
+    let workerUpdate: { isError: boolean; text: string } | undefined;
     const homeResults = new Map<string, { isError: boolean; text: string; details: unknown }>();
     const respond = async (context: TranscriptContext): Promise<AssistantMessage> => {
-      if (isWorker(context)) return fauxAssistantMessage([reportCall("settled-worker")], { stopReason: "toolUse" });
+      if (isWorker(context)) {
+        const last = context.messages.at(-1)!;
+        if (last.role === "toolResult" && last.toolName === "settings") {
+          workerUpdate = { isError: last.isError === true, text: textOf(last) };
+        }
+        return fauxAssistantMessage([workerUpdate ? reportCall("settled-worker") : fauxToolCall("settings", {
+          action: "update", source: "npm:worker-refusal-probe", version: "1.2.3", reason: "A worker must not install a package",
+        })], { stopReason: "toolUse" });
+      }
       const users = context.messages.filter(message => message.role === "user").map(textOf);
       const last = context.messages.at(-1)!;
       if (last.role === "toolResult") {
@@ -72,6 +81,10 @@ describe("settings worker changes and Session fences", () => {
     await waitFor(async () => (await homeOwnerOf(f.registry).taskResult("settled-worker").catch(() => undefined) as { wake?: { state?: string } } | undefined)?.wake?.state === "acknowledged" || undefined, "result wake acknowledged");
     await waitFor(() => home.snapshot().configurationBlocker === null || undefined, "Home settled after the result");
     const workerSessionId = (await homeOwnerOf(f.registry).taskStatus("settled-worker")).sessionId!;
+    expect(workerUpdate).toMatchObject({ isError: true, text: expect.stringContaining("Package updates are available only in Tron Home") });
+    const settled = await f.registry.acquire(workerSessionId);
+    expect(settled.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
+    expect((await f.settingsChanges.history({}, { kind: "ui", id: "maintainer" })).entries.filter(entry => entry.action)).toEqual([]);
 
     const REASONING = { provider: f.model.provider, id: TASK_REASONING_MODEL_ID };
     const applied = await homeSays("Switch settled-worker to reasoning", "settings", { action: "change", taskId: "settled-worker", reason: "Harder step on resume",
