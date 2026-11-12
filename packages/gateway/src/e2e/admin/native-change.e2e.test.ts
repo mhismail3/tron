@@ -595,4 +595,3 @@ describe("push registration retry card is a typed native intent", () => {
     } finally { broker.retire(); }
   });
 });
-
