@@ -247,6 +247,9 @@ skips runtime reload and keeps the provider prefix unchanged. Successful reloads
 alone advance applied state; failures remain pending for another idle edge or
 relevant file event. Retention leases do not block reload: native slot admission,
 not the broader eviction-busy flag, decides whether runtime work is idle.
+Public command, detail, context and resource reads serialize on the slot lane through
+reload publication, so a newly loaded catalog cannot escape before its
+`session.resourcesChanged` notice. Streaming turns do not hold this lane.
 Trust transactions keep public settings reads fenced until commit or compensation.
 Their snapshot refresh reads the session layer internally without re-entering that
 public fence; application and compensation use the same reload owner. The registry

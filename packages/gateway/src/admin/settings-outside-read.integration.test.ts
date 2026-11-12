@@ -72,11 +72,13 @@ it("applies outside MCP and trust edits to live sessions and refreshes provider 
     modelRuntime: f.gateway, trust: f.trust, settingsModel: f.settings.settingsModel, settingsChanges: f.settings.settingsChanges,
     broadcast: () => {}, globalProviderResources: { requestReload: () => { refreshes += 1; } },
   } as unknown as GatewayServiceDependencies);
+  let settingsReads: NodeJS.Timeout | undefined;
   try {
     await f.trust.set(f.cwd, true);
     const slot = await f.registry.create(f.cwd);
     await outside.reconcile([{ kind: "mcp" }, { kind: "trust" }, { kind: "models" }]);
     outside.startWatching(error => { throw error; });
+    settingsReads = setInterval(() => { void f.settings.settingsModel.owner.observedReaders.global(); }, 25);
     await writeFile(join(f.agentDir, "mcp.json"), JSON.stringify({ mcpServers: { outside: { url: `http://127.0.0.1:${address.port}/mcp`, exposure: "direct" } } }));
     await waitFor(() => slot.runtime.session.getAllTools().some(tool => tool.name === "mcp__outside__outside_tool"), "outside MCP edit reaches the same idle session").catch(error => {
       throw new Error(JSON.stringify({ requests, signals: f.signals, tools: slot.runtime.session.getAllTools().map(tool => tool.name), observed: outside.path }), { cause: error });
@@ -111,6 +113,7 @@ it("applies outside MCP and trust edits to live sessions and refreshes provider 
     await writeFile(join(f.agentDir, "AGENTS.md"), "# Global fixture rules\nApply this explicit global input.\n");
     await waitFor(() => f.signals.slice(beforeRules).some(event => event.outcome === "resources-reload" && event.reason === "completed" && event.sessionId === f.home.sessionId), "global AGENTS invalidates the live Home slot");
   } finally {
+    clearInterval(settingsReads);
     await outside.dispose();
     service.dispose();
     try { await disposeFixtures(); }

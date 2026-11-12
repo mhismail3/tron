@@ -248,8 +248,7 @@ export class OutsideChanges {
   private watchDirectory(id: string, directory: string, relevant: (name: string) => boolean, stores: ObservedStore[], changed?: () => void): boolean {
     try {
       const watcher = watch(directory, { persistent: false }, (_event, name) => {
-        if (!this.watching || (name !== null && !relevant(String(name)))) return;
-        clearTimeout(this.timers.get(id));
+        if (!this.watching || (name !== null && !relevant(String(name))) || this.timers.has(id)) return;
         this.timers.set(id, setTimeout(() => {
           this.timers.delete(id);
           if (!this.watching) return;

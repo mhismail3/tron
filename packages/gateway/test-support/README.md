@@ -71,6 +71,13 @@ stale-lock or power-loss recovery.
   resolvers and HTTP stubs. `network-isolation.ts` refuses any non-loopback TCP
   connection from an in-process socket and fails the current test (or file). It does
   not cover child processes or DNS.
+- **Worker routing.** Scripted providers identify finite Home workers in system messages
+  through pi-ai `getSystemMessageText`, including structured sections. User-role
+  content is task input, not the worker discriminator. Canonical JSONL context guards
+  inspect message roles: structured system context is retained, never injected into users.
+- **Canonical crash cuts.** Partial automation trigger fixtures retain the producer's
+  content, event identity and full-text reference. Real delivery's contradiction guard
+  and the exact-once/order/single-push assertions remain active across restart.
 - **Authority journeys.** The lock harness's `knowledge` option constructs the real
   Knowledge store/service and supplies Home the same settings/profile approval owner as
   transport. Model tool dispatch never receives the paired client's decision RPCs.
