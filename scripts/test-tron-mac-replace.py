@@ -786,6 +786,7 @@ def launch_services_journey():
         for directory in (platform.maintenance, platform.store):
             replace.private_mkdir(directory)
         journal = replace.Journal.create(platform.store / 'fixture', 'fixture', 'full', 'Launch Services fixture', {'revision': 'fixture'})
+        replace.stage_runner(platform, journal, HERE)
         journal.begin_attempt({'pid': os.getpid()})
         journal.data['artifact'] = {'path': str(candidate)}
         replace.Runner(platform, journal).step_swap_app()
