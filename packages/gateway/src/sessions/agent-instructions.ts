@@ -32,6 +32,7 @@ export interface AgentInstructions {
 interface SourceInfoLike { path: string; source: string; scope: string; origin: string }
 
 interface AgentInstructionsInput {
+  preview: boolean;
   prompt: string;
   tronContext: string;
   customPrompt?: { text: string; path?: string };
@@ -48,7 +49,7 @@ const OPEN_TAG = /\n\n<([a-z][a-z0-9_-]*)>\n/y;
 export function projectAgentInstructions(input: AgentInstructionsInput): AgentInstructions {
   let parsed = splitPrompt(input);
   const tron = parsed?.blocks.find(block => block.name === "tron");
-  if (tron && tron.body !== input.tronContext) {
+  if (input.preview && tron && tron.body !== input.tronContext) {
     const previous = `<tron>\n${tron.body}\n</tron>`;
     const at = input.prompt.lastIndexOf(previous);
     input = { ...input, prompt: input.prompt.slice(0, at) + `<tron>\n${input.tronContext}\n</tron>` + input.prompt.slice(at + previous.length) };

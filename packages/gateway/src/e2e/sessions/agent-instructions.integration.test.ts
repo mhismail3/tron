@@ -4,7 +4,7 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { fauxAssistantMessage, fauxProvider, getCurrentSystemPrompt, type TranscriptContext } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, fauxProvider, getCurrentSystemPrompt, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import { TrustService } from "../../kernel/resources/trust-service.js";
@@ -42,7 +42,10 @@ const FIXTURE_EXTENSION = `export default function(pi) {
     promptSnippet: "Fixture snippet",
     promptGuidelines: ["Fixture guideline first line\\n- nested bullet inside the guideline"],
     parameters: { type: "object", properties: {} },
-    execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
+    execute: async () => {
+      if (process.env.FIXTURE_CHANGE_TOOLS) pi.setActiveTools(["fixture_tool"]);
+      return { content: [{ type: "text", text: "ok" }], details: {} };
+    },
   });
   if (process.env.FIXTURE_BROWSER_TOOL) pi.registerTool({
     name: "agent_browser", label: "Browser", description: "fixture browser",
@@ -250,6 +253,26 @@ describe("Agent Instructions projection through the pinned runtime", () => {
     const idle = await instructions(f.slot);
     expect(idle.text).toBe(next.received);
     expect(idle.sections.some(section => section.id === "fixture_once")).toBe(false);
+  }, 20_000);
+
+  it("does not rewrite sent instruction bytes when tools change during a request", async () => {
+    vi.stubEnv("FIXTURE_CHANGE_TOOLS", "1");
+    const f = await fixture();
+    let received = "";
+    let during: AgentInstructions | undefined;
+    f.faux.setResponses([async (context: TranscriptContext) => {
+      received = getCurrentSystemPrompt(context.messages);
+      return fauxAssistantMessage([fauxToolCall("fixture_tool", {})], { stopReason: "toolUse" });
+    }, async (context: TranscriptContext) => {
+      received = getCurrentSystemPrompt(context.messages);
+      during = await instructions(f.slot);
+      return fauxAssistantMessage("Done");
+    }]);
+    await f.slot.prompt("hello");
+    await waitFor(() => !f.slot.isBusy, "the turn to settle");
+    expect(during!.text).toBe(received);
+    expect(during!.sections.find(section => section.id === "tron")!.text).toContain("Do on-screen work yourself");
+    expect((await instructions(f.slot)).sections.find(section => section.id === "tron")!.text).not.toContain("Do on-screen work yourself");
   }, 20_000);
 
   it("previews an accepted tool change while idle before the next provider request", async () => {
