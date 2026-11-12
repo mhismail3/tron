@@ -20,6 +20,8 @@ export interface ScheduleToolRequest {
   activate?: boolean;
   automationId?: string;
   runId?: string;
+  offset?: number;
+  limit?: number;
   expectedRevision?: number;
   outcome?: "succeeded" | "failed" | "cancelled";
 }
@@ -48,6 +50,8 @@ const parameters = Type.Object({
   activate: Type.Optional(Type.Boolean()),
   automationId: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
   runId: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+  offset: Type.Optional(Type.Integer({ minimum: 0 })),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 4096 })),
   expectedRevision: Type.Optional(Type.Integer({ minimum: 1 })),
   outcome: Type.Optional(StringEnum(["succeeded", "failed", "cancelled"] as const)),
 }, { additionalProperties: false });
@@ -61,7 +65,7 @@ export function createTronScheduleExtension(input: {
       name: "schedule",
       annotations: { openWorldHint: false },
       label: "Schedule",
-      description: "Create and manage durable Gateway-owned automations for this Tron session. Create accepts exactly one trigger: at, everyMinutes, or timezone + localTime + weekdays; optional expiresAt is an ISO expiry timestamp. Provide either prompt or notificationMessage, not both. Prompt automations may target the current session, create a new session in its workspace per run, or send an attributed message to Home. Home messages never grant maintainer authority and wake at most once per automation per 60 seconds.",
+      description: "Create and manage durable Gateway-owned automations for this Tron session. Create accepts exactly one trigger: at, everyMinutes, or timezone + localTime + weekdays; optional expiresAt is an ISO expiry timestamp. Provide either prompt or notificationMessage, not both. Prompt automations may target the current session, create a new session in its workspace per run, or send an attributed message to Home. Home messages never grant maintainer authority and wake at most once per automation per 60 seconds. show with automationId and runId reads that run’s original prompt or notification text in UTF-8 byte pages: offset defaults to 0, limit to 4096 (maximum 4096), and nextOffset is null at the end.",
       promptSnippet: "Create and manage durable schedules and reminders for the current Tron session",
       promptGuidelines: [
         "Use schedule for authorized durable automations. Home may manage them directly; interactive sessions require user confirmation; delegated workers cannot mutate them.",

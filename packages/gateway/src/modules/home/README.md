@@ -128,9 +128,11 @@ Composition supplies the same late K6 settings, Profile and raw model owners.
   overflow checks share one head constructor: recorded text/sections are replaced,
   declared tools are charged with `instructions`, and profile is counted
   separately. Every activation declares the same tools, so the one head constructor charges the
-  same schemas for user turns and wakes. `home-task-dispatch.e2e.test.ts` proves a full report
-  fits the wake's inline headroom; `home-tool-admission.e2e.test.ts` compares pre-usage instruction
-  accounting with the actual provider frame. Historical system deltas are not
+  same schemas for user turns and wakes. Admission reads the live SDK declaration head even
+  before the first canonical system entry. `home-task-dispatch.e2e.test.ts` proves first-turn
+  backlog delivery without overflow and native recovery of oversized reports; Home uses its
+  immutable-reference summary above the injected-text bound. `home-tool-admission.e2e.test.ts`
+  compares pre-usage instruction accounting with the actual provider frame. Historical system deltas are not
   additional heads. Output reserve remains.
 - **Token counts** follow the provider's usage. Before a request is sent its sections are Pi's
   character estimates multiplied by factors learned per model from the provider's usage, held in
