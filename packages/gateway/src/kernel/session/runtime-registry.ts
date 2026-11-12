@@ -59,6 +59,7 @@ import {
   type RuntimeSlotDependencies,
 } from "../run/runtime-slot.js";
 import { completionOwnedByMarker, type CanonicalAssistantCompletion, type SessionAttentionRebindDisposition } from "../run/completion-facts.js";
+import { ResourceFreshness, type ResourceFreshnessRecord } from "../run/resource-freshness.js";
 import { ExtensionActivityRecency } from "../../sessions/extension-activity-recency.js";
 import { ProcessActivityRecency } from "../projection/process-activity-recency.js";
 import { ExtensionArtifactDiscovery, type ExtensionArtifactDiscoveryCounts } from "../../sessions/extension-artifact-discovery.js";
@@ -472,6 +473,7 @@ export class RuntimeRegistry implements SessionOperations {
   private readonly artifactDiscovery: ExtensionArtifactDiscovery;
   private artifactDiscoveryInFlight: Promise<void> | undefined;
   private slotAdmissionsInFlight = 0;
+  readonly freshness: ResourceFreshness;
   private readonly slotAdmissionIdleWaiters: Array<() => void> = [];
   private administrativeDrainStarted = false;
   private readonly workRegistry: GatewayWorkRegistry;
@@ -516,6 +518,7 @@ export class RuntimeRegistry implements SessionOperations {
       stopSteeringDiagnostic?: RuntimeSlotDependencies["stopSteeringDiagnostic"];
       manualCompactionAdopted?: RuntimeSlotDependencies["manualCompactionAdopted"];
       requestRecord?: RuntimeSlotDependencies["requestRecord"];
+      resourceFreshnessDiagnostic?: (record: ResourceFreshnessRecord) => void;
       capabilityDiagnostic?: RuntimeSlotDependencies["capabilityDiagnostic"];
       codemodeDiagnostic?: RuntimeSlotDependencies["codemodeDiagnostic"];
       catalogDiscoveryLimits?: Partial<typeof DEFAULT_CATALOG_DISCOVERY_LIMITS>;
@@ -535,6 +538,7 @@ export class RuntimeRegistry implements SessionOperations {
       homeTaskDiagnostic?: (record: TaskWorkerDiagnostic) => void;
     },
   ) {
+    this.freshness = new ResourceFreshness({ agentDir: options.agentDir, diagnostic: options.resourceFreshnessDiagnostic });
     this.delegation = new DelegationOperations(this,
       (slot, by, before) => interruptToolCalls(slot.runtime.session, new ToolCallInterrupt(by), before), options);
     this.artifactDiscovery = new ExtensionArtifactDiscovery(this.slots, options);
@@ -672,6 +676,7 @@ export class RuntimeRegistry implements SessionOperations {
       if (existing !== undefined) return existing;
       const manager = await start.manager();
       slot = await start.create(manager);
+      await this.freshness.attach(slot);
       start.admitted?.(slot);
       const transcriptBytes = await sessionFileBytes(slot.sessionFile);
       const result = await this.mutex.run(() => {
@@ -689,7 +694,7 @@ export class RuntimeRegistry implements SessionOperations {
       return result;
     } catch (error) {
       start.failed?.();
-      if (slot && this.slots.get(slot.id) !== slot) await slot.dispose().catch(() => {});
+      if (slot && this.slots.get(slot.id) !== slot) { this.freshness.detach(slot); await slot.dispose().catch(() => {}); }
       throw error;
     } finally {
       if (reserved) {
@@ -724,6 +729,7 @@ export class RuntimeRegistry implements SessionOperations {
     await this.attention.initialize();
     await this.archive.initialize();
     this.sessionCatalog.start();
+    this.freshness.start();
     for (const lifecycle of this.lifecycles()) lifecycle.started();
     const markerEvidence = await this.markers.evidence();
     this.interrupted = await this.markers.interruptedSessionIds();
@@ -831,6 +837,7 @@ export class RuntimeRegistry implements SessionOperations {
         this.options.sessionListChanged();
       },
       settled: (sessionId: string) => { this.interrupted.delete(sessionId); },
+      idle: (slot: RuntimeSlot) => this.freshness.idle(slot),
       assistantResponseCompleted: async (
         sessionId: string,
         completion: CanonicalAssistantCompletion,
@@ -2544,6 +2551,7 @@ export class RuntimeRegistry implements SessionOperations {
           this.interrupted.has(sessionId),
         ),
       ));
+      await this.freshness.attach(slot!);
       await this.mutex.run(() => {
         if (selectedAcquisitionGeneration !== this.catalogAcquisitionInvalidationGeneration
             || this.trustReloadProjects.has(slot!.projectDir)) {
@@ -2562,7 +2570,7 @@ export class RuntimeRegistry implements SessionOperations {
       });
       return slot;
     } catch (error) {
-      if (slot && this.slots.get(sessionId) !== slot) await slot.dispose().catch(() => {});
+      if (slot && this.slots.get(sessionId) !== slot) { this.freshness.detach(slot); await slot.dispose().catch(() => {}); }
       throw error;
     } finally {
       await this.mutex.run(() => {
@@ -2607,6 +2615,7 @@ export class RuntimeRegistry implements SessionOperations {
           if (this.slots.has(importedId)) {
             throw new GatewayError("conflict", "Imported session identity became registered");
           }
+          await this.freshness.attach(slot);
           this.publishRuntime(importedId, slot, await sessionFileBytes(slot.sessionFile), "import");
           published = true;
           this.invalidateCatalogAcquisition();
@@ -3067,6 +3076,7 @@ export class RuntimeRegistry implements SessionOperations {
   }
 
   private recordRuntimeEviction(sessionId: string, reason: RuntimeEvictionReason): void {
+    this.freshness.detach(sessionId);
     const charge = this.publishedRuntimeBytes.get(sessionId);
     if (charge === undefined) return;
     this.publishedRuntimeBytes.delete(sessionId);
@@ -3600,6 +3610,7 @@ export class RuntimeRegistry implements SessionOperations {
   }
 
   private async performDispose(): Promise<void> {
+    await this.freshness.close();
     await this.waitForSlotAdmissionsIdle();
     const entries = await this.mutex.run(() => [...this.slots.entries()]);
     const results = await Promise.allSettled(entries.map(([, slot]) => slot.shutdown()));

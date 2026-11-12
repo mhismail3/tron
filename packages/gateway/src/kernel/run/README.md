@@ -222,6 +222,28 @@ artifacts are written to `packages/gateway/test-results/kernel-run-lifecycle.jso
 primitives. `direct-bash-process-owner.integration.test.ts` exercises real shells,
 detached descendants, timeout, Stop and environment boundaries.
 
+## Resource freshness
+
+`resource-freshness.ts` is the registry-owned freshness authority for all live
+slots, including Home. Registry admission captures their initial inputs; retirement
+removes their state and unused project watches; disposal closes watches and joins
+in-flight refreshes. Global agent resources, `agent/npm`, `~/.agents/skills`, each
+live project's `.pi` and context files, and resolved external resource paths are
+watched. Events settle for 150 ms; busy slots wait for their next idle edge.
+
+The SDK package resolver runs read-only with missing sources explicitly skipped;
+watching never installs a package. It supplies the same enabled resource paths as
+the loader. SDK skill descriptors exclude skill bodies; prompt/context/extension
+bytes and package sets/manifests complete the input. `requestLayers` supplies the
+shared process-keyed layer hash, not a separate hashing scheme. An identical input
+skips runtime reload and keeps the provider prefix unchanged. Successful reloads
+alone advance applied state; failures remain pending until another idle edge.
+
+The real-slot proof is `src/e2e/kernel/run/resource-freshness.e2e.test.ts`: global
+skill propagation to Home and an ordinary chat, busy-edge adoption, unchanged/body
+edits with identical provider system text, failed-reload retry and package manifest
+changes that actually change loaded skills.
+
 ## Signals
 
 Existing aborted/timed-out command errors and bounded-tool cancellation results.
@@ -235,6 +257,10 @@ Compaction diagnostics remain with the
 | `capability.usage` | info: actual SDK completion count, registered capability name (otherwise `unknown`), execution `ok`/`error`, preparation `refused`, or unknown tool; execute-latency bucket only (`lt100ms`, `lt1s`, `lt10s`, `gte10s`, `unknown`). Preparation refusals have no execute duration. Includes nested calls; never records arguments, results, paths, queries or call/session IDs. |
 | `runtime-prompt-failed` with repeated [`home.task.inbox`](../../modules/home/README.md#signals) `admission-aborted`/claim transitions | With zero provider calls and no intervening user activation, memory resume or new source event, diagnose premature pre-append wake acceptance. `input-admission.integration.test.ts` in Home injects SDK rejection, proves retained pending input and then explicit-resume delivery. |
 | `terminal-receipt-persistence-failed` | A completion ownership write failed. For a terminal Home task whose socket snapshot still says `running` without an operation, compare its canonical replies and task marker: a root task marker must not own an individual reply completion. `home-task-continuity.e2e.test.ts` reproduces the conflicting-stamp ordering and proves same-session resume. |
+
+`session.resources-reload` records `completed`, `unchanged`, `failed` or
+`watch-failed` with an optional session ID, never resource paths or content. Failures
+warn; completed/skipped comparisons are informational.
 
 ## Verify
 

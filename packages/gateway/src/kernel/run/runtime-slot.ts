@@ -189,6 +189,7 @@ interface RuntimeSlotHooks {
   summaryChanged: (summary: SessionSummaryUpdate) => void;
   changed: (sessionId: string) => void;
   settled: (sessionId: string) => void;
+  idle?: (slot: RuntimeSlot) => void;
   assistantResponseCompleted: (
     sessionId: string,
     completion: CanonicalAssistantCompletion,
@@ -3387,8 +3388,9 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   }
 
   public noteHomeIdle(): void {
-    if (!this.homeRequestPolicy || this.phase !== "idle" || this.operation !== undefined || this.activeOperationId !== undefined) return;
-    this.dependencies.modules.policy("runSettled")?.().idle(this.id, this.operationWasHomeWake ? "wake" : "user");
+    if (this.phase !== "idle" || this.operation !== undefined || this.activeOperationId !== undefined) return;
+    this.hooks.idle?.(this);
+    if (this.homeRequestPolicy) this.dependencies.modules.policy("runSettled")?.().idle(this.id, this.operationWasHomeWake ? "wake" : "user");
   }
 
   readonly admitSubagentWake: ManagedInternalWake = async (content, options, owner, messages) => {
