@@ -87,14 +87,10 @@ const delegatedRoot = delegatedArtifactRoot(config.tronHome);
 await ensureDelegatedArtifactRoot(delegatedRoot);
 delegatedProviderEnvironment(delegatedRoot);
 process.env[MODEL_QUEUE_PROJECTION_ENV] = modelQueueProjectionPath(config.tronHome);
-const configuredSessionDir = SettingsManager.create(process.cwd(), config.agentDir, { projectTrusted: false }).getSessionDir();
 configureSupervisedNodeCommandEnvironment();
 configureAgentBinEnvironment(config.agentDir);
 configureHomebrewPath();
-const releaseAgentRuntimeLock = await acquireAgentRuntimeLocks([
-  config.agentDir,
-  ...(configuredSessionDir ? [configuredSessionDir] : []),
-]);
+const releaseAgentRuntimeLock = await acquireAgentRuntimeLocks([config.agentDir]);
 const releaseRuntimeLock = releaseAgentRuntimeLock;
 try {
 process.env.PI_CODING_AGENT_DIR = config.agentDir;
