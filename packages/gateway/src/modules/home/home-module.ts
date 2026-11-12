@@ -206,8 +206,8 @@ function homeModuleServices(owner: HomeOwner, platform: HomeComposition, session
     inputAdmission: homeInputAdmission(owner, platform.homeTaskDiagnostic),
     lifecycle: {
       initialize: () => owner.initialize(),
-      started: () => owner.resources.start(),
-      closing: () => owner.resources.close(),
+      started: () => {},
+      closing: () => {},
       dispose: () => owner.dispose(),
     },
     taskLedger: {
@@ -239,7 +239,7 @@ function homeModuleServices(owner: HomeOwner, platform: HomeComposition, session
     },
     runSettled: {
       quiescent: sessionId => owner.chapterQuiescent(sessionId),
-      idle: (sessionId, by) => { owner.noteHomeIdle(sessionId, by); owner.resources.idle(sessionId); },
+      idle: (sessionId, by) => owner.noteHomeIdle(sessionId, by),
     },
     memory: sessionId => owner.memoryToolsFor(sessionId),
     task: (sessionId, request, confirm) => owner.taskTool(sessionId, request, confirm),

@@ -21,6 +21,8 @@ export {
   getShellConfig,
   hasTrustRequiringProjectResources,
   initTheme,
+  loadProjectContextFiles,
+  loadSkills,
   ModelRuntime,
   parseFrontmatter,
   parseSessionEntries,

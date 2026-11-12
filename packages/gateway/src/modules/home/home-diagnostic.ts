@@ -14,14 +14,13 @@ export type HomeDiagnosticRecord =
   | { outcome: "chapter-refused"; chapterOrdinal?: number; reason: HomeHardBoundary | "sealed-write" | "uncertain-session-evidence" | "materialization-failed" | "ownership-changed" | "missing-conversation-evidence" | "published-evidence-missing" | "publication-failed" | "conversation-not-durable" }
   | { outcome: "chapter-limit-stop"; chapterOrdinal: number; boundary: HomeHardBoundary; crossingBytes: number; crossingEntries: number; settledBytes: number; settledEntries: number }
   | { outcome: "wake"; decision: "admitted" | "deferred" | "refused"; reason: "delivered" | "busy" | "disabled" | "paused" | "blocked" | "unavailable" | "nothing-deliverable" | "failed" }
-  | { outcome: "route-bound"; category: "open" | CommandReceiptRouteCategory }
-  | { outcome: "resources-reload"; reason: "completed" | "failed" | "watch-failed" | GatewayErrorCode };
+  | { outcome: "route-bound"; category: "open" | CommandReceiptRouteCategory };
 
 export type HomeDiagnostic = (diagnostic: HomeDiagnosticRecord) => void;
 
 export function logHomeDiagnostic(logger: ModuleLog, diagnostic: HomeDiagnosticRecord): void {
   const level = (diagnostic.outcome === "client-control" && diagnostic.reason !== "completed") || diagnostic.outcome === "unavailable" || diagnostic.outcome === "refused"
-    || diagnostic.outcome === "chapter-refused" || diagnostic.outcome === "chapter-limit-stop" || (diagnostic.outcome === "resources-reload" && diagnostic.reason !== "completed")
+    || diagnostic.outcome === "chapter-refused" || diagnostic.outcome === "chapter-limit-stop"
     || (diagnostic.outcome === "wake" && diagnostic.decision === "refused") ? "warning" : "info";
   logger.log(level, `Tron Home ${diagnostic.outcome}`, {
     event: `home.${diagnostic.outcome}`, source: "home",

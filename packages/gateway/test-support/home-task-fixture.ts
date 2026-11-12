@@ -136,6 +136,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   let settings: ReturnType<typeof settingsDependencies> | undefined;
   const createRegistry = async () => await createTestRegistry({ projectOptions: options.projectOptions, knowledge, agentDir, tronHome, trust, machineId: "machine-task-test",
     settings: () => settings ? { model: settings.settingsModel, changes: settings.settingsChanges } : undefined,
+    resourceFreshnessDiagnostic: record => signals.push({ outcome: "resources-reload", ...record }),
     homeDiagnostic: record => { signals.push({ ...record }); options.homeDiagnostic?.(record); }, idleRuntimeMs: Infinity, ...(managedSubagents ? { managedSubagents } : {}),
     ...(managed ? { delegatedArtifactRoot: delegatedArtifactRoot(tronHome) } : {}),
     gatewayModelRuntime: gateway,
