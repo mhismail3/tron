@@ -1135,9 +1135,16 @@ describe("Home task list RPC", () => {
     let releaseWorker!: () => void;
     const workerHeld = new Promise<void>(resolve => { releaseWorker = resolve; });
     let workerTurns = 0;
+    let firstWorkerMessages = { user: "", system: "" };
     const respond: FauxResponseFactory = async context => {
       if (!context.messages.some(message => message.role === "system" && JSON.stringify(message).includes("This is a finite Home task."))) return fauxAssistantMessage("Home answered");
-      if (++workerTurns === 1) return fauxAssistantMessage([fauxToolCall("checkin", { step: "Measure", done: "Read the history", next: "Report" })], { stopReason: "toolUse" });
+      if (++workerTurns === 1) {
+        firstWorkerMessages = {
+          user: context.messages.filter(message => message.role === "user").map(message => JSON.stringify(message)).join("\n"),
+          system: context.messages.filter(message => message.role === "system").map(message => JSON.stringify(message)).join("\n"),
+        };
+        return fauxAssistantMessage([fauxToolCall("checkin", { step: "Measure", done: "Read the history", next: "Report" })], { stopReason: "toolUse" });
+      }
       await workerHeld;
       return fauxAssistantMessage([reportCall("checking", "Checked result")], { stopReason: "toolUse" });
     };
@@ -1152,6 +1159,8 @@ describe("Home task list RPC", () => {
     await checking.completion;
     await waitFor(async () => (await owner.taskResult("checking")).wake?.state === "acknowledged", "checked-in result delivered once");
     await waitFor(() => home.snapshot().phase === "idle" && home.snapshot().operation === undefined, "Home idle after the checked-in result");
+    expect(firstWorkerMessages.user).not.toContain("Send a short checkin");
+    expect(firstWorkerMessages.system).toContain("Send a lightweight checkin at milestones and about every 30 minutes");
     expect(home.canonicalSessionEntries().filter(entry => entry.type === "custom_message" && (entry as { details?: { taskId?: string } }).details?.taskId === "checking")).toHaveLength(1);
     f.faux.setResponses([fauxAssistantMessage([reportCall("late", "Late result")], { stopReason: "toolUse" }), fauxAssistantMessage("Late result read")]);
     await (await dispatch(f, "late")).completion;

@@ -3,6 +3,9 @@
 Owner: [gateway/home](README.md). Home may work directly with shared file/shell tools on a
 maintainer turn or delegate finite project work through `delegate` into ordinary worker sessions.
 General file/shell mutations are unavailable on wakes; existing task grants are unchanged.
+The worker role contract and the `checkin`/`report` tools own progress and completion
+instructions. Dispatch sends the intent and resolved model choice without a second
+check-in/report suffix; Home does not repeat that reminder in its rules.
 Each worker seals an immutable report, and results reach Home through
 the wake inbox. The contract spans the Home owner, RuntimeSlot and `DelegationOperations`, the
 managed subagent provider and the iOS task surfaces. Signals: [home module](README.md#signals).

@@ -168,8 +168,8 @@ describe("gateway/home contention, publication and restart lock", () => {
     const restartedRecord = restarted.record();
     const taskFile = (await readdir(join(homeRoot, "tasks"))).find((name) => name.endsWith(`-${TASK_ID}.json`));
 
-    const isWorker = (request: { messages: readonly TraceValue[] }) => JSON.stringify(request.messages).includes(WORKER_MARKER);
-    const messages = (requests: ReadonlyArray<{ messages: readonly TraceValue[] }>, worker: boolean) =>
+    const isWorker = (request: { tools: readonly string[] }) => request.tools.includes("report");
+    const messages = (requests: ReadonlyArray<{ messages: readonly TraceValue[]; tools: readonly string[] }>, worker: boolean) =>
       requests.filter((request) => isWorker(request) === worker).map((request) => request.messages) as unknown as TraceValue[];
     const trace = stabilize(normalizeTraceValue({
       lock: LOCK,
