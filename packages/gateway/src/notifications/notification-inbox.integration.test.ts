@@ -250,4 +250,3 @@ describe("push alert policy is Global settings, not registration state", () => {
     });
   });
 });
-

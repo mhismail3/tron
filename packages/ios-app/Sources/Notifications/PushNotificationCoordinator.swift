@@ -526,9 +526,6 @@ final class PushNotificationCoordinator {
         diagnostic = .stoppedUnavailable
     }
 
-    /// Runs after the paired iPhone approved an exact `push-registration-retry` card and the
-    /// owner accepted it. Refuses unless this profile and device are still current and the
-    /// key is still the rejected one, so a repeated approval cannot rotate twice.
     func retryAfterApprovedCard(profileID: String, deviceID: String) throws {
         guard !credentialLoadFailed,
               let context,

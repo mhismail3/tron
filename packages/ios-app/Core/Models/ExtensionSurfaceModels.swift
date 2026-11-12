@@ -221,7 +221,6 @@ package struct ChangeReview: Codable, Hashable, Sendable {
             exact = try c.decodeBoundedStringIfPresent(forKey: .exact, maximumBytes: 32 * 1_024)
         }
     }
-    /// Typed effect the approving paired iPhone performs itself after the exact tap.
     package enum Intent: String, Codable, Hashable, Sendable {
         case pushRegistrationRetry = "push-registration-retry"
     }

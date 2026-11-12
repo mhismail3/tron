@@ -943,6 +943,7 @@ module Protocol {
       title: string,
       requiresTap: bool,
       reason: Option<string>,
+      intent: Option<string>,
       items: seq<ChangeReviewItemsItem>
     )
 

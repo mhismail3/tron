@@ -1371,21 +1371,18 @@ export function encodeChangeReviewItemsItem(v: ChangeReviewItemsItem): string {
   return "{" + (',"label":' + JSON.stringify(v.label) + ',"before":' + JSON.stringify(v.before) + ',"after":' + JSON.stringify(v.after) + (v.detail === undefined ? "" : ',"detail":' + JSON.stringify(v.detail)) + (v.exact === undefined ? "" : ',"exact":' + JSON.stringify(v.exact))).slice(1) + "}";
 }
 /** The shared before/after projection; values are display text, never secret material. */
-/** Typed effect a card may carry; the paired iPhone that approves it performs the effect itself. */
-export type ChangeReviewIntent = "push-registration-retry";
 export interface ChangeReview {
   digest: string;
   title: string;
   requiresTap: boolean;
   reason?: string;
-  intent?: ChangeReviewIntent;
+  intent?: string;
   items: ChangeReviewItemsItem[];
 }
 export function decodeChangeReview(v: unknown, p = "$"): ChangeReview {
   const o = obj(v, p);
   only(o, p, ["digest","title","requiresTap","reason","intent","items"]);
-  if (own(o, "intent") !== undefined && own(o, "intent") !== "push-registration-retry") throw new WireError(p + ".intent", `unknown variant ${JSON.stringify(own(o, "intent"))}`);
-  return { digest: str(own(o, "digest"), p + ".digest"), title: str(own(o, "title"), p + ".title"), requiresTap: bool(own(o, "requiresTap"), p + ".requiresTap"), ...(own(o, "reason") === undefined ? {} : { reason: str(own(o, "reason"), p + ".reason") }), ...(own(o, "intent") === undefined ? {} : { intent: "push-registration-retry" as const }), items: seq(own(o, "items"), p + ".items", (x, q) => decodeChangeReviewItemsItem(x, q)) };
+  return { digest: str(own(o, "digest"), p + ".digest"), title: str(own(o, "title"), p + ".title"), requiresTap: bool(own(o, "requiresTap"), p + ".requiresTap"), ...(own(o, "reason") === undefined ? {} : { reason: str(own(o, "reason"), p + ".reason") }), ...(own(o, "intent") === undefined ? {} : { intent: str(own(o, "intent"), p + ".intent") }), items: seq(own(o, "items"), p + ".items", (x, q) => decodeChangeReviewItemsItem(x, q)) };
 }
 export function encodeChangeReview(v: ChangeReview): string {
   return "{" + (',"digest":' + JSON.stringify(v.digest) + ',"title":' + JSON.stringify(v.title) + ',"requiresTap":' + JSON.stringify(v.requiresTap) + (v.reason === undefined ? "" : ',"reason":' + JSON.stringify(v.reason)) + (v.intent === undefined ? "" : ',"intent":' + JSON.stringify(v.intent)) + ',"items":' + "[" + v.items.map((x) => encodeChangeReviewItemsItem(x)).join(",") + "]").slice(1) + "}";
