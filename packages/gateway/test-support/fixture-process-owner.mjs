@@ -62,8 +62,7 @@ export function disposeFixtureProcesses() {
     const escalateAt = Date.now() + 1_000;
     let escalated = false;
     let escalationError;
-    const unjoined = () => remaining().length > 0 || children.some(child => !child.exited);
-    while (unjoined()) {
+    while (remaining().length || children.some(child => !child.exited)) {
       if (!escalated && Date.now() >= escalateAt) {
         escalated = true;
         try { send("SIGKILL"); }
@@ -72,12 +71,7 @@ export function disposeFixtureProcesses() {
           escalationError = error;
         }
       }
-      if (Date.now() >= deadline) {
-        await new Promise(resolve => setImmediate(resolve));
-        if (!unjoined()) break;
-        const pids = [...new Set([...remaining().map(row => row.pid), ...children.filter(child => !child.exited).map(child => child.pid)])];
-        throw escalationError ?? new Error(`fixture process owner failed to join PIDs: ${pids.join(",")}`);
-      }
+      if (Date.now() >= deadline) throw escalationError ?? new Error(`fixture process owner failed to join PIDs: ${remaining().map(row => row.pid).join(",")}`);
       await new Promise(resolve => setTimeout(resolve, 20));
     }
   })().catch(error => {
