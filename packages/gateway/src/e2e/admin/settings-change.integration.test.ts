@@ -1117,19 +1117,14 @@ describe("every key at every allowed layer", () => {
         }
         expect(applied.status, `${key.id}@${layer}`).toBe("applied");
         const after = await resolve(layer, key.id);
-        const expectedValue = key.redacted ? undefined : value;
         expect(after!.layer, `${key.id}@${layer} source`).toBe(scope);
-        if (!key.redacted) expect(after!.value, `${key.id}@${layer} value`).toEqual(expectedValue);
+        expect(after!.value, `${key.id}@${layer} value`).toEqual(value);
         expect(await stored(key, layer, after!.qualifiers ?? row.qualifiers ?? {}), `${key.id}@${layer} store`).toEqual(value);
         const undo = maintainerChange(f.service, client([slot.id]), "settings.undo", { commandId: commandId(), changeId: applied.changes[0]!.changeId, ...(layer === "session" ? { fence: fence() } : {}) });
-        if (key.redacted) {
-          await expect(undo).rejects.toMatchObject({ code: "conflict" });
-          await f.change(targets[layer]!, [{ key: key.id, layer: scope, op: "unset", ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) }], extra, client([slot.id]));
-          expect(await stored(key, layer, row.qualifiers ?? {}), `${key.id}@${layer} unset`).toBeUndefined();
-        } else await undo;
+        await undo;
         const undone = await resolve(layer, key.id);
-        if (!key.redacted) expect(undone!.value, `${key.id}@${layer} undo`).toEqual(row.value);
-        report.push({ ...instance, result: "round-trip", value: key.redacted ? "redacted" : value });
+        expect(undone!.value, `${key.id}@${layer} undo`).toEqual(row.value);
+        report.push({ ...instance, result: "round-trip", value });
       }
     }
     transcript.push({ case: `every key: ${only}`, detail: report.filter(entry => entry.layer === only) });

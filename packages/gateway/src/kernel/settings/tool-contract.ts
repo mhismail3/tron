@@ -114,7 +114,6 @@ export interface ChangeOutcome {
   error?: { code: string; message: string };
   before?: unknown;
   after?: unknown;
-  redacted?: true;
   undoable?: false;
 }
 
