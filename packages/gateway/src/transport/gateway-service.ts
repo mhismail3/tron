@@ -682,7 +682,7 @@ export class GatewayService {
           const server = string(params.server, "server", { min: 1, max: 128 });
           rejectUnknownFields(params, ["commandId", "scope", "cwd", "server", "enabled", "exposure"], method);
           if (!/^[A-Za-z0-9._-]+$/.test(server)) throw new GatewayError("invalid_request", "MCP server name is invalid");
-          const patch: { enabled?: boolean; exposure?: import("../admin/mcp-admin-service.js").McpExposure } = {};
+          const patch: { enabled?: boolean; exposure?: import("../kernel/settings/mcp-server-value.js").McpExposure } = {};
           if (params.enabled !== undefined) patch.enabled = boolean(params.enabled, "enabled");
           if (params.exposure !== undefined) patch.exposure = oneOf(params.exposure, "exposure", ["codemode", "codemode-deferred", "deferred", "direct", "hidden"] as const);
           if (Object.keys(patch).length === 0) throw new GatewayError("invalid_request", "MCP update requires enabled or exposure");
@@ -2137,6 +2137,7 @@ export class GatewayService {
     for (const change of changes) {
       if (change.key === "permissions.projectTrust" && change.result !== undefined) this.dependencies.broadcast("trust.changed", safeJson(change.result));
     }
+    if (changes.some(change => change.key === "tools.mcp.server")) this.mcpChanged({ scope: "global" });
   }
 
   private configurationExpectation(params: Record<string, unknown>) {
