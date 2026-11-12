@@ -3650,13 +3650,17 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     return projectTree(this.displayProjection, this.runtime.session.sessionManager, this.dependencies.blobs);
   }
 
-  readResources<T>(read: () => T | Promise<T>): Promise<T> {
+  readResources<T>(read: () => T | Promise<T>, signal?: AbortSignal): Promise<T> {
     this.assertNoTrustReload();
     return this.lane.run(async () => {
       this.assertUsable();
       this.assertNoTrustReload();
-      return read();
-    });
+      const value = await read();
+      signal?.throwIfAborted();
+      this.assertUsable();
+      this.assertNoTrustReload();
+      return value;
+    }, signal);
   }
 
   commands(): CommandInfo[] {
