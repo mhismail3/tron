@@ -2625,6 +2625,7 @@ export class RuntimeRegistry implements SessionOperations {
           return slot;
         } catch (error) {
           if (!published) {
+            if (slot) this.freshness.detach(slot);
             await slot?.dispose().catch(() => {});
             if (importedPath) await rm(importedPath, { force: true });
           }
@@ -3111,6 +3112,7 @@ export class RuntimeRegistry implements SessionOperations {
     this.publishedRuntimeBytes.set(sessionId, { transcriptBytes, estimatedHeapBytes });
     this.slots.set(sessionId, slot);
     slot.markPublished();
+    this.freshness.idle(slot);
     this.options.resources?.recordRuntimeLoaded();
     this.recordRuntimeTransition({
       event: "runtime.loaded",

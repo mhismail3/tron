@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, getSystemMessageText } from "@earendil-works/pi-ai";
@@ -206,6 +206,11 @@ describe("Home's global skills and prompt templates follow the agent directory l
       await writeFile(join(f.root, "AGENTS.override.md"), "FRESH_ANCESTOR_RULE\n");
       await waitFor(() => chat.runtime.session.systemPrompt.includes("FRESH_ANCESTOR_RULE"), "new ancestor context refreshes");
     } finally { releaseLease(); }
+    await mkdir(join(f.agentDir, "prompts"), { recursive: true });
+    await symlink(join(f.root, "missing-prompt"), join(f.agentDir, "prompts", "broken.md"));
+    await writePrompt(f.agentDir, "after-link", "Survives dangling resource link", "BODY");
+    await waitFor(async () => (await commands(home.id)).some(command => command.name === "after-link")
+      && (await commands(chat.id)).some(command => command.name === "after-link"), "dangling link does not prevent either slot refreshing");
   }, 60_000);
 
   it("retries a failed reload at the next idle edge and reports successful package reloads", async () => {

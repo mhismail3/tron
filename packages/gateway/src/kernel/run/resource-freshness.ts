@@ -185,7 +185,7 @@ export class ResourceFreshness {
     for (const kind of ["skills", "prompts", "extensions"] as const) {
       if (kind === "extensions" && profile.resources.noExtensions) continue;
       const enabled = resolved[kind].filter(entry => entry.enabled);
-      inputs.push([kind, enabled.map(entry => entry.path).sort()]);
+      if (kind !== "skills") inputs.push([kind, enabled.map(entry => entry.path).sort()]);
       for (const entry of enabled) {
         await watchPath(entry.path);
         if (entry.metadata.packageRoot) packages.add(entry.metadata.packageRoot);
@@ -238,8 +238,11 @@ async function files(root: string, inputs: Array<[string, unknown]>, watched: Se
   for (const entry of entries) {
     if (entry.name === ".git" || entry.name === "node_modules" || entry.name === ".cache") continue;
     const path = join(root, entry.name);
-    const info = entry.isSymbolicLink() ? await stat(path) : entry;
-    if (entry.isSymbolicLink()) watched.add(info.isDirectory() ? await realpath(path) : dirname(await realpath(path)));
+    const target = entry.isSymbolicLink() ? await realpath(path).catch(() => undefined) : path;
+    if (!target) continue;
+    const info = entry.isSymbolicLink() ? await stat(target).catch(() => undefined) : entry;
+    if (!info) continue;
+    if (entry.isSymbolicLink()) watched.add(info.isDirectory() ? target : dirname(target));
     if (info.isDirectory()) await files(path, inputs, watched, seen);
     else if (info.isFile()) await file(path, inputs);
   }
