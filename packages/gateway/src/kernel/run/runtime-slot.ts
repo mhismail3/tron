@@ -669,6 +669,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         return owners.model.owner.inventory(this.cwd, this.dependencies.modules.summaries(), limit);
       },
       history: input => owners.changes.history(input),
+      updatePackage: input => owners.model.owner.updatePackage({ cwd: this.cwd, source: input.source, version: input.version, reason: input.reason },
+        actor(input.toolCallId), input.confirm),
       undo: (changeId, input) => owners.changes.undo(changeId, {
         actor: actor(input.toolCallId), reason: input.reason, session: source(),
         ...(this.usesHomeSettings ? { homeChapter: chapter() } : {}),

@@ -1,4 +1,4 @@
-import { type Resolution, type SettingsTarget, type Qualifiers, type GitResult } from "../kernel/settings/tool-contract.js";
+import { type Resolution, type SettingsTarget, type Qualifiers, type GitResult, type ChangeResult } from "../kernel/settings/tool-contract.js";
 import type { JsonValue, TronModuleSummary } from "../protocol/types.js";
 import type { MacTerminalService } from "../security/mac-terminal-service.js";
 import { setPath, unsetPath, qualifiedWrite, fillPath, type SessionSettingsSource, type SettingsOptionsRequest, type SettingsOptionsResult } from "../kernel/settings/settings-model.js";
@@ -21,6 +21,9 @@ import { targetLayers } from "../kernel/settings/settings-resolver.js";
 import type { SettingsSchema } from "../kernel/settings/settings-schema.js";
 import { type FormatContext, type ModelRefValue, type OptionSources, type SettingsStores, type ResolveOptions, type ObservedStore, type PlannedWrite } from "../kernel/settings/settings-types.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
+import type { PackageUpdateRequest } from "./package-service.js";
+import type { Actor } from "../kernel/settings/settings-record.js";
+import type { ConfirmChange } from "../kernel/settings/tool-contract.js";
 
 interface SettingsModelDependencies {
   schema: SettingsSchema;
@@ -30,6 +33,7 @@ interface SettingsModelDependencies {
   modelRuntime: ModelRuntime;
   toolCatalog?: (target: SettingsTarget) => Promise<readonly ToolCatalogEntry[]>;
   inventory?: (cwd: string, modules: readonly TronModuleSummary[], limit?: number) => Promise<JsonValue>;
+  updatePackage?: (request: PackageUpdateRequest, requester: Actor, confirm?: ConfirmChange) => Promise<ChangeResult>;
   macTerminalKeys?: Pick<MacTerminalService, "read" | "set" | "enabled" | "setEnabled">;
 }
 
@@ -44,6 +48,11 @@ export class SettingsStoreAdapter {
   inventory(cwd: string, modules: readonly TronModuleSummary[], limit?: number): Promise<JsonValue> {
     if (!this.dependencies.inventory) throw new GatewayError("unsupported", "Settings inventory is not available");
     return this.dependencies.inventory(cwd, modules, limit);
+  }
+
+  updatePackage(request: PackageUpdateRequest, requester: Actor, confirm?: ConfirmChange): Promise<ChangeResult> {
+    if (!this.dependencies.updatePackage) throw new GatewayError("unsupported", "Package updates are not available");
+    return this.dependencies.updatePackage(request, requester, confirm);
   }
 
   async projectRoot(path: string): Promise<string> {

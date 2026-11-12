@@ -14,6 +14,8 @@ per section; each section has a 12 KiB byte bound and reports total and omitted 
 The full projection stays below 64 KiB, carries hook-owner omission diagnostics, and
 uses the shared credential redactor, including credential-bearing URLs.
 
+The settings tool's `update` action (Tron Home only) installs one exact npm version of one configured, unpinned `npm:` package in the user scope through `PackageService.updatePackage`. The version must be `x.y.z[-pre][+build]`; tags, ranges, local sources and git sources are refused explicitly (git updates to exact commits are not yet covered). The card names the package and both versions and binds the reviewed candidate: the apply re-derives the candidate and refuses on any digest difference, so a later `latest` move never changes what is installed. The record writes `started` then `applied` (or `failed`) entries under key `package.update` marked `action`; they are permanent history and are not undoable, and the outcome reports `undoable: false`. The configured source in `sources.packages` is never rewritten. Only the native tap confirms an update; it reloads Home on success or uncertain outcome.
+
 - **F1 Schema.** Each setting is one key declared once (`src/kernel/settings/settings-schema.ts`): type
   and validation, group, scope grants, store bindings, timing, effect point, native-tap classification,
   writers, redaction and display. `sessionOverridable` and `projectSettable` govern admission;
