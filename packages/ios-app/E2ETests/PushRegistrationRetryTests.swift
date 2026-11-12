@@ -1,3 +1,4 @@
+import DeviceCheck
 import Foundation
 @testable import TronMobile
 @testable import TronMobileCore
@@ -99,7 +100,7 @@ final class PushRegistrationRetryTests: XCTestCase {
         let gate: PushRegistrationRetryApproval
     }
 
-    private func makeHarness(flagged: Bool) throws -> Harness {
+    private func makeHarness(flagged: Bool, assertionInvalidKey: Bool = false) throws -> Harness {
         let credentials = CredentialMemory(PushCredentialDocument(
             appAttestKeyID: Ledger.key(1),
             apnsToken: String(repeating: "ab", count: 32),
@@ -111,7 +112,12 @@ final class PushRegistrationRetryTests: XCTestCase {
             isSupported: { true },
             generateKey: { ledger.nextKey() },
             attest: { keyID, _ in ledger.recordAttestation(keyID); return Data([1]) },
-            assert: { _, _ in Data([2]) }
+            assert: { _, _ in
+                if assertionInvalidKey {
+                    throw NSError(domain: DCError.errorDomain, code: DCError.Code.invalidKey.rawValue)
+                }
+                return Data([2])
+            }
         )
         let coordinator = PushNotificationCoordinator(
             credentials: credentials,
@@ -260,6 +266,20 @@ final class PushRegistrationRetryTests: XCTestCase {
         XCTAssertEqual(harness.ledger.keysGenerated, 1, "one launch rotates one key: the in-loop assertion rotation")
         XCTAssertEqual(harness.ledger.count(path: "/v3/installations"), 2, "assertion then attestation, then no chain")
         XCTAssertEqual(harness.ledger.attestedKeys.count, 1)
+        XCTAssertGreaterThan(harness.credentials.saveCount, 0)
+    }
+
+    func testInvalidKeyAssertionRecoveryConsumesTheOneLaunchBudget() async throws {
+        let harness = try makeHarness(flagged: false, assertionInvalidKey: true)
+        await connect(harness)
+        try await eventually("the invalid-key recovery and its rejection settle") {
+            harness.ledger.count(path: "/v3/installations") >= 1
+                && harness.coordinator.diagnostic == .stoppedRejected
+        }
+        try await settle()
+        XCTAssertEqual(harness.ledger.keysGenerated, 1, "one launch generates one fresh key: the invalid-key recovery, with no second automatic rotation")
+        XCTAssertEqual(harness.ledger.count(path: "/v3/installations"), 1, "one registration attempt with the fresh key, then no chain")
+        XCTAssertEqual(harness.coordinator.diagnostic, .stoppedRejected)
         XCTAssertGreaterThan(harness.credentials.saveCount, 0)
     }
 

@@ -162,6 +162,7 @@ e2e_diagnostic_test_filters=(
   "TronMobileE2ETests/PushRegistrationRetryTests/testPresentedConnectionMismatchRefusesBeforeAnswer"
   "TronMobileE2ETests/PushRegistrationRetryTests/testConnectionChangeAfterAcceptanceRefusesRotation"
   "TronMobileE2ETests/PushRegistrationRetryTests/testUnflaggedStoredKeyRejectedInAssertionRotatesExactlyOnce"
+  "TronMobileE2ETests/PushRegistrationRetryTests/testInvalidKeyAssertionRecoveryConsumesTheOneLaunchBudget"
   "TronMobileE2ETests/PushRegistrationRetryTests/testOnlyAPushRetryCardWithATapYieldsAFence"
 )
 e2e_lan_test_filters=(
