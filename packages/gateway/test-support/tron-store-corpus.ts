@@ -116,7 +116,7 @@ async function expectReproducible(spec: StoreSpec): Promise<void> {
   try {
     await prepareHome(fresh.home);
     await recordFixed(() => spec.record(fresh.home));
-    expect(Object.keys(await fileDigests(fresh.home)).filter((path) => !path.startsWith("gateway/workspace-state/")
+    expect(Object.keys(await fileDigests(fresh.home)).filter((path) => !path.startsWith("state/workspace-state/")
       && Object.keys(owned({ [path]: "" })).length === 0), "recording writes only the store's own files").toEqual([]);
     expect(await content(fresh.home), "recording the store again writes the committed bytes")
       .toEqual(await content(TRON_CORPUS_HOME));

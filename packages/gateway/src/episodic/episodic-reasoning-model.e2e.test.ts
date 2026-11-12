@@ -146,7 +146,7 @@ describe("the episodic summarizer on a reasoning model", () => {
     expect([...stored.nodes.values()].some(node => node.level === 2 && node.kind === "summary")).toBe(true);
     expect(memory.status().blocked).toBeNull();
     await memory.dispose();
-    const usagePath = join(f.root, "gateway/model-usage.json");
+    const usagePath = join(f.root, "state/model-usage.json");
     const ledger = JSON.parse(await readFile(usagePath, "utf8"));
     expect(ledger.version).toBe(1);
     expect(ledger.records).toHaveLength(f.bodies.length);
@@ -174,7 +174,7 @@ describe("the episodic summarizer on a reasoning model", () => {
     const queue = new ModelQueueOwner({ tronHome: f.root, runtime: f.runtime, usage: { read: async () => ({ providers: [] }) },
       queue: async () => ["local-anthropic/cache-model"] });
     await queue.initialize();
-    const path = join(f.root, "gateway/model-usage.json");
+    const path = join(f.root, "state/model-usage.json");
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ version: 1, records: [] });
     const summarize = createQueueSummarizer(queue);
     const request = compactorRequest("private system prompt", "private source message", new AbortController().signal, "private-cache-key", "source-session");
@@ -208,7 +208,7 @@ describe("the episodic summarizer on a reasoning model", () => {
       now: () => now, queue: async () => ["local-openai/plain"] });
     const request = compactorRequest("private", "private", new AbortController().signal, "cache-key", "source-session");
     await createQueueSummarizer(queue())(request);
-    const path = join(f.root, "gateway/model-usage.json");
+    const path = join(f.root, "state/model-usage.json");
     const original = JSON.parse(await readFile(path, "utf8")).records[0];
     const records = Array.from({ length: 10_000 }, (_, index) => ({ ...original, timestamp: now - 10_000 + index }));
     await writeFile(path, JSON.stringify({ version: 1, records }));
@@ -248,7 +248,7 @@ describe("the episodic summarizer on a reasoning model", () => {
     const queue = new ModelQueueOwner({ tronHome: f.root, runtime: f.runtime, usage: { read: async () => ({ providers: [] }) },
       queue: async () => ["local-openai/plain"], log: record => diagnostics.push(record) });
     await queue.initialize();
-    const path = join(f.root, "gateway/model-usage.json");
+    const path = join(f.root, "state/model-usage.json");
     const request = compactorRequest("private", "private", new AbortController().signal, "cache-key", "source-session");
     const summarize = createQueueSummarizer(queue);
     const malformed = ["{broken private bytes", JSON.stringify({ version: 1, records: [], prompt: "must not persist" }),
@@ -278,7 +278,7 @@ describe("the episodic summarizer on a reasoning model", () => {
     await rm(path, { recursive: true });
     await writeFile(path, empty);
     const before = await readFile(path, "utf8");
-    await chmod(join(f.root, "gateway"), 0o500);
+    await chmod(join(f.root, "state"), 0o500);
     try {
       const completed = await summarize(request);
       expect(completed.stopReason).toBe("stop");
@@ -286,7 +286,7 @@ describe("the episodic summarizer on a reasoning model", () => {
       expect(await readFile(path, "utf8")).toBe(before);
       expect(f.bodies).toHaveLength(1);
       expect(diagnostics.at(-1)).toEqual({ event: "model-queue.usage-failed", code: "write-failed" });
-    } finally { await chmod(join(f.root, "gateway"), 0o700); }
+    } finally { await chmod(join(f.root, "state"), 0o700); }
     await summarize(request);
     expect(f.bodies).toHaveLength(2);
     expect(JSON.parse(await readFile(path, "utf8")).records).toHaveLength(1);

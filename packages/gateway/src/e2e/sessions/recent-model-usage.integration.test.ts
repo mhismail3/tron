@@ -129,7 +129,7 @@ describe("recent model usage", { concurrent: false }, () => {
     try {
       const slot = await fixture_.registry.acquire(fixture_.parentId);
       await run(slot, model, "record before disposal");
-      const path = join(fixture_.root, "tron", "gateway", "model-recents.json");
+      const path = join(fixture_.root, "tron", "state", "model-recents.json");
       await fixture_.registry.dispose();
       const document = JSON.parse(await readFile(path, "utf8")) as { models: Array<{ id: string }> };
       expect(document.models.map((entry) => entry.id)).toContain("recent-a");

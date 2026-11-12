@@ -44,7 +44,7 @@ afterAll(async () => {
 });
 
 async function taskFile(f: Awaited<ReturnType<typeof fixture>>, id: string): Promise<string> {
-  const directory = join(f.tronHome, "gateway/home/tasks");
+  const directory = join(f.tronHome, "state/home/tasks");
   return join(directory, (await readdir(directory)).find(name => name.endsWith(`-${id}.json`))!);
 }
 function processStat(pid: number): string {
@@ -456,7 +456,7 @@ describe("Home task bounded backlogs", () => {
     }
     const home = await f.registry.acquire(sessionId);
     const path = (home as any).sessionManager.getSessionFile();
-    const before = JSON.parse(await readFile(join(f.tronHome, "gateway/home/home.json"), "utf8"));
+    const before = JSON.parse(await readFile(join(f.tronHome, "state/home/home.json"), "utf8"));
     expect(before.chapters.at(-1).activationStarted).toBe(false);
     let request = "";
     f.faux.setResponses([fauxAssistantMessage([reportCall(`report-${kind}`)], { stopReason: "toolUse" }),
@@ -545,7 +545,7 @@ describe("Home task cold reconciliation", () => {
       authorizationScope: "full-work", restoreEpoch: await store.restoreEpoch() },
       { decisionId: "unspent", expiresAt: Date.now() + 60_000 });
     await authorization.enableInitialScope(await store.restoreEpoch());
-    const authorizationPath = join(f.tronHome, "gateway/home/tasks/authorization.json");
+    const authorizationPath = join(f.tronHome, "state/home/tasks/authorization.json");
     const beforeAuthority = await readFile(authorizationPath, "utf8");
     let providers = 0;
     const effect = join(f.cwd, "effect");
@@ -659,7 +659,7 @@ describe("Home task cold reconciliation", () => {
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const run = await dispatch(f); await run.completion;
     const taskPath = await taskFile(f, run.taskId);
-    const authPath = join(f.tronHome, "gateway/home/tasks/authorization.json");
+    const authPath = join(f.tronHome, "state/home/tasks/authorization.json");
     const taskBytes = await readFile(taskPath, "utf8"); const authBytes = await readFile(authPath, "utf8");
     await f.registry.dispose(); await f.registry.administrativeWorkRegistry.waitUntilSettled();
     await chmod(f.tronHome, 0o755);
@@ -709,7 +709,7 @@ describe("Home task cold reconciliation", () => {
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const run = await dispatch(f); await run.completion;
     await f.registry.dispose(); await f.registry.administrativeWorkRegistry.waitUntilSettled();
-    const bogus = join(f.tronHome, "gateway/home/tasks/0000000000001-bogus.json");
+    const bogus = join(f.tronHome, "state/home/tasks/0000000000001-bogus.json");
     await writeFile(bogus, "{}", { mode: 0o600 });
     const cold = await f.restart();
     expect(await homeOwnerOf(cold).status()).toMatchObject({ taskRecovery: { available: false, reason: "invalid-record" } });
@@ -931,7 +931,7 @@ describe("Home task cold reconciliation", () => {
     for (const intent of ["Finite work", "Next work"]) await issueGrant(tasks.authorization, { intentDigest: taskIntentDigest(intent),
       target: f.cwd, authorizationScope: "full-work", restoreEpoch: epoch },
       { decisionId: `single-use-${intent.length}`, expiresAt: Date.now() + 60_000 });
-    const directory = join(f.tronHome, "gateway/home/tasks");
+    const directory = join(f.tronHome, "state/home/tasks");
     let renamed = false, failed = false;
     (store as any).options.fileSystem = { mkdir, rm,
       rename: async (from: string, to: string) => { await rename(from, to); renamed ||= to.endsWith("-task-one.json"); },
@@ -974,7 +974,7 @@ describe("Home task cold reconciliation", () => {
     }
     const calls = vi.fn(() => fauxAssistantMessage("Never replay")); f.faux.setResponses([calls]);
     await expect(dispatch(f)).rejects.toThrow(/frozen/);
-    const authorizationPath = join(f.tronHome, "gateway/home/tasks/authorization.json");
+    const authorizationPath = join(f.tronHome, "state/home/tasks/authorization.json");
     const before = await readFile(authorizationPath, "utf8");
     vi.restoreAllMocks();
     const recovered = await f.restart();
@@ -1072,7 +1072,7 @@ describe("Home task list RPC", () => {
     const second = await service.invoke(client, "home.taskList", { limit: 2, cursor: first.nextCursor }) as any;
     const third = await service.invoke(client, "home.taskList", { limit: 2, cursor: second.nextCursor }) as any;
     expect([...second.items, ...third.items].map((row: any) => row.taskId)).toEqual(["list-2", "list-1", "list-0"]);
-    const copy = join(f.root, "tasks-copy"); const directory = join(f.tronHome, "gateway/home/tasks");
+    const copy = join(f.root, "tasks-copy"); const directory = join(f.tronHome, "state/home/tasks");
     await cp(directory, copy, { recursive: true }); await rm(directory, { recursive: true }); await rename(copy, directory);
     await expect(service.invoke(client, "home.taskList", { cursor: first.nextCursor })).rejects.toMatchObject({ code: "conflict" });
     await chmod(f.tronHome, 0o755);
@@ -1098,7 +1098,7 @@ describe("Home task list RPC", () => {
       await store.put({ ...write, taskId: `history-${i}`, revision: 1,
         wake: { ...write.wake!, eventId: `task-result-${createHash("sha256").update(`history-${i}`).digest("hex")}`, delivery: { ...write.wake!.delivery!, operationId: `history-operation-${i}` } } }, null);
     }
-    const directory = join(f.tronHome, "gateway/home/tasks");
+    const directory = join(f.tronHome, "state/home/tasks");
     const records = new Set<string>();
     for (const name of await readdir(directory)) {
       if (name === "authorization.json") continue;
@@ -1804,7 +1804,7 @@ describe("Home task production dispatch", () => {
     const f = await fixture();
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     await (await dispatch(f)).completion;
-    const namespace = join(f.tronHome, "gateway/home/tasks");
+    const namespace = join(f.tronHome, "state/home/tasks");
     const copy = join(f.root, "restored-tasks");
     await cp(namespace, copy, { recursive: true, preserveTimestamps: true });
     await rm(namespace, { recursive: true }); await rename(copy, namespace);

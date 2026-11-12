@@ -155,7 +155,7 @@ describe("cold session.open request span", () => {
 
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
-    const localToken = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken as string;
+    const localToken = JSON.parse(await readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken as string;
     const logPath = join(root, "logs", "gateway.jsonl");
     const logger = new GatewayLogger(logPath);
     const uploads = new UploadStore(root, 1_024);
@@ -323,7 +323,7 @@ describe("settings.resolve request span", () => {
     await registry.recoverCanonicalAttention();
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
-    const localToken = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken as string;
+    const localToken = JSON.parse(await readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken as string;
     const logPath = join(root, "logs", "gateway.jsonl");
     const logger = new GatewayLogger(logPath);
     const uploads = new UploadStore(root, 1_024);

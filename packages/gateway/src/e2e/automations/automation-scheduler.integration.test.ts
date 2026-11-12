@@ -152,7 +152,7 @@ describe("automation failure attribution", () => {
         triggerSnapshot: record.trigger, actionSnapshot: record.action, targetSnapshot: record.target,
         executionSessionId: `fixture-session-${index}`, state: "queued", preAdmissionAttemptCount: 0,
       } }));
-      const recordPath = join(root, "gateway", "automations", `${record.id}.json`);
+      const recordPath = join(root, "state", "automations", `${record.id}.json`);
       await rm(recordPath);
       await mkdir(recordPath);
       expected.push({

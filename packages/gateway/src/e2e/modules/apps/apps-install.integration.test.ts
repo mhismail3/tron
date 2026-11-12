@@ -176,7 +176,7 @@ describe("reviewed Swift app lifecycle through the Gateway", () => {
     const [directory] = await readdir(root);
     const path = join(root, directory!, "App.swift");
     const offered = await stat(path);
-    const displayed = await stat(join(f.root, "tron/gateway/display-artifacts/artifacts", reference.artifactId, "content"));
+    const displayed = await stat(join(f.root, "tron/state/display-artifacts/artifacts", reference.artifactId, "content"));
     expect([offered.dev, offered.ino]).toEqual([displayed.dev, displayed.ino]);
     await displayOwnerOf(f.registry).artifacts.revoke(reference.artifactId, reference.sessionId);
     expect(await readFile(path, "utf8")).toBe(source);

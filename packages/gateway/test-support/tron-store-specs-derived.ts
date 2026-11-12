@@ -9,7 +9,7 @@ import { SessionSearchIndex } from "../src/sessions/session-search-index.js";
 import { CORPUS_EPOCH } from "./fixed-recording.js";
 import { CORPUS_IDS, type StoreSpec } from "./tron-store-specs.js";
 
-const SEARCH_INDEX = "gateway/session-search.sqlite";
+const SEARCH_INDEX = "cache/session-search.sqlite";
 
 function searchDocument(sessionId: string, title: string, texts: readonly string[]) {
   return {
@@ -84,7 +84,7 @@ export const DERIVED_STORES: readonly StoreSpec[] = [
   },
   {
     module: "gateway/providers", name: "store-model-queue",
-    paths: ["gateway/model-queue.json", "gateway/model-queue-sessions"],
+    paths: ["state/model-queue.json", "state/model-queue-sessions"],
     reproducible: true,
     async record(home) {
       const owner = new ModelQueueOwner({ tronHome: home, runtime: queueRuntime, usage: { read: queueUsage }, now: () => CORPUS_EPOCH,
@@ -104,7 +104,7 @@ export const DERIVED_STORES: readonly StoreSpec[] = [
   },
   {
     module: "gateway/providers", name: "store-model-release-dates",
-    paths: ["gateway/model-release-dates.json"],
+    paths: ["cache/model-release-dates.json"],
     reproducible: true,
     async record(home) {
       const catalog = releaseCatalog(home);

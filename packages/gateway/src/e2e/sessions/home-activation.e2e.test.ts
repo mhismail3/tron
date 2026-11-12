@@ -604,7 +604,7 @@ describe("Tron Home activations end to end", () => {
           await expect(f.receipts.status(index ? terminal.identity : client.identity, "home.prompt", commands[index]!.commandId))
             .resolves.toMatchObject({ status: "completed", result: (outcomes[index] as PromiseFulfilledResult<unknown>).value });
         }
-        const receiptDirectory = join(f.tronHome, "receipts", "gateway", "command-receipts");
+        const receiptDirectory = join(f.tronHome, "receipts", "state", "command-receipts");
         const receipts = await Promise.all((await readdir(receiptDirectory)).filter(name => name.endsWith(".json"))
           .map(async name => JSON.parse(await readFile(join(receiptDirectory, name), "utf8"))));
         for (const [index, command] of commands.entries()) {

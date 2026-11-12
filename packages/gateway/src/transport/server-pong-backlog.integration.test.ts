@@ -39,7 +39,7 @@ async function pongAgainstBacklog(): Promise<{ backlogBeforePong: number; pendin
   const root = await mkdtemp(join(tmpdir(), "tron-server-pong-backlog-"));
   const devices = new DeviceStore(root, "machine");
   await devices.initialize();
-  const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+  const token = JSON.parse(await readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken;
   const port = await unusedPort();
   const logger = { log: vi.fn() };
   const gateway = new GatewayServer({ display: {} as never,

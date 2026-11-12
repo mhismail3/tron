@@ -40,7 +40,7 @@ describe("WebSocket connection and outbound capacity", () => {
     });
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
-    const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const token = JSON.parse(await readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken;
     const port = await unusedPort();
     const logger = { log: vi.fn() };
     const activeGateway = new GatewayServer({ display: {} as never,
@@ -141,7 +141,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
     const token = credential === "local"
-      ? JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken
+      ? JSON.parse(await readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken
       : (await devices.pair((await devices.ensureEnrollment()).code, "Phone")).token;
     const port = await unusedPort();
     const logger = { log: vi.fn() };
@@ -220,7 +220,7 @@ describe("WebSocket connection and outbound capacity", () => {
     });
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
-    const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const token = JSON.parse(await readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken;
     const port = await unusedPort();
     const logger = { log: vi.fn() };
     const sessions = { unsubscribeClient: vi.fn(), subscribe: vi.fn() };
@@ -462,7 +462,7 @@ describe("WebSocket connection and outbound capacity", () => {
     await devices.initialize();
     const enrollment = await devices.ensureEnrollment();
     const paired = await devices.pair(enrollment.code, "Phone");
-    const localToken = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const localToken = JSON.parse(await readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken;
     const port = await unusedPort();
     const logger = { log: vi.fn() };
     const service = {
@@ -531,7 +531,7 @@ describe("WebSocket connection and outbound capacity", () => {
     });
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
-    const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const token = JSON.parse(await readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken;
     const port = await unusedPort();
     const logger = { log: vi.fn() };
     gateway = new GatewayServer({ display: {} as never,
@@ -587,7 +587,7 @@ describe("WebSocket connection and outbound capacity", () => {
     });
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
-    const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const token = JSON.parse(await readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken;
     const port = await unusedPort();
     const logger = { log: vi.fn() };
     const dense = { private: "not-for-logs", rows: Array.from({ length: 8 }, () =>
@@ -696,7 +696,7 @@ describe("WebSocket connection and outbound capacity", () => {
     });
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
-    const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const token = JSON.parse(await readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken;
     const port = await unusedPort();
     const info = {
       gatewayVersion: "test", piVersion: "test", protocolVersion: 8, minProtocolVersion: 8,
@@ -788,7 +788,7 @@ describe("WebSocket connection and outbound capacity", () => {
       const root = await mkdtemp(join(tmpdir(), "tron-fanout-qualification-"));
       const devices = new DeviceStore(root, "fixture-machine");
       await devices.initialize();
-      const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+      const token = JSON.parse(await readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken;
       const port = await unusedPort();
       const peers: WebSocket[] = [];
       const physicalSockets: import("node:net").Socket[] = [];
@@ -900,7 +900,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-server-coalesce-"));
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
-    const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const token = JSON.parse(await readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken;
     const port = await unusedPort();
     const sampler = new ResourceSampler({
       readRuntimes: async () => [], durableWrites: () => ({ count: 0, ms: 0 }),
@@ -1229,7 +1229,7 @@ describe("WebSocket connection and outbound capacity", () => {
     });
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
-    const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const token = JSON.parse(await readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken;
     const paired = await devices.pair((await devices.ensureEnrollment()).code, "Phone");
     const port = await unusedPort();
     const logger = { log: vi.fn() };
@@ -1338,7 +1338,7 @@ describe("WebSocket connection and outbound capacity", () => {
     });
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
-    const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const token = JSON.parse(await readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken;
     const port = await unusedPort();
     const logger = { log: vi.fn() };
     const subscriptions = new Set<string>();
