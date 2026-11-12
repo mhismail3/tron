@@ -247,6 +247,14 @@ skips runtime reload and keeps the provider prefix unchanged. Successful reloads
 alone advance applied state; failures remain pending for another idle edge or
 relevant file event. Retention leases do not block reload: native slot admission,
 not the broader eviction-busy flag, decides whether runtime work is idle.
+Trust transactions keep public settings reads fenced until commit or compensation.
+Their snapshot refresh reads the session layer internally without re-entering that
+public fence; application and compensation use the same reload owner. The registry
+pauses and joins the freshness owner's in-flight reload before acquiring the slot
+trust fence, retaining pending invalidations until commit or retirement resumes it.
+This prevents an automatic reload from racing a trust undo as unrelated busy work.
+The existing
+Global settings roundtrip and project-lifecycle compensation tests protect this boundary.
 
 The real-slot proof is `src/e2e/kernel/run/resource-freshness.e2e.test.ts`: global
 skill propagation to Home and an ordinary chat, busy-edge adoption, unchanged/body
@@ -265,6 +273,7 @@ Compaction diagnostics remain with the
 | `logs/requests.jsonl` line (not a logger record) | One per provider request: `sessionId`, `kind` (`home`, `worker`, `ordinary`), provider, model, API, `hashKey`, `params`, `tools`, `system[]`, `marks[]` (`at`, `ttl`, `bytes`, `hash`), `request`, `usage`, `stop`. To explain a cache miss, compare the line with the session's previous line under the same `hashKey`: the first prefix whose hash differs is the layer that changed, and a changed `params` hash is a changed request option. With every earlier prefix and `params` equal and `cacheRead` 0, the cause is outside the request (lifetime expiry or provider eviction). Across Gateway runs only the sizes compare. |
 | `capability.usage` | info: actual SDK completion count, registered capability name (otherwise `unknown`), execution `ok`/`error`, preparation `refused`, or unknown tool; execute-latency bucket only (`lt100ms`, `lt1s`, `lt10s`, `gte10s`, `unknown`). Preparation refusals have no execute duration. Includes nested calls; never records arguments, results, paths, queries or call/session IDs. |
 | `runtime-prompt-failed` with repeated [`home.task.inbox`](../../modules/home/README.md#signals) `admission-aborted`/claim transitions | With zero provider calls and no intervening user activation, memory resume or new source event, diagnose premature pre-append wake acceptance. `input-admission.integration.test.ts` in Home injects SDK rejection, proves retained pending input and then explicit-resume delivery. |
+| Project-trust error details `failure` / `rollbackFailure` | Inspect both on a failed-compensation error. `Project trust is being reconfigured` from the reload itself indicates a public-read fence was re-entered by its transaction owner; the project-lifecycle successful-compensation case distinguishes this from an actual resource-loader failure. |
 | `terminal-receipt-persistence-failed` | A completion ownership write failed. For a terminal Home task whose socket snapshot still says `running` without an operation, compare its canonical replies and task marker: a root task marker must not own an individual reply completion. `home-task-continuity.e2e.test.ts` reproduces the conflicting-stamp ordering and proves same-session resume. |
 
 `session.resources-reload` records `completed`, `unchanged`, `failed` or

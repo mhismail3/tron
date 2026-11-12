@@ -774,6 +774,10 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
 
   settingsSessionLayer(): SessionStore {
     this.assertNoTrustReload();
+    return this.readSettingsSessionLayer();
+  }
+
+  private readSettingsSessionLayer(): SessionStore {
     const session = this.runtime.session;
     const policy = this.contextPolicies.get(session)?.snapshot();
     const branch = session.sessionManager.getBranch();
@@ -1371,7 +1375,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   }
 
   private reloadSettingsSource(): SessionSettingsSource {
-    const session = this.settingsSessionLayer();
+    const session = this.readSettingsSessionLayer();
     const fixed = Object.fromEntries(Object.entries(session.fixed ?? {}).filter(([key, value]) =>
       this.dependencies.settingsSchema.schemaKey(key).effect !== "reload" || value.from === "session" || value.from === "delegate"));
     return this.settingsSource({ ...session, fixed });

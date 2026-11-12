@@ -2640,20 +2640,32 @@ export class RuntimeRegistry implements SessionOperations {
   async reloadProject(projectDirInput: string, projectTrusted?: boolean, publish = true): Promise<void> {
     const projectDir = await this.options.trust.canonicalDirectory(projectDirInput);
     const transactional = !publish;
-    const slots = await this.mutex.run(() => {
-      const current = [...this.slots.values()].filter((slot) => slot.projectDir === projectDir);
-      if (current.some((slot) => slot.isBusy)) {
-        throw new GatewayError("busy", "Stop active sessions before changing project trust", true);
-      }
-      if (transactional) {
-        current.forEach((slot) => slot.beginTrustReload());
-        this.trustReloadProjects.add(projectDir);
-      }
-      return current;
+    const { slots, alreadyReloading } = await this.mutex.run(() => {
+      const alreadyReloading = this.trustReloadProjects.has(projectDir);
+      if (transactional) this.trustReloadProjects.add(projectDir);
+      return { slots: [...this.slots.values()].filter(slot => slot.projectDir === projectDir), alreadyReloading };
     });
+    await Promise.all(slots.map(slot => this.freshness.pause(slot)));
+    try {
+      await this.mutex.run(() => {
+        if (slots.some(slot => slot.isBusy)) {
+          throw new GatewayError("busy", "Stop active sessions before changing project trust", true);
+        }
+        if (transactional) {
+          slots.forEach(slot => slot.beginTrustReload());
+        }
+      });
+    } catch (error) {
+      if (!alreadyReloading) {
+        await this.mutex.run(() => this.trustReloadProjects.delete(projectDir));
+        slots.forEach(slot => this.freshness.resume(slot));
+      }
+      throw error;
+    }
     const results = await Promise.allSettled(
       slots.map((slot) => slot.reload(projectTrusted, false, transactional)),
     );
+    if (!transactional) slots.forEach(slot => this.freshness.resume(slot));
     const failures = results.flatMap((result, index) => result.status === "rejected"
       ? [{ sessionId: slots[index]!.id, reason: result.reason }]
       : []);
@@ -2717,6 +2729,7 @@ export class RuntimeRegistry implements SessionOperations {
       if (failures.length) throw new GatewayError("internal", "Failed project runtimes could not all retire", false, { failures });
     } finally {
       await this.mutex.run(() => this.trustReloadProjects.delete(projectDir));
+      slots.forEach(([, slot]) => this.freshness.resume(slot));
     }
   }
 
@@ -2724,7 +2737,7 @@ export class RuntimeRegistry implements SessionOperations {
     const projectDir = await this.options.trust.canonicalDirectory(projectDirInput).catch(() => projectDirInput);
     await this.mutex.run(() => {
       const slots = [...this.slots.values()].filter((slot) => slot.projectDir === projectDir);
-      slots.forEach((slot) => slot.commitReload());
+      slots.forEach((slot) => { slot.commitReload(); this.freshness.resume(slot); });
       this.trustReloadProjects.delete(projectDir);
     });
   }
