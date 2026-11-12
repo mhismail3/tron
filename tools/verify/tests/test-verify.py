@@ -247,6 +247,11 @@ class ExternalVerificationTests(VerifyCase):
             plan = json.loads(planned.stdout[planned.stdout.index("{"):])
             self.assertEqual({c["name"]: Path(c["command"][1]).name for c in plan["commands"] if c["name"].startswith("tests: gateway")},
                              {"tests: gateway": runner, "tests: gateway-nested": runner}, options)
+            node_command = next(c["command"] for c in plan["commands"] if c["name"] == "tests: node-gateway")
+            if runner == "mini.py":
+                self.assertEqual([Path(node_command[1]).name, *node_command[2:]], ["mini.py", "node", files[3]], options)
+            else:
+                self.assertEqual(node_command[-1:], [files[3]], options)
             local_python = " && ".join(f"echo '### verify file: {path}' && python3 {path}"
                                        for path in ("mods/alpha/test-alpha.py", "scripts/test-pooled.py"))
             python_command = next(c["command"] for c in plan["commands"] if c["name"] == "tests: python")
@@ -254,7 +259,7 @@ class ExternalVerificationTests(VerifyCase):
                              else python_command, ["python3", "mini.py", "python", local_python] if runner == "mini.py"
                              else local_python, options)
             self.assertEqual(plan["gatewayHost"], {"host": runner.removesuffix(".py").replace("gateway", "local"), "reason": reason})
-            self.assertIn(f"gateway and python lanes: on {'the Mac mini' if runner == 'mini.py' else 'this Mac'} ({reason})", planned.stdout)
+            self.assertIn(f"gateway, node and python lanes: on {'the Mac mini' if runner == 'mini.py' else 'this Mac'} ({reason})", planned.stdout)
             self.assertIn("mac-terminal lane: on this Mac (it needs this host's tailnet sshd)", planned.stdout)
         r.git("config", "tron.verify.mini", "mini.test")
         self.declare("alpha", [python])
@@ -263,7 +268,7 @@ class ExternalVerificationTests(VerifyCase):
         plan = json.loads(planned.stdout[planned.stdout.index("{"):])
         python_command = next(c["command"] for c in plan["commands"] if c["name"] == "tests: python")
         self.assertEqual((Path(python_command[1]).name, python_command[2]), ("mini.py", "python"), planned.stdout)
-        self.assertIn("gateway and python lanes: on the Mac mini (reachable and idle, load 1.5)", planned.stdout)
+        self.assertIn("gateway, node and python lanes: on the Mac mini (reachable and idle, load 1.5)", planned.stdout)
         r.git("config", "--unset", "tron.verify.mini")
         self.declare("alpha", ["scripts/tron test gateway scripts/outside.test.ts"])
         r.commit("unsupported Gateway input")
@@ -407,7 +412,7 @@ class GatewayFailureTests(VerifyCase):
         r.env["PATH"] = f"{stub}:{r.env['PATH']}"
         result = r.verify("--module", "gateway/sample", "--gateway-host", "mini")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn("gateway and python lanes: on the Mac mini", result.stdout)
+        self.assertIn("gateway, node and python lanes: on the Mac mini", result.stdout)
         report = r.report()
         step = next(step for step in report["steps"] if step["name"] == "tests: gateway")
         self.assertEqual((report["verdict"], step["status"], step["exit"]), ("incomplete", "no result", 75))

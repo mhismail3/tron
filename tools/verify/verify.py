@@ -1228,7 +1228,10 @@ def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, io
         return (node + ["npm", "test", "--", "--reporter=default", "--reporter=json", f"--outputFile.json={report}",
                         *[path[len(RELAY) + 1:] for path in files]], ROOT / RELAY, vitest_count(report))
     if group == "node-gateway":
-        return (node + ["node", "--test", "--test-concurrency=1", *[p[len(GATEWAY) + 1:] for p in files]], ROOT / GATEWAY, tap_count)
+        relative = [p[len(GATEWAY) + 1:] for p in files]
+        if gateway_host == "mini":
+            return (["python3", str(ROOT / "tools/verify/mini.py"), "node", *relative], ROOT / GATEWAY, tap_count)
+        return (node + ["node", "--test", "--test-concurrency=1", *relative], ROOT / GATEWAY, tap_count)
     if group == "node":
         return (node + ["node", "--test", "--test-concurrency=1", *files], ROOT, tap_count)
     if group == "python-here":
@@ -1408,10 +1411,10 @@ def main(argv: list[str]) -> int:
             print(f"  delta: compatibility wording added in {addition}: no compat code (AGENTS.md); delete it or ask", flush=True)
     for group, files in sorted(groups.items()):
         print(f"  {group}: {len(files)} file(s){' (skipped by --skip)' if skipped_group(group) else ''}", flush=True)
-    if any(group.startswith("gateway") or group == "python" for group in groups if not skipped_group(group)) or selection["deferredTests"]:
+    if any(group.startswith("gateway") or group in ("node-gateway", "python") for group in groups if not skipped_group(group)) or selection["deferredTests"]:
         if gateway_host == "pool":
             gateway_host, gateway_reason = mini.choose_host()
-        print(f"  gateway and python lanes: {'on the Mac mini' if gateway_host == 'mini' else 'on this Mac'} ({gateway_reason})", flush=True)
+        print(f"  gateway, node and python lanes: {'on the Mac mini' if gateway_host == 'mini' else 'on this Mac'} ({gateway_reason})", flush=True)
     else:
         gateway_host, gateway_reason = "local", "no Gateway or Python lane selected"
     if "python-here" in groups and not skipped_group("python-here"):
@@ -1632,7 +1635,7 @@ def main(argv: list[str]) -> int:
             command, cwd, count = test_spec(group, files, payload, run.logs, ios_wait=name != "all", gateway_host=gateway_host)
             report = run.logs / f"{group}-vitest.json"
             report.unlink(missing_ok=True)
-            on_mini = gateway_host == "mini" and (group.startswith("gateway") or group == "python")
+            on_mini = gateway_host == "mini" and (group.startswith("gateway") or group in ("node-gateway", "python"))
             env = {**update, "TRON_VERIFY_COMMIT": sha} if on_mini else update
             result = run.step(label, command, cwd=cwd, count=count, env=env)
             if group in owner_jobs and result["exit"] == 73:

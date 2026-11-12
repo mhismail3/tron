@@ -78,7 +78,7 @@ user's settings or profile. Test input and output must not depend on live stores
 
 ## Gateway and Python lanes on the test-host pool
 
-The Gateway Vitest lanes of `verify` and `scripts/tron test gateway`, and verify's Python group (not `python-here`), run on the pool {the Mac mini, this Mac}:
+The Gateway Vitest and Gateway `node --test` lanes (`gateway`, `gateway-nested`, `node-gateway`) of `verify` and `scripts/tron test gateway`, and verify's Python group (not `python-here`), run on the pool {the Mac mini, this Mac}:
 `mini.py`'s `choose_host` picks the mini when it is configured, the tree is committed and an ssh probe (5 s to
 connect, 30 s in all) finds it set up with its job lock free, and otherwise this Mac. Each run prints which host
 ran its lanes and why; verify records it (`gatewayHostReason`). `--gateway-host local|mini` (for both kinds of lane; `test gateway --local|--mini`) overrides the pool; `--update-locks` always runs here, and the pool runs a lane here when its arguments name a path outside the checkout (a relative one resolved against `packages/gateway`).
@@ -87,7 +87,7 @@ overwrites, so a push whose job never starts leaves nothing that grows. One job 
 (`~/tron-ci/jobs/gateway.lock`) checks out exactly that commit in `~/tron-ci/jobs/gateway`, cleaned except for the
 Gateway `node_modules`, refuses a Node binary or npm off the commit's `config/ci-toolchain.env`, reruns `npm ci`
 only when `package.json`, `package-lock.json`, `third_party/` or the Node binary changed, and runs that commit's
-`gateway.py`, or the Python group's per-file command (stderr merged, the pinned Node first on PATH), each in its own process group killed before the lock is released, with a minimal PATH and only the mini user's HOME, USER, LOGNAME, SHELL and LANG. Output streams
+`gateway.py`, the Gateway's `node --test` files on the pinned Node (`mini.py node`), or the Python group's per-file command (stderr merged, the pinned Node first on PATH), each in its own process group killed before the lock is released, with a minimal PATH and only the mini user's HOME, USER, LOGNAME, SHELL and LANG. Output streams
 live; the Vitest output files come back with paths rewritten to this checkout, and the lane's exit code is the step's. With `--mini`, an unconfigured or
 unreachable mini, a failed push, an off-pin toolchain, a job lock still held when the caller's `TRON_MINI_JOB_WAIT_SECONDS` runs out, or a session without a result exits 75 with a last `mini: no result: <reason>` line, never falling back here (a lane that itself exits 75 stays a lane result); verify records that step as `no result` with its reason and the run as `incomplete`, not failed. Stopping verify, or killing
 its whole process group, ends the session and SIGTERMs the mini job's child. Setup: `git config tron.verify.mini <user@host>` and
