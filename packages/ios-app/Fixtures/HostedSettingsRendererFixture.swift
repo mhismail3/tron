@@ -403,9 +403,10 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 "changeId": .string("fixture-change"), "at": .string("2026-10-11T12:00:00.000Z"),
                 "actor": .object(["kind": .string("agent"), "sessionId": .string("fixture-chat")]),
                 "target": .object(["kind": .string("global")]), "layer": .string("global"),
-                "key": .string("run.retry.maxRetries"), "op": .string("set"), "changed": .bool(true), "redacted": .bool(true),
+                "key": .string("tools.mcp.server"), "qualifiers": .object(["server": .string("fixture-server")]),
+                "op": .string("set"), "changed": .bool(true), "redacted": .bool(true),
                 "tier": .string("quiet"), "status": .string("applied"),
-                "presentation": .object(["label": .string("Agent retry count"), "section": .string("run"),
+                "presentation": .object(["label": .string("MCP server"), "section": .string("tools"),
                     "actor": .string("Agent"), "layer": .string("Global"),
                     "display": .object(["before": .string("Hidden"), "after": .string("Changed")])]),
             ])
