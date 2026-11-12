@@ -119,7 +119,7 @@ class ReinstallWindow(unittest.TestCase):
         self.assertEqual(child.returncode, 2 if error else 0, child.stdout + child.stderr)
         if error:
             self.assertIn(error, child.stderr)
-        return child.stdout
+        return child.stdout + child.stderr
 
     def operation(self):
         store = self.home / '.tron-maintenance'
@@ -225,8 +225,9 @@ class ReinstallWindow(unittest.TestCase):
             source.parent.mkdir(parents=True, exist_ok=True)
             source.write_text(secret + relative)
             source.chmod(0o644)
-        for directory in (path for path in tron.rglob('*') if path.is_dir()):
-            directory.chmod(0o755)
+        for top in ('gateway', 'internal', 'ios-builds'):
+            for directory in (tron / top, *(path for path in (tron / top).rglob('*') if path.is_dir())):
+                directory.chmod(0o755)
         executable = self.installed / 'fixture-executable'
         executable.write_text('fixture executable metadata')
         executable.chmod(0o755)

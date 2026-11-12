@@ -76,7 +76,11 @@ copies stay local under the private maintenance operation, never in a synced or 
 location. Data recovery files are restricted to `0600` and directories to `0700`,
 without following symlinks or changing source modes. Reinstall retains original source
 metadata in its frozen inventory; the separate app-bundle copy preserves executable
-metadata. Never sync or upload a recovery copy. The migration approval packet must explicitly disclose the
+metadata. Source ACLs and extended attributes are preserved verbatim; mode restriction
+is not ACL removal. These are evidence-grade byte copies, not launchable executable
+trees, except the separate app bundle. Existing Time Machine or other system backups
+may include the maintenance store and must be reviewed in the migration packet.
+Never sync or upload a recovery copy. The migration approval packet must explicitly disclose the
 old-path credential copies rather than silently excluding or redacting them.
 
 - Replace builds `partial-state-snapshot-<n>` before publishing `state-snapshot-<n>`;
