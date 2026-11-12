@@ -4,7 +4,7 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { fauxAssistantMessage, fauxProvider, getCurrentSystemPrompt, type TranscriptContext } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, fauxProvider, getCurrentSystemPrompt, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import { TrustService } from "../../kernel/resources/trust-service.js";
@@ -42,14 +42,23 @@ const FIXTURE_EXTENSION = `export default function(pi) {
     promptSnippet: "Fixture snippet",
     promptGuidelines: ["Fixture guideline first line\\n- nested bullet inside the guideline"],
     parameters: { type: "object", properties: {} },
-    execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
+    execute: async () => {
+      if (process.env.FIXTURE_CHANGE_TOOLS) pi.setActiveTools(["fixture_tool"]);
+      return { content: [{ type: "text", text: "ok" }], details: {} };
+    },
   });
   if (process.env.FIXTURE_BROWSER_TOOL) pi.registerTool({
     name: "agent_browser", label: "Browser", description: "fixture browser",
     parameters: { type: "object", properties: {} },
     execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
   });
-  if (process.env.FIXTURE_FORCE_PROMPT) pi.on("before_agent_start", async () => ({ systemPrompt: process.env.FIXTURE_FORCE_PROMPT }));
+  if (process.env.FIXTURE_FORCE_PROMPT) {
+    pi.on("before_agent_start", event => {
+      event.systemPromptOptions.sections.advertised_subagents = "Fixture subagent index";
+    });
+    pi.on("before_agent_start", async () => ({ systemPrompt: process.env.FIXTURE_FORCE_PROMPT }));
+    pi.on("before_agent_start", event => ({ systemPrompt: event.systemPrompt + "\\n\\nSecond whole-prompt handler." }));
+  }
   let sectionTurns = 0;
   if (process.env.FIXTURE_ONCE_SECTION) pi.on("before_agent_start", event => {
     if (sectionTurns++ === 0) event.systemPromptOptions.sections.fixture_once = "One-shot fixture";
@@ -130,7 +139,7 @@ async function instructions(slot: { context(): Promise<unknown> }): Promise<Agen
   return ((await slot.context()) as { instructions: AgentInstructions }).instructions;
 }
 
-async function turn(f: Awaited<ReturnType<typeof fixture>>) {
+async function turn(f: Awaited<ReturnType<typeof fixture>>, prompt = "hello") {
   let received = "";
   let during: AgentInstructions | undefined;
   f.faux.setResponses([async (context: TranscriptContext) => {
@@ -138,12 +147,28 @@ async function turn(f: Awaited<ReturnType<typeof fixture>>) {
     during = await instructions(f.slot);
     return fauxAssistantMessage("Done");
   }]);
-  await f.slot.prompt("hello");
+  await f.slot.prompt(prompt);
   await waitFor(() => !f.slot.isBusy, "the turn to settle");
   return { received, during: during! };
 }
 
 describe("Agent Instructions projection through the pinned runtime", () => {
+  it("keeps extension sections after whole-prompt handlers regardless of the input wording", async () => {
+    vi.stubEnv("FIXTURE_FORCE_PROMPT", "Whole prompt replacement.");
+    const f = await fixture(true);
+    const first = await turn(f);
+    const browser = await turn(f, "Use browser automation to open a website");
+    for (const { received } of [first, browser]) {
+      expect(received).toContain("Whole prompt replacement.");
+      expect(received).toContain("<mcp_servers>");
+      expect(received.match(/<mcp_servers>/g)).toHaveLength(1);
+      expect(received).toContain("<advertised_subagents>\nFixture subagent index\n</advertised_subagents>");
+      expect(received.match(/<advertised_subagents>/g)).toHaveLength(1);
+      expect(received).toContain("Second whole-prompt handler.");
+    }
+    expect(browser.received).toBe(first.received);
+  }, 30_000);
+
   it("shows the connected MCP section as session context idle and mid-turn, matching model bytes", async () => {
     const f = await fixture(true);
     expect((await instructions(f.slot)).sections.some(section => section.id === "mcp_servers")).toBe(false);
@@ -230,6 +255,26 @@ describe("Agent Instructions projection through the pinned runtime", () => {
     expect(idle.sections.some(section => section.id === "fixture_once")).toBe(false);
   }, 20_000);
 
+  it("does not rewrite sent instruction bytes when tools change during a request", async () => {
+    vi.stubEnv("FIXTURE_CHANGE_TOOLS", "1");
+    const f = await fixture();
+    let received = "";
+    let during: AgentInstructions | undefined;
+    f.faux.setResponses([async (context: TranscriptContext) => {
+      received = getCurrentSystemPrompt(context.messages);
+      return fauxAssistantMessage([fauxToolCall("fixture_tool", {})], { stopReason: "toolUse" });
+    }, async (context: TranscriptContext) => {
+      received = getCurrentSystemPrompt(context.messages);
+      during = await instructions(f.slot);
+      return fauxAssistantMessage("Done");
+    }]);
+    await f.slot.prompt("hello");
+    await waitFor(() => !f.slot.isBusy, "the turn to settle");
+    expect(during!.text).toBe(received);
+    expect(during!.sections.find(section => section.id === "tron")!.text).toContain("Do on-screen work yourself");
+    expect((await instructions(f.slot)).sections.find(section => section.id === "tron")!.text).not.toContain("Do on-screen work yourself");
+  }, 20_000);
+
   it("previews an accepted tool change while idle before the next provider request", async () => {
     const f = await fixture();
     await turn(f);
@@ -257,12 +302,13 @@ describe("Agent Instructions projection through the pinned runtime", () => {
     expect(await operating(["fixture_tool"])).not.toContain("Do on-screen work yourself");
   }, 20_000);
 
-  it.each([false, true])("shows an unrecognised forced prompt verbatim instead of guessing its structure (MCP=%s)", async (mcp) => {
+  it.each([false, true])("keeps a forced body verbatim and attributes appended sections (MCP=%s)", async (mcp) => {
     vi.stubEnv("FIXTURE_FORCE_PROMPT", "Entirely custom prompt from an extension.");
     const f = await fixture(mcp);
     const { received, during } = await turn(f);
     expect(during.text).toBe(received);
-    expect(during.sections.map(section => section.text).join("\n\n")).toBe(received);
-    expect(during.sections[0]).toMatchObject({ id: "prompt", timing: "turn" });
+    expect(during.sections[0]).toMatchObject({ id: "preamble", text: "Entirely custom prompt from an extension.\n\nSecond whole-prompt handler." });
+    expect(during.sections.map(section => section.id)).toEqual(["preamble", "advertised_subagents", ...(mcp ? ["mcp_servers"] : []), "tron"]);
+    expect(during.sections.map(section => section.id === "preamble" ? section.text : `<${section.id}>\n${section.text}\n</${section.id}>`).join("\n\n")).toBe(received);
   }, 20_000);
 });

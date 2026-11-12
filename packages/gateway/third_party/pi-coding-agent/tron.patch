@@ -41,6 +41,35 @@ Apply with git apply at tag v1.5.1 (dd30101cfc5b0609411dd80b6f93adbc14db14cf).
    undici 8.12.4. Gateway overrides do not replace their inlined dependency. The SDK
    checker executes both actual child entries against a loopback integrity-mismatch response.
 
+diff --git a/package-lock.json b/package-lock.json
+index fbf84cc836f6a6ba7d4082e5e767be57e8a1091e..7ecc721909bb1013d455835170f9e9dad0e3bea7 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -6451,7 +6451,7 @@
+ 				"quickjs-wasi": "3.6.2",
+ 				"semver": "7.8.5",
+ 				"typebox": "1.3.27",
+-				"undici": "8.12.3",
++				"undici": "8.12.4",
+ 				"yaml": "2.9.0"
+ 			},
+ 			"bin": {
+@@ -6542,6 +6542,15 @@
+ 			"extraneous": true,
+ 			"license": "MIT"
+ 		},
++		"packages/coding-agent/node_modules/undici": {
++			"version": "8.12.4",
++			"resolved": "https://registry.npmjs.org/undici/-/undici-8.12.4.tgz",
++			"integrity": "sha512-8Mx+uNKKER2bA4AdtedkqRbwUCIJFr2nJckXRe5yrDqzePqwLP7VNcctN8/XdmDSbF7mS+jJKIszlL+vbam1VA==",
++			"license": "MIT",
++			"engines": {
++				"node": ">=22.19.0"
++			}
++		},
+ 		"packages/durable": {
+ 			"name": "@earendil-works/pi-durable",
+ 			"version": "1.5.1",
 diff --git a/packages/coding-agent/docs/mcp.md b/packages/coding-agent/docs/mcp.md
 index 5c6aa7d86d71cd9634fd0efff10f8784de84fb00..c8c33a516183b6c137c8b49273f5d52ac7d72e3b 100644
 --- a/packages/coding-agent/docs/mcp.md
@@ -76,6 +105,64 @@ index 7d0883b3ff7926c077414ccce9b4f7aa31f7065b..18ea49a42b89422a640d11ffa6faa031
  `session.dispose()` aborts active work, invalidates extension contexts, disconnects from the agent, and removes event listeners. Call it when the session is no longer needed.
  
  `AgentSessionRuntime` adds `newSession()`, `switchSession()`, `fork()`, and `importFromJsonl()`. Each operation replaces the active `AgentSession` and recreates services for the target working directory.
+diff --git a/packages/coding-agent/install-lock/package-lock.json b/packages/coding-agent/install-lock/package-lock.json
+index eab89567b15c2db297d445219b0658ba02767adc..33dfa5f97949abccbce56dd640cb4fb3df96afa4 100644
+--- a/packages/coding-agent/install-lock/package-lock.json
++++ b/packages/coding-agent/install-lock/package-lock.json
+@@ -516,7 +516,7 @@
+ 				"quickjs-wasi": "3.6.2",
+ 				"semver": "7.8.5",
+ 				"typebox": "1.3.27",
+-				"undici": "8.12.3",
++				"undici": "8.12.4",
+ 				"yaml": "2.9.0"
+ 			},
+ 			"bin": {
+@@ -526,6 +526,15 @@
+ 				"node": ">=22.19.0"
+ 			}
+ 		},
++		"node_modules/@earendil-works/pi-coding-agent/node_modules/undici": {
++			"version": "8.12.4",
++			"resolved": "https://registry.npmjs.org/undici/-/undici-8.12.4.tgz",
++			"integrity": "sha512-8Mx+uNKKER2bA4AdtedkqRbwUCIJFr2nJckXRe5yrDqzePqwLP7VNcctN8/XdmDSbF7mS+jJKIszlL+vbam1VA==",
++			"license": "MIT",
++			"engines": {
++				"node": ">=22.19.0"
++			}
++		},
+ 		"node_modules/@earendil-works/pi-mcp": {
+ 			"version": "1.5.1",
+ 			"resolved": "https://registry.npmjs.org/@earendil-works/pi-mcp/-/pi-mcp-1.5.1.tgz",
+@@ -1443,15 +1452,6 @@
+ 			"integrity": "sha512-zu+jc1pcy4UiNThxikUr36f0Rybk9PEeCg/NE6adeWr/SKsdNO4EzZHYRDlv2YCVAfj3Odq3dESSo/jNyoBXzA==",
+ 			"license": "MIT"
+ 		},
+-		"node_modules/undici": {
+-			"version": "8.12.3",
+-			"resolved": "https://registry.npmjs.org/undici/-/undici-8.12.3.tgz",
+-			"integrity": "sha512-+fdndUTwBP86cVjihTp21hZHo7d6oj1c/47XPA3lL8mM0XHs+C4EkcjmgRsFnFk2f/UONGDy9ItBItmXsLOQHw==",
+-			"license": "MIT",
+-			"engines": {
+-				"node": ">=22.19.0"
+-			}
+-		},
+ 		"node_modules/undici-types": {
+ 			"version": "6.21.0",
+ 			"resolved": "https://registry.npmjs.org/undici-types/-/undici-types-6.21.0.tgz",
+diff --git a/packages/coding-agent/package.json b/packages/coding-agent/package.json
+index 20150665edcd78ce937030462d22fa1f6f8fd41a..422b781360eb8691c3a832176225ea516f44a6b4 100644
+--- a/packages/coding-agent/package.json
++++ b/packages/coding-agent/package.json
+@@ -61,7 +61,7 @@
+ 		"quickjs-wasi": "3.6.2",
+ 		"semver": "7.8.5",
+ 		"typebox": "1.3.27",
+-		"undici": "8.12.3",
++		"undici": "8.12.4",
+ 		"yaml": "2.9.0"
+ 	},
+ 	"overrides": {
 diff --git a/packages/coding-agent/src/core/agent-session-services.ts b/packages/coding-agent/src/core/agent-session-services.ts
 index 9673ba6a84a593d3a87d07a29649a747bf18c981..2c41265789dcc992531745c3cfe5ca085834e102 100644
 --- a/packages/coding-agent/src/core/agent-session-services.ts
@@ -142,7 +229,7 @@ index 9673ba6a84a593d3a87d07a29649a747bf18c981..2c41265789dcc992531745c3cfe5ca08
  		modelRuntime: options.services.modelRuntime,
  		settingsManager: options.services.settingsManager,
 diff --git a/packages/coding-agent/src/core/agent-session.ts b/packages/coding-agent/src/core/agent-session.ts
-index f76247d5647a6ab17923425ebb0cee5b4ca6495b..4e9c0d010095c040985b3191242f3f81bcd5043f 100644
+index f76247d5647a6ab17923425ebb0cee5b4ca6495b..faa5426daa6d209bcbcef72d1f3ce055f672b6f0 100644
 --- a/packages/coding-agent/src/core/agent-session.ts
 +++ b/packages/coding-agent/src/core/agent-session.ts
 @@ -141,6 +141,7 @@ import {
@@ -218,6 +305,15 @@ index f76247d5647a6ab17923425ebb0cee5b4ca6495b..4e9c0d010095c040985b3191242f3f81
  	}
  
  	private _setActiveTools(toolNames: string[]): void {
+@@ -1883,7 +1902,7 @@ export class AgentSession {
+ 			const current = getCurrentSystemMessage(transformed);
+ 			const head: SystemMessage = {
+ 				role: "system",
+-				content: forced,
++				content: buildSystemPrompt(this._runSystemPromptOptions!),
+ 				...(current?.toolsAdded ? { toolsAdded: current.toolsAdded } : {}),
+ 				timestamp: current?.timestamp ?? Date.now(),
+ 			};
 @@ -1946,8 +1965,13 @@ export class AgentSession {
  		let messages: AgentMessage[];
  		try {
@@ -261,7 +357,7 @@ index f76247d5647a6ab17923425ebb0cee5b4ca6495b..4e9c0d010095c040985b3191242f3f81
  		if (this._extensionRunnerRef) {
  			this._extensionRunnerRef.current = this._extensionRunner;
 diff --git a/packages/coding-agent/src/core/extensions/runner.ts b/packages/coding-agent/src/core/extensions/runner.ts
-index bf2c6380835fccb77a1896d6ef89469ca359f1e4..792b7cd4649fe326e315119b1d385365dbc9f7d6 100644
+index bf2c6380835fccb77a1896d6ef89469ca359f1e4..2849a90ed39c5b3cf549c9b25ce367d1f125605d 100644
 --- a/packages/coding-agent/src/core/extensions/runner.ts
 +++ b/packages/coding-agent/src/core/extensions/runner.ts
 @@ -367,6 +367,7 @@ export class ExtensionRunner {
@@ -297,6 +393,15 @@ index bf2c6380835fccb77a1896d6ef89469ca359f1e4..792b7cd4649fe326e315119b1d385365
  			get sessionManager() {
  				runner.assertActive();
  				return runner.sessionManager;
+@@ -1436,7 +1443,7 @@ export class ExtensionRunner {
+ 		systemPromptOptions: BuildSystemPromptOptions,
+ 	): Promise<BeforeAgentStartCombinedResult> {
+ 		const currentOptions = normalizeBuildSystemPromptOptions(systemPromptOptions);
+-		const renderCurrentSystemPrompt = (): string => buildSystemPrompt(currentOptions);
++		const renderCurrentSystemPrompt = (): string => buildSystemPrompt({ ...currentOptions, sections: {} });
+ 		const ctx = Object.defineProperties(
+ 			{},
+ 			Object.getOwnPropertyDescriptors(this.createContext()),
 diff --git a/packages/coding-agent/src/core/extensions/types.ts b/packages/coding-agent/src/core/extensions/types.ts
 index 7fcc870a99f799ebd19f3a4d51b300d63088ca78..780f8ad503a7d31231a29465c32073ff512266fd 100644
 --- a/packages/coding-agent/src/core/extensions/types.ts
@@ -586,10 +691,25 @@ index dbab1d1d99f309ed9b3ebec3f2c3272520ef8d0b..d5b7ea0d5bac0c4efd80add3771ef71a
  		resourceLoader,
  		customTools: options.customTools,
 diff --git a/packages/coding-agent/src/core/system-prompt.ts b/packages/coding-agent/src/core/system-prompt.ts
-index e51e14fe4065d73c3a85947000eff04402fa7a52..209394887955eeb080765b7a683809114db259b4 100644
+index e51e14fe4065d73c3a85947000eff04402fa7a52..c8882e7c2f89d53a64439a785315674f05fbdb63 100644
 --- a/packages/coding-agent/src/core/system-prompt.ts
 +++ b/packages/coding-agent/src/core/system-prompt.ts
-@@ -208,6 +208,27 @@ export function buildSystemPrompt(input: BuildSystemPromptOptions): string {
+@@ -199,7 +199,13 @@ export function buildSystemPromptState(input: BuildSystemPromptOptions): {
+ 	content: string;
+ 	sections?: SystemPromptSections;
+ } {
+-	if (input.forceSystemPrompt !== undefined) return { content: input.forceSystemPrompt };
++	if (input.forceSystemPrompt !== undefined) {
++		const rendered = buildSystemPromptSections(input);
++		const sections = Object.fromEntries(
++			Object.keys(input.sections ?? {}).filter((name) => rendered[name] !== undefined).map((name) => [name, rendered[name]]),
++		);
++		return { content: input.forceSystemPrompt, ...(Object.keys(sections).length > 0 ? { sections } : {}) };
++	}
+ 	return { content: "", sections: buildSystemPromptSections(input) };
+ }
+ 
+@@ -208,6 +214,27 @@ export function buildSystemPrompt(input: BuildSystemPromptOptions): string {
  	return getSystemMessageText({ role: "system", ...buildSystemPromptState(input), timestamp: 0 });
  }
  
@@ -770,10 +890,24 @@ index 0000000000000000000000000000000000000000..199f0930c9bd13c8d16bfafc02d97b2e
 +	});
 +});
 diff --git a/packages/coding-agent/test/system-prompt-updates.test.ts b/packages/coding-agent/test/system-prompt-updates.test.ts
-index bbe5fb9f0b12cc1cf38c4f1a3a51fce6aef3b8d5..9ca0dc189ce6478262021fff8b54a9909059b875 100644
+index bbe5fb9f0b12cc1cf38c4f1a3a51fce6aef3b8d5..e31d9f6a4ec9fd3e012a6e1a5307764db2fcd9e0 100644
 --- a/packages/coding-agent/test/system-prompt-updates.test.ts
 +++ b/packages/coding-agent/test/system-prompt-updates.test.ts
-@@ -184,6 +184,57 @@ describe("system prompt updates", () => {
+@@ -158,8 +158,11 @@ describe("system prompt updates", () => {
+ 				toolsAdded: systemMessages[0]?.[0]?.toolsAdded,
+ 				timestamp: systemMessages[0]?.[0]?.timestamp,
+ 			});
+-			expect(systemMessages[2]?.at(-1)).toEqual(forced);
+-			expect(getCurrentSystemPrompt(requests[2]!.messages)).toBe("Exact prompt.");
++			expect(systemMessages[2]?.at(-1)).toEqual({
++				...forced,
++				content: "Exact prompt.\n\n<plan_mode>\nPlan only.\n</plan_mode>",
++			});
++			expect(getCurrentSystemPrompt(requests[2]!.messages)).toBe("Exact prompt.\n\n<plan_mode>\nPlan only.\n</plan_mode>");
+ 			expect(requests[2]!.messages.map((message) => message.role)).toEqual([
+ 				"system",
+ 				"user",
+@@ -184,6 +187,57 @@ describe("system prompt updates", () => {
  		}
  	});
  
@@ -855,92 +989,3 @@ index 71988d3a437254aeb4152793bff481f48f7dfc85..732fac5d7343b7abad69d19076fc505b
  		agentDir,
  		modelRuntime: session.modelRuntime,
  		settingsManager: session.settingsManager,
-
-diff --git a/package-lock.json b/package-lock.json
-index fbf84cc..7ecc721 100644
---- a/package-lock.json
-+++ b/package-lock.json
-@@ -6451,7 +6451,7 @@
- 				"quickjs-wasi": "3.6.2",
- 				"semver": "7.8.5",
- 				"typebox": "1.3.27",
--				"undici": "8.12.3",
-+				"undici": "8.12.4",
- 				"yaml": "2.9.0"
- 			},
- 			"bin": {
-@@ -6542,6 +6542,15 @@
- 			"extraneous": true,
- 			"license": "MIT"
- 		},
-+		"packages/coding-agent/node_modules/undici": {
-+			"version": "8.12.4",
-+			"resolved": "https://registry.npmjs.org/undici/-/undici-8.12.4.tgz",
-+			"integrity": "sha512-8Mx+uNKKER2bA4AdtedkqRbwUCIJFr2nJckXRe5yrDqzePqwLP7VNcctN8/XdmDSbF7mS+jJKIszlL+vbam1VA==",
-+			"license": "MIT",
-+			"engines": {
-+				"node": ">=22.19.0"
-+			}
-+		},
- 		"packages/durable": {
- 			"name": "@earendil-works/pi-durable",
- 			"version": "1.5.1",
-diff --git a/packages/coding-agent/package.json b/packages/coding-agent/package.json
-index 2015066..422b781 100644
---- a/packages/coding-agent/package.json
-+++ b/packages/coding-agent/package.json
-@@ -61,7 +61,7 @@
- 		"quickjs-wasi": "3.6.2",
- 		"semver": "7.8.5",
- 		"typebox": "1.3.27",
--		"undici": "8.12.3",
-+		"undici": "8.12.4",
- 		"yaml": "2.9.0"
- 	},
- 	"overrides": {
-
-diff --git a/packages/coding-agent/install-lock/package-lock.json b/packages/coding-agent/install-lock/package-lock.json
-index eab8956..33dfa5f 100644
---- a/packages/coding-agent/install-lock/package-lock.json
-+++ b/packages/coding-agent/install-lock/package-lock.json
-@@ -516,7 +516,7 @@
- 				"quickjs-wasi": "3.6.2",
- 				"semver": "7.8.5",
- 				"typebox": "1.3.27",
--				"undici": "8.12.3",
-+				"undici": "8.12.4",
- 				"yaml": "2.9.0"
- 			},
- 			"bin": {
-@@ -526,6 +526,15 @@
- 				"node": ">=22.19.0"
- 			}
- 		},
-+		"node_modules/@earendil-works/pi-coding-agent/node_modules/undici": {
-+			"version": "8.12.4",
-+			"resolved": "https://registry.npmjs.org/undici/-/undici-8.12.4.tgz",
-+			"integrity": "sha512-8Mx+uNKKER2bA4AdtedkqRbwUCIJFr2nJckXRe5yrDqzePqwLP7VNcctN8/XdmDSbF7mS+jJKIszlL+vbam1VA==",
-+			"license": "MIT",
-+			"engines": {
-+				"node": ">=22.19.0"
-+			}
-+		},
- 		"node_modules/@earendil-works/pi-mcp": {
- 			"version": "1.5.1",
- 			"resolved": "https://registry.npmjs.org/@earendil-works/pi-mcp/-/pi-mcp-1.5.1.tgz",
-@@ -1443,15 +1452,6 @@
- 			"integrity": "sha512-zu+jc1pcy4UiNThxikUr36f0Rybk9PEeCg/NE6adeWr/SKsdNO4EzZHYRDlv2YCVAfj3Odq3dESSo/jNyoBXzA==",
- 			"license": "MIT"
- 		},
--		"node_modules/undici": {
--			"version": "8.12.3",
--			"resolved": "https://registry.npmjs.org/undici/-/undici-8.12.3.tgz",
--			"integrity": "sha512-+fdndUTwBP86cVjihTp21hZHo7d6oj1c/47XPA3lL8mM0XHs+C4EkcjmgRsFnFk2f/UONGDy9ItBItmXsLOQHw==",
--			"license": "MIT",
--			"engines": {
--				"node": ">=22.19.0"
--			}
--		},
- 		"node_modules/undici-types": {
- 			"version": "6.21.0",
- 			"resolved": "https://registry.npmjs.org/undici-types/-/undici-types-6.21.0.tgz",
