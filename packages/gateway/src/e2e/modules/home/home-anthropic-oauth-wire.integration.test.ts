@@ -76,6 +76,38 @@ function memoryMessage(): Message {
   return { role: "user", content: blocks.map((text) => ({ type: "text", text })), timestamp: 1 };
 }
 
+function viewMessage(spans: readonly number[]): Message {
+  let id = 0;
+  const lines = spans.map((span) => { const line = `${id}+${span}|fact ${id}\n`; id += span; return line; });
+  const groups: string[] = [];
+  for (let at = 0; at < lines.length; at += VIEW_BLOCK_LINES) groups.push(lines.slice(at, at + VIEW_BLOCK_LINES).join(""));
+  return { role: "user", content: ["<memory>", ...groups, "</memory>", `${HOME_NONCE_MARKER}wire`].map((text) => ({ type: "text", text })), timestamp: 1 };
+}
+
+async function oauthHome(prefix: string) {
+  const root = await mkdtemp(join(tmpdir(), prefix));
+  cleanups.push(() => rm(root, { recursive: true, force: true }));
+  const agentDir = join(root, "agent");
+  const endpoint = await anthropicEndpoint();
+  await mkdir(agentDir, { recursive: true });
+  await writeFile(join(agentDir, "auth.json"), JSON.stringify({ anthropic: { type: "oauth", access: ACCESS, refresh: "sk-ant-ort01-tron-wire-test", expires: Date.now() + 3_600_000 } }), { mode: 0o600 });
+  await writeFile(join(agentDir, "models.json"), JSON.stringify({ providers: { anthropic: { baseUrl: `http://127.0.0.1:${endpoint.port}` } } }));
+  const shared = await createProviderModelRuntime(agentDir);
+  const home = applyHomeCacheRetention(sessionRuntimeView(shared));
+  const model = home.getModels("anthropic").find((candidate) => candidate.id === "claude-opus-5-5")!;
+  return { root, endpoint, shared, home, model };
+}
+
+const HOME_TOOLS = [
+  { name: "bash", description: "Run a shell command.", parameters: { type: "object", properties: { command: { type: "string" } }, required: ["command"] } },
+  { name: "read", description: "Read a file.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
+];
+
+function wireMarks(body: Record<string, unknown>): Array<{ path: string; ttl?: string }> {
+  const order = (path: string) => [".tools", ".system", ".messages"].findIndex((key) => path.startsWith(key));
+  return cacheMarks(body).toSorted((left, right) => order(left.path) - order(right.path) || left.path.localeCompare(right.path, undefined, { numeric: true }));
+}
+
 function cacheMarks(body: Record<string, unknown>): Array<{ path: string; ttl?: string }> {
   const marks: Array<{ path: string; ttl?: string }> = [];
   const visit = (value: unknown, path: string) => {
@@ -90,26 +122,14 @@ function cacheMarks(body: Record<string, unknown>): Array<{ path: string; ttl?: 
 }
 
 describe("Claude subscription on Pi's built-in Anthropic OAuth", () => {
-  it("sends Home's one-hour view mark, Claude Code identity and tool casing, and maps the reply back", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-anthropic-oauth-wire-"));
-    cleanups.push(() => rm(root, { recursive: true, force: true }));
-    const agentDir = join(root, "agent");
-    const endpoint = await anthropicEndpoint();
-    await mkdir(agentDir, { recursive: true });
-    await writeFile(join(agentDir, "auth.json"), JSON.stringify({ anthropic: { type: "oauth", access: ACCESS, refresh: "sk-ant-ort01-tron-wire-test", expires: Date.now() + 3_600_000 } }), { mode: 0o600 });
-    await writeFile(join(agentDir, "models.json"), JSON.stringify({ providers: { anthropic: { baseUrl: `http://127.0.0.1:${endpoint.port}` } } }));
-    const shared = await createProviderModelRuntime(agentDir);
-    const home = applyHomeCacheRetention(sessionRuntimeView(shared));
-    const model = home.getModels("anthropic").find((candidate) => candidate.id === "claude-opus-5-5")!;
+  it("sends Home's one-hour prefix marks and five-minute last-message mark, Claude Code identity and tool casing, and maps the reply back", async () => {
+    const { root, endpoint, shared, home, model } = await oauthHome("tron-anthropic-oauth-wire-");
     expect(model).toMatchObject({ provider: "anthropic", api: "anthropic-messages" });
     expect(shared.isUsingOAuth("anthropic")).toBe(true);
     expect(getSupportedThinkingLevels(model)).toEqual(expect.arrayContaining(["xhigh", "max"]));
 
     const onPayload = homeBeforeProviderRequest();
-    const tools = [
-      { name: "bash", description: "Run a shell command.", parameters: { type: "object", properties: { command: { type: "string" } }, required: ["command"] } },
-      { name: "read", description: "Read a file.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
-    ];
+    const tools = HOME_TOOLS;
     const messages: Message[] = [memoryMessage(), { role: "user", content: [{ type: "text", text: "Run echo ok." }], timestamp: 2 }];
     const context: Context = { systemPrompt: "You are Tron Home.", tools: tools as never, messages };
     const first = await home.streamSimple(model, context, { sessionId: "home-wire", reasoning: "xhigh", onPayload }).result();
@@ -137,7 +157,11 @@ describe("Claude subscription on Pi's built-in Anthropic OAuth", () => {
       const marks = cacheMarks(body);
       expect(marks.map((mark) => mark.path)).toContain(`.messages[${memory}].content[2]`);
       expect(marks.length).toBeLessThanOrEqual(4);
-      expect(new Set(marks.map((mark) => mark.ttl))).toEqual(new Set(["1h"]));
+      const ordered = wireMarks(body);
+      expect(ordered.map((mark) => mark.ttl)).toEqual(["1h", "1h", "1h", undefined]);
+      const wire = body.messages as Array<WireMessage & { output_config?: unknown }>;
+      expect(wire.at(-1)).toMatchObject({ role: "system", content: [], output_config: { effort: expect.any(String) } });
+      expect(ordered.at(-1)!.path.startsWith(`.messages[${wire.length - 2}].`)).toBe(true);
     }
     const toolUse = (endpoint.requests[1]!.body.messages as WireMessage[]).flatMap((message) => Array.isArray(message.content) ? message.content : [])
       .find((block) => block.type === "tool_use");
@@ -153,6 +177,42 @@ describe("Claude subscription on Pi's built-in Anthropic OAuth", () => {
     await writeFile(join(direct, "auth.json"), JSON.stringify({ anthropic: { type: "oauth", access: ACCESS, refresh: "sk-ant-ort01-tron-wire-test", expires: Date.now() + 3_600_000 } }), { mode: 0o600 });
     expect((await usage.read(await createProviderModelRuntime(direct), "anthropic")).providers[0]).toMatchObject({ status: "available" });
     expect(usageAgent).toBe(`claude-code/${CLAUDE_CODE_VERSION}`);
+  });
+
+  it("marks the end of the settled view lines and keeps that prefix when only recent lines merge", async () => {
+    const { endpoint, home, model } = await oauthHome("tron-anthropic-settled-mark-");
+    const onPayload = homeBeforeProviderRequest();
+    const settled = [2048, 1024, 128, 128, 128, 128, 64, 64, 64, 64];
+    const send = async (spans: readonly number[], text: string) => {
+      const context: Context = { systemPrompt: "You are Tron Home.", tools: HOME_TOOLS as never,
+        messages: [viewMessage(spans), { role: "user", content: [{ type: "text", text }], timestamp: 2 }] };
+      await home.streamSimple(model, context, { sessionId: "home-settled", reasoning: "xhigh", onPayload }).result();
+      return endpoint.requests.at(-1)!.body;
+    };
+    const settledEnd = 1 + Math.floor(settled.length / VIEW_BLOCK_LINES) - 1;
+    const prefixTo = (body: Record<string, unknown>, block: number) => JSON.stringify([body.tools, (body.system as Block[]).map(({ cache_control: _mark, ...rest }) => rest),
+      (body.messages as WireMessage[])[0]!.content.slice(0, block + 1).map((part) => typeof part === "string" ? part : { type: part.type, text: part.text })]);
+
+    const before = await send([...settled, 32, 32, 16, 16, 8, 4, 2, 1, 1, 1, 1, 1], "first");
+    expect(wireMarks(before)).toEqual([
+      { path: ".system[1]", ttl: "1h" },
+      { path: `.messages[0].content[${settledEnd}]`, ttl: "1h" },
+      { path: ".messages[0].content[5]", ttl: "1h" },
+      { path: ".messages[1].content[0]", ttl: undefined },
+    ]);
+
+    const after = await send([...settled, 64, 16, 16, 8, 4, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1], "second");
+    expect(wireMarks(after)).toEqual([
+      { path: ".system[1]", ttl: "1h" },
+      { path: `.messages[0].content[${settledEnd}]`, ttl: "1h" },
+      { path: ".messages[0].content[6]", ttl: "1h" },
+      { path: ".messages[1].content[0]", ttl: undefined },
+    ]);
+    expect(prefixTo(after, settledEnd)).toBe(prefixTo(before, settledEnd));
+    expect(prefixTo(after, settledEnd + 1)).not.toBe(prefixTo(before, settledEnd + 1));
+
+    const unsettled = await send([32, 32, 16, 16, 8, 4, 2, 1, 1], "third");
+    expect(wireMarks(unsettled).map((mark) => mark.path)).toEqual([".system[0]", ".system[1]", ".messages[0].content[2]", ".messages[1].content[0]"]);
   });
 
   it("sends every request with its full context, never an Anthropic message thread, on Anthropic's own endpoint", async () => {

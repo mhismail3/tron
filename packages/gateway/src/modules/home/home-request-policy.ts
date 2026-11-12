@@ -7,12 +7,13 @@ import {
   type ModelRuntime,
   type SessionProjection,
 } from "../../kernel/pi/coding-agent.js";
-import { markAnthropicBlocks, VIEW_BLOCK_LINES } from "../../episodic/cache-layout.js";
+import { markAnthropicBlocks, shortenLastMessageMark, VIEW_BLOCK_LINES, VIEW_SETTLED_SPAN } from "../../episodic/cache-layout.js";
 import { INPUT_TRIGGER_MESSAGE, INPUT_TRIGGER_RESUME_MESSAGE } from "../../kernel/receipts/delivery-tags.js";
 import { HOME_TASK_RESULT_MESSAGE } from "../../kernel/receipts/invocation-receipts.js";
 import type { HomeContextSection } from "../../protocol/types.js";
 import { HomeResponseTiming, type HomeResponseSample } from "./home-response-timing.js";
 import { homeToolAvailable } from "./home-runtime-policy.js";
+import { HomeTokenCalibration, type HomeTokenEstimate } from "./home-token-calibration.js";
 
 const HOME_MEMORY_CUSTOM_TYPE = "tron.home-memory.v1";
 export const HOME_NONCE_MARKER = "tron.home-nonce:";
@@ -118,6 +119,11 @@ export type HomeRequestRecord =
     waitedMs: number;
   }
   | {
+    event: "usage";
+    estimatedTokens: number;
+    providerTokens: number;
+  }
+  | {
     event: "refused";
     reason: HomeRefusalReason;
     detail: string;
@@ -159,7 +165,9 @@ interface ActivationState extends HomeActivationIdentity {
   view: Promise<HomeActivationView> | undefined;
   viewRefusal: HomeRequestPolicyError | undefined;
   unrecorded: boolean;
+  unmeasured: boolean;
   step: HomeRequestStep | undefined;
+  sent: { model: string; estimate: HomeTokenEstimate } | undefined;
   refusal: HomeRefusal | undefined;
 }
 
@@ -185,6 +193,7 @@ export class HomeRequestPolicy {
   private expectedDigest: string | undefined;
   private expectedNonSystemMessages: AgentMessage[] | undefined;
   private readonly transformIdentities: boolean[] = [];
+  private readonly calibration = new HomeTokenCalibration();
 
   readonly responseTiming: HomeResponseTiming;
 
@@ -225,7 +234,9 @@ export class HomeRequestPolicy {
       view: undefined,
       viewRefusal: undefined,
       unrecorded: true,
+      unmeasured: true,
       step: undefined,
+      sent: undefined,
       refusal: undefined,
     };
     this.expectedDigest = undefined;
@@ -269,10 +280,11 @@ export class HomeRequestPolicy {
     const projection = session.sessionManager.buildSessionProjection();
     const cut = this.cut(projection, this.boundaryIndex(projection, activation), activation, view);
     const window = session.model?.contextWindow ?? 0;
-    const nonSystem = cut.messages.filter(message => message.role !== "system").reduce((total, message) => total + estimateTokens(message), 0);
-    const incomingSystem = estimateTokens(systemMessage(systemPrompt, cut.messages));
-    const prefix = nonSystem + incomingSystem;
-    const freshTokens = Math.max(0, window - HOME_RESERVE_TOKENS - prefix);
+    const memory = estimateTokens(cut.memory);
+    const other = cut.tail.reduce((total, item) => total + estimateTokens(item.message), 0) + estimateTokens(systemMessage(systemPrompt, activation.kind, cut.messages));
+    const scale = this.calibration.factors(modelKey(session.model));
+    const prefix = Math.ceil(memory * scale.memory + other * scale.other);
+    const freshTokens = Math.floor(Math.max(0, window - HOME_RESERVE_TOKENS - prefix) / scale.other);
     return { tokens: Math.max(0, freshTokens - estimateTokens(input)), freshTokens, signal: activation.cancellation.signal };
   }
 
@@ -300,7 +312,9 @@ export class HomeRequestPolicy {
       }
       const rewritten = this.cut(projection, boundaryIndex, activation, memoryView);
       const model = update?.model ?? request.model;
-      const sections = requestSections(system, rewritten, memoryView, activation.kind);
+      const estimated = requestSections(system, rewritten, memoryView, activation.kind);
+      const scale = this.calibration.factors(modelKey(model));
+      const sections = estimated.map(section => ({ ...section, tokens: Math.ceil(section.tokens * (section.id === "memory" ? scale.memory : scale.other)) }));
       const effectiveTokens = sections.reduce((total, section) => total + section.tokens, 0);
       const contextWindow = model?.contextWindow ?? 0;
       if (contextWindow > 0 && effectiveTokens > contextWindow - HOME_RESERVE_TOKENS) {
@@ -311,6 +325,9 @@ export class HomeRequestPolicy {
           { effectiveTokens, contextWindow },
         );
       }
+      const memoryEstimate = estimated.find(section => section.id === "memory")?.tokens ?? 0;
+      activation.sent = { model: modelKey(model), estimate: { memory: memoryEstimate,
+        other: estimated.reduce((total, section) => total + section.tokens, 0) - memoryEstimate } };
       this.expectedNonSystemMessages = rewritten.nonSystem;
       const viewBytes = utf8Bytes(memoryView.text);
       const viewLines = memoryView.text === "" ? 0 : memoryView.text.split("\n").length;
@@ -381,15 +398,37 @@ export class HomeRequestPolicy {
         );
       }
       const finish = this.responseTiming.model(activation.operationId);
+      const step = activation.step;
+      const sent = activation.sent;
       try {
         const result = stream(model, context, options);
-        void Promise.resolve(result).then((stream) => stream.result()).then(finish, finish);
+        void Promise.resolve(result).then((stream) => stream.result()).then((message) => {
+          finish();
+          if (step && sent) this.measure(activation, step, sent, message.usage.input + message.usage.cacheRead + message.usage.cacheWrite);
+        }, finish).catch(() => {});
         return result;
       } catch (error) {
         finish();
         throw error;
       }
     };
+  }
+
+  private measure(activation: ActivationState, step: HomeRequestStep, sent: NonNullable<ActivationState["sent"]>, providerTokens: number): void {
+    if (!this.calibration.observe(sent.model, activation.nonce, sent.estimate, providerTokens)) return;
+    if (activation.unmeasured) {
+      activation.unmeasured = false;
+      this.options.onRecord?.({ event: "usage", estimatedTokens: step.effectiveTokens, providerTokens });
+    }
+    const estimated = step.effectiveTokens;
+    let assigned = 0;
+    for (const section of step.sections) {
+      section.tokens = Math.floor(section.tokens * providerTokens / estimated);
+      assigned += section.tokens;
+    }
+    const largest = step.sections.reduce((best, section) => section.tokens > best.tokens ? section : best);
+    largest.tokens += providerTokens - assigned;
+    step.effectiveTokens = providerTokens;
   }
 
   private requireActivation(): ActivationState {
@@ -556,6 +595,10 @@ export class HomeRequestPolicy {
   }
 }
 
+function modelKey(model: { provider: string; id: string } | undefined): string {
+  return model ? `${model.provider}/${model.id}` : "";
+}
+
 function homeSystemText(prompt: HomeSystemPrompt): string {
   return `${prompt.instructions}\n\n${prompt.profile}`;
 }
@@ -587,8 +630,8 @@ function requestSections(system: HomeSystemPrompt, cut: RewrittenContext, view: 
   });
   const summaries = view.text === "" ? 0 : view.text.split("\n").filter(line => MEMORY_SUMMARY_LINE.test(line)).length;
   return [
-    { id: "instructions", tokens: estimateTokens(systemMessage(system.instructions, cut.messages)) },
-    { id: "profile", tokens: estimateTokens(systemMessage(system.profile)), count: system.profileNotes },
+    { id: "instructions", tokens: estimateTokens(systemMessage(system.instructions, kind, cut.messages)) },
+    { id: "profile", tokens: estimateTokens(systemMessage(system.profile, kind)), count: system.profileNotes },
     { id: "memory", tokens: estimateTokens(cut.memory), count: summaries },
     { id: "chapter", tokens: chapterTokens, count: chapterEntries.size },
     { id: "results", tokens: resultTokens, count: results },
@@ -596,15 +639,15 @@ function requestSections(system: HomeSystemPrompt, cut: RewrittenContext, view: 
   ];
 }
 
-function systemMessage(text: string, messages?: readonly AgentMessage[], kind?: HomeActivationKind): AgentMessage {
+function systemMessage(text: string, kind: HomeActivationKind, messages?: readonly AgentMessage[]): AgentMessage {
   const current = messages ? getCurrentSystemMessage(messages as never) : undefined;
-  const toolsAdded = kind === undefined ? current?.toolsAdded : current?.toolsAdded?.filter(tool => homeToolAvailable(tool.name, kind));
+  const toolsAdded = current?.toolsAdded?.filter(tool => homeToolAvailable(tool.name, kind));
   return { role: "system", content: text, ...(toolsAdded ? { toolsAdded } : {}),
     timestamp: current?.timestamp ?? (messages ? Date.now() : 0) } as AgentMessage;
 }
 
 function homeSystemFrame(messages: readonly AgentMessage[], system: string, kind: HomeActivationKind): AgentMessage[] {
-  return [systemMessage(system, messages, kind), ...messages.filter(message => message.role !== "system")];
+  return [systemMessage(system, kind, messages), ...messages.filter(message => message.role !== "system")];
 }
 
 function excludedMessages(projection: SessionProjection, boundaryIndex: number): AgentMessage[] {
@@ -650,13 +693,35 @@ export function markHomeMemoryCache(payload: unknown): unknown {
   if (mark < 0) return payload;
   const lines = viewGroupLines(blocks[mark]);
   if (lines !== undefined && lines < VIEW_BLOCK_LINES) mark -= 1;
-  return markAnthropicBlocks(payload, index, [mark]);
+  const settled = settledBlock(blocks, mark);
+  const both = settled === undefined ? payload : markAnthropicBlocks(payload, index, [settled, mark]);
+  return shortenLastMessageMark(both === payload ? markAnthropicBlocks(payload, index, [mark]) : both, index);
+}
+
+function viewGroupText(block: unknown): string | undefined {
+  const text = (block as { type?: unknown; text?: unknown } | null)?.text;
+  if ((block as { type?: unknown } | null)?.type !== "text" || typeof text !== "string") return undefined;
+  return /^(?:\d+\+\d+\|[^\n]*\n)+$/u.test(text) ? text : undefined;
 }
 
 function viewGroupLines(block: unknown): number | undefined {
-  const text = (block as { type?: unknown; text?: unknown } | null)?.text;
-  if ((block as { type?: unknown } | null)?.type !== "text" || typeof text !== "string") return undefined;
-  return /^(?:\d+\+\d+\|[^\n]*\n)+$/u.test(text) ? text.split("\n").length - 1 : undefined;
+  const text = viewGroupText(block);
+  return text === undefined ? undefined : text.split("\n").length - 1;
+}
+
+function settledBlock(blocks: readonly unknown[], before: number): number | undefined {
+  let settled: number | undefined;
+  for (let at = 0; at < before; at += 1) {
+    const text = viewGroupText(blocks[at]);
+    if (text === undefined) {
+      if (settled === undefined) continue;
+      break;
+    }
+    const spans = [...text.matchAll(/^\d+\+(\d+)\|/gmu)].map((line) => Number(line[1]));
+    if (spans.length < VIEW_BLOCK_LINES || spans.some((span) => span < VIEW_SETTLED_SPAN)) break;
+    settled = at;
+  }
+  return settled;
 }
 
 export function applyHomeCacheRetention(runtime: ModelRuntime): ModelRuntime {

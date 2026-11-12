@@ -1,6 +1,6 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname } from "node:path";
+import { RotatingJsonl } from "./rotating-jsonl.js";
 import { redact, redactCredentialField } from "../util/credential-redaction.js";
 import { GatewayError } from "../errors.js";
 import type { HomeHardBoundary } from "../modules/home/home-diagnostic.js";
@@ -165,8 +165,6 @@ interface LoggerIdentity {
 const PERSISTED_TAIL_RECORDS = 1_000;
 const DEBUG_BUFFER_MAX_RECORDS = 4_000;
 const DEBUG_BUFFER_MAX_BYTES = 2 * 1_024 * 1_024;
-const SEGMENT_MAX_BYTES = 5 * 1_024 * 1_024;
-const SEGMENT_COUNT = 8;
 const MAX_MESSAGE_BYTES = 2_000;
 const MAX_STAGES_BYTES = 1_024;
 const MAX_ERROR_MESSAGE_BYTES = 1_000;
@@ -360,12 +358,11 @@ export class GatewayLogger {
   private readonly records: LogRecord[] = [];
   private readonly debugRecords: Array<{ record: LogRecord; bytes: number }> = [];
   private debugBytes = 0;
-  private readonly path: string | undefined;
+  private readonly file: RotatingJsonl | undefined;
   private readonly identity: Pick<LogRecord, "runtimeEpoch" | "payloadVersion">;
-  private activeBytes: number | undefined;
 
   constructor(path?: string, identity: LoggerIdentity = {}) {
-    this.path = path;
+    this.file = path ? new RotatingJsonl(path) : undefined;
     this.identity = {
       ...(identity.runtimeEpoch ? { runtimeEpoch: boundedDiagnosticID(identity.runtimeEpoch) } : {}),
       ...(identity.payloadVersion ? { payloadVersion: boundedDiagnosticID(identity.payloadVersion) } : {}),
@@ -388,7 +385,7 @@ export class GatewayLogger {
     }
     this.records.push(record);
     if (this.records.length > PERSISTED_TAIL_RECORDS) this.records.splice(0, this.records.length - PERSISTED_TAIL_RECORDS);
-    this.persist(record);
+    this.file?.append(record);
     if (process.env.TRON_GATEWAY_SUPERVISED === "1") return;
     const output = `[${record.timestamp}] ${level.toUpperCase()}${record.event ? ` ${record.event}` : ""} ${record.message}\n`;
     if (level === "error") process.stderr.write(output);
@@ -415,11 +412,12 @@ export class GatewayLogger {
   }
 
   private loadPersisted(): void {
-    if (!this.path) return;
+    const file = this.file;
+    if (!file) return;
     try {
       const newestFirst: LogRecord[] = [];
-      for (let index = 0; index < SEGMENT_COUNT && newestFirst.length < PERSISTED_TAIL_RECORDS; index += 1) {
-        const candidate = this.segmentPath(index);
+      for (let index = 0; index < file.segments && newestFirst.length < PERSISTED_TAIL_RECORDS; index += 1) {
+        const candidate = file.segmentPath(index);
         if (!existsSync(candidate)) continue;
         const lines = readFileSync(candidate, "utf8").split("\n").filter(Boolean);
         for (let line = lines.length - 1; line >= 0 && newestFirst.length < PERSISTED_TAIL_RECORDS; line -= 1) {
@@ -450,35 +448,5 @@ export class GatewayLogger {
     } catch {
       return undefined;
     }
-  }
-
-  private persist(record: LogRecord): void {
-    if (!this.path) return;
-    try {
-      mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
-      const line = `${JSON.stringify(record)}\n`;
-      const lineBytes = Buffer.byteLength(line);
-      if (this.activeBytes === undefined) {
-        this.activeBytes = existsSync(this.path) ? statSync(this.path).size : 0;
-      }
-      if (this.activeBytes > 0 && this.activeBytes + lineBytes > SEGMENT_MAX_BYTES) this.rotate();
-      appendFileSync(this.path, line, { mode: 0o600 });
-      this.activeBytes += lineBytes;
-    } catch {
-      this.activeBytes = undefined;
-    }
-  }
-
-  private rotate(): void {
-    try { unlinkSync(this.segmentPath(SEGMENT_COUNT - 1)); } catch { }
-    for (let index = SEGMENT_COUNT - 2; index >= 0; index -= 1) {
-      try { renameSync(this.segmentPath(index), this.segmentPath(index + 1)); } catch { }
-    }
-    this.activeBytes = 0;
-  }
-
-  private segmentPath(index: number): string {
-    const base = this.path ?? "gateway.jsonl";
-    return index === 0 ? base : `${base}.${index}`;
   }
 }

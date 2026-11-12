@@ -60,11 +60,11 @@ it("keeps managed subagents ordinary-only across Home profile replacement and re
       const names = context.availableTools.map(tool => tool.name);
       if (profile === "home") {
         expect(names.sort()).toEqual([
-          "ask_user", "bash", "date", "delegate", "display", "edit", "find", "grep", "ls", "memory_search", "obligation", "profile",
+          "ask_user", "bash", ...(process.platform === "darwin" ? ["computer"] : []), "date", "delegate", "display", "edit", "find", "grep", "ls", "memory_search", "obligation", "profile",
           "projects", "read", "session_read", "session_search", "settings", "task", "web_search", "write", "zoom",
         ]);
         expect(context.extensions.map(extension => extension.name.replace(/^<inline:/, "").replace(/>$/, "")).sort())
-          .toEqual(["tron-ask-user", "tron-compaction-policy", "tron-context-window", "tron-display", "tron-home", "tron-home-research", "tron-projects", "tron-settings", "tron-web-research"]);
+          .toEqual(["tron-ask-user", "tron-compaction-policy", ...(process.platform === "darwin" ? ["tron-computer"] : []), "tron-context-window", "tron-display", "tron-home", "tron-home-research", "tron-projects", "tron-settings", "tron-web-research"]);
         expect(resources.subagents).toEqual([]);
       } else {
         expect(names).toContain("subagent");

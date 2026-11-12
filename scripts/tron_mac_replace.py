@@ -30,7 +30,8 @@ import sys
 import time
 import uuid
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[1] / 'tools/home-layout')]
+import home_layout  # noqa: E402
 from tron_mac_replace_journal import Journal, TERMINAL_STATES, describe, now, private_mkdir, write_json_atomic  # noqa: E402
 from tron_mac_replace_platform import Failure, MacPlatform, capture, git, git_succeeds, run  # noqa: E402
 from tron_mac_replace_rpc import RpcError  # noqa: E402
@@ -40,6 +41,8 @@ LIBC = ctypes.CDLL(None, use_errno=True)
 DISK_RESERVE = {'full': 15 * 1024 ** 3, 'quick': 3 * 1024 ** 3}
 WORKER_STOP_TIMEOUT = 10 * 60
 KEPT_APP_NAME = 'Tron.app.kept'
+STAGED_REGISTRY = Path(home_layout.REGISTRY).name
+CLONE_NOFOLLOW = 1
 RESUME_TEXT = ('The Mac app was replaced while this task ran, so it was stopped and preserved. '
                'Continue the task in place from where you left off.')
 
@@ -354,13 +357,7 @@ class Runner:
             blocker = platform.offline_blocker()
             if blocker:
                 raise Failure(f'not offline before the swap: {blocker}')
-            snapshot = operation / f'state-snapshot-{self.data["attempt"]}'
-            if snapshot.exists():
-                raise Failure(f'raw snapshot already exists; preserving it rather than overwriting: {snapshot}')
-            if LIBC.clonefile(os.fsencode(platform.tron_home), os.fsencode(snapshot), 0) != 0:
-                raise Failure(f'could not snapshot {platform.tron_home}: {os.strerror(ctypes.get_errno())}')
-            swap['snapshot'] = str(snapshot)
-            self.journal.save()
+            self.snapshot_state()
             channel = platform.stable_channel()
             if channel.exists():
                 retired = operation / f'retired-stable-payloads-{self.data["attempt"]}'
@@ -388,6 +385,28 @@ class Runner:
         finally:
             os.close(lock)
         return f'installed {self.revision[:9]}; previous app kept at {previous}'
+
+    def snapshot_state(self):
+        """Clone what the Tron-home registry backs up, and every path it does not know, as this attempt's rollback point."""
+        home, operation, attempt = self.platform.tron_home, self.journal.directory, self.data['attempt']
+        snapshot, partial = operation / f'state-snapshot-{attempt}', operation / f'partial-state-snapshot-{attempt}'
+        if snapshot.exists():
+            raise Failure(f'raw snapshot already exists; preserving it rather than overwriting: {snapshot}')
+        paths = staged_registry(operation / 'runner')
+        failures = remove_tree(partial, worktree=False) if partial.exists() else []
+        if failures:
+            raise Failure(f'could not clear an interrupted snapshot: {failures[0]}')
+        private_mkdir(partial)
+        for relative, decision in home_layout.backup_walk(paths, home):
+            source, target = home / relative, partial / relative
+            if decision == 'mixed':
+                private_mkdir(target)
+            elif LIBC.clonefile(os.fsencode(source), os.fsencode(target), CLONE_NOFOLLOW) != 0:
+                raise Failure(f'could not snapshot {source}: {os.strerror(ctypes.get_errno())}')
+        os.rename(partial, snapshot)
+        self.data['swap']['snapshot'] = str(snapshot)
+        self.journal.save()
+        return snapshot
 
     def maintenance_lock(self):
         """Exclude `mac reinstall` for the offline window (its own flock)."""
@@ -486,7 +505,7 @@ class Runner:
             self.journal.note(f'could not relaunch the previous app: {error}')
 
     def rollback(self):
-        """Restore the previous app and payload channel; keep the ~/.tron snapshot as a rollback point."""
+        """Restore the previous app and payload channel; keep the selected home-state snapshot as a rollback point."""
         platform, swap, operation = self.platform, self.data['swap'], self.journal.directory
         attempt = self.data['attempt']
         self.data['rollback'] = {'state': 'running', 'startedAt': now()}
@@ -523,7 +542,7 @@ class Runner:
             if from_revision and info.get('sourceRevision') != from_revision:
                 raise Failure(f'restored Gateway reports {info.get("sourceRevision")}, expected {from_revision}')
             self.data['rollback'] = {'state': 'restored', 'endedAt': now(),
-                                     'detail': f'previous app restored; {detail}; ~/.tron snapshot kept at {swap.get("snapshot")}'}
+                                     'detail': f'previous app restored; {detail}; selected home-state snapshot kept at {swap.get("snapshot")}'}
             self.journal.settle('rolled-back')
         except Exception as error:  # noqa: BLE001
             self.data['rollback'] = {'state': 'failed', 'endedAt': now(), 'detail': f'{error} (log: {log})'}
@@ -563,36 +582,39 @@ def format_age(seconds):
 
 
 OPERATION_FILES = {'journal.json', 'journal.log', 'logs', 'runner', 'runner.lock', 'runner.out', 'runner.plist'}
-ROLLBACK_SET = re.compile(r'(state-snapshot|previous-app|retired-stable-payloads|failed-app|failed-stable-payloads)-\d+')
+ROLLBACK_SET = re.compile(r'(state-snapshot|partial-state-snapshot|previous-app|retired-stable-payloads|failed-app|failed-stable-payloads)-\d+')
 
 
 def prune_store(platform, operation, revision):
     """After a full replacement, keep only this operation and the build it installed.
 
     Older rollback sets are superseded: rollback restores only this operation's previous app
-    and payloads, and an older ~/.tron snapshot is never restored over newer data. Returns the
+    and payloads, and an older selected home-state snapshot is never restored over newer data. Returns the
     paths it could not delete, with the reason."""
     builds = platform.store / 'builds'
     targets = [entry for entry in sorted(builds.iterdir()) if entry.name != revision] if builds.is_dir() else []
     operations = [other for other in sorted(platform.store.iterdir())
                   if other != operation and not other.is_symlink() and (other / 'journal.json').is_file()]
-    targets += [entry for other in operations for entry in sorted(other.iterdir())
-                if entry.name in OPERATION_FILES or ROLLBACK_SET.fullmatch(entry.name)]
+    copies = [entry for other in operations for entry in sorted(other.iterdir())
+              if entry.name in OPERATION_FILES or ROLLBACK_SET.fullmatch(entry.name)]
     failures = [failure for path in targets for failure in remove_tree(path)]
+    failures += [failure for path in copies for failure in remove_tree(path, worktree=False)]
     for other in operations:
         with contextlib.suppress(OSError):
             other.rmdir()
     return failures
 
 
-def remove_tree(path):
-    """Delete `path`, including Gateway payloads bundle-gateway.sh sealed read-only (`chmod -R a-w`)."""
+def remove_tree(path, worktree=True):
+    """Delete `path`, including Gateway payloads bundle-gateway.sh sealed read-only (`chmod -R a-w`).
+
+    A build is a git worktree and is unregistered first; `worktree=False` is for a tree that only holds copies."""
     try:
         if path.is_dir() and not path.is_symlink():
             for directory, _, _ in os.walk(path):
                 os.chmod(directory, os.stat(directory).st_mode | stat.S_IWUSR)
-            registration_dropped = not (path / '.git').is_file() or git_succeeds(path, 'worktree', 'remove', '--force', path,
-                                                                         timeout=600)
+            registration_dropped = not worktree or not (path / '.git').is_file() or git_succeeds(
+                path, 'worktree', 'remove', '--force', path, timeout=600)
             if path.exists():
                 shutil.rmtree(path)
             if not registration_dropped:
@@ -621,12 +643,31 @@ def runner_label(operation):
     return f'com.tron.mac.replace.{operation[:8]}'
 
 
+def stage_runner(platform, journal, script_dir):
+    runtime = private_mkdir(journal.directory / 'runner')
+    for name in (*(f'tron_mac_replace{part}.py' for part in ('', '_journal', '_platform', '_rpc')), 'tron_rebuild_lock.py', *platform.runner_files()):
+        shutil.copy2(Path(script_dir) / name, runtime / name)
+    for source in ('tools/home-layout/home_layout.py', home_layout.REGISTRY):
+        shutil.copy2(Path(script_dir).parent / source, runtime / Path(source).name)
+    staged_registry(runtime)
+    return runtime
+
+
+def staged_registry(runtime):
+    try:
+        registry = json.loads((runtime / STAGED_REGISTRY).read_text())
+    except (OSError, ValueError) as error:
+        raise Failure(f'cannot read the staged Tron-home registry: {error}') from None
+    problems = home_layout.shape(registry)
+    if problems:
+        raise Failure(f'the staged Tron-home registry is invalid: {problems[0]}')
+    return registry['paths']
+
+
 def launch_runner(platform, journal, script_dir):
     """Detach the runner as its own launchd job, from a private copy of this script."""
     operation = journal.directory
-    runtime = private_mkdir(operation / 'runner')
-    for name in (*(f'tron_mac_replace{part}.py' for part in ('', '_journal', '_platform', '_rpc')), 'tron_rebuild_lock.py', *platform.runner_files()):
-        shutil.copy2(Path(script_dir) / name, runtime / name)
+    runtime = stage_runner(platform, journal, script_dir)
     label = runner_label(journal.data['id'])
     plist = operation / 'runner.plist'
     with plist.open('wb') as stream:

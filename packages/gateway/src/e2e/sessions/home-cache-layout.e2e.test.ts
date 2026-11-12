@@ -1,5 +1,5 @@
 import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
-import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
+import { createServer, type IncomingHttpHeaders, type Server, type ServerResponse } from "node:http";
 import { settingsDependencies } from "../../../test-support/settings-dependencies.js";
 import { homeMemoryChange } from "../../../test-support/session-settings-change.js";
 import { createHash } from "node:crypto";
@@ -17,6 +17,7 @@ import { EPISODIC_DEFAULTS } from "../../episodic/episodic-contract.js";
 import { HOME_MEMORY_VIEW_MARKER } from "../../modules/home/home-memory.js";
 import { HOME_NONCE_MARKER, markHomeMemoryCache, type HomeRequestRecord } from "../../modules/home/home-request-policy.js";
 import type { HomeStatus } from "../../protocol/types.js";
+import type { RequestRecord } from "../../kernel/run/request-record.js";
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
@@ -28,6 +29,7 @@ const SMALL_MODEL_ID = "small-local";
 const SUMMARY = (n: number) => `summary ${n} ${"s".repeat(470)}`.slice(0, 490);
 const REPORT_PATH = "test-results/home-cache-layout/report.json";
 const CACHE_READ = 7;
+const CACHE_WRITE = 11;
 const client = { id: "terminal", identity: "device:home-cache", isLocal: false, unsubscribe: () => {} } as unknown as ClientContext;
 
 interface Captured {
@@ -48,9 +50,21 @@ afterAll(async () => {
   process.stdout.write(`home-cache-layout e2e: ${report.cases.length} cases -> ${REPORT_PATH}\n`);
 });
 
-async function endpoint(responses = false): Promise<{ server: Server; port: number; requests: Captured[]; toolCalls: Array<{ name: string; input: unknown }> }> {
+const HELD_REQUEST = "hold this request open";
+const METERED_WINDOW = 120_000;
+
+function providerCount(body: Record<string, unknown>): number {
+  const messages = body.messages as WireMessage[];
+  const view = blocks(messages[0]!).map((block) => block.text ?? "").join("");
+  const memory = view.startsWith(HOME_MEMORY_VIEW_MARKER);
+  const rest = JSON.stringify([body.tools, body.system, memory ? messages.slice(1) : messages]);
+  return Math.ceil((memory ? Buffer.byteLength(view) : 0) / 2 + Buffer.byteLength(rest) / 2.8);
+}
+
+async function endpoint(responses = false, metered = false): Promise<{ server: Server; port: number; requests: Captured[]; toolCalls: Array<{ name: string; input: unknown }>; held: ServerResponse[] }> {
   const requests: Captured[] = [];
   const toolCalls: Array<{ name: string; input: unknown }> = [];
+  const held: ServerResponse[] = [];
   let summaries = 0;
   const server = createServer((request, response) => {
     let raw = "";
@@ -62,11 +76,12 @@ async function endpoint(responses = false): Promise<{ server: Server; port: numb
       const kind: Captured["kind"] = system.includes(EPISODIC_COMPACT_PROMPT.slice(0, 40)) ? "summarizer"
         : system.includes("## Tron Home") ? "home" : "ordinary";
       requests.push({ kind, body, headers: request.headers });
+      if (raw.includes(HELD_REQUEST)) return void held.push(response);
       const tool = kind === "home" ? toolCalls.shift() : undefined;
       const text = kind === "summarizer" ? SUMMARY(++summaries) : `reply ${requests.length} ${"r".repeat(900)}`;
       const event = (type: string, data: Record<string, unknown>) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
-      const usage = { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: kind === "summarizer" ? CACHE_READ : 0,
-        cache_creation_input_tokens: 0 };
+      const usage = { input_tokens: metered && kind === "home" ? providerCount(body) : 10, output_tokens: 5, cache_read_input_tokens: kind === "summarizer" ? CACHE_READ : 0,
+        cache_creation_input_tokens: kind === "home" && !metered ? CACHE_WRITE : 0 };
       if (responses) {
         const output = tool
           ? { type: "function_call", id: `fc_${requests.length}`, call_id: `call_${requests.length}`, name: tool.name, arguments: JSON.stringify(tool.input), status: "completed" }
@@ -96,13 +111,14 @@ async function endpoint(responses = false): Promise<{ server: Server; port: numb
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  return { server, port: (server.address() as AddressInfo).port, requests, toolCalls };
+  return { server, port: (server.address() as AddressInfo).port, requests, toolCalls, held };
 }
 
-async function fixture(responses = false) {
+async function fixture(responses = false, metered = false) {
   const root = await mkdtemp(join(tmpdir(), "tron-home-cache-"));
-  const local = await endpoint(responses);
+  const local = await endpoint(responses, metered);
   disposals.push(async () => {
+    for (const response of local.held) response.destroy();
     await new Promise<void>((resolve) => local.server.close(() => resolve()));
     await rm(root, { recursive: true, force: true });
   });
@@ -114,12 +130,13 @@ async function fixture(responses = false) {
     baseUrl: `http://127.0.0.1:${local.port}`, api: responses ? "openai-responses" : "anthropic-messages", apiKey: "local-test-key",
     compat: { sendSessionAffinityHeaders: true },
     models: [
-      { id: MODEL_ID, name: "Opus (local)", reasoning: false, input: ["text"], contextWindow: 1_000_000, maxTokens: 4_096 },
+      { id: MODEL_ID, name: "Opus (local)", reasoning: false, input: ["text"], contextWindow: metered ? METERED_WINDOW : 1_000_000, maxTokens: 4_096 },
       { id: SMALL_MODEL_ID, name: "Small (local)", reasoning: false, input: ["text"], contextWindow: 4_096, maxTokens: 1_024 },
     ],
   } } }));
   const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: join(agentDir, "models.json"), refreshOnCreate: false });
   const records: HomeRequestRecord[] = [];
+  const requestRecords: RequestRecord[] = [];
   const configurations: Array<{ sessionId: string; blocker: unknown }> = [];
   let settings: ReturnType<typeof settingsDependencies> | undefined;
   const registry = await createTestRegistry({ agentDir, tronHome, idleRuntimeMs: 60_000,
@@ -132,6 +149,7 @@ async function fixture(responses = false) {
     sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     gatewayModelRuntime: runtime,
     homeRequestDiagnostic: (record) => records.push(record),
+    requestRecord: (record) => requestRecords.push(record),
   });
   disposals.push(async () => { await registry.dispose(); });
   const service = new GatewayService({ display: displayOwnerOf(registry),
@@ -143,7 +161,7 @@ async function fixture(responses = false) {
   } as unknown as GatewayServiceDependencies);
   await settings.settingsChanges.start();
   await registry.initialize();
-  return { ...local, registry, service, records, root, configurations };
+  return { ...local, registry, service, records, requestRecords, root, configurations };
 }
 
 async function settledTurn(f: { configurations: Array<{ sessionId: string; blocker: unknown }> },
@@ -180,19 +198,8 @@ const memoryOf = (request: Captured) => blocks(messagesOf(request)[0]!);
 
 const viewBlocksOf = (request: Captured) => memoryOf(request).slice(0, -2).map((block) => block.text ?? "");
 
-function markTtls(captured: Captured): Set<string> {
-  const ttls = new Set<string>();
-  const visit = (value: unknown) => {
-    if (Array.isArray(value)) value.forEach(visit);
-    else if (value && typeof value === "object") {
-      for (const [key, field] of Object.entries(value)) {
-        if (key === "cache_control") ttls.add(String((field as { ttl?: unknown }).ttl ?? "5m"));
-        else visit(field);
-      }
-    }
-  };
-  visit(captured.body);
-  return ttls;
+function lifetimes(captured: Captured): string[] {
+  return wireBlocks(captured).flatMap((block) => block.ttl === undefined ? [] : [block.ttl]);
 }
 
 function expectViewLayout(pieces: string[]): void {
@@ -208,11 +215,12 @@ function expectViewLayout(pieces: string[]): void {
   });
 }
 
-function wireBlocks(captured: Captured): Array<{ path: string; json: string; marked: boolean }> {
-  const out: Array<{ path: string; json: string; marked: boolean }> = [];
+function wireBlocks(captured: Captured): Array<{ path: string; json: string; marked: boolean; ttl?: string }> {
+  const out: Array<{ path: string; json: string; marked: boolean; ttl?: string }> = [];
   const add = (path: string, block: unknown) => {
     const { cache_control: control, ...rest } = block as Record<string, unknown>;
-    out.push({ path, json: JSON.stringify(rest), marked: control !== undefined });
+    out.push({ path, json: JSON.stringify(rest), marked: control !== undefined,
+      ...(control === undefined ? {} : { ttl: String((control as { ttl?: unknown }).ttl ?? "5m") }) });
   };
   for (const key of ["tools", "system"] as const) {
     const list = captured.body[key];
@@ -239,6 +247,45 @@ function reread(previous: Captured, next: Captured): string | undefined {
     }
   });
   return deepest < 0 ? undefined : after[deepest]!.path;
+}
+
+const recordedIdentity = new Map<string, string>();
+const wireIdentity = new Map<string, string>();
+
+function expectRecordOfWire(record: RequestRecord, captured: Captured): void {
+  const units: Array<{ path: string; json: string; ttl?: string }> = [];
+  const add = (path: string, unit: unknown) => {
+    const { cache_control: control, ...rest } = unit as Record<string, unknown>;
+    units.push({ path, json: JSON.stringify(rest), ...(control === undefined ? {} : { ttl: String((control as { ttl?: unknown }).ttl ?? "5m") }) });
+  };
+  for (const key of ["tools", "system"] as const) (captured.body[key] as unknown[]).forEach((unit, index) => add(`.${key}[${index}]`, unit));
+  (captured.body.messages as Array<Record<string, unknown>>).forEach((message, index) => {
+    if (!Array.isArray(message.content)) return add(`.messages[${index}]`, message);
+    const { content, ...envelope } = message;
+    add(`.messages[${index}]`, envelope);
+    (content as unknown[]).forEach((block, at) => add(`.messages[${index}].content[${at}]`, block));
+  });
+  const hashes = prefixHashes(units);
+  const sizes = units.map((_unit, index) => units.slice(0, index + 1).reduce((bytes, unit) => bytes + Buffer.byteLength(unit.json), 0));
+  const same = (recorded: { bytes: number; hash: string } | undefined, at: number) => {
+    expect(recorded?.bytes).toBe(sizes[at]);
+    expect(recorded!.hash).toMatch(/^[0-9a-f]{16}$/u);
+    expect(recordedIdentity.get(hashes[at]!) ?? recorded!.hash, "one sent prefix has one recorded hash").toBe(recorded!.hash);
+    expect(wireIdentity.get(recorded!.hash) ?? hashes[at], "one recorded hash names one sent prefix").toBe(hashes[at]);
+    recordedIdentity.set(hashes[at]!, recorded!.hash);
+    wireIdentity.set(recorded!.hash, hashes[at]!);
+  };
+  const end = (prefix: string) => units.reduce((last, unit, index) => unit.path.startsWith(prefix) ? index : last, -1);
+  const marked = units.flatMap((unit, index) => unit.ttl === undefined ? [] : [{ at: unit.path, ttl: unit.ttl, index }]);
+  expect(marked.length).toBeGreaterThan(0);
+  expect(record.marks.map(({ at, ttl }) => ({ at, ttl }))).toEqual(marked.map(({ at, ttl }) => ({ at, ttl })));
+  marked.forEach((mark, index) => same(record.marks[index], mark.index));
+  same(record.tools, end(".tools"));
+  expect(record.system).toHaveLength((captured.body.system as unknown[]).length);
+  same(record.system.at(-1), end(".system"));
+  same(record.request, units.length - 1);
+  const { tools: _tools, system: _system, messages: _messages, ...params } = captured.body;
+  expect(record.params.bytes).toBe(Buffer.byteLength(JSON.stringify(Object.fromEntries(Object.entries(params).sort(([left], [right]) => left < right ? -1 : 1)))));
 }
 
 function viewMarks(captured: Captured): string[] {
@@ -356,7 +403,8 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     const lastMessage = messagesOf(last!).length - 1;
     expect(lastMarks).toContain(`.messages[${lastMessage}].content[${blocks(messagesOf(last!)[lastMessage]!).length - 1}]`);
     expect(lastMarks.length).toBeLessThanOrEqual(ANTHROPIC_MAX_CACHE_BREAKPOINTS);
-    expect(markTtls(last!)).toEqual(new Set(["1h"]));
+    expect(lifetimes(last!)).toEqual(["1h", "1h", "1h", "5m"]);
+    expect(wireBlocks(last!).findLast((block) => block.marked)!.path).toBe(`.messages[${lastMessage}].content[${blocks(messagesOf(last!)[lastMessage]!).length - 1}]`);
     expect(JSON.stringify(previous!.body.system)).toBe(JSON.stringify(last!.body.system));
     expect(JSON.stringify(previous!.body.tools)).toBe(JSON.stringify(last!.body.tools));
     expect(memoryOf(toolStep!).map((block) => block.text)).toEqual(lastMemory.map((block) => block.text));
@@ -365,6 +413,8 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     expect(cacheMarks(toolStep!).length).toBeLessThanOrEqual(ANTHROPIC_MAX_CACHE_BREAKPOINTS);
     expect(viewMarks(toolStep!)).toEqual(viewMarks(last!));
     expect(cacheMarks(toolStep!)).toContain(`.messages[${stepLast}].content[${blocks(messagesOf(toolStep!)[stepLast]!).length - 1}]`);
+    expect(lifetimes(toolStep!)).toEqual(["1h", "1h", "1h", "5m"]);
+    expect(wireBlocks(toolStep!).findLast((block) => block.marked)!.path).toBe(`.messages[${stepLast}].content[${blocks(messagesOf(toolStep!)[stepLast]!).length - 1}]`);
 
     expect(summarizer.length).toBeGreaterThan(0);
     for (const request of summarizer) {
@@ -376,9 +426,10 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     const sample = summarizer.at(-1)!;
     const sampleMarks = cacheMarks(sample);
     expect(sampleMarks.length).toBeLessThanOrEqual(ANTHROPIC_MAX_CACHE_BREAKPOINTS);
-    expect(markTtls(sample)).toEqual(new Set(["1h"]));
+    expect(new Set(lifetimes(sample))).toEqual(new Set(["1h"]));
     expect(new Set(summarizer.map((request) => request.headers["x-session-affinity"]))).toEqual(new Set([`tron-episodic:${status.homeId}`]));
     expect(f.records.filter((record) => record.event === "refused")).toEqual([]);
+    expect(f.records.filter((record) => record.event === "usage"), "a usage of 21 tokens is not a plausible count of these requests").toEqual([]);
     const statusOf = async () => (await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus).memory.episodic!;
     await waitFor(async () => (await statusOf()).view.unbuilt === 0, "the memory view to complete");
     await f.service.invoke(client, "home.pauseMemory", { commandId: "cache-freeze-usage" });
@@ -398,7 +449,35 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     expect(plainMarks.every((path) => path.startsWith(".system") || path.startsWith(".tools")
       || path.startsWith(`.messages[${messagesOf(plain).length - 1}]`))).toBe(true);
     expect(JSON.stringify(plain.body)).not.toContain(HOME_MEMORY_VIEW_MARKER);
-    expect(markTtls(plain)).toEqual(new Set(["5m"]));
+    expect(new Set(lifetimes(plain))).toEqual(new Set(["5m"]));
+
+    const homeRecords = f.requestRecords.filter((record) => record.sessionId === home.id);
+    expect(homeRecords).toHaveLength(homeRequests.length);
+    const [previousRecord, lastRecord, stepRecord] = homeRecords.slice(-3);
+    expectRecordOfWire(previousRecord!, previous!);
+    expectRecordOfWire(lastRecord!, last!);
+    expectRecordOfWire(stepRecord!, toolStep!);
+    expect(lastRecord).toMatchObject({ kind: "home", provider: PROVIDER, model: MODEL_ID, api: "anthropic-messages", stop: "toolUse",
+      usage: { input: 10, cacheRead: 0, cacheWrite: CACHE_WRITE, output: 5 } });
+    expect(stepRecord!.stop).toBe("stop");
+    expect([lastRecord!.tools, lastRecord!.system, lastRecord!.params, lastRecord!.hashKey]).toEqual([previousRecord!.tools, previousRecord!.system, previousRecord!.params, previousRecord!.hashKey]);
+    expect(JSON.stringify(f.requestRecords)).not.toMatch(/input \d|reply \d|summary \d|Tron Home/u);
+    expect(lastRecord!.request.hash).not.toBe(previousRecord!.request.hash);
+    const viewMark = (record: RequestRecord) => record.marks.find((mark) => mark.at.startsWith(".messages[0]."));
+    expect(viewMark(stepRecord!)).toEqual(viewMark(lastRecord!));
+    expect(stepRecord!.request.bytes).toBeGreaterThan(lastRecord!.request.bytes);
+    const plainRecords = f.requestRecords.filter((record) => record.sessionId === ordinary.id);
+    expect(plainRecords).toHaveLength(1);
+    expectRecordOfWire(plainRecords[0]!, plain);
+    expect(plainRecords[0]).toMatchObject({ kind: "ordinary", usage: { input: 10, cacheRead: 0, cacheWrite: 0, output: 5 } });
+    expect(plainRecords[0]!.tools.hash).not.toBe(lastRecord!.tools.hash);
+    void ordinary.prompt(HELD_REQUEST).catch(() => {});
+    await waitFor(() => f.held.length === 1, "the provider to hold the request");
+    await ordinary.abort("agent");
+    await waitFor(() => f.requestRecords.filter((record) => record.sessionId === ordinary.id).length === 2, "the aborted request's record");
+    const abortedRecord = f.requestRecords.filter((record) => record.sessionId === ordinary.id)[1]!;
+    expect(abortedRecord.stop).toBe("aborted");
+    expectRecordOfWire(abortedRecord, f.requests.at(-1)!);
 
     report.cases.push({
       case: "wire-layout", homeTurns: homeRequests.length, summarizerCalls: summarizer.length,
@@ -449,6 +528,61 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
       lastViewBytes: Buffer.byteLength(viewBlocksOf(turns.at(-1)!).join("")),
     });
   }, 900_000);
+
+  it("counts Home requests by the provider's usage: calibrated before sending, exact after, and refuses a real overflow", async () => {
+    const f = await fixture(false, true);
+    await f.service.invoke(client, "home.designate", { commandId: "count-designate", model: MODEL });
+    await f.service.invoke(client, "settings.change", homeMemoryChange({ commandId: "count-memory", model: MODEL }));
+    const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    const home = await f.registry.acquire(status.sessionId!);
+    const TURNS = 130;
+    for (let turn = 0; turn < TURNS; turn += 1) {
+      if (turn % 40 === 1) f.toolCalls.push({ name: "memory_search", input: { query: "reply" } });
+      await settledTurn(f, home, `input ${turn} ${"i".repeat(900)}`, `Home turn ${turn}`);
+    }
+    const requests = f.requests.filter((request) => request.kind === "home");
+    const activations = f.records.flatMap((record) => record.event === "activation" ? [record] : []);
+    const usages = f.records.flatMap((record) => record.event === "usage" ? [record] : []);
+    expect(activations).toHaveLength(TURNS);
+    expect(usages).toHaveLength(TURNS);
+    const firstOf = (turn: number) => requests.find((request) => JSON.stringify(messagesOf(request).at(-1)).includes(`input ${turn} `))!;
+    const error = (turn: number) => activations[turn]!.effectiveTokens / providerCount(firstOf(turn).body) - 1;
+
+    expect(error(0)).toBeLessThan(-0.25);
+    for (const turn of [TURNS - 3, TURNS - 2, TURNS - 1]) {
+      expect(Math.abs(error(turn)), `turn ${turn}`).toBeLessThan(0.02);
+      expect(usages[turn]).toEqual({ event: "usage", estimatedTokens: activations[turn]!.effectiveTokens, providerTokens: providerCount(firstOf(turn).body) });
+    }
+    const last = requests.at(-1)!;
+    expect(Buffer.byteLength(viewBlocksOf(last).join(""))).toBeGreaterThan(100_000);
+    const counted = providerCount(last.body);
+    const context = await f.service.invoke(client, "home.context", {}) as unknown as { effectiveTokens: number; breakdown: { effectiveTokens: number; sections: Array<{ id: string; tokens: number }> } };
+    expect(context.effectiveTokens).toBe(counted);
+    expect(context.breakdown.effectiveTokens).toBe(counted);
+    expect(context.breakdown.sections.reduce((total, section) => total + section.tokens, 0)).toBe(counted);
+    const memoryCounted = Math.ceil(Buffer.byteLength(blocks(messagesOf(last)[0]!).map((block) => block.text ?? "").join("")) / 2);
+    expect(Math.abs(context.breakdown.sections.find((section) => section.id === "memory")!.tokens / memoryCounted - 1)).toBeLessThan(0.05);
+
+    const sized = (share: number, from: number) => "i".repeat(Math.ceil((share * (METERED_WINDOW - 1_024) - from) * 2.8));
+    const under = sized(0.92, counted);
+    expect(under.length).toBeGreaterThan(0);
+    await settledTurn(f, home, `input under ${under}`, "the under-window turn");
+    const admitted = f.requests.filter((request) => request.kind === "home").at(-1)!;
+    expect(JSON.stringify(messagesOf(admitted).at(-1))).toContain("input under ");
+    expect(providerCount(admitted.body)).toBeGreaterThan(0.91 * (METERED_WINDOW - 1_024));
+    expect(providerCount(admitted.body)).toBeLessThan(METERED_WINDOW - 1_024);
+    expect(f.records.filter((record) => record.event === "refused")).toEqual([]);
+
+    const over = sized(1.1, providerCount(admitted.body) - under.length / 2.8);
+    expect(over.length).toBeGreaterThan(under.length);
+    const sent = f.requests.length;
+    await home.prompt(`input over ${over}`);
+    await waitFor(() => home.snapshot().configurationBlocker === null, "Home configuration after the over-window turn");
+    expect(f.records.flatMap((record) => record.event === "refused" ? [record] : []).map((record) => ({ reason: record.reason, contextWindow: record.contextWindow })))
+      .toEqual([{ reason: "context-overflow", contextWindow: METERED_WINDOW }]);
+    expect(f.requests.slice(sent).filter((request) => request.kind === "home")).toEqual([]);
+    report.cases.push({ case: "provider-count", turns: TURNS, firstError: error(0), lastErrors: [TURNS - 3, TURNS - 2, TURNS - 1].map(error), counted, underChars: under.length, overChars: over.length });
+  }, 600_000);
 
   it("keeps the cached view's end across an activation refused before dispatch", async () => {
     const f = await fixture();
