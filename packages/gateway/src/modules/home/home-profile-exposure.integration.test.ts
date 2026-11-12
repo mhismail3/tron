@@ -33,7 +33,7 @@ it("keeps a synthetic 21-note current Profile metadata-only and preserves every 
   }
   expect(records).toHaveLength(21);
   const turn = await homeActivation(f, "Inspect discovery metadata only.", [say("index seen")]);
-  const index = profileSection(turn.first.systemPrompt);
+  const index = profileSection(turn.first);
   for (const note of records) {
     expect(index).not.toContain(note.content.title);
     expect(index).not.toContain(note.content.body);

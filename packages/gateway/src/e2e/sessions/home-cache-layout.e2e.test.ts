@@ -196,7 +196,8 @@ function blocks(message: WireMessage): Block[] {
 
 const memoryOf = (request: Captured) => blocks(messagesOf(request)[0]!);
 
-const viewBlocksOf = (request: Captured) => memoryOf(request).slice(0, -2).map((block) => block.text ?? "");
+const viewBlocksOf = (request: Captured) => memoryOf(request).slice(0, -3).map((block) => block.text ?? "");
+const turnStateOf = (request: Captured) => memoryOf(request).at(-2)!.text ?? "";
 
 function lifetimes(captured: Captured): string[] {
   return wireBlocks(captured).flatMap((block) => block.ttl === undefined ? [] : [block.ttl]);
@@ -339,7 +340,7 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     expect(JSON.stringify(activation)).not.toContain("responses input 1");
     expect(view(activation!).startsWith(view(prior!))).toBe(true);
     expect(view(activation!).length).toBeGreaterThan(view(prior!).length);
-    expect(text(memory(activation!))).toMatch(new RegExp(`</chat>${HOME_NONCE_MARKER.replace(".", "\\.")}[0-9a-f-]{36}$`, "u"));
+    expect(text(memory(activation!))).toMatch(new RegExp(`</chat><turn-state>\\nCurrent Home chat model: ${PROVIDER}/${MODEL_ID}\\n[^]*</turn-state>${HOME_NONCE_MARKER.replace(".", "\\.")}[0-9a-f-]{36}$`, "u"));
     expect(memory(step!)).toEqual(memory(activation!));
     expect(input(step!).some((message) => message.type === "function_call_output")).toBe(true);
     expect(step!.tools).toEqual(activation!.tools);
@@ -377,12 +378,17 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     const summarizer = f.requests.filter((request) => request.kind === "summarizer");
     const [previous, last, toolStep] = homeRequests.slice(-3);
     const lastMemory = memoryOf(last!);
-    const viewPieces = lastMemory.slice(0, -1).map((block) => block.text ?? "");
+    const viewPieces = lastMemory.slice(0, -2).map((block) => block.text ?? "");
     const view = viewPieces.join("");
     const lastMarks = cacheMarks(last!);
 
     expect(lastMemory.length).toBeGreaterThanOrEqual(2);
     expect(lastMemory.at(-1)!.text).toMatch(new RegExp(`^${HOME_NONCE_MARKER.replace(".", "\\.")}[0-9a-f-]{36}$`, "u"));
+    expect(turnStateOf(last!).split("\n").slice(0, 4)).toEqual(["<turn-state>", `Current Home chat model: ${PROVIDER}/${MODEL_ID}`, "Current Home thinking level: off",
+      "Profile unavailable: Profile is not available on this Gateway. No item is applied in this instruction, and the profile is not known to be empty."]);
+    expect(turnStateOf(last!).endsWith("\n</turn-state>")).toBe(true);
+    expect(JSON.stringify(last!.body.system)).not.toMatch(/Current Home chat model|Sorting offer:|active \/ \d+ total|capacity: \d|Profile unavailable/iu);
+    expect(JSON.stringify(last!.body.system)).toContain("- Unsorted (inferred): profile read path=inferred");
     expect(JSON.stringify(last!.body).split(HOME_NONCE_MARKER).length - 1).toBe(1);
     const previousBlocks = wireBlocks(previous!), lastBlocks = wireBlocks(last!);
     const previousMark = previousBlocks.findIndex((block) => block.path === viewMarks(previous!).at(-1));
@@ -391,7 +397,7 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     expect(transition(previous!, last!)).toBe("extend");
     expect(view.length).toBeGreaterThan(50_000);
     expectViewLayout(viewPieces);
-    const lastGroup = lastMemory.length - 3;
+    const lastGroup = lastMemory.length - 4;
     const viewMarkAt = (lastMemory[lastGroup]!.text ?? "").split("\n").length - 1 === VIEW_BLOCK_LINES ? lastGroup : lastGroup - 1;
     expect(viewMarks(last!)).toEqual([`.messages[0].content[${viewMarkAt}]`]);
     expect(homeRequests.slice(0, 3).map(viewMarks)).toEqual([[".messages[0].content[0]"], [".messages[0].content[0]"], [".messages[0].content[1]"]]);
@@ -520,7 +526,7 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     for (const step of rewrites) {
       expect(step.sharedBlocks, `rebalance at turn ${step.turn}`).toBeGreaterThanOrEqual(1 + Math.floor(step.sharedLines / VIEW_BLOCK_LINES));
     }
-    for (const request of turns.slice(-3)) expectViewLayout(memoryOf(request).slice(0, -1).map((block) => block.text ?? ""));
+    for (const request of turns.slice(-3)) expectViewLayout(memoryOf(request).slice(0, -2).map((block) => block.text ?? ""));
     report.cases.push({
       case: "past-budget", turns: turns.length, firstRewrite: firstRewrite!.turn, turnsPast: past.length,
       rewrites: rewrites.map((step) => ({ turn: step.turn, sharedBytes: step.shared, previousBytes: step.size, sharedBlocks: step.sharedBlocks, kind: step.kind })),
