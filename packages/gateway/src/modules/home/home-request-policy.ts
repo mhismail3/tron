@@ -281,7 +281,7 @@ export class HomeRequestPolicy {
     const cut = this.cut(projection, this.boundaryIndex(projection, activation), activation, view);
     const window = session.model?.contextWindow ?? 0;
     const memory = estimateTokens(cut.memory);
-    const other = cut.tail.reduce((total, item) => total + estimateTokens(item.message), 0) + estimateTokens(systemMessage(systemPrompt, cut.messages));
+    const other = cut.tail.reduce((total, item) => total + estimateTokens(item.message), 0) + estimateTokens(systemMessage(systemPrompt, activation.kind, cut.messages));
     const scale = this.calibration.factors(modelKey(session.model));
     const prefix = Math.ceil(memory * scale.memory + other * scale.other);
     const freshTokens = Math.floor(Math.max(0, window - HOME_RESERVE_TOKENS - prefix) / scale.other);
@@ -630,8 +630,8 @@ function requestSections(system: HomeSystemPrompt, cut: RewrittenContext, view: 
   });
   const summaries = view.text === "" ? 0 : view.text.split("\n").filter(line => MEMORY_SUMMARY_LINE.test(line)).length;
   return [
-    { id: "instructions", tokens: estimateTokens(systemMessage(system.instructions, cut.messages)) },
-    { id: "profile", tokens: estimateTokens(systemMessage(system.profile)), count: system.profileNotes },
+    { id: "instructions", tokens: estimateTokens(systemMessage(system.instructions, kind, cut.messages)) },
+    { id: "profile", tokens: estimateTokens(systemMessage(system.profile, kind)), count: system.profileNotes },
     { id: "memory", tokens: estimateTokens(cut.memory), count: summaries },
     { id: "chapter", tokens: chapterTokens, count: chapterEntries.size },
     { id: "results", tokens: resultTokens, count: results },
@@ -639,15 +639,15 @@ function requestSections(system: HomeSystemPrompt, cut: RewrittenContext, view: 
   ];
 }
 
-function systemMessage(text: string, messages?: readonly AgentMessage[], kind?: HomeActivationKind): AgentMessage {
+function systemMessage(text: string, kind: HomeActivationKind, messages?: readonly AgentMessage[]): AgentMessage {
   const current = messages ? getCurrentSystemMessage(messages as never) : undefined;
-  const toolsAdded = kind === undefined ? current?.toolsAdded : current?.toolsAdded?.filter(tool => homeToolAvailable(tool.name, kind));
+  const toolsAdded = current?.toolsAdded?.filter(tool => homeToolAvailable(tool.name, kind));
   return { role: "system", content: text, ...(toolsAdded ? { toolsAdded } : {}),
     timestamp: current?.timestamp ?? (messages ? Date.now() : 0) } as AgentMessage;
 }
 
 function homeSystemFrame(messages: readonly AgentMessage[], system: string, kind: HomeActivationKind): AgentMessage[] {
-  return [systemMessage(system, messages, kind), ...messages.filter(message => message.role !== "system")];
+  return [systemMessage(system, kind, messages), ...messages.filter(message => message.role !== "system")];
 }
 
 function excludedMessages(projection: SessionProjection, boundaryIndex: number): AgentMessage[] {
