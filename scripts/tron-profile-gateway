@@ -300,7 +300,7 @@ def scrubbed_environment() -> dict[str, str]:
 
 RESTART_START_DEADLINE_SECONDS = 300
 RESTART_LOCK_RETRY_SECONDS = 5
-RUNTIME_LOCK_CONFLICT = "owns a canonical session directory"
+RUNTIME_LOCK_CONFLICT = "owns an agent directory"
 
 
 LOG_SEGMENT_COUNT = 8
