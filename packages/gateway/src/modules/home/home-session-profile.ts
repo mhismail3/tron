@@ -19,7 +19,7 @@ export function homeSessionProfile(services: () => HomeSessionProfileServices): 
     extensions: [...HOME_MODULE_NAMES, "tron-home", "tron-home-research", "tron-web-research"],
     resources: {
       noExtensions: true,
-      noContextFiles: true,
+      agentsFilesOverride: ({ agentsFiles }) => ({ agentsFiles: agentsFiles.filter(file => file.path === services().globalRulesPath) }),
       systemPromptOverride: () => undefined,
       appendSystemPromptOverride: () => [],
     },
