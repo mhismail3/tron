@@ -18,6 +18,8 @@ import { estimateTokens } from "../../../kernel/pi/coding-agent.js";
 import { UploadStore } from "../../../machine/upload-store.js";
 import { EpisodicMemoryError } from "../../../errors.js";
 import { RuntimeRegistry } from "../../../kernel/session/runtime-registry.js";
+import { RunOperations } from "../../../kernel/run/run-operations.js";
+import { HOME_TASK_MARKER } from "../../../kernel/delegation/task-report.js";
 import { delegatedArtifactRoot } from "../../../kernel/delegation/delegated-provider.js";
 import { RunMarkerStore } from "../../../kernel/run/run-markers.js";
 import { stopTaskWorker, taskWorkerSteeringInput } from "../../../kernel/delegation/worker-control.js";
@@ -1551,6 +1553,12 @@ describe("Home task production dispatch", () => {
 
   it("refuses extension commands in an owned Home task brief", async () => {
     const f = await fixture();
+    const refusals: Array<{ operationId: string | undefined; error: unknown }> = [];
+    const prompt = RunOperations.prototype.prompt;
+    vi.spyOn(RunOperations.prototype, "prompt").mockImplementation(async function (...args) {
+      try { return await prompt.apply(this, args); }
+      catch (error) { refusals.push({ operationId: args[5]?.operationId, error }); throw error; }
+    });
     const extensions = join(f.cwd, ".pi", "extensions");
     await mkdir(extensions, { recursive: true });
     await writeFile(join(extensions, "owned-command.ts"), `export default pi => pi.registerCommand("owned-command", { handler: async () => { throw new Error("must not execute"); } });`);
@@ -1558,7 +1566,15 @@ describe("Home task production dispatch", () => {
     const run = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "command-brief", intent: "/owned-command argument", target: f.cwd });
     await run.completion;
     const slot = await f.registry.acquire(run.sessionId);
-    expect(slot.canonicalSessionEntries().filter(entry => entry.type === "message" && entry.message.role === "user")).toEqual([]);
+    expect(slot.commands()).toContainEqual(expect.objectContaining({ name: "owned-command", source: "extension" }));
+    expect(refusals.filter(entry => entry.operationId === run.operationId).map(entry => entry.error)).toEqual([
+      expect.objectContaining({ code: "invalid_request", message: "Extension commands cannot be scheduled" }),
+    ]);
+    const entries = slot.canonicalSessionEntries();
+    expect(entries.filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER)).toEqual([
+      expect.objectContaining({ data: expect.objectContaining({ taskId: run.taskId, operationId: run.operationId }) }),
+    ]);
+    expect(entries.filter(entry => entry.type === "message" && entry.message.role === "user")).toEqual([]);
     expect(slot.snapshot().operation).toBeUndefined();
   });
 

@@ -89,6 +89,8 @@ uses those same identity codecs as the scheduler, executor and cold catalog.
   Recognition uses the original action text carried by admission, not the rendered
   provenance envelope. The rejection signal is `agent-admission-rejected`; the owning
   runtime-registry integration case also proves that no marker, lease or work survives.
+  This effect-free ordering describes automation runs; Home task briefs keep their
+  earlier binding marker before refusal, as documented by the Run owner.
 - **Settlement.** Occurrences and runs are durable before dispatch. Pre-admission
   transient failures retry with bounded backoff; accepted agent failures do not.
   Accepted work without exact terminal evidence becomes `outcomeUnknown`, blocks
