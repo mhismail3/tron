@@ -2138,6 +2138,7 @@ export class GatewayService {
         this.dependencies.sessions.refreshCompactionPolicies(change.layer === "global" ? "global" : "project", projectDir ?? this.dependencies.config.tronHome);
       }
     }
+    await new Promise(resolve => setTimeout(resolve, 200));
     this.dependencies.broadcast("settings.changed", safeJson({
       changeIds: changes.map(change => change.changeId), keys: [...new Set(changes.map(change => change.key))],
       layer: changes[0]!.layer, target,
