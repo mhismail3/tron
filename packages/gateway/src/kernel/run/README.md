@@ -237,7 +237,8 @@ whole-tree watch. Events settle for 150 ms; busy slots wait for their next idle 
 The SDK package resolver runs read-only with missing sources explicitly skipped;
 watching never installs a package. It supplies the same enabled resource paths as
 the loader. SDK skill descriptors exclude skill bodies; prompt/context/extension
-bytes and package sets/manifests complete the input. `requestLayers` supplies the
+bytes, package sets/manifests and schema-declared effective `reload` settings
+complete the input. `requestLayers` supplies the
 shared process-keyed layer hash, not a separate hashing scheme. An identical input
 skips runtime reload and keeps the provider prefix unchanged. Successful reloads
 alone advance applied state; failures remain pending for another idle edge or

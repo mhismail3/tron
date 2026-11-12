@@ -75,6 +75,22 @@ Unknown, changed or uncertain accepted effects require inspection, never blind
 retry under another command ID. Project actions do not invent a generic inverse.
 A running tool targeting its own project still fails the lifecycle busy guard.
 
+## Snapshot reload effects
+
+Shell path/prefix, codemode mode/budget, image auto-resize, cache warming and
+resource sources declare `reload`. Typed writes mark the affected live sessions
+stale through the registry's resource freshness owner; outside settings-file edits
+reach the same digest through its file watcher. Reload remains idle-only, and
+unchanged effective values do not reload. `model.thinkingBudgets` remains
+`new-chat`.
+
+The native slot refreshes inherited reload-fixed values while preserving explicit
+Session/delegate choices. The SDK settings adapter re-applies resolved reload
+values after its disk read and before the SDK rebuilds tools, so a Session image
+setting does not disappear behind Global on reload. These are runtime projections,
+not another stored schema. The same-chat shell-prefix and Session image-snapshot
+proofs live in `settings-three-layer.e2e.test.ts`.
+
 ## Undo and audit durability
 
 Expected-before checks, including Session-owned fields, run inside the target stripe.
