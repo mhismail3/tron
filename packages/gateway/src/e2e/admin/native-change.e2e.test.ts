@@ -5,7 +5,7 @@ import { once } from "node:events";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { join } from "node:path";
-import { fauxAssistantMessage, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, getSystemMessageText, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fixture, disposeFixtures, reportCall } from "../../../test-support/home-task-fixture.js";
 import { waitFor } from "../../../test-support/wait-for.js";
@@ -39,7 +39,7 @@ function settingsService(f: Awaited<ReturnType<typeof fixture>>, broadcast: (top
 async function settledWorker(f: Awaited<ReturnType<typeof fixture>>) {
   const home = await f.registry.acquire(f.home.sessionId);
   const respond = (context: TranscriptContext) => {
-    if (context.messages.some(message => message.role === "user" && JSON.stringify(message.content).includes("This is a finite Home task"))) {
+    if (context.messages.some(message => message.role === "system" && getSystemMessageText(message).includes("This is a finite Home task"))) {
       return fauxAssistantMessage([reportCall("diff-worker")], { stopReason: "toolUse" });
     }
     const last = context.messages.at(-1);

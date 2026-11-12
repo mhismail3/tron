@@ -108,7 +108,10 @@ describe("Tron workspace through the pinned runtime", () => {
     expect(agentContexts).toHaveLength(7);
     expect(f.slot.cwd).toBe(f.cwd);
     expect(file.startsWith(join(f.agentDir, "sessions"))).toBe(true);
-    expect(await readFile(file, "utf8")).not.toContain("## Tron operating context");
+    const persisted = (await readFile(file, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line));
+    const messages = persisted.filter(entry => entry.type === "message").map(entry => entry.message);
+    expect(messages.filter(message => message.role === "user").map(message => JSON.stringify(message.content)).join("\n")).not.toContain("## Tron operating context");
+    expect(messages.some(message => message.role === "system" && message.sections?.tron?.includes("## Tron operating context"))).toBe(true);
     await rm(internal, { recursive: true });
     await resumed.prompt("unrelated work still works"); await settle(resumed);
     expect(getCurrentSystemPrompt(f.contexts.at(-1)!.messages)).toContain("(unavailable)");

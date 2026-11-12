@@ -1,7 +1,7 @@
 import { readFile, mkdir, writeFile, rm, open } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, getSystemMessageText, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, expect, it, vi } from "vitest";
 import { startLockGateway, type LockGateway, type LockGatewayOptions } from "../../../test-support/gateway-lock-harness.js";
 import { NotificationService } from "../../notifications/notification-service.js";
@@ -478,6 +478,7 @@ it("real Gateway: paused crash claims and a partial canonical batch recover exac
     expect(relayRequests[0].path).toBe("/v3/notifications");
     const notificationAfter = JSON.parse(await readFile(`${gateway.tronHome}/gateway/notifications.json`, "utf8"));
     expect(notificationAfter.receipts).toEqual(notificationBefore.receipts);
+    await mkdir("test-results/2094", { recursive: true });
     await writeFile("test-results/2094/push-crash-restart-trace.json", JSON.stringify({ survivingIds, messagesBefore, messagesAfter, recovered, relayRequests, receipts: notificationAfter.receipts }, null, 2));
   } finally { for (const owner of notifications) owner.dispose(); }
 });
@@ -576,7 +577,7 @@ it("real Gateway: an image-sized canonical line within the prompt bound cannot b
 it("real Gateway: a Home-created automation wake cannot approve settings, trust, grants or sensitive profile decisions", async () => {
   const { gateway, phone, fire, sessionId } = await preparedGateway({ knowledge: true });
   gateway.script(Array.from({ length: 8 }, () => context => {
-    if (context.messages.some(message => message.role === "user" && JSON.stringify(message.content).includes("This is a finite Home task"))) {
+    if (context.messages.some(message => message.role === "system" && getSystemMessageText(message).includes("This is a finite Home task"))) {
       return fauxAssistantMessage([fauxToolCall("report", { resultId: "scope-setup-result", outcome: "final", text: "Scope setup completed.", evidence: ["Fixture report completed"] })], { stopReason: "toolUse" });
     }
     const last = context.messages.at(-1);
