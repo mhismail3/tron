@@ -85,7 +85,10 @@ uses those same identity codecs as the scheduler, executor and cold catalog.
   revalidate the typed skill or prompt inside the slot and carry automation
   provenance. Extension commands, attachments, shell, webhooks, deployment and Gateway
   lifecycle are not automation capabilities; RuntimeSlot rejects scheduled text that
-  resolves to an extension command before any effect.
+  resolves to an extension command before any effect or retained operation ownership.
+  Recognition uses the original action text carried by admission, not the rendered
+  provenance envelope. The rejection signal is `agent-admission-rejected`; the owning
+  runtime-registry integration case also proves that no marker, lease or work survives.
 - **Settlement.** Occurrences and runs are durable before dispatch. Pre-admission
   transient failures retry with bounded backoff; accepted agent failures do not.
   Accepted work without exact terminal evidence becomes `outcomeUnknown`, blocks
@@ -138,6 +141,7 @@ uses those same identity codecs as the scheduler, executor and cold catalog.
 | Signal | Level | Meaning |
 |---|---|---|
 | `stale-home-delivery` | run state | `automation.run.get`: `outcomeUnknown` preserves the original `executionSessionId` and operation; inspect that chapter before the explicit receipt-backed resolution. No redirect or replay. |
+| `agent-admission-rejected` | run failure reason | A scheduled literal extension command is refused using its original action text. The runtime-registry refusal journey checks absent command effects, work, protection and marker; an explicit user command still executes. |
 | `automation.dispatch-failed` | warning | Dispatch, recovery or settlement failed (`automation-diagnostic.ts`): `referenceHash` (automation ID, or `scheduler` for a scan) and optional `operationHash` (run ID), 16 hex characters of SHA-256 |
 | `automation.recovery-step` | info | One part of recovery finished: `step` (`store`, `reconcile-targets`, `scheduler-recover`), `durationMs`; target count and slowest target kind in the message |
 | `automation.recovery-deferred` | warning | Initialization ran before the catalog's first cut, so targets are re-checked next start: `reason=catalog_not_ready` |
