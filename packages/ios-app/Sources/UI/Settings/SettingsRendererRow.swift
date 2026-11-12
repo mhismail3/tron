@@ -170,7 +170,7 @@ struct SettingsRendererRow: View {
     }
 
     private var display: String {
-        return setting.value == nil && setting.display == "Not set" && presentation.redacted != true ? "—" : setting.display
+        return setting.value == nil && setting.display == "Not set" ? "—" : setting.display
     }
 
     @ViewBuilder
