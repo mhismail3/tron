@@ -2121,8 +2121,7 @@ export class GatewayService {
       const key = this.dependencies.settingsModel.schema.KEYS.find(candidate => candidate.id === change.key);
       if (!key) continue;
       if (key.effect === "reload") {
-        const trustProject = change.key === "permissions.projectTrust" ? change.qualifiers?.project : undefined;
-        this.dependencies.sessions.freshness.stale(trustProject ? { projectDir: trustProject }
+        this.dependencies.sessions.freshness.stale(change.key === "permissions.projectTrust" ? {}
           : change.layer === "session" && target.kind === "session" ? { sessionId: target.sessionId }
             : change.layer === "project" && projectDir ? { projectDir } : {});
         if (change.layer === "global" && key.group === "sources") this.dependencies.globalProviderResources.requestReload();

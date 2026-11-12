@@ -1,5 +1,6 @@
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import { execFileSync } from "node:child_process";
 import { fixture, disposeFixtures } from "../../test-support/home-task-fixture.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { GatewayService, type GatewayServiceDependencies } from "../transport/gateway-service.js";
@@ -43,7 +44,11 @@ it("persists observed state only when a comparison changed it", async () => {
 });
 
 it("applies outside MCP and trust edits to live sessions and refreshes provider inputs without reading auth", async () => {
+  const isolatedHome = await mkdtemp(join(tmpdir(), "tron-outside-home-"));
+  roots.push(isolatedHome);
+  vi.stubEnv("HOME", isolatedHome);
   const f = await fixture();
+  execFileSync("git", ["init", "--quiet", f.cwd]);
   vi.stubEnv("PI_CODING_AGENT_DIR", f.agentDir);
   const requests: string[] = [];
   const server = createServer(async (request, response) => {
@@ -88,8 +93,14 @@ it("applies outside MCP and trust edits to live sessions and refreshes provider 
     await waitFor(() => slot.runtime.session.getAllTools().some(tool => tool.name === "mcp__local__outside_tool"), "project MCP reaches its live session");
     expect(other.runtime.session.getAllTools().some(tool => tool.name === "mcp__local__outside_tool")).toBe(false);
     expect(f.signals.slice(beforeProject).filter(event => event.outcome === "resources-reload" && event.reason === "completed").map(event => event.sessionId)).not.toContain(other.id);
-    await writeFile(join(f.agentDir, "trust.json"), JSON.stringify({ [await f.trust.canonicalDirectory(f.cwd)]: false }));
-    await waitFor(() => !slot.runtime.session.settingsManager.isProjectTrusted(), "outside trust revocation reaches the idle runtime");
+    const nestedCwd = join(f.cwd, "nested");
+    await mkdir(nestedCwd);
+    const nested = await f.registry.create(nestedCwd);
+    expect(nested.projectDir).toBe(slot.projectDir);
+    expect(nested.cwd).not.toBe(nested.projectDir);
+    await writeFile(join(f.agentDir, "trust.json"), JSON.stringify({ [slot.projectDir]: true, [nested.cwd]: false, [other.projectDir]: true }));
+    await waitFor(() => !nested.runtime.session.settingsManager.isProjectTrusted(), "outside cwd-keyed trust revocation reaches its nested idle runtime", { boundMs: 4_000 });
+    expect(slot.runtime.session.settingsManager.isProjectTrusted()).toBe(true);
     await writeFile(join(f.agentDir, "models.json"), JSON.stringify({ providers: { outside: { baseUrl: "https://fixture.invalid", api: "openai-completions", models: [] } } }));
     await waitFor(() => refreshes > 0, "outside models refreshes the provider owner");
     const beforeAuth = refreshes;
@@ -102,8 +113,10 @@ it("applies outside MCP and trust edits to live sessions and refreshes provider 
   } finally {
     await outside.dispose();
     service.dispose();
-    await disposeFixtures();
-    server.closeAllConnections();
-    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    try { await disposeFixtures(); }
+    finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    }
   }
 });
