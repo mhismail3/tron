@@ -66,6 +66,9 @@ unanswered after a day (`CHANGE_REVIEW_TTL_MS`) with nothing applied. Settings, 
 profile edits, project lifecycle and Home task grants all use it.
 
 A required review alone has no effects. The model tool supplies no digest argument.
+An agent's or Home's Undo follows the same rule through the shared `withConfirmation` wrapper: an Undo
+that needs a tap shows the same card, its acceptance re-reads the undone entry under its target stripe,
+and a stale or already-undone acceptance refuses with no effect.
 The built-in host's dedicated `change` interaction binds a server-owned typed callback,
 not a generic form. A paired-native response checks identity, epoch, revision, answer
 shape and exact digest, then consumes the interaction before awaiting that callback.
