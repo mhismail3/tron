@@ -738,6 +738,8 @@ class MigrateTests(unittest.TestCase):
                     else:
                         self.assertEqual(self.migrate("--apply")[0], 0)
                 self.assertEqual(self.migrate("--rollback", home=debug)[0], 0)
+                if crash_after == 2:
+                    self.assertFalse(shared.exists(), "other home's claimed move was inverted by this rollback")
                 self.assertEqual(self.migrate("--apply")[0], 0)
                 self.assertFalse(shared.exists())
                 self.assertEqual(self.migrate("--rollback")[0], 0)
