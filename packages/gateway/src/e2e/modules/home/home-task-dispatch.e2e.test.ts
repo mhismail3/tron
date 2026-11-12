@@ -358,7 +358,10 @@ describe("Home task bounded backlogs", () => {
       return collect(context, true);
     }, collect, collect, collect, collect, collect, collect]);
     await home.prompt("u".repeat(70000));
-    await waitFor(() => batches.flat().length === tasks.length, "backlog delivered by bounded activations");
+    await waitFor(() => batches.flat().length === tasks.length, "backlog delivered by bounded activations").catch(error => {
+      throw new Error(JSON.stringify({ batches, firstRequestBytes: Buffer.byteLength(firstRequest), refusals: f.signals.filter(record => record.event === "refused"),
+        errors: home.canonicalSessionEntries().flatMap(entry => entry.type === "message" && entry.message.role === "assistant" && entry.message.errorMessage ? [entry.message.errorMessage] : []) }), { cause: error });
+    });
     expect(tasks.length - batches[0]!.length).toBeGreaterThan(0);
     expect(firstRequest).toContain("[from: gateway; kind: pending; authority: none]");
     expect(firstRequest).toContain(`${tasks.length - batches[0]!.length} more task results pending`);
