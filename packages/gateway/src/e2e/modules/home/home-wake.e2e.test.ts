@@ -1,4 +1,4 @@
-import { fauxAssistantMessage, fauxToolCall, getCurrentTools, type FauxResponseFactory } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt, getCurrentTools, type FauxResponseFactory } from "@earendil-works/pi-ai";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setHomeMemoryModels } from "../../../../test-support/settings-dependencies.js";
@@ -57,14 +57,16 @@ function operationsWithResults(entries: readonly Entry[]): string[] {
 }
 
 describe("Home wakes on its own task results (#749)", () => {
-  it("uses shared file and shell tools on maintainer turns without granting them to a hostile result wake", async () => {
+  it("uses shared file and shell tools on maintainer turns and refuses each of them, though listed, on a hostile result wake", async () => {
     const f = await fixture();
     await configure(f);
     const home = await f.registry.acquire(f.home.sessionId);
     const path = join(f.cwd, "home-shared-tools.txt");
     const shellPath = join(f.cwd, "home-shell.txt");
+    const heads: Array<{ system: string; tools: string }> = [];
+    const head = (context: Parameters<FauxResponseFactory>[0]) => heads.push({ system: getCurrentSystemPrompt(context.messages), tools: JSON.stringify(getCurrentTools(context.messages)) });
     f.faux.setResponses([
-      fauxAssistantMessage([fauxToolCall("write", { path, content: "before" })], { stopReason: "toolUse" }),
+      context => { head(context); return fauxAssistantMessage([fauxToolCall("write", { path, content: "before" })], { stopReason: "toolUse" }); },
       fauxAssistantMessage([fauxToolCall("edit", { path, oldText: "before", newText: "after" })], { stopReason: "toolUse" }),
       fauxAssistantMessage([fauxToolCall("read", { path })], { stopReason: "toolUse" }),
       fauxAssistantMessage([fauxToolCall("bash", { command: `printf shell-proof > '${shellPath}'` })], { stopReason: "toolUse" }),
@@ -77,6 +79,7 @@ describe("Home wakes on its own task results (#749)", () => {
 
     const wakeTools: string[][] = [];
     const wakeReply: FauxResponseFactory = context => {
+      head(context);
       wakeTools.push(getCurrentTools(context.messages).map(tool => tool.name));
       return fauxAssistantMessage([fauxToolCall("write", { path, content: "wake escaped" }),
         fauxToolCall("bash", { command: `printf escaped > '${shellPath}'` }),
@@ -91,13 +94,15 @@ describe("Home wakes on its own task results (#749)", () => {
     await run.completion;
     await waitAcknowledged(f, run.taskId);
     expect(wakeTools).toHaveLength(1);
+    expect(heads).toHaveLength(2);
+    expect(heads[0]!.system).toContain("## Learned profile");
+    expect(heads[1]).toEqual(heads[0]);
     expect(wakeTools[0]).toContain("read");
-    for (const name of ["write", "edit", "bash", "computer"]) expect(wakeTools[0]).not.toContain(name);
-    const forged = (home.canonicalSessionEntries() as Array<{ message?: { role: string; toolName?: string; isError?: boolean; content?: Array<{ text?: string }> } }>)
-      .flatMap(entry => entry.message?.role === "toolResult" && entry.message.toolName === "computer" ? [entry.message] : []);
-    expect(forged).toHaveLength(1);
-    expect(forged[0]!.isError).toBe(true);
-    expect(forged[0]!.content?.map(part => part.text ?? "").join("")).toBe("Tool computer not found");
+    for (const name of ["write", "edit", "bash", "computer"]) expect(wakeTools[0]).toContain(name);
+    const refused = (home.canonicalSessionEntries() as Array<{ message?: { role: string; toolName?: string; isError?: boolean; content?: Array<{ text?: string }> } }>)
+      .flatMap(entry => entry.message?.role === "toolResult" && entry.message.isError ? [{ tool: entry.message.toolName, text: entry.message.content?.map(part => part.text ?? "").join("") }] : []);
+    expect(refused).toEqual(["write", "bash", "computer"].map(tool => ({ tool,
+      text: "This tool requires the current maintainer turn; wake content cannot grant file, shell or computer authority." })));
     expect(await readFile(path, "utf8")).toBe("after");
     expect(await readFile(shellPath, "utf8")).toBe("shell-proof");
     expect(results(home.canonicalSessionEntries() as Entry[])).toHaveLength(1);

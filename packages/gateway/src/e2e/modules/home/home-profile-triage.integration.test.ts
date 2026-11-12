@@ -105,7 +105,8 @@ it("receipts Not now durably; cold restart, edits, moves and old-command replay 
   await knowledge!.updateNote({ commandId: "triage-edit-existing", recordId: old.id, expectedRevision: old.revisionId,
     record: { ...old, content: { ...old.content, title: "An edit is not a new note", profile: { version: 2, path: ["communication", "answers"] } } } });
   const suppressed = await p.turn("Continue with another question.");
-  expect(suppressed.first.system).toContain("Sorting offer: deferred");
+  expect(JSON.stringify(suppressed.first.messages)).toContain("Sorting offer: deferred");
+  expect(suppressed.first.system).not.toContain("Sorting offer:");
   expect((await readHomeProfileIndex(knowledge!)).sorting.version).toBe(version);
   const newNote = await seed(8);
   expect((await readHomeProfileIndex(knowledge!)).sorting.deferred).toBe(false);
@@ -113,7 +114,8 @@ it("receipts Not now durably; cold restart, edits, moves and old-command replay 
   expect(await knowledge!.deferProfileSorting(commandId, version)).toEqual(saved);
   expect((await readHomeProfileIndex(knowledge!)).sorting.deferred).toBe(false);
   const resumed = await p.turn("Start another maintainer turn.");
-  expect(resumed.first.system).toContain("Sorting offer: eligible");
+  expect(JSON.stringify(resumed.first.messages)).toContain("Sorting offer: eligible");
+  expect(resumed.first.system).toBe(suppressed.first.system);
   expect((await knowledge!.read(newNote.id) as Note).content.confirmed).toBe(false);
   await knowledge!.forget("triage-forget-new", newNote.id, "Explicit fixture forget", newNote.revisionId);
   expect((await readHomeProfileIndex(knowledge!)).sorting.deferred).toBe(false);
@@ -209,7 +211,8 @@ it("does not offer sorting or accept Not now during a real worker-completion wak
   await run.completion;
   await waitFor(async () => (await homeOwnerOf(p.f.registry).taskResult(run.taskId)).wake?.state === "acknowledged", "profile wake acknowledged");
   expect(requests).toHaveLength(2);
-  expect(requests[0]!.system).toContain("Sorting offer: on-demand only; not a maintainer turn start");
+  expect(JSON.stringify(requests[0]!.messages)).toContain("Sorting offer: on-demand only; not a maintainer turn start");
+  expect(requests[0]!.system).not.toContain("Sorting offer:");
   const result = requests[1]!.messages.find(message => message.role === "toolResult" && message.toolCallId === "wake-defer")?.details;
   expect(result).toMatchObject({ status: "refused", action: "defer" });
   expect((await readHomeProfileIndex(knowledge!)).sorting.deferred).toBe(false);

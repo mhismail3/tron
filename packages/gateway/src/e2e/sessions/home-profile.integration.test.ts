@@ -33,7 +33,7 @@ describe("Tron Home learned profile", () => {
     });
 
     const next = await homeActivation(f, "What do you know about me?", [say("Short.")]);
-    const section = profileSection(next.first.systemPrompt);
+    const section = profileSection(next.first);
     expect(section.startsWith(PROFILE_HEADING)).toBe(true);
     expect(section).not.toContain(note!.id);
     expect(section).not.toContain("I prefer short replies.");
@@ -42,21 +42,25 @@ describe("Tron Home learned profile", () => {
     recordCase("learn-and-next-activation", { noteId: note!.id, tags: note!.content.tags });
   }, 120_000);
 
-  it("F6: the system prompt is byte-identical across activations while the profile is unchanged", async () => {
+  it("F6: the system prompt is byte-identical across activations and profile changes; only the turn state moves", async () => {
     const f = await fixture("stable");
     const before = await homeActivation(f, "hello", [say("hi")]);
     const again = await homeActivation(f, "hello again", [say("hi again")]);
     expect(again.first.systemPrompt).toBe(before.first.systemPrompt);
+    expect(profileSection(again.first)).toBe(profileSection(before.first));
 
     await homeActivation(f, "Remember: answer in English.", [
       profileCall({ action: "learn", kind: "preference", text: "Answer in English." }, "call-stable-1"),
       say("Saved."),
     ]);
     const changed = await homeActivation(f, "one more", [say("ok")]);
-    expect(changed.first.systemPrompt).not.toBe(before.first.systemPrompt);
+    expect(changed.first.systemPrompt).toBe(before.first.systemPrompt);
+    expect(profileSection(changed.first)).not.toBe(profileSection(before.first));
+    expect(profileSection(changed.first)).toContain("- inferred: 1 active / 1 total");
     const settled = await homeActivation(f, "and again", [say("ok")]);
     expect(settled.first.systemPrompt).toBe(changed.first.systemPrompt);
-    recordCase("prompt-stability", { stableWhileUnchanged: true, movesOnChange: true });
+    expect(profileSection(settled.first)).toBe(profileSection(changed.first));
+    recordCase("prompt-stability", { stableWhileUnchanged: true, systemStableOnChange: true, turnStateMovesOnChange: true });
   }, 120_000);
 
   it("F3: refine replaces the current head with shared audit; explicit reads distinguish active, superseded and retired records", async () => {
@@ -85,7 +89,7 @@ describe("Tron Home learned profile", () => {
         before: expect.objectContaining({ text: "Use metric units.", revisionId: originalRevision }),
         after: expect.objectContaining({ text: "Use metric units everywhere.", revisionId: refined.revisionId }) })]);
     const afterRefine = await homeActivation(f, "after refine", [say("ok")]);
-    const refinedSection = profileSection(afterRefine.first.systemPrompt);
+    const refinedSection = profileSection(afterRefine.first);
     expect(refinedSection).not.toContain("Use metric units everywhere.");
     expect((await readProfilePage(f)).items).toEqual([expect.objectContaining({ id: original!.id, text: "Use metric units everywhere.", status: "active" })]);
 
@@ -192,7 +196,7 @@ describe("Tron Home learned profile", () => {
       ids.push(record.id);
     }
     const next = await homeActivation(f, "over the bound", [say("ok")]);
-    const section = profileSection(next.first.systemPrompt);
+    const section = profileSection(next.first);
     const pages = [];
     let cursor: string | undefined;
     do {
@@ -219,7 +223,7 @@ describe("Tron Home learned profile", () => {
     f.worker.push(() => fauxAssistantMessage(fauxToolCall("report", { resultId: "profile-result-0001", outcome: "final", text: "Reviewed.", evidence: ["checked"] }, { id: "worker-report-0001" }), { stopReason: "toolUse" }));
     f.worker.push(say("done"));
     const delegate: Step = (context) => {
-      expect(profileSection(context.systemPrompt)).not.toContain(item!.content.title);
+      expect(profileSection(context)).not.toContain(item!.content.title);
       const cited = profileReadResult(context.messages, "delegation-profile-read").items.filter(note => note.id === item!.id);
       expect(cited).toHaveLength(1);
       const intent = ["Review the change.", "", "Preferences applied:", ...cited.map(note => `- note ${note.id}: ${note.text}`)].join("\n");
@@ -332,7 +336,7 @@ describe("Tron Home learned profile", () => {
     expect((await noteAt(f, b.id)).content.retired).toBeFalsy();
 
     const next = await homeActivation(f, "What do you know about me?", [say("ok")]);
-    const section = profileSection(next.first.systemPrompt);
+    const section = profileSection(next.first);
     expect(section).not.toContain("I prefer short replies.");
     expect(section).not.toContain("The office is in Lisbon, where I work.");
     const readAfterUndo = await readProfilePage(f, "inferred", undefined, true);
@@ -427,13 +431,13 @@ describe("Tron Home learned profile", () => {
     expect(entry).toMatchObject({ key: "home.profile.item", after: { confirmed: false, state: "active", text: "I like dry humour." },
       presentation: { label: "Profile item", actor: "Home" } });
     const before = await homeActivation(f, "still there?", [say("ok")]);
-    expect(profileSection(before.first.systemPrompt)).not.toContain("I like dry humour.");
+    expect(profileSection(before.first)).not.toContain("I like dry humour.");
     expect((await readProfilePage(f)).items).toEqual([expect.objectContaining({ id: learnedId, text: "I like dry humour.", kind: "preference", confirmed: false, status: "active" })]);
 
     const undone = await undo(f, entry!.changeId, "undo-home-learn");
     expect(undone).toMatchObject({ status: "applied" });
     const after = await homeActivation(f, "and now?", [say("ok")]);
-    expect(profileSection(after.first.systemPrompt)).not.toContain(learnedId);
+    expect(profileSection(after.first)).not.toContain(learnedId);
     expect((await readProfilePage(f, "inferred", undefined, true)).items).toEqual([expect.objectContaining({ id: learnedId, text: "I like dry humour.", status: "retired" })]);
     expect((await noteAt(f, learnedId)).content.retired).toBe(true);
     recordCase("home-change-recorded-and-undone", { note: learnedId, historyActor: "Home" });
