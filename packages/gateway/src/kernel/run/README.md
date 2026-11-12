@@ -228,8 +228,8 @@ detached descendants, timeout, Stop and environment boundaries.
 slots, including Home. Registry admission captures their initial inputs; retirement
 removes their state and unused project watches; disposal closes watches and joins
 in-flight refreshes. Global agent resources, `agent/npm`, `~/.agents/skills`, each
-live project's `.pi` and context files, and resolved external resource paths are
-watched. Events settle for 150 ms; busy slots wait for their next idle edge.
+live project's `.pi`, SDK-selected context files (including new ancestor files),
+and resolved external resource paths and symlink targets are watched. Events settle for 150 ms; busy slots wait for their next idle edge.
 
 The SDK package resolver runs read-only with missing sources explicitly skipped;
 watching never installs a package. It supplies the same enabled resource paths as
@@ -237,7 +237,9 @@ the loader. SDK skill descriptors exclude skill bodies; prompt/context/extension
 bytes and package sets/manifests complete the input. `requestLayers` supplies the
 shared process-keyed layer hash, not a separate hashing scheme. An identical input
 skips runtime reload and keeps the provider prefix unchanged. Successful reloads
-alone advance applied state; failures remain pending until another idle edge.
+alone advance applied state; failures remain pending for another idle edge or
+relevant file event. Retention leases do not block reload: native slot admission,
+not the broader eviction-busy flag, decides whether runtime work is idle.
 
 The real-slot proof is `src/e2e/kernel/run/resource-freshness.e2e.test.ts`: global
 skill propagation to Home and an ordinary chat, busy-edge adoption, unchanged/body

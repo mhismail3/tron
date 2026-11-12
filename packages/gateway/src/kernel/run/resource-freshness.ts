@@ -1,8 +1,8 @@
 import { watch, type FSWatcher } from "node:fs";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { DefaultPackageManager, loadSkills, SettingsManager } from "../pi/coding-agent.js";
+import { DefaultPackageManager, loadProjectContextFiles, loadSkills, SettingsManager } from "../pi/coding-agent.js";
 import { GatewayError } from "../../errors.js";
 import { requestLayers } from "./request-record.js";
 import type { RuntimeSlot } from "./runtime-slot.js";
@@ -17,7 +17,9 @@ interface PendingResource {
   wanted: number;
   applied: number;
   idles: number;
+  lastAttemptIdle: number;
   paths: Set<string>;
+  ready: boolean;
   draining?: Promise<void> | undefined;
 }
 
@@ -25,7 +27,8 @@ const AGENT_INPUTS = new Set(["settings.json", "prompts", "skills", "npm", "exte
 const CONTEXT_FILES = ["AGENTS.md", "SYSTEM.md", "APPEND_SYSTEM.md"];
 
 export class ResourceFreshness {
-  private readonly watchers = new Map<string, FSWatcher>();
+  private readonly watchers = new Map<string, { watcher: FSWatcher; recursive: boolean }>();
+  private watchInputs = new Map<string, { relevant: (name: string) => boolean; recursive: boolean }>();
   private readonly states = new Map<RuntimeSlot, PendingResource>();
   private settle?: NodeJS.Timeout;
   private closed = false;
@@ -39,11 +42,12 @@ export class ResourceFreshness {
 
   async attach(slot: RuntimeSlot): Promise<void> {
     if (this.closed) return;
-    const state: PendingResource = { digest: "", wanted: 0, applied: 0, idles: 0, paths: new Set() };
+    const state: PendingResource = { digest: "", wanted: 0, applied: 0, idles: 0, lastAttemptIdle: 0, paths: new Set(), ready: false };
     this.states.set(slot, state);
     this.arm();
     try { state.digest = await this.digest(slot, state); this.arm(); }
     catch { state.wanted += 1; this.record(slot, "failed"); }
+    finally { state.ready = true; }
   }
 
   detach(retired: string | RuntimeSlot): void {
@@ -70,7 +74,7 @@ export class ResourceFreshness {
   async close(): Promise<void> {
     this.closed = true;
     clearTimeout(this.settle);
-    for (const watcher of this.watchers.values()) watcher.close();
+    for (const { watcher } of this.watchers.values()) watcher.close();
     this.watchers.clear();
     await Promise.all([...this.states.values()].map(state => state.draining));
     this.states.clear();
@@ -84,29 +88,31 @@ export class ResourceFreshness {
       roots.set(root, { relevant: previous ? name => previous.relevant(name) || relevant(name) : relevant, recursive: recursive || previous?.recursive === true });
     };
     add(homedir(), name => name === ".agents", false);
-    add(this.options.agentDir, name => AGENT_INPUTS.has(name.split(/[\\/]/)[0]!));
+    add(this.options.agentDir, name => AGENT_INPUTS.has(name.split(/[\\/]/)[0]!) || (!name.includes("/") && /\.md$/i.test(name)));
     add(join(homedir(), ".agents"), name => name.split(/[\\/]/)[0] === "skills");
     for (const [slot, state] of this.states) {
-      add(slot.projectDir, name => name.split(/[\\/]/)[0] === ".pi" || CONTEXT_FILES.includes(name));
+      add(slot.projectDir, name => name.split(/[\\/]/)[0] === ".pi" || (!name.includes("/") && /\.md$/i.test(name)));
+      if (!slot.liveProfile().resources.noContextFiles) for (const directory of ancestors(slot.cwd)) add(directory, name => /\.md$/i.test(name), false);
       for (const path of state.paths) {
         if ([...roots].some(([root, { relevant }]) => path.startsWith(`${root}/`) && relevant(path.slice(root.length + 1)))) continue;
         add(path, () => true);
       }
     }
-    for (const [root, watcher] of this.watchers) {
-      if (!roots.has(root)) { watcher.close(); this.watchers.delete(root); }
+    this.watchInputs = roots;
+    for (const [root, { watcher, recursive }] of this.watchers) {
+      if (!roots.has(root) || roots.get(root)!.recursive !== recursive) { watcher.close(); this.watchers.delete(root); }
     }
-    for (const [root, { relevant, recursive }] of roots) {
+    for (const [root, { recursive }] of roots) {
       if (this.watchers.has(root)) continue;
       const armedAt = Date.now();
       try {
         const watcher = watch(root, { recursive, persistent: false }, (_event, name) => {
-          if (name !== null && !relevant(String(name))) return;
+          if (name !== null && !this.watchInputs.get(root)?.relevant(String(name))) return;
           void (name === null ? Promise.resolve(true) : stat(join(root, String(name))).then(info => info.ctimeMs >= armedAt, () => true))
             .then(changed => { if (changed) this.changed(); });
         });
         watcher.on("error", () => { watcher.close(); this.watchers.delete(root); this.options.diagnostic?.({ reason: "watch-failed" }); this.changed(); });
-        this.watchers.set(root, watcher);
+        this.watchers.set(root, { watcher, recursive });
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") this.options.diagnostic?.({ reason: "watch-failed" });
       }
@@ -121,14 +127,18 @@ export class ResourceFreshness {
   }
 
   private apply(slot: RuntimeSlot, state: PendingResource): void {
-    if (state.applied >= state.wanted || state.draining || this.closed || slot.isBusy) return;
-    state.draining = this.drain(slot, state).finally(() => { state.draining = undefined; });
+    if (state.applied >= state.wanted || state.draining || !state.ready || this.closed || slot.isDisposed) return;
+    state.draining = this.drain(slot, state).finally(() => {
+      state.draining = undefined;
+      if (state.applied < state.wanted && state.idles > state.lastAttemptIdle) this.apply(slot, state);
+    });
   }
 
   private async drain(slot: RuntimeSlot, state: PendingResource): Promise<void> {
     while (!this.closed && this.states.get(slot) === state && state.applied < state.wanted) {
       const target = state.wanted;
       const idles = state.idles;
+      state.lastAttemptIdle = idles;
       try {
         const digest = await this.digest(slot, state);
         this.arm();
@@ -167,8 +177,10 @@ export class ResourceFreshness {
     const packages = new Set<string>();
     const watchPath = async (path: string): Promise<void> => {
       if (path.startsWith("builtin:")) return;
-      const directory = await stat(path).then(info => info.isDirectory(), () => false);
-      paths.add(directory ? path : dirname(path));
+      for (const candidate of new Set([path, await realpath(path).catch(() => path)])) {
+        const directory = await stat(candidate).then(info => info.isDirectory(), () => false);
+        paths.add(directory ? candidate : dirname(candidate));
+      }
     };
     for (const kind of ["skills", "prompts", "extensions"] as const) {
       if (kind === "extensions" && profile.resources.noExtensions) continue;
@@ -177,7 +189,7 @@ export class ResourceFreshness {
       for (const entry of enabled) {
         await watchPath(entry.path);
         if (entry.metadata.packageRoot) packages.add(entry.metadata.packageRoot);
-        if (kind !== "skills" && !entry.path.startsWith("builtin:")) await files(entry.path, inputs);
+        if (kind !== "skills" && !entry.path.startsWith("builtin:")) await files(entry.path, inputs, paths);
       }
     }
     const skills = loadSkills({ cwd: slot.cwd, agentDir, skillPaths: resolved.skills.filter(entry => entry.enabled).map(entry => entry.path), includeDefaults: true });
@@ -185,12 +197,21 @@ export class ResourceFreshness {
     for (const root of packages) await file(join(root, "package.json"), inputs);
     inputs.push(["packages", settings.getPackages()]);
     if (!profile.resources.noContextFiles) {
-      for (const context of slot.runtime.session.resourceLoader.getAgentsFiles().agentsFiles) { await file(context.path, inputs); await watchPath(context.path); }
+      for (const context of loadProjectContextFiles({ cwd: slot.cwd, agentDir })) { inputs.push([context.path, context.content]); await watchPath(context.path); }
       for (const root of [agentDir, slot.projectDir, join(slot.projectDir, ".pi")]) for (const name of CONTEXT_FILES) await file(join(root, name), inputs);
     }
     state.paths = paths;
     return requestLayers({ system: [...new Map(inputs)].sort(([a], [b]) => a.localeCompare(b)) }).request.hash;
   }
+}
+
+function ancestors(directory: string): string[] {
+  const paths = [directory];
+  while (dirname(directory) !== directory) {
+    directory = dirname(directory);
+    paths.push(directory);
+  }
+  return paths;
 }
 
 async function json(path: string): Promise<Record<string, unknown>> {
@@ -203,7 +224,10 @@ async function file(path: string, inputs: Array<[string, unknown]>): Promise<voi
   catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
 }
 
-async function files(root: string, inputs: Array<[string, unknown]>): Promise<void> {
+async function files(root: string, inputs: Array<[string, unknown]>, watched: Set<string>, seen = new Set<string>()): Promise<void> {
+  const canonical = await realpath(root).catch(() => root);
+  if (seen.has(canonical)) return;
+  seen.add(canonical);
   let entries;
   try { entries = await readdir(root, { withFileTypes: true }); }
   catch (error) {
@@ -214,7 +238,9 @@ async function files(root: string, inputs: Array<[string, unknown]>): Promise<vo
   for (const entry of entries) {
     if (entry.name === ".git" || entry.name === "node_modules" || entry.name === ".cache") continue;
     const path = join(root, entry.name);
-    if (entry.isDirectory()) await files(path, inputs);
-    else if (entry.isFile()) await file(path, inputs);
+    const info = entry.isSymbolicLink() ? await stat(path) : entry;
+    if (entry.isSymbolicLink()) watched.add(info.isDirectory() ? await realpath(path) : dirname(await realpath(path)));
+    if (info.isDirectory()) await files(path, inputs, watched, seen);
+    else if (info.isFile()) await file(path, inputs);
   }
 }

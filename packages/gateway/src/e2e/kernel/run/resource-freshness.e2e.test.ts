@@ -199,6 +199,13 @@ describe("Home's global skills and prompt templates follow the agent directory l
     await run;
     await waitFor(async () => (await commands(chat.id)).some(command => command.name === "skill:project-skill"), "ordinary slot adopts project skill");
     expect((await commands(home.id)).some(command => command.name === "skill:project-skill")).toBe(false);
+    const releaseLease = chat.retainLease();
+    try {
+      await writeFile(join(f.cwd, "CLAUDE.md"), "FRESH_PROJECT_RULE\n");
+      await waitFor(() => chat.runtime.session.systemPrompt.includes("FRESH_PROJECT_RULE"), "context alias creation refreshes despite retention lease");
+      await writeFile(join(f.root, "AGENTS.override.md"), "FRESH_ANCESTOR_RULE\n");
+      await waitFor(() => chat.runtime.session.systemPrompt.includes("FRESH_ANCESTOR_RULE"), "new ancestor context refreshes");
+    } finally { releaseLease(); }
   }, 60_000);
 
   it("retries a failed reload at the next idle edge and reports successful package reloads", async () => {
