@@ -98,7 +98,10 @@ stale-lock or power-loss recovery.
   groups, stops and joins them (TERM then one KILL) before roots are removed, and
   writes join failures to `TRON_TEST_PROCESS_OWNER_FAILURE`. A KILL permission
   denial retains its error while the existing bounded join observes terminal
-  state, without resending or extending the deadline. Only a fully joined tree
+  state, without resending or extending the deadline. At the deadline the owner
+  yields once to the event loop before failing, because a direct child's exit
+  callback can be queued behind a synchronous process-table scan; only fresh
+  unjoined PIDs fail the join. Only a fully joined tree
   succeeds; a still-live target fails with the original denial and live PIDs.
 - Home task fixtures await an offline model refresh after provider registration,
   before returning either the Gateway-wide or a session runtime. Early refusal tests
