@@ -133,8 +133,6 @@ struct HostedSettingsRendererFixture: View {
                         SettingsRendererView(target: SettingsTarget.project(cwd: "/fixture/project").gatewayTarget, writeLayer: nil, presentation: .section("tools"))
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-ui-providers") {
                         providerReview
-                    } else if ProcessInfo.processInfo.arguments.contains("-settings-ui-push") {
-                        PushNotificationsSettingsView()
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-changes") {
                         SettingsChangesView(scope: ProcessInfo.processInfo.arguments.contains("-settings-changes-session")
                             ? .session("fixture-chat", projectCWD: "/fixture/project") : .all,

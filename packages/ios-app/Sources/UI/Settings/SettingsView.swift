@@ -69,10 +69,6 @@ struct SettingsView: View {
                     SettingsGroupCard(.diagnostics) {
                         MacTerminalSettingsRow()
                         TronSettingsDivider()
-                        settingsLink("Push Notifications", summary: "Agent alerts on this iPhone", icon: "bell.badge") {
-                            PushNotificationsSettingsView()
-                        }
-                        TronSettingsDivider()
                         settingsLink("Setup", summary: "Import, session storage, telemetry, and prototypes", icon: "gearshape.2") {
                             SetupSettingsView(onImported: onImported)
                         }
