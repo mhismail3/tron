@@ -470,7 +470,7 @@ describe("gateway/home scenario lock", () => {
       generation: 1, homeId: "<id>", policyRevision: 3, routeGeneration: 1, updatedAt: "<timestamp>", version: 2 });
     expect(stable(await gateway.file(join(homeRoot, "tasks", taskFile!))), "the persisted task").toEqual(TASK);
 
-    const requests = recorded.providerRequests as unknown as Array<{ messages: readonly TraceValue[] }>;
+    const requests = recorded.providerRequests as unknown as Array<{ messages: readonly TraceValue[]; tools: readonly string[] }>;
     const isWorker = (request: { tools: readonly string[] }) => request.tools.includes("report");
     const trace = stabilize({
       lock: LOCK,
