@@ -150,6 +150,12 @@ export function homeTaskPolicy(inputs: HomeTaskPolicyInputs, trust: Pick<TrustSe
       if (inspection.effectiveDecision !== true) throw new GatewayError("trust_required", "Home tasks require a trusted project");
       return inspection.cwd;
     },
+    workerLimit: async () => {
+      const settings = inputs.settings();
+      if (!settings) throw new GatewayError("conflict", "Home worker settings are unavailable");
+      const resolution = await settings.resolve({ kind: "home" }, undefined, ["run.workers.maxConcurrent"], { storeState: false });
+      return resolution.keys[0]!.value as number;
+    },
     budget: async () => {
       const settings = inputs.settings();
       if (!settings) return undefined;

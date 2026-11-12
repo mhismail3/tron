@@ -93,6 +93,8 @@ it.each([
         for (const [path, bytes] of Object.entries(files)) { await writeFile(path, bytes); untouched.set(path, bytes); }
       }
     }
+    await writeFile(join(agentDir, "AGENTS.md"), "GLOBAL_CHILD_RULES_MARKER");
+    await writeFile(join(cwd, "AGENTS.md"), "PROJECT_CHILD_RULES_MARKER");
     await mkdir(join(agentDir, "skills", "ordinary-local"), { recursive: true });
     await writeFile(join(agentDir, "skills", "ordinary-local", "SKILL.md"), "---\nname: ordinary-local\ndescription: Local resource control\n---\nLocal");
     const logger = new GatewayLogger();
@@ -111,16 +113,17 @@ it.each([
     const faux = fauxProvider({ provider: "tron-offline-subagents", tokensPerSecond: 10_000 });
     const model = faux.getModel();
     await mkdir(join(cwd, ".pi", "agents"), { recursive: true });
-    await writeFile(join(cwd, ".pi", "agents", "offline-worker.md"), `---\nname: offline-worker\ndescription: Offline activation probe\nmodel: ${model.provider}/${model.id}\ntools: read\n---\nReturn the requested probe marker.\n`);
+    await writeFile(join(cwd, ".pi", "agents", "offline-worker.md"), `---\nname: offline-worker\ndescription: Offline activation probe\nmodel: ${model.provider}/${model.id}\ntools: read\ninheritProjectContext: false\n---\nReturn the requested probe marker.\n`);
     await writeFile(join(cwd, ".pi", "agents", "detail-probe.md"), "---\nname: detail-probe\ndescription: Detail probe\n---\nDelegated body line.\nUse key sk-abcdefghijklmnopqrstuvwx carefully.\n");
     const invalidDefinition = join(cwd, ".pi", "agents", "invalid-worker.md");
     if (conflict) await writeFile(invalidDefinition, "---\nname: invalid-worker\ndescription: Invalid definition probe\nfallbackModels: [provider/model]\n---\nRead only.\n");
+    let childSystem = "";
     faux.setResponses([
       fauxAssistantMessage([fauxToolCall("subagent", {
         agent: "offline-worker", task: "Return CHILD_OFFLINE_COMPLETE", async: false,
         acceptance: { level: "none", reason: "Read-only offline activation probe" },
       }, { id: "offline-launch" })], { stopReason: "toolUse" }),
-      fauxAssistantMessage("CHILD_OFFLINE_COMPLETE"),
+      context => { childSystem = JSON.stringify(context.messages.filter(message => message.role === "system")); return fauxAssistantMessage("CHILD_OFFLINE_COMPLETE"); },
       fauxAssistantMessage("PARENT_OFFLINE_COMPLETE"),
     ]);
     const trust = new TrustService(agentDir);
@@ -248,6 +251,8 @@ it.each([
       runId: string;
       results: Array<{ index: number; exitCode: number; finalOutput: string; sessionFile: string; sessionOwnerId: string }>;
     };
+    expect(childSystem).toContain("GLOBAL_CHILD_RULES_MARKER");
+    expect(childSystem).not.toContain("PROJECT_CHILD_RULES_MARKER");
     expect(details.results).toHaveLength(1);
     const result = details.results[0]!;
     expect(result).toMatchObject({ index: 0, exitCode: 0, finalOutput: "CHILD_OFFLINE_COMPLETE", sessionOwnerId: details.runId });

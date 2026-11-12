@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fauxAssistantMessage, fauxToolCall, getCurrentSystemMessage, getCurrentTools } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, getCurrentSystemMessage, getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai";
 import { afterEach, expect, it, vi } from "vitest";
 import { startLockGateway, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
 import { waitFor } from "../../../test-support/wait-for.js";
@@ -53,6 +53,10 @@ async function resumedHome(label: string, seedStale = true, initialNotifications
   let gateway = await startLockGateway(`home-tool-${label}`, { ...options, ...(initialNotifications ? {} : { notifications: undefined }) });
   owned.push(gateway);
   const phone = await gateway.connect("phone");
+  await writeFile(join(gateway.agentDir, "AGENTS.md"), "GLOBAL_HOME_RULES_MARKER");
+  const homeWorkspace = homeOwnerOf(gateway.registry).homeWorkspacePath();
+  await mkdir(homeWorkspace, { recursive: true, mode: 0o700 });
+  await writeFile(join(homeWorkspace, "AGENTS.md"), "PROJECT_HOME_RULES_MARKER");
   const settings = JSON.parse(await readFile(join(gateway.agentDir, "settings.json"), "utf8"));
   const designated = await phone.request("home.designate", { commandId: gateway.commandId(),
     model: { provider: settings.defaultProvider, id: settings.defaultModel } });
@@ -60,10 +64,13 @@ async function resumedHome(label: string, seedStale = true, initialNotifications
   expect((await phone.request("settings.change", { commandId: gateway.commandId(), target: { kind: "home" },
     changes: [{ key: "model.queue[role=background]", layer: "session", op: "set",
       value: [`${settings.defaultProvider}/${settings.defaultModel}`] }] })).ok).toBe(true);
-  gateway.script([() => fauxAssistantMessage("Home initialized.")]);
+  let homePrompt = "";
+  gateway.script([context => { homePrompt = getCurrentSystemPrompt(context.messages); return fauxAssistantMessage("Home initialized."); }]);
   expect((await phone.request("home.prompt", { commandId: gateway.commandId(), text: "Initialize the chapter." })).ok).toBe(true);
   const sessionId = designated.result.sessionId as string;
   await gateway.settled(sessionId);
+  expect(homePrompt).toContain("GLOBAL_HOME_RULES_MARKER");
+  expect(homePrompt).not.toContain("PROJECT_HOME_RULES_MARKER");
   expect([...gateway.record().providerRequests[0]!.tools].sort()).toEqual(userTools.filter(name => initialNotifications || name !== "notify"));
   const slot = await gateway.registry.acquire(sessionId);
   const sessionFile = slot.sessionFile!;
@@ -255,6 +262,7 @@ it("real Gateway: a settled task result wakes Home with every tool listed and ma
     const task = await phone.request("home.taskStatus", { taskId: "tool-admission-task" });
     expect(task.ok, JSON.stringify(task)).toBe(true);
     await gateway.settled(task.result.sessionId);
+    expect(task.result).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" } });
     evidence.push({ case: "result-wake", actual: homeTools });
     expect(homeTools).toEqual([userTools, userTools, userTools, userTools]);
     expect(await refusedCalls(gateway, sessionId)).toEqual([{ tool: "edit", text: WAKE_REFUSAL }, { tool: "bash", text: WAKE_REFUSAL }]);
