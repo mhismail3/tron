@@ -122,6 +122,20 @@ class HomeLayoutTests(unittest.TestCase):
         self.assertNotIn("test-publish.sh", result.stdout)
         self.assertNotIn("publish.sh:2", result.stdout)
 
+    def test_check_requires_exact_external_owner_names(self) -> None:
+        fixture = Fixture(self.base)
+        for owner in ("pi-sdk-typo", "pi-subagentsOld", "extensionX", "extension", "extension "):
+            with self.subTest(owner=owner):
+                fixture.write(REGISTRY, registry({**PATHS, "logs": entry(owner, **{"class": "log"})}))
+                result = fixture.run("check")
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn(f"logs: owner {owner} is not a module", result.stdout)
+        for owner in ("pi-sdk", "pi-subagents", "extension pi-web-access", "extension @scope/package"):
+            with self.subTest(owner=owner):
+                fixture.write(REGISTRY, registry({**PATHS, "logs": entry(owner, **{"class": "log"})}))
+                result = fixture.run("check")
+                self.assertEqual(result.returncode, 0, result.stdout)
+
     def test_check_sees_debug_homes_shell_variables_wrapped_joins_and_swift_chains(self) -> None:
         fixture = Fixture(self.base)
         fixture.write("scripts/dev", '#!/bin/bash\nSTATE_DIR="$HOME/.tron-dev/gateway"\nPID_FILE="$STATE_DIR/bogus.pid"\n'

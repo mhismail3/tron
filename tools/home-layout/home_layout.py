@@ -25,7 +25,7 @@ ENTRY_FIELDS = {"owner", "class", "backup", "credential", "container", "subtree"
 PRUNE_BOUNDS = {"when": str, "maxAge": str, "maxEntries": int, "maxBytes": int, "keepNewest": int}
 PRUNE_FIELDS = {"by": str, **PRUNE_BOUNDS}
 AGE = re.compile(r"[1-9]\d*[mhd]")
-EXTERNAL_OWNERS = ("pi-sdk", "pi-subagents", "extension")
+EXTERNAL_OWNERS = re.compile(r"(?:pi-sdk|pi-subagents|extension \S+)")
 RUNTIME_LOCK = "agent/.tron-gateway-runtime.lock.lock"
 RUNTIME_LOCK_STALE_SECONDS = 60
 
@@ -202,7 +202,7 @@ def validate(registry: dict, root: Path) -> list[str]:
         return problems
     known = modules(root)
     for key, entry in registry["paths"].items():
-        if not entry["owner"].startswith(EXTERNAL_OWNERS) and entry["owner"] not in known:
+        if not EXTERNAL_OWNERS.fullmatch(entry["owner"]) and entry["owner"] not in known:
             problems.append(f"{key}: owner {entry['owner']} is not a module (scripts/tron ownership --modules)")
     return problems
 
