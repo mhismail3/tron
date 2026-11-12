@@ -46,9 +46,10 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   Other routine settings have no editor exposure; explicit values retain read-only Reset/Revert and Project inspection.
   Automatic compaction and Summary thinking are excluded by the shared iPhone row selection even
   when saved; canonical Gateway values, scope rules and writers are unchanged. Other Compaction
-  values appear only while retained values need inspection or Revert. Scoped More Settings contains
-  the Connection group (HTTP proxy); Global embeds that group directly. There is no Advanced section. Trusted Projects and the server's Mac Terminal section consume their declared
-  groups without duplicating them in More Settings.
+  values appear only while retained values need inspection or Revert. More Settings groups
+  retained values; Global embeds those groups directly. There is no Advanced section.
+  Trusted Projects and the server's Mac Terminal section consume their declared groups
+  without duplicating them in More Settings.
   Notifications and Changes sit in the toolbar; no Value & Source sheet. Dashboard Settings
   exposes only Global: editable keys plus explicit read-only values with Reset and Project inspection.
   Trusted Projects owns the default trust policy and per-project trust; Add Project records the
@@ -69,7 +70,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   the group, or which has one row, has no container of its own, so a lone row keeps its
   `settings-row-*` identity; other sections are wrapped as `settings-section-<id>-detail`.
 - **Renderer.** Sends `SettingsRendererContract` version 1 (`toggle`, `choice`, `text`,
-  `secret`, `list`, `catalog`, `readOnly`) with `settings.resolve` and renders sections in Gateway
+  `list`, `catalog`, `readOnly`) with `settings.resolve` and renders sections in Gateway
   order. An unimplemented control renders its `display` read-only; an
   undeclared group shows under its id. The Gateway declaration owns row exposure. Options come from
   `settings.options`, re-requested when a `dependsOn` key changes; catalog pages fence every
@@ -198,7 +199,7 @@ scripts/ios-gateway-e2e-test run-ui \
 ```
 
 `TronSettingsScopeRowsUITests` checks read-only queue values, independent Revert and Project
-inspection. `TronSmokeUITests` keeps direct model/thinking, shared string-list/secret editing,
+inspection. `TronSmokeUITests` keeps direct model/thinking and shared string-list editing,
 read-only numeric-map/no-write inspection, approvals and Changes coverage.
 `TronAgentBehaviorRegressionUITests` checks numeric-map values without native editor/reset routes in
 light/dark and XXXL; Gateway `native-change.e2e.test.ts` owns actual agent numeric-map changes,
