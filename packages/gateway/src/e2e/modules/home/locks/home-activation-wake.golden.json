@@ -1154,7 +1154,7 @@
           }
         },
         {
-          "description": "Read and change Tron settings through typed writes. Reversible changes apply and are logged. Read durable audit records with history; reverse a change with undo and its changeId. Only irreversible effects, trust/authority, privacy expansion, spend and installs need the exact shared native tap. dryRun validates and returns before/after without effects. Home may target its task worker; running workers adopt from the next model request and are signalled.",
+          "description": "Read and change Tron settings through typed writes. Reversible changes apply and are logged. Read bounded hooks (by event and extension), packages, Tron modules and MCP status with inventory. Read durable audit records with history; reverse a change with undo and its changeId. Only irreversible effects, trust/authority, privacy expansion, spend and installs need the exact shared native tap. dryRun validates and returns before/after without effects. Home may target its task worker; running workers adopt from the next model request and are signalled.",
           "name": "settings",
           "parameters": {
             "additionalProperties": false,
@@ -1165,7 +1165,8 @@
                   "resolve",
                   "change",
                   "history",
-                  "undo"
+                  "undo",
+                  "inventory"
                 ],
                 "type": "string"
               },
@@ -1263,7 +1264,7 @@
                 "type": "array"
               },
               "limit": {
-                "description": "history: maximum records per page (default 50).",
+                "description": "history/inventory: maximum records per page or section (default 50). Inventory sections also have byte limits and disclose omitted counts.",
                 "maximum": 200,
                 "minimum": 1,
                 "type": "integer"
@@ -1887,7 +1888,7 @@
           }
         },
         {
-          "description": "Read and change Tron settings through typed writes. Reversible changes apply and are logged. Read durable audit records with history; reverse a change with undo and its changeId. Only irreversible effects, trust/authority, privacy expansion, spend and installs need the exact shared native tap. dryRun validates and returns before/after without effects. Home may target its task worker; running workers adopt from the next model request and are signalled.",
+          "description": "Read and change Tron settings through typed writes. Reversible changes apply and are logged. Read bounded hooks (by event and extension), packages, Tron modules and MCP status with inventory. Read durable audit records with history; reverse a change with undo and its changeId. Only irreversible effects, trust/authority, privacy expansion, spend and installs need the exact shared native tap. dryRun validates and returns before/after without effects. Home may target its task worker; running workers adopt from the next model request and are signalled.",
           "name": "settings",
           "parameters": {
             "additionalProperties": false,
@@ -1898,7 +1899,8 @@
                   "resolve",
                   "change",
                   "history",
-                  "undo"
+                  "undo",
+                  "inventory"
                 ],
                 "type": "string"
               },
@@ -1996,7 +1998,7 @@
                 "type": "array"
               },
               "limit": {
-                "description": "history: maximum records per page (default 50).",
+                "description": "history/inventory: maximum records per page or section (default 50). Inventory sections also have byte limits and disclose omitted counts.",
                 "maximum": 200,
                 "minimum": 1,
                 "type": "integer"
