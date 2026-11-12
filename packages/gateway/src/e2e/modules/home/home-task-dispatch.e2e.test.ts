@@ -1174,6 +1174,8 @@ describe("Home task list RPC", () => {
 describe("Home task production dispatch", () => {
   it("reloads Home for global rules but not excluded workspace or system context", async () => {
     const f = await fixture();
+    await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
+    await homeOwnerOf(f.registry).pauseMemory();
     const globalRules = join(f.agentDir, "AGENTS.md");
     const home = await f.registry.acquire(f.home.sessionId);
     const before = f.signals.length;
@@ -1191,6 +1193,7 @@ describe("Home task production dispatch", () => {
     let prompt = "";
     f.faux.setResponses([context => { prompt = getCurrentSystemPrompt(context.messages); return fauxAssistantMessage("Global rules read."); }]);
     await home.prompt("Verify the global-only context.");
+    await waitFor(() => prompt !== "", "Home reaches the provider after global-rules reload");
     await waitFor(() => !home.isBusy && home.snapshot().operation === undefined, "global rules provider request settled");
     expect(prompt).toContain("GLOBAL_HOME_FRESHNESS_UPDATED");
     expect(prompt).not.toContain("IGNORED_HOME_CONTEXT_MARKER");
