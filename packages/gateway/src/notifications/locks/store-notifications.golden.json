@@ -2,7 +2,7 @@
   "store": "store-notifications",
   "module": "gateway/notifications",
   "files": [
-    "gateway/notifications.json"
+    "state/notifications.json"
   ],
   "projection": {
     "document": {

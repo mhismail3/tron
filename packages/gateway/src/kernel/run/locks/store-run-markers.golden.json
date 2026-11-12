@@ -2,7 +2,7 @@
   "store": "store-run-markers",
   "module": "gateway/run",
   "files": [
-    "gateway/runtime-markers/01a00000-0000-7000-8000-00000000c0a1.json"
+    "state/runtime-markers/01a00000-0000-7000-8000-00000000c0a1.json"
   ],
   "projection": {
     "evidence": {

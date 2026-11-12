@@ -4,15 +4,15 @@
   "live": "hard-linked content objects",
   "files": [
     {
-      "path": "gateway/display-artifacts/artifacts/<id>/content",
+      "path": "state/display-artifacts/artifacts/<id>/content",
       "content": "<45 bytes>"
     },
     {
-      "path": "gateway/display-artifacts/artifacts/<id>/content",
+      "path": "state/display-artifacts/artifacts/<id>/content",
       "content": "<45 bytes>"
     },
     {
-      "path": "gateway/display-artifacts/artifacts/<id>/metadata.json",
+      "path": "state/display-artifacts/artifacts/<id>/metadata.json",
       "content": {
         "createdAt": "<timestamp>",
         "digest": "<base64:64>",
@@ -28,7 +28,7 @@
       }
     },
     {
-      "path": "gateway/display-artifacts/artifacts/<id>/metadata.json",
+      "path": "state/display-artifacts/artifacts/<id>/metadata.json",
       "content": {
         "createdAt": "<timestamp>",
         "digest": "<base64:64>",
@@ -45,7 +45,7 @@
       }
     },
     {
-      "path": "gateway/display-artifacts/objects/0d/b5920631d621e1b3929eccee0b2db8505a6fd260f921122aa30817b6545e78",
+      "path": "state/display-artifacts/objects/0d/b5920631d621e1b3929eccee0b2db8505a6fd260f921122aa30817b6545e78",
       "content": "<45 bytes>"
     }
   ],
