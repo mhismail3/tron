@@ -18,6 +18,8 @@ import { estimateTokens } from "../../../kernel/pi/coding-agent.js";
 import { UploadStore } from "../../../machine/upload-store.js";
 import { EpisodicMemoryError } from "../../../errors.js";
 import { RuntimeRegistry } from "../../../kernel/session/runtime-registry.js";
+import { RunOperations } from "../../../kernel/run/run-operations.js";
+import { HOME_TASK_MARKER } from "../../../kernel/delegation/task-report.js";
 import { delegatedArtifactRoot } from "../../../kernel/delegation/delegated-provider.js";
 import { RunMarkerStore } from "../../../kernel/run/run-markers.js";
 import { stopTaskWorker, taskWorkerSteeringInput } from "../../../kernel/delegation/worker-control.js";
@@ -1549,8 +1551,38 @@ describe("Home task production dispatch", () => {
     } finally { release(); await slot.abort("agent").catch(() => {}); await run.completion.catch(() => {}); }
   }, 20_000);
 
+  it("refuses extension commands in an owned Home task brief", async () => {
+    const f = await fixture();
+    const refusals: Array<{ operationId: string | undefined; error: unknown }> = [];
+    const prompt = RunOperations.prototype.prompt;
+    vi.spyOn(RunOperations.prototype, "prompt").mockImplementation(async function (...args) {
+      try { return await prompt.apply(this, args); }
+      catch (error) { refusals.push({ operationId: args[5]?.operationId, error }); throw error; }
+    });
+    const extensions = join(f.cwd, ".pi", "extensions");
+    await mkdir(extensions, { recursive: true });
+    await writeFile(join(extensions, "owned-command.ts"), `export default pi => pi.registerCommand("owned-command", { handler: async () => { throw new Error("must not execute"); } });`);
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const run = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "command-brief", intent: "/owned-command argument", target: f.cwd });
+    await run.completion;
+    const slot = await f.registry.acquire(run.sessionId);
+    expect(slot.commands()).toContainEqual(expect.objectContaining({ name: "owned-command", source: "extension" }));
+    expect(refusals.filter(entry => entry.operationId === run.operationId).map(entry => entry.error)).toEqual([
+      expect.objectContaining({ code: "invalid_request", message: "Extension commands cannot be scheduled" }),
+    ]);
+    const entries = slot.canonicalSessionEntries();
+    expect(entries.filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER)).toEqual([
+      expect.objectContaining({ data: expect.objectContaining({ taskId: run.taskId, operationId: run.operationId }) }),
+    ]);
+    expect(entries.filter(entry => entry.type === "message" && entry.message.role === "user")).toEqual([]);
+    expect(slot.snapshot().operation).toBeUndefined();
+  });
+
   it("orders Home and maintainer steering in the same lane and refuses stale or post-report work", async () => {
     const f = await fixture();
+    const extensions = join(f.cwd, ".pi", "extensions");
+    await mkdir(extensions, { recursive: true });
+    await writeFile(join(extensions, "owned-command.ts"), `export default pi => pi.registerCommand("owned-command", { handler: async () => { throw new Error("must not execute"); } });`);
     let entered = false;
     let release!: () => void;
     let releaseSteer: (() => void) | undefined;
@@ -1595,6 +1627,13 @@ describe("Home task production dispatch", () => {
       expect(called).toEqual([homeSteer, "Maintainer second", maintainerSteer]);
       expect(f.signals.filter(record => record.event === "home.task.control" && record.action === "steer")).toHaveLength(3);
       expect((slot as any).runtime.session.getSteeringMessages()).toEqual([homeSteer, "Maintainer second", maintainerSteer]);
+      expect(slot.commands()).toContainEqual(expect.objectContaining({ name: "owned-command", source: "extension" }));
+      const command = { ...control, text: "/owned-command argument" };
+      await expect(homeOwnerOf(f.registry).steerTask(f.home.sessionId, command)).rejects.toThrow("Extension commands cannot be scheduled");
+      await expect(homeOwnerOf(f.registry).maintainTask(command)).rejects.toThrow("Extension commands cannot be scheduled");
+      await expect(homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "interrupt", ...command })).rejects.toThrow("Extension commands cannot be scheduled");
+      await expect(homeOwnerOf(f.registry).interruptTask(command)).rejects.toThrow("Extension commands cannot be scheduled");
+      expect(called).toEqual([homeSteer, "Maintainer second", maintainerSteer]);
       await expect(homeOwnerOf(f.registry).steerTask(f.home.sessionId, { ...control, operationId: "stale-operation", text: "stale" })).rejects.toThrow(/stale|changed|conflict/i);
       await expect(slot.prompt(...taskWorkerSteeringInput({ ...control, operationId: "stale-operation" }, "stale slot control", "tron-home"))).rejects.toThrow(/stale|changed|conflict/i);
       const service = new GatewayService({ display: displayOwnerOf(f.registry), config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),

@@ -610,8 +610,9 @@ describe("one ordered message lane per Home worker", () => {
     expect(result.terminalEvidence?.outcome).toBe("final");
     const users = slot.canonicalSessionEntries().flatMap(entry => entry.type === "message" && entry.message.role === "user"
       ? [typeof entry.message.content === "string" ? entry.message.content : entry.message.content.map(part => part.type === "text" ? part.text : "").join("")] : []);
-    expect(users.indexOf("Home first")).toBeGreaterThan(0);
-    expect(users.indexOf("Maintainer second")).toBeGreaterThan(users.indexOf("Home first"));
+    const homeFirst = "[from: tron-home; kind: steer; authority: task]\nHome first";
+    expect(users.indexOf(homeFirst)).toBeGreaterThan(0);
+    expect(users.indexOf("Maintainer second")).toBeGreaterThan(users.indexOf(homeFirst));
     evidence.push({ case: "shared-lane-maintainer-and-home", order: users.slice(1) });
   }, 60_000);
 });
