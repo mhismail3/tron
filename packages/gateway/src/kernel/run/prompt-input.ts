@@ -17,6 +17,7 @@ import type { PromptQueueDisplay, QueueBehavior, RuntimeQueuedMessage } from "./
 interface AutomationPromptOwnership<TaskFence> {
   kind?: never;
   operationId: string;
+  originalText?: string;
   taskFence?: TaskFence;
   signal?: AbortSignal;
   origin: ChatOrigin;
@@ -73,7 +74,7 @@ export function preparePromptInput<TaskFence>(
     text = composeResourcePrompt(composedResources, text, operations.resourceExpansionCatalog());
   }
   const parsedCommand = ownership?.kind === "subagentWake" || ownership?.kind === "homeWake" || composedResources !== undefined
-    ? undefined : parsePiLiteralCommand(ownership ? (queueDisplay?.text ?? text) : text);
+    ? undefined : parsePiLiteralCommand(ownership?.originalText ?? text);
   const extensionCommandName = parsedCommand?.name;
   const isExactExtensionCommand = extensionCommandName !== undefined
     && session.extensionRunner.getCommand(extensionCommandName) !== undefined;
