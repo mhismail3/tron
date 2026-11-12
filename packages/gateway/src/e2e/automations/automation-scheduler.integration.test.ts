@@ -63,6 +63,7 @@ describe("automation cancellation ownership", () => {
       const store = new AutomationStore(root);
       await store.initialize();
       const text = "scheduled claim-window prompt";
+      const deliveredText = `[from: automation; kind: automation; authority: task]\n${text}`;
       const definition = await store.create({
         name: "Claim cancellation", activation: "paused",
         target: { kind: "existingSession", sessionId: slot.id },
@@ -85,7 +86,7 @@ describe("automation cancellation ownership", () => {
       await waitFor(() => store.get(definition.id).lastRun?.runId === successful.runId
         && store.get(definition.id).lastRun?.state === "succeeded", "the normal automation's durable terminal");
       await waitFor(() => !scheduler!.hasSessionRun(slot.id), "the successful execution owner to retire");
-      expect(await userMessages()).toEqual(["baseline control", text]);
+      expect(await userMessages()).toEqual(["baseline control", deliveredText]);
 
       const queued = await scheduler.runNow(definition.id, definition.revision);
       scheduler.beginDrain();
@@ -93,7 +94,7 @@ describe("automation cancellation ownership", () => {
       expect(store.get(definition.id).currentRun).toMatchObject({ runId: queued.runId, state: "queued" });
       await expect(scheduler.cancel(definition.id, queued.runId)).resolves.toMatchObject({ state: "cancelled", reason: "user-cancelled" });
       await scheduler.dispose();
-      expect(await userMessages()).toEqual(["baseline control", text]);
+      expect(await userMessages()).toEqual(["baseline control", deliveredText]);
       expect(scheduler.hasSessionRun(slot.id)).toBe(false);
       expect(registry.administrativeWorkRegistry.size).toBe(0);
       expect(slot.isEvictionProtected).toBe(false);
@@ -107,7 +108,7 @@ describe("automation cancellation ownership", () => {
       expect(reopened.get(definition.id).currentRun).toBeUndefined();
       await slot.prompt("next explicit control");
       await waitFor(() => slot.catalogPhase === "idle", "the explicit successor turn to settle");
-      expect(await userMessages()).toEqual(["baseline control", text, "next explicit control"]);
+      expect(await userMessages()).toEqual(["baseline control", deliveredText, "next explicit control"]);
     } finally {
       await scheduler?.cancelActiveForShutdown();
       await scheduler?.dispose();
