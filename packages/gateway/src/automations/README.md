@@ -106,7 +106,12 @@ uses those same identity codecs as the scheduler, executor and cold catalog.
   and delegated-worker facts: Home mutates without confirmation, delegated workers
   (including their subagents) cannot mutate, and ordinary interactive sessions retain
   their UI confirmation. No authority comes from a trigger. Paired credentials are machine-administrator
-  credentials, so any paired client may manage any automation.
+  credentials, so any paired client may manage any automation. Read-only `show` with
+  `automationId` and `runId` returns the immutable run snapshot’s prompt or notification
+  text as model-visible JSON pages (`offset`/`limit` in UTF-8 bytes, maximum 4096;
+  follow `nextOffset` until null). This uses the same session-ownership check as `show`
+  and the shared host byte pager used by task reports; it never reads the current mutable
+  definition in place of the firing snapshot. Home’s canonical trigger text remains whole.
   Composition supplies the canonical receipt owner's existing mutation operation;
   this tool owns no receipt lane or completion policy. Diagnostics use the shared
   module log port, not a transport logger dependency.

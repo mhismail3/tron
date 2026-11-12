@@ -1,6 +1,7 @@
 import type { TaskWorkerControl, TaskControlRefusalReason } from "../../kernel/delegation/worker-contract.js";
 import type { InputEnvelope, InputDelivery, InputTrigger, InputMessage, InputTriggerInbox } from "../../kernel/host/input-admission.js";
 import type { ImageContent } from "../../kernel/pi/ai.js";
+import { utf8Page } from "../../kernel/host/utf8-page.js";
 import { isWakeEvidence, WakeInboxOwner, type HomeWakeEvidence, type HomeWakeEvidenceScope, type HomeWakeRoute, type HomeWakeTrigger } from "./home-wake-inbox.js";
 import { readCanonicalSession, visitCanonicalSessionEntries } from "../../kernel/session/canonical-reader.js";
 import { HOME_OBLIGATION, admitObligation, replayObligations, owed, type ObligationEvent, type ObligationRequest } from "./home-obligations.js";
@@ -319,16 +320,9 @@ export class HomeOwner {
     if (named.homeId !== record.homeId) throw refuse(new GatewayError("conflict", `task ${action}: "${taskId}" belongs to another Home`), "home-generation-changed");
     if (action === "status") return { control: await owner.controlRow(named, await this.continuation(named)), ...await this.taskStatus(taskId) };
     if (action === "report") {
-      const offset = request.offset ?? 0, limit = request.limit ?? 4096;
-      if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 4096) throw new GatewayError("invalid_request", "task report: invalid page: offset must be 0 or more and limit 1 to 4096 bytes");
       if (named.lifecycle !== "terminal") throw new GatewayError("conflict", `task report: "${taskId}" is ${named.lifecycle === "active" ? "still running" : "not started yet"}; it has no report until it settles`);
       const { text } = await this.immutableTaskReport(taskId);
-      const bytes = Buffer.from(text);
-      if (offset > bytes.length || (offset < bytes.length && (bytes[offset]! & 0xc0) === 0x80)) throw new GatewayError("invalid_request", `task report: offset ${offset} is not a UTF-8 character start within the ${bytes.length}-byte report page`);
-      let end = Math.min(bytes.length, offset + limit);
-      while (end < bytes.length && end > offset && (bytes[end]! & 0xc0) === 0x80) end--;
-      if (end === offset && end < bytes.length) throw new GatewayError("invalid_request", "task report: limit is too small for the next UTF-8 character");
-      return { taskId: named.taskId, offset, bytes: bytes.length, text: bytes.subarray(offset, end).toString("utf8"), nextOffset: end < bytes.length ? end : null };
+      return { taskId: named.taskId, ...utf8Page(text, "task report", request.offset, request.limit) };
     }
     const continuedAs = await this.continuation(named);
     const task = continuedAs ? (await this.tasks.store.read(continuedAs)) ?? named : named;

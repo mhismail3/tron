@@ -31,6 +31,8 @@ session file. Trigger references travel in custom-message details so admission c
 same bounded projection without cutting canonical trigger text. Non-text parts remain
 intact, and the full text stays with its source. These labels convey provenance and
 scope, not approval or a grant; native attribution and refusal checks stay authoritative.
+`utf8-page.ts` owns byte-page bounds and Unicode boundaries shared by task reports and
+scheduled-run snapshot readers; the native owners retain their source and authorization.
 `session-profile.ts` owns the neutral immutable runtime recipe and ordinary defaults.
 `session-lineage.ts` also owns `LineageRuntimePort<Runtime>`: single-flight runtime
 construction/publication with an opaque issuer-interpreted authority object. Its

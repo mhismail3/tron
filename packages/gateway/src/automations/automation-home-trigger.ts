@@ -49,7 +49,7 @@ export class AutomationHomeTrigger implements InputTriggerInbox {
     return { customType: INPUT_TRIGGER_MESSAGE, display: true,
       content: injectedText(`${title}\n\n${run.actionSnapshot.text}`, "automation", "trigger", "task"),
       details: { eventId: `automation:${run.runId}`,
-        fullTextReference: `schedule ${JSON.stringify({ action: "show", automationId: record.id })}; runId ${JSON.stringify(run.runId)} actionSnapshot.text`, trigger: { kind: "automation", sourceId: record.id, eventId: run.runId, title: run.homeName! } } };
+        fullTextReference: `schedule ${JSON.stringify({ action: "show", automationId: record.id, runId: run.runId, offset: 0, limit: 4096 })}`, trigger: { kind: "automation", sourceId: record.id, eventId: run.runId, title: run.homeName! } } };
   }
 
   private resumeMessage(message: InputMessage, operationId: string): InputMessage {
