@@ -111,6 +111,12 @@ are installed; schema access never evaluates their late-bound service getter.
   native filenames may omit the changed settings file. Unchanged digests skip their
   canonical readers and emit no audit or push; accepted scans and observers are
   joined by `dispose`.
+- Outside MCP and trust changes invalidate affected live slots through registry
+  freshness, which reloads at idle only when effective inputs differ. Untrusted
+  Project MCP remains excluded. Global model-definition changes request the
+  serialized global provider refresh, including its model catalog refresh.
+  `auth.json` has a coalesced change-only watch requesting the same owner: it is
+  never read, hashed, recorded or projected by the outside comparison.
 - Tron never writes Project settings; the repository owns them.
 - Changing a model or thinking never persists a default. A masked Chat write
   refuses without replacing the stored choice. Operational Project selections
