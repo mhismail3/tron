@@ -56,6 +56,7 @@ included); Tron Home and the maintainer see and undo every change. `undo` takes 
 reason; the target session's own store is acquired through its owner, never Home's snapshot.
 Writer grants, exact native taps, expected-value checks and busy/idle rules still apply.
 Routine reversible changes, tool selection included, apply, log and can be undone.
+`update` (Home only) installs one exact npm version of a configured unpinned package behind the install tap; its audit entries are `action` records and never undoable (see `docs/settings-contract.md`).
 Widening trust/executable authority, privacy access or spend, and any install or
 irreversible effect, require an exact native tap; narrowing them is routine. Writer
 grants and scope admission apply first.

@@ -685,6 +685,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           ...(input.confirm ? { confirm: input.confirm } : {}),
         });
       },
+      updatePackage: input => owners.model.owner.updatePackage({ cwd: this.cwd, source: input.source, version: input.version, reason: input.reason },
+        actor(input.toolCallId), input.confirm),
       resolve: async (keys, taskId) => {
         if (taskId === undefined) return owners.model.resolve(target, source(), keys);
         const { task, slot, target: workerTarget } = await worker(taskId, "resolve");

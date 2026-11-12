@@ -180,6 +180,7 @@ const settingsModel = new SettingsModel(new SettingsStoreAdapter({
   tronHome: config.tronHome,
   trust,
   modelRuntime,
+  updatePackage: (request, requester, confirm) => packages.updatePackage(request, requester, confirm),
   toolCatalog: async (target) => target.kind === "session"
     ? sessions.liveToolCatalog(target.sessionId)
     : target.kind === "home" ? homeToolCatalog(sessions.runtimeEntries(), id => sessions.isLineageMember(id))
@@ -737,6 +738,7 @@ const mcpAdmin = new McpAdminService(
 );
 sessions.setSettings(settingsModel, settingsChanges, new SettingsInventoryReader(hookResources, packages, mcpAdmin, trust, modules));
 projects.register(settingsChanges);
+packages.register(settingsChanges, () => globalProviderResources.requestReload());
 
 const service = new GatewayService({
   config,

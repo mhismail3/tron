@@ -169,6 +169,7 @@ export interface SettingsToolAccess {
   inventory(): Promise<SettingsInventory>;
   history(input: SettingsHistoryQuery, toolCallId: string): Promise<{ entries: unknown[]; nextCursor?: string }>;
   undo(changeId: string, input: { reason: string; toolCallId: string; confirm?: ConfirmChange }): Promise<ChangeResult>;
+  updatePackage(input: { source: string; version: string; reason: string; toolCallId: string; confirm?: ConfirmChange }): Promise<ChangeResult>;
   resolve(keys?: string[], taskId?: string): Promise<Resolution & { worker?: TaskWorkerSettingsView }>;
   change(changes: ChangeRequest[], input: { reason: string; dryRun?: boolean; toolCallId: string; taskId?: string; confirm?: ConfirmChange }): Promise<ChangeResult & { worker?: TaskWorkerSettingsView }>;
 }
