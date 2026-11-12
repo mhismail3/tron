@@ -224,15 +224,19 @@ class ReinstallWindow(unittest.TestCase):
             source = tron / relative
             source.parent.mkdir(parents=True, exist_ok=True)
             source.write_text(secret + relative)
-            source.chmod(0o600)
-        for directory in (tron, *(path for path in tron.rglob('*') if path.is_dir())):
-            directory.chmod(0o700)
+            source.chmod(0o644)
+        for directory in (path for path in tron.rglob('*') if path.is_dir()):
+            directory.chmod(0o755)
+        executable = self.installed / 'fixture-executable'
+        executable.write_text('fixture executable metadata')
+        executable.chmod(0o755)
         self.begin()
         output = self.cli('--confirm-offline')
         operation = self.operation()
         self.assertTrue(operation.is_relative_to(self.home / '.tron-maintenance'))
         self.assertNotIn(secret, output)
         self.assertNotIn(secret, (operation / 'receipt.json').read_text())
+        self.assertEqual((operation / 'backups/old-app/fixture-executable').stat().st_mode & 0o777, 0o755)
         for relative in paths:
             top, _, rest = relative.partition('/')
             component = next(name for name, source in self.receipt()['sourcePaths'].items() if source == str(tron / top))
@@ -240,6 +244,7 @@ class ReinstallWindow(unittest.TestCase):
             self.assertTrue(recovered.resolve().is_relative_to(operation / 'backups'))
             self.assertEqual(recovered.read_text(), secret + relative)
             self.assertEqual(recovered.stat().st_mode & 0o777, 0o600)
+            self.assertEqual((tron / relative).stat().st_mode & 0o777, 0o644)
             for directory in (parent for parent in recovered.parents if parent.is_relative_to(self.home / '.tron-maintenance')):
                 self.assertEqual(directory.stat().st_mode & 0o777, 0o700)
 

@@ -403,6 +403,12 @@ class Runner:
                 private_mkdir(target)
             elif LIBC.clonefile(os.fsencode(source), os.fsencode(target), CLONE_NOFOLLOW) != 0:
                 raise Failure(f'could not snapshot {source}: {os.strerror(ctypes.get_errno())}')
+        for directory, _children, files in os.walk(partial, followlinks=False):
+            os.chmod(directory, 0o700, follow_symlinks=False)
+            for name in files:
+                path = Path(directory) / name
+                if stat.S_ISREG(path.lstat().st_mode):
+                    os.chmod(path, 0o600, follow_symlinks=False)
         os.rename(partial, snapshot)
         self.data['swap']['snapshot'] = str(snapshot)
         self.journal.save()

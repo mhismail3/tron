@@ -73,8 +73,10 @@ The registry classifies canonical names only. Before migration, old `gateway/`,
 `internal/` and `ios-builds/` addresses have no compatibility classification; unknown
 paths are copied conservatively, including regenerated old-path credentials. Recovery
 copies stay local under the private maintenance operation, never in a synced or uploaded
-location. Credential files retain mode `0600` and every ancestor directory `0700`; never sync or
-upload a recovery copy. The migration approval packet must explicitly disclose the
+location. Data recovery files are restricted to `0600` and directories to `0700`,
+without following symlinks or changing source modes. Reinstall retains original source
+metadata in its frozen inventory; the separate app-bundle copy preserves executable
+metadata. Never sync or upload a recovery copy. The migration approval packet must explicitly disclose the
 old-path credential copies rather than silently excluding or redacting them.
 
 - Replace builds `partial-state-snapshot-<n>` before publishing `state-snapshot-<n>`;

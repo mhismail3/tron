@@ -1022,6 +1022,8 @@ def snapshot_journey():
                 path.chmod(0o600)
             for directory_path in (home, *(path for path in home.rglob('*') if path.is_dir())):
                 directory_path.chmod(0o700)
+            (home / 'gateway').chmod(0o755)
+            (home / 'gateway/local-auth.json').chmod(0o644)
             (home / 'state/unregistered-link').symlink_to('devices.json')
             journal = replace.Journal.create(operation, 'operation', 'full', 'fixture', {'revision': 'b' * 40})
             runtime = replace.stage_runner(SimpleNamespace(runner_files=lambda: ()), journal, HERE)
@@ -1040,7 +1042,9 @@ def snapshot_journey():
                    f'the staged runner snapshots the home without the checkout: {result.stderr.strip()}')
             missing = [relative for relative in SNAPSHOT_KEPT if not (first / relative).is_file()
                        or (first / relative).read_text() != relative or (first / relative).stat().st_mode & 0o777 != 0o600]
-            record(not missing, f'backed-up and unregistered paths are cloned with their bytes and modes; missing: {missing}')
+            record(not missing, f'backed-up and unregistered paths retain bytes with private0600 copy modes; missing: {missing}')
+            record((home / 'gateway/local-auth.json').stat().st_mode & 0o777 == 0o644,
+                   'private recovery modes never change the source credential permissions')
             present = [relative for relative in SNAPSHOT_SKIPPED if (first / relative).exists()]
             record(not present, f'regenerated credentials, caches, runtimes, scratch, locks, logs and builds are not cloned; present: {present}')
             record((first / 'state/unregistered-link').is_symlink()
