@@ -38,10 +38,9 @@ describe("per-chat tool loadout", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-tool-loadout-"));
     roots.push(root);
     const agentDir = join(root, "agent");
-    const sessionDir = join(root, "sessions");
+    const sessionDir = join(agentDir, "sessions");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
-    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir }));
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
     const faux = fauxProvider({ provider: "tron-tool-loadout", tokensPerSecond: 10_000 });
