@@ -285,7 +285,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       writers: ["ui", "home"], label: "Code mode", help: "Let the model call tools from a script.", order: 20, importance: "advanced", control: "choice",
     },
     {
-      id: "tools.codemode.inlineBudget", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "tools", type: types.integer(0, 1_000_000, "bytes"),
+      id: "tools.codemode.inlineBudget", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "tools", type: types.integer(0, 1_000_000, "tokens"),
       layers: both(pi("codemode", "inlineBudget")), timing: "fixed", effect: "reload", writers: ["ui", "home"],
       label: "Inline budget", help: "Tokens of script output returned inline.", order: 30, importance: "advanced",
     },
