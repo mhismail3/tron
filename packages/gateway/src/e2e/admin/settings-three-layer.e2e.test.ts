@@ -3,7 +3,7 @@ import { RequestSpan, runInRequestSpan } from "../../util/request-span.js";
 import { chmod, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { fauxAssistantMessage, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, getSystemMessageText, type TranscriptContext } from "@earendil-works/pi-ai";
 import { disposeFixtures, fixture, reportCall, TASK_REASONING_MODEL_ID } from "../../../test-support/home-task-fixture.js";
 import { setModelQueue } from "../../../test-support/settings-dependencies.js";
 import { waitFor } from "../../../test-support/wait-for.js";
@@ -408,10 +408,8 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     await setModelQueue(f.dependencies, "background", [f.model]);
     await setModelQueue(f.dependencies, "worker", [{ provider: f.model.provider, id: TASK_REASONING_MODEL_ID }]);
     const observed: string[] = [];
-    const text = (content: unknown): string => typeof content === "string" ? content
-      : Array.isArray(content) ? content.map(part => part.text ?? "").join("") : "";
-    const workerTurn = (context: TranscriptContext) => context.messages.some(message => message.role === "user"
-      && text(message.content).includes("This is a finite Home task"));
+    const workerTurn = (context: TranscriptContext) => context.messages.some(message => message.role === "system"
+      && getSystemMessageText(message).includes("This is a finite Home task"));
     f.faux.setResponses(Array.from({ length: 4 }, () => (context, _options, _state, model) => {
       if (workerTurn(context)) {
         observed.push(model.id);
