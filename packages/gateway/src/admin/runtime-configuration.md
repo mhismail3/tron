@@ -52,8 +52,7 @@ its own owner; the displaced unadmitted request is rejected `busy` for explicit 
 
 ## Settings, trust and custom models
 
-Settings projections drop write-only proxy credentials (`httpProxyConfigured` only)
-and fail closed before projection would truncate. Trust changes reload idle runtimes
+Settings projections fail closed before projection would truncate. Trust changes reload idle runtimes
 before acknowledgement. Custom model documents are validated by a temporary pinned
 runtime before an atomic write (≤ 768 KiB, bounded depth and nodes); reads redact
 secrets and updates restore matching placeholders.
