@@ -2302,9 +2302,8 @@ export class RuntimeRegistry implements SessionOperations {
       canonical = await realpath(input);
     } catch { return undefined; }
     if (canonical !== input) return undefined;
-    const roots = await Promise.all([join(this.options.agentDir, "sessions"), this.catalogDirectory()]
-      .map(async (root) => realpath(root).catch(() => resolve(root))));
-    if (!roots.some((root) => canonical === root || canonical.startsWith(root + sep))) return undefined;
+    const root = await realpath(this.catalogDirectory()).catch(() => resolve(this.catalogDirectory()));
+    if (canonical !== root && !canonical.startsWith(root + sep)) return undefined;
     let parentCanonical: string;
     try { parentCanonical = await realpath(expectedParentPath); }
     catch { return undefined; }

@@ -9,7 +9,7 @@ consume it. Edge cases follow from a [foundation](#foundations), never a new rul
 
 - **F1 Schema.** Each setting is one key declared once (`src/kernel/settings/settings-schema.ts`): type
   and validation, group, scope grants, store bindings, timing, effect point, native-tap classification,
-  writers, redaction and display. `sessionOverridable` and `projectSettable` govern admission;
+  writers and display. `sessionOverridable` and `projectSettable` govern admission;
   store bindings describe owned persistence. iOS renders the served metadata generically.
 - **F2 Truth.** Each layer's store is the truth; the change record is audit and undo, never
   consulted for a value. A store that differs from the last observed value is an
@@ -107,7 +107,7 @@ Record subjects (`RECORD_SUBJECTS`), changed per instance through the same path:
 
 Other schema fields: `subgroup`, `type`, `options` or `optionsSource` (`catalog.models`,
 `catalog.thinkingLevels(model)`, `catalog.tools`, ...), `defaultValue`, `direction`, `tap`, `writers`
-(`ui`, `home`, `worker`, `agent`: the list is the grant), `redacted`, `applier`, and display
+(`ui`, `home`, `worker`, `agent`: the list is the grant), `applier`, and display
 fields (`label`, `help`, `order`, `importance`, `control`/`fallback`, `unit`/`format`,
 `confirm`, `entry`). MCP and Accounts keep their own RPCs; record subjects compare by digest.
 
@@ -142,7 +142,7 @@ tool (Home may name a `taskId`); `outside` (observed only).
 4. Append the durable record and broadcast `settings.changed`. Post-effect audit failure
    is uncertain, not permission to replay the effect.
 
-Outcomes name key, layer, status and redacted `before`/`after`; `review` includes the
+Outcomes name key, layer, status and `before`/`after`; `review` includes the
 exact digest-bound before/after projection and whether a native tap is required. A chat's own Session scope
 changes only while idle; Home Chat compaction values are
 refused. **Record:** `<tronHome>/gateway/settings/changes/`, append-only 500-entry segments
@@ -201,8 +201,8 @@ the Mac `settings.json`, `trust.json`, `mcp.json`, `models.json` and each known 
 files; first sight is the baseline. Known projects have no count bound: a project leaves
 observed state only when its root no longer exists on disk. A comparison that changed nothing but the
 read instant writes nothing, so reads never queue behind a durable write. Each differing instance is one `outside`
-entry (with `HEAD` and branch for repository files; redacted keys by digest); MCP servers and
-custom providers report only added/changed/removed, then `mcp.changed` or
+entry (with `HEAD` and branch for repository files); MCP servers and custom providers
+compare by digest and report only added/changed/removed, then `mcp.changed` or
 `models.customChanged`. Tron's own writes are bracketed (`begin`/`end`, `adopt`).
 
 ## Project git state
