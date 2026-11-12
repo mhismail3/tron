@@ -56,7 +56,7 @@ it("drives managed subagents through single, workflow, question and steering che
   try {
     await mkdir(agentDir, { recursive: true });
     await mkdir(join(cwd, ".pi", "agents"), { recursive: true });
-    await writeFile(join(agentDir, "parity-input.mjs"), `export default pi => { globalThis.parityPi = pi; pi.on("input", async event => { if (event.text === "Subagent updates above." && globalThis.parityPreflight) await globalThis.parityPreflight(); return {action:"continue"}; }); };`);
+    await writeFile(join(agentDir, "parity-input.mjs"), `export default pi => { globalThis.parityPi = pi; pi.on("input", async event => { if (event.text === ${JSON.stringify("[from: pi-subagents; kind: subagent-notice; authority: none]\nSubagent updates above.")} && globalThis.parityPreflight) await globalThis.parityPreflight(); return {action:"continue"}; }); };`);
     process.env.PI_CODING_AGENT_DIR = agentDir;
     process.env.TRON_TEST_PROCESS_OWNER = root;
     process.env.TRON_TEST_PROCESS_OWNER_FAILURE = join(root, "join-failure.jsonl");
