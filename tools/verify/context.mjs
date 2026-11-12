@@ -58,7 +58,7 @@ export function audit(layers, sources = []) {
   return { diagnostics, sizes, comparisons, budgets, unavailable: ["tool declarations", "installed skills", "global user rules", "workflow child prompts"], budgetPolicy: "PRINCIPLES section 9; byte/4 estimates; review signal, not a gate" };
 }
 
-async function render() {
+export async function render() {
   const require = createRequire(resolve(root, "packages/gateway/node_modules/@earendil-works/pi-coding-agent/package.json"));
   const { createJiti } = require("jiti");
   const jiti = createJiti(import.meta.url, { moduleCache: false, fsCache: false });
