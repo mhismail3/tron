@@ -356,8 +356,7 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
   owner.roots.push(root);
   const tronHome = join(root, "tron");
   const agentDir = join(tronHome, "agent");
-  const sessionDir = join(root, "sessions");
-  await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true })]);
+  await mkdir(agentDir, { recursive: true });
   const faux = fauxProvider({ provider: "tron-settings-change", tokensPerSecond: 10_000, models: [{ id: "first", reasoning: true }, { id: "second", reasoning: true }] });
   const runtimeFactory = async () => {
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
@@ -365,7 +364,7 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
     return runtime;
   };
   const modelRuntime = await runtimeFactory();
-  await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, retry: { maxRetries: 4 } }));
+  await writeFile(join(agentDir, "settings.json"), JSON.stringify({ retry: { maxRetries: 4 } }));
   const trust = new TrustService(agentDir);
   const registry = await createTestRegistry({ agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: runtimeFactory, trust,
     broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
