@@ -465,6 +465,10 @@ class AuditTests(unittest.TestCase):
         readme.write_text(valid + "| replace | old | duplicate | 2026-01-01 | duplicate rule |\n")
         self.assertEqual(json.loads(self.fixture.run(*args).stdout)["findings"], [
             {"path": "maintenance/replace", "reasons": ["maintenance_index"]}])
+        (maintenance / "legacy").mkdir()
+        readme.write_text(valid + "\nUnrelated table\n\n| Name | Note | Owner | Extra | Rule |\n| legacy | x | someone | y | z |\n")
+        self.assertEqual(json.loads(self.fixture.run(*args).stdout)["findings"], [
+            {"path": "maintenance/legacy", "reasons": ["maintenance_index"]}])
         readme.unlink()
         self.assertEqual(self.fixture.run(*args).returncode, 1)
 
@@ -621,6 +625,82 @@ class MigrateTests(unittest.TestCase):
         self.assertEqual(self.migrate("--rollback", home=debug)[0], 0)
         self.assertEqual((debug / "gateway/proof-traffic/only-copy").read_text(), "debug")
         self.assertEqual((shared / "only-copy").read_text(), "shared")
+        for home in (debug, stable):
+            self.assertEqual(self.migrate("--apply", home=home)[0], 0)
+        self.assertEqual(self.migrate("--rollback", home=debug)[0], 0)
+        self.assertTrue(shared.exists())
+        self.assertFalse((stable / "gateway/home/chapter-reseals.jsonl").exists())
+        self.assertEqual(self.migrate("--rollback", home=stable)[0], 0)
+        self.assertEqual((stable / "gateway/home/chapter-reseals.jsonl").read_text(), "stable")
+
+    def test_forward_apply_journals_a_source_that_appears_after_its_first_apply(self) -> None:
+        retired = [self.RETIRED[1], {"from": "late-backup", "to": "~/.tron-maintenance/backups/late-backup"}]
+        self.fixture.write(REGISTRY, registry(PATHS, retired))
+        self.assertEqual(self.migrate("--apply")[0], 0)
+        (self.home / "late-backup").mkdir(mode=0o700)
+        (self.home / "late-backup/only-copy").write_text("late")
+        self.assertEqual(self.migrate("--dry-run")[0], 0)
+        code, report = self.migrate("--apply")
+        self.assertEqual(code, 0, report)
+        self.assertFalse((self.home / "late-backup").exists())
+        self.assertEqual(self.migrate("--status")[1]["state"], "applied")
+        self.assertEqual(self.migrate("--rollback")[0], 0)
+        self.assertEqual((self.home / "late-backup/only-copy").read_text(), "late")
+
+    def test_a_crashed_home_retains_the_only_claim_on_a_shared_pending_move(self) -> None:
+        self.fixture.write(REGISTRY, (ROOT / REGISTRY).read_text())
+        (self.home / "gateway/home").mkdir()
+        (self.home / "gateway/home/chapter-reseals.jsonl").write_text("stable")
+        debug = self.user / ".tron-dev"
+        (debug / "gateway/proof-traffic").mkdir(parents=True)
+        shared = self.user / "Workspace/workspace-backups/x-library-20261111T1425"
+        shared.mkdir(parents=True)
+        (shared / "only-copy").write_text("shared")
+        runner = self.base / "crash-before-rename.py"
+        runner.write_text(
+            "import importlib.util, os\n"
+            f"spec = importlib.util.spec_from_file_location('layout', {str(self.fixture.repo / TOOL)!r})\n"
+            "layout = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(layout)\n"
+            "def rename(source, destination): os._exit(86)\n"
+            "layout.rename_exclusive = rename\n"
+            f"layout.main(['migrate', '--home', {str(self.home)!r}, '--apply'])\n")
+        result = subprocess.run(["python3", "-B", str(runner)], env={**os.environ, "HOME": str(self.user)}, capture_output=True)
+        self.assertEqual(result.returncode, 86, result.stderr)
+        for lock in (self.home / "agent/.tron-gateway-runtime.lock.lock", debug / "agent/.tron-gateway-runtime.lock.lock"):
+            lock.rmdir()
+        for mode in ("--dry-run", "--apply"):
+            before = snapshot(self.user)
+            code, report = self.migrate(mode, home=debug)
+            self.assertEqual(code, 1, report)
+            self.assertIn("move_owned_by_other_home", json.dumps(report))
+            self.assertEqual(snapshot(self.user, contents_first=False), before)
+        self.assertEqual(self.migrate("--apply")[0], 0)
+        self.assertEqual(self.migrate("--apply", home=debug)[0], 0)
+        self.assertEqual(self.migrate("--rollback", home=debug)[0], 0)
+        self.assertFalse(shared.exists())
+        self.assertEqual(self.migrate("--rollback")[0], 0)
+        self.assertEqual((shared / "only-copy").read_text(), "shared")
+
+    def test_rollback_does_not_create_a_journal_removed_during_lock_acquisition(self) -> None:
+        self.fixture.write(REGISTRY, registry(PATHS, [self.RETIRED[1]]))
+        self.assertEqual(self.migrate("--apply")[0], 0)
+        runner = self.base / "remove-journal.py"
+        runner.write_text(
+            "import contextlib, importlib.util\n"
+            "from pathlib import Path\n"
+            f"spec = importlib.util.spec_from_file_location('layout', {str(self.fixture.repo / TOOL)!r})\n"
+            "layout = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(layout)\n"
+            "original = layout.runtime_lock\n"
+            "@contextlib.contextmanager\ndef acquire(path):\n"
+            "    with original(path) as guard:\n"
+            f"        for journal in Path({str(self.user / '.tron-maintenance/layout-v2')!r}).glob('*.json'): journal.unlink()\n"
+            "        yield guard\n"
+            "layout.runtime_lock = acquire\n"
+            f"raise SystemExit(layout.main(['migrate', '--home', {str(self.home)!r}, '--rollback']))\n")
+        result = subprocess.run(["python3", "-B", str(runner)], env={**os.environ, "HOME": str(self.user)}, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("no_journal", result.stdout)
+        self.assertEqual(list((self.user / ".tron-maintenance/layout-v2").glob("*.json")), [])
 
     def test_apply_resume_and_rollback_preserve_identity_and_new_writes(self) -> None:
         self.fixture.write(REGISTRY, registry(PATHS, [self.RETIRED[1]]))

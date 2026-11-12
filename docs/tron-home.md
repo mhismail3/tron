@@ -173,7 +173,7 @@ to prove already-moved identities; it does not create journals or lock directori
 
 The registry currently declares only recovery-copy renames. After the maintainer approves
 an offline live step, `--apply` creates a private journal under
-`$HOME/.tron-maintenance/layout-v2/<home-path-hash>.json`, then renames the selected entries
+`$HOME/.tron-maintenance/layout-v2/<registry-sha256>.json`, then renames the selected entries
 with atomic no-clobber operations. No credential or recovery-copy body is read, cloned,
 rewritten or pruned. Modes and inodes survive. `--rollback` requires that journal and
 inverts only its moves, carrying later writes back rather than restoring old snapshots.
@@ -186,13 +186,17 @@ recovery, but a Gateway's `proper-lockfile` can reclaim them after 60 seconds. K
 Gateways stopped through recovery; these locks alone do not make a partly moved home
 safe to start.
 
-The journal binds the exact registry digest, source/destination and original device/inode.
-It is fsynced before any rename; rename parents are fsynced too. Resume infers a completed
-rename only from the same inode at its recorded destination. A completed shared destination
-is accepted by another home only when a validated journal from the same registry digest
-claims that same logical move and inode. Each home's rollback inverts only its own journal,
-so it never takes another home's completed move. Planning checks the same journal ownership
-and identity constraints before reporting a clear dry run. A replaced entry, occupied
+One journal owns all moves for that registry digest across homes. Every move binds its
+owning home, logical source/destination and original device/inode. The shared Debug lock
+serializes all homes' writes to it. It is fsynced before any rename; rename parents are
+fsynced too. Resume infers a completed rename only from the same inode at its recorded
+destination. A pending move reserved by another home refuses even after a crash, so shared
+paths never acquire two owners. Forward apply journals newly present registered sources
+before moving them and refuses success if a pending move remains. Each home's rollback
+inverts only its own records, in either home's rollback order, carrying current data back.
+Planning checks the same journal ownership and identity constraints before reporting a
+clear dry run. A different registry digest cannot use a previous journal as proof of an
+already-moved destination; finish both homes against the same registry. A replaced entry, occupied
 inverse destination, changed registry or unknown pre-existing destination refuses. It never
 replays an uncertain rename. The journal and `layout-v2` maintenance index row are retained
 for review, never automatically discarded. `--apply`/`--rollback` are code capabilities,

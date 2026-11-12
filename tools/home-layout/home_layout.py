@@ -678,57 +678,39 @@ def read_journal(path: Path, report: dict) -> dict | None:
         if len(contents) > 1024 * 1024:
             raise LayoutError("unsafe_journal")
         journal = json.loads(contents)
-    if (not isinstance(journal, dict) or not isinstance(journal.get("home"), str) or not os.path.isabs(journal["home"])
-            or journal.get("phase") not in ("prepared", "applying", "applied", "rolling_back", "rolled_back")
-            or not isinstance(journal.get("moves"), list)
-            or hashlib.sha256(os.fsencode(journal["home"])).hexdigest()[:16] != path.stem):
+    if not isinstance(journal, dict) or journal.keys() != {"registry", "moves"} or not isinstance(journal["moves"], list):
         raise LayoutError("invalid_journal")
-    if journal.get("registry") != report["source"]["manifest_sha256"]:
-        if journal["home"] == report["home"]:
-            raise LayoutError("journal_contract_changed")
-        return None
+    if journal["registry"] != report["source"]["manifest_sha256"]:
+        raise LayoutError("journal_contract_changed")
     expected = {(row["from"], row["to"]) for row in report["moves"]}
-    seen = set()
+    destinations = set()
     for row in journal["moves"]:
-        if not isinstance(row, dict) or (row.get("from"), row.get("to")) not in expected:
+        if (not isinstance(row, dict) or (row.get("from"), row.get("to")) not in expected
+                or not isinstance(row.get("home"), str) or not os.path.isabs(row["home"])):
             raise LayoutError("invalid_journal")
-        pair = (row["from"], row["to"])
-        locations = [os.path.join(report["user_home"], value[2:]) if value.startswith("~/") else os.path.join(journal["home"], value) for value in pair]
+        locations = [os.path.join(report["user_home"], value[2:]) if value.startswith("~/") else os.path.join(row["home"], value) for value in (row["from"], row["to"])]
         identity = row.get("identity")
-        if (pair in seen or [row.get("source"), row.get("destination")] != locations or not isinstance(identity, dict)
+        if ([row.get("source"), row.get("destination")] != locations or row["destination"] in destinations or not isinstance(identity, dict)
                 or any(type(identity.get(key)) is not int or identity[key] < 0 for key in ("device", "inode"))):
             raise LayoutError("invalid_journal")
-        seen.add(pair)
+        destinations.add(row["destination"])
     return journal
 
 
-def journal_context(report: dict) -> tuple[Path, dict | None]:
-    identity = hashlib.sha256(os.fsencode(report["home"])).hexdigest()[:16]
-    path = Path(report["user_home"]) / ".tron-maintenance/layout-v2" / (identity + ".json")
+def journal_context(report: dict, rollback: bool = False) -> tuple[Path, dict | None]:
+    path = Path(report["user_home"]) / ".tron-maintenance/layout-v2" / (report["source"]["manifest_sha256"] + ".json")
     journal = read_journal(path, report)
-    owned = {(row["from"], row["to"]) for row in journal["moves"]} if journal else set()
-    if journal:
-        for row in journal["moves"]:
-            move_position(row)
-    unclaimed = [row for row in report["moves"] if row["state"] == "done" and (row["from"], row["to"]) not in owned]
-    if unclaimed:
-        others = []
-        fd = open_home(str(path.parent))
-        try:
-            with os.scandir(fd) as entries:
-                candidates = [entry.name for entry in entries if re.fullmatch(r"[a-f0-9]{16}\.json", entry.name) and entry.name != path.name]
-            if len(candidates) > 100:
-                raise LayoutError("journal_budget_exceeded")
-            for name in candidates:
-                other = read_journal(path.parent / name, report)
-                if other:
-                    others.extend(other["moves"])
-        finally:
-            os.close(fd)
-        for row in unclaimed:
-            if not any(other["from"] == row["from"] and other["to"] == row["to"] and other["destination"] == row["destination"]
-                       and (other["identity"]["device"], other["identity"]["inode"]) == (row["identity"]["device"], row["identity"]["inode"]) for other in others):
-                raise LayoutError("unowned_destination")
+    claims = {row["destination"]: row for row in journal["moves"]} if journal else {}
+    for claim in claims.values():
+        move_position(claim)
+    for row in report["moves"]:
+        claim = claims.get(row["destination"])
+        if row["state"] == "done" and claim is None:
+            raise LayoutError("unowned_destination")
+        if claim is not None and (claim["from"], claim["to"]) != (row["from"], row["to"]):
+            raise LayoutError("destination_claim_conflict")
+        if not rollback and row["state"] == "pending" and claim is not None and claim["home"] != report["home"]:
+            raise LayoutError("move_owned_by_other_home")
     return path, journal
 
 
@@ -739,7 +721,7 @@ def execute_migration(home: str, rollback: bool, root: Path = ROOT) -> tuple[int
     if report["blockers"] or any(row["refusals"] for row in report["moves"]):
         return 1, report
     try:
-        journal_path, journal = journal_context(report)
+        journal_path, journal = journal_context(report, rollback)
     except (OSError, ValueError, KeyError, TypeError, LayoutError) as failure:
         report["blockers"].append(str(failure) if isinstance(failure, LayoutError) else "journal_unavailable")
         return 1, report
@@ -752,7 +734,7 @@ def execute_migration(home: str, rollback: bool, root: Path = ROOT) -> tuple[int
                 if observed(str(lock)) is not None:
                     report["blockers"].append("runtime_lock_present")
                     return 1, report
-            if rollback and journal is None:
+            if rollback and (journal is None or not any(row["home"] == report["home"] for row in journal["moves"])):
                 report["blockers"].append("no_journal")
                 return 1, report
             guards = [locks.enter_context(runtime_lock(lock)) for lock in lock_paths]
@@ -760,15 +742,27 @@ def execute_migration(home: str, rollback: bool, root: Path = ROOT) -> tuple[int
             if current["errors"] or any(row["refusals"] for row in current["moves"]):
                 report["blockers"].append("plan_changed")
                 return 1, report
-            _, journal = journal_context(current)
-            if [(row["state"], row["identity"]) for row in current["moves"]] != [(row["state"], row["identity"]) for row in report["moves"]]:
+            if rollback and read_journal(journal_path, current) is None:
+                raise LayoutError("no_journal")
+            _, journal = journal_context(current, rollback)
+            if rollback and (journal is None or not any(row["home"] == report["home"] for row in journal["moves"])):
+                raise LayoutError("no_journal")
+            def identities(plan):
+                return [(row["state"], tuple(row["identity"][key] for key in ("type", "device", "inode")) if row["identity"] else None) for row in plan["moves"]]
+            if identities(current) != identities(report):
                 raise LayoutError("plan_changed")
-            private_directory(journal_path.parent)
             if journal is None:
-                journal = {"home": report["home"], "registry": report["source"]["manifest_sha256"],
-                           "moves": [row for row in current["moves"] if row["state"] == "pending"], "phase": "prepared"}
-                write_journal(journal_path, journal)
-            moves = list(reversed(journal["moves"])) if rollback else journal["moves"]
+                journal = {"registry": report["source"]["manifest_sha256"], "moves": []}
+            if not rollback:
+                claims = {row["destination"] for row in journal["moves"]}
+                for row in current["moves"]:
+                    if row["state"] == "pending" and row["destination"] not in claims:
+                        journal["moves"].append({**row, "home": report["home"]})
+                        claims.add(row["destination"])
+            moves = [row for row in journal["moves"] if row["home"] == report["home"]]
+            if rollback:
+                moves.reverse()
+            private_directory(journal_path.parent)
             for row in moves:
                 move_position(row)
                 source, destination = (row["destination"], row["source"]) if rollback else (row["source"], row["destination"])
@@ -776,7 +770,6 @@ def execute_migration(home: str, rollback: bool, root: Path = ROOT) -> tuple[int
                     raise LayoutError("destination_inside_source")
             for guard in guards:
                 guard()
-            journal["phase"] = "rolling_back" if rollback else "applying"
             write_journal(journal_path, journal)
             for row in moves:
                 source, destination = (row["destination"], row["source"]) if rollback else (row["source"], row["destination"])
@@ -789,9 +782,12 @@ def execute_migration(home: str, rollback: bool, root: Path = ROOT) -> tuple[int
                     raise LayoutError("move_identity_changed")
             for guard in guards:
                 guard()
-            journal["phase"] = "rolled_back" if rollback else "applied"
-            write_journal(journal_path, journal)
-            report["state"] = journal["phase"]
+            completed = migration(home, root)
+            if completed["errors"] or any(row["refusals"] for row in completed["moves"]):
+                raise LayoutError("plan_changed")
+            if not rollback and any(row["state"] == "pending" for row in completed["moves"]):
+                raise LayoutError("plan_changed")
+            report["state"] = "rolled_back" if rollback else "applied"
             return 0, report
         except (OSError, ValueError, KeyError, TypeError, LayoutError) as failure:
             report["errors"].append({"path": str(journal_path), "reason": str(failure) if isinstance(failure, LayoutError) else type(failure).__name__,
