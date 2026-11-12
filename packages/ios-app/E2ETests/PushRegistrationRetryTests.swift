@@ -34,6 +34,9 @@ final class PushRegistrationRetryTests: XCTestCase {
         private var requestPaths: [String] = []
         private var generated: [String] = []
         private var attested: [String] = []
+        private var scriptedStatuses: [Int]
+
+        init(installationStatuses: [Int] = []) { scriptedStatuses = installationStatuses }
 
         func respond(_ request: URLRequest) throws -> (Data, HTTPURLResponse) {
             guard let url = request.url else { throw URLError(.badURL) }
@@ -42,7 +45,8 @@ final class PushRegistrationRetryTests: XCTestCase {
             let body = isChallenge
                 ? Data(#"{"challengeId":"challenge-000001","challenge":"challenge-body-000001","expiresAt":"2026-11-12T20:00:00Z"}"#.utf8)
                 : Data("{}".utf8)
-            guard let response = HTTPURLResponse(url: url, statusCode: isChallenge ? 200 : 401, httpVersion: nil, headerFields: nil) else {
+            let status = isChallenge ? 200 : lock.withLock { scriptedStatuses.isEmpty ? 401 : scriptedStatuses.removeFirst() }
+            guard let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil) else {
                 throw URLError(.badServerResponse)
             }
             return (body, response)
@@ -100,14 +104,14 @@ final class PushRegistrationRetryTests: XCTestCase {
         let gate: PushRegistrationRetryApproval
     }
 
-    private func makeHarness(flagged: Bool, assertionInvalidKey: Bool = false) throws -> Harness {
+    private func makeHarness(flagged: Bool, assertionInvalidKey: Bool = false, installationStatuses: [Int] = []) throws -> Harness {
         let credentials = CredentialMemory(PushCredentialDocument(
             appAttestKeyID: Ledger.key(1),
             apnsToken: String(repeating: "ab", count: 32),
             grants: [:],
             appAttestKeyRejected: flagged ? true : nil
         ))
-        let ledger = Ledger()
+        let ledger = Ledger(installationStatuses: installationStatuses)
         let appAttest = PushAppAttestClient(
             isSupported: { true },
             generateKey: { ledger.nextKey() },
@@ -278,6 +282,31 @@ final class PushRegistrationRetryTests: XCTestCase {
         XCTAssertEqual(harness.ledger.count(path: "/v3/installations"), 1, "one registration attempt with the fresh key, then no chain")
         XCTAssertEqual(harness.coordinator.diagnostic, .stoppedRejected)
         XCTAssertGreaterThan(harness.credentials.saveCount, 0)
+    }
+
+    func testTransientAttestationThenAssertionRejectionStopsWithCardEligibleKey() async throws {
+        let harness = try makeHarness(flagged: true, installationStatuses: [503, 401])
+        await connect(harness)
+        try await eventually("the transient attestation retry ends at its one assertion rejection") {
+            harness.ledger.count(path: "/v3/installations") == 2
+                && harness.coordinator.diagnostic == .stoppedRejected
+        }
+        try await settle()
+        XCTAssertEqual(harness.ledger.keysGenerated, 1, "the flagged key rotates once; the 503 retry and the assertion 401 spend no second rotation")
+        XCTAssertEqual(harness.ledger.count(path: "/v3/installations"), 2, "one attestation that fails transiently, one assertion that is rejected, then no chain")
+        XCTAssertEqual(try XCTUnwrap(harness.credentials.load()).appAttestKeyRejected, true)
+
+        let card = try retryCardReview()
+        _ = try XCTUnwrap(harness.coordinator.retryFence(for: card, connection: try XCTUnwrap(harness.connection.current)))
+        let counter = AnswerCounter()
+        try await harness.gate.approve(card, answer: answerOnce(counter))
+        XCTAssertEqual(counter.accepted, 1)
+        try await eventually("the accepted card makes its single fresh attempt") {
+            harness.ledger.count(path: "/v3/installations") == 3
+                && harness.coordinator.diagnostic == .stoppedRejected
+        }
+        try await settle()
+        XCTAssertEqual(harness.ledger.keysGenerated, 2, "the accepted card rotates exactly once more")
     }
 
     func testOnlyAPushRetryCardWithATapYieldsAFence() async throws {
