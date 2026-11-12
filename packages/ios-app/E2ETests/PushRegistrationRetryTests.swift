@@ -276,6 +276,7 @@ final class PushRegistrationRetryTests: XCTestCase {
     }
 }
 
+@MainActor
 private func XCTAssertThrowsErrorAsync<T>(
     _ expression: @autoclosure () async throws -> T,
     file: StaticString = #filePath,
