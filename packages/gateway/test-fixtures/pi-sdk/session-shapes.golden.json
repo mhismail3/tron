@@ -583,7 +583,7 @@
               "name": "computer"
             },
             {
-              "description": "Create and manage durable Gateway-owned automations for this Tron session. Create accepts exactly one trigger: at, everyMinutes, or timezone + localTime + weekdays; optional expiresAt is an ISO expiry timestamp. Provide either prompt or notificationMessage, not both. Prompt automations may target the current session, create a new session in its workspace per run, or send an attributed message to Home. Home messages never grant maintainer authority and wake at most once per automation per 60 seconds.",
+              "description": "Create and manage durable Gateway-owned automations for this Tron session. Create accepts exactly one trigger: at, everyMinutes, or timezone + localTime + weekdays; optional expiresAt is an ISO expiry timestamp. Provide either prompt or notificationMessage, not both. Prompt automations may target the current session, create a new session in its workspace per run, or send an attributed message to Home. Home messages never grant maintainer authority and wake at most once per automation per 60 seconds. show with automationId and runId reads that run’s original prompt or notification text in UTF-8 byte pages: offset defaults to 0, limit to 4096 (maximum 4096), and nextOffset is null at the end.",
               "name": "schedule",
               "parameters": {
                 "additionalProperties": false,
@@ -629,6 +629,11 @@
                     "minLength": 1,
                     "type": "string"
                   },
+                  "limit": {
+                    "maximum": 4096,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
                   "localTime": {
                     "maxLength": 5,
                     "minLength": 5,
@@ -643,6 +648,10 @@
                     "maxLength": 512,
                     "minLength": 1,
                     "type": "string"
+                  },
+                  "offset": {
+                    "minimum": 0,
+                    "type": "integer"
                   },
                   "outcome": {
                     "enum": [
