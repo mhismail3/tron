@@ -285,7 +285,7 @@ final class PushRegistrationRetryTests: XCTestCase {
     }
 
     func testTransientAttestationThenAssertionRejectionStopsWithCardEligibleKey() async throws {
-        let harness = try makeHarness(flagged: true, installationStatuses: [503, 401])
+        let harness = try makeHarness(flagged: true, installationStatuses: [503, 401, 503, 401])
         await connect(harness)
         try await eventually("the transient attestation retry ends at its one assertion rejection") {
             harness.ledger.count(path: "/v3/installations") == 2
@@ -302,11 +302,13 @@ final class PushRegistrationRetryTests: XCTestCase {
         try await harness.gate.approve(card, answer: answerOnce(counter))
         XCTAssertEqual(counter.accepted, 1)
         try await eventually("the accepted card makes its single fresh attempt") {
-            harness.ledger.count(path: "/v3/installations") == 3
+            harness.ledger.count(path: "/v3/installations") == 4
                 && harness.coordinator.diagnostic == .stoppedRejected
         }
         try await settle()
         XCTAssertEqual(harness.ledger.keysGenerated, 2, "the accepted card rotates exactly once more")
+        XCTAssertEqual(harness.ledger.count(path: "/v3/installations"), 4, "the card also stops after its transient attestation and assertion rejection")
+        XCTAssertEqual(try XCTUnwrap(harness.credentials.load()).appAttestKeyRejected, true)
     }
 
     func testOnlyAPushRetryCardWithATapYieldsAFence() async throws {

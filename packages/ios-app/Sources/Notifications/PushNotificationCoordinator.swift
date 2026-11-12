@@ -609,7 +609,6 @@ final class PushNotificationCoordinator {
             }
             do {
                 try await self.registerCurrent(generation: generation)
-                self.automaticRetryAvailable = true
             }
             catch is CancellationError { return }
             catch let error as PushRegistrationError {

@@ -26,8 +26,8 @@ notification inbox.
   registration loop an assertion 401 or the typed `DCError.invalidKey` rotates only while the budget is unspent;
   once it is spent, the current key is marked rejected and the attempt stops (`stoppedRejected`), so the
   agent-requested card can offer a fresh key. The outer handler rotates a flagged key only while the budget is
-  unspent, and the card rotates once; both spend the budget. The budget returns only after a successful
-  registration or a relaunch, so one failure streak rotates at most one key. Other rejections stop without
+  unspent, and the card rotates once; both spend the budget. There is one automatic key rotation per app
+  launch; success never re-arms it. Every later rotation in that launch requires an approved card. Other rejections stop without
   credential churn; APNs tokens are preserved. Registration reconciles on connection, foreground, profile,
   permission and token changes; Worker failure leaves it pending.
 - **Agent-requested retry.** A `push-registration-retry` card (`ChangeReview.intent`, shared native change
