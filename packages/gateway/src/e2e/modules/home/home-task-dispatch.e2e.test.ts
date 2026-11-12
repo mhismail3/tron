@@ -334,7 +334,7 @@ describe("Home task authorization RPC", () => {
 
 describe("Home task bounded backlogs", () => {
   it("delivers a backlog across bounded activations exactly once in order without context-overflow", async () => {
-    const f = await fixture(undefined, false, 34_000);
+    const f = await fixture(undefined, false, 19_000);
     const model = f.faux.getModel();
     await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     const tasks = [];
@@ -347,17 +347,18 @@ describe("Home task bounded backlogs", () => {
     const home = await f.registry.acquire(f.home.sessionId);
     const batches: string[][] = [];
     let firstRequest = "";
-    const collect = (context: unknown, maintainer = false) => {
+    const collect = (context: unknown, maintainer: boolean) => {
       const request = JSON.stringify(context);
       batches.push(tasks.filter((_task, index) => request.includes(String(index).repeat(1000))).map(task => task.taskId));
       if (!maintainer) expect(request).not.toContain("u".repeat(1000));
       return fauxAssistantMessage("Reviewed results");
     };
+    const wake: FauxResponseFactory = context => collect(context, false);
     f.faux.setResponses([(context) => {
       firstRequest = JSON.stringify(context);
       return collect(context, true);
-    }, collect, collect, collect, collect, collect, collect]);
-    await home.prompt("u".repeat(70000));
+    }, wake, wake, wake, wake, wake, wake]);
+    await home.prompt("u".repeat(20000));
     await waitFor(() => batches.flat().length === tasks.length, "backlog delivered by bounded activations").catch(error => {
       throw new Error(JSON.stringify({ batches, firstRequestBytes: Buffer.byteLength(firstRequest), refusals: f.signals.filter(record => record.event === "refused"),
         errors: home.canonicalSessionEntries().flatMap(entry => entry.type === "message" && entry.message.role === "assistant" && entry.message.errorMessage ? [entry.message.errorMessage] : []) }), { cause: error });
@@ -366,7 +367,7 @@ describe("Home task bounded backlogs", () => {
     expect(firstRequest).toContain("[from: gateway; kind: pending; authority: none]");
     expect(firstRequest).toContain(`${tasks.length - batches[0]!.length} more task results pending`);
     expect(f.signals.filter(record => record.reason === "context-overflow")).toEqual([]);
-    expect(batches.length).toBeGreaterThan(1);
+    expect(batches.filter(batch => batch.length > 0).length).toBeGreaterThan(1);
     expect(batches.flat()).toEqual(tasks.map(t => t.taskId));
     expect(f.signals).not.toContainEqual(expect.objectContaining({ reason: "context-overflow" }));
     for (const task of tasks) {
