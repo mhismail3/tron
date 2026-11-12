@@ -292,7 +292,7 @@ struct ExtensionInteractionSheet: View {
         let expectedToken = presentationSurfaceToken
         Task { @MainActor in
             do {
-                let answer = { try await model.answerInteraction(interaction, sessionID: sessionID, value: value, cancelled: false) }
+                let answer: PushRetryAnswer = { try await model.answerInteraction(interaction, sessionID: sessionID, value: value, cancelled: false) }
                 if let approval { try await approval(answer) } else { try await answer() }
                 model.extensionInteractionDrafts.clear(sessionID: sessionID, interaction: interaction)
                 guard PresentationPublicationPolicy.allows(ambient: presentationActivity, coordinator: presentationActivityCoordinator, token: expectedToken) else { return }

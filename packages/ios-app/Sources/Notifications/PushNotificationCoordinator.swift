@@ -356,14 +356,15 @@ enum PushRetryRefusal: Error, Equatable, LocalizedError {
     }
 }
 
-@MainActor
-typealias PushRetryGate = (() async throws -> Void) async throws -> Void
+typealias PushRetryAnswer = @MainActor () async throws -> Void
+typealias PushRetryGate = @MainActor (PushRetryAnswer) async throws -> Void
 
+@MainActor
 struct PushRegistrationRetryApproval {
     let connection: @MainActor () -> PushConnectionIdentity?
     let coordinator: PushNotificationCoordinator
 
-    func approve(_ review: ChangeReview, answer: () async throws -> Void) async throws {
+    func approve(_ review: ChangeReview, answer: PushRetryAnswer) async throws {
         guard let current = connection(), let fence = coordinator.retryFence(for: review, connection: current) else {
             throw PushRetryRefusal.notThisConnection
         }
