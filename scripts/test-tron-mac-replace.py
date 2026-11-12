@@ -1016,6 +1016,7 @@ def snapshot_journey():
                 path.chmod(0o600)
             for directory_path in (home, *(path for path in home.rglob('*') if path.is_dir())):
                 directory_path.chmod(0o700)
+            (home / 'gateway/unregistered-link').symlink_to('devices.json')
             journal = replace.Journal.create(operation, 'operation', 'full', 'fixture', {'revision': 'b' * 40})
             runtime = replace.stage_runner(SimpleNamespace(runner_files=lambda: ()), journal, HERE)
 
@@ -1036,6 +1037,8 @@ def snapshot_journey():
             record(not missing, f'backed-up and unregistered paths are cloned with their bytes and modes; missing: {missing}')
             present = [relative for relative in SNAPSHOT_SKIPPED if (first / relative).exists()]
             record(not present, f'credentials to re-issue, caches, runtimes, scratch, logs and builds are not cloned; present: {present}')
+            record((first / 'gateway/unregistered-link').is_symlink()
+                   and os.readlink(first / 'gateway/unregistered-link') == 'devices.json', 'a symlink is cloned as a link, never followed')
             record(first.stat().st_mode & 0o777 == 0o700 and (first / 'gateway').stat().st_mode & 0o777 == 0o700
                    and (first / 'internal').stat().st_mode & 0o777 == 0o700, 'the snapshot and its partly cloned folders stay private')
             record(json.loads((operation / 'journal.json').read_text())['swap'].get('snapshot') == str(first),

@@ -42,6 +42,7 @@ DISK_RESERVE = {'full': 15 * 1024 ** 3, 'quick': 3 * 1024 ** 3}
 WORKER_STOP_TIMEOUT = 10 * 60
 KEPT_APP_NAME = 'Tron.app.kept'
 STAGED_REGISTRY = Path(home_layout.REGISTRY).name
+CLONE_NOFOLLOW = 1
 RESUME_TEXT = ('The Mac app was replaced while this task ran, so it was stopped and preserved. '
                'Continue the task in place from where you left off.')
 
@@ -400,7 +401,7 @@ class Runner:
             source, target = home / relative, partial / relative
             if decision == 'mixed':
                 private_mkdir(target)
-            elif LIBC.clonefile(os.fsencode(source), os.fsencode(target), 0) != 0:
+            elif LIBC.clonefile(os.fsencode(source), os.fsencode(target), CLONE_NOFOLLOW) != 0:
                 raise Failure(f'could not snapshot {source}: {os.strerror(ctypes.get_errno())}')
         os.rename(partial, snapshot)
         self.data['swap']['snapshot'] = str(snapshot)
