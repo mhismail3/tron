@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, getSystemMessageText } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setHomeMemoryModels } from "../../../../test-support/settings-dependencies.js";
 import { disposeFixtures, fixture } from "../../../../test-support/home-task-fixture.js";
@@ -190,7 +190,7 @@ describe("Home's global skills and prompt templates follow the agent directory l
     release();
     await waitFor(async () => globalResources(await commands(home.id)).includes("during-run|Written mid-run"), "Home lists the mid-run prompt");
     let system = "";
-    f.faux.setResponses([context => { system = context.systemPrompt ?? ""; return fauxAssistantMessage("next activation"); }]);
+    f.faux.setResponses([context => { system = context.messages.filter(message => message.role === "system").map(getSystemMessageText).join("\n"); return fauxAssistantMessage("next activation"); }]);
     await home.prompt("next");
     await waitFor(() => system.length > 0, "next activation provider request");
     expect(system).toContain("Skill written mid-run");
