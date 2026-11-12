@@ -12,7 +12,7 @@ import * as fsPromises from "node:fs/promises";
 import { appendFileSync, existsSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { appendFile, copyFile, mkdir, readFile, readdir, realpath, rename, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { fileURLToPath } from "node:url";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
@@ -11566,11 +11566,13 @@ export default function (pi) {
     registries.push(registry);
     await initializeRegistry(registry);
     const slot = await registry.create(cwd);
-    expect(slot.sessionFile?.startsWith(sessionDir)).toBe(true);
+    expect(slot.sessionFile?.startsWith(join(agentDir, "sessions") + sep)).toBe(true);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await slot.prompt("cache stats");
     await waitFor(() => !slot.isBusy, "the slot to go idle");
+    expect(await readdir(sessionDir)).toEqual([]);
+    expect(await readFile(slot.sessionFile!, "utf8")).toContain("cached");
 
     const snapshot = slot.snapshot();
     const assistant = snapshot.transcript.find((item) => item.role === "assistant");
