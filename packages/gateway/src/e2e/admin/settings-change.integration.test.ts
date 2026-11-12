@@ -920,6 +920,10 @@ describe("outside changes to MCP servers and custom models", () => {
     expect(f.pushes).toEqual([]);
     expect(f.broadcasts.filter(event => event.topic === "mcp.changed").length).toBe(2);
     expect(JSON.stringify(await f.history())).not.toContain("outside-secret");
+    await expect(f.service.invoke(client(), "settings.undo", { commandId: commandId(), changeId: added.changeId }))
+      .rejects.toMatchObject({ code: "conflict", message: "This change is not undoable; inspect it with its owner" });
+    await expect(f.service.invoke(client(), "settings.applyAgain", { commandId: commandId(), changeId: added.changeId }))
+      .rejects.toMatchObject({ code: "conflict", message: "A hidden value cannot be applied again: it was never recorded" });
     expect(await readFile(f.outside.path, "utf8")).not.toContain("outside-secret");
     expect(await servers(f, { scope: "global" })).toEqual(["global:hand-added", "global:tron-added"]);
     const afterAdd = JSON.parse(await readFile(globalMcp, "utf8")) as { mcpServers: Record<string, unknown> };

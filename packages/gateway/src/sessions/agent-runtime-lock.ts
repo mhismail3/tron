@@ -19,7 +19,7 @@ async function acquireAgentRuntimeLock(agentDir: string): Promise<() => Promise<
   } catch {
     throw new GatewayError(
       "conflict",
-      "Another Tron Gateway already owns a canonical session directory; use a separate agent or session directory for another runtime.",
+      "Another Tron Gateway already owns an agent directory; use a separate agent directory for another runtime.",
       false,
     );
   }
