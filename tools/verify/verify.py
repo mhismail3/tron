@@ -1440,8 +1440,10 @@ def main(argv: list[str]) -> int:
                           "| scripts/personal-info-guard.sh --stdin", {}),
         ("git diff --check", ["git", "diff", "--check", f"{base}..HEAD"], {}),
         ("no new comments", ["python3", "tools/verify/comments.py", "--base", base], {}),
-        ("context audit (report only)", [tron, "context", "audit", "--report-only"] if gateway_touched else None, {}),
     ]
+    if gateway_touched or any(path.startswith("tools/verify/context") for path in selection["paths"]):
+        checks.append(("context audit (report only)", [tron, "context", "audit", "--report-only"], {}))
+        plan_steps.insert(9, "context audit (report only)")
     gateway_checks = [("gateway typecheck", node + ["npm", "run", "check"]),
                       ("gateway lint", node + ["npm", "run", "lint"]),
                       ("layers gateway", [tron, "layers", "gateway", "--base", base])]

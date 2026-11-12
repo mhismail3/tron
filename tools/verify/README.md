@@ -148,12 +148,16 @@ provider counts. Source checks locate duplicated check-in/approval prose and kin
 Home declarations. `--input <json>` accepts `{layers, sources}` for isolated regression
 proofs; errors exit 2, diagnostics exit 1.
 
-Verify runs `context audit --report-only` for Gateway changes while the context plan's
-Stage 2 is landing. This transitional invocation retains every diagnostic but does not
-make today's known duplicate text a red gate. Direct audit remains strict. After Stage 2,
-the invocation becomes strict in the same final slice. This is not a request-record or
-live-state audit: global user files, installed skills, external tool declarations and
-workflow child prompts are not yet rendered, and missing coverage is not a clean bill.
+Verify runs `context audit --report-only` for Gateway changes and audit-tool edits while
+the context plan's producer slices are landing. This transitional invocation retains every
+diagnostic but does not make today's duplicates a red gate. Direct audit remains strict.
+Stage 2 resolves duplicated prose; Stage 3.3 supplies canonical index markup. Strict
+verify wiring waits for both inputs. Home's composed system/profile comes from
+`homeSystemPrompt`; changing model/thinking/activation state stays outside those layers.
+The report compares rendered role totals with the review budgets in the plan's
+`PRINCIPLES.md` section 9. These are partial source-rendered totals, not whole-request sizes:
+global user files, installed skills, tool declarations and workflow child prompts remain
+explicitly unavailable. Missing coverage is not a clean bill or a provider measurement.
 
 ### No exemptions
 
