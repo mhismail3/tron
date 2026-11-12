@@ -21,6 +21,7 @@ import { ModelConfigService } from "./admin/model-config-service.js";
 import { PackageService } from "./admin/package-service.js";
 import { ScopeToolCatalog } from "./admin/tool-catalog.js";
 import { HookResources } from "./admin/hook-resources.js";
+import { SettingsInventory } from "./admin/settings-inventory.js";
 import { AuthBroker } from "./admin/auth-broker.js";
 import { MacKeychainMcpCredentialOwner, McpAdminService } from "./admin/mcp-admin-service.js";
 import { GlobalProviderResources } from "./admin/global-provider-resources.js";
@@ -165,6 +166,12 @@ const browserLiveViews = new BrowserLiveViewRegistry();
 const displayArtifacts = new DisplayArtifactStore(config.tronHome);
 const display = new DisplayOwner(displayArtifacts, browserLiveViews, () => sessions);
 const macTerminalKeys = new MacTerminalService(config.tronHome);
+const mcpAdmin = new McpAdminService(
+  config.agentDir,
+  piCliBundle(),
+  new MacKeychainMcpCredentialOwner(),
+  (level, message, event, fields) => logger.log(level, message, { event, source: "mcp", ...fields }),
+);
 const settingsSchema = createGatewaySettingsSchema();
 const settingsModel = new SettingsModel(new SettingsStoreAdapter({
   schema: settingsSchema,
@@ -173,6 +180,7 @@ const settingsModel = new SettingsModel(new SettingsStoreAdapter({
   tronHome: config.tronHome,
   trust,
   modelRuntime,
+  inventory: (cwd, moduleSummaries, limit) => settingsInventory.read(cwd, moduleSummaries, limit),
   toolCatalog: async (target) => target.kind === "session"
     ? sessions.liveToolCatalog(target.sessionId)
     : target.kind === "home" ? homeToolCatalog(sessions.runtimeEntries(), id => sessions.isLineageMember(id))
@@ -476,6 +484,7 @@ const packages = new PackageService(
   outsideSettings,
 );
 const hookResources = new HookResources(config.agentDir, trust, workRegistry, managedSubagents);
+const settingsInventory = new SettingsInventory(hookResources, packages, mcpAdmin);
 const scopeToolCatalog = new ScopeToolCatalog(config.agentDir, trust, workRegistry, managedSubagents);
 const automationStore = new AutomationStore(config.tronHome, {
   changed: (automationId) => transport?.broadcast("automation.changed", {
@@ -752,12 +761,7 @@ const service = new GatewayService({
   automations,
   knowledge,
   home: home(),
-  mcpAdmin: new McpAdminService(
-    config.agentDir,
-    piCliBundle(),
-    new MacKeychainMcpCredentialOwner(),
-    (level, message, event, fields) => logger.log(level, message, { event, source: "mcp", ...fields }),
-  ),
+  mcpAdmin,
 });
 outsideSettings.startWatching(error => logger.log("warning", "Outside settings comparison failed", {
   event: "settings.outside.failed", source: "settings", error: error instanceof Error ? error.message : String(error),

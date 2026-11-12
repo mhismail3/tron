@@ -15,7 +15,7 @@ custom models, Gateway updates, iOS installs, Mac replacement and diagnostics.
 | SDK scope admission and operational model selection | [kernel SDK storage admission](../kernel/settings/settings-sdk-manager.ts), [kernel operational admission](../kernel/settings/settings-admission.ts) |
 | Store/options adapter and presentation | `settings-model.ts` (`SettingsStoreAdapter`), `settings-presentation.ts`; [kernel resolver and diagnostics](../kernel/settings/README.md) |
 | Project reader, store appliers and outside writers | `project-settings-writer.ts` (read-only Project layer and git state), [kernel trust owner](../kernel/resources/trust-service.ts), `settings-outside.ts` (`OutsideChanges`) |
-| The agents' `settings` tool and web mark | `tron-settings-extension.ts` |
+| The agents' `settings` tool and web mark | `tron-settings-extension.ts`; bounded read-only inventory: `settings-inventory.ts`, calling the hook/package/MCP owners with the composed module summaries |
 | Provider auth and model catalog | `auth-broker.ts`, `model-config-service.ts`, `global-provider-resources.ts` |
 | Packages, extensions, hooks, tools | `package-service.ts`, `package-provides.ts`, `session-free-extensions.ts`, `hook-resources.ts`, `tool-catalog.ts` |
 | MCP administration | `mcp-admin-service.ts` |

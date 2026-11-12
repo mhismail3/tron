@@ -7,6 +7,13 @@ consume it. Edge cases follow from a [foundation](#foundations), never a new rul
 
 ## Foundations
 
+The settings tool's read-only `inventory` action lists hooks by event and extension,
+configured packages, composed Tron modules and Global MCP status. It calls the existing
+resource owners and writes no settings audit record. `limit` is 1–200 (default 50)
+per section; each section has a 12 KiB byte bound and reports total and omitted counts.
+The full projection stays below 64 KiB, carries hook-owner omission diagnostics, and
+uses the shared credential redactor, including credential-bearing URLs.
+
 - **F1 Schema.** Each setting is one key declared once (`src/kernel/settings/settings-schema.ts`): type
   and validation, group, scope grants, store bindings, timing, effect point, native-tap classification,
   writers, redaction and display. `sessionOverridable` and `projectSettable` govern admission;

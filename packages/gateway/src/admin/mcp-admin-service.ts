@@ -146,7 +146,7 @@ export class McpAdminService {
   private cliEnvironment(): NodeJS.ProcessEnv {
     return { ...process.env, PI_CODING_AGENT_DIR: this.agentDir };
   }
-  async list(scope: McpScope): Promise<unknown> {
+  async list(scope: McpScope) {
     const result = await runProcess(process.execPath, this.cliArgs(scope, ["list", "--json"]), { cwd: scope.scope === "project" ? scope.cwd : this.agentDir, timeoutMs: this.cliTimeoutMs, env: this.cliEnvironment() });
     if (result.code !== 0 && result.code !== 1) {
       this.log("warning", "Bundled MCP status listing failed", "mcp.startup.problem", { reason: "cli-failure", scope: scope.scope });
