@@ -338,7 +338,7 @@ def journeys():
         check(platform.system_info()['sourceRevision'] == fixture.old_revision, 'the previous Gateway runs again', evidence)
         manifest = json.loads((platform.bundled_gateway(platform.installed) / 'manifest.json').read_text())
         check(manifest['sourceRevision'] == fixture.old_revision, 'the previous app bundle is back in place', evidence)
-        check(Path(data['swap']['snapshot']).is_dir(), 'the ~/.tron snapshot rollback point is kept', evidence)
+        check(Path(data['swap']['snapshot']).is_dir(), 'the selected home-state snapshot rollback point is kept', evidence)
         status = fixture.status_text()
         check('rolled-back' in status and 'logs/start.log' in status, 'terminal status shows the failure and its log', evidence)
         check((fixture.root / 'build-count').read_text() == '1', 'built once', evidence)

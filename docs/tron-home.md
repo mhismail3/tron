@@ -168,7 +168,8 @@ the overall state (`nothing_declared`, `nothing_to_move`, `not_started`, `partly
 would be refused and **1** a refusal or a blocker. For `--status`, exit **0** means no move
 is pending and **1** a pending move or a conflict; blockers are printed but do not change
 it. Exit **2** is an unreadable home or registry. Sizes are the entry's own metadata; no tree is
-walked and no file body is read.
+walked and no payload body is read. Planning may read the tool's own bounded private journals
+to prove already-moved identities; it does not create journals or lock directories.
 
 The registry currently declares only recovery-copy renames. After the maintainer approves
 an offline live step, `--apply` creates a private journal under
@@ -179,11 +180,19 @@ inverts only its moves, carrying later writes back rather than restoring old sna
 Both modes acquire the selected home's and Debug's agent-runtime lock directories; any
 existing lock, even stale, refuses rather than stealing it. The Debug home and agent
 parents are created lazily only in these mutating modes. A held lock or a planning refusal
-causes no mutation. A crash retains its locks for explicit offline owner recovery.
+causes no mutation. While a migration runs, a heartbeat keeps its locks fresh.
+A crash leaves lock directories behind: this tool refuses them until explicit offline owner
+recovery, but a Gateway's `proper-lockfile` can reclaim them after 60 seconds. Keep both
+Gateways stopped through recovery; these locks alone do not make a partly moved home
+safe to start.
 
 The journal binds the exact registry digest, source/destination and original device/inode.
 It is fsynced before any rename; rename parents are fsynced too. Resume infers a completed
-rename only from the same inode at its recorded destination. A replaced entry, occupied
+rename only from the same inode at its recorded destination. A completed shared destination
+is accepted by another home only when a validated journal from the same registry digest
+claims that same logical move and inode. Each home's rollback inverts only its own journal,
+so it never takes another home's completed move. Planning checks the same journal ownership
+and identity constraints before reporting a clear dry run. A replaced entry, occupied
 inverse destination, changed registry or unknown pre-existing destination refuses. It never
 replays an uncertain rename. The journal and `layout-v2` maintenance index row are retained
 for review, never automatically discarded. `--apply`/`--rollback` are code capabilities,

@@ -453,6 +453,7 @@ def maintenance_index(directory: str) -> list[dict]:
                 columns = None
                 for line in stream:
                     if not line.lstrip().startswith("|"):
+                        columns = None
                         continue
                     cells = [cell.strip().strip("`") for cell in line.strip().strip("|").split("|")]
                     labels = [cell.lower() for cell in cells]
@@ -562,6 +563,10 @@ def migrate(home: str, status: bool, root: Path = ROOT) -> tuple[int, dict]:
         summary = {key: report[key] for key in ("home", "source", "state", "blockers", "errors")}
         summary["moves"] = [{key: row[key] for key in ("from", "to", "state")} for row in report["moves"]]
         return (1 if report["state"] in ("not_started", "partly_applied", "conflict") else 0), summary
+    try:
+        journal_context(report)
+    except (OSError, ValueError, KeyError, TypeError, LayoutError) as failure:
+        report["blockers"].append(str(failure) if isinstance(failure, LayoutError) else "journal_unavailable")
     refused = report["blockers"] or any(row["refusals"] for row in report["moves"])
     return (1 if refused else 0), report
 
@@ -647,14 +652,97 @@ def runtime_lock(path: Path):
             path.rmdir()
 
 
+def move_position(row: dict) -> str:
+    before, after = observed(row["source"]), observed(row["destination"])
+    current = before or after
+    if (before is not None and after is not None or current is None
+            or (current.st_dev, current.st_ino) != (row["identity"]["device"], row["identity"]["inode"])
+            or linked_component(row["source"], "/") or linked_component(row["destination"], "/")):
+        raise LayoutError("move_identity_changed")
+    return "pending" if before is not None else "done"
+
+
+def read_journal(path: Path, report: dict) -> dict | None:
+    if observed(str(path)) is None:
+        return None
+    parent = open_home(str(path.parent))
+    try:
+        fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+    finally:
+        os.close(parent)
+    with os.fdopen(fd) as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > 1024 * 1024 or info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) & 0o077:
+            raise LayoutError("unsafe_journal")
+        contents = stream.read(1024 * 1024 + 1)
+        if len(contents) > 1024 * 1024:
+            raise LayoutError("unsafe_journal")
+        journal = json.loads(contents)
+    if (not isinstance(journal, dict) or not isinstance(journal.get("home"), str) or not os.path.isabs(journal["home"])
+            or journal.get("phase") not in ("prepared", "applying", "applied", "rolling_back", "rolled_back")
+            or not isinstance(journal.get("moves"), list)
+            or hashlib.sha256(os.fsencode(journal["home"])).hexdigest()[:16] != path.stem):
+        raise LayoutError("invalid_journal")
+    if journal.get("registry") != report["source"]["manifest_sha256"]:
+        if journal["home"] == report["home"]:
+            raise LayoutError("journal_contract_changed")
+        return None
+    expected = {(row["from"], row["to"]) for row in report["moves"]}
+    seen = set()
+    for row in journal["moves"]:
+        if not isinstance(row, dict) or (row.get("from"), row.get("to")) not in expected:
+            raise LayoutError("invalid_journal")
+        pair = (row["from"], row["to"])
+        locations = [os.path.join(report["user_home"], value[2:]) if value.startswith("~/") else os.path.join(journal["home"], value) for value in pair]
+        identity = row.get("identity")
+        if (pair in seen or [row.get("source"), row.get("destination")] != locations or not isinstance(identity, dict)
+                or any(type(identity.get(key)) is not int or identity[key] < 0 for key in ("device", "inode"))):
+            raise LayoutError("invalid_journal")
+        seen.add(pair)
+    return journal
+
+
+def journal_context(report: dict) -> tuple[Path, dict | None]:
+    identity = hashlib.sha256(os.fsencode(report["home"])).hexdigest()[:16]
+    path = Path(report["user_home"]) / ".tron-maintenance/layout-v2" / (identity + ".json")
+    journal = read_journal(path, report)
+    owned = {(row["from"], row["to"]) for row in journal["moves"]} if journal else set()
+    if journal:
+        for row in journal["moves"]:
+            move_position(row)
+    unclaimed = [row for row in report["moves"] if row["state"] == "done" and (row["from"], row["to"]) not in owned]
+    if unclaimed:
+        others = []
+        fd = open_home(str(path.parent))
+        try:
+            with os.scandir(fd) as entries:
+                candidates = [entry.name for entry in entries if re.fullmatch(r"[a-f0-9]{16}\.json", entry.name) and entry.name != path.name]
+            if len(candidates) > 100:
+                raise LayoutError("journal_budget_exceeded")
+            for name in candidates:
+                other = read_journal(path.parent / name, report)
+                if other:
+                    others.extend(other["moves"])
+        finally:
+            os.close(fd)
+        for row in unclaimed:
+            if not any(other["from"] == row["from"] and other["to"] == row["to"] and other["destination"] == row["destination"]
+                       and (other["identity"]["device"], other["identity"]["inode"]) == (row["identity"]["device"], row["identity"]["inode"]) for other in others):
+                raise LayoutError("unowned_destination")
+    return path, journal
+
+
 def execute_migration(home: str, rollback: bool, root: Path = ROOT) -> tuple[int, dict]:
     report = migration(home, root)
     if report["errors"]:
         return 2, report
     if report["blockers"] or any(row["refusals"] for row in report["moves"]):
         return 1, report
-    identity = hashlib.sha256(os.fsencode(report["home"])).hexdigest()[:16]
-    journal_path = Path(report["user_home"]) / ".tron-maintenance/layout-v2" / (identity + ".json")
+    try:
+        journal_path, journal = journal_context(report)
+    except (OSError, ValueError, KeyError, TypeError, LayoutError) as failure:
+        report["blockers"].append(str(failure) if isinstance(failure, LayoutError) else "journal_unavailable")
+        return 1, report
     report["journal"] = str(journal_path)
     with contextlib.ExitStack() as locks:
         try:
@@ -664,7 +752,7 @@ def execute_migration(home: str, rollback: bool, root: Path = ROOT) -> tuple[int
                 if observed(str(lock)) is not None:
                     report["blockers"].append("runtime_lock_present")
                     return 1, report
-            if rollback and not journal_path.exists():
+            if rollback and journal is None:
                 report["blockers"].append("no_journal")
                 return 1, report
             guards = [locks.enter_context(runtime_lock(lock)) for lock in lock_paths]
@@ -672,35 +760,18 @@ def execute_migration(home: str, rollback: bool, root: Path = ROOT) -> tuple[int
             if current["errors"] or any(row["refusals"] for row in current["moves"]):
                 report["blockers"].append("plan_changed")
                 return 1, report
+            _, journal = journal_context(current)
+            if [(row["state"], row["identity"]) for row in current["moves"]] != [(row["state"], row["identity"]) for row in report["moves"]]:
+                raise LayoutError("plan_changed")
             private_directory(journal_path.parent)
-            if observed(str(journal_path)) is not None:
-                fd = os.open(journal_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-                with os.fdopen(fd) as stream:
-                    info = os.fstat(stream.fileno())
-                    if not stat.S_ISREG(info.st_mode) or info.st_size > 1024 * 1024 or stat.S_IMODE(info.st_mode) & 0o077:
-                        raise LayoutError("unsafe_journal")
-                    journal = json.load(stream)
-                if journal.get("home") != report["home"] or journal.get("registry") != report["source"]["manifest_sha256"]:
-                    raise LayoutError("journal_contract_changed")
-                expected = {(row["source"], row["destination"]) for row in report["moves"]}
-                if not isinstance(journal.get("moves"), list) or any((row["source"], row["destination"]) not in expected for row in journal["moves"]):
-                    raise LayoutError("invalid_journal")
-            else:
-                if any(row["state"] == "done" for row in report["moves"]):
-                    raise LayoutError("unowned_destination")
+            if journal is None:
                 journal = {"home": report["home"], "registry": report["source"]["manifest_sha256"],
-                           "moves": [row for row in report["moves"] if row["state"] == "pending"], "phase": "prepared"}
+                           "moves": [row for row in current["moves"] if row["state"] == "pending"], "phase": "prepared"}
                 write_journal(journal_path, journal)
             moves = list(reversed(journal["moves"])) if rollback else journal["moves"]
             for row in moves:
+                move_position(row)
                 source, destination = (row["destination"], row["source"]) if rollback else (row["source"], row["destination"])
-                before, after = observed(source), observed(destination)
-                expected_identity = (row["identity"]["device"], row["identity"]["inode"])
-                current_identity = before or after
-                if (before is not None and after is not None or current_identity is None
-                        or (current_identity.st_dev, current_identity.st_ino) != expected_identity
-                        or linked_component(source, "/") or linked_component(destination, "/")):
-                    raise LayoutError("move_identity_changed")
                 if source == destination or destination.startswith(source + "/"):
                     raise LayoutError("destination_inside_source")
             for guard in guards:
@@ -711,9 +782,11 @@ def execute_migration(home: str, rollback: bool, root: Path = ROOT) -> tuple[int
                 source, destination = (row["destination"], row["source"]) if rollback else (row["source"], row["destination"])
                 for guard in guards:
                     guard()
-                if observed(source) is not None:
+                if move_position(row) == ("done" if rollback else "pending"):
                     private_directory(Path(destination).parent)
                     rename_exclusive(source, destination)
+                if move_position(row) != ("pending" if rollback else "done"):
+                    raise LayoutError("move_identity_changed")
             for guard in guards:
                 guard()
             journal["phase"] = "rolled_back" if rollback else "applied"

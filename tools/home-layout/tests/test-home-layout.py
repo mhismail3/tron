@@ -459,6 +459,12 @@ class AuditTests(unittest.TestCase):
         result = self.fixture.run(*args)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(snapshot(maintenance, contents_first=False), before)
+        valid = readme.read_text()
+        readme.write_text(valid + "\nUnrelated table\n\n| Name | Detail | Other |\n| replace | | |\n")
+        self.assertEqual(self.fixture.run(*args).returncode, 0)
+        readme.write_text(valid + "| replace | old | duplicate | 2026-01-01 | duplicate rule |\n")
+        self.assertEqual(json.loads(self.fixture.run(*args).stdout)["findings"], [
+            {"path": "maintenance/replace", "reasons": ["maintenance_index"]}])
         readme.unlink()
         self.assertEqual(self.fixture.run(*args).returncode, 1)
 
@@ -593,6 +599,29 @@ class MigrateTests(unittest.TestCase):
         self.assertEqual(self.migrate("--status")[1]["state"], "nothing_declared")
         self.assertEqual(self.migrate("--dry-run")[0], 0)
 
+    def test_two_homes_share_destinations_without_claiming_each_others_moves(self) -> None:
+        self.fixture.write(REGISTRY, (ROOT / REGISTRY).read_text())
+        stable = self.home
+        debug = self.user / ".tron-dev"
+        debug.mkdir()
+        (debug / "gateway/proof-traffic").mkdir(parents=True)
+        (debug / "gateway/proof-traffic/only-copy").write_text("debug")
+        (stable / "gateway/home").mkdir()
+        (stable / "gateway/home/chapter-reseals.jsonl").write_text("stable")
+        shared = self.user / "Workspace/workspace-backups/x-library-20261111T1425"
+        shared.mkdir(parents=True)
+        (shared / "only-copy").write_text("shared")
+        for home in (debug, stable):
+            code, report = self.migrate("--apply", home=home)
+            self.assertEqual(code, 0, report)
+        self.assertEqual(self.migrate("--rollback", home=stable)[0], 0)
+        self.assertEqual((stable / "gateway/home/chapter-reseals.jsonl").read_text(), "stable")
+        self.assertFalse((debug / "gateway/proof-traffic").exists())
+        self.assertFalse(shared.exists())
+        self.assertEqual(self.migrate("--rollback", home=debug)[0], 0)
+        self.assertEqual((debug / "gateway/proof-traffic/only-copy").read_text(), "debug")
+        self.assertEqual((shared / "only-copy").read_text(), "shared")
+
     def test_apply_resume_and_rollback_preserve_identity_and_new_writes(self) -> None:
         self.fixture.write(REGISTRY, registry(PATHS, [self.RETIRED[1]]))
         before = (self.home / "backup-1").stat()
@@ -604,6 +633,8 @@ class MigrateTests(unittest.TestCase):
         self.assertEqual(destination.stat().st_mode, before.st_mode)
         (destination / "new-after-move").write_text("new data")
         self.assertEqual(self.migrate("--apply")[0], 0)
+        self.assertFalse((self.home / "agent/.tron-gateway-runtime.lock.lock").exists())
+        self.assertFalse((self.user / ".tron-dev/agent/.tron-gateway-runtime.lock.lock").exists())
         code, report = self.migrate("--rollback")
         self.assertEqual(code, 0, report)
         self.assertEqual((self.home / "backup-1/new-after-move").read_text(), "new data")
@@ -676,6 +707,68 @@ class MigrateTests(unittest.TestCase):
             f"raise SystemExit(layout.main(['migrate', '--home', {str(self.home)!r}, '--apply']))\n")
         result = subprocess.run(["python3", "-B", str(runner)], env={**os.environ, "HOME": str(self.user)}, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_journal_binding_unsafe_journals_and_unowned_destinations_refuse_in_plans_too(self) -> None:
+        self.fixture.write(REGISTRY, registry(PATHS, [self.RETIRED[1]]))
+        self.assertEqual(self.migrate("--apply")[0], 0)
+        path = next((self.user / ".tron-maintenance/layout-v2").glob("*.json"))
+        original = path.read_text()
+        for failure in ("journal_contract_changed", "unsafe_journal", "invalid_journal", "move_identity_changed"):
+            with self.subTest(failure=failure):
+                path.write_text(original)
+                path.chmod(0o600)
+                value = json.loads(original)
+                if failure == "journal_contract_changed":
+                    value["registry"] = "a" * 64
+                elif failure == "unsafe_journal":
+                    path.chmod(0o644)
+                elif failure == "invalid_journal":
+                    value["moves"][0]["destination"] = str(self.user / "not-the-recorded-destination")
+                else:
+                    value["moves"][0]["identity"]["inode"] += 1
+                path.write_text(json.dumps(value))
+                for mode in ("--dry-run", "--apply", "--rollback"):
+                    before = snapshot(self.user)
+                    code, report = self.migrate(mode)
+                    self.assertEqual(code, 1, report)
+                    self.assertIn(failure, json.dumps(report))
+                    self.assertEqual(snapshot(self.user, contents_first=False), before)
+        path.write_text(original)
+        path.chmod(0o600)
+        path.unlink()
+        before = snapshot(self.user)
+        for mode in ("--dry-run", "--apply"):
+            code, report = self.migrate(mode)
+            self.assertEqual(code, 1, report)
+            self.assertIn("unowned_destination", json.dumps(report))
+            self.assertEqual(snapshot(self.user, contents_first=False), before)
+
+    def test_stale_selected_home_lock_refuses_without_mutation(self) -> None:
+        lock = self.home / "agent/.tron-gateway-runtime.lock.lock"
+        lock.mkdir(parents=True)
+        stale = time.time() - 600
+        os.utime(lock, (stale, stale))
+        before = snapshot(self.user)
+        for mode in ("--apply", "--rollback"):
+            code, report = self.migrate(mode)
+            self.assertEqual(code, 1, report)
+            self.assertIn("runtime_lock_present", report["blockers"])
+            self.assertEqual(snapshot(self.user, contents_first=False), before)
+
+    def test_a_source_removed_during_the_rename_cannot_be_reported_applied(self) -> None:
+        self.fixture.write(REGISTRY, registry(PATHS, [self.RETIRED[1]]))
+        runner = self.base / "vanish.py"
+        runner.write_text(
+            "import importlib.util, shutil\n"
+            f"spec = importlib.util.spec_from_file_location('layout', {str(self.fixture.repo / TOOL)!r})\n"
+            "layout = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(layout)\n"
+            "def rename(source, destination): shutil.rmtree(source)\n"
+            "layout.rename_exclusive = rename\n"
+            f"raise SystemExit(layout.main(['migrate', '--home', {str(self.home)!r}, '--apply']))\n")
+        result = subprocess.run(["python3", "-B", str(runner)], env={**os.environ, "HOME": str(self.user)}, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertNotEqual(json.loads(result.stdout)["state"], "applied")
+        self.assertIn("move_identity_changed", result.stdout)
 
     def test_debug_runtime_lock_refuses_all_modes_without_mutations(self) -> None:
         lock = self.user / ".tron-dev/agent/.tron-gateway-runtime.lock.lock"
