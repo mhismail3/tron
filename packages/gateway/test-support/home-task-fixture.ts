@@ -96,7 +96,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   gateway.registerVirtualModel({ provider: model.provider, id: TASK_VIRTUAL_MODEL_ID, name: "Fixture router",
     route: () => ({ model: gateway.getModel(model.provider, model.id)!, thinkingLevel: "off" }) });
   await gateway.refresh({ allowNetwork: false });
-  const sdkSettings: Record<string, unknown> = { sessionDir: join(root, "sessions"), defaultProvider: model.provider, defaultModel: model.id };
+  const sdkSettings: Record<string, unknown> = { defaultProvider: model.provider, defaultModel: model.id };
   if (contextWindow) sdkSettings.compaction = { enabled: false, reserveTokens: 1024, keepRecentTokens: 0 };
   if (codemode) {
     sdkSettings.defaultTools = ["+codemode"];

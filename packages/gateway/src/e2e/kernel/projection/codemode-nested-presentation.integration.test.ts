@@ -43,10 +43,9 @@ describe("codemode nested presentation tools", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-codemode-nested-presentation-"));
     roots.push(root);
     const agentDir = join(root, "agent");
-    const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
     const extensionDir = join(cwd, ".pi", "extensions");
-    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true }), mkdir(extensionDir, { recursive: true })]);
+    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(extensionDir, { recursive: true })]);
     const sdkUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
     const browserReferenceUrl = new URL("../../../display/browser-tool-reference.ts", import.meta.url).href;
     const browserFixture = `import { sealBrowserToolReference } from ${JSON.stringify(browserReferenceUrl)};
@@ -55,7 +54,7 @@ export default function(pi) { pi.registerTool({ name: "agent_browser", label: "F
  return { content: [{ type: "text", text: "view ready" }], details: { browserLiveView: descriptor, tronBrowserReference: sealBrowserToolReference(ctx.sessionManager.getSessionId(), id, descriptor, true) } };
 } }); }`;
     await Promise.all([
-      writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, defaultTools: ["+codemode"] })),
+      writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultTools: ["+codemode"] })),
       writeFile(join(extensionDir, "codemode.ts"), `import { createCodemodeExtension } from ${JSON.stringify(sdkUrl)}; export default createCodemodeExtension({ mode: "on" });\n`),
       writeFile(join(extensionDir, "browser-fixture.ts"), browserFixture),
       writeFile(join(cwd, "display.txt"), "Nested codemode display artifact\n"),
