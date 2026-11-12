@@ -68,11 +68,11 @@ final class PushRegistrationRetryTests: XCTestCase {
         }
     }
 
-    private final class ConnectionBox {
+    private final class ConnectionBox: @unchecked Sendable {
         var current: PushConnectionIdentity?
     }
 
-    private final class AnswerCounter {
+    private final class AnswerCounter: @unchecked Sendable {
         var accepted = 0
         var attempted = 0
     }
@@ -91,7 +91,7 @@ final class PushRegistrationRetryTests: XCTestCase {
     "items":[{"label":"Push registration","before":"Stopped","after":"Requested"}]}
     """
 
-    private struct Harness {
+    private struct Harness: @unchecked Sendable {
         let coordinator: PushNotificationCoordinator
         let credentials: CredentialMemory
         let ledger: Ledger
@@ -167,7 +167,7 @@ final class PushRegistrationRetryTests: XCTestCase {
     }
 
     /// The Gateway's answer boundary for a card: the broker accepts the first exact answer and refuses later ones.
-    private func answerOnce(_ counter: AnswerCounter) -> () async throws -> Void {
+    private func answerOnce(_ counter: AnswerCounter) -> PushRetryAnswer {
         {
             counter.attempted += 1
             guard counter.accepted == 0 else { throw GatewayFailure(code: "not_found", message: "Extension interaction is no longer pending", retryable: false, details: nil) }
@@ -239,8 +239,8 @@ final class PushRegistrationRetryTests: XCTestCase {
         let harness = try await stoppedAfterAutomaticRetry()
         let card = try retryCardReview()
         let counter = AnswerCounter()
-        let answer: () async throws -> Void = {
-            try await answerOnce(counter)()
+        let answer: PushRetryAnswer = { [self] in
+            try await self.answerOnce(counter)()
             harness.connection.current = self.identity(Self.profileA, epoch: "epoch-2", admission: 2)
         }
         await XCTAssertThrowsErrorAsync(try await harness.gate.approve(card, answer: answer))
