@@ -7,7 +7,7 @@ import {
   type ModelRuntime,
   type SessionProjection,
 } from "../../kernel/pi/coding-agent.js";
-import { markAnthropicBlocks, shortenLastMessageMark, VIEW_BLOCK_LINES } from "../../episodic/cache-layout.js";
+import { markAnthropicBlocks, shortenLastMessageMark, VIEW_BLOCK_LINES, VIEW_SETTLED_SPAN } from "../../episodic/cache-layout.js";
 import { INPUT_TRIGGER_MESSAGE, INPUT_TRIGGER_RESUME_MESSAGE } from "../../kernel/receipts/delivery-tags.js";
 import { HOME_TASK_RESULT_MESSAGE } from "../../kernel/receipts/invocation-receipts.js";
 import type { HomeContextSection } from "../../protocol/types.js";
@@ -650,13 +650,35 @@ export function markHomeMemoryCache(payload: unknown): unknown {
   if (mark < 0) return payload;
   const lines = viewGroupLines(blocks[mark]);
   if (lines !== undefined && lines < VIEW_BLOCK_LINES) mark -= 1;
-  return shortenLastMessageMark(markAnthropicBlocks(payload, index, [mark]), index);
+  const settled = settledBlock(blocks, mark);
+  const both = settled === undefined ? payload : markAnthropicBlocks(payload, index, [settled, mark]);
+  return shortenLastMessageMark(both === payload ? markAnthropicBlocks(payload, index, [mark]) : both, index);
+}
+
+function viewGroupText(block: unknown): string | undefined {
+  const text = (block as { type?: unknown; text?: unknown } | null)?.text;
+  if ((block as { type?: unknown } | null)?.type !== "text" || typeof text !== "string") return undefined;
+  return /^(?:\d+\+\d+\|[^\n]*\n)+$/u.test(text) ? text : undefined;
 }
 
 function viewGroupLines(block: unknown): number | undefined {
-  const text = (block as { type?: unknown; text?: unknown } | null)?.text;
-  if ((block as { type?: unknown } | null)?.type !== "text" || typeof text !== "string") return undefined;
-  return /^(?:\d+\+\d+\|[^\n]*\n)+$/u.test(text) ? text.split("\n").length - 1 : undefined;
+  const text = viewGroupText(block);
+  return text === undefined ? undefined : text.split("\n").length - 1;
+}
+
+function settledBlock(blocks: readonly unknown[], before: number): number | undefined {
+  let settled: number | undefined;
+  for (let at = 0; at < before; at += 1) {
+    const text = viewGroupText(blocks[at]);
+    if (text === undefined) {
+      if (settled === undefined) continue;
+      break;
+    }
+    const spans = [...text.matchAll(/^\d+\+(\d+)\|/gmu)].map((line) => Number(line[1]));
+    if (spans.length < VIEW_BLOCK_LINES || spans.some((span) => span < VIEW_SETTLED_SPAN)) break;
+    settled = at;
+  }
+  return settled;
 }
 
 export function applyHomeCacheRetention(runtime: ModelRuntime): ModelRuntime {

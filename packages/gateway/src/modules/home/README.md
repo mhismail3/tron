@@ -128,7 +128,10 @@ Composition supplies the same late K6 settings, Profile and raw model owners.
   separately. Historical system deltas are not additional heads. Output reserve remains.
 - `home.context` breaks the last request into `instructions`, `profile`, `memory`, `chapter`,
   `results`, `input`. For caching, system prompt and tools are stable within an origin kind; the view only grows between rebalances,
-  goes in four-line blocks with one Anthropic mark on the last whole block. Marks up to and including that one keep `long` (one-hour) retention;
+  goes in four-line blocks with one Anthropic mark on the last whole block and, when the view starts with whole blocks of settled lines
+  (each line covers at least `VIEW_SETTLED_SPAN`, 64, messages), one on the last of those, so a merge among recent lines re-reads the settled
+  prefix. Within Anthropic's four marks the last-tool mark yields first, then system marks before the last system block; if both view marks
+  still do not fit, only the end-of-view mark is placed. Marks up to and including the end-of-view mark keep `long` (one-hour) retention;
   the last-message mark, whose prefix is never read after its activation, is rewritten to the five-minute default (`shortenLastMessageMark`).
 
 ### Maintainer obligations
