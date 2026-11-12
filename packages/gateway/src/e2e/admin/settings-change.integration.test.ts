@@ -21,6 +21,7 @@ import { SettingsChangeRecord, type ChangeEntry } from "../../kernel/settings/se
 import { maintainerChange } from "../../../test-support/native-change.js";
 import { OutsideChanges } from "../../admin/settings-outside.js";
 import { McpAdminService } from "../../admin/mcp-admin-service.js";
+import { createTronSettingsExtension } from "../../admin/tron-settings-extension.js";
 import { ModelConfigService } from "../../admin/model-config-service.js";
 import { type SettingsStores } from "../../kernel/settings/settings-types.js";
 import { composedBelow, readBinding } from "../../kernel/settings/settings-resolver.js";
@@ -958,16 +959,22 @@ describe("outside changes to MCP servers and custom models", () => {
     transcript.push({ case: "outside mcp and models", detail: await outsideEntries(f) });
   });
 
-  caseIt("broadcasts one mcp.changed when a Home-proposed MCP server is approved on the native card", async owner => {
+  caseIt("broadcasts one mcp.changed when Home's settings tool proposes an MCP server and the native card approves it", async owner => {
     const f = await stagedFixture(owner);
-    const requests = [{ key: "tools.mcp.server", qualifiers: { server: "home-docs" }, layer: "global" as const, op: "set" as const,
-      value: { command: "npx", args: ["-y", "@acme/docs-mcp"] } }];
-    const home = { actor: { kind: "home" as const, id: "home-session", sessionId: "home-session", toolCallId: "call-mcp" }, reason: "Maintainer asked for the docs server" };
-    const review = await f.settingsChanges.change({ kind: "global" }, requests, home);
-    expect(review).toMatchObject({ status: "review" });
-    expect(f.broadcasts.filter(event => event.topic === "mcp.changed")).toEqual([]);
-    const applied = await f.settingsChanges.change({ kind: "global" }, requests, { actor: { kind: "ui", id: "device:phone" }, reason: home.reason, confirmationDigest: review.review!.digest });
-    expect(applied).toMatchObject({ status: "applied" });
+    const tools: Array<{ execute: (...args: unknown[]) => Promise<{ details: { status: string } }> }> = [];
+    const settingsExtension = createTronSettingsExtension(() => ({
+      resolve: async () => { throw new Error("resolve is not used in this proof"); },
+      change: (changes, input) => f.settingsChanges.change({ kind: "global" }, changes, {
+        actor: { kind: "home", id: "home-session", sessionId: "home-session", toolCallId: input.toolCallId },
+        reason: input.reason, ...(input.confirm ? { confirm: input.confirm } : {}),
+      }),
+    }), async ({ apply }) => apply({ deviceId: "device:phone", commandId: "command-mcp-tool" }));
+    settingsExtension({ registerTool: tool => { tools.push(tool as never); } } as never);
+    const [tool] = tools;
+    const requests = [{ key: "tools.mcp.server", qualifiers: { server: "home-docs" }, layer: "global", op: "set", value: { command: "npx", args: ["-y", "@acme/docs-mcp"] } }];
+    const result = await tool!.execute("call-mcp", { action: "change", changes: requests, reason: "Maintainer asked for the docs server" },
+      new AbortController().signal, () => {}, { hasUI: true });
+    expect(result.details).toMatchObject({ status: "applied" });
     expect(f.broadcasts.filter(event => event.topic === "mcp.changed")).toEqual([{ topic: "mcp.changed", payload: { scope: "global" } }]);
     expect(JSON.parse(await readFile(join(f.agentDir, "mcp.json"), "utf8")).mcpServers["home-docs"]).toEqual({ command: "npx", args: ["-y", "@acme/docs-mcp"] });
     expect(await f.history({ key: "tools.mcp.server" })).toEqual([expect.objectContaining({ status: "applied", qualifiers: { server: "home-docs" } })]);
