@@ -111,7 +111,6 @@ struct TrustSettingsView: View {
             guard presentationActivity.allowsPresentationPublication else { return }
             await load()
         }
-
     }
 
     private func trustSummaryCard(_ summary: ProjectTrustSummary) -> some View {
