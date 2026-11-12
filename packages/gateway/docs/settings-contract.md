@@ -149,7 +149,8 @@ Outcomes name key, layer, status and redacted `before`/`after`; `review` include
 exact digest-bound before/after projection and whether a native tap is required. A chat's own Session scope
 changes only while idle; `setup.sessionDir` has no writer; Home Chat compaction values are
 refused. **Record:** `<tronHome>/state/settings/changes/`, append-only 500-entry segments
-listed in `index.json`, kept forever, paged by `settings.history` (a page may be empty with a
+listed in `index.json`, kept forever, paged by `settings.history` (the maintainer's full view) or the tool's `history`
+action (optional key filter, cursor and limit 1–200; a page may be empty with a
 `nextCursor`); entries hold actor, target, key, `before`/`after` (never credentials), reason,
 status, git result and `undoOf`/`applyAgainOf`. Existing persisted facts remain readable;
 there is no pending-request folding or tier basis in new facts. **Undo** (`settings.undo`) writes
