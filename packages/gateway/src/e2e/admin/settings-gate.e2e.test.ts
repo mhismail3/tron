@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { fauxAssistantMessage, fauxProvider, fauxToolCall, type ToolCall } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxProvider, fauxToolCall, getCurrentTools, type ToolCall } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { settingsDependencies, setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
@@ -25,6 +25,7 @@ const ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../../test
 const transcript: Array<{ case: string; steps: Array<Record<string, unknown>> }> = [];
 const roots: string[] = [];
 const registries: RuntimeRegistry[] = [];
+const isWorker = (context: TranscriptContext) => getCurrentTools(context.messages).some(tool => tool.name === "report");
 afterEach(async () => {
   await disposeFixtures();
   await Promise.all(registries.splice(0).map(registry => registry.dispose().catch(() => {})));
@@ -799,7 +800,6 @@ describe("typed settings at real runtime boundaries", () => {
     await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
     const textOf = (message: { content: unknown }) => typeof message.content === "string" ? message.content
       : (message.content as Array<{ text?: string }>).map(part => part.text ?? "").join("");
-    const isWorker = (context: TranscriptContext) => context.messages.some(message => message.role === "user" && textOf(message).includes("This is a finite Home task"));
     const fetched = new Map<string, string>();
     const worker = (taskId: string, value: number, expected: number, marked: boolean) =>
       (context: TranscriptContext): AssistantMessage => {
@@ -851,7 +851,6 @@ describe("typed settings at real runtime boundaries", () => {
     const REASONING = { provider: f.model.provider, id: TASK_REASONING_MODEL_ID };
     const textOf = (message: { content: unknown }) => typeof message.content === "string" ? message.content
       : (message.content as Array<{ text?: string }>).map(part => part.text ?? "").join("");
-    const isWorker = (context: TranscriptContext) => context.messages.some(message => message.role === "user" && textOf(message).includes("This is a finite Home task"));
     const gate = () => { let open!: () => void; const opened = new Promise<void>(resolve => { open = resolve; }); return { open, opened }; };
     const gates = [gate(), gate()];
     const workerRequests: Array<{ model: string; thinking: string | undefined; signals: string[] }> = [];
