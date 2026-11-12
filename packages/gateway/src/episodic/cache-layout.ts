@@ -35,6 +35,21 @@ export function markAnthropicBlocks(payload: unknown, messageIndex: number, bloc
   return total <= ANTHROPIC_MAX_CACHE_BREAKPOINTS ? next : payload;
 }
 
+export function shortenLastMessageMark(payload: unknown, after: number): unknown {
+  if (!isObject(payload) || !Array.isArray(payload.messages)) return payload;
+  const longLived = (block: unknown) => isObject(block) && isObject(block.cache_control) && block.cache_control.ttl !== undefined;
+  for (let at = payload.messages.length - 1; at > after; at -= 1) {
+    const message = payload.messages[at];
+    if (!isObject(message) || !Array.isArray(message.content) || !message.content.some(longLived)) continue;
+    const next = structuredClone(payload) as Json & { messages: Json[] };
+    const block = (next.messages[at]!.content as Json[]).findLast(longLived)!;
+    const { ttl: _ttl, ...control } = block.cache_control as Json;
+    block.cache_control = control;
+    return next;
+  }
+  return payload;
+}
+
 function existingControl(payload: Json): unknown {
   let found: unknown;
   visit(payload, (holder) => { found ??= holder.cache_control; });

@@ -189,19 +189,8 @@ const memoryOf = (request: Captured) => blocks(messagesOf(request)[0]!);
 
 const viewBlocksOf = (request: Captured) => memoryOf(request).slice(0, -2).map((block) => block.text ?? "");
 
-function markTtls(captured: Captured): Set<string> {
-  const ttls = new Set<string>();
-  const visit = (value: unknown) => {
-    if (Array.isArray(value)) value.forEach(visit);
-    else if (value && typeof value === "object") {
-      for (const [key, field] of Object.entries(value)) {
-        if (key === "cache_control") ttls.add(String((field as { ttl?: unknown }).ttl ?? "5m"));
-        else visit(field);
-      }
-    }
-  };
-  visit(captured.body);
-  return ttls;
+function lifetimes(captured: Captured): string[] {
+  return wireBlocks(captured).flatMap((block) => block.ttl === undefined ? [] : [block.ttl]);
 }
 
 function expectViewLayout(pieces: string[]): void {
@@ -217,11 +206,12 @@ function expectViewLayout(pieces: string[]): void {
   });
 }
 
-function wireBlocks(captured: Captured): Array<{ path: string; json: string; marked: boolean }> {
-  const out: Array<{ path: string; json: string; marked: boolean }> = [];
+function wireBlocks(captured: Captured): Array<{ path: string; json: string; marked: boolean; ttl?: string }> {
+  const out: Array<{ path: string; json: string; marked: boolean; ttl?: string }> = [];
   const add = (path: string, block: unknown) => {
     const { cache_control: control, ...rest } = block as Record<string, unknown>;
-    out.push({ path, json: JSON.stringify(rest), marked: control !== undefined });
+    out.push({ path, json: JSON.stringify(rest), marked: control !== undefined,
+      ...(control === undefined ? {} : { ttl: String((control as { ttl?: unknown }).ttl ?? "5m") }) });
   };
   for (const key of ["tools", "system"] as const) {
     const list = captured.body[key];
@@ -404,7 +394,8 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     const lastMessage = messagesOf(last!).length - 1;
     expect(lastMarks).toContain(`.messages[${lastMessage}].content[${blocks(messagesOf(last!)[lastMessage]!).length - 1}]`);
     expect(lastMarks.length).toBeLessThanOrEqual(ANTHROPIC_MAX_CACHE_BREAKPOINTS);
-    expect(markTtls(last!)).toEqual(new Set(["1h"]));
+    expect(lifetimes(last!)).toEqual(["1h", "1h", "1h", "5m"]);
+    expect(wireBlocks(last!).findLast((block) => block.marked)!.path).toBe(`.messages[${lastMessage}].content[${blocks(messagesOf(last!)[lastMessage]!).length - 1}]`);
     expect(JSON.stringify(previous!.body.system)).toBe(JSON.stringify(last!.body.system));
     expect(JSON.stringify(previous!.body.tools)).toBe(JSON.stringify(last!.body.tools));
     expect(memoryOf(toolStep!).map((block) => block.text)).toEqual(lastMemory.map((block) => block.text));
@@ -413,6 +404,8 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     expect(cacheMarks(toolStep!).length).toBeLessThanOrEqual(ANTHROPIC_MAX_CACHE_BREAKPOINTS);
     expect(viewMarks(toolStep!)).toEqual(viewMarks(last!));
     expect(cacheMarks(toolStep!)).toContain(`.messages[${stepLast}].content[${blocks(messagesOf(toolStep!)[stepLast]!).length - 1}]`);
+    expect(lifetimes(toolStep!)).toEqual(["1h", "1h", "1h", "5m"]);
+    expect(wireBlocks(toolStep!).findLast((block) => block.marked)!.path).toBe(`.messages[${stepLast}].content[${blocks(messagesOf(toolStep!)[stepLast]!).length - 1}]`);
 
     expect(summarizer.length).toBeGreaterThan(0);
     for (const request of summarizer) {
@@ -424,7 +417,7 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     const sample = summarizer.at(-1)!;
     const sampleMarks = cacheMarks(sample);
     expect(sampleMarks.length).toBeLessThanOrEqual(ANTHROPIC_MAX_CACHE_BREAKPOINTS);
-    expect(markTtls(sample)).toEqual(new Set(["1h"]));
+    expect(new Set(lifetimes(sample))).toEqual(new Set(["1h"]));
     expect(new Set(summarizer.map((request) => request.headers["x-session-affinity"]))).toEqual(new Set([`tron-episodic:${status.homeId}`]));
     expect(f.records.filter((record) => record.event === "refused")).toEqual([]);
     const statusOf = async () => (await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus).memory.episodic!;
@@ -446,7 +439,7 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     expect(plainMarks.every((path) => path.startsWith(".system") || path.startsWith(".tools")
       || path.startsWith(`.messages[${messagesOf(plain).length - 1}]`))).toBe(true);
     expect(JSON.stringify(plain.body)).not.toContain(HOME_MEMORY_VIEW_MARKER);
-    expect(markTtls(plain)).toEqual(new Set(["5m"]));
+    expect(new Set(lifetimes(plain))).toEqual(new Set(["5m"]));
 
     const homeRecords = f.requestRecords.filter((record) => record.sessionId === home.id);
     expect(homeRecords).toHaveLength(homeRequests.length);
