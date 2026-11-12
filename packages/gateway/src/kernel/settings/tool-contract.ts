@@ -1,4 +1,4 @@
-import type { ChangeReview, NativeChangeAcceptance } from "../../protocol/types.js";
+import type { ChangeReview, NativeChangeAcceptance, JsonValue } from "../../protocol/types.js";
 export const LAYERS = ["project", "session", "global"] as const;
 
 export type LayerId = typeof LAYERS[number];
@@ -151,6 +151,7 @@ export interface SettingsHistoryQuery {
 }
 
 export interface SettingsToolAccess {
+  inventory(limit?: number): Promise<JsonValue>;
   history(input: SettingsHistoryQuery): Promise<{ entries: unknown[]; nextCursor?: string }>;
   undo(changeId: string, input: { reason: string; toolCallId: string; confirm?: ConfirmChange }): Promise<ChangeResult>;
   resolve(keys?: string[], taskId?: string): Promise<Resolution & { worker?: TaskWorkerSettingsView }>;

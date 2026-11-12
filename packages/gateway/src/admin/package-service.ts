@@ -132,7 +132,7 @@ export class PackageService {
     }
   }
 
-  async list(cwd: string): Promise<unknown> {
+  async list(cwd: string) {
     return this.trackAdministrative(() => this.mutex.run(async () => {
       const { manager, settings, project } = await this.manager(cwd, false);
       const packages = manager.listConfiguredPackages();

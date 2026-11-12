@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { JsonValue, TronModuleSummary } from "../../protocol/types.js";
 import type { ModelRuntime, SettingsManager } from "../pi/coding-agent.js";
 import type { FixedSetting, Resolution, SettingsTarget, Qualifiers } from "./tool-contract.js";
 import { resolveSettings } from "./settings-resolver.js";
@@ -33,6 +34,7 @@ export interface SettingsOptionsResult {
 
 
 export interface SettingsReadOwner {
+  inventory?(cwd: string, modules: readonly TronModuleSummary[], limit?: number): Promise<JsonValue>;
   readonly schema: SettingsSchema;
   readonly modelRuntime: ModelRuntime;
   readonly admitModelChoice: (runtime: ModelRuntime, provider: string, id: string) => Promise<void>;

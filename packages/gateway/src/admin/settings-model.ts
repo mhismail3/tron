@@ -1,4 +1,5 @@
 import { type Resolution, type SettingsTarget, type Qualifiers, type GitResult } from "../kernel/settings/tool-contract.js";
+import type { JsonValue, TronModuleSummary } from "../protocol/types.js";
 import type { MacTerminalService } from "../security/mac-terminal-service.js";
 import { setPath, unsetPath, qualifiedWrite, fillPath, type SessionSettingsSource, type SettingsOptionsRequest, type SettingsOptionsResult } from "../kernel/settings/settings-model.js";
 import type { ChangeContext, SettingsWriters, Planned } from "../kernel/settings/settings-change.js";
@@ -28,6 +29,7 @@ interface SettingsModelDependencies {
   trust: Pick<TrustService, "inspect" | "canonicalDirectory">;
   modelRuntime: ModelRuntime;
   toolCatalog?: (target: SettingsTarget) => Promise<readonly ToolCatalogEntry[]>;
+  inventory?: (cwd: string, modules: readonly TronModuleSummary[], limit?: number) => Promise<JsonValue>;
   macTerminalKeys?: Pick<MacTerminalService, "read" | "set" | "enabled" | "setEnabled">;
 }
 
@@ -38,6 +40,11 @@ export class SettingsStoreAdapter {
   private outside: OutsideChanges | undefined;
 
   constructor(private readonly dependencies: SettingsModelDependencies) {}
+
+  inventory(cwd: string, modules: readonly TronModuleSummary[], limit?: number): Promise<JsonValue> {
+    if (!this.dependencies.inventory) throw new GatewayError("unsupported", "Settings inventory is not available");
+    return this.dependencies.inventory(cwd, modules, limit);
+  }
 
   async projectRoot(path: string): Promise<string> {
     return (await this.dependencies.trust.inspect(path)).projectDir;
