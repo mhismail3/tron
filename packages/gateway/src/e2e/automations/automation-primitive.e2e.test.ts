@@ -48,7 +48,16 @@ it("real Home uses the standard schedule lifecycle without confirmation and reta
   expect(paused.ok).toBe(true);
   expect((await call({ action: "list" })).details.automations).toEqual(expect.arrayContaining([expect.objectContaining({ id: automation.id, activation: "paused" })]));
   expect((await phone.request("automation.get", { automationId: automation.id })).result.activation).toBe("paused");
-  const resumed = await call({ action: "enable", automationId: automation.id, expectedRevision: paused.result.revision });
+  const updated = await call({ action: "update", automationId: automation.id, expectedRevision: paused.result.revision,
+    name: "Updated authorized work", at: "2099-02-01T00:00:00.000Z", prompt: "Inspect the updated authorized work." });
+  expect(updated.isError, JSON.stringify(updated)).not.toBe(true);
+  expect(updated.details).toMatchObject({ name: "Updated authorized work", activation: "paused", target: automation.target,
+    trigger: { kind: "once", at: "2099-02-01T00:00:00.000Z" }, action: { kind: "sessionPrompt", text: "Inspect the updated authorized work." },
+    provenance: automation.provenance, revision: paused.result.revision + 1 });
+  const stale = await call({ action: "update", automationId: automation.id, expectedRevision: paused.result.revision, name: "Stale overwrite" });
+  expect(stale.isError).toBe(true);
+  expect((await phone.request("automation.get", { automationId: automation.id })).result).toMatchObject({ name: "Updated authorized work", revision: updated.details.revision });
+  const resumed = await call({ action: "enable", automationId: automation.id, expectedRevision: updated.details.revision });
   expect(resumed.isError).not.toBe(true);
   expect((await call({ action: "delete", automationId: automation.id, expectedRevision: resumed.details.revision })).isError).not.toBe(true);
   expect((await phone.request("automation.list", {})).result.items).toHaveLength(0);
