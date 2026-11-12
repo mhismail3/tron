@@ -311,6 +311,10 @@ export class SettingsChangePath {
   async undo(changeId: string, context: Omit<ChangeContext, "undoOf">, session?: ChangeContext["session"]): Promise<ChangeResult> {
     const found = await this.record.entry(changeId);
     if (!found) throw new GatewayError("not_found", "No such settings change");
+    if (context.actor.kind !== "ui" && found.entry.target.kind === "session"
+      && found.entry.target.sessionId !== context.actor.sessionId) {
+      throw new GatewayError("invalid_request", "An agent cannot undo another session’s settings change");
+    }
     if (found.entry.key === HOME_PROFILE_SUBJECT.id) {
       if (!this.writers.undoSubject) throw new GatewayError("unsupported", "Knowledge is not available on this Gateway");
       return this.writers.undoSubject(found.entry, context);
