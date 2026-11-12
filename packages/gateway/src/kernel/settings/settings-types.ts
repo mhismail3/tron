@@ -87,7 +87,7 @@ export function changeReview(identity: unknown, input: Omit<ChangeReview, "diges
 export type Writer = "ui" | "home" | "worker" | "agent";
 export type Timing = "fixed" | "live";
 export type Effect = "next-turn" | "next-request" | "new-chat" | "reload" | "restart" | "next-memory-pass" | "next-compaction" | "next-change" | "delegate";
-export const CONTROLS = ["toggle", "choice", "text", "secret", "list", "checklist", "catalog", "readOnly"] as const;
+export const CONTROLS = ["toggle", "choice", "text", "list", "checklist", "catalog", "readOnly"] as const;
 export type Control = typeof CONTROLS[number];
 export const RENDERER_CONTRACT_VERSION = 1;
 

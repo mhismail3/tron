@@ -3,11 +3,11 @@ import TronMobileCore
 
 enum SettingsRendererContract {
     static let version = 1
-    static let controls = ["toggle", "choice", "text", "secret", "list", "checklist", "catalog", "readOnly"]
+    static let controls = ["toggle", "choice", "text", "list", "checklist", "catalog", "readOnly"]
 }
 
 enum SettingsRowControl: String, Equatable, Sendable {
-    case toggle, choice, text, secret, list, checklist, catalog, readOnly
+    case toggle, choice, text, list, checklist, catalog, readOnly
 
     init(negotiated control: String?) {
         self = control.flatMap(Self.init(rawValue:)) ?? .readOnly
