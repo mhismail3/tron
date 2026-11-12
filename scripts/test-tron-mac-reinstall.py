@@ -165,6 +165,51 @@ class ReinstallWindow(unittest.TestCase):
         self.cli('--confirm-offline')
         self.assertEqual(self.receipt()['phase'], 'awaiting-replacement')
 
+    def test_backups_hold_what_the_home_registry_backs_up_and_every_unknown_path(self):
+        tron = self.home / '.tron'
+        kept = ('agent/sessions/project/session.jsonl', 'agent/auth.json', 'gateway/devices.json', 'gateway/unregistered/only-copy',
+                'internal/machine-group-id', 'unregistered/only-copy', 'logs/unregistered.txt', 'ios-builds/unregistered/only-copy')
+        skipped = ('agent/npm/node_modules/package/index.js', 'agent/.tron-gateway-runtime.lock.lock/stale', 'gateway/local-auth.json',
+                   'gateway/session-search.sqlite', 'internal/subagents/run/status.json', 'logs/gateway.jsonl',
+                   'ios-builds/builds/1/TronMobile.ipa')
+        for relative in (*kept, *skipped):
+            path = tron / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(relative)
+            path.chmod(0o600)
+
+        def label(name):
+            return 'tron-' + hashlib.sha256(os.fsencode(name)).hexdigest()[:16]
+
+        self.prepare()
+        operation = self.operation()
+
+        def backup(relative):
+            top, _, rest = relative.partition('/')
+            return operation / 'backups' / ('agent' if top == 'agent' else label(top)) / rest
+
+        self.assertEqual({relative: backup(relative).read_text() for relative in kept}, {relative: relative for relative in kept})
+        self.assertEqual([relative for relative in skipped if os.path.lexists(backup(relative))], [])
+        self.assertEqual(set(self.receipt()['components']), {'agent', 'old-app', 'browser-config', 'machine-group',
+                                                           label('gateway'), label('internal'), label('unregistered'),
+                                                           label('logs'), label('ios-builds')})
+        staged = json.loads((operation / 'tron-home-layout.json').read_text())
+        self.assertEqual(staged, json.loads((REPO / 'packages/gateway/src/foundation/tron-home-layout.json').read_text()))
+        for relative in ('logs/gateway.jsonl', 'gateway/session-search.sqlite', 'gateway/local-auth.json'):
+            (tron / relative).write_text('changed after the inventory froze')
+        (tron / 'logs/gateway.jsonl.1').write_text('a new log segment')
+        self.cli('--confirm-offline')
+        self.assertEqual(self.receipt()['phase'], 'awaiting-replacement')
+        (tron / 'logs/unregistered.txt').write_text('late writer changed an unregistered file')
+        self.cli('--confirm-offline', error='source-changed')
+        (tron / 'logs/unregistered.txt').write_text('logs/unregistered.txt')
+        self.cli('--confirm-offline')
+        (tron / 'gateway/devices.json').write_text('late writer changed a backed-up record')
+        self.cli('--confirm-offline', error='source-changed')
+        (tron / 'gateway/devices.json').write_text('gateway/devices.json')
+        (operation / 'tron-home-layout.json').write_text(json.dumps({'version': 1, 'paths': {}}))
+        self.cli('--confirm-offline', error='layout-registry')
+
     def test_finish_requires_verified_candidate_and_keeps_recovery_bytes(self):
         self.prepare()
         operation = self.operation()
