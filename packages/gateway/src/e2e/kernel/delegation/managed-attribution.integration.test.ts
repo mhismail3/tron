@@ -23,6 +23,7 @@ import { invocationProjection, invocationReceipts } from "../../../kernel/receip
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, makeExtensionActivityReceipt, extensionActivityReceipts } from "../../../kernel/receipts/extension-activity-history.js";
 
 it("attributes real workflow completion and supervisor delivery to their managed producer", async ({ task }) => {
+  const noticePrefix = "[from: pi-subagents; kind: subagent-notice; authority: none]\n";
   const root = await mkdtemp(join(tmpdir(), "tron-managed-attribution-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "workspace");
@@ -52,7 +53,7 @@ it("attributes real workflow completion and supervisor delivery to their managed
   try {
     await mkdir(agentDir);
     await mkdir(join(cwd, ".pi", "agents"), { recursive: true });
-    await writeFile(join(agentDir, "capture.mjs"), `export default pi => { globalThis.tronAttributionPi = pi; pi.on("input", async event => { if (event.text === "idle-wake-marker" && globalThis.tronWakeInputGate) { globalThis.tronWakeInputStarted = true; await globalThis.tronWakeInputGate; } return {action:event.text === "consumed-wake-marker" ? "handled" : "continue"}; }); pi.on("before_agent_start", () => ({ message: { customType: "wake-hook-proof", content: "NORMAL_PROMPT_HOOK", display: false } })); };`);
+    await writeFile(join(agentDir, "capture.mjs"), `export default pi => { globalThis.tronAttributionPi = pi; pi.on("input", async event => { if (event.text === ${JSON.stringify(noticePrefix + "idle-wake-marker")} && globalThis.tronWakeInputGate) { globalThis.tronWakeInputStarted = true; await globalThis.tronWakeInputGate; } return {action:event.text === ${JSON.stringify(noticePrefix + "consumed-wake-marker")} ? "handled" : "continue"}; }); pi.on("before_agent_start", () => ({ message: { customType: "wake-hook-proof", content: "NORMAL_PROMPT_HOOK", display: false } })); };`);
     await writeFile(join(agentDir, "settings.json"), JSON.stringify({ extensions: ["capture.mjs"] }));
     process.env.PI_CODING_AGENT_DIR = agentDir;
     process.env.TRON_TEST_PROCESS_OWNER = root;
@@ -290,7 +291,24 @@ it("attributes real workflow completion and supervisor delivery to their managed
     const managed = managedProducerAPI(api, owner, (content, options, producer, messages) => slot.admitSubagentWake(content, options, producer, messages));
     const send = (type: string, content: Parameters<ExtensionAPI["sendMessage"]>[0]["content"], options?: Parameters<ExtensionAPI["sendMessage"]>[1]) =>
       external.runInAsyncScope(() => managed.sendMessage({ customType: type, content, display: true }, options));
-    faux.setResponses(Array.from({ length: 12 }, () => fauxAssistantMessage("BOUNDARY_COMPLETE")));
+    let boundedNotice: string[] = [];
+    let exactBoundary = "";
+    faux.setResponses([context => {
+      boundedNotice = context.messages.flatMap(message => (message.role === "user" && Array.isArray(message.content) && message.content.some(part => part.type === "text" && part.text.startsWith("a".repeat(80))))
+        ? message.content.filter(part => part.type === "text").map((part, index) => index === 0 ? part.text.slice(noticePrefix.length) : part.text) : []);
+      exactBoundary = context.messages.flatMap(message => message.role === "user" && Array.isArray(message.content)
+        ? message.content.filter(part => part.type === "text").map(part => part.text) : []).find(text => text.startsWith(`${noticePrefix}${"z".repeat(80)}`))?.slice(noticePrefix.length) ?? "";
+      return fauxAssistantMessage("BOUNDED_NOTICE_COMPLETE");
+    }, ...Array.from({ length: 12 }, () => fauxAssistantMessage("BOUNDARY_COMPLETE"))]);
+    const fullNotice = [{ type: "text" as const, text: "a".repeat(5000) }, { type: "text" as const, text: `${"b".repeat(5000)}ARRAY_TAIL` }];
+    send("exact-boundary", "z".repeat(8192), { triggerTurn: false });
+    send("oversized-array", fullNotice, { triggerTurn: true });
+    await waitFor(() => boundedNotice.length > 0 && !slot.isBusy, "bounded notice delivered");
+    expect(exactBoundary).toBe("z".repeat(8192));
+    expect(boundedNotice.reduce((bytes, text) => bytes + Buffer.byteLength(text), 0)).toBeLessThanOrEqual(8192);
+    expect(boundedNotice.join("")).toContain(`[Full text: read ${JSON.stringify(slot.sessionFile)}`);
+    expect(boundedNotice.join("")).not.toContain("ARRAY_TAIL");
+    expect(await readFile(slot.sessionFile!, "utf8")).toContain("ARRAY_TAIL");
     send("idle-stored", "idle stored", { triggerTurn: false });
     await waitFor(() => SessionManager.open(slot.sessionFile!).getEntries().some(entry => entry.type === "custom" && entry.customType === "tron.context-delivery.v4"
       ), "idle stored receipt");
@@ -325,7 +343,10 @@ it("attributes real workflow completion and supervisor delivery to their managed
         && (receipt.data as { targetEntryId?: string }).targetEntryId === entry!.id), type).toMatchObject({ data: { delivery, origin: { owner: expectedOwner } } });
       if (entry?.type === "custom_message") {
         if (type === "idle-stored" || type === "idle-triggered" || type === "busy-stored") expect(typeof entry.content, type).toBe("string");
-        else expect(entry.content, type).toEqual(reused);
+        else expect(entry.content, type).toEqual([{ type: "text", text: noticePrefix }, ...reused]);
+        const text = typeof entry.content === "string" ? entry.content : entry.content.filter(part => part.type === "text").map(part => part.text).join("");
+        expect(text).toBe(`${noticePrefix}${["idle-stored", "idle-triggered", "busy-stored"].includes(type) ? type.replace("-", " ") : "reused array"}`);
+        expect(reused).toEqual([{ type: "text", text: "reused array" }]);
       }
     }
     const sendIncremental = (outcome: string, workflowRunning: boolean) => external.runInAsyncScope(() => managed.sendMessage({
@@ -336,7 +357,7 @@ it("attributes real workflow completion and supervisor delivery to their managed
     const before = assistantCount();
     for (const outcome of ["failed", "stopped", "completed", "paused"]) sendIncremental(outcome, true);
     sendIncremental("failed", false);
-    await waitFor(() => SessionManager.open(slot.sessionFile!).getEntries().filter(entry => entry.type === "custom_message" && typeof entry.content === "string" && entry.content.startsWith("typed-")).length === 5, "all incremental context stored");
+    await waitFor(() => SessionManager.open(slot.sessionFile!).getEntries().filter(entry => entry.type === "custom_message" && typeof entry.content === "string" && entry.content.startsWith(`${noticePrefix}typed-`)).length === 5, "all incremental context stored");
     expect.soft(assistantCount(), "all incremental notes remain context").toBe(before);
     const progress = entries.find(entry => entry.type === "custom_message" && entry.customType === "subagent_supervisor_request" && (entry.details as { expectsReply?: boolean })?.expectsReply === false);
     expect.soft(progress, "real supervisor progress stored").toBeDefined();
@@ -417,7 +438,7 @@ it("attributes real workflow completion and supervisor delivery to their managed
     await racing;
     await waitFor(() => liveSession.getSteeringMessages().length >= 2, "both owners queued");
     facts.wakeQueue = slot.snapshot().queuedItems;
-    expect.soft(slot.snapshot().queuedItems.find(item => item.text === "busy-wake-marker")).toMatchObject({ semantic: { kind: "prompt", direction: "hiddenInternal", origin: { kind: "subagent", ownerId: owner.id } } });
+    expect.soft(slot.snapshot().queuedItems.find(item => item.text === `${noticePrefix}busy-wake-marker`)).toMatchObject({ semantic: { kind: "prompt", direction: "hiddenInternal", origin: { kind: "subagent", ownerId: owner.id } } });
     release!(); release = undefined;
     await waitFor(() => !slot.isBusy, "wake and maintainer queue settle");
     const wakeProjection = slot.snapshot().transcript;
@@ -448,7 +469,7 @@ it("attributes real workflow completion and supervisor delivery to their managed
     }, "frame delivery receipts persist");
     const wakeEntries = SessionManager.open(slot.sessionFile!).getEntries();
     const coldDeliveries = contextDeliveryMetadataByEntry(wakeEntries);
-    const onlyProgress = wakeEntries.find(entry => entry.type === "custom_message" && entry.content === "only frame progress")!;
+    const onlyProgress = wakeEntries.find(entry => entry.type === "custom_message" && entry.content === `${noticePrefix}only frame progress`)!;
     expect.soft(coldDeliveries.get(onlyProgress.id)).toMatchObject({delivery: "stored"});
     expect.soft(coldDeliveries.get(onlyProgress.id)?.wakeEntryId).toBeUndefined();
     expect.soft([...coldDeliveries]).toEqual([...contextDeliveryMetadataByEntry(runtimeManager.getEntries())]);
@@ -465,7 +486,7 @@ it("attributes real workflow completion and supervisor delivery to their managed
       expect.soft(coldDeliveries.get(entry.id)?.wakeEntryId, type).toBeUndefined();
     }
     facts.wakeEntries = wakeEntries;
-    for (const entry of wakeEntries.filter(entry => entry.type === "custom_message" && entry.customType === "subagent_supervisor_request" && typeof entry.content === "string" && entry.content.startsWith("frame idle"))) {
+    for (const entry of wakeEntries.filter(entry => entry.type === "custom_message" && entry.customType === "subagent_supervisor_request" && typeof entry.content === "string" && entry.content.startsWith(`${noticePrefix}frame idle`))) {
       if (entry.type !== "custom_message") continue;
       expect.soft(coldDeliveries.get(entry.id), String(entry.content)).toMatchObject({delivery: (entry.details as {expectsReply?: boolean})?.expectsReply === false ? "stored" : "triggeredTurn"});
     }
