@@ -57,8 +57,9 @@ export interface ExtensionHostActivity {
 function nativeReview(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const review = value as Record<string, unknown>;
-  return Object.keys(review).every(key => ["digest", "title", "requiresTap", "reason", "items"].includes(key))
+  return Object.keys(review).every(key => ["digest", "title", "requiresTap", "reason", "intent", "items"].includes(key))
     && typeof review.digest === "string" && /^[a-f0-9]{64}$/.test(review.digest)
+    && (review.intent === undefined || review.intent === "push-registration-retry")
     && review.requiresTap === true && boundedSafe(review.title, 4 * 1024, true)
     && (review.reason === undefined || boundedSafe(review.reason, 32 * 1024, true))
     && Array.isArray(review.items) && review.items.length > 0 && review.items.length <= 50

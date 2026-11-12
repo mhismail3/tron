@@ -25,8 +25,10 @@ notification inbox.
   An assertion 401 or the typed invalid-key code clears only the App Attest key, once. A 401 on a key
   already marked rejected clears it once more automatically; the next such 401 stops, and that one
   automatic retry is available again only after a successful registration or a relaunch. Other
-  rejections stop without credential churn; APNs tokens are preserved. Until the agent-requested
-  retry card exists, a stopped registration needs a relaunch or a successful reconcile to proceed. Registration reconciles on
+  rejections stop without credential churn; APNs tokens are preserved. An agent-requested
+  `push-registration-retry` card (`ChangeReview.intent`) makes the approving iPhone rotate the rejected
+  key and register again through `retryAfterApprovedCard`, after the Gateway accepts the approval.
+  Nothing rotates before that tap. Registration reconciles on
   connection, foreground, profile, permission and token changes; Worker failure leaves it pending.
 - **Secrets.** App Attest keys, token bytes and grants use a Keychain namespace separate from Gateway
   credentials; an unreadable Keychain document is never overwritten with an empty one (push fails
