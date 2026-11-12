@@ -259,7 +259,7 @@ export class ModuleHost {
     });
   }
 
-  summaries(names: readonly string[]): TronModuleSummary[] {
+  summaries(names: readonly string[] = this.started.map(entry => entry.descriptor.name)): TronModuleSummary[] {
     return names.map(name => {
       const { descriptor } = this.named(name);
       return { name, purpose: descriptor.purpose, tools: [...descriptor.tools], commands: [...descriptor.commands] };

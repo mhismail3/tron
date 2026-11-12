@@ -16,7 +16,9 @@ setting and is not an approval queue.
   proof block `settings/precedence` ([`gateway/core`](../../core/settings/precedence/facade.ts), generated from
   `packages/core`): the resolver gives it each layer's facts with a token per value and turns its answer back
   into values, and holds no copy of the fold (`settings-resolver.test.ts` pins the rows and values around it). `settings-project-diagnostics.ts` owns bounded Project diagnostics.
-- `settings-model.ts`: target resolution and fixed-direction request pins.
+- `settings-model.ts`: target resolution and fixed-direction request pins; the optional
+  read-only inventory port receives composed module summaries from the live runtime.
+  The admin inventory adapter calls the existing hook, package and MCP owners.
 - `settings-change.ts`: planning, expected-before fences, target stripes, ordered
   store application/reverse rollback, outside-write brackets, Home companion effects,
   audit and history-consumed Undo. A store that refuses its compensating write is

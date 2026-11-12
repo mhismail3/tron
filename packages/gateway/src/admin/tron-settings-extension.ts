@@ -13,33 +13,35 @@ const CHANGE = Type.Object({
 }, { additionalProperties: false });
 
 const PARAMETERS = Type.Object({
-  action: StringEnum(["resolve", "change", "history", "undo"] as const, { description: "resolve: read current values and scopes. history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card." }),
+  action: StringEnum(["resolve", "change", "history", "undo", "inventory"] as const, { description: "resolve: read current values and scopes. history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card." }),
   keys: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 200 }), { maxItems: 200, description: "resolve: the key ids to read; omit for every key." })),
   taskId: Type.Optional(Type.String({ minLength: 1, maxLength: 160,
     description: "Tron Home only: the delegated task (from task list) whose worker session to read or change instead of this chat." })),
   changes: Type.Optional(Type.Array(CHANGE, { minItems: 1, maxItems: 50, description: "change (required): the changes, applied together." })),
   key: Type.Optional(Type.String({ minLength: 1, maxLength: 200, description: "history: include only this key." })),
   cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 200, description: "history: nextCursor from the previous page." })),
-  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200, description: "history: maximum records per page (default 50)." })),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200, description: "history/inventory: maximum records per page or section (default 50). Inventory sections also have byte limits and disclose omitted counts." })),
   changeId: Type.Optional(Type.String({ minLength: 1, maxLength: 200, description: "undo (required): changeId from history." })),
   reason: Type.Optional(Type.String({ minLength: 1, maxLength: 2_000, description: "change/undo (required): why, for the maintainer." })),
   dryRun: Type.Optional(Type.Boolean({ description: "change: validate and return exact before/after without applying." })),
 }, { additionalProperties: false });
 
 type SettingsCall =
+  | { action: "inventory"; limit?: number }
   | { action: "resolve"; keys?: string[]; taskId?: string }
   | { action: "history"; key?: string; cursor?: string; limit?: number }
   | { action: "undo"; changeId: string; reason: string }
   | { action: "change"; changes: ChangeRequest[]; reason: string; dryRun?: boolean; taskId?: string };
 
-function admitSettingsCall(input: { action: "resolve" | "change" | "history" | "undo"; keys?: string[]; taskId?: string; changes?: unknown[]; reason?: string; dryRun?: boolean; key?: string; cursor?: string; limit?: number; changeId?: string }): SettingsCall {
+function admitSettingsCall(input: { action: "resolve" | "change" | "history" | "undo" | "inventory"; keys?: string[]; taskId?: string; changes?: unknown[]; reason?: string; dryRun?: boolean; key?: string; cursor?: string; limit?: number; changeId?: string }): SettingsCall {
   const fields = {
     resolve: ["keys", "taskId"], change: ["changes", "reason", "dryRun", "taskId"],
-    history: ["key", "cursor", "limit"], undo: ["changeId", "reason"],
+    history: ["key", "cursor", "limit"], undo: ["changeId", "reason"], inventory: ["limit"],
   }[input.action];
   for (const [field, value] of Object.entries(input)) {
     if (field !== "action" && value !== undefined && !fields.includes(field)) throw new Error(`settings ${input.action}: "${field}" is not used by this action`);
   }
+  if (input.action === "inventory") return { action: "inventory", ...(input.limit !== undefined ? { limit: input.limit } : {}) };
   if (input.action === "history") return { action: "history", ...(input.key ? { key: input.key } : {}), ...(input.cursor ? { cursor: input.cursor } : {}), ...(input.limit !== undefined ? { limit: input.limit } : {}) };
   if (input.action === "undo") {
     if (!input.changeId?.trim()) throw new Error("settings undo: changeId is required");
@@ -67,7 +69,7 @@ export function createTronSettingsExtension(access: () => SettingsToolAccess | u
   return pi => {
     pi.registerTool({
       name: "settings", label: "Settings",
-      description: "Read and change Tron settings through typed writes. Reversible changes apply and are logged. Read durable audit records with history; reverse a change with undo and its changeId. Only irreversible effects, trust/authority, privacy expansion, spend and installs need the exact shared native tap. dryRun validates and returns before/after without effects. Home may target its task worker; running workers adopt from the next model request and are signalled.",
+      description: "Read and change Tron settings through typed writes. Reversible changes apply and are logged. Read bounded hooks (by event and extension), packages, Tron modules and MCP status with inventory. Read durable audit records with history; reverse a change with undo and its changeId. Only irreversible effects, trust/authority, privacy expansion, spend and installs need the exact shared native tap. dryRun validates and returns before/after without effects. Home may target its task worker; running workers adopt from the next model request and are signalled.",
       promptSnippet: "Change settings with the settings tool, never by editing settings files.",
       promptGuidelines: [
         "Use settings to read or change model, context, tools, permissions and run settings; never edit settings.json, .pi/ or trust files directly.",
@@ -85,6 +87,10 @@ export function createTronSettingsExtension(access: () => SettingsToolAccess | u
             ...(key.applied ? {} : { applied: false, reason: key.reason }),
           }));
           return { content: [{ type: "text", text: JSON.stringify({ ...(resolution.worker ? { worker: resolution.worker } : {}), layers: resolution.layers, keys: summary }) }], details: resolution };
+        }
+        if (input.action === "inventory") {
+          const result = await owner.inventory(input.limit);
+          return { content: [{ type: "text" as const, text: JSON.stringify(result) }], details: result };
         }
         if (input.action === "history") {
           const { action: _action, ...query } = input;

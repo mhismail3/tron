@@ -664,6 +664,10 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       return { task, slot, target: { kind: "session" as const, sessionId: task.sessionId } };
     };
     return {
+      inventory: limit => {
+        if (!owners.model.owner.inventory) throw new GatewayError("unsupported", "Settings inventory is not available");
+        return owners.model.owner.inventory(this.cwd, this.dependencies.modules.summaries(), limit);
+      },
       history: input => owners.changes.history(input),
       undo: (changeId, input) => owners.changes.undo(changeId, {
         actor: actor(input.toolCallId), reason: input.reason, session: source(),

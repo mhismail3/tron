@@ -21,6 +21,9 @@ import { SettingsChangeRecord, type ChangeEntry } from "../../kernel/settings/se
 import { maintainerChange } from "../../../test-support/native-change.js";
 import { OutsideChanges } from "../../admin/settings-outside.js";
 import { McpAdminService } from "../../admin/mcp-admin-service.js";
+import { SettingsInventory } from "../../admin/settings-inventory.js";
+import { HookResources } from "../../admin/hook-resources.js";
+import { PackageService } from "../../admin/package-service.js";
 import { ModelConfigService } from "../../admin/model-config-service.js";
 import { type SettingsStores } from "../../kernel/settings/settings-types.js";
 import { composedBelow, readBinding } from "../../kernel/settings/settings-resolver.js";
@@ -374,7 +377,11 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
   await registry.initialize();
   const privateService = new MacTerminalService(tronHome, { launchAgentDirectory: join(root, "agents") });
   const macTerminalKeys = new MacTerminalKeys(privateService.root);
-  const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: privateService }));
+  const mcpAdmin = new McpAdminService(agentDir, join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js"));
+  const inventory = new SettingsInventory(new HookResources(agentDir, trust), new PackageService(agentDir, trust, () => {}), mcpAdmin);
+  const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: privateService,
+    inventory: (cwd, modules, limit) => inventory.read(cwd, modules, limit),
+  }));
   const record = new SettingsChangeRecord(tronHome, options.segmentEntries);
   const outside = new OutsideChanges(TEST_SETTINGS_SCHEMA, tronHome, agentDir, record, settingsModel.owner.observedReaders);
   settingsModel.owner.observeOutside(outside);
@@ -396,7 +403,7 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
     modelRuntime, trust, settingsModel, settingsChanges, sessions: registry, receipts: new CommandReceiptStore(tronHome), notifications,
     broadcast: (topic: string, payload: unknown) => broadcasts.push({ topic, payload }),
     globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
-    mcpAdmin: new McpAdminService(agentDir, join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js")),
+    mcpAdmin,
     modelConfig: new ModelConfigService(agentDir),
   } as unknown as GatewayServiceDependencies);
   const change = (target: Record<string, unknown>, changes: unknown[], extra: Record<string, unknown> = {}, c = client()) =>
@@ -476,6 +483,55 @@ describe("settings.change", () => {
     expect(JSON.stringify(preview)).not.toContain("fixture-secret-token");
     expect(await f.history()).toEqual([]);
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
+  });
+
+  caseIt("an agent inventories built-in hooks, configured packages, modules and MCP status without a write", async owner => {
+    const f = await fixture(owner);
+    const source = join(f.root, "inventory-package");
+    await mkdir(source);
+    await writeFile(join(source, "package.json"), JSON.stringify({ name: "inventory-package", version: "1.0.0", pi: { extensions: [] } }));
+    const settings = await f.macDocument();
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...settings, packages: [source] }));
+    const cwd = join(f.root, "inventory-chat");
+    await mkdir(cwd);
+    const slot = await f.registry.create(cwd);
+    const model = f.faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    let sequence = 0;
+    const call = async (input: Record<string, unknown>) => {
+      const id = `inventory-tool-${++sequence}`;
+      f.faux.setResponses([
+        fauxAssistantMessage([fauxToolCall("settings", input, { id })], { stopReason: "toolUse" }),
+        fauxAssistantMessage("Observed."),
+      ]);
+      await slot.prompt("Read the authorized settings inventory.");
+      await waitFor(() => !slot.isBusy && !slot.hasActiveAgentRun || undefined, "settings inventory turn settled");
+      const result = slot.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === id);
+      if (result?.type !== "message" || result.message.role !== "toolResult") throw new Error("No canonical inventory tool result");
+      return result.message;
+    };
+    const full = await call({ action: "inventory" });
+    expect(full.isError, JSON.stringify(full)).not.toBe(true);
+    const inventory = full.details as any;
+    expect(inventory.hooks.byExtension.items).toEqual(expect.arrayContaining([expect.objectContaining({ name: "builtin:mcp", source: "builtin" })]));
+    expect(inventory.hooks.byEvent.items).toEqual(expect.arrayContaining([expect.objectContaining({ event: "session_start", extensions: expect.arrayContaining(["builtin:mcp"]) })]));
+    expect(inventory.packages.items).toEqual(expect.arrayContaining([expect.objectContaining({ source, scope: "user" })]));
+    expect(inventory.modules.items).toEqual(expect.arrayContaining([expect.objectContaining({ name: "tron-workspace" })]));
+    expect(inventory.mcp.items).toEqual([]);
+    expect(Buffer.byteLength(JSON.stringify(inventory))).toBeLessThanOrEqual(64 * 1024);
+    const bounded = await call({ action: "inventory", limit: 1 });
+    expect(bounded.isError).not.toBe(true);
+    expect((bounded.details as any).hooks.byExtension.items).toHaveLength(1);
+    expect((bounded.details as any).hooks.byExtension.omitted).toBeGreaterThan(0);
+    expect((await call({ action: "inventory", reason: "Not an inventory parameter" })).isError).toBe(true);
+    const sensitive = await f.settingsModel.owner.inventory(cwd, [{ name: "credential-probe", tools: [], commands: [],
+      purpose: "https://inventory-user:inventory-password@example.invalid/package?access_token=inventory-token&version=1" }]);
+    const safe = JSON.stringify(sensitive);
+    expect(safe).not.toContain("inventory-user");
+    expect(safe).not.toContain("inventory-password");
+    expect(safe).not.toContain("inventory-token");
+    expect(safe).toContain("version=1");
+    expect(await f.history()).toEqual([]);
   });
 
   caseIt("an agent pages its settings history and undoes without borrowing another session's authority", async owner => {
