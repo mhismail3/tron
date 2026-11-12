@@ -7,6 +7,7 @@ import { type ConfirmChange, type ChangeRequest, type SettingsSignal, type Chang
 import type { Actor, ActorKind, ChangeEntry, SettingsChangeRecord } from "./settings-record.js";
 import { composedBelow, readBinding, resolveSettings } from "./settings-resolver.js";
 import { HOME_PROFILE_SUBJECT, keyDefault, hasSessionSettingsApplier, keyForHome, type Binding, type KeyDeclaration } from "./settings-schema.js";
+import type { McpServerValue } from "./mcp-server-value.js";
 import { changeReview, formatStoredSetting, LAYER_LABELS, type ModelRefValue, type SettingsStores, type PlannedWrite } from "./settings-types.js";
 import { canonicalSettingsTarget, scopeAdmitted, storeForScope } from "./scope-resolution.js";
 import { SettingsModel, declaredKey, deepEqual, setPath, unsetPath, qualifiedWrite, type SessionSettingsSource, type SettingsReadOwner } from "./settings-model.js";
@@ -72,6 +73,7 @@ interface SettingsChangeOwner extends SettingsReadOwner {
   observedWrites(planned: readonly Planned[], projectRoot: string | undefined): PlannedWrite[];
   readonly outsideChanges: { begin(writes: readonly PlannedWrite[]): Promise<void>; end(writes: readonly PlannedWrite[], landed: ReadonlyMap<string, { git?: GitResult; changeId: string }>): Promise<void> } | undefined;
   applyStore(target: SettingsTarget, stores: SettingsStores, plan: Planned, value: unknown, context: ChangeContext, writers: Pick<SettingsWriters, "setTrust">): Promise<StoreApplyResult>;
+  mcpServer(server: string): Promise<McpServerValue | undefined>;
 }
 
 export interface Planned {
@@ -92,7 +94,7 @@ const adoptsHomeRuntime = (plan: Planned) => plan.request.layer === "session" &&
   && (plan.key.layers.session?.store === "session" || plan.key.layers.session?.store === "session-settings");
 
 const STORE_ORDER: Record<Binding["store"], number> = {
-  "pi": 0, "pi-model-ref": 0, "trust": 1, "mac-terminal": 1, "mac-terminal-service": 1, "home": 3, "gateway": 4, "session": 5, "session-settings": 5, "session-launch": 5,
+  "pi": 0, "pi-model-ref": 0, "trust": 1, "mac-terminal": 1, "mac-terminal-service": 1, "mcp": 1, "home": 3, "gateway": 4, "session": 5, "session-settings": 5, "session-launch": 5,
 };
 
 type StoreApplyResult = { revision?: number; git?: GitResult; result?: unknown };
@@ -470,7 +472,8 @@ export class SettingsChangePath {
   }
 
   private async plan(target: SettingsTarget, stores: SettingsStores, request: ChangeRequest, context: ChangeContext, runtime: ModelRuntime): Promise<Planned> {
-    const key = keyForHome(declaredKey(this.model.schema, request.key), stores.layers.includes("home"));
+    const record = this.model.schema.recordKey(request.key);
+    const key = record ?? keyForHome(declaredKey(this.model.schema, request.key), stores.layers.includes("home"));
     if (request.layer === "project") {
       throw new GatewayError("invalid_request", "Project settings are read-only; edit the repository");
     }
@@ -480,6 +483,10 @@ export class SettingsChangePath {
     if (!stores.layers.includes(store)) throw new GatewayError("invalid_request", `This target has no ${LAYER_LABELS[request.layer]} layer`);
     const writer = context.actor.kind === "outside" ? undefined : context.actor.kind;
     if (!writer || !key.writers.includes(writer)) throw new GatewayError("invalid_request", `${key.label} cannot be changed by ${context.actor.kind}`);
+    if (record && (!request.qualifiers?.server || Object.keys(request.qualifiers).some(name => name !== "server")
+      || !/^[A-Za-z0-9_-]{1,128}$/u.test(request.qualifiers.server))) {
+      throw new GatewayError("invalid_request", `${key.label} changes one server named by its server qualifier`);
+    }
     for (const [name, value] of Object.entries(key.fixed ?? {})) {
       const named = request.qualifiers?.[name as keyof Qualifiers];
       if (named !== undefined && named !== value) throw new GatewayError("invalid_request", `${key.id} is the ${name}=${value} instance; ${name}=${named} is a different setting`);
@@ -549,7 +556,8 @@ export class SettingsChangePath {
       fixedAt = { value: after, from: row?.layer ?? "global", at: this.now().toISOString(), ref: randomUUID(), ...(row?.qualifiers ? { qualifiers: row.qualifiers } : {}) };
       request = { ...request, op: "set", value: after };
     }
-    const before = binding.store === "trust" ? stores.trust[qualifiers.project!]
+    const before = record ? await this.model.owner.mcpServer(qualifiers.server!)
+      : binding.store === "trust" ? stores.trust[qualifiers.project!]
       : readBinding(stores, store, binding, qualifiers, qualifiedWrite(binding, qualifiers), key.id);
     if (request.expected !== undefined && !deepEqual(request.expected, before ?? null)) {
       throw new GatewayError("conflict", `${key.label} changed since it was read; refresh and try again`, false, {

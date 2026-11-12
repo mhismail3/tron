@@ -68,6 +68,7 @@ function observedFile(store: ObservedStore, agentDir: string): string {
 
 export function observedInstance(key: KeyDeclaration, layer: string, binding: Binding, qualifiers: Qualifiers, projectRoot: string | undefined): { store: ObservedStore; instance: string } | undefined {
   const fixed = key.fixed ?? {};
+  if (binding.store === "mcp") return layer === "global" ? { store: { kind: "mcp" }, instance: instanceId(key.id, qualifiers) } : undefined;
   if (binding.store === "trust") {
     return qualifiers.project === undefined ? undefined : { store: { kind: "trust" }, instance: instanceId(key.id, { ...fixed, project: qualifiers.project }) };
   }
@@ -184,7 +185,7 @@ export class OutsideChanges {
   }
 
   private observed(value: ObservedValue): ObservedValue {
-    if (!this.schemaKeyOrUndefined(value.key)?.redacted || value.value === undefined) return value;
+    if (value.value === undefined || !(recordSubject(value.key) || this.schemaKeyOrUndefined(value.key)?.redacted)) return value;
     const { value: secret, ...rest } = value;
     return { ...rest, hash: createHash("sha256").update(JSON.stringify(secret)).digest("hex") };
   }
