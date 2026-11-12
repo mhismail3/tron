@@ -892,12 +892,17 @@ private struct DisplayHTMLArtifactView: View {
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var loadedIdentity: ChatMediaIdentity?
     @State private var loadedHTML: String?
+    @State private var networkBlock: WKContentRuleList?
     @State private var failed = false
 
     var body: some View {
         Group {
-            if let html {
-                DisplayHTMLWebView(html: html, allowsScripts: context == .sheet && DisplayHTMLSandbox.admitsScripts)
+            if let html, let networkBlock = networkBlock ?? DisplayHTMLSandbox.compiledNetworkBlock {
+                DisplayHTMLWebView(
+                    html: html,
+                    networkBlock: networkBlock,
+                    allowsScripts: context == .sheet && DisplayHTMLSandbox.admitsScripts
+                )
             } else if failed {
                 DisplayUnavailableView(text: display.fallbackText)
             } else {
@@ -928,9 +933,14 @@ private struct DisplayHTMLArtifactView: View {
             failed = true
             return
         }
-        if html != nil { return }
         failed = false
         do {
+            let rules = try await DisplayHTMLSandbox.networkBlock()
+            guard !Task.isCancelled,
+                  presentationActivity.allowsPresentationPublication,
+                  mediaIdentity == identity else { return }
+            networkBlock = rules
+            if html != nil { return }
             let source = try await model.chatMedia.inlineArtifact(for: identity) { payload in
                 guard let source = String(data: payload.data, encoding: .utf8) else {
                     throw CocoaError(.fileReadCorruptFile)
@@ -954,6 +964,7 @@ private struct DisplayHTMLArtifactView: View {
 
 struct DisplayHTMLWebView: UIViewRepresentable {
     let html: String
+    let networkBlock: WKContentRuleList
     let allowsScripts: Bool
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -961,10 +972,19 @@ struct DisplayHTMLWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
+        configuration.userContentController.add(networkBlock)
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
         configuration.mediaTypesRequiringUserActionForPlayback = .all
-        context.coordinator.peerConnectionsDisabled = DisplayHTMLSandbox.disablePeerConnections(configuration.preferences)
+        let peerConnectionsDisabled = DisplayHTMLSandbox.disablePeerConnections(configuration.preferences)
+        context.coordinator.runsScripts = allowsScripts && peerConnectionsDisabled
+        if allowsScripts, !peerConnectionsDisabled {
+            Task {
+                await AppLog.shared.recordCausal(
+                    name: "display.html", outcome: "failure", details: "scripts=off peerConnectionsDisabled=false"
+                )
+            }
+        }
         let view = DisplayHTMLHostView(frame: .zero, configuration: configuration)
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
@@ -978,41 +998,15 @@ struct DisplayHTMLWebView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: WKWebView, context: Context) {
-        context.coordinator.load(html, allowsScripts: allowsScripts, in: view)
+        guard context.coordinator.loadedHTML != html else { return }
+        context.coordinator.loadedHTML = html
+        let policy = DisplayHTMLSandbox.contentSecurityPolicy(runsScripts: context.coordinator.runsScripts)
+        view.loadHTMLString("<meta http-equiv=\"Content-Security-Policy\" content=\"\(policy)\">" + html, baseURL: nil)
     }
 
-    @MainActor
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
-        var peerConnectionsDisabled = false
-        private var requested: Request?
-        private var blocksNetwork = false
-        private var runsScripts = false
-
-        private struct Request: Equatable {
-            let html: String
-            let allowsScripts: Bool
-        }
-
-        func load(_ html: String, allowsScripts: Bool, in view: WKWebView) {
-            let request = Request(html: html, allowsScripts: allowsScripts)
-            guard requested != request else { return }
-            requested = request
-            Task { [weak view] in
-                let rules = await DisplayHTMLSandbox.networkBlock()
-                guard let view, requested == request else { return }
-                if let rules, !blocksNetwork {
-                    view.configuration.userContentController.add(rules)
-                    blocksNetwork = true
-                }
-                runsScripts = allowsScripts && blocksNetwork && peerConnectionsDisabled
-                if allowsScripts, !runsScripts {
-                    let details = "scripts=off networkRules=\(blocksNetwork) peerConnectionsDisabled=\(peerConnectionsDisabled)"
-                    Task { await AppLog.shared.recordCausal(name: "display.html", outcome: "failure", details: details) }
-                }
-                let policy = DisplayHTMLSandbox.contentSecurityPolicy(runsScripts: runsScripts)
-                view.loadHTMLString("<meta http-equiv=\"Content-Security-Policy\" content=\"\(policy)\">" + html, baseURL: nil)
-            }
-        }
+        var loadedHTML: String?
+        var runsScripts = false
 
         func webView(
             _ webView: WKWebView,
@@ -1054,27 +1048,33 @@ struct DisplayHTMLWebView: UIViewRepresentable {
 
 @MainActor
 enum DisplayHTMLSandbox {
-    private static var networkBlockRules: WKContentRuleList?
+    private(set) static var compiledNetworkBlock: WKContentRuleList?
 
     static func contentSecurityPolicy(runsScripts: Bool) -> String {
-        let inert = "default-src 'none'; img-src data: blob:; media-src data: blob:; style-src 'unsafe-inline'; font-src data:; form-action 'none'; frame-src 'none'; connect-src 'none'"
+        let inert = "default-src 'none'; img-src data: blob:; media-src data: blob:; style-src 'unsafe-inline'; font-src data:; form-action 'none'; frame-src 'none'; connect-src 'none'; base-uri 'none'"
         return runsScripts ? inert + "; script-src 'unsafe-inline' blob:; worker-src 'none'" : inert
     }
 
-    static func networkBlock() async -> WKContentRuleList? {
-        if let networkBlockRules { return networkBlockRules }
-        networkBlockRules = try? await WKContentRuleListStore.default().compileContentRuleList(
-            forIdentifier: "display-html-network-block",
-            encodedContentRuleList: """
-            [{"trigger":{"url-filter":".*"},"action":{"type":"block"}},
-             {"trigger":{"url-filter":"^blob:"},"action":{"type":"ignore-previous-rules"}},
-             {"trigger":{"url-filter":"^data:"},"action":{"type":"ignore-previous-rules"}}]
-            """
-        )
-        return networkBlockRules
+    static func networkBlock() async throws -> WKContentRuleList {
+        if let compiledNetworkBlock { return compiledNetworkBlock }
+        do {
+            guard let rules = try await WKContentRuleListStore.default().compileContentRuleList(
+                forIdentifier: "display-html-network-block",
+                encodedContentRuleList: """
+                [{"trigger":{"url-filter":".*"},"action":{"type":"block"}},
+                 {"trigger":{"url-filter":"^blob:"},"action":{"type":"ignore-previous-rules"}},
+                 {"trigger":{"url-filter":"^data:"},"action":{"type":"ignore-previous-rules"}}]
+                """
+            ) else { throw CocoaError(.featureUnsupported) }
+            compiledNetworkBlock = rules
+            return rules
+        } catch {
+            await AppLog.shared.recordCausal(name: "display.html", outcome: "failure", details: "networkRules=false")
+            throw error
+        }
     }
 
-    #if TRON_PRIVATE_VARIABLE_BLUR || HOSTED_TEST
+    #if TRON_PRIVATE_VARIABLE_BLUR || (DEBUG && HOSTED_TEST)
     static let admitsScripts = true
 
     static func disablePeerConnections(_ preferences: WKPreferences) -> Bool {

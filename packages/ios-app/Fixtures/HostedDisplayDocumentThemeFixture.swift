@@ -64,6 +64,11 @@ enum HostedDisplayDocumentThemeFixture {
             const canvas = document.createElement("canvas");
             say("WebGL " + Boolean(canvas.getContext("webgl2") || canvas.getContext("webgl")));
           });
+          await attempt(() => { say(eval("'Eval ran'")); });
+          await attempt(() => {
+            const worker = new Worker(URL.createObjectURL(new Blob(["postMessage(1)"], { type: "text/javascript" })));
+            worker.onmessage = () => say("Worker ran");
+          });
           await attempt(() => fetch("\(http)/fetch", { mode: "no-cors" }));
           await attempt(() => new Promise(done => {
             const request = new XMLHttpRequest();

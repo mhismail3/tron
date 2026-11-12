@@ -153,6 +153,8 @@ import UIKit
         Thread.sleep(forTimeInterval: 3)
         XCTAssertEqual(probe.summary, "requests=[] idle=0 datagrams=0", "The sandboxed page reached the network")
         XCTAssertTrue(app.staticTexts["First content line"].firstMatch.exists, "Navigation away is cancelled")
+        XCTAssertFalse(app.staticTexts["Eval ran"].firstMatch.exists, "The policy admits no eval")
+        XCTAssertFalse(app.staticTexts["Worker ran"].firstMatch.exists, "The policy admits no workers")
         capture(app, "html-sheet-sandboxed-script")
         app.terminate()
 
@@ -164,9 +166,10 @@ import UIKit
         XCTAssertTrue(window.waitForExistence(timeout: 20), floating.debugDescription)
         window.tap()
         XCTAssertTrue(floating.staticTexts["First content line"].firstMatch.waitForExistence(timeout: 10), floating.debugDescription)
+        Thread.sleep(forTimeInterval: 3)
         XCTAssertTrue(floating.staticTexts["Script idle"].firstMatch.exists,
                       "Only the sheet runs page scripts: \(floating.debugDescription)")
-        Thread.sleep(forTimeInterval: 3)
+        XCTAssertFalse(floating.staticTexts["Script ran"].firstMatch.exists, "Only the sheet runs page scripts")
         XCTAssertEqual(probe.summary, "requests=[] idle=0 datagrams=0", "The floating page reached the network")
     }
 
@@ -184,12 +187,14 @@ import UIKit
         XCTAssertTrue(first.waitForExistence(timeout: 10), app.debugDescription)
         let pinned = app.staticTexts["Pinned line"].firstMatch
         let done = app.buttons["Done"].firstMatch
-        let page = app.webViews.firstMatch
+        let page = app.webViews.containing(.staticText, identifier: "First content line").firstMatch
         capture(app, "html-sheet-first-line")
         XCTAssertLessThanOrEqual(page.frame.minY, done.frame.minY,
                                  "The page extends under the toolbar blur: \(page.frame) vs Done \(done.frame)")
         XCTAssertGreaterThanOrEqual(first.frame.minY, done.frame.maxY,
                                     "The first line starts below the toolbar: \(first.frame) vs Done \(done.frame)")
+        XCTAssertLessThan(first.frame.minY, done.frame.maxY + done.frame.height,
+                          "The top inset applies once: \(first.frame) vs Done \(done.frame)")
         page.swipeUp()
         XCTAssertLessThan(first.frame.maxY, done.frame.minY, "The page scrolls under the toolbar: \(first.frame)")
         XCTAssertGreaterThanOrEqual(pinned.frame.minY, done.frame.maxY,
