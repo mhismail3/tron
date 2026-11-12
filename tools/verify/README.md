@@ -138,6 +138,23 @@ cases; a file with no executed passes cannot hide beside a passing neighbour.
    below). A selection without the iOS lane runs it only when a fresh index
    exists; otherwise it is reported as skipped, never as passed.
 
+### Context audit
+
+`scripts/tron context audit` renders source-owned core, Home, worker-contract and direct
+child-handoff layers plus this repository's rules and Home profile index. Diagnostics name
+layer/source owners without printing their text. Sentence comparison is normalized and
+near-duplicate (Jaccard ≥0.8); budgets and byte/4 token estimates are review signals, not
+provider counts. Source checks locate duplicated check-in/approval prose and kind-filtered
+Home declarations. `--input <json>` accepts `{layers, sources}` for isolated regression
+proofs; errors exit 2, diagnostics exit 1.
+
+Verify runs `context audit --report-only` for Gateway changes while the context plan's
+Stage 2 is landing. This transitional invocation retains every diagnostic but does not
+make today's known duplicate text a red gate. Direct audit remains strict. After Stage 2,
+the invocation becomes strict in the same final slice. This is not a request-record or
+live-state audit: global user files, installed skills, external tool declarations and
+workflow child prompts are not yet rendered, and missing coverage is not a clean bill.
+
 ### No exemptions
 
 There is no known-failure registry, quarantine, waiver, expiry or qualified verdict
