@@ -99,7 +99,7 @@ final class TronConsolidatedUIRegressionTests: XCTestCase {
         let card = element(app, "home-model-summary")
         XCTAssertTrue(card.waitForExistence(timeout: 5), "The model card belongs directly below the usage summary")
         XCTAssertGreaterThanOrEqual(card.frame.minY, element(app, "home-context-summary").frame.maxY)
-        XCTAssertTrue(card.staticTexts["Effort"].exists && card.staticTexts["Context Window"].exists)
+        XCTAssertTrue(card.staticTexts["Thinking"].exists && card.staticTexts["Context Window"].exists)
         tap(app, "settings-row-model.ref_role_chat_-reset")
         XCTAssertTrue(card.staticTexts["Claude Haiku 5.5"].waitForExistence(timeout: 5), app.debugDescription)
         tap(app, "manage-model-switch")
@@ -112,15 +112,15 @@ final class TronConsolidatedUIRegressionTests: XCTestCase {
         keep("home-model-write-and-remaining-workers")
     }
 
-    @MainActor func testSessionModelCardUsesFencedWritesAndEffortRevert() {
+    @MainActor func testSessionModelCardUsesFencedWritesAndThinkingRevert() {
         let app = session([]); defer { app.terminate() }
         tap(app, "Release terminal settlement")
         let card = element(app, "session-model-summary")
         XCTAssertTrue(card.waitForExistence(timeout: 5))
-        XCTAssertTrue(card.staticTexts["Effort"].exists && card.staticTexts["Context Window"].exists)
+        XCTAssertTrue(card.staticTexts["Thinking"].exists && card.staticTexts["Context Window"].exists)
         tap(app, "settings-row-model.thinking_role_chat_-reset")
-        let revertedEffort = expectation(for: NSPredicate(format: "value == %@", "High"), evaluatedWith: card.buttons["Effort"])
-        wait(for: [revertedEffort], timeout: 5)
+        let revertedThinking = expectation(for: NSPredicate(format: "value == %@", "High"), evaluatedWith: card.buttons["Thinking"])
+        wait(for: [revertedThinking], timeout: 5)
         tap(app, "manage-model-switch")
         let alternative = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Alternative Model'")).firstMatch
         XCTAssertTrue(alternative.waitForExistence(timeout: 5)); alternative.tap()

@@ -1,8 +1,8 @@
 import XCTest
 
 final class TronManageSheetsThemeUITests: XCTestCase {
-    @MainActor func testFirstOpenHomeEffortAndContextExposeUsableSliders() {
-        for (control, slider) in [("Effort", "settings-choice-slider")] {
+    @MainActor func testFirstOpenHomeThinkingAndContextExposeUsableSliders() {
+        for (control, slider) in [("Thinking", "settings-choice-slider")] {
             let app = launchManageHome(dark: false)
             defer { app.terminate() }
             let button = app.buttons[control].firstMatch
