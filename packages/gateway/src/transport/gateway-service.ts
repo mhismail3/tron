@@ -360,6 +360,7 @@ export class GatewayService {
       applied: (target, changes, context) => this.settingsChanged(target, changes, context),
     });
     dependencies.settingsModel?.owner.outsideChanges?.observe({
+      providerFilesChanged: () => dependencies.globalProviderResources.requestReload(),
       outside: async (entries) => {
         const outside = entries.filter(entry => entry.status === "outside" && !recordSubject(entry.key));
         this.recordSubjectsChangedOutside(entries.filter(entry => entry.status === "outside" && recordSubject(entry.key)));
@@ -386,9 +387,13 @@ export class GatewayService {
       }));
       const target = group[0]!.target;
       if (group.some(entry => entry.key === "tools.mcp.server")) {
+        this.dependencies.sessions.freshness.stale(target.kind === "project" ? { projectDir: target.cwd } : {});
         this.dependencies.broadcast("mcp.changed", target.kind === "project" ? { scope: "project", projectDir: target.cwd } : { scope: "global" });
       }
-      if (group.some(entry => entry.key === "accounts.models.provider")) this.dependencies.broadcast("models.customChanged", {});
+      if (group.some(entry => entry.key === "accounts.models.provider")) {
+        this.dependencies.globalProviderResources.requestReload();
+        this.dependencies.broadcast("models.customChanged", {});
+      }
     }
   }
 
@@ -2116,8 +2121,9 @@ export class GatewayService {
       const key = this.dependencies.settingsModel.schema.KEYS.find(candidate => candidate.id === change.key);
       if (!key) continue;
       if (key.effect === "reload") {
-        this.dependencies.sessions.freshness.stale(change.layer === "session" && target.kind === "session" ? { sessionId: target.sessionId }
-          : change.layer === "project" && projectDir ? { projectDir } : {});
+        this.dependencies.sessions.freshness.stale(change.key === "permissions.projectTrust" ? {}
+          : change.layer === "session" && target.kind === "session" ? { sessionId: target.sessionId }
+            : change.layer === "project" && projectDir ? { projectDir } : {});
         if (change.layer === "global" && key.group === "sources") this.dependencies.globalProviderResources.requestReload();
       }
       if (key.effect === "next-compaction" && (change.layer === "global" || projectDir)) {

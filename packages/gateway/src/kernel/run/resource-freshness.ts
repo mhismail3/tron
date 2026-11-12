@@ -175,9 +175,16 @@ export class ResourceFreshness {
     const { agentDir } = this.options;
     const profile = slot.liveProfile();
     const global = await json(join(agentDir, "settings.json"));
-    const project = profile.projectSettings ? await json(join(slot.projectDir, ".pi", "settings.json")) : {};
+    const trusted = await slot.resourceProjectTrusted();
+    inputs.push(["projectTrusted", trusted]);
+    await file(join(agentDir, "AGENTS.md"), inputs);
+    if (profile.extensions === "ordinary") {
+      inputs.push(["mcp", await json(join(agentDir, "mcp.json"))]);
+      if (trusted && profile.projectSettings) inputs.push(["projectMcp", await json(join(slot.projectDir, ".pi", "mcp.json"))]);
+    }
+    const project = profile.projectSettings && trusted ? await json(join(slot.projectDir, ".pi", "settings.json")) : {};
     const settings = SettingsManager.fromStorage({ withLock: (scope, read) => { read(JSON.stringify(scope === "global" ? global : project)); } },
-      { projectTrusted: slot.runtime.session.settingsManager.isProjectTrusted() });
+      { projectTrusted: trusted });
     const manager = new DefaultPackageManager({ cwd: slot.cwd, projectDir: slot.projectDir, agentDir, settingsManager: settings });
     const resolved = await manager.resolve(async () => "skip");
     const paths = new Map<string, "file" | "directory">();

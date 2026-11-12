@@ -1445,6 +1445,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     await this.persistSessionSettings({ fixed });
   }
 
+  resourceProjectTrusted(): Promise<boolean> { return this.effectiveResourceReloadOptions()!.resolveProjectTrust(); }
+
   private effectiveResourceReloadOptions(): { resolveProjectTrust: () => Promise<boolean> } | undefined {
     const override = this.projectTrustReloadOverride;
     return override === undefined || this.liveProfile().projectTrust === "never"
