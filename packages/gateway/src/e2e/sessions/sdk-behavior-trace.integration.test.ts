@@ -93,9 +93,8 @@ async function runBoundaryScenario(options: ScenarioOptions): Promise<BehaviorTr
   const root = await mkdtemp(join(tmpdir(), "tron-sdk-behavior-trace-"));
   roots.push(root);
   const agentDir = join(root, "agent");
-  const sessionDir = join(root, "sessions");
   const cwd = join(root, "workspace");
-  await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
+  await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
   const normalization = { roots: [root, await realpath(root)], stableIds: SCRIPTED_TOOL_CALL_IDS };
 
   const fixture = resolve(process.cwd(), "test-fixtures", "pi-sdk", "mcp-jsonrpc-fixture.mjs");
@@ -115,7 +114,6 @@ async function runBoundaryScenario(options: ScenarioOptions): Promise<BehaviorTr
   await Promise.all([
     writeFile(join(cwd, "notes.txt"), "boundary notes\n"),
     writeFile(join(agentDir, "settings.json"), JSON.stringify({
-      sessionDir,
       defaultTools: ["+codemode", "+tool_search"],
       compaction: { enabled: false, reserveTokens: 2_048, keepRecentTokens: 300 },
     })),
