@@ -30,7 +30,7 @@
         "cwd",
         "mcp_servers"
       ],
-      "promptHash": "sha256:7f7d628eccac90dc3b7e0e86b7e8d4c856059bfd98fdc64596bf4d362dc511e9"
+      "promptHash": "sha256:6b944369141308d4ab02e620fdd969f4cd15021d61e87529be0d813812c9badf"
     },
     {
       "repeats": 6,
@@ -62,7 +62,7 @@
         "cwd",
         "mcp_servers"
       ],
-      "promptHash": "sha256:7f7d628eccac90dc3b7e0e86b7e8d4c856059bfd98fdc64596bf4d362dc511e9"
+      "promptHash": "sha256:6b944369141308d4ab02e620fdd969f4cd15021d61e87529be0d813812c9badf"
     },
     {
       "repeats": 1,
