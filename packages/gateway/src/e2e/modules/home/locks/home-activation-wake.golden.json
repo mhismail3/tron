@@ -174,7 +174,7 @@
           "cwd",
           "tron"
         ],
-        "promptHash": "sha256:a91ab48b5e2a9a371c433f8d70d880f0c7e07d533be1d199152eceeea016f9ec",
+        "promptHash": "sha256:d77f4bf38b2ec170322494fa3f2e4345ca91379090e9c18abcb06e40f382f11e",
         "messages": [
           {
             "role": "user",
