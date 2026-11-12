@@ -107,7 +107,7 @@ it("real delegated workers cannot mutate standard automations", async () => {
   await gateway.settled(sessionId);
   expect(workerCalls).toBeGreaterThanOrEqual(2);
   expect(workerRefusal?.isError).toBe(true);
-  expect(JSON.stringify(workerRefusal?.content)).toContain("Delegated workers and their subagents cannot mutate automations");
+  expect(JSON.stringify(workerRefusal?.content)).toContain("Home tasks can't schedule work, launch or attach a mission, subscribe to a wake, control a run the task did not start, or use an unverified producer; do the work directly or report back.");
   expect((await phone.request("automation.list", {})).result.items).toHaveLength(0);
 });
 it("real interactive schedule mutations still require and obey confirmation", async () => {
