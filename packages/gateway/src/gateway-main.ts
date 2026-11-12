@@ -86,11 +86,7 @@ const moduleGraphLoadedAt = performance.now();
 const tronHome = resolveTronHome();
 const agentDir = resolveAgentDir(tronHome);
 await assertHomeLayout(tronHome);
-const configuredSessionDir = SettingsManager.create(process.cwd(), agentDir, { projectTrusted: false }).getSessionDir();
-const releaseRuntimeLock = await acquireAgentRuntimeLocks([
-  agentDir,
-  ...(configuredSessionDir ? [configuredSessionDir] : []),
-]);
+const releaseRuntimeLock = await acquireAgentRuntimeLocks([agentDir]);
 try {
 const config = await loadConfig();
 const delegatedRoot = delegatedArtifactRoot(config.tronHome);
