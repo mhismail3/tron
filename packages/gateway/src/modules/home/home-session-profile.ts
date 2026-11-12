@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import type { ProfileModelRuntime, SessionProfile } from "../../kernel/host/session-profile.js";
 import { HOME_TOOL_NAMES } from "./home-runtime-policy.js";
 import { GatewayError } from "../../errors.js";
@@ -19,7 +20,12 @@ export function homeSessionProfile(services: () => HomeSessionProfileServices): 
     extensions: [...HOME_MODULE_NAMES, "tron-home", "tron-home-research", "tron-web-research"],
     resources: {
       noExtensions: true,
-      agentsFilesOverride: ({ agentsFiles }) => ({ agentsFiles: agentsFiles.filter(file => file.path === services().globalRulesPath) }),
+      noContextFiles: true,
+      agentsFilesOverride: () => {
+        const path = services().globalRulesPath;
+        try { return { agentsFiles: [{ path, content: readFileSync(path, "utf8") }] }; }
+        catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return { agentsFiles: [] }; throw error; }
+      },
       systemPromptOverride: () => undefined,
       appendSystemPromptOverride: () => [],
     },

@@ -1172,6 +1172,27 @@ describe("Home task list RPC", () => {
 });
 
 describe("Home task production dispatch", () => {
+  it("reloads Home for global rules but not excluded workspace or system context", async () => {
+    const f = await fixture();
+    const globalRules = join(f.agentDir, "AGENTS.md");
+    await writeFile(globalRules, "GLOBAL_HOME_FRESHNESS_START\n");
+    const home = await f.registry.acquire(f.home.sessionId);
+    expect(home.runtime.session.systemPrompt).toContain("GLOBAL_HOME_FRESHNESS_START");
+    const before = f.signals.length;
+    for (const path of [join(home.cwd, "AGENTS.md"), join(f.agentDir, "SYSTEM.md"), join(f.agentDir, "APPEND_SYSTEM.md")]) {
+      await writeFile(path, "IGNORED_HOME_CONTEXT_MARKER\n");
+    }
+    const settingsPath = join(f.agentDir, "settings.json");
+    await writeFile(settingsPath, await readFile(settingsPath));
+    await waitFor(() => f.signals.slice(before).some(event => event.outcome === "resources-reload" && event.sessionId === home.id), "Home freshness observes the edit batch");
+    expect(f.signals.slice(before).filter(event => event.outcome === "resources-reload" && event.sessionId === home.id && event.reason === "completed")).toHaveLength(0);
+    expect(home.runtime.session.systemPrompt).not.toContain("IGNORED_HOME_CONTEXT_MARKER");
+    await writeFile(globalRules, "GLOBAL_HOME_FRESHNESS_UPDATED\n");
+    await waitFor(() => home.runtime.session.systemPrompt.includes("GLOBAL_HOME_FRESHNESS_UPDATED"), "global rules reload Home through the existing freshness owner");
+    expect(f.signals.slice(before).some(event => event.outcome === "resources-reload" && event.sessionId === home.id && event.reason === "completed")).toBe(true);
+    expect(home.runtime.session.systemPrompt).not.toContain("IGNORED_HOME_CONTEXT_MARKER");
+  });
+
   it("reserves a typed worker limit atomically and releases it after settlement", async () => {
     const f = await fixture();
     await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
