@@ -163,9 +163,14 @@ it("owns authorization and launchd recovery while preserving host identity and t
   expect((await readFile(service.hostKeyPath)).equals(key)).toBe(true);
   expect((await service.status()).hostKeys).toEqual(host);
   expect((await phone.ssh(`${tmux} display-message -p -t ${name} '#{pane_pid}'`)).trim()).toBe(shell);
+  const enabledPlist = await readFile(service.plistPath);
   await rename(service.hostKeyPath, `${service.hostKeyPath}.saved`);
   try {
-    expect((await service.status()).serviceState).toBe("failed");
+    await expect(service.restore()).rejects.toThrow(/automatic rotation is forbidden/u);
+    expect(await service.enabled()).toBe(true);
+    expect(await readFile(service.plistPath)).toEqual(enabledPlist);
+    expect(await service.status()).toMatchObject({ serviceState: "failed", detail: expect.stringContaining("automatic rotation is forbidden") });
+    await expect(lstat(service.hostKeyPath)).rejects.toThrow(/ENOENT/u);
     await expect(service.setEnabled(true)).rejects.toThrow(/automatic rotation is forbidden/u);
     await expect(service.recover()).rejects.toThrow(/automatic rotation is forbidden/u);
   } finally { await rename(`${service.hostKeyPath}.saved`, service.hostKeyPath); }

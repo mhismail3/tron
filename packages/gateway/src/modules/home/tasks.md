@@ -11,7 +11,7 @@ managed subagent provider and the iOS task surfaces. Signals: [home module](READ
 
 ## Persistence
 
-`HomeTaskStore` owns `<tronHome>/gateway/home/tasks/` (0700; files 0600, bounded, read without
+`HomeTaskStore` owns `<tronHome>/state/home/tasks/` (0700; files 0600, bounded, read without
 following symlinks).
 
 - The first dispatch publishes an empty `authorization.json`, then

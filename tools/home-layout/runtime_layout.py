@@ -493,7 +493,9 @@ def prepare(l, report, registry, journal, journal_path, reverse, locks, guards):
     terminal_layout.retire(l, sys.modules[__name__], report, layout, journal, journal_path, reverse, fence)
     for record, output in rewrites(l, report, registry, reverse, layout):
         path = Path(record["file"])
-        saved = phase[canonical_record(path, home, registry)]
+        saved = phase.get(canonical_record(path, home, registry))
+        if saved is None:
+            raise l.LayoutError("rewrite_changed")
         if record["before"] == saved["after"] and saved["before"] != saved["after"]:
             continue
         if record["before"] != saved["before"] or record["after"] != saved["after"] or record["source_sha256"] != saved["source_sha256"]:

@@ -98,9 +98,9 @@ unknown fields are rejected.
   Assistant rows name the physical `provider`/`modelId` and `thinkingLevel`.
 - `model.recent`: one Gateway-wide list of ≤ 12 `{provider,id,lastUsedAt}`, recorded
   only when user input starts a run in a user session; `models.recentChanged` on
-  change; `gateway/model-recents.json` is disposable (bad documents are replaced).
+  change; `state/model-recents.json` is disposable (bad documents are replaced).
 - Release dates overlay a persisted `models.dev` snapshot
-  (`<tronHome>/gateway/model-release-dates.json`, ≤ 32 MiB, ETag/Last-Modified) on
+  (`<tronHome>/cache/model-release-dates.json`, ≤ 32 MiB, ETag/Last-Modified) on
   `packages/gateway/src/providers/model-release-dates.json`, with aliases in
   `model-release-date-aliases.json`. Reads never do network I/O. Refresh after listen
   and every 12 h; `models.refresh` (60 s) adds `releaseDates: {updated[, error]}`

@@ -27,7 +27,7 @@ modules stay separate, so read-only consumers do not gain a lockfile dependency.
   `PI_CODING_AGENT_DIR` is the only override (the Debug supervisor strips it). Canonical JSONL, settings, credentials,
   packages, resources, retries and compaction stay there. The retired `~/.pi/agent`
   is never read, migrated or deleted. Stable and Debug never share these stores.
-- **Gateway state** is `<TRON_DATA_DIR|~/$TRON_HOME_NAME|~/.tron>/gateway/`.
+- **Gateway state** is `<TRON_DATA_DIR|~/$TRON_HOME_NAME|~/.tron>/state/`.
   `gateway.json` is an exact-shape document (16 KiB max, 256-byte machine ID, 1 KiB
   name); unsafe, malformed, oversized or unknown-shape files fail startup without rekeying.
 - Owner-only regular non-symlink files: `local-auth.json` (local wrapper credential,

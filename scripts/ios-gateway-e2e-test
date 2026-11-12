@@ -464,14 +464,14 @@ start_fresh_fixture() {
   require_gateway_node
   local tron_home="$run_root/tron" agent_dir="$run_root/agent" gateway_home="$run_root/home" workspace="$run_root/home/Workspace" port code pi_version
   rm -rf "$tron_home" "$agent_dir" "$gateway_home"
-  mkdir -p "$tron_home/gateway" "$workspace"
-  chmod 700 "$tron_home" "$tron_home/gateway" "$gateway_home" "$workspace"
+  mkdir -p "$tron_home/state" "$workspace"
+  chmod 700 "$tron_home" "$tron_home/state" "$gateway_home" "$workspace"
   gateway_home="$(realpath "$gateway_home")"
   workspace="$(realpath "$workspace")"
   printf '# E2E Project Rules\n\nKeep the boundary fixture honest.\n' >"$workspace/AGENTS.md"
   cp "$repo_root/packages/gateway/src/modules/apps/fixtures/InstalledPersistence.swift" "$workspace/InstalledPersistence.swift"
   cp "$repo_root/tools/web/apps/builds/Builds.swift" "$workspace/Builds.swift"
-  python3 - "$tron_home/gateway/gateway.json" <<'PY'
+  python3 - "$tron_home/state/gateway.json" <<'PY'
 import json, os, sys
 path = sys.argv[1]
 with open(path, "x", encoding="utf-8") as handle:
@@ -506,7 +506,7 @@ PY
 
   sleep 0.1
   for _ in {1..200}; do
-    [[ -s "$tron_home/gateway/enrollment.json" ]] \
+    [[ -s "$tron_home/state/enrollment.json" ]] \
       && curl -fsS "http://127.0.0.1:$port/health" >/dev/null 2>&1 \
       && break
     if ! kill -0 "$spawned_pid" 2>/dev/null; then
@@ -515,11 +515,11 @@ PY
     fi
     sleep 0.1
   done
-  [[ -s "$tron_home/gateway/enrollment.json" ]] \
+  [[ -s "$tron_home/state/enrollment.json" ]] \
     || { retire_spawned "$spawned_pid"; rm -f "$pid_file"; die "gateway fixture did not become ready"; }
   gateway_running \
     || { retire_spawned "$spawned_pid"; rm -f "$pid_file"; die "ready Gateway fixture does not match its owned command"; }
-  code="$(python3 - "$tron_home/gateway/enrollment.json" <<'PY'
+  code="$(python3 - "$tron_home/state/enrollment.json" <<'PY'
 import json, sys
 with open(sys.argv[1]) as handle:
     print(json.load(handle)["code"])

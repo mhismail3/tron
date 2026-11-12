@@ -35,6 +35,10 @@ performs cleanup nor grants deletion authority. `not pruned` records an owner ga
 | `logs/` | bounded Gateway, Mac, launcher, deploy and diagnostic logs, each rotated by its writer |
 | `internal/` | existing host-wide simulator/device/coordination leases, not installation data |
 
+`repo/ios` owns the remaining `internal/` and `internal/run/` containers: their
+children coordinate shared simulator/device leases and host slots. Mac onboarding
+and version markers belong to `mac-app/server` under `state/mac/`.
+
 Roots can be mixed: `state` is keep but contains scratch receipts and rebuildable queues.
 Observed settings, recent models, mission records, unread state and Mac setup evidence
 are keep because losing them is visible and nothing reconstructs them. Exports retain
@@ -169,8 +173,10 @@ Enabled SSH receives a plist for the new root/label. Gateway startup restores it
 automatically, generating current assigned-Tailnet-IPv4 config with its existing verified
 identity. Missing/corrupt identity never triggers rotation. Disabled SSH gets no enabled
 plist and stays off. Startup failure retains intent and emits
-`mac-terminal.startup-failed`; it never selects wildcard exposure or stops a foreign
-port owner. Inverse retires the new job, carries current intent back, restores old-root
+`mac-terminal.startup-failed`; the existing `macTerminal.status` RPC exposes
+`serviceState: "failed"` with the identity/job refusal detail. Chat remains available;
+SSH is visibly degraded, not silently disabled. It never selects wildcard exposure
+or stops a foreign port owner. Inverse retires the new job, carries current intent back, restores old-root
 config/plist and bootstraps only when enabled. An unpublished partial operation recovers
 original intent from the receipt. Native proofs use uniquely rooted disposable homes,
 launch agents and ports, never production labels.

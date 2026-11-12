@@ -22,8 +22,8 @@ custom models, Gateway updates, iOS installs, Mac replacement and diagnostics.
 | Install and lifecycle projections | `gateway-update-service.ts`, `ios-device-install-service.ts`, `ios-device-install-helper.ts`, `mac-replace-service.ts`, `diagnose.ts` |
 | Shared admission | `document-admission.ts` (`COMMAND_ID`, `admitTronSourceRoot`); [host control](host-control.md) |
 
-Durable stores: `<tronHome>/gateway/settings/` (`changes/`,
-`observed.json`, `gateway.json`), `<tronHome>/gateway/home/profile.json`
+Durable stores: `<tronHome>/state/settings/` (`changes/`,
+`observed.json`, `gateway.json`), `<tronHome>/state/home/profile.json`
 (Home's durable Session recipe) and the pi agent directory files it applies
 (`<tronHome>/agent/settings.json`, `trust.json`, `mcp.json`, `models.json`).
 

@@ -154,7 +154,7 @@ afterAll(async () => {
 describe("Mac Terminal", () => {
   it("enrolls through the logged path, logs in over Tailscale, survives the Gateway, and fails loudly on every refusal", async () => {
     const tronHome = join(root, "tron");
-    const sshDirectory = join(tronHome, "mac-terminal");
+    const sshDirectory = join(tronHome, "state/mac-terminal");
     const hostDirectory = sshDirectory;
     await mkdir(sshDirectory, { recursive: true, mode: 0o700 });
     const own = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOwnUserKeyOwnUserKeyOwnUserKeyOwnUser00 user@laptop";

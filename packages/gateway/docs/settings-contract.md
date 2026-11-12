@@ -26,7 +26,7 @@ consume it. Edge cases follow from a [foundation](#foundations), never a new rul
 | Scope | Store | Owner |
 |---|---|---|
 | Project | Admitted `.pi/settings.json` and `.pi/mcp.json` fields at the worktree root | Repository-owned, read-only; Tron never writes it, and Undo of a historical Project entry refuses |
-| Session/Home override | Session JSONL for ordinary chats and workers; `<tronHome>/gateway/home/profile.json` for Home's bounded durable recipe | Settings change path; the runtime lane owns SDK effects |
+| Session/Home override | Session JSONL for ordinary chats and workers; `<tronHome>/state/home/profile.json` for Home's bounded durable recipe | Settings change path; the runtime lane owns SDK effects |
 | Global | Agent and Gateway defaults, trust, notifications and SDK/schema defaults | Gateway and the underlying SDK stores; hand edits are outside writers |
 
 Precedence is Project > Session/Home override > Global, admitted by
@@ -147,7 +147,7 @@ tool (Home may name a `taskId`); `outside` (observed only).
 Outcomes name key, layer, status and redacted `before`/`after`; `review` includes the
 exact digest-bound before/after projection and whether a native tap is required. A chat's own Session scope
 changes only while idle; `setup.sessionDir` has no writer; Home Chat compaction values are
-refused. **Record:** `<tronHome>/gateway/settings/changes/`, append-only 500-entry segments
+refused. **Record:** `<tronHome>/state/settings/changes/`, append-only 500-entry segments
 listed in `index.json`, kept forever, paged by `settings.history` (a page may be empty with a
 `nextCursor`); entries hold actor, target, key, `before`/`after` (never credentials), reason,
 status, git result and `undoOf`/`applyAgainOf`. Existing persisted facts remain readable;
@@ -198,7 +198,7 @@ acceptance; supported edits announce through the existing fenced worker steer.
 ## Outside changes
 
 `OutsideChanges` (`settings-outside.ts`) compares stores with the values last observed
-(`<tronHome>/gateway/settings/observed.json`) on every read and on debounced directory events:
+(`<tronHome>/state/settings/observed.json`) on every read and on debounced directory events:
 the Mac `settings.json`, `trust.json`, `mcp.json`, `models.json` and each known project's `.pi/`
 files; first sight is the baseline. Known projects have no count bound: a project leaves
 observed state only when its root no longer exists on disk. A comparison that changed nothing but the
