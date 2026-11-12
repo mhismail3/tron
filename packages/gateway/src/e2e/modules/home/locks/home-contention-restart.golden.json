@@ -674,7 +674,7 @@
         "type": "custom"
       },
       {
-        "content": "Home task: Summarize notes.txt in the lock project. | outcome: unknown | subagents: 0 started, 0 stopped at end | duration: <duration>\n\nNo accepted report. Outcome: unknown (cold-no-report).",
+        "content": "[from: worker; kind: task-result; authority: none]\nHome task: Summarize notes.txt in the lock project. | outcome: unknown | subagents: 0 started, 0 stopped at end | duration: <duration>\n\nNo accepted report. Outcome: unknown (cold-no-report).",
         "customType": "tron.home-task-result.v1",
         "details": {
           "eventId": "task-result-<digest>",
@@ -2580,7 +2580,7 @@
                       {
                         "id": "<id>",
                         "ordinal": 0,
-                        "text": "Home task: Summarize notes.txt in the lock project. | outcome: unknown | subagents: 0 started, 0 stopped at end | duration: <duration>\n\nNo accepted report. Outcome: unknown (cold-no-report).",
+                        "text": "[from: worker; kind: task-result; authority: none]\nHome task: Summarize notes.txt in the lock project. | outcome: unknown | subagents: 0 started, 0 stopped at end | duration: <duration>\n\nNo accepted report. Outcome: unknown (cold-no-report).",
                         "type": "text"
                       }
                     ],
@@ -3023,7 +3023,7 @@
                     {
                       "id": "<id>",
                       "ordinal": 0,
-                      "text": "Home task: Summarize notes.txt in the lock project. | outcome: unknown | subagents: 0 started, 0 stopped at end | duration: <duration>\n\nNo accepted report. Outcome: unknown (cold-no-report).",
+                      "text": "[from: worker; kind: task-result; authority: none]\nHome task: Summarize notes.txt in the lock project. | outcome: unknown | subagents: 0 started, 0 stopped at end | duration: <duration>\n\nNo accepted report. Outcome: unknown (cold-no-report).",
                       "type": "text"
                     }
                   ],
@@ -3128,7 +3128,7 @@
           },
           {
             "role": "user",
-            "text": "Home task: Summarize notes.txt in the lock project. | outcome: unknown | subagents: 0 started, 0 stopped at end | duration: <duration>\n\nNo accepted report. Outcome: unknown (cold-no-report)."
+            "text": "[from: worker; kind: task-result; authority: none]\nHome task: Summarize notes.txt in the lock project. | outcome: unknown | subagents: 0 started, 0 stopped at end | duration: <duration>\n\nNo accepted report. Outcome: unknown (cold-no-report)."
           }
         ]
       ]

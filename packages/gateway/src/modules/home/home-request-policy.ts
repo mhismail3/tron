@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Agent, AgentMessage, PrepareRequest, StreamFn } from "../../kernel/pi/agent-core.js";
-import { getCurrentSystemMessage } from "../../kernel/pi/ai.js";
+import { getCurrentSystemMessage, type Tool } from "../../kernel/pi/ai.js";
 import {
   estimateTokens,
   type AgentSession,
@@ -281,7 +281,7 @@ export class HomeRequestPolicy {
     const cut = this.cut(projection, this.boundaryIndex(projection, activation), activation, view, "");
     const window = session.model?.contextWindow ?? 0;
     const memory = estimateTokens(cut.memory);
-    const other = cut.tail.reduce((total, item) => total + estimateTokens(item.message), 0) + estimateTokens(systemMessage(systemPrompt, cut.messages));
+    const other = cut.tail.reduce((total, item) => total + estimateTokens(item.message), 0) + estimateTokens(systemMessage(systemPrompt, { toolsAdded: session.agent.state.tools, timestamp: 0 }));
     const scale = this.calibration.factors(modelKey(session.model));
     const prefix = Math.ceil(memory * scale.memory + other * scale.other);
     const freshTokens = Math.floor(Math.max(0, window - HOME_RESERVE_TOKENS - prefix) / scale.other);
@@ -630,7 +630,7 @@ function requestSections(system: HomeSystemPrompt, cut: RewrittenContext, view: 
   });
   const summaries = view.text === "" ? 0 : view.text.split("\n").filter(line => MEMORY_SUMMARY_LINE.test(line)).length;
   return [
-    { id: "instructions", tokens: estimateTokens(systemMessage(system.instructions, cut.messages)) },
+    { id: "instructions", tokens: estimateTokens(systemMessage(system.instructions, getCurrentSystemMessage(cut.messages as never))) },
     { id: "profile", tokens: estimateTokens(systemMessage(`${system.profile}\n${system.turn}`)), count: system.profileNotes },
     { id: "memory", tokens: estimateTokens(cut.memory) - estimateTokens(systemMessage(system.turn)), count: summaries },
     { id: "chapter", tokens: chapterTokens, count: chapterEntries.size },
@@ -639,15 +639,13 @@ function requestSections(system: HomeSystemPrompt, cut: RewrittenContext, view: 
   ];
 }
 
-function systemMessage(text: string, messages?: readonly AgentMessage[]): AgentMessage {
-  const current = messages ? getCurrentSystemMessage(messages as never) : undefined;
+function systemMessage(text: string, current?: { toolsAdded?: Tool[]; timestamp: number }): AgentMessage {
   const toolsAdded = current?.toolsAdded;
-  return { role: "system", content: text, ...(toolsAdded ? { toolsAdded } : {}),
-    timestamp: current?.timestamp ?? (messages ? Date.now() : 0) } as AgentMessage;
+  return { role: "system", content: text, ...(toolsAdded ? { toolsAdded } : {}), timestamp: current?.timestamp ?? 0 } as AgentMessage;
 }
 
 function homeSystemFrame(messages: readonly AgentMessage[], system: string): AgentMessage[] {
-  return [systemMessage(system, messages), ...messages.filter(message => message.role !== "system")];
+  return [systemMessage(system, getCurrentSystemMessage(messages as never)), ...messages.filter(message => message.role !== "system")];
 }
 
 function excludedMessages(projection: SessionProjection, boundaryIndex: number): AgentMessage[] {

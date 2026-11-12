@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "../pi/coding-agent.js";
 import type { ExtensionOwner, ExtensionToolOrigin } from "../../protocol/types.js";
 import { withExtensionOwner } from "../host/extension-execution-context.js";
+import { injectedText } from "../host/injected-text.js";
 
 export interface ManagedMessageCapture {
   origin: ExtensionToolOrigin;
@@ -34,7 +35,7 @@ export function managedProducerAPI(pi: ExtensionAPI, owner: ExtensionOwner, inte
       const value = Reflect.get(target, key, receiver);
       if (typeof value !== "function") return value;
       if (key === "sendMessage") return (message: Parameters<ExtensionAPI["sendMessage"]>[0], options: Parameters<ExtensionAPI["sendMessage"]>[1]) => {
-        const canonicalContent = message.content;
+        const canonicalContent = injectedText(message.content ?? [], "pi-subagents", "subagent-notice", "none");
         const content = typeof canonicalContent === "string"
           ? [{ type: "text" as const, text: canonicalContent }]
           : [...(canonicalContent ?? [])];
@@ -59,7 +60,8 @@ export function managedProducerAPI(pi: ExtensionAPI, owner: ExtensionOwner, inte
         if (!internalWake) throw new Error("Managed internal wake has no RuntimeSlot admission owner");
         const messages = frame ?? [];
         frame = undefined;
-        return internalWake(content, options, owner, messages);
+        const wrapped = injectedText(content, "pi-subagents", "subagent-notice", "none");
+        return internalWake(wrapped, options, owner, messages);
       };
       return (...args: unknown[]) => withExtensionOwner(owner, () => Reflect.apply(value, target, args));
     },
