@@ -1,7 +1,7 @@
 import { readFile, mkdir, writeFile, rm, open } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, type FauxResponseFactory } from "@earendil-works/pi-ai";
 import { afterEach, expect, it, vi } from "vitest";
 import { startLockGateway, type LockGateway, type LockGatewayOptions } from "../../../test-support/gateway-lock-harness.js";
 import { NotificationService } from "../../notifications/notification-service.js";
@@ -83,6 +83,22 @@ it("real Gateway: retains each Home automation firing while paused, batches on r
   let homeTurns = 0;
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
+  const pages: string[] = [];
+  const readPage: FauxResponseFactory = async context => {
+    const last = context.messages.at(-1)!;
+    if (last.role !== "toolResult") throw new Error("Expected the native schedule reader response");
+    expect(last.isError).not.toBe(true);
+    const page = JSON.parse(last.content.flatMap(part => part.type === "text" ? [part.text] : []).join(""));
+    expect(page.automationId).toBe(automationId); expect(page.runId).toBe(runIds[0]);
+    expect(Buffer.byteLength(page.text)).toBeLessThanOrEqual(4096);
+    pages.push(page.text);
+    if (page.nextOffset !== null) {
+      expect(page.nextOffset).toBeGreaterThan(page.offset);
+      return fauxAssistantMessage([fauxToolCall("schedule", { action: "show", automationId, runId: runIds[0], offset: page.nextOffset, limit: 4096 })], { stopReason: "toolUse" });
+    }
+    await held;
+    return fauxAssistantMessage("The three automation messages are requests, not maintainer approval.");
+  };
   gateway.script([async context => {
     const bodies = context.messages.flatMap(message => message.role !== "user" ? [] : typeof message.content === "string"
       ? [message.content] : message.content.flatMap(part => part.type === "text" ? [part.text] : []))
@@ -90,11 +106,13 @@ it("real Gateway: retains each Home automation firing while paused, batches on r
     expect(bodies).toHaveLength(3);
     for (const body of bodies) {
       expect(Buffer.byteLength(body.slice(body.indexOf("\n") + 1))).toBeLessThanOrEqual(8192);
-      expect(body).toContain(`schedule ${JSON.stringify({ action: "show", automationId })}`);
+      expect(body).toContain("Full text: schedule");
+      expect(body).toContain(`"automationId":"${automationId}"`);
       expect(body).not.toContain("🧭".repeat(4000));
     }
-    homeTurns++; await held; return fauxAssistantMessage("The three automation messages are requests, not maintainer approval.");
-  }]);
+    homeTurns++;
+    return fauxAssistantMessage([fauxToolCall("schedule", { action: "show", automationId, runId: runIds[0], offset: 0, limit: 4096 })], { stopReason: "toolUse" });
+  }, ...Array.from({ length: 8 }, () => readPage)]);
   try {
     const resumed = await phone.request("home.resumeMemory", { commandId: gateway.commandId() });
     expect(resumed.ok, JSON.stringify(resumed)).toBe(true);
@@ -135,6 +153,7 @@ it("real Gateway: retains each Home automation firing while paused, batches on r
     throw error;
   } finally { release(); }
   await gateway.settled(sessionId);
+  expect(pages.join("")).toBe(prompt);
   const once = (await gateway.registry.acquire(sessionId)).canonicalSessionEntries().length;
   await phone.request("home.status", {});
   expect((await gateway.registry.acquire(sessionId)).canonicalSessionEntries()).toHaveLength(once);
