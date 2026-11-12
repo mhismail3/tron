@@ -1028,7 +1028,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         }
         dismissTopSheet(app)
 
-        for (title, marker, name) in [("Connections", "Paired Macs", "connections"), ("Push Notifications", "Input needed", "push")] {
+        XCTAssertFalse(app.buttons["settings-link-Push Notifications"].exists, "push alert policy is Global settings the agent changes, not an app sheet")
+        for (title, marker, name) in [("Connections", "Paired Macs", "connections")] {
             let link = app.buttons["settings-link-\(title)"]
             revealBelowNavigationBar(app, link)
             link.tap()
@@ -1036,8 +1037,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                 app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", text)).firstMatch
             }
             XCTAssertTrue(labelled(marker).waitForExistence(timeout: 30), "\(title) did not open: \(app.debugDescription)")
-            if title == "Connections" {
-                XCTAssertFalse(labelled("Input needed").exists, "push alerts moved to their own sheet")
+            do {
                 assertToolbarTint(app, title: "Connections")
                 let device = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Details for ' AND label CONTAINS ' on '")).firstMatch
                 XCTAssertTrue(device.waitForExistence(timeout: 30), app.debugDescription)

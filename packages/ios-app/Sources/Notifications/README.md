@@ -22,19 +22,22 @@ notification inbox.
   lost response may mean the Gateway already removed the grant; a re-allowed permission re-registers.
 - **Retries.** One bounded, profile-generation-owned operation: a fresh challenge and proof per
   attempt, two backoffs for timeouts and retryable 5xx, no commit across a profile or token change.
-  An assertion 401 or the typed invalid-key code clears only the App Attest key, once. Other
-  rejections stop without credential churn; APNs tokens are preserved. Registration reconciles on
+  An assertion 401 or the typed invalid-key code clears only the App Attest key, once. A 401 on a key
+  already marked rejected clears it once more automatically; the next such 401 stops, and that one
+  automatic retry is available again only after a successful registration or a relaunch. Other
+  rejections stop without credential churn; APNs tokens are preserved. Until the agent-requested
+  retry card exists, a stopped registration needs a relaunch or a successful reconcile to proceed. Registration reconciles on
   connection, foreground, profile, permission and token changes; Worker failure leaves it pending.
 - **Secrets.** App Attest keys, token bytes and grants use a Keychain namespace separate from Gateway
   credentials; an unreadable Keychain document is never overwritten with an empty one (push fails
-  closed while the Gateway stays usable). Settings shows only a fixed local stage label; the app accepts no relay URL or push
-  credential from settings.
+  closed while the Gateway stays usable). The app shows no push settings; it accepts no relay URL or push
+  credential from anywhere but the bundled configuration.
 - **Alerts.** No badge, background fetch or notification approval actions. Exact changes
   are reviewed in the shared in-chat native card. The bundled `tron-notification.caf` sound; ask pushes are Time
   Sensitive (entitlement in every build configuration). A foreground synchronized chat's
-  presentation lease suppresses its own agent-terminal alert at the Gateway. Push Notifications
-  settings toggle Input needed, Finished and Waiting through `push.registration.upsert`, rolling
-  back on failure.
+  presentation lease suppresses its own agent-terminal alert at the Gateway. Input needed,
+  Finished and Waiting are Global settings the agent changes; the app sends no policy with
+  `push.registration.upsert`.
 - **Icon.** iOS owns the small app icon in system notifications; there is no per-notification
   theme color or icon override in Tron's payload. Theme selection uses bundled alternate app
   icons through UIKit, not a notification extension or communication-avatar workaround. Apple
@@ -78,7 +81,7 @@ notification inbox.
 
 ## Signals
 
-Registration stage label only.
+None. The registration diagnostic stays in memory until the log upload (settings slice 3) carries it.
 
 ## Verify
 
@@ -86,7 +89,6 @@ Registration stage label only.
 scripts/tron-ios-test run --only-testing TronMobileUITests/TronNotificationInboxUITests \
   --only-testing TronMobileUITests/TronHomePushNavigationUITests \
   --only-testing TronMobileUITests/TronDeliveredNotificationUITests \
-  --only-testing TronMobileUITests/TronSmokeUITests/testPushReadinessAndRegistrationAreSeparateFromPolicyToggles
 scripts/validate-push-service-config.sh config/PushService.xcconfig
 ```
 
@@ -95,7 +97,7 @@ Notification Center local deliveries and production chat visibility over a fixtu
 `HostedDeliveredNotificationFixture` owns exact-ID cleanup. Neither suite proves APNs delivery.
 `TRON_PUSH_SERVICE_ORIGIN` is shared with the Mac payload, so a change installs the Mac first.
 Before shipping an identity, check its signed entitlements, pair a physical device, rotate its
-token by reinstalling, and verify revoke, offline retry and the Settings registration stage.
+token by reinstalling, and verify revoke and offline retry.
 
 ## Not here
 
