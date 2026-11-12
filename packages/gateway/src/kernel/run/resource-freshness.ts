@@ -20,6 +20,7 @@ interface PendingResource {
   lastAttemptIdle: number;
   paths: Map<string, "file" | "directory">;
   ready: boolean;
+  paused?: boolean;
   draining?: Promise<void> | undefined;
 }
 
@@ -53,6 +54,20 @@ export class ResourceFreshness {
   detach(retired: string | RuntimeSlot): void {
     for (const slot of this.states.keys()) if (typeof retired === "string" ? slot.id === retired : slot === retired) this.states.delete(slot);
     this.arm();
+  }
+
+  async pause(slot: RuntimeSlot): Promise<void> {
+    const state = this.states.get(slot);
+    if (!state) return;
+    state.paused = true;
+    await state.draining;
+  }
+
+  resume(slot: RuntimeSlot): void {
+    const state = this.states.get(slot);
+    if (!state) return;
+    state.paused = false;
+    this.apply(slot, state);
   }
 
   idle(slot: RuntimeSlot): void {
@@ -134,7 +149,7 @@ export class ResourceFreshness {
   }
 
   private apply(slot: RuntimeSlot, state: PendingResource): void {
-    if (state.applied >= state.wanted || state.draining || !state.ready || this.closed || slot.isDisposed) return;
+    if (state.applied >= state.wanted || state.draining || !state.ready || state.paused || this.closed || slot.isDisposed) return;
     state.draining = this.drain(slot, state).finally(() => {
       state.draining = undefined;
       if (state.applied < state.wanted && state.idles > state.lastAttemptIdle) this.apply(slot, state);
@@ -142,7 +157,7 @@ export class ResourceFreshness {
   }
 
   private async drain(slot: RuntimeSlot, state: PendingResource): Promise<void> {
-    while (!this.closed && this.states.get(slot) === state && state.applied < state.wanted) {
+    while (!this.closed && !state.paused && this.states.get(slot) === state && state.applied < state.wanted) {
       const target = state.wanted;
       const idles = state.idles;
       state.lastAttemptIdle = idles;
