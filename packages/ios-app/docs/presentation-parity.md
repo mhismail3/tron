@@ -184,7 +184,7 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   `TronTypography.settingsRowSubtext` (never smaller than rows), attached eight points below with
   `tronSettingsCaption`. Actionable failures use `TronSettingsNotice` with a trailing Retry.
 - **Saving.** Ordinary settings have no Save toolbar: valid edits use the renderer's typed
-  change path; failed reads show `TronSettingsNotice` with Reload. Authentication, package
+  change path; failed initial reads show a `Settings Unavailable` placeholder with Reload; refresh errors use `presentError`. Authentication, package
   installation and maintenance stay explicit commands.
 - **Setup cards.** New Session cards are one `TronSetupCardLabel` with
   `TronTypography.settingsRowSubtext`.
