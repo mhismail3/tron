@@ -277,7 +277,7 @@ export interface GatewayServiceDependencies {
   packages: PackageService;
   hookResources: HookResources;
   auth: AuthBroker;
-  globalProviderResources: Pick<GlobalProviderResources, "requestReload" | "withStableSnapshot">;
+  globalProviderResources: Pick<GlobalProviderResources, "requestReload" | "withStableSnapshot" | "refreshModels">;
   updateService?: GatewayUpdateService;
   iosDeviceInstallService?: IosDeviceInstallService;
   logger: GatewayLogger;
@@ -1917,12 +1917,6 @@ export class GatewayService {
         });
       case "models.custom.get":
         return safeJson(await this.dependencies.modelConfig.get());
-      case "models.custom.put":
-        return this.mutation(client, method, params, async () => {
-          const result = await this.asTronWrite([{ kind: "models" }], () => this.dependencies.modelConfig.put(params.document));
-          this.dependencies.broadcast("models.customChanged", {});
-          return safeJson(result);
-        });
       case "models.refresh": {
         const controller = new AbortController();
         const work = this.workRegistry?.begin({
@@ -2129,6 +2123,10 @@ export class GatewayService {
       if (key.effect === "next-compaction" && (change.layer === "global" || projectDir)) {
         this.dependencies.sessions.refreshCompactionPolicies(change.layer === "global" ? "global" : "project", projectDir ?? this.dependencies.config.tronHome);
       }
+    }
+    if (changes.some(change => change.key === "accounts.models.provider")) {
+      await this.dependencies.globalProviderResources.refreshModels();
+      this.dependencies.broadcast("models.customChanged", {});
     }
     this.dependencies.broadcast("settings.changed", safeJson({
       changeIds: changes.map(change => change.changeId), keys: [...new Set(changes.map(change => change.key))],

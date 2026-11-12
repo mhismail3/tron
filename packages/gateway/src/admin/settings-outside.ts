@@ -69,6 +69,7 @@ function observedFile(store: ObservedStore, agentDir: string): string {
 export function observedInstance(key: KeyDeclaration, layer: string, binding: Binding, qualifiers: Qualifiers, projectRoot: string | undefined): { store: ObservedStore; instance: string } | undefined {
   const fixed = key.fixed ?? {};
   if (binding.store === "mcp") return layer === "global" ? { store: { kind: "mcp" }, instance: instanceId(key.id, qualifiers) } : undefined;
+  if (binding.store === "models") return layer === "global" ? { store: { kind: "models" }, instance: instanceId(key.id, qualifiers) } : undefined;
   if (binding.store === "trust") {
     return qualifiers.project === undefined ? undefined : { store: { kind: "trust" }, instance: instanceId(key.id, { ...fixed, project: qualifiers.project }) };
   }

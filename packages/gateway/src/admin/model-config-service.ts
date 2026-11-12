@@ -1,15 +1,13 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ModelRuntime } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import { readJson, updateJsonLocked } from "../foundation/json.js";
-import { object } from "../util/validation.js";
+import { modelProviderOnDisk, type ModelProviderValue } from "../kernel/settings/model-provider-value.js";
 
 const MODEL_CONFIG_MAX_BYTES = 768 * 1_024;
 const MODEL_CONFIG_MAX_DEPTH = 64;
 const MODEL_CONFIG_MAX_NODES = 32_768;
 const MODEL_CONFIG_MAX_COLLECTION_MEMBERS = 8_192;
+const MODEL_CONFIG_MAX_PROVIDERS = 100;
 
 function assertBoundedDocument(
   value: unknown,
@@ -62,24 +60,12 @@ function redact(value: unknown, key = ""): unknown {
   return value;
 }
 
-function restoreRedacted(next: unknown, previous: unknown): unknown {
-  if (next === "<redacted>") {
-    if (previous === undefined) {
-      throw new GatewayError("invalid_request", "A redacted secret cannot be written without a canonical value");
-    }
-    return previous;
+function providersOf(document: Record<string, unknown>): Record<string, unknown> {
+  const providers = document.providers ?? {};
+  if (typeof providers !== "object" || providers === null || Array.isArray(providers)) {
+    throw new GatewayError("conflict", "Custom model configuration has no valid providers object");
   }
-  if (Array.isArray(next)) {
-    const prior = Array.isArray(previous) ? previous : [];
-    return next.map((value, index) => restoreRedacted(value, prior[index]));
-  }
-  if (typeof next === "object" && next !== null) {
-    const prior = typeof previous === "object" && previous !== null && !Array.isArray(previous)
-      ? previous as Record<string, unknown>
-      : {};
-    return Object.fromEntries(Object.entries(next).map(([key, value]) => [key, restoreRedacted(value, prior[key])]));
-  }
-  return next;
+  return providers as Record<string, unknown>;
 }
 
 export class ModelConfigService {
@@ -90,6 +76,42 @@ export class ModelConfigService {
   }
 
   async get(): Promise<{ document: unknown; redacted: boolean }> {
+    const document = await this.read();
+    const redactedDocument = redact(document);
+    return { document: redactedDocument, redacted: JSON.stringify(document) !== JSON.stringify(redactedDocument) };
+  }
+
+  async provider(id: string): Promise<ModelProviderValue | undefined> {
+    const raw = providersOf(await this.read())[id];
+    return raw === undefined ? undefined : modelProviderOnDisk(id, raw);
+  }
+
+  async setProvider(id: string, value: ModelProviderValue | undefined): Promise<void> {
+    try {
+      await updateJsonLocked<Record<string, unknown>>(this.path, { providers: {} }, (current) => {
+        assertBoundedDocument(current, "conflict");
+        const providers = { ...providersOf(current) };
+        const existing = providers[id];
+        if (existing !== undefined) modelProviderOnDisk(id, existing);
+        if (value === undefined) {
+          if (existing === undefined) return current;
+          delete providers[id];
+        } else {
+          if (existing === undefined && Object.keys(providers).length >= MODEL_CONFIG_MAX_PROVIDERS) {
+            throw new GatewayError("invalid_request", `At most ${MODEL_CONFIG_MAX_PROVIDERS} custom providers are allowed`);
+          }
+          providers[id] = value;
+        }
+        const next = { ...current, providers };
+        assertBoundedDocument(next, "conflict", true);
+        return next;
+      }, MODEL_CONFIG_MAX_BYTES);
+    } catch (error) {
+      boundedReadFailure(error);
+    }
+  }
+
+  private async read(): Promise<Record<string, unknown>> {
     let document: Record<string, unknown>;
     try {
       document = await readJson<Record<string, unknown>>(this.path, { providers: {} }, MODEL_CONFIG_MAX_BYTES);
@@ -97,48 +119,6 @@ export class ModelConfigService {
       boundedReadFailure(error);
     }
     assertBoundedDocument(document, "conflict");
-    const redactedDocument = redact(document);
-    return { document: redactedDocument, redacted: JSON.stringify(document) !== JSON.stringify(redactedDocument) };
-  }
-
-  async validate(raw: unknown): Promise<{ valid: true; providerCount: number }> {
-    const document = object(raw, "models document");
-    assertBoundedDocument(document, "invalid_request", true);
-    const providers = object(document.providers, "models.providers");
-    if (Object.keys(providers).length > 100) throw new GatewayError("invalid_request", "At most 100 custom providers are allowed");
-    for (const [providerId, value] of Object.entries(providers)) {
-      if (!/^[a-z0-9][a-z0-9._-]{0,119}$/i.test(providerId)) throw new GatewayError("invalid_request", `Invalid provider id: ${providerId}`);
-      const provider = object(value, `provider ${providerId}`);
-      if (provider.models !== undefined && !Array.isArray(provider.models)) throw new GatewayError("invalid_request", `provider ${providerId}.models must be an array`);
-      if (Array.isArray(provider.models) && provider.models.length > 500) throw new GatewayError("invalid_request", `provider ${providerId} has too many models`);
-    }
-
-    const root = await mkdtemp(join(tmpdir(), "tron-model-validation-"));
-    const candidate = join(root, "models.json");
-    try {
-      await writeFile(candidate, canonicalDocument(document, "invalid_request"), { mode: 0o600 });
-      const runtime = await ModelRuntime.create({ modelsPath: candidate, refreshOnCreate: false });
-      const error = runtime.getError();
-      if (error) throw new GatewayError("invalid_request", `Custom model configuration is invalid: ${error}`);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-    return { valid: true, providerCount: Object.keys(providers).length };
-  }
-
-  async put(raw: unknown): Promise<{ requiresRestart: true }> {
-    const document = object(raw, "models document");
-    await this.validate(document);
-    try {
-      await updateJsonLocked<Record<string, unknown>>(this.path, { providers: {} }, (current) => {
-        assertBoundedDocument(current, "conflict");
-        const restored = restoreRedacted(document, current) as Record<string, unknown>;
-        assertBoundedDocument(restored, "conflict", true);
-        return restored;
-      }, MODEL_CONFIG_MAX_BYTES);
-    } catch (error) {
-      boundedReadFailure(error);
-    }
-    return { requiresRestart: true };
+    return document;
   }
 }
