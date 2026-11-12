@@ -421,6 +421,87 @@ describe("typed changes and exact native acceptance", () => {
     expect(textOf(refused)).toBe("Default trust policy cannot be changed by home");
   });
 
+  it("an ordinary agent's Undo that restores image visibility shows one native card; decline and stale acceptance leave the store unchanged, and accept applies the reviewed change with its undoOf logged", async () => {
+    const f = await fixture();
+    const chat = await f.registry.create(f.cwd);
+    await chat.setModel(f.model.provider, f.model.id);
+    const service = settingsService(f);
+    const key = "context.images.block";
+    const blockValue = async () => ((await service.invoke(phone, "settings.resolve", { target: { kind: "global" }, keys: [key] })) as unknown as Resolution).keys[0]!.value;
+    const historyOf = async () => (await f.settings.settingsChanges.history({ key }, { kind: "ui", id: "maintainer" })).entries;
+    const toolResult = (id: string) => {
+      const entries = chat.canonicalSessionEntries();
+      const entry = entries.find(item => item.type === "message" && item.message.role === "toolResult" && item.message.toolCallId === id);
+      if (entry?.type !== "message" || entry.message.role !== "toolResult") {
+        throw new Error(`No canonical settings result for ${id}; canonical entries: ${JSON.stringify(entries.map(item => item.type === "message" ? item.message.role : item.type))}`);
+      }
+      return entry.message;
+    };
+    const turn = (args: Record<string, unknown>, id: string) => {
+      f.faux.setResponses([fauxAssistantMessage([fauxToolCall("settings", args, { id })], { stopReason: "toolUse" }), fauxAssistantMessage("Finished")]);
+      const prompting = chat.prompt(id);
+      let settled = false;
+      const done = prompting.then(() => waitFor(() => !chat.isBusy && !chat.hasActiveAgentRun || undefined, `${id} turn settled`)).then(() => { settled = true; });
+      const cards = waitFor(() => {
+        const pending = chat.snapshot().extensionPresentation.pendingInteractions;
+        return pending.length > 0 || settled ? pending : undefined;
+      }, `${id}: a native card or its settlement`);
+      return { cards, done };
+    };
+    const undoCard = async (changeId: string, id: string) => {
+      const attempt = turn({ action: "undo", changeId, reason: "Show images again" }, id);
+      const cards = await attempt.cards;
+      expect(cards).toHaveLength(1);
+      const card = cards[0]!;
+      if (card.method !== "change") throw new Error("Expected the shared change card");
+      expect(card.review).toMatchObject({ requiresTap: true, title: "Block images", reason: "Show images again" });
+      expect(JSON.parse(card.review.items[0]!.exact!)).toMatchObject({ target: { kind: "session", sessionId: chat.id }, key, layer: "global", before: true, after: false });
+      return { card, done: attempt.done };
+    };
+    const respond = (card: { id: string; hostEpoch: string; presentationRevision: number; review: { digest: string } }, commandId: string, approved: boolean) =>
+      service.invoke(phone, "extension.respond", { commandId, sessionId: chat.id, interactionId: card.id, hostEpoch: card.hostEpoch,
+        presentationRevision: card.presentationRevision, value: { digest: card.review.digest, approved } });
+    await service.invoke(phone, "settings.change", { commandId: `images-seed-${++sequence}`, target: { kind: "global" }, changes: [{ key, layer: "global", op: "set", value: false }] });
+    expect(await blockValue()).toBe(false);
+    const narrowed = turn({ action: "change", reason: "Block images for this chat", changes: [{ key, layer: "global", op: "set", value: true }] }, "images-narrow");
+    expect(await narrowed.cards).toEqual([]);
+    await narrowed.done;
+    expect(toolResult("images-narrow")).toMatchObject({ isError: false, details: { status: "applied", review: { requiresTap: false } } });
+    const narrowId = (toolResult("images-narrow").details as { changes: Array<{ changeId: string }> }).changes[0]!.changeId;
+    expect(await blockValue()).toBe(true);
+
+    const countBeforeDecline = (await historyOf()).length;
+    const declined = await undoCard(narrowId, "images-undo-decline");
+    await respond(declined.card, `images-decline-${++sequence}`, false);
+    await declined.done;
+    expect(toolResult("images-undo-decline")).toMatchObject({ details: { status: "declined", changes: [] } });
+    expect(chat.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
+    expect(await blockValue()).toBe(true);
+    expect(await historyOf()).toHaveLength(countBeforeDecline);
+
+    const stale = await undoCard(narrowId, "images-undo-stale");
+    await service.invoke(phone, "settings.change", { commandId: `images-stale-${++sequence}`, target: { kind: "global" }, changes: [{ key, layer: "global", op: "set", value: false }] });
+    await expect(respond(stale.card, `images-stale-accept-${++sequence}`, true)).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("changed since it was read") });
+    await stale.done;
+    expect(chat.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
+    expect(await blockValue()).toBe(false);
+    expect((await historyOf()).some(entry => entry.undoOf === narrowId)).toBe(false);
+
+    const renarrowed = turn({ action: "change", reason: "Block images again", changes: [{ key, layer: "global", op: "set", value: true }] }, "images-renarrow");
+    expect(await renarrowed.cards).toEqual([]);
+    await renarrowed.done;
+    const renarrowId = (toolResult("images-renarrow").details as { changes: Array<{ changeId: string }> }).changes[0]!.changeId;
+    const accepted = await undoCard(renarrowId, "images-undo-accept");
+    const acceptCommand = `images-accept-${++sequence}`;
+    await expect(respond(accepted.card, acceptCommand, true)).resolves.toEqual({ answered: true });
+    await accepted.done;
+    expect(toolResult("images-undo-accept")).toMatchObject({ isError: false, details: { status: "applied" } });
+    expect(await blockValue()).toBe(false);
+    const undone = (await historyOf()).filter(entry => entry.undoOf === renarrowId);
+    expect(undone).toHaveLength(1);
+    expect(undone[0]).toMatchObject({ actor: { kind: "ui", id: "device:phone" }, status: "applied", target: { kind: "session", sessionId: chat.id }, layer: "global", before: true, after: false, commandId: acceptCommand });
+  });
+
   it("applies a reversible routine edit in its original real tool turn without any approval reader or form", async () => {
     const f = await fixture();
     await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
