@@ -53,6 +53,12 @@ async function resumedHome(label: string, seedStale = true, initialNotifications
   let gateway = await startLockGateway(`home-tool-${label}`, { ...options, ...(initialNotifications ? {} : { notifications: undefined }) });
   owned.push(gateway);
   const phone = await gateway.connect("phone");
+  const originalRequest = phone.request.bind(phone);
+  phone.request = async (...args) => {
+    const result = await originalRequest(...args);
+    if (!result.ok) process.stderr.write(`HOME_ADMISSION_DIAGNOSTIC ${JSON.stringify(result)}\n`);
+    return result;
+  };
   await writeFile(join(gateway.agentDir, "AGENTS.md"), "GLOBAL_HOME_RULES_MARKER");
   const homeWorkspace = homeOwnerOf(gateway.registry).homeWorkspacePath();
   await mkdir(homeWorkspace, { recursive: true });
