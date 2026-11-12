@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import { fauxAssistantMessage, getSystemMessageText, fauxToolCall } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, getSystemMessageText } from "@earendil-works/pi-ai";
 import { startLockGateway, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
 import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
 import { waitFor } from "../../../test-support/wait-for.js";
@@ -83,9 +83,11 @@ it("real delegated workers cannot mutate standard automations", async () => {
   let homeCalls = 0; let workerCalls = 0;
   const step = (context: any) => {
     if (context.messages.some((message: any) => message.role === "system" && getSystemMessageText(message).includes("This is a finite Home task"))) {
-      return workerCalls++ === 0
-        ? fauxAssistantMessage([fauxToolCall("schedule", create)], { stopReason: "toolUse" })
-        : fauxAssistantMessage([fauxToolCall("report", { resultId: "worker-authority", outcome: "final", text: "Mutation was refused.", evidence: ["Observed schedule refusal"] })], { stopReason: "toolUse" });
+      if (workerCalls++ === 0) return fauxAssistantMessage([fauxToolCall("schedule", create)], { stopReason: "toolUse" });
+      const refusal = context.messages.findLast((message: any) => message.role === "toolResult" && message.toolName === "schedule");
+      expect(refusal?.isError).toBe(true);
+      expect(JSON.stringify(refusal?.content)).toContain("Delegated workers and their subagents cannot mutate automations");
+      return fauxAssistantMessage([fauxToolCall("report", { resultId: "worker-authority", outcome: "final", text: "Mutation was refused.", evidence: ["Observed schedule refusal"] })], { stopReason: "toolUse" });
     }
     return homeCalls++ === 0
       ? fauxAssistantMessage([fauxToolCall("delegate", { taskId: "worker-authority", title: "Worker authority", intent: "Attempt schedule once, then report.", target: gateway.cwd })], { stopReason: "toolUse" })
