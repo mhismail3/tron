@@ -1066,8 +1066,13 @@ describe("outside changes to MCP servers and custom models", () => {
     }
     expect(await providers()).toEqual({ "tron-provider": provider });
     const saved = await providers();
+    const beforeModels = (await outsideEntries(f)).length;
     await writeJson(modelsPath, { providers: { ...saved, "hand-provider": { ...provider, baseUrl: "https://hand-models.invalid/v1", apiKey: secret } } });
     await f.settingsModel.resolve(global);
+    await until("publication: custom model provider hand-provider", () => f.published("accounts.models.provider", ["provider", "hand-provider"]));
+    expect((await outsideEntries(f)).length).toBe(beforeModels + 1);
+    expect((await outsideEntries(f))[0]).toMatchObject({ key: "accounts.models.provider", qualifiers: { provider: "hand-provider" }, added: true,
+      presentation: { label: "Custom model provider hand-provider", section: "accounts" } });
     const handBytes = await readFile(modelsPath, "utf8");
     for (const request of [set("hand-provider", { ...provider, baseUrl: "https://elsewhere.invalid/v1" }), { key: "accounts.models.provider", qualifiers: { provider: "hand-provider" }, layer: "global" as const, op: "unset" as const }]) {
       const error = await f.settingsChanges.change(global, [request], ui).catch((caught: unknown) => caught);
