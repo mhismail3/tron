@@ -34,7 +34,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:5baa16c3ca38e277adf7852fc059d1b9e6c818bb5511f014a835684fcd3b39cf",
+        "promptHash": "sha256:45efc2439ae02a2b289012f0fd530f5cb0fa84694805fd7121868b9a2913c578",
         "messages": [
           {
             "role": "user",
@@ -78,7 +78,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:5baa16c3ca38e277adf7852fc059d1b9e6c818bb5511f014a835684fcd3b39cf",
+        "promptHash": "sha256:45efc2439ae02a2b289012f0fd530f5cb0fa84694805fd7121868b9a2913c578",
         "messages": [
           {
             "role": "user",
@@ -134,7 +134,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:5baa16c3ca38e277adf7852fc059d1b9e6c818bb5511f014a835684fcd3b39cf",
+        "promptHash": "sha256:45efc2439ae02a2b289012f0fd530f5cb0fa84694805fd7121868b9a2913c578",
         "messages": [
           {
             "role": "user",
@@ -177,7 +177,7 @@
         "messages": [
           {
             "role": "user",
-            "text": "Summarize notes.txt in the lock project.\n\nWorker choice: model tron-lock-home-activation-wake/faux-1 (same as Home); thinking off (same as Home).\n\nWorker at start: tron-lock-home-activation-wake/faux-1; thinking off.\n\nThis is a finite Home task. Send a short checkin at milestones and about every 30 minutes (step, done, next; optional blocker/refs). It does not pause or finish work. Use needsAttention only for blockers needing Home; it is rate-limited. Use report with explicit evidence to finish. A normal reply is not a task result."
+            "text": "Summarize notes.txt in the lock project.\n\nWorker choice: model tron-lock-home-activation-wake/faux-1 (same as Home); thinking off (same as Home).\n\nWorker at start: tron-lock-home-activation-wake/faux-1; thinking off."
           }
         ]
       }

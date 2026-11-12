@@ -391,9 +391,7 @@ describe("gateway/home scenario lock", () => {
       { ...ASSISTANT, stopReason: "stop", content: [{ text: "Delegated the lock task.", type: "text" }] },
       { ...ASSISTANT, stopReason: "stop", content: [{ text: "The lock task reported: lock notes.", type: "text" }] },
     ]);
-    const WORKER_PROMPT = `${INTENT}\n\nWorker at start: ${MODEL}; thinking off.\n\n${WORKER_MARKER} Send a short checkin at milestones and about every 30 minutes `
-      + "(step, done, next; optional blocker/refs). It does not pause or finish work. Use needsAttention only for blockers needing Home; it is rate-limited. "
-      + "Use report with explicit evidence to finish. A normal reply is not a task result.";
+    const WORKER_PROMPT = `${INTENT}\n\nWorker at start: ${MODEL}; thinking off.`;
     const REPORT = { evidence: ["read notes.txt"], outcome: "final", resultId: "lock-result", text: "The notes say: lock notes." };
     expect(workerSessionJsonl.flatMap(message), "the worker's persisted messages").toEqual([
       { content: [{ text: WORKER_PROMPT, type: "text" }], role: "user" },
@@ -472,8 +470,8 @@ describe("gateway/home scenario lock", () => {
       generation: 1, homeId: "<id>", policyRevision: 3, routeGeneration: 1, updatedAt: "<timestamp>", version: 2 });
     expect(stable(await gateway.file(join(homeRoot, "tasks", taskFile!))), "the persisted task").toEqual(TASK);
 
-    const requests = recorded.providerRequests as unknown as Array<{ messages: readonly TraceValue[] }>;
-    const isWorker = (request: { messages: readonly TraceValue[] }) => JSON.stringify(request.messages).includes(WORKER_MARKER);
+    const requests = recorded.providerRequests as unknown as Array<{ messages: readonly TraceValue[]; tools: readonly string[] }>;
+    const isWorker = (request: { tools: readonly string[] }) => request.tools.includes("report");
     const trace = stabilize({
       lock: LOCK,
       providerRequests: {

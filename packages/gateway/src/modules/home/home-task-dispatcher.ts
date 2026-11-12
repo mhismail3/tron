@@ -568,7 +568,7 @@ export class HomeTaskDispatcher {
       deadline = dispatch.armDeadline();
       const bounded = dispatch.enforceDeadline({ operationId, completion: terminal, cancel: cancellation }, deadline);
       work.transition("foreground-agent-operation", slot.id);
-      const admitted = slot.prompt(`${task.intent.text}${appliedChoice}\n\nThis is a finite Home task. Send a short checkin at milestones and about every 30 minutes (step, done, next; optional blocker/refs). It does not pause or finish work. Use needsAttention only for blockers needing Home; it is rate-limited. Use report with explicit evidence to finish. A normal reply is not a task result.`, launch.resume?.images ?? [], undefined, undefined, undefined,
+      const admitted = slot.prompt(`${task.intent.text}${appliedChoice}`, launch.resume?.images ?? [], undefined, undefined, undefined,
         { operationId, signal: reports.signal, origin: { kind: "gateway", ownerId: task.taskId, title: "Home task", confidence: "boundary" }, onTerminal: resolve });
       void admitted.catch(async () => {
         await cancellation("admission-refused").catch(() => {});
