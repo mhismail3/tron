@@ -1315,11 +1315,6 @@ extension AppModel {
         }
     }
 
-    func presentConfigurationActionError(_ error: Error) {
-        guard !(error is CancellationError) else { return }
-        surface(error)
-    }
-
     func start(scenePhase: AppScenePhase = .active) async {
         seedLaunchScenePhase(scenePhase)
         await client.installAppLog(appLog)
