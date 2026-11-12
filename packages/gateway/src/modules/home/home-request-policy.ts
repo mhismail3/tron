@@ -281,7 +281,7 @@ export class HomeRequestPolicy {
     const cut = this.cut(projection, this.boundaryIndex(projection, activation), activation, view, "");
     const window = session.model?.contextWindow ?? 0;
     const memory = estimateTokens(cut.memory);
-    const other = cut.tail.reduce((total, item) => total + estimateTokens(item.message), 0) + estimateTokens(systemMessage(systemPrompt, cut.messages));
+    const other = cut.tail.reduce((total, item) => total + estimateTokens(item.message), 0) + estimateTokens(systemMessage(systemPrompt, session.agent.state.messages));
     const scale = this.calibration.factors(modelKey(session.model));
     const prefix = Math.ceil(memory * scale.memory + other * scale.other);
     const freshTokens = Math.floor(Math.max(0, window - HOME_RESERVE_TOKENS - prefix) / scale.other);
