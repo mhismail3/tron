@@ -1179,6 +1179,34 @@ describe("Home task list RPC", () => {
 });
 
 describe("Home task production dispatch", () => {
+  it("reserves a typed worker limit atomically and releases it after settlement", async () => {
+    const f = await fixture();
+    await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
+    const owner = homeOwnerOf(f.registry);
+    await owner.pauseMemory();
+    const current = await f.settings.settingsModel.resolve({ kind: "home" }, undefined, ["run.workers.maxConcurrent"]);
+    expect(current.keys[0]!.value).toBe(4);
+    await f.settings.settingsChanges.change({ kind: "home" }, [{ key: "run.workers.maxConcurrent", layer: "global", op: "set", value: 1 }],
+      { actor: { kind: "ui", id: "fixture" }, commandId: "worker-limit-one" });
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const respond: FauxResponseFactory = async () => { await held; return fauxAssistantMessage([reportCall("bounded-worker")], { stopReason: "toolUse" }); };
+    f.faux.setResponses([respond, respond]);
+    const outcomes = await Promise.allSettled([dispatch(f, "cap-first"), dispatch(f, "cap-second")]);
+    try {
+      expect(outcomes.filter(result => result.status === "fulfilled")).toHaveLength(1);
+      const refused = outcomes.find(result => result.status === "rejected") as PromiseRejectedResult;
+      expect(refused.reason).toMatchObject({ code: "conflict", message: expect.stringContaining("Home worker limit 1") });
+    } finally {
+      release();
+      await Promise.all(outcomes.flatMap(result => result.status === "fulfilled" ? [result.value.completion] : []));
+    }
+    f.faux.setResponses([fauxAssistantMessage([reportCall("released-worker")], { stopReason: "toolUse" })]);
+    const after = await (await dispatch(f, "cap-after")).completion;
+    expect(after.terminalEvidence?.outcome).toBe("final");
+    evidence.push({ case: "typed-worker-limit", limit: 1, admitted: outcomes.filter(result => result.status === "fulfilled").length, after: after.taskId });
+  }, 30_000);
+
   it.each(["file", "directory"] as const)("settles unknown without replay when the live canonical %s sync is refused", async target => {
     const f = await fixture();
     let release!: () => void;
