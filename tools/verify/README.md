@@ -144,8 +144,8 @@ cases; a file with no executed passes cannot hide beside a passing neighbour.
 child-handoff layers plus this repository's rules and Home profile index. Diagnostics name
 layer/source owners without printing their text. Sentence comparison is normalized and
 near-duplicate (Jaccard ≥0.8); budgets and byte/4 token estimates are review signals, not
-provider counts. Source presence checks locate duplicated check-in/approval prose and the current
-kind-filtered Home declaration expression; they do not prove runtime wiring. `--input <json>` accepts `{layers, sources}` for isolated regression
+provider counts. Source checks count each check-in/approval literal, including repeats within one owner,
+and locate the current kind-filtered Home declaration expression; they do not prove runtime wiring. `--input <json>` accepts `{layers, sources}` for isolated regression
 proofs; errors exit 2, diagnostics exit 1.
 
 Verify runs `context audit --report-only` for Gateway changes and audit-tool edits while
