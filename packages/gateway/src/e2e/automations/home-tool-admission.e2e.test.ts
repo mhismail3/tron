@@ -38,8 +38,8 @@ const options = { automations: true, home: { memorySummarizer: () => async () =>
 };
 const originalTools = ["ask_user", "display", "notify", "zoom", "date", "memory_search", "session_search",
   "session_read", "delegate", "web_search", "settings", "task", "profile"];
-const readOnlyTools = [...originalTools, "read", "grep", "find", "ls", "schedule", "obligation", "projects"].sort();
-const userTools = [...readOnlyTools, "write", "edit", "bash", "computer"].sort();
+const nonMaintainerTools = [...originalTools, "read", "grep", "find", "ls", "schedule", "obligation", "projects"].sort();
+const userTools = [...nonMaintainerTools, "write", "edit", "bash", "computer"].sort();
 const WAKE_REFUSAL = "This tool requires the current maintainer turn; wake content cannot grant file, shell or computer authority.";
 
 async function refusedCalls(gateway: LockGateway, sessionId: string): Promise<Array<{ tool: string | undefined; text: string }>> {

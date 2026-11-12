@@ -4,7 +4,7 @@ import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import type { ProfileNoteRecord } from "../../modules/home/profile-note-contract.js";
 import { waitFor } from "../../../test-support/wait-for.js";
-import { PROVIDER, MODEL_ID, PROFILE_HEADING, readProfilePage, profileReadResult, report, retireFixtures, holdTerminalWrite, recordCase, Step, fixture, homeActivation, profileResults, profileCall, say, profileSection, latestMaintainerEntryId, profileNotes, noteAt, maintainer, command, listed, itemText, history, change, undo } from "../../../test-support/home-profile-fixture.js";
+import { PROVIDER, MODEL_ID, PROFILE_HEADING, readProfilePage, profileReadResult, report, retireFixtures, holdTerminalWrite, recordCase, Step, fixture, homeActivation, profileResults, profileCall, say, profileSection, latestMaintainerEntryId, profileNotes, noteAt, maintainer, command, listed, itemText, history, change, undo, homeHead } from "../../../test-support/home-profile-fixture.js";
 
 describe("Tron Home learned profile", () => {
   it("F1/F2: learn preserves evidence; the next activation indexes it and an explicit read carries it verbatim", async () => {
@@ -97,8 +97,8 @@ describe("Tron Home learned profile", () => {
     const [replaced] = supersede.saved;
     expect(replaced).toMatchObject({ status: "saved", action: "supersede", supersededId: original!.id, previousText: "Use metric units everywhere." });
     const afterSupersede = await homeActivation(f, "after supersede", [say("ok")]);
-    expect(afterSupersede.first.systemPrompt).not.toContain(`note ${original!.id}`);
-    expect(afterSupersede.first.systemPrompt).not.toContain("Use metric units, and state conversions.");
+    expect(homeHead(afterSupersede.first)).not.toContain(`note ${original!.id}`);
+    expect(homeHead(afterSupersede.first)).not.toContain("Use metric units, and state conversions.");
     expect((await readProfilePage(f, "inferred", undefined, true)).items).toEqual([expect.objectContaining({ id: original!.id, status: "superseded" }), expect.objectContaining({ id: (replaced as { id: string }).id, text: "Use metric units, and state conversions.", status: "active" })]);
     const replacement = await noteAt(f, (replaced as { id: string }).id);
     expect(replacement.relations).toEqual([{ type: "supersedes", recordId: original!.id, revisionId: refined.revisionId }]);
@@ -114,7 +114,7 @@ describe("Tron Home learned profile", () => {
       { id: replacement.id, kind: "preference", text: "Use metric units, and state conversions.", confirmed: true, status: "retired" },
     ]);
     const afterRetire = await homeActivation(f, "after retire", [say("ok")]);
-    expect(afterRetire.first.systemPrompt).not.toContain(`note ${replacement.id}`);
+    expect(homeHead(afterRetire.first)).not.toContain(`note ${replacement.id}`);
     const retired = await noteAt(f, replacement.id);
     expect(retired.content.retired).toBe(true);
     expect(retired.provenance.reason).toBe("The maintainer changed topic.");
@@ -166,7 +166,7 @@ describe("Tron Home learned profile", () => {
     const [item] = await profileNotes(f);
     await change(f, [{ action: "confirm", id: item!.id, expectedRevision: item!.revisionId }], "native-confirm");
     const next = await homeActivation(f, "after confirm", [say("ok")]);
-    expect(next.first.systemPrompt).not.toContain(item!.id);
+    expect(homeHead(next.first)).not.toContain(item!.id);
     expect((await readProfilePage(f)).items).toEqual([expect.objectContaining({ id: item!.id, kind: "delegation-default", confirmed: true, status: "active" })]);
     expect((await noteAt(f, item!.id)).content.tags).toEqual(["home-profile", "kind-delegation-default"]);
     expect((await noteAt(f, item!.id)).content.profile).toEqual({ version: 2, path: ["inferred", "review"] });
@@ -175,7 +175,7 @@ describe("Tron Home learned profile", () => {
     await change(f, [{ action: "refine", id: item!.id, expectedRevision: confirmed.revisionId,
       text: "Delegate reviews to a cheaper model, by default." }], "native-refine");
     const corrected = await homeActivation(f, "after correction", [say("ok")]);
-    expect(corrected.first.systemPrompt).not.toContain("Delegate reviews to a cheaper model, by default.");
+    expect(homeHead(corrected.first)).not.toContain("Delegate reviews to a cheaper model, by default.");
     expect((await readProfilePage(f)).items).toEqual([expect.objectContaining({ id: item!.id, text: "Delegate reviews to a cheaper model, by default.", confirmed: true, status: "active" })]);
     expect((await noteAt(f, item!.id)).content.tags).toEqual(["home-profile", "kind-delegation-default"]);
     expect((await noteAt(f, item!.id)).content.profile).toEqual({ version: 2, path: ["inferred", "review"] });
