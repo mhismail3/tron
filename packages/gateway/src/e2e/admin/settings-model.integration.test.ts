@@ -132,7 +132,6 @@ function piEffective(manager: SettingsManager, model: { provider: string; id: st
     "context.images.autoResize": manager.getImageAutoResize(),
     "context.images.block": manager.getBlockImages(),
     "permissions.defaultProjectTrust": manager.getDefaultProjectTrust(),
-    "setup.installTelemetry": manager.getEnableInstallTelemetry(),
   };
 }
 
@@ -144,10 +143,15 @@ describe("settings.resolve", () => {
       const project = join(root, "project");
       await mkdir(agentDir, { recursive: true });
       await mkdir(join(project, ".pi"), { recursive: true });
-      await writeFile(join(agentDir, "settings.json"), JSON.stringify({ cacheWarming: "off", defaultProjectTrust: "never", httpProxy: "http://mac.invalid" }));
+      await writeFile(join(agentDir, "settings.json"), JSON.stringify({ cacheWarming: "off", defaultProjectTrust: "never", httpProxy: "http://mac.invalid", enableInstallTelemetry: true }));
       await writeFile(join(project, ".pi", "settings.json"), JSON.stringify({ cacheWarming: "idle", defaultProjectTrust: "always", httpProxy: "http://project.invalid" }));
       const pi = SettingsManager.create(project, agentDir, { projectTrusted: true });
       expect([pi.getCacheWarmingMode(), pi.getDefaultProjectTrust(), pi.getGlobalSettings().httpProxy]).toEqual(["off", "never", "http://mac.invalid"]);
+      const product = await createSettingsManager(TEST_SETTINGS_SCHEMA, project, agentDir, true);
+      expect(product.getEnableInstallTelemetry()).toBe(false);
+      product.reload();
+      expect(product.getEnableInstallTelemetry()).toBe(false);
+      expect(TEST_SETTINGS_SCHEMA.KEYS.map(key => key.id)).not.toContain("setup.installTelemetry");
     } finally { await rm(root, { recursive: true, force: true }); }
   });
   it("changes bounded Home profile fields through the canonical change path and reads them from profile.json", async () => {

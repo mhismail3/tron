@@ -437,8 +437,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                         return key != "model.thinking[role=chat]" && !key.hasPrefix("context.")
                     }
                 + (ProcessInfo.processInfo.arguments.contains("-settings-sheet-theme-review") ? HostedSettingsReviewSchema.sheetThemeKeys : [])
-                + [HostedSettingsReviewSchema.key("setup.sessionDir", "setup", "Session folder", .string("/workspace/sessions"), "/workspace/sessions", "readOnly", help: "Where chats are stored. Applies after a restart."),
-                   HostedSettingsReviewSchema.key("setup.installTelemetry", "setup", "Install telemetry", .bool(false), "Off", "toggle", order: 20)]
+                + [HostedSettingsReviewSchema.key("setup.sessionDir", "setup", "Session folder", .string("/workspace/sessions"), "/workspace/sessions", "readOnly", help: "Where chats are stored. Applies after a restart.")]
             if ProcessInfo.processInfo.arguments.contains("-six-ui-surface") {
                 return .object(["keys": .array(rows), "sections": .array(HostedSettingsReviewSchema.sections)])
             }
