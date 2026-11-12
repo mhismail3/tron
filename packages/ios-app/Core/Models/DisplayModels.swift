@@ -397,7 +397,7 @@ package enum DisplayRemoteURLPolicy {
         let components = host.split(separator: ".", omittingEmptySubsequences: false)
         guard components.count == 4 else { return true }
         let octets = components.compactMap { UInt8($0) }
-        guard octets.count == 4 else { return false }
+        guard octets.count == 4 else { return true }
         let a = Int(octets[0]), b = Int(octets[1]), c = Int(octets[2])
         return !(a == 0 || a == 10 || a == 127 || a >= 224
             || (a == 100 && b >= 64 && b <= 127)
