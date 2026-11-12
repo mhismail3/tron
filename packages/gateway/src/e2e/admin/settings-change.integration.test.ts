@@ -178,7 +178,7 @@ describe("settings-change fixture teardown", () => {
     await mkdir(cwd);
     await f.trust.set(cwd, true);
     const slot = await f.registry.create(cwd);
-    const marker = join(f.tronHome, "gateway", "runtime-markers", `${slot.id}.json`);
+    const marker = join(f.tronHome, "state", "runtime-markers", `${slot.id}.json`);
     await mkdir(join(marker, "blocker"), { recursive: true });
     try {
       const error = await disposeCase(owned).then(() => undefined, (caught: unknown) => caught);
@@ -372,7 +372,7 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
   });
   owner.registries.push(registry);
   await registry.initialize();
-  const privateService = new MacTerminalService(tronHome, { launchAgentDirectory: join(root, "agents") });
+  const privateService = new MacTerminalService(join(tronHome, "state/mac-terminal"), { launchAgentDirectory: join(root, "agents") });
   const macTerminalKeys = new MacTerminalKeys(privateService.root);
   const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: privateService }));
   const record = new SettingsChangeRecord(tronHome, options.segmentEntries);
@@ -551,7 +551,7 @@ describe("settings.change", () => {
 
   caseIt("rolls back every store when a change in the same request fails, leaving both unchanged", async owner => {
     const f = await fixture(owner);
-    const homeDirectory = join(f.tronHome, "gateway", "home");
+    const homeDirectory = join(f.tronHome, "state", "home");
     await mkdir(homeDirectory, { recursive: true });
     await writeFile(join(homeDirectory, "profile.json"), "{}\n");
     await chmod(homeDirectory, 0o500);
@@ -584,7 +584,7 @@ describe("settings.change", () => {
       { key: "model.thinking[role=worker]", layer: "session", op: "set", value: "low" },
     ] as Parameters<SettingsChangePath["change"]>[1];
     const context = { actor: { kind: "ui" as const, id: "device:phone" }, reason: "Trust the project and lower worker thinking" };
-    const homeDirectory = join(f.tronHome, "gateway", "home");
+    const homeDirectory = join(f.tronHome, "state", "home");
     await mkdir(homeDirectory, { recursive: true });
     await writeFile(join(homeDirectory, "profile.json"), "{}\n");
     await chmod(homeDirectory, 0o500);
@@ -1082,10 +1082,10 @@ describe("every key at every allowed layer", () => {
       const stores = {
         layers: ["session", "home", "project", "global", "default"], global: await json(join(f.agentDir, "settings.json")),
         project: { root: project, document: await json(join(project, ".pi", "settings.json")), applied: true },
-        home: await json(join(f.tronHome, "gateway", "home", "profile.json")),
+        home: await json(join(f.tronHome, "state", "home", "profile.json")),
         trust: await json(join(f.agentDir, "trust.json")) as Record<string, boolean>,
         macTerminal: await f.macTerminalKeys.read(),
-        gateway: await json(join(f.tronHome, "gateway", "settings", "gateway.json")),
+        gateway: await json(join(f.tronHome, "state", "settings", "gateway.json")),
         session: slot.settingsSessionLayer(),
       } as unknown as SettingsStores;
       const qualified = binding.store === "pi" && binding.qualified !== undefined && qualifiers.model !== undefined;

@@ -51,7 +51,7 @@ def fixture_main(root, arguments):
         def verify_installed(self, require_bundled=False):
             reinstall.require((root / 'resumed').exists(), 'fixture-not-resumed')
             if require_bundled:
-                reinstall.require(not (root / 'home/.tron/gateway/payloads/stable').exists(),
+                reinstall.require(not (root / 'home/.tron/state/payloads/stable').exists(),
                                   'fixture-external-payload-present')
 
     try:
@@ -206,9 +206,9 @@ class ReinstallWindow(unittest.TestCase):
         self.cli('--confirm-offline', error='source-changed')
         (tron / 'logs/unregistered.txt').write_text('logs/unregistered.txt')
         self.cli('--confirm-offline')
-        (tron / 'gateway/devices.json').write_text('late writer changed a backed-up record')
+        (tron / 'state' / 'devices.json').write_text('late writer changed a backed-up record')
         self.cli('--confirm-offline', error='source-changed')
-        (tron / 'gateway/devices.json').write_text('gateway/devices.json')
+        (tron / 'state' / 'devices.json').write_text('gateway/devices.json')
         staged['paths']['gateway/devices.json']['backup'] = False
         staged_path.write_text(json.dumps(staged))
         self.cli('--confirm-offline', error='layout-registry-digest')
@@ -243,7 +243,7 @@ class ReinstallWindow(unittest.TestCase):
         self.assertEqual((operation / 'backups/old-app/identity.json').read_bytes(), old_identity)
 
     def test_channel_retirement_and_restart_keep_original_evidence_owner(self):
-        channel = self.home / '.tron/gateway/payloads/stable'
+        channel = self.home / '.tron/state/payloads/stable'
         channel.mkdir(parents=True, mode=0o700)
         (channel / 'current.json').write_bytes(b'{"version":"fixture-old"}')
         (channel / 'previous.json').write_bytes(b'{"version":"fixture-previous"}')

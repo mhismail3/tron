@@ -12,7 +12,7 @@ it("session-attention-paths: complete, set, acknowledge, rekey, prune, remove an
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(Date.parse(T0));
   onTestFinished(async () => { vi.useRealTimers(); await rm(home, { recursive: true, force: true }); });
-  const path = join(home, "gateway", "session-attention.json");
+  const path = join(home, "state", "session-attention.json");
   const committed = async () => readFile(path, "utf8").then((text) => JSON.parse(text) as unknown,
     (error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return undefined; throw error; });
   let store = new SessionAttentionStore(home);
@@ -28,7 +28,7 @@ it("session-attention-paths: complete, set, acknowledge, rekey, prune, remove an
 
   await expect(store.complete("a", "a-1"), "mutation before initialize").rejects.toThrow(expect.objectContaining({ message: "Session attention store is not initialized" }));
   expect(await committed()).toBeUndefined();
-  await mkdir(join(home, "gateway"), { recursive: true });
+  await mkdir(join(home, "state"), { recursive: true });
   await store.initialize();
   expect({ cursor: store.reconciliationCursor(), ...view("a") }, "initialize empty").toEqual({ cursor: T0, a: none });
   expect(await committed()).toEqual(stored({}));

@@ -9,7 +9,7 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
   const home = join(await realpath(await mkdtemp(join(tmpdir(), "tron-catalog-metadata-"))), "home");
   onTestFinished(() => rm(join(home, ".."), { recursive: true, force: true }));
   const failures: string[] = [];
-  const gateway = join(home, "gateway");
+  const gateway = join(home, "state");
   const root = join(home, "sessions");
   await mkdir(root, { recursive: true });
   const index = new CatalogMetadataIndex(gateway, (stage) => { failures.push(stage); });

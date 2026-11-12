@@ -14,7 +14,7 @@ async function fixture() {
   roots.push(root);
   const tronHome = join(root, "tron"), agentDir = join(root, "agent");
   await mkdir(agentDir, { recursive: true });
-  await mkdir(join(tronHome, "gateway", "settings"), { recursive: true });
+  await mkdir(join(tronHome, "state", "settings"), { recursive: true });
   const outside = new OutsideChanges(TEST_SETTINGS_SCHEMA, tronHome, agentDir, new SettingsChangeRecord(tronHome), {
     global: async () => ({}),
     project: async project => {

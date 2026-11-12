@@ -27,7 +27,7 @@ export const DELEGATED_PROVIDER_ROOT_ENV = "PI_SUBAGENTS_TEMP_ROOT";
 const PI_HOST_PACKAGE_ROOT = piHostPackageRoot();
 
 export function delegatedArtifactRoot(tronHome: string): string {
-  return tronHomePath(resolve(tronHome), "internal/subagents");
+  return tronHomePath(resolve(tronHome), "state/subagents");
 }
 
 export function delegatedProviderEnvironment(root: string, environment: NodeJS.ProcessEnv = process.env): void {

@@ -173,10 +173,10 @@ export class UploadStore {
     private readonly maximumBytes: number,
     options: UploadStoreOptions = {},
   ) {
-    this.directory = tronHomePath(tronHome, "gateway/uploads");
-    this.bodyDirectory = tronHomePath(tronHome, "gateway/upload-bodies");
-    this.importDirectory = tronHomePath(tronHome, "gateway/upload-imports");
-    this.objectDirectory = tronHomePath(tronHome, "gateway/upload-objects");
+    this.directory = tronHomePath(tronHome, "state/uploads");
+    this.bodyDirectory = tronHomePath(tronHome, "state/upload-bodies");
+    this.importDirectory = tronHomePath(tronHome, "state/upload-imports");
+    this.objectDirectory = tronHomePath(tronHome, "state/upload-objects");
     this.maximumStagingEntries = options.maximumStagingEntries ?? DEFAULT_MAXIMUM_STAGING_ENTRIES;
     this.maximumRetainedEntries = options.maximumRetainedEntries ?? DEFAULT_MAXIMUM_RETAINED_ENTRIES;
     this.maximumRetainedLogicalBytes = options.maximumRetainedLogicalBytes

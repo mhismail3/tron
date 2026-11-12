@@ -172,7 +172,7 @@ export class DisplayArtifactStore {
   private initialized = false;
 
   constructor(tronHome: string, options: DisplayArtifactStoreOptions = {}) {
-    this.root = tronHomePath(tronHome, "gateway/display-artifacts");
+    this.root = tronHomePath(tronHome, "state/display-artifacts");
     this.artifactDirectory = join(this.root, "artifacts");
     this.objectDirectory = join(this.root, "objects");
     this.stagingDirectory = join(this.root, "staging");

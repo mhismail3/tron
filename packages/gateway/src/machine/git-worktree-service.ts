@@ -121,7 +121,7 @@ export class GitWorktreeService {
   private readonly worktreeRoot: string;
 
   constructor(tronHome: string) {
-    this.worktreeRoot = tronHomePath(resolve(tronHome), "gateway/worktrees");
+    this.worktreeRoot = tronHomePath(resolve(tronHome), "state/worktrees");
   }
 
   async prepare(

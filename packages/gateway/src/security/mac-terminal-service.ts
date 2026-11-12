@@ -1,16 +1,15 @@
 import { createHash, randomBytes } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { chmod, lstat, mkdir, readFile, rm } from "node:fs/promises";
 import { isIP } from "node:net";
 import { homedir, userInfo } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import lockfile from "proper-lockfile";
 import { GatewayError } from "../errors.js";
 import { durableAtomicWriteText, durableRemove } from "../foundation/durable-json.js";
 import { readTailscaleStatus, runBoundedCommand } from "../platform/tailscale-status.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { MacTerminalKeys } from "./mac-terminal.js";
-import { tronHomePath } from "../foundation/tron-home-layout.js";
 
 const MAC_TERMINAL_PORT = 44222;
 export interface MacTerminalStatus {
@@ -48,8 +47,14 @@ export class MacTerminalService {
   private readonly run = runBoundedCommand;
   private readonly username = userInfo().username;
 
-  constructor(tronHome: string, options: { port?: number; launchAgentDirectory?: string } = {}) {
-    this.root = tronHomePath(realpathSync(tronHome), "mac-terminal");
+  constructor(root: string, options: { port?: number; launchAgentDirectory?: string } = {}) {
+    let ancestor = dirname(resolve(root));
+    const remaining = [basename(root)];
+    while (!existsSync(ancestor)) {
+      remaining.unshift(basename(ancestor));
+      ancestor = dirname(ancestor);
+    }
+    this.root = join(realpathSync(ancestor), ...remaining);
     if (/[\x00-\x1f]/u.test(this.root) || this.root.trim() !== this.root) throw new GatewayError("invalid_request", "Invalid SSH home path");
     this.port = options.port ?? MAC_TERMINAL_PORT;
     if (!Number.isInteger(this.port) || this.port < 1024 || this.port > 65535) throw new GatewayError("invalid_request", "Mac Terminal requires a high port");
@@ -78,6 +83,22 @@ export class MacTerminalService {
     await this.mutate(async fence => {
       if (enabled) await this.start(fence);
       else await this.stop(fence);
+    });
+  }
+
+  async restore(): Promise<void> {
+    if (!await this.enabled()) return;
+    await this.mutate(async fence => {
+      if (!await this.enabled()) return;
+      if (await this.text(this.configPath) === undefined) {
+        if (!await this.identity(false)) throw new GatewayError("conflict", "The enabled SSH host identity is missing; automatic rotation is forbidden");
+        const config = this.config(await this.currentIPv4());
+        await this.validate(config);
+        await this.retireJob(fence);
+        fence();
+        await durableAtomicWriteText(this.configPath, config);
+      }
+      await this.start(fence);
     });
   }
 
@@ -203,7 +224,7 @@ export class MacTerminalService {
   }
 
   private async start(fence: () => void): Promise<void> {
-    await this.enabled();
+    const enabled = await this.enabled();
     const ip = await this.currentIPv4();
     await this.command("/bin/launchctl", ["print", this.domain]);
     await this.identity(true, fence);
@@ -235,18 +256,23 @@ export class MacTerminalService {
       throw new GatewayError("conflict", "The owned SSH job did not establish its exact IPv4 listener");
     } catch (error) {
       fence();
-      await this.stop(fence);
+      await this.retireJob(fence);
+      if (!enabled) await durableRemove(this.plistPath);
       throw error;
     }
   }
 
-  private async stop(fence: () => void): Promise<void> {
-    await this.enabled();
+  private async retireJob(fence: () => void): Promise<void> {
     if (await this.job()) {
       fence();
       await this.command("/bin/launchctl", ["bootout", `${this.domain}/${this.label}`]);
       if (await this.job()) throw new GatewayError("conflict", "The owned SSH job did not stop");
     }
+  }
+
+  private async stop(fence: () => void): Promise<void> {
+    await this.enabled();
+    await this.retireJob(fence);
     fence();
     if (await this.text(this.plistPath) !== undefined) await durableRemove(this.plistPath);
   }

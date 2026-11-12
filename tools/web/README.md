@@ -133,7 +133,7 @@ A source commit does not change the live page. Only a separately authorized
 normal `scripts/tron-ios-device share` from fetched main invokes this renderer
 and embeds the shared CSS into the next generated index. Existing server/Tailscale
 configuration stays unchanged; no Gateway/app build or restart is needed for CSS.
-Do not manually edit `~/.tron/ios-builds/index.html` or other generated/live files.
+Do not manually edit `~/.tron/workspace/builds/ios-ota/index.html` or other generated/live files.
 
 Existing runtime paths remain as documented in the
 [OTA runbook](../../packages/ios-app/docs/development.md#over-the-air-development-install):

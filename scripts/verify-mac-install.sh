@@ -441,7 +441,7 @@ observe_debug() {
   listener_pid="$listener_pids"
   [[ "$listener_pid" =~ ^[0-9]+$ ]] || { fail "Debug listener PID is invalid"; return; }
 
-  lifecycle="$HOME/.tron-dev/gateway/lifecycle.json"
+  lifecycle="$HOME/.tron-dev/state/lifecycle.json"
   regular_file "$lifecycle" || { fail "Debug listener has no regular scripts/tron-dev lifecycle record"; return; }
   lifecycle_state="$(plist_value lifecycle "$lifecycle")"
   expected_port="$(plist_value expectedPort "$lifecycle")"
@@ -467,7 +467,7 @@ observe_debug() {
     && pass "Debug child PID/start identity is live and exact" \
     || { fail "Debug child PID/start identity mismatch"; return; }
 
-  regular_file "$HOME/.tron-dev/gateway/payloads/dev/current.json" \
+  regular_file "$HOME/.tron-dev/state/payloads/dev/current.json" \
     || { fail "Debug listener has no immutable dev selection"; return; }
   verify_payload dev "$HOME/.tron-dev" dev "$BUNDLED"
   command_line="$(ps -ww -o command= -p "$listener_pid" 2>/dev/null || true)"

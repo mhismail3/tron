@@ -20,7 +20,7 @@ const RECORD_MS = 15 * 60_000;
 const PROJECTED_USAGE_MS = 10 * 60_000;
 const PROJECTION_BYTES = 64 * 1024;
 
-export function modelQueueProjectionPath(tronHome: string): string { return tronHomePath(tronHome, "gateway/model-queue.json"); }
+export function modelQueueProjectionPath(tronHome: string): string { return tronHomePath(tronHome, "state/model-queue.json"); }
 
 function modelQueueSessionProjectionPath(base: string, sessionId: string): string {
   return join(dirname(base), "model-queue-sessions", `${createHash("sha256").update(sessionId).digest("hex")}.json`);

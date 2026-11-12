@@ -206,7 +206,7 @@ describe("episodic memory crash recovery", () => {
     const durableSpend = await spendOf();
     child.kill("SIGKILL");
     await new Promise(resolve => child.once("exit", resolve));
-    const lock = join(fx.home, "gateway", "workspace-state.lock");
+    const lock = join(fx.home, "state", "workspace-state.lock");
     const past = new Date(Date.now() - 120_000);
     await utimes(lock, past, past);
 
@@ -252,7 +252,7 @@ describe("episodic memory crash recovery", () => {
     await new Promise(resolve => child.once("exit", resolve));
     expect(output).not.toContain("done");
     expect(output).not.toContain("Error");
-    const lock = join(fx.home, "gateway", "workspace-state.lock");
+    const lock = join(fx.home, "state", "workspace-state.lock");
     const past = new Date(Date.now() - 120_000);
     await utimes(lock, past, past);
 
@@ -322,7 +322,7 @@ describe("episodic memory crash recovery", () => {
     const editedRecord = [...new Map(records(await readFile(fx.catalogPath, "utf8")).map(record => [record.index as number, record])).values()]
       .find(record => record.text === editedText)!;
     expect(editedRecord).toBeDefined();
-    const lock = join(fx.home, "gateway", "workspace-state.lock");
+    const lock = join(fx.home, "state", "workspace-state.lock");
     const past = new Date(Date.now() - 120_000);
     await utimes(lock, past, past);
     const before = liveNodes((await readPersistedState(fx)).nodes);

@@ -217,7 +217,7 @@ async function payloadSelectionSection(payloadsDirectory: string): Promise<Secti
 }
 
 function isTronProcess(command: string, tronHome: string): boolean {
-  return command.includes(`${tronHomePath(tronHome, "gateway/payloads")}/`) || command.includes("/Applications/Tron.app") || command.includes("TronNativeHost");
+  return command.includes(`${tronHomePath(tronHome, "state/payloads")}/`) || command.includes("/Applications/Tron.app") || command.includes("TronNativeHost");
 }
 
 async function processesSection(tronHome: string, runCommand: BoundedCommand): Promise<{ section: Section; gateway: GatewayProcess | undefined }> {
@@ -272,7 +272,7 @@ function matchPeer(peers: readonly TailscalePeer[], names: readonly string[]): T
 }
 
 async function pairedDevices(tronHome: string): Promise<PairedDevice[]> {
-  const content = await readFile(tronHomePath(tronHome, "gateway/devices.json"), "utf8").catch(() => undefined);
+  const content = await readFile(tronHomePath(tronHome, "state/devices.json"), "utf8").catch(() => undefined);
   if (content === undefined) return [];
   try {
     const parsed: unknown = JSON.parse(content);
@@ -371,7 +371,7 @@ async function collectDiagnosticBundle(options: DiagnosticBundleOptions = {}): P
   const logsDirectory = tronHomePath(tronHome, "logs");
   const logs = await logsSection(logsDirectory, windowStartMs);
   const deviceExports = await deviceExportsSection(logsDirectory);
-  const payloadSelection = await payloadSelectionSection(tronHomePath(tronHome, "gateway/payloads"));
+  const payloadSelection = await payloadSelectionSection(tronHomePath(tronHome, "state/payloads"));
   const processes = await processesSection(tronHome, runCommand);
   const launchd = await launchdSection(since, runCommand);
   const tailscale = await tailscaleSection(tronHome, since, runCommand);
