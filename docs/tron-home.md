@@ -13,7 +13,7 @@ Every field has a consumer; an unknown field fails `check`.
 
 | Field | Meaning | Acted on by |
 |---|---|---|
-| `owner` | The module (or `pi-sdk`, `pi-subagents`, `extension …`) that may write, migrate or prune the path | `check`: must be a module |
+| `owner` | The module (or exactly `pi-sdk`, `pi-subagents`, or `extension <package>`) that may write, migrate or prune the path | `check`: must name a module or an exact external owner; package names contain no whitespace |
 | `class` | What is lost if the path is deleted: `keep` (irreplaceable), `rebuild` (its owner rebuilds it), `scratch` (working state, locks, in-flight work) or `log`. Stated on every top-level entry and wherever a child differs; otherwise inherited from the nearest ancestor | backup selection, `check`, `audit` |
 | `backup` | Overrides the default, which is: `keep` is backed up, the other classes are not. Used for the two credentials the Gateway regenerates at start and for the selected Gateway payloads | Mac replace snapshot, Mac reinstall backup, `audit` |
 | `credential` | `true` when the path holds a key or token | `audit`: group or other access to the registered entry (a file, or the folder that holds the keys) is a `credential_mode` finding |
