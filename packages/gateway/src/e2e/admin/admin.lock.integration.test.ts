@@ -43,7 +43,7 @@ describe("gateway/admin kernel locks", () => {
       changeId: changed.result.changes[0].changeId, reason: "Retry transient provider failures longer", target: { kind: "global" }, actor: expect.objectContaining({ kind: "ui" }),
       presentation: { actor: "You", display: { before: "4 retries", after: "6 retries" }, label: "Retries", layer: "Global", section: "run" } })]);
     expect(await gateway.file(join(gateway.agentDir, "settings.json"))).toEqual({ compaction: { enabled: false, keepRecentTokens: 120, reserveTokens: 2048 },
-      defaultModel: "faux-1", defaultProvider: "tron-lock-admin-settings-change", retry: { maxRetries: 6 }, sessionDir: "<tmp>/sessions" });
+      defaultModel: "faux-1", defaultProvider: "tron-lock-admin-settings-change", retry: { maxRetries: 6 } });
     expect(await gateway.tree(join(gateway.tronHome, "gateway", "settings"))).toEqual(["changes/000000.jsonl", "changes/index.json", "observed.json"]);
     expect(gateway.notifications).toEqual([]);
   });

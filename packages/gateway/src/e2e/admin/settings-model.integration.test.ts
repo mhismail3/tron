@@ -51,9 +51,8 @@ async function fixture() {
   roots.push(root);
   const tronHome = join(root, "tron");
   const agentDir = join(tronHome, "agent");
-  const sessionDir = join(root, "sessions");
   const project = join(root, "project");
-  await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true }), mkdir(join(project, ".pi"), { recursive: true })]);
+  await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(join(project, ".pi"), { recursive: true })]);
   const faux = fauxProvider({
     provider: "tron-settings-model", tokensPerSecond: 10_000,
     models: [{ id: "reasoner", name: "Reasoner Pro", reasoning: true, contextWindow: 200_000 }, { id: "plain", reasoning: false }],
@@ -69,7 +68,6 @@ async function fixture() {
   };
   const modelRuntime = await runtimeFactory();
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({
-    sessionDir,
     defaultProvider: model.provider,
     defaultModel: model.id,
     defaultThinkingLevel: "high",
