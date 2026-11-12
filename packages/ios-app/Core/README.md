@@ -70,8 +70,10 @@ the hosted test targets link.
   ≤ 192 KiB; `PendingShareStoring` rejects documents above 256 KiB and reports save failure, so the
   extension opens the app only after a successful write. One slot, cleared after confirmed send.
 - **Display URLs.** Strict transcript decoding admits HTTPS display URLs with DNS hosts regardless
-  of label count. Only four numeric octets in 0–255 enter the IPv4 range restrictions; private,
-  loopback, reserved and documentation ranges stay blocked. Credentials, queries, fragments,
+  of label count. Four-label hosts ending in a decimal or hexadecimal number must be valid IPv4,
+  matching the Gateway URL parser; other four-label hosts follow DNS admission. Only four numeric
+  octets in 0–255 enter the IPv4 range restrictions; private, loopback, reserved and documentation
+  ranges stay blocked. Credentials, queries, fragments,
   local hostnames and nonpublic IPv6 remain prohibited.
 - **Models.** Model identity is always `(provider, id)`. Cross-file references are plain value
   composition; no model is a second cache or reducer. Extension activity lifecycle presentation

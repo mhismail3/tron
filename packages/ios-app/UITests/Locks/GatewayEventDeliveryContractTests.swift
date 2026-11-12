@@ -88,10 +88,12 @@ final class GatewayEventDeliveryContractTests: XCTestCase {
     }
 
     func testDisplayRemoteURLPolicyDistinguishesDNSFromIPv4() {
-        for host in ["mooses-macbook-server.tail3b6e78.ts.net", "one.two.example.com", "8.8.8.8", "1.1.1.1"] {
+        for host in ["mooses-macbook-server.tail3b6e78.ts.net", "one.two.example.com", "one.two.example.com1",
+                     "0.face.beef.net", "8.8.8.8", "1.1.1.1"] {
             XCTAssertTrue(DisplayRemoteURLPolicy.admits("https://\(host)/"), host)
         }
-        for host in ["10.0.0.1", "127.0.0.1", "192.168.1.1", "172.16.0.1", "100.64.0.1", "169.254.0.1", "203.0.113.1"] {
+        for host in ["10.0.0.1", "127.0.0.1", "192.168.1.1", "172.16.0.1", "100.64.0.1", "169.254.0.1", "203.0.113.1",
+                     "1.2.3.256", "256.1.1.1", "0x7f.0.0.1", "1.2.3.0x100", "a.b.c.4"] {
             XCTAssertFalse(DisplayRemoteURLPolicy.admits("https://\(host)/"), host)
         }
     }
