@@ -211,7 +211,7 @@ def audit(home: str, max_entries: int, root: Path = ROOT) -> tuple[int, dict]:
                             reasons.append("unknown")
                         if row["type"] in ("symlink", "special"):
                             reasons.append("unsafe_type")
-                        elif row["type"] != "directory" and (contract.get("container") or contract.get("subtree")):
+                        elif classification != "delegated" and row["type"] != "directory" and (contract.get("container") or contract.get("subtree")):
                             reasons.append("expected_directory")
                         if reasons:
                             report["findings"].append({"path": path, "reasons": reasons})
