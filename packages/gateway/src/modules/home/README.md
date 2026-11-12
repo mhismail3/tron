@@ -125,7 +125,11 @@ Composition supplies the same late K6 settings, Profile and raw model owners.
   profile at its bound, over the same frozen memory cut. Framing, admission and final
   overflow checks share one head constructor: recorded text/sections are replaced,
   declared tools are origin-filtered and charged with `instructions`, and profile is counted
-  separately. Historical system deltas are not additional heads. Output reserve remains.
+  separately. The head constructor requires activation kind, so wake estimates cannot charge
+  withheld write/edit/bash/computer schemas. `home-task-dispatch.e2e.test.ts` proves a full report
+  fits the wake's inline headroom; `home-tool-admission.e2e.test.ts` compares pre-usage instruction
+  accounting with the actual origin-filtered provider frame. Historical system deltas are not
+  additional heads. Output reserve remains.
 - **Token counts** follow the provider's usage. Before a request is sent its sections are Pi's
   character estimates multiplied by factors learned per model from the provider's usage, held in
   memory by this Home session's request policy and lost when its runtime is rebuilt

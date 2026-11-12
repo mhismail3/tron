@@ -334,7 +334,7 @@ describe("Home task authorization RPC", () => {
 
 describe("Home task bounded backlogs", () => {
   it("delivers a backlog across bounded activations exactly once in order without context-overflow", async () => {
-    const f = await fixture(undefined, false, 32_000);
+    const f = await fixture(undefined, false, 34_000);
     const model = f.faux.getModel();
     await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     const tasks = [];
@@ -368,6 +368,28 @@ describe("Home task bounded backlogs", () => {
       expect(await homeOwnerOf(f.registry).taskResult(task.taskId)).toMatchObject({ wake: { state: "acknowledged" } });
     }
     evidence.push({ case: "bounded-backlog", batches });
+  }, 30_000);
+
+  it("keeps a wake-sized full report inline without charging maintainer-only tools", async () => {
+    const f = await fixture(undefined, false, 32_000);
+    const owner = homeOwnerOf(f.registry);
+    const model = f.faux.getModel();
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
+    const home = await f.registry.acquire(f.home.sessionId);
+    f.faux.setResponses([fauxAssistantMessage("Home initialized")]);
+    await home.prompt("Initialize Home before its result wake");
+    await owner.pauseMemory();
+    const report = "w".repeat(65536);
+    f.faux.setResponses([fauxAssistantMessage([reportCall("wake-sized", report)], { stopReason: "toolUse" })]);
+    const task = await (await dispatch(f, "wake-sized")).completion;
+    let request = "";
+    f.faux.setResponses([context => { request = JSON.stringify(context); return fauxAssistantMessage("Reviewed the full report"); }]);
+    await owner.resumeMemory();
+    await waitFor(() => request !== "", "wake-sized report request");
+    expect(request.includes(report)).toBe(true);
+    expect(owner.contextStatus()).toMatchObject({ available: true, breakdown: { activation: { kind: "wake" } } });
+    await waitForTaskAcknowledgement(f, task.taskId);
+    evidence.push({ case: "wake-sized-report", reportLength: report.length });
   }, 30_000);
 
   it("delivers a never-fit report by reference before its successor and reads immutable bounded pages", async () => {
