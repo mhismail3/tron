@@ -1211,18 +1211,18 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertEqual(codeMode.value as? String, "Codemode only", "Reopening reads the stored code-mode setting")
         keepScreenshot(app, name: "settings-surface-settings-code-mode-edit")
         dismissTopSheet(app)
-        openSettingsSection(app, "setup", linkLabel: "Setup", loneRow: settingRowToken("setup.installTelemetry"))
-        let globalEdit = toggleSetting(app, key: "setup.installTelemetry", confirmingReview: true)
+        openSettingsSection(app, "context")
+        let globalEdit = toggleSetting(app, key: "context.compaction.enabled")
         XCTAssertNotEqual(globalEdit.before, globalEdit.after, "the Global edit was not accepted")
         dismissTopSheet(app)
         dismissTopSheet(app)
         XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
         openGlobalSettings()
-        openSettingsSection(app, "setup", linkLabel: "Setup", loneRow: settingRowToken("setup.installTelemetry"))
-        let reopenedTelemetry = topSwitchRow(app, key: "setup.installTelemetry")
-        XCTAssertTrue(waitForOverride(reopenedTelemetry, timeout: 30),
-                      "the reopened Settings must offer the Global reset: \(reopenedTelemetry.debugDescription)")
-        XCTAssertEqual(switchValue(reopenedTelemetry), globalEdit.after, "the reopened Global value is not the accepted value")
+        openSettingsSection(app, "context")
+        let reopenedCompaction = topSwitchRow(app, key: "context.compaction.enabled")
+        XCTAssertTrue(waitForOverride(reopenedCompaction, timeout: 30),
+                      "the reopened Settings must offer the Global reset: \(reopenedCompaction.debugDescription)")
+        XCTAssertEqual(switchValue(reopenedCompaction), globalEdit.after, "the reopened Global value is not the accepted value")
         keepScreenshot(app, name: "settings-surface-settings-global-edit")
         dismissTopSheet(app)
         dismissTopSheet(app)
@@ -1248,27 +1248,29 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             XCTAssertTrue(app.navigationBars.staticTexts["Global Settings"].waitForExistence(timeout: 30), app.debugDescription)
         }
         openGlobalSettings()
-        openSettingsSection(app, "setup", linkLabel: "Setup", loneRow: settingRowToken("setup.installTelemetry"))
-        let globalEdit = toggleSetting(app, key: "setup.installTelemetry", confirmingReview: true)
+        openSettingsSection(app, "context")
+        let globalEdit = toggleSetting(app, key: "context.compaction.enabled")
         dismissTopSheet(app)
         dismissTopSheet(app)
         XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
 
         try editGlobalSettingsOutsideTron(fixture.agentDirectory) { document in
-            document["enableInstallTelemetry"] = globalEdit.before == "1"
+            var compaction = document["compaction"] as? [String: Any] ?? [:]
+            compaction["enabled"] = globalEdit.before == "1"
+            document["compaction"] = compaction
         }
         openGlobalSettings()
-        openSettingsSection(app, "setup", linkLabel: "Setup", loneRow: settingRowToken("setup.installTelemetry"))
-        let outsideRow = topSwitchRow(app, key: "setup.installTelemetry")
+        openSettingsSection(app, "context")
+        let outsideRow = topSwitchRow(app, key: "context.compaction.enabled")
         XCTAssertEqual(switchValue(outsideRow), globalEdit.before, "the live value must follow the edited store")
-        let applyAgain = hittableElement(app, identifier: settingRowToken("setup.installTelemetry") + "-applyAgain", timeout: 120)
+        let applyAgain = hittableElement(app, identifier: settingRowToken("context.compaction.enabled") + "-applyAgain", timeout: 120)
         XCTAssertNotNil(applyAgain, "the outside change of Tron's value must offer Apply again: \(app.debugDescription)")
         keepScreenshot(app, name: "settings-surface-outside-change-apply-again")
         applyAgain?.tap()
         XCTAssertTrue(waitUntil(timeout: 60) {
             self.switchValue(outsideRow) == globalEdit.after
         }, "Apply again must restore Tron's accepted value")
-        XCTAssertTrue(waitForNonExistence(app.buttons[settingRowToken("setup.installTelemetry") + "-applyAgain"], timeout: 30),
+        XCTAssertTrue(waitForNonExistence(app.buttons[settingRowToken("context.compaction.enabled") + "-applyAgain"], timeout: 30),
                       "Apply again must clear the canonical outside-change evidence")
 
         for _ in 0..<3 {

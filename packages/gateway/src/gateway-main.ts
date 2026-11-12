@@ -101,6 +101,7 @@ process.env.PI_CODING_AGENT_DIR = config.agentDir;
 process.env.PI_CODING_AGENT ??= "true";
 process.env.AI_AGENT ??= "pi";
 process.env.PI_SKIP_VERSION_CHECK ??= "1";
+process.env.PI_TELEMETRY = "0";
 
 const gatewayLogPath = tronHomePath(config.tronHome, "logs", "gateway.jsonl");
 const logger = new GatewayLogger(gatewayLogPath, {

@@ -123,6 +123,7 @@ export async function createSettingsManager(schema: SettingsSchema, projectDir: 
     },
   };
   const manager = SettingsManager.fromStorage(storage, { projectTrusted });
+  manager.getEnableInstallTelemetry = () => false;
   if (afterReload) {
     const reload = manager.reload.bind(manager);
     manager.reload = async () => { await reload(); await afterReload(manager); };

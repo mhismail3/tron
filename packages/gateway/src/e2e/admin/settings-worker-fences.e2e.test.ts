@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, type AssistantMessage, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
@@ -43,6 +43,42 @@ async function gateway() {
 }
 
 describe("settings worker changes and Session fences", () => {
+  it("Home changes the default trust policy only through its exact card and ordinary chats remain refused", async () => {
+    const f = await gateway();
+    let args: Record<string, unknown> = { action: "change", reason: "Use the authorized Global trust policy",
+      changes: [{ key: "permissions.defaultProjectTrust", layer: "global", op: "set", value: "always" }] };
+    const results: Array<{ isError: boolean; details: unknown }> = [];
+    f.faux.setResponses(Array.from({ length: 12 }, () => (async (context: TranscriptContext) => {
+      const last = context.messages.at(-1)!;
+      if (last.role === "toolResult") {
+        results.push({ isError: last.isError === true, details: last.details });
+        return fauxAssistantMessage("Observed.");
+      }
+      return fauxAssistantMessage([fauxToolCall("settings", args)], { stopReason: "toolUse" });
+    }) as never));
+    const home = await f.registry.acquire(f.home.sessionId);
+    const pending = home.prompt("Change the default project trust policy.");
+    const first = await waitFor(() => home.snapshot().extensionPresentation.pendingInteractions[0] ?? results[0], "Home trust card or refusal");
+    expect(first).toMatchObject({ method: "change", review: { requiresTap: true } });
+    if (!("method" in first) || first.method !== "change") throw new Error("Default trust needs its exact native card");
+    expect(first.review.items).toEqual(expect.arrayContaining([expect.objectContaining({ label: "Default trust policy", after: "Always trust" })]));
+    await f.service.invoke(phone(), "extension.respond", { commandId: commandId(), sessionId: home.id,
+      interactionId: first.id, hostEpoch: first.hostEpoch, presentationRevision: first.presentationRevision,
+      value: { digest: first.review.digest, approved: true } });
+    await pending;
+    await waitFor(() => results.length === 1 || undefined, "Home trust result");
+    expect(results[0]).toMatchObject({ isError: false, details: { status: "applied" } });
+    expect(JSON.parse(await readFile(join(f.agentDir, "settings.json"), "utf8")).defaultProjectTrust).toBe("always");
+    const ordinary = await f.registry.create(f.cwd);
+    await ordinary.setModel(f.model.provider, f.model.id);
+    args = { ...args, changes: [{ key: "permissions.defaultProjectTrust", layer: "global", op: "set", value: "never" }] };
+    await ordinary.prompt("Try the Home-only policy from an ordinary chat.");
+    await waitFor(() => results.length === 2 || undefined, "ordinary chat trust refusal");
+    expect(results[1].isError).toBe(true);
+    expect(ordinary.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
+    expect(JSON.parse(await readFile(join(f.agentDir, "settings.json"), "utf8")).defaultProjectTrust).toBe("always");
+    transcript.push({ case: "Home default trust card and ordinary-chat refusal", steps: results });
+  }, 90_000);
   it("Home applies routine model/thinking changes to a settled worker without a client opening that worker", async () => {
     const f = await gateway();
     const isWorker = (context: TranscriptContext) => context.messages.some(message => message.role === "user" && textOf(message).includes("This is a finite Home task"));

@@ -341,7 +341,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
         { value: "never", label: "Never trust", detail: "Never loads a project's extensions or hooks" },
       ]),
       layers: { global: pi("defaultProjectTrust") }, defaultValue: "ask", timing: "live", effect: "next-change",
-      direction: (_b, a) => a === "always" ? "widen" : "narrow", writers: ["ui"],
+      direction: (_b, a) => a === "always" ? "widen" : "narrow", writers: ["ui", "home"],
       label: "Default trust policy", help: "What happens with a project that has no trust decision.", order: 20, importance: "advanced",
       control: "choice", confirm: "Always trust loads every new project's extensions and hooks without asking.",
     },
@@ -455,11 +455,6 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       writers: [], label: "Session folder", help: "Where chats are stored. Applies after a restart.",
       order: 10, importance: "advanced", control: "text",
       entry: { hint: "A folder path on the Mac. Start with ~ or /.", example: "~/Documents/Tron Sessions" },
-    },
-    {
-      tap: "irreversible", id: "setup.installTelemetry", sessionOverridable: false, projectSettable: false, group: "setup", type: types.boolean(), layers: { global: pi("enableInstallTelemetry") }, defaultValue: true,
-      timing: "live", effect: "next-request", writers: ["ui"], label: "Install telemetry",
-      help: "Send pi's anonymous install attribution header.", order: 20, importance: "advanced", control: "toggle",
     },
   ] satisfies readonly KeyDeclaration[]);
 

@@ -38,7 +38,11 @@ setting and is not an approval queue.
   selection and synchronous compaction validation.
 - `settings-sdk-manager.ts`: declared Project projection, validation and locked
   raw-document merging through Pi's public storage seam. Ignored repository fields
-  stay with their canonical document and survive SDK writes.
+  stay with their canonical document and survive SDK writes. Install attribution is
+  pinned off through the SDK accessor across reloads; the Gateway also fixes `PI_TELEMETRY=0`
+  for its process and children. Telemetry is not an editable setting. Home and the app
+  can change the Global default project trust policy; widening it still requires its
+  exact native card. Ordinary chats and workers cannot write that policy.
 
 Home keeps Profile content, provenance, revision checks, restoration and durable
 profile publication. `auditSubject` holds validation, grouped successful audit and

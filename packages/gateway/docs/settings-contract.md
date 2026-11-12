@@ -97,7 +97,6 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 | `sources.packages` | — | sources | project, global | none | fixed | reload | install |
 | `sources.npmCommand` | — | sources | global | none | live | next-change | trust |
 | `setup.sessionDir` | — | setup | global | as allowed | live | restart | — |
-| `setup.installTelemetry` | — | setup | global | as allowed | live | next-request | irreversible |
 
 Record subjects (`RECORD_SUBJECTS`), changed per instance through the same path:
 
