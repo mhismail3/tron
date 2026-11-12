@@ -439,7 +439,7 @@ final class ReadOnlySubagentSessionStore {
         }
     }
 
-    func invalidate(_ change: ProcessTranscriptChanged) {
+    func invalidate(_ change: PresentedProcessTranscriptChanged) {
         let ownsLiveLease = change.leaseId == leaseID
         let ownsOpening = change.leaseId == openingViewerID
         guard ownsLiveLease || ownsOpening else { return }

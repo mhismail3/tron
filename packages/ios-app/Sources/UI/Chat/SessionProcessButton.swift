@@ -3,7 +3,7 @@ import TronMobileCore
 
 enum SessionProcessButtonPolicy {
     static func isVisible(
-        overview: SessionProcessOverview?,
+        overview: PresentedProcessOverview?,
         hasAdmittedActivity: Bool,
         localRecentExpired: Bool,
         recentFinishedRetentionMinutes: Int = 5
@@ -14,7 +14,7 @@ enum SessionProcessButtonPolicy {
     }
 
     static func preferredRecentExpiry(
-        overview: SessionProcessOverview?,
+        overview: PresentedProcessOverview?,
         activities: [PresentedProcessActivity]?,
         retentionMinutes: Int
     ) -> String? {

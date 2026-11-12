@@ -113,7 +113,7 @@ package enum PreparedSessionEventData: Sendable, Equatable {
     case compaction(TranscriptItem)
     case toolProgress(ToolExecutionState)
     case extensionActivity(ExtensionActivityDelta)
-    case processActivity(SessionProcessDelta)
+    case processActivity(PresentedProcessDelta)
     case extensionPresentation(ExtensionPresentationMutation)
     case raw
     case invalid
@@ -145,7 +145,7 @@ package enum GatewayEventPreparation: Sendable, Equatable {
     case sessionSnapshot(SessionSnapshot)
     case sessionRebaseline(PreparedSessionRebaseline)
     case sessionEvent(PreparedSessionEvent)
-    case processTranscriptChanged(ProcessTranscriptChanged)
+    case processTranscriptChanged(PresentedProcessTranscriptChanged)
     case automationChanged(AutomationChanged)
     case notificationInboxChanged(NotificationInboxChanged)
 }
@@ -308,7 +308,7 @@ package struct GatewayEvent: Decodable, Sendable, Equatable {
                   SessionProcessAdmissionPolicy.admitsSnapshotFacts(payload.snapshot) else { return .none }
             return .sessionRebaseline(PreparedSessionRebaseline(snapshot: payload.snapshot, subscriptionToken: payload.subscriptionToken))
         case "session.processTranscript.changed":
-            guard let changed = try? adapter.decode(ProcessTranscriptChanged.self),
+            guard let changed = try? adapter.decode(PresentedProcessTranscriptChanged.self),
                   SessionProcessAdmissionPolicy.admits(changed) else { return .none }
             return .processTranscriptChanged(changed)
         case let topic where topic.hasPrefix("session.") && topic != "session.listChanged":
@@ -343,7 +343,7 @@ package struct GatewayEvent: Decodable, Sendable, Equatable {
                    ExtensionActivityAdmissionPolicy.admitsDelta(delta) { preparedData = .extensionActivity(delta) }
                 else { preparedData = .invalid }
             case "session.processActivity":
-                if let delta = try? envelope.data.decode(SessionProcessDelta.self),
+                if let delta = try? envelope.data.decode(PresentedProcessDelta.self),
                    SessionProcessAdmissionPolicy.admits(delta) { preparedData = .processActivity(delta) }
                 else { preparedData = .invalid }
             case "session.extensionPresentation":

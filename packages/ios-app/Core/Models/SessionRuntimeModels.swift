@@ -610,7 +610,7 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
     var extensionActivityOmissions: ExtensionActivityOmissions? = nil
     package var liveActivityRevision: Int? = nil
     package var extensionActivityAsOf: String? = nil
-    package var processOverview: SessionProcessOverview? = nil
+    package var processOverview: PresentedProcessOverview? = nil
     package var processActivities: [PresentedProcessActivity]? = nil
     package var extensionPresentation: ExtensionPresentationState
     var diagnostics: [RuntimeDiagnostic]
@@ -630,7 +630,7 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
         operation: SessionOperationState?, retry: RetryState?, activeToolSegmentId: String? = nil,
         toolExecutions: [ToolExecutionState], extensionActivities: [ExtensionRunActivity]? = nil,
         extensionActivityOmissions: ExtensionActivityOmissions? = nil, liveActivityRevision: Int? = nil,
-        extensionActivityAsOf: String? = nil, processOverview: SessionProcessOverview? = nil,
+        extensionActivityAsOf: String? = nil, processOverview: PresentedProcessOverview? = nil,
         processActivities: [PresentedProcessActivity]? = nil, extensionPresentation: ExtensionPresentationState,
         diagnostics: [RuntimeDiagnostic], isCachedProjection: Bool? = nil,
         contextWindowPolicy: ContextWindowPolicy? = nil, compactionPolicy: CompactionPolicyProjection? = nil,
@@ -873,7 +873,7 @@ package struct SessionContextPresentation: Hashable, Sendable {
     package let stats: SessionStats
     package let lastTranscriptKind: TranscriptItem.Kind?
     package let automaticCompactionEnabled: Bool
-    package let processOverview: SessionProcessOverview?
+    package let processOverview: PresentedProcessOverview?
     package let model: ModelRef?
     package let thinkingLevel: String
     package let availableThinkingLevels: [String]

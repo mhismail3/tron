@@ -6,7 +6,7 @@ import UIKit
 
 struct ChatComposerView: View {
     let sessionFacts: ChatVisibleSessionFacts?
-    let processOverview: SessionProcessOverview?
+    let processOverview: PresentedProcessOverview?
     let processActivities: [PresentedProcessActivity]?
     let extensionRetainedContent: ExtensionRetainedContent
     let pendingAttachments: [PendingAttachment]

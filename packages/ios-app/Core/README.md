@@ -73,13 +73,12 @@ the hosted test targets link.
   composition; no model is a second cache or reducer. Extension activity lifecycle presentation
   records temporarily retain their existing Encodable representation for handwritten snapshot
   containers and byte budgets; their Decodable initializers delegate to the separately named
-  generated ExtensionRun lifecycle values. Process lifecycle records use the same split:
-  `PresentedProcessLifecycle`, `PresentedProcessAttention` and `SessionProcessLifecycleState`
-  delegate decoding to generated SessionProcess values while keeping their existing encoders.
-  These adapters are S7 deletion debt tracked in #2380;
-  generated records have no Encodable bridge. `PresentedProcessActivity` and its kind, execution
-  mode, source and visibility enums follow that split; the local duration sample anchor remains
-  on the presentation record and is excluded from its unchanged wire encoder. The four nested surface enums (`Kind`, `Placement`,
+  generated ExtensionRun lifecycle values. Process lifecycle/activity/overview/delta/transcript-change
+  records, their enums and process/extension omission records follow that split: generated decoding
+  and exact integer projection stay inside the shared decodeWire corruption-error boundary;
+  existing hand encoders retain their field sets and byte budgets. The local duration sample anchor
+  stays client-owned and outside the activity encoder. These adapters are S7 deletion debt tracked
+  in #2380; generated records have no Encodable bridge. The four nested surface enums (`Kind`, `Placement`,
   `Lifecycle`, `InputMode`) use the same temporary split: generated surface enum decoding,
   unchanged hand raw-value encoding, and deletion with the final handwritten surface container.
 

@@ -892,6 +892,26 @@ package struct ExtensionRunLifecycle: Hashable, Sendable {
     return "{" + String(s.dropFirst()) + "}"
   }
 }
+package struct ExtensionRunActivityLifecycleOmissions: Hashable, Sendable {
+  package let children: Double
+  package let byteLimitExceeded: Bool
+  package init(children: Double, byteLimitExceeded: Bool) {
+    self.children = children
+    self.byteLimitExceeded = byteLimitExceeded
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> ExtensionRunActivityLifecycleOmissions {
+    let o = try wObj(v, p)
+    let f_children: Double = wAbsent(o.value("children")) ? 0 : try wNum(o.value("children")!, p + ".children")
+    let f_byteLimitExceeded: Bool = wAbsent(o.value("byteLimitExceeded")) ? false : try wBool(o.value("byteLimitExceeded")!, p + ".byteLimitExceeded")
+    return ExtensionRunActivityLifecycleOmissions(children: f_children, byteLimitExceeded: f_byteLimitExceeded)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"children\":" + wFormat(self.children)
+    s += ",\"byteLimitExceeded\":" + (self.byteLimitExceeded ? "true" : "false")
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
 package enum SessionProcessKind: String, CaseIterable, Hashable, Sendable {
   case command = "command"
   case subagent = "subagent"
@@ -1185,6 +1205,194 @@ package struct SessionProcessActivity: Hashable, Sendable {
     s += (self.toolCallId == nil ? "" : ",\"toolCallId\":" + wEscape(self.toolCallId!))
     s += (self.runId == nil ? "" : ",\"runId\":" + wEscape(self.runId!))
     s += (self.childSessionRef == nil ? "" : ",\"childSessionRef\":" + wEscape(self.childSessionRef!))
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
+package enum SessionProcessOverviewVisibility: String, CaseIterable, Hashable, Sendable {
+  case hidden = "hidden"
+  case active = "active"
+  case recent = "recent"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> SessionProcessOverviewVisibility {
+    switch v {
+    case .string("hidden"): return .hidden
+    case .string("active"): return .active
+    case .string("recent"): return .recent
+    default: throw WireError(path: p, message: "unknown value")
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .hidden: return "\"hidden\""
+    case .active: return "\"active\""
+    case .recent: return "\"recent\""
+    }
+  }
+}
+package enum SessionProcessOverviewOmissionsReason: String, CaseIterable, Hashable, Sendable {
+  case count = "count"
+  case bytes = "bytes"
+  case countAndBytes = "countAndBytes"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> SessionProcessOverviewOmissionsReason {
+    switch v {
+    case .string("count"): return .count
+    case .string("bytes"): return .bytes
+    case .string("countAndBytes"): return .countAndBytes
+    default: throw WireError(path: p, message: "unknown value")
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .count: return "\"count\""
+    case .bytes: return "\"bytes\""
+    case .countAndBytes: return "\"countAndBytes\""
+    }
+  }
+}
+package struct SessionProcessOverviewOmissions: Hashable, Sendable {
+  package let count: Double
+  package let bytes: Double
+  package let reason: SessionProcessOverviewOmissionsReason
+  package init(count: Double, bytes: Double, reason: SessionProcessOverviewOmissionsReason) {
+    self.count = count
+    self.bytes = bytes
+    self.reason = reason
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> SessionProcessOverviewOmissions {
+    let o = try wObj(v, p)
+    let f_count: Double = wAbsent(o.value("count")) ? 0 : try wNum(o.value("count")!, p + ".count")
+    let f_bytes: Double = wAbsent(o.value("bytes")) ? 0 : try wNum(o.value("bytes")!, p + ".bytes")
+    let f_reason: SessionProcessOverviewOmissionsReason = wAbsent(o.value("reason")) ? try wMissing(p + ".reason") : try SessionProcessOverviewOmissionsReason.decode(o.value("reason")!, p + ".reason")
+    return SessionProcessOverviewOmissions(count: f_count, bytes: f_bytes, reason: f_reason)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"count\":" + wFormat(self.count)
+    s += ",\"bytes\":" + wFormat(self.bytes)
+    s += ",\"reason\":" + self.reason.encode()
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
+package struct SessionProcessOverview: Hashable, Sendable {
+  package let version: Literal1
+  package let revision: Double
+  package let asOf: String
+  package let activeCount: Double
+  package let recentCount: Double
+  package let problemCount: Double
+  package let visibility: SessionProcessOverviewVisibility
+  package let nearestExpiry: String?
+  package let omissions: SessionProcessOverviewOmissions?
+  package let extensionChildOmissions: ExtensionRunActivityLifecycleOmissions?
+  package init(version: Literal1, revision: Double, asOf: String, activeCount: Double, recentCount: Double, problemCount: Double, visibility: SessionProcessOverviewVisibility, nearestExpiry: String? = nil, omissions: SessionProcessOverviewOmissions? = nil, extensionChildOmissions: ExtensionRunActivityLifecycleOmissions? = nil) {
+    self.version = version
+    self.revision = revision
+    self.asOf = asOf
+    self.activeCount = activeCount
+    self.recentCount = recentCount
+    self.problemCount = problemCount
+    self.visibility = visibility
+    self.nearestExpiry = nearestExpiry
+    self.omissions = omissions
+    self.extensionChildOmissions = extensionChildOmissions
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> SessionProcessOverview {
+    let o = try wObj(v, p)
+    let f_version: Literal1 = wAbsent(o.value("version")) ? .v1 : try Literal1.decode(o.value("version")!, p + ".version")
+    let f_revision: Double = wAbsent(o.value("revision")) ? 0 : try wNum(o.value("revision")!, p + ".revision")
+    let f_asOf: String = wAbsent(o.value("asOf")) ? "" : try wStr(o.value("asOf")!, p + ".asOf")
+    let f_activeCount: Double = wAbsent(o.value("activeCount")) ? 0 : try wNum(o.value("activeCount")!, p + ".activeCount")
+    let f_recentCount: Double = wAbsent(o.value("recentCount")) ? 0 : try wNum(o.value("recentCount")!, p + ".recentCount")
+    let f_problemCount: Double = wAbsent(o.value("problemCount")) ? 0 : try wNum(o.value("problemCount")!, p + ".problemCount")
+    let f_visibility: SessionProcessOverviewVisibility = wAbsent(o.value("visibility")) ? try wMissing(p + ".visibility") : try SessionProcessOverviewVisibility.decode(o.value("visibility")!, p + ".visibility")
+    let f_nearestExpiry: String? = wAbsent(o.value("nearestExpiry")) ? nil : try wStr(o.value("nearestExpiry")!, p + ".nearestExpiry")
+    let f_omissions: SessionProcessOverviewOmissions? = wAbsent(o.value("omissions")) ? nil : try SessionProcessOverviewOmissions.decode(o.value("omissions")!, p + ".omissions")
+    let f_extensionChildOmissions: ExtensionRunActivityLifecycleOmissions? = wAbsent(o.value("extensionChildOmissions")) ? nil : try ExtensionRunActivityLifecycleOmissions.decode(o.value("extensionChildOmissions")!, p + ".extensionChildOmissions")
+    return SessionProcessOverview(version: f_version, revision: f_revision, asOf: f_asOf, activeCount: f_activeCount, recentCount: f_recentCount, problemCount: f_problemCount, visibility: f_visibility, nearestExpiry: f_nearestExpiry, omissions: f_omissions, extensionChildOmissions: f_extensionChildOmissions)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"version\":" + self.version.encode()
+    s += ",\"revision\":" + wFormat(self.revision)
+    s += ",\"asOf\":" + wEscape(self.asOf)
+    s += ",\"activeCount\":" + wFormat(self.activeCount)
+    s += ",\"recentCount\":" + wFormat(self.recentCount)
+    s += ",\"problemCount\":" + wFormat(self.problemCount)
+    s += ",\"visibility\":" + self.visibility.encode()
+    s += (self.nearestExpiry == nil ? "" : ",\"nearestExpiry\":" + wEscape(self.nearestExpiry!))
+    s += (self.omissions == nil ? "" : ",\"omissions\":" + self.omissions!.encode())
+    s += (self.extensionChildOmissions == nil ? "" : ",\"extensionChildOmissions\":" + self.extensionChildOmissions!.encode())
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
+package struct SessionProcessDelta: Hashable, Sendable {
+  package let activity: SessionProcessActivity?
+  package let removedProcessIds: [String]?
+  package let processRevision: Double
+  package let processAsOf: String
+  package let overview: SessionProcessOverview
+  package init(activity: SessionProcessActivity? = nil, removedProcessIds: [String]? = nil, processRevision: Double, processAsOf: String, overview: SessionProcessOverview) {
+    self.activity = activity
+    self.removedProcessIds = removedProcessIds
+    self.processRevision = processRevision
+    self.processAsOf = processAsOf
+    self.overview = overview
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> SessionProcessDelta {
+    let o = try wObj(v, p)
+    let f_activity: SessionProcessActivity? = wAbsent(o.value("activity")) ? nil : try SessionProcessActivity.decode(o.value("activity")!, p + ".activity")
+    let f_removedProcessIds: [String]? = wAbsent(o.value("removedProcessIds")) ? nil : try wSeq(o.value("removedProcessIds")!, p + ".removedProcessIds") { x, q in try wStr(x, q) }
+    let f_processRevision: Double = wAbsent(o.value("processRevision")) ? 0 : try wNum(o.value("processRevision")!, p + ".processRevision")
+    let f_processAsOf: String = wAbsent(o.value("processAsOf")) ? "" : try wStr(o.value("processAsOf")!, p + ".processAsOf")
+    let f_overview: SessionProcessOverview = wAbsent(o.value("overview")) ? try wMissing(p + ".overview") : try SessionProcessOverview.decode(o.value("overview")!, p + ".overview")
+    return SessionProcessDelta(activity: f_activity, removedProcessIds: f_removedProcessIds, processRevision: f_processRevision, processAsOf: f_processAsOf, overview: f_overview)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += (self.activity == nil ? "" : ",\"activity\":" + self.activity!.encode())
+    s += (self.removedProcessIds == nil ? "" : ",\"removedProcessIds\":" + "[" + self.removedProcessIds!.map { wEscape($0) }.joined(separator: ",") + "]")
+    s += ",\"processRevision\":" + wFormat(self.processRevision)
+    s += ",\"processAsOf\":" + wEscape(self.processAsOf)
+    s += ",\"overview\":" + self.overview.encode()
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
+package struct ProcessTranscriptChanged: Hashable, Sendable {
+  package let leaseId: String
+  package let processId: String?
+  package let revision: String?
+  package let total: Double?
+  package let leafEntryId: String?
+  package let closed: Bool?
+  package let reason: String?
+  package init(leaseId: String, processId: String? = nil, revision: String? = nil, total: Double? = nil, leafEntryId: String? = nil, closed: Bool? = nil, reason: String? = nil) {
+    self.leaseId = leaseId
+    self.processId = processId
+    self.revision = revision
+    self.total = total
+    self.leafEntryId = leafEntryId
+    self.closed = closed
+    self.reason = reason
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> ProcessTranscriptChanged {
+    let o = try wObj(v, p)
+    let f_leaseId: String = wAbsent(o.value("leaseId")) ? "" : try wStr(o.value("leaseId")!, p + ".leaseId")
+    let f_processId: String? = wAbsent(o.value("processId")) ? nil : try wStr(o.value("processId")!, p + ".processId")
+    let f_revision: String? = wAbsent(o.value("revision")) ? nil : try wStr(o.value("revision")!, p + ".revision")
+    let f_total: Double? = wAbsent(o.value("total")) ? nil : try wNum(o.value("total")!, p + ".total")
+    let f_leafEntryId: String? = wAbsent(o.value("leafEntryId")) ? nil : try wStr(o.value("leafEntryId")!, p + ".leafEntryId")
+    let f_closed: Bool? = wAbsent(o.value("closed")) ? nil : try wBool(o.value("closed")!, p + ".closed")
+    let f_reason: String? = wAbsent(o.value("reason")) ? nil : try wStr(o.value("reason")!, p + ".reason")
+    return ProcessTranscriptChanged(leaseId: f_leaseId, processId: f_processId, revision: f_revision, total: f_total, leafEntryId: f_leafEntryId, closed: f_closed, reason: f_reason)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"leaseId\":" + wEscape(self.leaseId)
+    s += (self.processId == nil ? "" : ",\"processId\":" + wEscape(self.processId!))
+    s += (self.revision == nil ? "" : ",\"revision\":" + wEscape(self.revision!))
+    s += (self.total == nil ? "" : ",\"total\":" + wFormat(self.total!))
+    s += (self.leafEntryId == nil ? "" : ",\"leafEntryId\":" + wEscape(self.leafEntryId!))
+    s += (self.closed == nil ? "" : ",\"closed\":" + (self.closed! ? "true" : "false"))
+    s += (self.reason == nil ? "" : ",\"reason\":" + wEscape(self.reason!))
     return "{" + String(s.dropFirst()) + "}"
   }
 }

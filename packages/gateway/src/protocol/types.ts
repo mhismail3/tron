@@ -1139,6 +1139,38 @@ export function decodeSessionProcessOverview(v: unknown, p = "$"): SessionProces
 export function encodeSessionProcessOverview(v: SessionProcessOverview): string {
   return "{" + (',"version":' + encodeLiteral1(v.version) + ',"revision":' + encNum(v.revision) + ',"asOf":' + JSON.stringify(v.asOf) + ',"activeCount":' + encNum(v.activeCount) + ',"recentCount":' + encNum(v.recentCount) + ',"problemCount":' + encNum(v.problemCount) + ',"visibility":' + encodeSessionProcessOverviewVisibility(v.visibility) + (v.nearestExpiry === undefined ? "" : ',"nearestExpiry":' + JSON.stringify(v.nearestExpiry)) + (v.omissions === undefined ? "" : ',"omissions":' + encodeSessionProcessOverviewOmissions(v.omissions)) + (v.extensionChildOmissions === undefined ? "" : ',"extensionChildOmissions":' + encodeExtensionRunActivityLifecycleOmissions(v.extensionChildOmissions))).slice(1) + "}";
 }
+export interface SessionProcessDelta {
+  activity?: SessionProcessActivity;
+  removedProcessIds?: string[];
+  processRevision: number;
+  processAsOf: string;
+  overview: SessionProcessOverview;
+}
+export function decodeSessionProcessDelta(v: unknown, p = "$"): SessionProcessDelta {
+  const o = obj(v, p);
+  only(o, p, ["activity","removedProcessIds","processRevision","processAsOf","overview"]);
+  return { ...(own(o, "activity") === undefined ? {} : { activity: decodeSessionProcessActivity(own(o, "activity"), p + ".activity") }), ...(own(o, "removedProcessIds") === undefined ? {} : { removedProcessIds: seq(own(o, "removedProcessIds"), p + ".removedProcessIds", (x, q) => str(x, q)) }), processRevision: num(own(o, "processRevision"), p + ".processRevision"), processAsOf: str(own(o, "processAsOf"), p + ".processAsOf"), overview: decodeSessionProcessOverview(own(o, "overview"), p + ".overview") };
+}
+export function encodeSessionProcessDelta(v: SessionProcessDelta): string {
+  return "{" + ((v.activity === undefined ? "" : ',"activity":' + encodeSessionProcessActivity(v.activity)) + (v.removedProcessIds === undefined ? "" : ',"removedProcessIds":' + "[" + v.removedProcessIds.map((x) => JSON.stringify(x)).join(",") + "]") + ',"processRevision":' + encNum(v.processRevision) + ',"processAsOf":' + JSON.stringify(v.processAsOf) + ',"overview":' + encodeSessionProcessOverview(v.overview)).slice(1) + "}";
+}
+export interface ProcessTranscriptChanged {
+  leaseId: string;
+  processId?: string;
+  revision?: string;
+  total?: number;
+  leafEntryId?: string;
+  closed?: boolean;
+  reason?: string;
+}
+export function decodeProcessTranscriptChanged(v: unknown, p = "$"): ProcessTranscriptChanged {
+  const o = obj(v, p);
+  only(o, p, ["leaseId","processId","revision","total","leafEntryId","closed","reason"]);
+  return { leaseId: str(own(o, "leaseId"), p + ".leaseId"), ...(own(o, "processId") === undefined ? {} : { processId: str(own(o, "processId"), p + ".processId") }), ...(own(o, "revision") === undefined ? {} : { revision: str(own(o, "revision"), p + ".revision") }), ...(own(o, "total") === undefined ? {} : { total: num(own(o, "total"), p + ".total") }), ...(own(o, "leafEntryId") === undefined ? {} : { leafEntryId: str(own(o, "leafEntryId"), p + ".leafEntryId") }), ...(own(o, "closed") === undefined ? {} : { closed: bool(own(o, "closed"), p + ".closed") }), ...(own(o, "reason") === undefined ? {} : { reason: str(own(o, "reason"), p + ".reason") }) };
+}
+export function encodeProcessTranscriptChanged(v: ProcessTranscriptChanged): string {
+  return "{" + (',"leaseId":' + JSON.stringify(v.leaseId) + (v.processId === undefined ? "" : ',"processId":' + JSON.stringify(v.processId)) + (v.revision === undefined ? "" : ',"revision":' + JSON.stringify(v.revision)) + (v.total === undefined ? "" : ',"total":' + encNum(v.total)) + (v.leafEntryId === undefined ? "" : ',"leafEntryId":' + JSON.stringify(v.leafEntryId)) + (v.closed === undefined ? "" : ',"closed":' + JSON.stringify(v.closed)) + (v.reason === undefined ? "" : ',"reason":' + JSON.stringify(v.reason))).slice(1) + "}";
+}
 export type SessionProcessHistoryPageOmissionsReason = "bytes" | "countAndBytes";
 const SessionProcessHistoryPageOmissionsReasonValues: ReadonlyArray<unknown> = ["bytes", "countAndBytes"];
 export function decodeSessionProcessHistoryPageOmissionsReason(v: unknown, p = "$"): SessionProcessHistoryPageOmissionsReason { if (!SessionProcessHistoryPageOmissionsReasonValues.includes(v)) throw new WireError(p, `unknown value ${JSON.stringify(v)}`); return v as SessionProcessHistoryPageOmissionsReason; }
