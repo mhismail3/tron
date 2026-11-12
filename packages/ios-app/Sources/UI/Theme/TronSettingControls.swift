@@ -217,22 +217,6 @@ struct TronCatalogOptionRow: View {
     }
 }
 
-struct TronSettingsInputScope: Equatable {
-    var profile = 0
-    var scope = 0
-}
-
-private struct TronSettingsInputScopeKey: EnvironmentKey {
-    static let defaultValue = TronSettingsInputScope()
-}
-
-extension EnvironmentValues {
-    var tronSettingsInputScope: TronSettingsInputScope {
-        get { self[TronSettingsInputScopeKey.self] }
-        set { self[TronSettingsInputScopeKey.self] = newValue }
-    }
-}
-
 struct TronNumberSettingRow: View {
     let icon: String
     let title: String
@@ -240,10 +224,8 @@ struct TronNumberSettingRow: View {
     @Binding var value: Int
     var accent: Color = .tronPrimary
     var stagedText: Binding<String?>? = nil
-    @Environment(\.tronSettingsInputScope) private var inputScope
     @State private var text: String?
     @State private var acceptedBinding: Binding<Int>?
-    @State private var admittedScope: TronSettingsInputScope?
     @State private var invalid = false
     @FocusState private var focused: Bool
 
@@ -257,7 +239,7 @@ struct TronNumberSettingRow: View {
                 if let stagedText {
                     stagedText.wrappedValue = next
                 } else {
-                    if text == nil { acceptedBinding = $value; admittedScope = inputScope }
+                    if text == nil { acceptedBinding = $value }
                     text = next
                 }
                 invalid = false
@@ -286,13 +268,11 @@ struct TronNumberSettingRow: View {
         }
         .onSubmit { commit() }
         .onChange(of: focused) { _, active in if !active { commit() } }
-        .onChange(of: inputScope) { _, _ in discard(); focused = false }
         .onDisappear { commit() }
     }
 
     private func commit() {
         guard stagedText == nil, let text else { return }
-        guard admittedScope == inputScope else { discard(); return }
         guard let number = Self.parse(text) else { invalid = true; return }
         if let acceptedBinding, acceptedBinding.wrappedValue != number { acceptedBinding.wrappedValue = number }
         discard()
@@ -302,7 +282,6 @@ struct TronNumberSettingRow: View {
         guard stagedText == nil else { return }
         text = nil
         acceptedBinding = nil
-        admittedScope = nil
         invalid = false
     }
 

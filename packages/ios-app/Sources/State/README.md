@@ -27,7 +27,7 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
 | `MacTerminalController`, `MacTerminalEnrollmentStore` | Mac Terminal enrollment and shells ([Terminal](../UI/Terminal/README.md)). |
 | `SettingsTrustCoordinator`, `ProjectLifecycleModels` | Settings resolve/change/history/approvals, project trust and the native lifecycle read/request contract. |
 | `ProviderAuthCoordinator` | Provider/model catalogs, auth operations and prompts, MCP sign-in. |
-| `PackageConfigurationCoordinator`, `ConfigurationAutosaveCoordinator` | Packages and autosaved settings writes. |
+| `PackageConfigurationCoordinator` | Package operations. |
 | `HomeStatusPresentationOwner`, `HomeSheetReadOwner`, `HomeMutationCoordinator` | Home status, Home sheet reads, Home commands. |
 | `AutomationCatalogCoordinator`, `AutomationRPCClient` | Automation summaries per Gateway. |
 | `KnowledgePresentationIdentity`, `KnowledgeDestinationIdentity` | Shared transport/read and accepted-result identities used by settings, uploads, auth and Profile; no corpus projection. |
@@ -58,10 +58,6 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
   projections and receipt-owned `projects.change`, whose review the shared card confirms by
   resending its exact digest and intent. `ProjectLifecycleModels` decodes that contract strictly; names,
   paths and cursors are never trimmed. There is no iOS project store or approval engine.
-- **Autosave.** `ConfigurationAutosaveCoordinator` admits writes only from user input, debounces,
-  serializes, merges sparse patches per target, retains up to 64 batches (then rejects visibly),
-  flushes on dismissal without cancelling accepted commands, and never auto-retries an uncertain
-  outcome.
 - **Provider auth.** Operations belong to the device identity; a 4-operation, 64-element,
   16 KiB pre-response quarantine admits events that arrive before `auth.begin` returns. Lost
   operations recover through `auth.begin` (`recovered: true`) and `replaceOperationId`; unsent input
