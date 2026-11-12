@@ -120,7 +120,7 @@ it touches (P1); the full suite and E2E journeys are batch and checkpoint signal
 - Issue writes use `scripts/tron work`; reads may use `gh`. A nonzero GraphQL exit is
   uncertain: inspect remote state, never replay. Repository protection is maintainer-only.
 - Answer questions in chat; file concrete work (bodies hold remaining scope; PRs optional);
-  Pi upstream: #198. Home workers `checkin` at milestones/~30 min; `report` seals results.
+  Pi upstream: #198.
 
 ## Working decisions
 
@@ -130,7 +130,7 @@ it touches (P1); the full suite and E2E journeys are batch and checkpoint signal
 - Home decides objective gates; verify has [no exemptions](tools/verify/README.md#no-exemptions). Review scales with risk: full independent ACCEPT for test changes, persisted data/`~/.tron`, wire protocol, security, data-loss and irreversible changes; visual-only changes whose screenshots the maintainer approved get a light diff review.
 - Keep one file owner and downward layer/cycle/Pi-seam ratchets, not phase handshakes,
   file-length targets or blanket base-lock runs. Build ahead on branches. [Health](docs/HEALTH.md) metrics are signals, never gates; never drop a capability to move a metric.
-- Default 2h tasks, 30-minute SHA/change/blocker check-ins; land at the no-worse-than-main bar or settle in ≤25 lines.
+- Default 2h tasks; land at the no-worse-than-main bar or settle in ≤25 lines.
   Gateway/Mac/iPhone rebuilds wait until all workers stop/park cleanly; Home coordinates, the maintainer executes lockstep delivery.
 
 ## Where things go
