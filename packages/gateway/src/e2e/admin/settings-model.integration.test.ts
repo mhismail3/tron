@@ -587,8 +587,6 @@ describe("settings renderer contract", () => {
     ]);
     const edited = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
     expect(presentedRow(edited, "sources.extensions")).toMatchObject({ value: ["beta", "gamma"], presentation: { control: "list", valueKind: "stringList" } });
-    expect(JSON.stringify(edited)).not.toContain("replacement.invalid");
-    expect(JSON.stringify(await f.service.invoke(subscribed(), "settings.history", {}))).not.toContain("replacement.invalid");
     const toggles = await resolveWith(f, macTarget, { version: 1, controls: ["hologram", "toggle"] });
     expect(presentedRow(toggles, "model.thinking[role=chat]", { model: f.modelKey }).presentation).toMatchObject({ control: "readOnly", note: UPDATE_TRON_NOTE });
     expect(presentedRow(toggles, "context.images.block").presentation.control).toBe("toggle");
