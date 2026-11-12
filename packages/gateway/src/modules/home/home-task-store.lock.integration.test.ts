@@ -55,7 +55,7 @@ const stored = (write: HomeTaskWrite, createdAt: number, updatedAt: number): Hom
   ({ ...write, createdAt: EPOCH + createdAt, updatedAt: EPOCH + updatedAt }) as HomeTaskRecord;
 
 async function drive(home: string, store: HomeTaskStore): Promise<void> {
-  const tasks = join(home, "gateway", "home", "tasks");
+  const tasks = join(home, "state", "home", "tasks");
   const advance = (ms: number) => { vi.setSystemTime(Date.now() + ms); };
   const records = async () => { const all: HomeTaskRecord[] = []; for await (const record of store.records()) all.push(record); return all; };
   const page = async (input: { limit?: number; cursor?: string }) => {
@@ -74,12 +74,12 @@ async function drive(home: string, store: HomeTaskStore): Promise<void> {
   expect(await page({}), "page before initialize").toEqual({ items: [], counts: { active: 0, finished: 0 }, nextCursor: false });
   expect(await records(), "records before initialize").toEqual([]);
   await holds("before initialize");
-  await mkdir(join(home, "gateway", "home"), { mode: 0o700 });
+  await mkdir(join(home, "state", "home"), { mode: 0o700 });
   await writeFile(tasks, "{}", { mode: 0o700 });
   try {
     expect(await outcome(() => store.read("task-1")), "a regular file where the tasks directory belongs").toEqual(refused("unsafe-state"));
     expect(await readFile(tasks, "utf8"), "the regular file is left as it was").toBe("{}");
-  } finally { await rm(join(home, "gateway", "home"), { recursive: true }); }
+  } finally { await rm(join(home, "state", "home"), { recursive: true }); }
   expect(await store.initialize(), "initialize").toBe(true);
   const authority = { version: 1, revision: 1, scopes: [] as unknown[], requests: [] as unknown[], decisions: [] as unknown[], grants: [] as unknown[] };
   expected["authorization.json"] = { ...authority };

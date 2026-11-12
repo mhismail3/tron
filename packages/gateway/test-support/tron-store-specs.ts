@@ -261,7 +261,7 @@ export const STORES: readonly StoreSpec[] = [
     },
     async read(home) {
       const uploads = new UploadStore(home, 1_048_576);
-      const ids = (await readdir(join(home, "gateway", "uploads"), { withFileTypes: true }))
+      const ids = (await readdir(join(home, "state", "uploads"), { withFileTypes: true }))
         .filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
       const leases = [];
       for (const id of ids) {
@@ -411,7 +411,7 @@ export const STORES: readonly StoreSpec[] = [
     async read(home) {
       const store = new DisplayArtifactStore(home, { minimumFreeBytes: 0 });
       await store.initialize();
-      const ids = (await readdir(join(home, "gateway", "display-artifacts", "artifacts"))).sort();
+      const ids = (await readdir(join(home, "state", "display-artifacts", "artifacts"))).sort();
       const artifacts = [];
       for (const id of ids) {
         const lease = await store.acquire(id, CORPUS_IDS.session);

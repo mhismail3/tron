@@ -211,6 +211,7 @@ function treeIdentity(root: string): string {
 export class ManagedSubagents {
   readonly root: string;
   private verifiedTree: string | undefined;
+  private readonly canonicalHome: string;
   constructor(private readonly tronHome: string, private readonly logger?: ModuleLog) {
     this.tronHome = resolve(tronHome);
     let ancestor = this.tronHome;
@@ -219,7 +220,8 @@ export class ManagedSubagents {
       missing.unshift(relative(dirname(ancestor), ancestor));
       ancestor = dirname(ancestor);
     }
-    this.root = tronHomePath(join(realpathSync(ancestor), ...missing), "internal/pi-subagents", pin.version);
+    this.canonicalHome = join(realpathSync(ancestor), ...missing);
+    this.root = tronHomePath(this.canonicalHome, "cache/pi-subagents", pin.version);
   }
 
   static activateForStartup(tronHome: string, logger?: ModuleLog): ManagedSubagents {
@@ -473,7 +475,7 @@ export class ManagedSubagents {
 
   private jitiOptions(): { jitiUrl: string; jiti: JitiOptions } {
     const require = createRequire(join(this.root, "package.json"));
-    const fsCache = tronHomePath(dirname(dirname(dirname(this.root))), "internal/pi-subagents-transform-cache", basename(this.root));
+    const fsCache = tronHomePath(this.canonicalHome, "cache/pi-subagents-transform-cache", basename(this.root));
     privateDirectory(fsCache);
     return { jitiUrl: pathToFileURL(require.resolve("jiti")).href, jiti: { moduleCache: false, alias: piExtensionAliases(), fsCache } };
   }

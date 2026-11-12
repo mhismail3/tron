@@ -37,7 +37,7 @@ it("the Gateway update configuration is synchronized before configure returns, a
   drainDurableWriteStats();
   const config = await update.configure({ sourceRoot });
   expect(drainDurableWriteStats().count).toBe(2);
-  const path = join(tronHome, "gateway", "update-config.json");
+  const path = join(tronHome, "state", "update-config.json");
   expect(await readFile(path, "utf8")).toBe(`${JSON.stringify(config)}\n`);
   expect((await stat(path)).mode & 0o777).toBe(0o600);
 });
@@ -69,8 +69,8 @@ it("Gateway and Mac replacement RPCs return the same invalid repository diagnosi
   const gateway = await startLockGateway("source-repository");
   try {
     const sourceRoot = await realpath(gateway.cwd);
-    await mkdir(join(gateway.tronHome, "gateway"), { recursive: true });
-    await writeFile(join(gateway.tronHome, "gateway/update-config.json"), JSON.stringify({
+    await mkdir(join(gateway.tronHome, "state"), { recursive: true });
+    await writeFile(join(gateway.tronHome, "state", "update-config.json"), JSON.stringify({
       schema: 1, kind: "tron-gateway-update-config", sourceRoot, updatedAt: "2026-10-30T00:00:00.000Z",
     }));
     const phone = await gateway.connect("phone");

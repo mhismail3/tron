@@ -172,7 +172,7 @@ class VerifierJourney(unittest.TestCase):
                 (aliases / "node").symlink_to(f"../node-{architecture}")
                 (aliases / "npm").symlink_to(f"../npm-{architecture}/bin/npm-cli.js")
                 (aliases / "pi").symlink_to("../../app/node_modules/.bin/pi")
-            selection = home / ".tron-dev/gateway/payloads/dev"
+            selection = home / ".tron-dev/state/payloads/dev"
             document(selection / "current.json", {"schema": 1, "kind": "tron-gateway-selection", "channel": "dev", "version": "fixture", "payloadFingerprint": "a" * 64})
             (selection / "versions").mkdir()
             shutil.copytree(payload, selection / "versions/fixture", symlinks=True)
@@ -204,7 +204,7 @@ class VerifierJourney(unittest.TestCase):
                 command = lambda path, arguments="": f"{path}/runtime/node-{'x64' if os.uname().machine == 'x86_64' else 'arm64'} --max-old-space-size=4096 {path}/app/dist/index.js{arguments}"
                 document(state, {"child": process.pid, "stableCommand": command(payload), "debugCommand": command(debug_payload, " --host 127.0.0.1 --port 9848")})
                 start = lambda pid: subprocess.check_output(["/bin/ps", "-o", "lstart=", "-p", str(pid)], text=True).strip()
-                document(home / ".tron-dev/gateway/lifecycle.json", {"lifecycle": "ready", "expectedPort": 9848, "expectedHome": str(home / ".tron-dev"), "expectedHost": "127.0.0.1", "supervisorPid": os.getpid(), "supervisorStartIdentity": start(os.getpid()), "childPid": process.pid, "childStartIdentity": start(process.pid), "epoch": "fixture-epoch", "sourceRevision": "b" * 40, "buildFingerprint": "a" * 64})
+                document(home / ".tron-dev/state/lifecycle.json", {"lifecycle": "ready", "expectedPort": 9848, "expectedHome": str(home / ".tron-dev"), "expectedHost": "127.0.0.1", "supervisorPid": os.getpid(), "supervisorStartIdentity": start(os.getpid()), "childPid": process.pid, "childStartIdentity": start(process.pid), "epoch": "fixture-epoch", "sourceRevision": "b" * 40, "buildFingerprint": "a" * 64})
                 for scenario, success in (("tls-first", True), ("wrong-first", False), ("main-only", True), ("wrong-main", False), ("no-sockets", False), ("absent", True)):
                     with self.subTest(scenario=scenario):
                         mode.write_text(scenario)

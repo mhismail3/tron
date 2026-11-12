@@ -114,7 +114,7 @@ async function gateway(tronHome: string, port: number) {
   });
   registries.push(sessions);
   await sessions.initialize();
-  const keys = new MacTerminalService(tronHome, { port, launchAgentDirectory: join(root, "agents") });
+  const keys = new MacTerminalService(join(tronHome, "state/mac-terminal"), { port, launchAgentDirectory: join(root, "agents") });
   const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: keys }));
   const settingsChanges = new SettingsChangePath(settingsModel, new SettingsChangeRecord(tronHome), {
     setTrust: async () => { throw new Error("not used"); },
@@ -162,7 +162,7 @@ describe("Mac Terminal", () => {
     const authorizedKeys = join(sshDirectory, "authorized_keys");
     await writeFile(authorizedKeys, handWritten, { mode: 0o600 });
     const port = await freePort();
-    const native = new MacTerminalService(tronHome, { port, launchAgentDirectory: join(root, "agents") });
+    const native = new MacTerminalService(join(tronHome, "state/mac-terminal"), { port, launchAgentDirectory: join(root, "agents") });
     try {
       let { service, pair, devices } = await gateway(tronHome, port);
       const phone = await pair("Fixture iPhone");

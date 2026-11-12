@@ -13,7 +13,7 @@ it("run-markers-paths: mark, complete, reassert, clear, bounds and admission", a
   onTestFinished(async () => { vi.useRealTimers(); await rm(home, { recursive: true, force: true }); });
   const advance = (ms: number) => { vi.setSystemTime(Date.now() + ms); };
   const store = new RunMarkerStore(home);
-  const directory = join(home, "gateway", "runtime-markers");
+  const directory = join(home, "state", "runtime-markers");
   const all = async () => ({
     evidence: Object.fromEntries([...(await store.evidence())].sort(([a], [b]) => a.localeCompare(b))),
     interrupted: [...await store.interruptedSessionIds()].sort(),

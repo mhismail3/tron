@@ -298,7 +298,7 @@ describe("Tron Home designation", () => {
     const requestsBeforeCorruption = f.faux.state.callCount;
     expect(requestsBeforeCorruption).toBe(1);
 
-    await writeFile(join(f.tronHome, "gateway", "home", "home.json"), "{broken", { mode: 0o600 });
+    await writeFile(join(f.tronHome, "state", "home", "home.json"), "{broken", { mode: 0o600 });
     await reopen(f);
     await waitForCatalog(f);
     let admissionError: unknown;
@@ -355,7 +355,7 @@ describe("Tron Home designation", () => {
 
     const home = await f.registry.acquire(designation.sessionId);
     const homeContext = await contextOf(home);
-    expect(home.cwd).toBe(await realpath(join(f.tronHome, "gateway", "home", "workspace")));
+    expect(home.cwd).toBe(await realpath(join(f.tronHome, "state", "home", "workspace")));
     expect(activeTools(homeContext)).toEqual(HOME_TOOLS);
     expect(registeredTools(homeContext)).toEqual(HOME_TOOLS);
     expect(extensionNames(homeContext)).toEqual(HOME_EXTENSIONS);
@@ -543,7 +543,7 @@ describe("Tron Home designation", () => {
     f.faux.setResponses([fauxAssistantMessage("persist virtual transcript")]);
     await home.prompt("persist disabled transcript");
     await waitUntil(() => home.snapshot().configurationBlocker === null);
-    const profilePath = join(f.tronHome, "gateway", "home", "profile.json");
+    const profilePath = join(f.tronHome, "state", "home", "profile.json");
     const profile = JSON.parse(await readFile(profilePath, "utf8").catch(() => "{}")) as { model?: Record<string, unknown> };
     await writeFile(profilePath, `${JSON.stringify({ ...profile, model: { ...profile.model, chat: { provider: PROVIDER, id: VIRTUAL_MODEL_ID } } })}\n`, { mode: 0o600 });
     await reopen(f);

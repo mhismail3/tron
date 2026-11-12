@@ -290,7 +290,7 @@ async function receiptHome() {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(EPOCH);
   onTestFinished(async () => { vi.useRealTimers(); await rm(home, { recursive: true, force: true }); });
-  const directory = join(home, "gateway", "command-receipts");
+  const directory = join(home, "state", "command-receipts");
   let calls = 0;
   return {
     home, directory,

@@ -19,7 +19,7 @@ describe("gateway/automations owned-run lock", () => {
     const gateway = await startLockGateway("automation-owned-run", { automations: true });
     gateways.push(gateway);
     const { sessionId, existing, workspace } = await automationOwnedRunScenario(gateway);
-    const automationFile = (automationId: string) => join(gateway.tronHome, "gateway", "automations", `${automationId}.json`);
+    const automationFile = (automationId: string) => join(gateway.tronHome, "state", "automations", `${automationId}.json`);
     const recorded = gateway.record();
     const exchanges = recorded.exchanges as Array<{ method: string; params: Record<string, unknown>; response: { ok: boolean; result: any } }>;
     const results = (method: string) => exchanges.filter((exchange) => exchange.method === method).map((exchange) => exchange.response.result);
@@ -102,7 +102,7 @@ describe("gateway/automations owned-run lock", () => {
     ]);
     expectRequestShapes(recorded.providerRequests, Array(5).fill("chatWithAutomations"));
 
-    const receiptsDir = join(gateway.tronHome, "gateway", "command-receipts");
+    const receiptsDir = join(gateway.tronHome, "state", "command-receipts");
     const commandReceipts = (await Promise.all((await gateway.tree(receiptsDir)).map(async (name) => JSON.parse(await readFile(join(receiptsDir, name), "utf8")) as Record<string, any>)))
       .sort((left, right) => String(left.commandId).localeCompare(String(right.commandId)));
     expect(commandReceipts.map((entry) => entry.method)).toEqual([
@@ -116,6 +116,6 @@ describe("gateway/automations owned-run lock", () => {
     }
     expect(commandReceipts.map((entry) => normalizeTraceValue(entry.result, gateway.normalization)))
       .toEqual(mutations.map((exchange) => exchange.response.result));
-    expect(await gateway.tree(join(gateway.tronHome, "gateway", "runtime-markers"))).toEqual([]);
+    expect(await gateway.tree(join(gateway.tronHome, "state", "runtime-markers"))).toEqual([]);
   });
 });

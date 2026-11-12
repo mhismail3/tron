@@ -274,7 +274,7 @@ export async function automationOwnedRunScenario(gateway: LockGateway) {
   expect(opened.ok, JSON.stringify(opened)).toBe(true);
   expect((await phone.request("session.sync", { sessionId, syncToken: opened.result.syncToken })).ok).toBe(true);
 
-  const automationFile = (automationId: string) => join(gateway.tronHome, "gateway", "automations", `${automationId}.json`);
+  const automationFile = (automationId: string) => join(gateway.tronHome, "state", "automations", `${automationId}.json`);
   const raw = async (automationId: string) => {
     return JSON.parse(await readFile(automationFile(automationId), "utf8")) as AutomationRecordFile;
   };
@@ -371,7 +371,7 @@ export async function notificationsPushScenario(own: (release: () => Promise<voi
   own(() => gateway.dispose());
   own(async () => notifications.dispose());
   const sent = (count: number, label: string) => waitFor(() => relayRequests.length >= count, label);
-  const document = async () => JSON.parse(await readFile(join(gateway.tronHome, "gateway", "notifications.json"), "utf8")) as {
+  const document = async () => JSON.parse(await readFile(join(gateway.tronHome, "state", "notifications.json"), "utf8")) as {
     receipts: Array<{ result: string; grantIds: string[] }>;
     pending: unknown[];
   };

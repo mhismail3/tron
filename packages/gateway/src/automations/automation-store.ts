@@ -170,7 +170,7 @@ export class AutomationStore {
   private catalogRevision = 0;
 
   constructor(tronHome: string, options: AutomationStoreOptions = {}) {
-    this.directory = tronHomePath(tronHome, "gateway/automations");
+    this.directory = tronHomePath(tronHome, "state/automations");
     this.changed = options.changed ?? (() => {});
   }
 

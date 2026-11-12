@@ -40,9 +40,9 @@ async function runCrashCut() {
   const root = await mkdtemp(join(tmpdir(), "tron-home-ledger-crash-"));
   roots.push(root);
   const tronHome = join(root, "tron");
-  const recordPath = join(tronHome, "gateway", "home", "home.json");
+  const recordPath = join(tronHome, "state", "home", "home.json");
   const marker = join(root, "barrier-reached");
-  await mkdir(join(tronHome, "gateway", "home"), { recursive: true });
+  await mkdir(join(tronHome, "state", "home"), { recursive: true });
   await writeFile(recordPath, `${JSON.stringify(initialRecord(), null, 2)}\n`, { mode: 0o600 });
   const child = spawn(process.execPath, [
     "--experimental-transform-types", "--import", pathToFileURL(preload).href,

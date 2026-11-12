@@ -402,7 +402,7 @@ function memoryStatePath(f: Fixture, homeId: string): string {
 }
 
 async function homeMemoryStateId(f: Fixture): Promise<string> {
-  return (JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord).homeId;
+  return (JSON.parse(await readFile(join(f.tronHome, "state", "home", "home.json"), "utf8")) as HomeRecord).homeId;
 }
 
 async function readMemoryState(f: Fixture, sessionId: string): Promise<Record<string, unknown> | undefined> {
@@ -739,10 +739,10 @@ describe("Tron Home activations end to end", () => {
     f.faux.setResponses([fauxAssistantMessage("soft threshold crossed")]);
     await slot.prompt("cross the soft Home threshold");
     await waitUntil(async () => {
-      const record = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+      const record = JSON.parse(await readFile(join(f.tronHome, "state", "home", "home.json"), "utf8")) as HomeRecord;
       return record.chapters.length === 2;
     });
-    const stored = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const stored = JSON.parse(await readFile(join(f.tronHome, "state", "home", "home.json"), "utf8")) as HomeRecord;
     expect(stored.chapters).toHaveLength(2);
     expect(stored.chapters[0]).toMatchObject({ state: "sealed", sizeAtSeal: bytes, entriesAtSeal: entries });
     expect(stored.chapters[1]).toMatchObject({ state: "reserved", ordinal: 2 });
@@ -772,7 +772,7 @@ describe("Tron Home activations end to end", () => {
       text: "must dispatch only after the hard-limit rollover",
     }) as unknown as { sessionId: string; operationId: string };
     expect(accepted.sessionId).not.toBe(slot.id);
-    const stored = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const stored = JSON.parse(await readFile(join(f.tronHome, "state", "home", "home.json"), "utf8")) as HomeRecord;
     expect(stored.chapters).toHaveLength(2);
     expect(stored.chapters[0]).toMatchObject({
       state: "sealed",
@@ -969,7 +969,7 @@ describe("Tron Home activations end to end", () => {
     }]);
     const accepted = await f.service.invoke(client, "home.prompt", { commandId: "real-byte-stop-next", text: "continue after the stopped chapter" }) as unknown as { sessionId: string; operationId: string };
     expect(accepted.sessionId).not.toBe(slot.id);
-    const ledger = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const ledger = JSON.parse(await readFile(join(f.tronHome, "state", "home", "home.json"), "utf8")) as HomeRecord;
     expect(ledger.chapters[0]).toMatchObject({ state: "sealed", sizeAtSeal: before });
     const successor = await f.registry.acquire(accepted.sessionId);
     await waitUntil(() => successor.snapshot().configurationBlocker === null && successor.sessionManager.getBranch().some(entry => entry.type === "message"
@@ -1162,7 +1162,7 @@ describe("Tron Home activations end to end", () => {
     };
     owner.options.sessions.chapterMetrics = async () => ({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true });
     await owner.chapterQuiescent(oldSlot.id);
-    const current = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const current = JSON.parse(await readFile(join(f.tronHome, "state", "home", "home.json"), "utf8")) as HomeRecord;
     const reservedId = current.chapters.at(-1)!.sessionId;
     expect(current.chapters.at(-1)).toMatchObject({ state: "reserved", ordinal: 2 });
     await f.registry.dispose();
@@ -1202,7 +1202,7 @@ describe("Tron Home activations end to end", () => {
       sessionDirectory(cwd: string): string;
     };
     const owner = homeOwnerOf(f.registry) as unknown as { writeLocked(record: HomeRecord): Promise<void> };
-    const current = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const current = JSON.parse(await readFile(join(f.tronHome, "state", "home", "home.json"), "utf8")) as HomeRecord;
     const active = current.chapters[0]!;
     const reservedId = "recorded-path-absent-session";
     const expectedPath = join(registry.sessionDirectory(homeOwnerOf(f.registry).homeWorkspacePath()), "missing-recorded-path.jsonl");
@@ -1216,7 +1216,7 @@ describe("Tron Home activations end to end", () => {
 
     await expect(homeOwnerOf(f.registry).materializer.materialize(reservedId)).rejects.toMatchObject({ code: "conflict" });
     await expect(readFile(expectedPath)).rejects.toMatchObject({ code: "ENOENT" });
-    const recovered = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const recovered = JSON.parse(await readFile(join(f.tronHome, "state", "home", "home.json"), "utf8")) as HomeRecord;
     expect(recovered.chapters.at(-1)).toMatchObject({ state: "materializing", expectedPath });
   });
 
@@ -1324,7 +1324,7 @@ describe("Tron Home activations end to end", () => {
     const active = await designateHome(f, `e2e-reenable-${state}`);
     const pending = await f.registry.create(f.agentDir);
     const owner = homeOwnerOf(f.registry) as unknown as { writeLocked(record: HomeRecord): Promise<void> };
-    const current = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const current = JSON.parse(await readFile(join(f.tronHome, "state", "home", "home.json"), "utf8")) as HomeRecord;
     const attemptId = "attempt-reenable";
     const expectedPath = pending.sessionFile!;
     await owner.writeLocked({
@@ -1343,7 +1343,7 @@ describe("Tron Home activations end to end", () => {
     expect(designation).toMatchObject({ sessionId: pending.id });
     expect(pending.snapshot().revision).toBeGreaterThan(afterDisable);
     expect(pending.snapshot().model).toMatchObject(OTHER_MODEL);
-    const stored = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const stored = JSON.parse(await readFile(join(f.tronHome, "state", "home", "home.json"), "utf8")) as HomeRecord;
     expect(Object.hasOwn(stored, "model")).toBe(false);
     const saved = await (f.registry as unknown as { settingsOwners: { model: { resolve(target: unknown, session: undefined, keys: string[]): Promise<{ keys: Array<{ value: unknown; layer: string }> }> } } })
       .settingsOwners.model.resolve({ kind: "home" }, undefined, ["model.ref[role=chat]"]);
@@ -1371,7 +1371,7 @@ describe("Tron Home activations end to end", () => {
     };
     owner.options.sessions.chapterMetrics = async () => ({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true });
     await owner.chapterQuiescent(oldSlot.id);
-    const current = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const current = JSON.parse(await readFile(join(f.tronHome, "state", "home", "home.json"), "utf8")) as HomeRecord;
     const reservedId = current.chapters.at(-1)!.sessionId;
     expect(current.chapters.at(-1)).toMatchObject({ state: "reserved", ordinal: 2 });
     await f.registry.dispose();
@@ -1846,7 +1846,7 @@ describe("Tron Home activations end to end", () => {
       await resume(f);
       expect(await f.service.invoke(client, "home.status", {})).toMatchObject({ memory: { paused: false } });
       expect(f.faux.state.callCount).toBe(1);
-      const record = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8"));
+      const record = JSON.parse(await readFile(join(f.tronHome, "state", "home", "home.json"), "utf8"));
       expect(record.memory.paused).toBeUndefined();
       report.cases.push({ case: "pause-idle-restart-input", inputRetained: true, explicitRefusal: true, automaticReplay: false });
     }, 60_000);

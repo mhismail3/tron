@@ -50,7 +50,7 @@ export class SessionAttentionStore {
   private document: SessionAttentionDocument | undefined;
 
   constructor(tronHome: string, options: SessionAttentionStoreOptions = {}) {
-    this.path = tronHomePath(tronHome, "gateway/session-attention.json");
+    this.path = tronHomePath(tronHome, "state/session-attention.json");
     this.write = options.write;
     this.now = options.now ?? (() => new Date());
   }

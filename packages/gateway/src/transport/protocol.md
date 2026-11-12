@@ -51,7 +51,7 @@ default unless the main bind is loopback (`127.0.0.0/8`, `::1`, `localhost`);
 `--lan-endpoint on|off` or `TRON_GATEWAY_LAN_ENDPOINT` overrides. It binds only an
 RFC 1918 or IPv6 ULA address the Mac has (never a wildcard, link-local or Tailscale
 range), rebinds when it changes and disables itself with none. Key and self-signed
-certificate: `~/.tron/gateway/lan-endpoint/` (0600 in 0700), created once, replaced
+certificate: `~/.tron/state/lan-endpoint/` (0600 in 0700), created once, replaced
 only by explicit rotation because phones pin the public key; a key without its
 certificate is completed from that key, a certificate without its key is refused. It
 shares all HTTP/WebSocket handling but serves only the socket and authenticated

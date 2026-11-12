@@ -50,7 +50,7 @@ state only.
 - Provider credentials stay in the runtime credential store on the Mac and are
   never returned to iOS.
 - The Mac wrapper uses a separate owner-only local credential under
-  `~/.tron/gateway/`.
+  `~/.tron/state/`.
 - Project trust controls whether project-local settings and executable resources
   load. Trust is **not a sandbox**. Agent tools, extensions, and packages run
   with the Mac user's authority.

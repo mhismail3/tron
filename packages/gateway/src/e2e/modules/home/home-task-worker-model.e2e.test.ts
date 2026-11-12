@@ -198,7 +198,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
   it("lets an explicit model override only its field while profile thinking remains", async () => {
     const f = await fixture();
     installSettings(f);
-    await writeFile(join(f.tronHome, "gateway", "home", "profile.json"), JSON.stringify({ thinking: { worker: "low" } }));
+    await writeFile(join(f.tronHome, "state", "home", "profile.json"), JSON.stringify({ thinking: { worker: "low" } }));
     const { observed } = await delegateThroughHome(f, { taskId: "fieldwise", intent: "Finite work", target: f.cwd,
       model: { provider: f.model.provider, id: TASK_REASONING_MODEL_ID }, reason: "This task needs reasoning" });
     await taskIsTerminal(f, "fieldwise");
@@ -482,7 +482,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     const legacyWorker = await legacy.acquire(task.sessionId!);
     expect(legacyWorker.snapshot().model).toMatchObject({ provider: f.model.provider, id: TASK_REASONING_MODEL_ID });
     for (const key of keys) expect(legacyWorker.settingsSessionLayer().fixed?.[key]).toBeUndefined();
-    expect(await readdir(join(f.tronHome, "gateway", "model-queue-sessions"))).toEqual([]);
+    expect(await readdir(join(f.tronHome, "state", "model-queue-sessions"))).toEqual([]);
   }, 60_000);
 });
 

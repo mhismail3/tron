@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { join } from "node:path";
+import { assertHomeLayout } from "../foundation/tron-home-layout.js";
 import { MacTerminalService } from "./mac-terminal-service.js";
 
 async function main(): Promise<void> {
@@ -6,7 +8,8 @@ async function main(): Promise<void> {
   if (!command || !["status", "start", "stop", "recover"].includes(command) || flag !== "--home" || !home || extra.length) {
     throw new Error("Usage: scripts/tron terminal-ssh status|start|stop|recover --home <existing-tron-home>");
   }
-  const service = new MacTerminalService(home);
+  await assertHomeLayout(home);
+  const service = new MacTerminalService(join(home, "state/mac-terminal"));
   if (command === "start") await service.setEnabled(true);
   else if (command === "stop") await service.setEnabled(false);
   else if (command === "recover") await service.recover();

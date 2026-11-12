@@ -264,7 +264,7 @@ scripts/tron dev handoff     # maintainer only: tested Debug artifact → inacti
 ```
 
 Debug builds the selected worktree directly, runs the installed signed launcher with the `dev`
-selection and keeps `~/.tron-dev` (provider install in `~/.tron-dev/internal/pi-subagents/`,
+selection and keeps `~/.tron-dev` (provider install in `~/.tron-dev/cache/pi-subagents/`,
 [Gateway install contract](../../gateway/README.md#tron-owned-pi-subagents-build)). It is
 loopback unless `--tailscale`; later commands inherit the recorded host and reject a conflict.
 A short atomic command lock fails concurrent commands closed; an orphan child with the exact
