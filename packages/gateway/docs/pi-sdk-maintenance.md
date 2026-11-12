@@ -76,7 +76,8 @@ names the new floor when Anthropic refuses the version.
 
 Until a release ships them, `pi-coding-agent` is a Tron-built tarball at the family's version
 carrying: the `projectDir` option ([project root](../src/machine/README.md#project-root)),
-an idle `session.systemPrompt` that keeps transcript-provided extension sections, and a
+an idle `session.systemPrompt` that keeps transcript-provided extension sections, a final
+prompt assembler that preserves extension sections after whole-prompt handlers, and a
 run start that `preflightResult("started")` can revoke, and FIFO `ModelRuntime`
 config reads. A newer awaited refresh cannot overtake an older registration-triggered
 config read and let that continuation start storage work after readiness. Each call
@@ -108,6 +109,14 @@ the exact release version, delete the declaration, `third_party/pi-coding-agent/
 `packages/gateway/scripts/build-pi-coding-agent-patch.mjs` and its script, drop it from
 `packages/mac-app/scripts/stage-gateway-app.sh` and `BUILD_INPUT_FILES` in
 `scripts/gateway-install-inputs.mjs`, then `npm install` and `update:pi-sdk`.
+
+Whole-prompt `before_agent_start` handlers see the prompt body without extension sections.
+The final assembler appends the run's sections once, including `mcp_servers` and
+`advertised_subagents`, even when a handler replaces the body. Forced provider projections
+use that same assembler. `agent-instructions.integration.test.ts` proves preservation and
+input-wording stability through the real slot. The pinned browser package already registers
+its guidance as an unconditional `agent_browser` section; the old installed package's
+prompt-keyword handler is not part of that pin.
 
 ## Signals
 
