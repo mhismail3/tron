@@ -163,13 +163,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if startupMode != .testHost {
             TronLog.shared.record(.info, event: "app.started", source: "lifecycle", message: "Mac app started", appVersion: version, build: build)
         }
-        switch startupMode {
-        case .testHost:
-            return
-        default:
-            break
-        }
-
         if startupMode == .testHost {
             return
         }
