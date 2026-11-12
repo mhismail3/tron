@@ -6,7 +6,7 @@ import { currentInvocationContext } from "../kernel/host/extension-execution-con
 import type { JsonValue } from "../protocol/types.js";
 
 export interface ScheduleToolRequest {
-  action: "list" | "show" | "create" | "enable" | "pause" | "delete" | "runNow" | "cancel" | "resolve";
+  action: "list" | "show" | "create" | "update" | "enable" | "pause" | "delete" | "runNow" | "cancel" | "resolve";
   name?: string;
   prompt?: string;
   notificationMessage?: string;
@@ -36,7 +36,7 @@ export interface ScheduleToolOperations {
 }
 
 const parameters = Type.Object({
-  action: StringEnum(["list", "show", "create", "enable", "pause", "delete", "runNow", "cancel", "resolve"] as const),
+  action: StringEnum(["list", "show", "create", "update", "enable", "pause", "delete", "runNow", "cancel", "resolve"] as const),
   name: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
   prompt: Type.Optional(Type.String({ minLength: 1, maxLength: 65_536 })),
   notificationMessage: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
@@ -65,7 +65,7 @@ export function createTronScheduleExtension(input: {
       name: "schedule",
       annotations: { openWorldHint: false },
       label: "Schedule",
-      description: "Create and manage durable Gateway-owned automations for this Tron session. Create accepts exactly one trigger: at, everyMinutes, or timezone + localTime + weekdays; optional expiresAt is an ISO expiry timestamp. Provide either prompt or notificationMessage, not both. Prompt automations may target the current session, create a new session in its workspace per run, or send an attributed message to Home. Home messages never grant maintainer authority and wake at most once per automation per 60 seconds. show with automationId and runId reads that run’s original prompt or notification text in UTF-8 byte pages: offset defaults to 0, limit to 4096 (maximum 4096), and nextOffset is null at the end.",
+      description: "Create and manage durable Gateway-owned automations for this Tron session. Update requires automationId and expectedRevision, changes only supplied definition fields, and preserves activation and expiry. Create accepts exactly one trigger: at, everyMinutes, or timezone + localTime + weekdays; optional expiresAt is an ISO expiry timestamp. Provide either prompt or notificationMessage, not both. Prompt automations may target the current session, create a new session in its workspace per run, or send an attributed message to Home. Home messages never grant maintainer authority and wake at most once per automation per 60 seconds. show with automationId and runId reads that run’s original prompt or notification text in UTF-8 byte pages: offset defaults to 0, limit to 4096 (maximum 4096), and nextOffset is null at the end.",
       promptSnippet: "Create and manage durable schedules and reminders for the current Tron session",
       promptGuidelines: [
         "Use schedule for authorized durable automations. Home may manage them directly; interactive sessions require user confirmation; delegated workers cannot mutate them.",
