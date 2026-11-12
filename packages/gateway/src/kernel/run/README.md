@@ -6,7 +6,8 @@ Gateway-owned execution primitives layered on Pi's session loop.
 
 The K1 native Registry (`../session/runtime-registry.ts`) implements `SessionOperations` directly: one canonical
 map/construction/mutation authority, shared synchronous `liveRuntime` read and
-mutex-ordered `orderedRuntime` read. Profile modules supply domain recipes over
+mutex-ordered `orderedRuntime` read. Canonical sessions use the SDK's project-specific
+folders under `<agentDir>/sessions`; no settings value redirects this root. Profile modules supply domain recipes over
 those operations; no Registry-produced Home provider exists. The actual K2 frame is
 `runtime-slot.ts`; the runtime pair retains the `gateway/run` logical owner.
 Worker binding/control is K5-owned, separate from physical native ownership.
