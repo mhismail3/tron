@@ -1000,6 +1000,7 @@ struct DisplayHTMLWebView: UIViewRepresentable {
     func updateUIView(_ view: WKWebView, context: Context) {
         guard context.coordinator.loadedHTML != html else { return }
         context.coordinator.loadedHTML = html
+        context.coordinator.awaitsRequestedLoad = true
         let policy = DisplayHTMLSandbox.contentSecurityPolicy(runsScripts: context.coordinator.runsScripts)
         view.loadHTMLString("<meta http-equiv=\"Content-Security-Policy\" content=\"\(policy)\">" + html, baseURL: nil)
     }
@@ -1007,6 +1008,7 @@ struct DisplayHTMLWebView: UIViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         var loadedHTML: String?
         var runsScripts = false
+        var awaitsRequestedLoad = false
 
         func webView(
             _ webView: WKWebView,
@@ -1015,11 +1017,21 @@ struct DisplayHTMLWebView: UIViewRepresentable {
             decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy, WKWebpagePreferences) -> Void
         ) {
             preferences.allowsContentJavaScript = runsScripts
-            guard let scheme = navigationAction.request.url?.scheme?.lowercased() else {
-                decisionHandler(.allow, preferences)
-                return
+            decisionHandler(admits(navigationAction, in: webView) ? .allow : .cancel, preferences)
+        }
+
+        private func admits(_ action: WKNavigationAction, in webView: WKWebView) -> Bool {
+            guard let url = action.request.url, url.scheme?.lowercased() == "about" else { return false }
+            if action.targetFrame?.isMainFrame == false { return true }
+            if awaitsRequestedLoad {
+                awaitsRequestedLoad = false
+                return true
             }
-            decisionHandler(scheme == "about" ? .allow : .cancel, preferences)
+            return url.fragment != nil && Self.document(url) == Self.document(webView.url)
+        }
+
+        private static func document(_ url: URL?) -> String? {
+            url?.absoluteString.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init)
         }
 
         func webView(

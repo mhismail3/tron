@@ -64,6 +64,12 @@ enum HostedDisplayDocumentThemeFixture {
             const canvas = document.createElement("canvas");
             say("WebGL " + Boolean(canvas.getContext("webgl2") || canvas.getContext("webgl")));
           });
+          await attempt(() => new Promise(done => {
+            addEventListener("hashchange", done, { once: true });
+            setTimeout(done, 3000);
+            location.hash = "probe";
+          }));
+          say("Fragment " + location.hash);
           await attempt(() => { say(eval("'Eval ran'")); });
           await attempt(() => {
             const worker = new Worker(URL.createObjectURL(new Blob(["postMessage(1)"], { type: "text/javascript" })));
@@ -105,6 +111,7 @@ enum HostedDisplayDocumentThemeFixture {
           }
           await attempt(() => window.open("\(http)/window"));
           say("Navigation attempted");
+          \(scriptProbeControl ? "" : "location.href = \"about:blank\"; await new Promise(done => setTimeout(done, 1000));")
           location.href = "\(http)/navigate";
         })();
         </script></body></html>
@@ -137,6 +144,7 @@ enum HostedDisplayDocumentThemeFixture {
     }
 }
 
+#if DEBUG
 struct HostedDisplayHTMLProbeControl: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let view = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
@@ -146,6 +154,7 @@ struct HostedDisplayHTMLProbeControl: UIViewRepresentable {
 
     func updateUIView(_ view: WKWebView, context: Context) {}
 }
+#endif
 
 struct HostedDisplayDocumentThemeChanges: View {
     @State private var showingReader = false

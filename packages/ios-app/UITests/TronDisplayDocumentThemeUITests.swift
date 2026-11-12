@@ -149,6 +149,8 @@ import UIKit
                       "A blob: module import runs: \(app.debugDescription)")
         XCTAssertTrue(app.staticTexts["WebGL true"].firstMatch.waitForExistence(timeout: 10),
                       "A WebGL canvas is available: \(app.debugDescription)")
+        XCTAssertTrue(app.staticTexts["Fragment #probe"].firstMatch.waitForExistence(timeout: 10),
+                      "Links inside the page still work: \(app.debugDescription)")
         XCTAssertTrue(app.staticTexts["Navigation attempted"].firstMatch.waitForExistence(timeout: 30), app.debugDescription)
         Thread.sleep(forTimeInterval: 3)
         XCTAssertEqual(probe.summary, "requests=[] idle=0 datagrams=0", "The sandboxed page reached the network")
