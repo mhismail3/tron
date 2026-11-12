@@ -2,8 +2,8 @@
   "store": "store-model-queue",
   "module": "gateway/providers",
   "files": [
-    "gateway/model-queue-sessions/a6391f109d3f70dda387c8af21482f5538d2aab99af046c770545f96ee078a86.json",
-    "gateway/model-queue.json"
+    "state/model-queue-sessions/a6391f109d3f70dda387c8af21482f5538d2aab99af046c770545f96ee078a86.json",
+    "state/model-queue.json"
   ],
   "projection": {
     "mac": {

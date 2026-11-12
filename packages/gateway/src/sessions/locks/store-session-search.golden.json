@@ -2,7 +2,7 @@
   "store": "store-session-search",
   "module": "gateway/session-search",
   "files": [
-    "gateway/session-search.sqlite"
+    "cache/session-search.sqlite"
   ],
   "projection": {
     "stats": {
