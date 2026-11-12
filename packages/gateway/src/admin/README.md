@@ -73,10 +73,11 @@ In short:
 
 RPCs (shapes in the [Gateway README](../../README.md)): `settings.resolve`,
 `settings.options`, `settings.change` (with `dryRun`), `settings.undo`,
-`settings.applyAgain`, `settings.history`, plus `home.profileChange` for learned-profile notes.
+`settings.applyAgain`, `settings.history` (the maintainer's full view), plus `home.profileChange` for learned-profile notes.
 Broadcasts: `settings.changed`, `trust.changed`, `mcp.changed`,
 `models.customChanged`. Agents reach the same path through the `settings` tool
-(a thin client of resolve and change); Home's tool may target a delegated
+(a thin client of resolve, change, history and undo, each carrying the calling chat's actor; history and undo are
+scoped by that actor as the kernel contract defines). Home's tool may target a delegated
 worker by `taskId`.
 
 Ports in: `gateway-main.ts` wires kernel `SettingsModel`/`SettingsChangePath`,
@@ -102,6 +103,9 @@ are installed; schema access never evaluates their late-bound service getter.
   serialize per target.
 - The record is append-only and kept forever; credentials and redacted values
   never appear in it. It is never read to compute a value.
+- An agent's history page and Undo reach only its own chat's changes; the scope
+  filter runs inside the history owner's page, never after the page returns. Tron Home
+  and the maintainer see and undo all changes, each Undo logged with before and after.
 - Native review binds the exact diff. Acceptance rechecks actual target state
   under its stripe; generic forms and local RPC cannot grant effects. Corrupt
   indexed audit/groups refuse rather than restoring partial state.
