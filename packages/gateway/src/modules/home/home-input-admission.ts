@@ -4,9 +4,10 @@ import type { HomeOwner } from "./home-owner.js";
 import type { HomeTaskDiagnostic } from "./home-task-dispatcher.js";
 import { HOME_OPERATING_CONTEXT } from "./tron-home-extension.js";
 import { HOME_PROFILE_BOUND_BYTES } from "./home-profile.js";
+import { PROFILE_AREAS_SECTION } from "./home-profile-hierarchy.js";
 import { HOME_HARD_BYTES, HOME_HARD_ENTRIES } from "./home-chapter-state.js";
 
-const HOME_PROFILE_HEADROOM_TEXT = "x".repeat(HOME_PROFILE_BOUND_BYTES + 1_024);
+const HOME_PROFILE_HEADROOM_TEXT = "x".repeat(Buffer.byteLength(PROFILE_AREAS_SECTION) + HOME_PROFILE_BOUND_BYTES + 1_024);
 const HOME_INBOX_ADMISSION_SLOW_MS = 2_000;
 
 export function homeInputAdmission(owner: HomeOwner, diagnostic?: (record: HomeTaskDiagnostic) => void): InputAdmissionPolicy {

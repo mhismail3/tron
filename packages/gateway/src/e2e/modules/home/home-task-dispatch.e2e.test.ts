@@ -370,8 +370,8 @@ describe("Home task bounded backlogs", () => {
     evidence.push({ case: "bounded-backlog", batches });
   }, 30_000);
 
-  it("keeps a wake-sized full report inline without charging maintainer-only tools", async () => {
-    const f = await fixture(undefined, false, 32_000);
+  it("keeps a wake-sized full report inline on a wake that declares every Home tool", async () => {
+    const f = await fixture(undefined, false, 33_000);
     const owner = homeOwnerOf(f.registry);
     const model = f.faux.getModel();
     await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
