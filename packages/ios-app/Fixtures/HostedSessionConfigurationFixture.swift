@@ -204,7 +204,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                 "layer": .string("session"), "applied": .bool(true), "overridden": .bool(true),
                 "layers": .array([.object(["layer": .string("session"), "value": .string(snapshot.thinkingLevel), "display": .string(snapshot.thinkingLevel.capitalized), "applied": .bool(true)])]),
                 "badges": .array([]),
-                "presentation": .object(["label": .string("Chat thinking"), "help": .string("Thinking for this chat."),
+                "presentation": .object(["label": .string("Thinking"), "help": .string("Thinking for this chat."),
                     "order": .number(10), "importance": .string("essential"), "control": .string("choice"),
                     "sessionOverridable": .bool(true), "projectSettable": .bool(true), "editable": .bool(true),
                     "options": .array([.object(["value": .string("off"), "label": .string("Off")]),
