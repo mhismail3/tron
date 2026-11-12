@@ -48,7 +48,11 @@ document holds no policy.
 - **Retry card.** `push_retry({reason})` asks for one exact native card (`intent: push-registration-retry`,
   digest over session and tool call). The Gateway writes nothing: approval resolves the request with
   `requested` and the approving iPhone alone rotates its rejected App Attest key and registers again, after
-  its own profile, device and generation fences. A duplicate approval finds no rejected key and does nothing.
+  its own connection, device and generation fences. A duplicate approval is refused at the answer boundary and
+  never rotates. The App Attest key is per iPhone and its card names the other paired Macs. The result is
+  "requested", never "registered"; nothing is persisted, so an app death after acceptance is best effort.
+- **Automatic keys.** `notifications.push.inputNeeded|finished|waiting` are privacy-tapped: turning one on is
+  a widening that needs the native card, turning it off is routine.
 - **Presence.** A mobile subscription or local connection may publish
   `session.presentation.set` after sync: token-bound, revisioned, one per connection,
   visible leases expiring after 45 s. Visible at observation (latched before receipt

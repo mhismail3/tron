@@ -22,16 +22,24 @@ notification inbox.
   lost response may mean the Gateway already removed the grant; a re-allowed permission re-registers.
 - **Retries.** One bounded, profile-generation-owned operation: a fresh challenge and proof per
   attempt, two backoffs for timeouts and retryable 5xx, no commit across a profile or token change.
-  An assertion 401 or the typed invalid-key code clears only the App Attest key, once. A 401 on a key
-  already marked rejected clears it once more automatically; the next such 401 stops, and that one
-  automatic retry is available again only after a successful registration or a relaunch. Other
-  rejections stop without credential churn; APNs tokens are preserved. An agent-requested
-  `push-registration-retry` card (`ChangeReview.intent`) makes the approving iPhone rotate the rejected
-  key and register again. `ExtensionInteractionSheet` takes a `PushRetryFence` (profile, device, runtime
-  identity, client, registration generation and card digest) at tap time through `retryFence(for:)`;
-  `retryAfterApprovedCard(_:)` runs only after the Gateway accepts, refuses any stale or duplicate fence,
-  and never chains the automatic retry. Nothing rotates before that tap. Registration reconciles on
-  connection, foreground, profile, permission and token changes; Worker failure leaves it pending.
+  An assertion 401 or the typed invalid-key code clears only the App Attest key, once. A 401 on a stored
+  key that was not yet flagged rotates it once in the loop and consumes the launch's one automatic rotation
+  budget; a 401 on a key already flagged rejected rotates once automatically. The next 401 stops, and the
+  budget returns only after a successful registration or a relaunch. Other rejections stop without
+  credential churn; APNs tokens are preserved. Registration reconciles on connection, foreground, profile,
+  permission and token changes; Worker failure leaves it pending.
+- **Agent-requested retry.** A `push-registration-retry` card (`ChangeReview.intent`, shared native change
+  card) rotates the rejected key only on the iPhone that approves it. `PushRegistrationRetryApproval.approve`
+  captures a `PushRetryFence` (the answering connection: selected profile, machine, runtime epoch and
+  lifecycle admission from `AppModel.pushRetryConnection`, the device, and the registration generation)
+  before the answer. It refuses without answering when the coordinator is not on that connection. After the
+  Gateway accepts the answer it re-reads the connection and calls `retryAfterApprovedCard`, which refuses if
+  anything changed. The Gateway request is then only "requested"; registration success is not claimed. Nothing
+  is persisted: an app death or a lost response after acceptance loses the effect (best effort, no replay).
+  Duplicate approvals are refused at the answer boundary and never rotate. The approved attempt does not
+  re-arm the automatic budget. The key is per iPhone, so the card names the other paired Macs.
+- **Residual.** Registration stage and Retry Registration left the app with the Push Notifications sheet
+  (approved in the 1.2/5.4 slice). Status is no longer shown on the phone.
 - **Secrets.** App Attest keys, token bytes and grants use a Keychain namespace separate from Gateway
   credentials; an unreadable Keychain document is never overwritten with an empty one (push fails
   closed while the Gateway stays usable). The app shows no push settings; it accepts no relay URL or push
