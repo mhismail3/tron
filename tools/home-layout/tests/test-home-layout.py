@@ -702,6 +702,70 @@ class MigrateTests(unittest.TestCase):
         self.assertIn("no_journal", result.stdout)
         self.assertEqual(list((self.user / ".tron-maintenance/layout-v2").glob("*.json")), [])
 
+    def test_rollback_releases_each_claim_durably_for_the_other_home(self) -> None:
+        self.fixture.write(REGISTRY, (ROOT / REGISTRY).read_text())
+        for crash_after in (0, 1, 2):
+            with self.subTest(crash_after=crash_after):
+                self.user = self.base / f"rollback-user-{crash_after}"
+                self.home = self.user / ".tron"
+                (self.home / "gateway/home").mkdir(parents=True)
+                (self.home / "gateway/home/chapter-reseals.jsonl").write_text("stable")
+                debug = self.user / ".tron-dev"
+                (debug / "gateway/proof-traffic").mkdir(parents=True)
+                shared = self.user / "Workspace/workspace-backups/x-library-20261111T1425"
+                shared.mkdir(parents=True)
+                (shared / "only-copy").write_text("shared")
+                self.assertEqual(self.migrate("--apply", home=debug)[0], 0)
+                if crash_after:
+                    runner = self.base / "rollback-crash.py"
+                    runner.write_text(
+                        "import importlib.util, os\n"
+                        f"spec = importlib.util.spec_from_file_location('layout', {str(self.fixture.repo / TOOL)!r})\n"
+                        "layout = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(layout)\n"
+                        "original = layout.rename_exclusive\ncount = 0\n"
+                        "def rename(source, destination):\n"
+                        "    global count\n    original(source, destination)\n    count += 1\n"
+                        f"    if count == {crash_after}: os._exit(86)\n"
+                        "layout.rename_exclusive = rename\n"
+                        f"layout.main(['migrate', '--home', {str(debug)!r}, '--rollback'])\n")
+                    result = subprocess.run(["python3", "-B", str(runner)], env={**os.environ, "HOME": str(self.user)}, capture_output=True)
+                    self.assertEqual(result.returncode, 86, result.stderr)
+                    (debug / "agent/.tron-gateway-runtime.lock.lock").rmdir()
+                    if crash_after == 1:
+                        code, report = self.migrate("--apply")
+                        self.assertEqual(code, 1, report)
+                        self.assertIn("move_owned_by_other_home", json.dumps(report))
+                    else:
+                        self.assertEqual(self.migrate("--apply")[0], 0)
+                self.assertEqual(self.migrate("--rollback", home=debug)[0], 0)
+                self.assertEqual(self.migrate("--apply")[0], 0)
+                self.assertFalse(shared.exists())
+                self.assertEqual(self.migrate("--rollback")[0], 0)
+                self.assertEqual((shared / "only-copy").read_text(), "shared")
+                self.assertEqual(self.migrate("--rollback", home=debug)[0], 0)
+
+    def test_ctime_only_changes_during_locking_preserve_the_move_identity(self) -> None:
+        self.fixture.write(REGISTRY, registry(PATHS, [self.RETIRED[1]]))
+        source = self.home / "backup-1"
+        original_inode = source.stat().st_ino
+        runner = self.base / "ctime.py"
+        runner.write_text(
+            "import contextlib, importlib.util, os\n"
+            f"spec = importlib.util.spec_from_file_location('layout', {str(self.fixture.repo / TOOL)!r})\n"
+            "layout = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(layout)\n"
+            "original = layout.runtime_lock\n"
+            "@contextlib.contextmanager\ndef acquire(path):\n"
+            "    with original(path) as guard:\n"
+            f"        os.chmod({str(source)!r}, 0o700)\n"
+            "        yield guard\n"
+            "layout.runtime_lock = acquire\n"
+            f"raise SystemExit(layout.main(['migrate', '--home', {str(self.home)!r}, '--apply']))\n")
+        result = subprocess.run(["python3", "-B", str(runner)], env={**os.environ, "HOME": str(self.user)}, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        destination = self.user / ".tron-maintenance/backups/2026-01-01-one"
+        self.assertEqual(destination.stat().st_ino, original_inode)
+        self.assertEqual(stat.S_IMODE(destination.stat().st_mode), 0o700)
+
     def test_apply_resume_and_rollback_preserve_identity_and_new_writes(self) -> None:
         self.fixture.write(REGISTRY, registry(PATHS, [self.RETIRED[1]]))
         before = (self.home / "backup-1").stat()
@@ -816,6 +880,7 @@ class MigrateTests(unittest.TestCase):
         path.write_text(original)
         path.chmod(0o600)
         path.unlink()
+        path.parent.rmdir()
         before = snapshot(self.user)
         for mode in ("--dry-run", "--apply"):
             code, report = self.migrate(mode)

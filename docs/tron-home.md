@@ -194,6 +194,10 @@ destination. A pending move reserved by another home refuses even after a crash,
 paths never acquire two owners. Forward apply journals newly present registered sources
 before moving them and refuses success if a pending move remains. Each home's rollback
 inverts only its own records, in either home's rollback order, carrying current data back.
+After each inverse rename it removes that move's claim and fsyncs the journal before the
+next move. A crash between rename and release retains the claim for an idempotent retry;
+a completed rollback releases it so either home can acquire the restored source. A valid
+journal with no moves owned by this home returns `nothing_to_rollback` without writing.
 Planning checks the same journal ownership and identity constraints before reporting a
 clear dry run. A different registry digest cannot use a previous journal as proof of an
 already-moved destination; finish both homes against the same registry. A replaced entry, occupied
@@ -202,6 +206,14 @@ replays an uncertain rename. The journal and `layout-v2` maintenance index row a
 for review, never automatically discarded. `--apply`/`--rollback` are code capabilities,
 not permission to use them on a live installation. Root renames, stored-path rewrites and
 Gateway startup stamps are not part of this recovery-copy slice.
+
+Before applying, keep both Gateways offline, use the same checkout and registry for both
+homes, and review the dry run and maintenance index. The journal intentionally fails closed
+for every home if any recorded identity is missing or replaced: stop, preserve the journal
+and remaining copies, and obtain an owner-reviewed recovery plan rather than editing claims
+or replacing a copy to bypass its inode proof. Do not change the registry between homes'
+applies; a new digest does not inherit old reservations. This conservative coupling avoids
+silently discarding another home's recovery evidence.
 
 ## Rules
 

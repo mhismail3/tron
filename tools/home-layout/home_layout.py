@@ -734,9 +734,12 @@ def execute_migration(home: str, rollback: bool, root: Path = ROOT) -> tuple[int
                 if observed(str(lock)) is not None:
                     report["blockers"].append("runtime_lock_present")
                     return 1, report
-            if rollback and (journal is None or not any(row["home"] == report["home"] for row in journal["moves"])):
+            if rollback and journal is None:
                 report["blockers"].append("no_journal")
                 return 1, report
+            if rollback and not any(row["home"] == report["home"] for row in journal["moves"]):
+                report["state"] = "nothing_to_rollback"
+                return 0, report
             guards = [locks.enter_context(runtime_lock(lock)) for lock in lock_paths]
             current = migration(home, root)
             if current["errors"] or any(row["refusals"] for row in current["moves"]):
@@ -745,7 +748,7 @@ def execute_migration(home: str, rollback: bool, root: Path = ROOT) -> tuple[int
             if rollback and read_journal(journal_path, current) is None:
                 raise LayoutError("no_journal")
             _, journal = journal_context(current, rollback)
-            if rollback and (journal is None or not any(row["home"] == report["home"] for row in journal["moves"])):
+            if rollback and journal is None:
                 raise LayoutError("no_journal")
             def identities(plan):
                 return [(row["state"], tuple(row["identity"][key] for key in ("type", "device", "inode")) if row["identity"] else None) for row in plan["moves"]]
@@ -780,6 +783,9 @@ def execute_migration(home: str, rollback: bool, root: Path = ROOT) -> tuple[int
                     rename_exclusive(source, destination)
                 if move_position(row) != ("pending" if rollback else "done"):
                     raise LayoutError("move_identity_changed")
+                if rollback:
+                    journal["moves"].remove(row)
+                    write_journal(journal_path, journal)
             for guard in guards:
                 guard()
             completed = migration(home, root)
