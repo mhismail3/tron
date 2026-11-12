@@ -23,7 +23,7 @@ class ContextAuditTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(result['diagnostics'], [])
         self.assertEqual(result['sizes'][0]['bytes'], 60000)
-        self.assertEqual(result['comparisons'][0], {'role': 'worker', 'tokens': 15000, 'budget': 11000, 'over': True})
+        self.assertEqual(result['comparisons'][0], {'role': 'worker', 'tokens': 15000, 'budget': 11000, 'over': True, 'coverage': 'partial source-rendered system layers; see unavailable'})
 
     def test_each_violation_is_a_failure_and_report_only_retains_it(self):
         sentence = 'Keep credentials in their owned stores and never publish secret values to source files.'
@@ -31,11 +31,14 @@ class ContextAuditTests(unittest.TestCase):
             {'role': 'worker', 'name': 'core', 'text': sentence, 'kind': 'system', 'always': True},
             {'role': 'worker', 'name': 'rules', 'text': sentence, 'kind': 'rules', 'always': True},
             {'role': 'home', 'name': 'profile', 'text': '12 active / 13 total; version abcdef123456', 'kind': 'index'},
+            {'role': 'home', 'name': 'model', 'text': 'Current Home chat model: gpt-5', 'kind': 'system'},
+            {'role': 'home', 'name': 'thinking', 'text': 'Current Home thinking level: medium', 'kind': 'system'},
             {'role': 'chat', 'name': 'skills', 'text': '<index name="skills">\n- z: Bad.\n</index>', 'kind': 'index'},
         ]
         code, result = self.run_audit(layers)
         self.assertEqual(code, 1)
         self.assertEqual({item['rule'] for item in result['diagnostics']}, {'duplicate', 'volatile', 'index-format'})
+        self.assertEqual({item['layer'] for item in result['diagnostics'] if item['rule'] == 'volatile'}, {'profile', 'model', 'thinking'})
         report_code, report = self.run_audit(layers, report=True)
         self.assertEqual(report_code, 0)
         self.assertEqual(report, result)

@@ -13,7 +13,7 @@ export function audit(layers, sources = []) {
   const diagnostics = [];
   const sizes = layers.map(layer => ({ role: layer.role, name: layer.name, bytes: Buffer.byteLength(layer.text), tokens: Math.ceil(Buffer.byteLength(layer.text) / 4), estimate: "bytes/4; report only" }));
   for (const layer of layers) {
-    if (["system", "tools", "index"].includes(layer.kind) && /\b\d{4}-\d{2}-\d{2}\b|\b[a-f0-9]{12,64}\b|\b\d+\s+(?:active|total)\b|(?:arrival version|capacity|sorting offer|current .* model|current .* thinking level):\s*(?:\d|[a-z]+\/)/i.test(layer.text)) {
+    if (["system", "tools", "index"].includes(layer.kind) && /\b\d{4}-\d{2}-\d{2}\b|\b[a-f0-9]{12,64}\b|\b\d+\s+(?:active|total)\b|(?:arrival version|capacity|sorting offer):\s*\d|current Home (?:chat model|thinking level):\s*\S+/i.test(layer.text)) {
       diagnostics.push({ rule: "volatile", role: layer.role, layer: layer.name });
     }
     if (layer.kind === "index" && !/<index\b/.test(layer.text)) diagnostics.push({ rule: "index-format", role: layer.role, layer: layer.name });
@@ -49,11 +49,11 @@ export function audit(layers, sources = []) {
     if (owners.length > 1) diagnostics.push({ rule, owners });
   }
   if (sources.some(source => /\.filter\(tool => homeToolAvailable\(tool.name, (?:activation.kind|kind)\)\)/.test(source.text))) diagnostics.push({ rule: "N1-kind-dependent-tools", role: "home" });
-  const budgets = { workerSystem: 11000, homeSystem: 8000, workerTools: 10000, homeTools: 10000, globalRules: 800, projectRules: 5000, skills: 2500, subagent: 6400 };
+  const budgets = { workerSystem: 11000, homeSystem: 8000, subagent: 6400 };
   const comparisons = ["worker", "home", "subagent"].map(role => {
     const tokens = sizes.filter(layer => layer.role === role).reduce((sum, layer) => sum + layer.tokens, 0);
     const budget = role === "home" ? budgets.homeSystem : role === "worker" ? budgets.workerSystem : budgets.subagent;
-    return { role, tokens, budget, over: tokens > budget };
+    return { role, tokens, budget, over: tokens > budget, coverage: "partial source-rendered system layers; see unavailable" };
   });
   return { diagnostics, sizes, comparisons, budgets, unavailable: ["tool declarations", "installed skills", "global user rules", "workflow child prompts"], budgetPolicy: "PRINCIPLES section 9; byte/4 estimates; review signal, not a gate" };
 }
@@ -82,7 +82,8 @@ async function render() {
     if (["chat", "worker"].includes(role)) layers.push({ role, name: "project", text: project, kind: "rules", always: true });
     if (role === "worker") layers.push({ role, name: "worker-contract", text: worker, kind: "system", always: true });
   }
-  layers.push({ role: "home", name: "profile-index", text: home.profile, kind: "index", always: true });
+  const { HOME_TOOL_NAMES } = await jiti.import(resolve(root, "packages/gateway/src/modules/home/home-runtime-policy.ts"));
+  layers.push({ role: "home", name: "profile-index", text: home.profile, kind: "index", always: true, tools: HOME_TOOL_NAMES });
   const paths = ["packages/gateway/src/workspace/tron-core-extension.ts", "packages/gateway/src/modules/home/tron-home-extension.ts", "packages/gateway/src/modules/home/home-task-dispatcher.ts", "packages/gateway/src/kernel/delegation/task-worker-extension.ts", "packages/gateway/src/modules/home/home-request-policy.ts", "AGENTS.md"];
   const sources = await Promise.all(paths.map(async name => ({ name, text: await readFile(resolve(root, name), "utf8") })));
   return { layers, sources };
