@@ -664,6 +664,12 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       return { task, slot, target: { kind: "session" as const, sessionId: task.sessionId } };
     };
     return {
+      history: input => owners.changes.history(input),
+      undo: (changeId, input) => owners.changes.undo(changeId, {
+        actor: actor(input.toolCallId), reason: input.reason, session: source(),
+        ...(this.usesHomeSettings ? { homeChapter: chapter() } : {}),
+        ...(input.confirm ? { confirm: input.confirm } : {}),
+      }),
       resolve: async (keys, taskId) => {
         if (taskId === undefined) return owners.model.resolve(target, source(), keys);
         const { task, slot, target: workerTarget } = await worker(taskId, "resolve");
