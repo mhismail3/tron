@@ -67,6 +67,37 @@ final class GatewayEventDeliveryContractTests: XCTestCase {
         }
     }
 
+    func testDisplayTranscriptResponseAdmitsFourLabelDNSHost() async throws {
+        let remoteURL = "https://mooses-macbook-server.tail3b6e78.ts.net:8443/"
+        let entry: [String: Any] = [
+            "id": "64", "timestamp": "2026-11-12T20:13:35Z", "kind": "message",
+            "role": "toolResult", "presentationId": "display-64", "content": [], "toolName": "display",
+            "display": [
+                "schema": "tron.display.v1", "displayId": "display-64", "revision": 1,
+                "title": "Build", "altText": "Build page", "kind": "webpage",
+                "presentation": ["requestedSurface": "sheet", "inlineTapAction": "sheet"],
+                "eligibleSurfaces": ["sheet"], "fallbackText": "Build page", "remoteURL": remoteURL
+            ]
+        ]
+        try await withClient(policy: .init(maximumEvents: 3, maximumBytes: 4096)) { client, peer in
+            await peer.respond(to: "fixture.transcript", with: try JSONSerialization.data(withJSONObject: [entry]))
+            let decoded: [TranscriptItem] = try await client.request("fixture.transcript", EmptyParams())
+            XCTAssertEqual(decoded.count, 1)
+            XCTAssertEqual(decoded.first?.display?.remoteURL, remoteURL)
+        }
+    }
+
+    func testDisplayRemoteURLPolicyDistinguishesDNSFromIPv4() {
+        for host in ["mooses-macbook-server.tail3b6e78.ts.net", "one.two.example.com", "one.two.example.com1",
+                     "0.face.beef.net", "8.8.8.8", "1.1.1.1"] {
+            XCTAssertTrue(DisplayRemoteURLPolicy.admits("https://\(host)/"), host)
+        }
+        for host in ["10.0.0.1", "127.0.0.1", "192.168.1.1", "172.16.0.1", "100.64.0.1", "169.254.0.1", "203.0.113.1",
+                     "1.2.3.256", "256.1.1.1", "0x7f.0.0.1", "1.2.3.0x100", "a.b.c.4"] {
+            XCTAssertFalse(DisplayRemoteURLPolicy.admits("https://\(host)/"), host)
+        }
+    }
+
     func testProcessActivityIntegerProjectionPreservesInvalidResponseFailure() async throws {
         try await withClient(policy: .init(maximumEvents: 3, maximumBytes: 4096)) { client, peer in
             let method = "fixture.processActivity"
