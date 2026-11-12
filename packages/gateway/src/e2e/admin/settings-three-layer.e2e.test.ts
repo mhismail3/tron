@@ -335,12 +335,12 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
       changes: [{ key: "notifications.push.waiting", layer: "global", op: "set", value: false }],
     });
     const agent = { kind: "agent" as const, id: "push-agent" };
-    const widened = await f.settingsChanges.change({ kind: "global" },
+    const widened = await f.settings.settingsChanges.change({ kind: "global" },
       [{ key: "notifications.push.waiting", layer: "global", op: "set", value: true }],
       { actor: agent, reason: "Alert me again" });
     expect(widened).toMatchObject({ status: "review", changes: [] });
     expect((await readNotificationPolicy((names) => f.registry.resolveGlobalSettings(names))).waiting).toBe(false);
-    const narrowed = await f.settingsChanges.change({ kind: "global" },
+    const narrowed = await f.settings.settingsChanges.change({ kind: "global" },
       [{ key: "notifications.push.waiting", layer: "global", op: "set", value: false }],
       { actor: agent, reason: "Stop alerts while I am away" });
     expect(narrowed).toMatchObject({ status: "applied" });
