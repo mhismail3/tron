@@ -3,6 +3,7 @@ import type { AgentSession, ModelRuntime, SettingsManager } from "../pi/coding-a
 import type { StreamFn } from "../pi/agent-core.js";
 import { installAgentPipeline, wrapModelRuntimeStream, type AgentPipelineStages } from "../pi/adapters.js";
 import { lazyStream, type AssistantMessageEvent, type AssistantMessageEventStream } from "../pi/ai.js";
+import { recordingStream, type RequestOutcome } from "./request-record.js";
 
 async function* abortAwareEvents(
   source: AssistantMessageEventStream,
@@ -41,6 +42,7 @@ interface RunRequestPipelineOptions {
   settingsApplied(): void;
   compactionStream(stream: StreamFn): StreamFn;
   policyStream?: (stream: StreamFn) => StreamFn;
+  record?: (outcome: RequestOutcome) => void;
   outer?: AgentPipelineStages["outer"];
   finishTurn?: AgentPipelineStages["finishTurn"];
 }
@@ -89,7 +91,8 @@ export class RunRequestPipeline {
             ...(settings.retry?.provider?.maxRetryDelayMs === undefined ? {} : { maxRetryDelayMs: settings.retry.provider.maxRetryDelayMs }),
           }));
         };
-        return options.compactionStream(abortAwareStream(options.policyStream ? options.policyStream(baseStream) : baseStream));
+        const sent = abortAwareStream(options.policyStream ? options.policyStream(baseStream) : baseStream);
+        return options.compactionStream(options.record ? recordingStream(sent, options.record) : sent);
       },
       ...(options.outer ? { outer: options.outer } : {}),
       ...(options.finishTurn ? { finishTurn: options.finishTurn } : {}),

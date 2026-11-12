@@ -102,6 +102,7 @@
 
     "logs": {"owner": "gateway/transport", "writer": "gateway, mac, scripts", "life": "log", "rebuild": "n/a", "backup": false, "secret": "private", "retention": "per child", "view": "system", "container": true},
     "logs/gateway.jsonl*": {"owner": "gateway/transport", "writer": "gateway", "life": "log", "rebuild": "n/a", "backup": false, "secret": "private", "retention": "8 segments of 5 MiB", "view": "system"},
+    "logs/requests.jsonl*": {"owner": "gateway/run", "writer": "gateway", "life": "log", "rebuild": "n/a", "backup": false, "secret": "private", "retention": "16 segments of 5 MiB", "view": "system"},
     "logs/gateway-stderr.log": {"owner": "mac-app/gateway-payload", "writer": "mac", "life": "log", "rebuild": "n/a", "backup": false, "secret": "private", "retention": "truncated above 1 MiB on Mac launch", "view": "system"},
     "logs/mac.jsonl*": {"owner": "mac-app/support", "writer": "mac", "life": "log", "rebuild": "n/a", "backup": false, "secret": "private", "retention": "4 segments of 1 MiB", "view": "system"},
     "logs/deploy.jsonl*": {"owner": "repo/dev", "writer": "scripts", "life": "log", "rebuild": "n/a", "backup": false, "secret": null, "retention": "one rotation at 1 MiB", "view": "system"},

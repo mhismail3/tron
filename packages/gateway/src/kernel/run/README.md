@@ -137,6 +137,22 @@ actual K3 host; native frames do not select product modules or keep another list
   one-hour Anthropic cache retention, including cold-resumed tasks. Ordinary interactive
   sessions and subagent children retain Pi's default five-minute retention. Other providers
   are unchanged; this policy does not enable cache warming.
+- `request-record.ts`: one content-free record per provider request of a Gateway session,
+  taken outside the abort-aware stream and after every Pi and Gateway payload hook, so its
+  stop reason is the run's. The request is read as units in cache order: each `tools` item;
+  the provider's separate system field (`system`, `instructions`, `systemInstruction`), one
+  unit per array item; then the conversation (`messages`, `input`, `contents`), where an item
+  with a `content` array is its other fields followed by each content block and any other
+  item is one unit. A unit is serialized without `cache_control`. Each recorded prefix is the
+  byte size and the first 16 hex digits of an HMAC-SHA-256 over all units up to and including one point: the end
+  of tools, each system unit, each cache mark (with its lifetime) and the whole request.
+  `params` is the same pair over every other top-level field, keys sorted. System text that
+  an API carries inside the conversation (OpenAI completions and Responses) is part of
+  `request`, and `system` is empty. The key is 32 random bytes held in process memory.
+  One record costs one synchronous pass over the payload.
+  A failure to compute a record never fails the request. A provider adapter's own payload
+  normalization (Kimi) runs below this boundary. Subagent children are separate Pi processes
+  and are not recorded.
 
 ## Contract
 
@@ -215,6 +231,7 @@ Compaction diagnostics remain with the
 
 | Signal | Meaning / diagnosis |
 |---|---|
+| `logs/requests.jsonl` line (not a logger record) | One per provider request: `sessionId`, `kind` (`home`, `worker`, `ordinary`), provider, model, API, `hashKey`, `params`, `tools`, `system[]`, `marks[]` (`at`, `ttl`, `bytes`, `hash`), `request`, `usage`, `stop`. To explain a cache miss, compare the line with the session's previous line under the same `hashKey`: the first prefix whose hash differs is the layer that changed, and a changed `params` hash is a changed request option. With every earlier prefix and `params` equal and `cacheRead` 0, the cause is outside the request (lifetime expiry or provider eviction). Across Gateway runs only the sizes compare. |
 | `capability.usage` | info: actual SDK completion count, registered capability name (otherwise `unknown`), execution `ok`/`error`, preparation `refused`, or unknown tool; execute-latency bucket only (`lt100ms`, `lt1s`, `lt10s`, `gte10s`, `unknown`). Preparation refusals have no execute duration. Includes nested calls; never records arguments, results, paths, queries or call/session IDs. |
 | `runtime-prompt-failed` with repeated [`home.task.inbox`](../../modules/home/README.md#signals) `admission-aborted`/claim transitions | With zero provider calls and no intervening user activation, memory resume or new source event, diagnose premature pre-append wake acceptance. `input-admission.integration.test.ts` in Home injects SDK rejection, proves retained pending input and then explicit-resume delivery. |
 | `terminal-receipt-persistence-failed` | A completion ownership write failed. For a terminal Home task whose socket snapshot still says `running` without an operation, compare its canonical replies and task marker: a root task marker must not own an individual reply completion. `home-task-continuity.e2e.test.ts` reproduces the conflicting-stamp ordering and proves same-session resume. |

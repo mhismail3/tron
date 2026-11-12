@@ -31,6 +31,7 @@ import { DRAIN_WAIT_LOG_INTERVAL_MS, logDrainBlockers, logUnresolvedDrainOwners,
 import { acquireAgentRuntimeLocks } from "./sessions/agent-runtime-lock.js";
 import type { JsonValue } from "./protocol/types.js";
 import { GatewayLogger } from "./transport/logger.js";
+import { RotatingJsonl } from "./transport/rotating-jsonl.js";
 import { logHomeDiagnostic } from "./modules/home/home-diagnostic.js";
 import { homeToolCatalog } from "./modules/home/home-runtime-policy.js";
 import type { HomeComposition } from "./modules/home/home-module.js";
@@ -106,6 +107,7 @@ const logger = new GatewayLogger(gatewayLogPath, {
   runtimeEpoch: process.env.TRON_GATEWAY_RUNTIME_EPOCH,
   payloadVersion: process.env.TRON_GATEWAY_PAYLOAD_VERSION,
 });
+const requestLog = new RotatingJsonl(tronHomePath(config.tronHome, "logs", "requests.jsonl"), 5 * 1_024 * 1_024, 16);
 const managedSubagents = ManagedSubagents.activateForStartup(config.tronHome, logger);
 {
   const identity = runtimeIdentity();
@@ -377,6 +379,7 @@ const sessions: RuntimeRegistry = new RuntimeRegistry({
     "Queued manual compaction adopted by an active compaction",
     { event: "session.compaction.manual-adopted", source: "session", ...diagnostic },
   ),
+  requestRecord: record => requestLog.append({ timestamp: new Date().toISOString(), ...record }),
   capabilityDiagnostic: aggregate => logger.log("info", "Capability usage aggregate", {
     event: "capability.usage", source: "runtime", step: aggregate.name, outcome: aggregate.status,
     stage: aggregate.latencyBucket, counts: { calls: aggregate.count },

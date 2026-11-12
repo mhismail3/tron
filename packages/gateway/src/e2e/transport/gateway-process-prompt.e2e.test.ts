@@ -86,6 +86,25 @@ describe("prompt journeys across the real Gateway process", () => {
       expectExactlyOnce(await freshSnapshot(gateway, sessionId));
       const status = await phone.request("command.status", { method: "session.prompt", commandId: "prompt-once-command" });
       expect(status.result).toEqual({ status: "completed", result: { operationId: admitted.result.operationId } });
+      const requestLog = (await readFile(join(gateway.tronHome, "logs", "requests.jsonl"), "utf8")).trimEnd().split("\n").map((line) => JSON.parse(line));
+      expect(requestLog).toHaveLength(1);
+      const sent = JSON.parse(gateway.provider.requests[0]!.body) as Record<string, unknown> & { messages: Array<Record<string, unknown>>; tools?: unknown[] };
+      const size = (units: readonly unknown[]) => units.reduce<number>((bytes, unit) => bytes + Buffer.byteLength(JSON.stringify(unit)), 0);
+      const toolBytes = size(sent.tools ?? []);
+      const messageBytes = size(sent.messages.flatMap((message) => {
+        if (!Array.isArray(message.content)) return [message];
+        const { content, ...envelope } = message;
+        return [envelope, ...content as unknown[]];
+      }));
+      const { tools: _tools, messages: _messages, ...params } = sent;
+      expect(sent.messages.map((message) => message.role)).toEqual(expect.arrayContaining(["system", "user"]));
+      expect(toolBytes).toBeGreaterThan(0);
+      expect(requestLog[0]).toMatchObject({ sessionId, kind: "ordinary", api: "openai-completions", stop: "stop", marks: [], system: [],
+        tools: { bytes: toolBytes }, request: { bytes: toolBytes + messageBytes },
+        params: { bytes: Buffer.byteLength(JSON.stringify(Object.fromEntries(Object.entries(params).sort(([left], [right]) => left < right ? -1 : 1)))) } });
+      expect(Date.parse(requestLog[0].timestamp)).toBeGreaterThan(0);
+      expect(new Set([requestLog[0].tools.hash, requestLog[0].request.hash, requestLog[0].params.hash]).size).toBe(3);
+      expect(JSON.stringify(requestLog[0])).not.toContain(prompt);
       await phone.close();
 
       const normalRestartStarted = performance.now();
