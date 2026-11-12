@@ -192,6 +192,7 @@ describe("Home's global skills and prompt templates follow the agent directory l
     let system = "";
     f.faux.setResponses([context => { system = context.systemPrompt ?? ""; return fauxAssistantMessage("next activation"); }]);
     await home.prompt("next");
+    await waitFor(() => system.length > 0, "next activation provider request");
     expect(system).toContain("Skill written mid-run");
   }, 60_000);
 });
