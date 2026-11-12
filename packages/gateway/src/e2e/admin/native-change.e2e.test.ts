@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fixture, disposeFixtures, reportCall } from "../../../test-support/home-task-fixture.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
+import { publishedNpmRegistry } from "../../../test-support/package-source-fixtures.js";
 import type { ExtensionInteraction } from "../../protocol/types.js";
 import type { ChangeRequest, Resolution } from "../../kernel/settings/tool-contract.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
@@ -761,5 +762,74 @@ describe("typed changes and exact native acceptance", () => {
       expect(await settled).toMatchObject({ message: "synchronous effect failure" });
       expect(broker.interactions()).toEqual([]);
     } finally { broker.retire(); }
+  });
+});
+
+describe("package update through the registered settings tool", () => {
+  it("applies one Home npm update behind its exact native card and refuses an ordinary chat's attempt", async () => {
+    const f = await fixture();
+    const name = `tron-update-e2e-${Date.now()}`;
+    const registry = await publishedNpmRegistry(f.root, [{ name, versions: ["1.0.0", "1.2.0", "1.3.0"], latest: "1.0.0" }]);
+    const saved = { registry: process.env.npm_config_registry, cache: process.env.npm_config_cache };
+    process.env.npm_config_registry = registry.base;
+    process.env.npm_config_cache = join(f.root, "npm-cache");
+    try {
+      const source = `npm:${name}`;
+      const settingsPath = join(f.agentDir, "settings.json");
+      const existing = JSON.parse(await readFile(settingsPath, "utf8").catch(() => "{}"));
+      await writeFile(settingsPath, JSON.stringify({ ...existing, packages: [source] }));
+      await f.packages.mutate("update", source, f.cwd, false);
+      const installedVersion = async (configured = source) => {
+        const installedPath = (await f.packages.list(f.cwd)).packages.find(row => row.source === configured)?.installedPath;
+        return installedPath ? JSON.parse(await readFile(join(installedPath, "package.json"), "utf8")).version as string : undefined;
+      };
+      expect(await installedVersion()).toBe("1.0.0");
+      await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
+
+      const home = await f.registry.acquire(f.home.sessionId);
+      f.faux.setResponses([
+        fauxAssistantMessage([fauxToolCall("settings", { action: "update", source, version: "1.2.0", reason: "Home requested the exact fixture update" }, { id: "package-update" })], { stopReason: "toolUse" }),
+        fauxAssistantMessage("Package updated"),
+      ]);
+      const prompting = home.prompt("Update the fixture package").then(() => waitFor(() => !home.isBusy, "package update turn settled"));
+      const interaction = await waitFor(() => home.snapshot().extensionPresentation.pendingInteractions[0], "package update card");
+      if (interaction.method !== "change") throw new Error("Expected the shared native install card");
+      expect(interaction.review).toMatchObject({ requiresTap: true, title: `Update ${name} to exactly 1.2.0`, items: [
+        expect.objectContaining({ label: `Package ${name}`, before: "1.0.0", after: "1.2.0" }),
+        expect.objectContaining({ label: "Configured source", before: source, after: `npm:${name}@1.2.0` }),
+      ] });
+      expect(await installedVersion()).toBe("1.0.0");
+      registry.state.latest[name] = "1.3.0";
+
+      const service = settingsService(f);
+      const respond = (commandId: string) => service.invoke(phone, "extension.respond", { commandId, sessionId: home.id,
+        interactionId: interaction.id, hostEpoch: interaction.hostEpoch, presentationRevision: interaction.presentationRevision,
+        value: { digest: interaction.review.digest, approved: true } });
+      await respond("package-update-response-1");
+      await prompting;
+      expect(await installedVersion(`npm:${name}@1.2.0`)).toBe("1.2.0");
+      expect(JSON.parse(await readFile(settingsPath, "utf8")).packages).toEqual([`npm:${name}@1.2.0`]);
+      await respond("package-update-response-2").catch(() => undefined);
+      expect(await installedVersion(`npm:${name}@1.2.0`)).toBe("1.2.0");
+      const audited = (await f.settings.settingsChanges.history({ key: "package.update" })).entries;
+      expect(audited.map(entry => entry.status).sort()).toEqual(["applied", "started"]);
+      expect(audited.find(entry => entry.status === "applied")).toMatchObject({ action: true, reason: "Home requested the exact fixture update" });
+
+      const chat = await f.registry.create(f.cwd);
+      f.faux.setResponses([
+        fauxAssistantMessage([fauxToolCall("settings", { action: "update", source: `npm:${name}@1.2.0`, version: "1.3.0", reason: "Ordinary chat attempt" }, { id: "chat-update" })], { stopReason: "toolUse" }),
+        fauxAssistantMessage("Refused"),
+      ]);
+      await chat.prompt("Try to update the package from chat");
+      await waitFor(() => !chat.isBusy, "ordinary chat update settled");
+      expect(chat.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === "chat-update"))
+        .toMatchObject({ type: "message", message: { role: "toolResult", isError: true } });
+      expect(chat.snapshot().extensionPresentation.pendingInteractions).toHaveLength(0);
+      expect(await installedVersion(`npm:${name}@1.2.0`)).toBe("1.2.0");
+    } finally {
+      await registry.close();
+      process.env.npm_config_registry = saved.registry;
+      process.env.npm_config_cache = saved.cache;
+    }
   });
 });

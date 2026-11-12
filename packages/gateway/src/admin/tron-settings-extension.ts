@@ -13,7 +13,7 @@ const CHANGE = Type.Object({
 }, { additionalProperties: false });
 
 const PARAMETERS = Type.Object({
-  action: StringEnum(["resolve", "change", "history", "undo", "inventory", "update"] as const, { description: "resolve: read current values and scopes. inventory: read-only hooks by event and extension, packages, Tron modules and MCP server status for this chat's directory (credentials masked). history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card. update (Tron Home only): install one exact npm version of one configured unpinned package behind the native install card; never undoable." }),
+  action: StringEnum(["resolve", "change", "history", "undo", "inventory", "update"] as const, { description: "resolve: read current values and scopes. history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card. update (Tron Home only): install one exact npm version or full git commit SHA of one configured package behind the native install card; the card shows any configured pin change; never undoable." }),
   keys: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 200 }), { maxItems: 200, description: "resolve: the key ids to read; omit for every key." })),
   taskId: Type.Optional(Type.String({ minLength: 1, maxLength: 160,
     description: "Tron Home only: the delegated task (from task list) whose worker session to read or change instead of this chat." })),
@@ -25,7 +25,7 @@ const PARAMETERS = Type.Object({
   reason: Type.Optional(Type.String({ minLength: 1, maxLength: 2_000, description: "change/undo (required): why, for the maintainer." })),
   dryRun: Type.Optional(Type.Boolean({ description: "change: validate and return exact before/after without applying." })),
   source: Type.Optional(Type.String({ minLength: 1, maxLength: 2_000, description: "update (required): the configured package source exactly as in sources.packages, e.g. npm:name." })),
-  version: Type.Optional(Type.String({ minLength: 1, maxLength: 64, description: "update (required): the exact npm version to install, e.g. 1.2.3. Tags and ranges are refused." })),
+  version: Type.Optional(Type.String({ minLength: 1, maxLength: 64, description: "update (required): the exact npm version (e.g. 1.2.3) or the full 40-character git commit SHA to install. Tags and ranges are refused." })),
 }, { additionalProperties: false });
 
 type SettingsCall =
@@ -78,7 +78,7 @@ export function createTronSettingsExtension(access: () => SettingsToolAccess | u
   return pi => {
     pi.registerTool({
       name: "settings", label: "Settings",
-      description: "Read and change Tron settings through typed writes. Reversible changes apply and are logged. Read durable audit records with history; reverse a change with undo and its changeId. Tron Home alone can update (action update) one configured unpinned npm package to an exact version behind the native install card; that is never undoable. Only irreversible effects, trust/authority, privacy expansion, spend and installs need the exact shared native tap. dryRun validates and returns before/after without effects. Home may target its task worker; running workers adopt from the next model request and are signalled.",
+      description: "Read and change Tron settings through typed writes. Reversible changes apply and are logged. Read durable audit records with history; reverse a change with undo and its changeId. Tron Home alone can update (action update) one configured package to an exact npm version or git commit SHA behind the native install card, which shows any pin change; that is never undoable. Only irreversible effects, trust/authority, privacy expansion, spend and installs need the exact shared native tap. dryRun validates and returns before/after without effects. Home may target its task worker; running workers adopt from the next model request and are signalled.",
       promptSnippet: "Change settings with the settings tool, never by editing settings files.",
       promptGuidelines: [
         "Use settings to read or change model, context, tools, permissions and run settings; never edit settings.json, .pi/ or trust files directly.",
