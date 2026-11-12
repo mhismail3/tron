@@ -257,6 +257,13 @@ const homeComposition: HomeComposition = {
       });
       return;
     }
+    if (record.event === "usage") {
+      logger.log("info", "Tron Home activation usage", {
+        event: "home.activation-usage", source: "home",
+        counts: { estimatedTokens: record.estimatedTokens, providerTokens: record.providerTokens },
+      });
+      return;
+    }
     if (record.event === "activation") {
       logger.log("info", "Tron Home activation", {
         event: "home.activation", source: "home",

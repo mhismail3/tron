@@ -13,6 +13,7 @@ import { HOME_TASK_RESULT_MESSAGE } from "../../kernel/receipts/invocation-recei
 import type { HomeContextSection } from "../../protocol/types.js";
 import { HomeResponseTiming, type HomeResponseSample } from "./home-response-timing.js";
 import { homeToolAvailable } from "./home-runtime-policy.js";
+import { HomeTokenCalibration, type HomeTokenEstimate } from "./home-token-calibration.js";
 
 const HOME_MEMORY_CUSTOM_TYPE = "tron.home-memory.v1";
 export const HOME_NONCE_MARKER = "tron.home-nonce:";
@@ -118,6 +119,11 @@ export type HomeRequestRecord =
     waitedMs: number;
   }
   | {
+    event: "usage";
+    estimatedTokens: number;
+    providerTokens: number;
+  }
+  | {
     event: "refused";
     reason: HomeRefusalReason;
     detail: string;
@@ -159,7 +165,9 @@ interface ActivationState extends HomeActivationIdentity {
   view: Promise<HomeActivationView> | undefined;
   viewRefusal: HomeRequestPolicyError | undefined;
   unrecorded: boolean;
+  unmeasured: boolean;
   step: HomeRequestStep | undefined;
+  sent: { model: string; estimate: HomeTokenEstimate } | undefined;
   refusal: HomeRefusal | undefined;
 }
 
@@ -185,6 +193,7 @@ export class HomeRequestPolicy {
   private expectedDigest: string | undefined;
   private expectedNonSystemMessages: AgentMessage[] | undefined;
   private readonly transformIdentities: boolean[] = [];
+  private readonly calibration = new HomeTokenCalibration();
 
   readonly responseTiming: HomeResponseTiming;
 
@@ -225,7 +234,9 @@ export class HomeRequestPolicy {
       view: undefined,
       viewRefusal: undefined,
       unrecorded: true,
+      unmeasured: true,
       step: undefined,
+      sent: undefined,
       refusal: undefined,
     };
     this.expectedDigest = undefined;
@@ -269,10 +280,11 @@ export class HomeRequestPolicy {
     const projection = session.sessionManager.buildSessionProjection();
     const cut = this.cut(projection, this.boundaryIndex(projection, activation), activation, view);
     const window = session.model?.contextWindow ?? 0;
-    const nonSystem = cut.messages.filter(message => message.role !== "system").reduce((total, message) => total + estimateTokens(message), 0);
-    const incomingSystem = estimateTokens(systemMessage(systemPrompt, cut.messages));
-    const prefix = nonSystem + incomingSystem;
-    const freshTokens = Math.max(0, window - HOME_RESERVE_TOKENS - prefix);
+    const memory = estimateTokens(cut.memory);
+    const other = cut.tail.reduce((total, item) => total + estimateTokens(item.message), 0) + estimateTokens(systemMessage(systemPrompt, cut.messages));
+    const scale = this.calibration.factors(modelKey(session.model));
+    const prefix = Math.ceil(memory * scale.memory + other * scale.other);
+    const freshTokens = Math.floor(Math.max(0, window - HOME_RESERVE_TOKENS - prefix) / scale.other);
     return { tokens: Math.max(0, freshTokens - estimateTokens(input)), freshTokens, signal: activation.cancellation.signal };
   }
 
@@ -300,7 +312,9 @@ export class HomeRequestPolicy {
       }
       const rewritten = this.cut(projection, boundaryIndex, activation, memoryView);
       const model = update?.model ?? request.model;
-      const sections = requestSections(system, rewritten, memoryView, activation.kind);
+      const estimated = requestSections(system, rewritten, memoryView, activation.kind);
+      const scale = this.calibration.factors(modelKey(model));
+      const sections = estimated.map(section => ({ ...section, tokens: Math.ceil(section.tokens * (section.id === "memory" ? scale.memory : scale.other)) }));
       const effectiveTokens = sections.reduce((total, section) => total + section.tokens, 0);
       const contextWindow = model?.contextWindow ?? 0;
       if (contextWindow > 0 && effectiveTokens > contextWindow - HOME_RESERVE_TOKENS) {
@@ -311,6 +325,9 @@ export class HomeRequestPolicy {
           { effectiveTokens, contextWindow },
         );
       }
+      const memoryEstimate = estimated.find(section => section.id === "memory")?.tokens ?? 0;
+      activation.sent = { model: modelKey(model), estimate: { memory: memoryEstimate,
+        other: estimated.reduce((total, section) => total + section.tokens, 0) - memoryEstimate } };
       this.expectedNonSystemMessages = rewritten.nonSystem;
       const viewBytes = utf8Bytes(memoryView.text);
       const viewLines = memoryView.text === "" ? 0 : memoryView.text.split("\n").length;
@@ -381,15 +398,37 @@ export class HomeRequestPolicy {
         );
       }
       const finish = this.responseTiming.model(activation.operationId);
+      const step = activation.step;
+      const sent = activation.sent;
       try {
         const result = stream(model, context, options);
-        void Promise.resolve(result).then((stream) => stream.result()).then(finish, finish);
+        void Promise.resolve(result).then((stream) => stream.result()).then((message) => {
+          finish();
+          if (step && sent) this.measure(activation, step, sent, message.usage.input + message.usage.cacheRead + message.usage.cacheWrite);
+        }, finish).catch(() => {});
         return result;
       } catch (error) {
         finish();
         throw error;
       }
     };
+  }
+
+  private measure(activation: ActivationState, step: HomeRequestStep, sent: NonNullable<ActivationState["sent"]>, providerTokens: number): void {
+    if (!this.calibration.observe(sent.model, activation.nonce, sent.estimate, providerTokens)) return;
+    if (activation.unmeasured) {
+      activation.unmeasured = false;
+      this.options.onRecord?.({ event: "usage", estimatedTokens: step.effectiveTokens, providerTokens });
+    }
+    const estimated = step.effectiveTokens;
+    let assigned = 0;
+    for (const section of step.sections) {
+      section.tokens = Math.floor(section.tokens * providerTokens / estimated);
+      assigned += section.tokens;
+    }
+    const largest = step.sections.reduce((best, section) => section.tokens > best.tokens ? section : best);
+    largest.tokens += providerTokens - assigned;
+    step.effectiveTokens = providerTokens;
   }
 
   private requireActivation(): ActivationState {
@@ -554,6 +593,10 @@ export class HomeRequestPolicy {
     this.options.onRecord?.({ event: "refused", reason, detail, ...(sizes ?? {}) });
     return new HomeRequestPolicyError(reason, homeRefusalMessage(reason));
   }
+}
+
+function modelKey(model: { provider: string; id: string } | undefined): string {
+  return model ? `${model.provider}/${model.id}` : "";
 }
 
 function homeSystemText(prompt: HomeSystemPrompt): string {
