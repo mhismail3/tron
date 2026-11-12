@@ -31,7 +31,7 @@ preserve it and `gateway/workspace-state`
 
 ## Variants
 
-`MacStartupMode.resolve` is the single startup authority: test host and CLI first, Xcode Debug
+`MacStartupMode.resolve` is the single startup authority: test host first, Xcode Debug
 → read-only observation, installed Release → wizard or onboarded lifecycle, misplaced Release →
 a visible error. Test-host detection accepts known XCTest and Swift Testing environment markers;
 Debug never creates a LaunchAgent.

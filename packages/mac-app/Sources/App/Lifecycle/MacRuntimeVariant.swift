@@ -21,7 +21,6 @@ enum MacStartupMode: Equatable, Sendable {
         case .unsupported: return .unsupported
         }
     }
-
 }
 
 enum MacRuntimeVariant: Equatable, Sendable {
