@@ -80,7 +80,7 @@ struct ExtensionsSettingsView: View {
                     } else if packageError == nil {
                         TronPlaceholderState(
                             title: "No packages configured",
-                            detail: "Use Reload, or ask Tron to install one.",
+                            detail: "Use Reload, or ask Home to install one.",
                             icon: "shippingbox"
                         )
                     }

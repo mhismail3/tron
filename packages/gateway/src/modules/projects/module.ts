@@ -38,8 +38,8 @@ export function projectsModule(owner: ProjectLifecycle): ModuleDescriptor<Projec
       } },
     }, extension: session => pi => {
       pi.registerTool({ name: "projects", label: "Projects", annotations: { openWorldHint: false }, executionMode: "sequential",
-        description: "Create a direct-child Workspace project: an untrusted folder with a Git repository on main, then trusted after the exact shared native tap. Existing paths are never overwritten. Change an existing project's trust with the settings tool (permissions.projectTrust); use git and gh directly for everything else. No automatic replay after uncertain effects: inspect the filesystem, Git and trust before another action.",
-        promptSnippet: "Use projects to create a project; change project trust with the settings tool; never write trust files.",
+        description: "Create a direct-child Workspace project: an untrusted folder with a Git repository on main, then trusted after the exact shared native tap. Existing paths are never overwritten. Only Home can change an existing project's trust with the settings tool (permissions.projectTrust); use git and gh directly for everything else. No automatic replay after uncertain effects: inspect the filesystem, Git and trust before another action.",
+        promptSnippet: "Use projects to create a project; only Home can change project trust with the settings tool; never write trust files.",
         parameters: Type.Object({ name: Type.String({ minLength: 1, maxLength: 64 }), reason: Type.String({ minLength: 1, maxLength: 2000 }),
           }, { additionalProperties: false }),
         execute: async (toolCallId, raw, signal, _update, context) => {
