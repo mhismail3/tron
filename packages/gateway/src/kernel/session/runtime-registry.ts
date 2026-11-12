@@ -19,7 +19,6 @@ import {
   SessionManager,
   type FileEntry,
   type SessionEntry,
-  SettingsManager,
 } from "../pi/coding-agent.js";
 import { GatewayError } from "../../errors.js";
 import type {
@@ -444,7 +443,6 @@ export class RuntimeRegistry implements SessionOperations {
   private readonly presentationPresence = new SessionPresentationPresenceRegistry();
   private readonly catalogMetadataIndex: CatalogMetadataIndex;
   private readonly sessionCatalog: SessionCatalog;
-  private readonly configuredSessionDir: string | undefined;
   private interrupted = new Set<string>();
   private readonly subscribers = new Map<string, Set<string>>();
   private readonly idleEvictions = new Map<string, IdleEviction>();
@@ -572,11 +570,6 @@ export class RuntimeRegistry implements SessionOperations {
       limitBytes: getHeapStatistics().heap_size_limit,
     }));
     this.drainId = `idle-${createHash("sha256").update(this.workRegistry.runtimeEpoch).digest("hex").slice(0, 16)}`;
-    this.configuredSessionDir = SettingsManager.create(
-      process.cwd(),
-      options.agentDir,
-      { projectTrusted: false },
-    ).getSessionDir();
     for (const [name, value] of Object.entries(this.catalogDiscoveryLimits())) {
       if (!Number.isSafeInteger(value) || value < 1) throw new Error(`Invalid session catalog ${name} bound`);
     }
@@ -1278,19 +1271,13 @@ export class RuntimeRegistry implements SessionOperations {
     };
   }
 
-  private configuredSessionDirectory(): string | undefined {
-    return this.configuredSessionDir;
-  }
-
   sessionDirectory(cwd: string): string {
-    const configured = this.configuredSessionDirectory();
-    if (configured) return configured;
     const safePath = `--${resolve(cwd).replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
     return join(this.options.agentDir, "sessions", safePath);
   }
 
   private catalogDirectory(): string {
-    return this.configuredSessionDirectory() ?? join(this.options.agentDir, "sessions");
+    return join(this.options.agentDir, "sessions");
   }
 
   private catalogDiscoveryLimits() {

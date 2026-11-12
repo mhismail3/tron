@@ -464,8 +464,8 @@ describe("settings.change", () => {
     const actor = { actor: { kind: "home" as const, id: "home-fixture" }, reason: "Change the declared setting" };
     await expect(f.settingsChanges.change({ kind: "global" }, [
       { key: "run.retry.maxRetries", layer: "global", op: "set", value: 8 },
-      { key: "run.httpProxy", layer: "global", op: "set", value: "http://private-fixture.invalid:3128" },
-    ], actor)).rejects.toMatchObject({ code: "invalid_request", message: "HTTP proxy cannot be changed by home" });
+      { key: "permissions.defaultProjectTrust", layer: "global", op: "set", value: "always" },
+    ], actor)).rejects.toMatchObject({ code: "invalid_request", message: "Default trust policy cannot be changed by home" });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
     expect(await f.history()).toEqual([]);
     const preview = await f.settingsChanges.change({ kind: "global" }, [
@@ -478,7 +478,7 @@ describe("settings.change", () => {
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
   });
 
-  caseIt("records every change once with actor and diff, undoes it, refuses a stale undo, and never undoes a redacted key", async owner => {
+  caseIt("records every change once with actor and diff, undoes it, and refuses a stale undo", async owner => {
     const f = await fixture(owner);
     const applied = await f.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 6, expected: 4 }]);
     expect(applied.status).toBe("applied");
@@ -503,17 +503,6 @@ describe("settings.change", () => {
       .rejects.toMatchObject({ code: "conflict", details: { current: 10, after: 8,
         display: { current: "10 retries", after: "8 retries" } } });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 10 });
-
-    const proxy = await f.change({ kind: "global" }, [{ key: "run.httpProxy", layer: "global", op: "set", value: "http://proxy.invalid:3128" }]);
-    expect(proxy.changes[0]).toMatchObject({ redacted: true });
-    expect(proxy.changes[0]).not.toHaveProperty("after");
-    expect(JSON.stringify(proxy)).not.toContain("proxy.invalid");
-    const proxyEntry = (await f.history({ key: "run.httpProxy" }))[0]!;
-    expect(proxyEntry).toMatchObject({ changed: true, redacted: true,
-      presentation: { label: "HTTP proxy", display: { before: "Hidden", after: "Changed" } } });
-    expect(JSON.stringify(await f.history())).not.toContain("proxy.invalid");
-    await expect(maintainerChange(f.service, client(), "settings.undo", { commandId: commandId(), changeId: proxy.changes[0]!.changeId }))
-      .rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("not undoable") });
 
     await expect(f.change({ kind: "global" }, [{ key: "setup.sessionDir", layer: "global", op: "set", value: "/elsewhere" }])).rejects.toMatchObject({ code: "invalid_request" });
     await f.record.append([{ ...entry!, changeId: "retired-key-entry", key: "retired.setting", actor: { kind: "outside", id: "fixture" }, before: "old", after: "new" }]);
@@ -779,12 +768,6 @@ describe("outside changes", () => {
     expect((await row(f, { kind: "global" }, "run.retry.maxRetries")).value).toBe(2);
     expect((await outsideEntries(f)).filter(entry => entry.key === "run.retry.maxRetries").map(entry => entry.after)).toEqual([2, 9]);
 
-    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), httpProxy: "http://user:secret@proxy.invalid" }));
-    await row(f, { kind: "global" }, "run.httpProxy");
-    const proxy = (await outsideEntries(f)).find(entry => entry.key === "run.httpProxy")!;
-    expect(proxy).toMatchObject({ redacted: true, changed: true });
-    expect(JSON.stringify(proxy)).not.toContain("secret");
-    expect(await readFile(f.outside.path, "utf8")).not.toContain("secret");
     transcript.push({ case: "outside mac", detail: await outsideEntries(f) });
   });
 

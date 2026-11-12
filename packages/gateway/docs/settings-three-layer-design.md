@@ -83,7 +83,6 @@ mechanism; its restricted execution recipe is not expanded by this redesign (dec
 | `run.transport` | run | C,P,M | yes | yes | no | Next request |
 | `run.httpIdleTimeoutMs` | run | C,P,M | yes | yes | no | Next request |
 | `run.websocketConnectTimeoutMs` | run | C,P,M | yes | yes | no | Next request |
-| `run.httpProxy` | run | M | no | no | yes | Gateway restart; redacted |
 | `run.cacheWarming` | run | M | no | no | no | New chat; ordinary runtime only |
 | `sources.extensions` | sources | P,M | no | yes | no | Explicit resource reload, never implicit code execution |
 | `sources.skills` | sources | P,M | no | yes | no | Resource reload |
@@ -91,7 +90,6 @@ mechanism; its restricted execution recipe is not expanded by this redesign (dec
 | `sources.themes` | sources | P,M | no | yes | no | Resource reload |
 | `sources.packages` | sources | P,M | no | yes | no | Exact install card/resource reload; trusted code |
 | `sources.npmCommand` | sources | M | no | no | no | Next package operation |
-| `setup.sessionDir` | setup | M, no writer | no | no | no | Stopped-runtime configuration; hide from Settings |
 | `setup.installTelemetry` | setup | M | no | no | no | Next request |
 
 Model-qualified keys: chat thinking, context window, compaction reserve/recent. Dynamic instances:
