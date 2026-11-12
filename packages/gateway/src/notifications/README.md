@@ -45,6 +45,10 @@ document holds no policy.
   `editor`, form, including the `pi-ask-user` adapter's) emits one alert from
   `SemanticUIBroker` while pending, keyed by the interaction ID; it never delays the
   interaction. `notifications.push.inputNeeded` governs all of them.
+- **Retry card.** `push_retry({reason})` asks for one exact native card (`intent: push-registration-retry`,
+  digest over session and tool call). The Gateway writes nothing: approval resolves the request with
+  `requested` and the approving iPhone alone rotates its rejected App Attest key and registers again, after
+  its own profile, device and generation fences. A duplicate approval finds no rejected key and does nothing.
 - **Presence.** A mobile subscription or local connection may publish
   `session.presentation.set` after sync: token-bound, revisioned, one per connection,
   visible leases expiring after 45 s. Visible at observation (latched before receipt

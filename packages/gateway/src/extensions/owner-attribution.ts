@@ -10,6 +10,7 @@ import { TRON_ASK_USER_INLINE_PATH, TRON_ASK_USER_SOURCE } from "./tron-ask-user
 
 const RESERVED_FIRST_PARTY_TOOLS: ReadonlyArray<readonly [string, string]> = [
   ["notify", "tron-notify"],
+  ["push_retry", "tron-notify"],
   ["display", "tron-display"],
   ["native_capture", "tron-native-capture"],
   ["computer", "tron-computer"],

@@ -3,6 +3,7 @@ import DeviceCheck
 import Foundation
 import Observation
 import Security
+import SwiftUI
 import TronMobileCore
 import UIKit
 import UserNotifications
@@ -328,6 +329,21 @@ struct PushWorkerClient: Sendable {
     }
 }
 
+struct PushRegistrationRetryApproval {
+    let perform: @MainActor (_ profileID: String, _ deviceID: String) throws -> Void
+}
+
+private struct PushRegistrationRetryApprovalKey: EnvironmentKey {
+    static let defaultValue: PushRegistrationRetryApproval? = nil
+}
+
+extension EnvironmentValues {
+    var pushRegistrationRetryApproval: PushRegistrationRetryApproval? {
+        get { self[PushRegistrationRetryApprovalKey.self] }
+        set { self[PushRegistrationRetryApprovalKey.self] = newValue }
+    }
+}
+
 private struct PushRegistrationTransfer: Encodable, Sendable {
     let commandId: String
     let installationId: String
@@ -508,6 +524,24 @@ final class PushNotificationCoordinator {
         guard registrationAdmitted else { return }
         readiness = .pending
         diagnostic = .stoppedUnavailable
+    }
+
+    /// Runs after the paired iPhone approved an exact `push-registration-retry` card and the
+    /// owner accepted it. Refuses unless this profile and device are still current and the
+    /// key is still the rejected one, so a repeated approval cannot rotate twice.
+    func retryAfterApprovedCard(profileID: String, deviceID: String) throws {
+        guard !credentialLoadFailed,
+              let context,
+              context.profile.id == profileID,
+              context.profile.deviceId == deviceID,
+              registrationAdmitted,
+              document.appAttestKeyRejected == true,
+              registrationTask == nil else { throw PushRegistrationError.unavailable }
+        registrationGeneration &+= 1
+        try rotateInvalidKey()
+        automaticRetryAvailable = true
+        diagnostic = .idle
+        scheduleRegistration()
     }
 
     private func scheduleRegistration() {
