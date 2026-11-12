@@ -52,11 +52,11 @@ export class DelegationOperations<Session extends OwnedSession> {
     await slot.prompt(...taskWorkerSteeringInput(control, text, from));
   }
 
-  async interruptWorker(sessionId: string, control: TaskWorkerControl, by: string, text?: string): Promise<string[]> {
+  async interruptWorker(sessionId: string, control: TaskWorkerControl, from: "tron-home" | "maintainer", text?: string): Promise<string[]> {
     const slot = await this.sessions.acquire(sessionId);
     return await interruptTaskWorker(slot.ownedTurns.worker, control,
-      () => this.interruptTools(slot, by,
-        text === undefined ? undefined : async () => { await slot.prompt(...taskWorkerSteeringInput(control, text, by === "the maintainer" ? "maintainer" : "tron-home")); }));
+      () => this.interruptTools(slot, from === "maintainer" ? "the maintainer" : "Home",
+        text === undefined ? undefined : async () => { await slot.prompt(...taskWorkerSteeringInput(control, text, from)); }));
   }
 
   async stopWorker(sessionId: string, control: TaskWorkerControl): Promise<void> {

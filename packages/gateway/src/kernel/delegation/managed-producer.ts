@@ -35,9 +35,7 @@ export function managedProducerAPI(pi: ExtensionAPI, owner: ExtensionOwner, inte
       const value = Reflect.get(target, key, receiver);
       if (typeof value !== "function") return value;
       if (key === "sendMessage") return (message: Parameters<ExtensionAPI["sendMessage"]>[0], options: Parameters<ExtensionAPI["sendMessage"]>[1]) => {
-        const canonicalContent = typeof message.content === "string"
-          ? injectedText(message.content, "pi-subagents", "subagent-notice", "none")
-          : message.content?.map(part => part.type === "text" ? { ...part, text: injectedText(part.text, "pi-subagents", "subagent-notice", "none") } : part);
+        const canonicalContent = injectedText(message.content ?? [], "pi-subagents", "subagent-notice", "none");
         const content = typeof canonicalContent === "string"
           ? [{ type: "text" as const, text: canonicalContent }]
           : [...(canonicalContent ?? [])];
@@ -62,8 +60,7 @@ export function managedProducerAPI(pi: ExtensionAPI, owner: ExtensionOwner, inte
         if (!internalWake) throw new Error("Managed internal wake has no RuntimeSlot admission owner");
         const messages = frame ?? [];
         frame = undefined;
-        const wrapped = typeof content === "string" ? injectedText(content, "pi-subagents", "subagent-notice", "none")
-          : content.map(part => part.type === "text" ? { ...part, text: injectedText(part.text, "pi-subagents", "subagent-notice", "none") } : part);
+        const wrapped = injectedText(content, "pi-subagents", "subagent-notice", "none");
         return internalWake(wrapped, options, owner, messages);
       };
       return (...args: unknown[]) => withExtensionOwner(owner, () => Reflect.apply(value, target, args));

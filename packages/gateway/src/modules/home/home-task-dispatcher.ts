@@ -719,7 +719,7 @@ export class HomeTaskDispatcher {
     });
   }
 
-  async steer(control: TaskWorkerControl & { text: string }, from: "tron-home" | "maintainer" = "tron-home"): Promise<void> {
+  async steer(control: TaskWorkerControl & { text: string }, from: "tron-home" | "maintainer"): Promise<void> {
     await this.refusingControl("steer", control, async () => {
       const task = await this.activeControl(control);
       if (!this.running.has(task.taskId)) throw new GatewayError("conflict", "Task has no live worker; stop settles it");
@@ -728,14 +728,14 @@ export class HomeTaskDispatcher {
     });
   }
 
-  async interrupt(control: TaskWorkerControl & { text?: string }, by: string): Promise<{ interrupted: string[] }> {
+  async interrupt(control: TaskWorkerControl & { text?: string }, from: "tron-home" | "maintainer"): Promise<{ interrupted: string[] }> {
     const interrupted = await this.refusingControl("interrupt", control, async () => {
       const task = await this.activeControl(control);
       if (!this.running.has(task.taskId)) throw new GatewayError("conflict", "Task has no live worker; stop settles it");
       if (control.text !== undefined && (typeof control.text !== "string" || !control.text.trim() || Buffer.byteLength(control.text) > 65536)) {
         throw new GatewayError("invalid_request", "Invalid task steering text");
       }
-      return { taskId: task.taskId, interrupted: await this.sessions.delegation.interruptWorker(task.sessionId!, control, by, control.text) };
+      return { taskId: task.taskId, interrupted: await this.sessions.delegation.interruptWorker(task.sessionId!, control, from, control.text) };
     });
     this.diagnostic?.({ event: "home.task.control", taskHash: hash(interrupted.taskId), operationHash: hash(control.operationId), action: "interrupt", disposition: "accepted", calls: interrupted.interrupted.length });
     return { interrupted: interrupted.interrupted };

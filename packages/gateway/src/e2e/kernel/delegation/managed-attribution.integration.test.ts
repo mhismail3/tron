@@ -292,14 +292,19 @@ it("attributes real workflow completion and supervisor delivery to their managed
     const send = (type: string, content: Parameters<ExtensionAPI["sendMessage"]>[0]["content"], options?: Parameters<ExtensionAPI["sendMessage"]>[1]) =>
       external.runInAsyncScope(() => managed.sendMessage({ customType: type, content, display: true }, options));
     let boundedNotice: string[] = [];
+    let exactBoundary = "";
     faux.setResponses([context => {
-      boundedNotice = context.messages.flatMap(message => (message.role === "user" && Array.isArray(message.content) && message.content.some(part => part.type === "text" && part.text.startsWith(`${noticePrefix}${"a".repeat(80)}`)))
-        ? message.content.filter(part => part.type === "text" && part.text.startsWith(noticePrefix)).map(part => part.text.slice(noticePrefix.length)) : []);
+      boundedNotice = context.messages.flatMap(message => (message.role === "user" && Array.isArray(message.content) && message.content.some(part => part.type === "text" && part.text.startsWith("a".repeat(80))))
+        ? message.content.filter(part => part.type === "text").map((part, index) => index === 0 ? part.text.slice(noticePrefix.length) : part.text) : []);
+      exactBoundary = context.messages.flatMap(message => message.role === "user" && Array.isArray(message.content)
+        ? message.content.filter(part => part.type === "text").map(part => part.text) : []).find(text => text.startsWith(`${noticePrefix}${"z".repeat(80)}`))?.slice(noticePrefix.length) ?? "";
       return fauxAssistantMessage("BOUNDED_NOTICE_COMPLETE");
     }, ...Array.from({ length: 12 }, () => fauxAssistantMessage("BOUNDARY_COMPLETE"))]);
     const fullNotice = [{ type: "text" as const, text: "a".repeat(5000) }, { type: "text" as const, text: `${"b".repeat(5000)}ARRAY_TAIL` }];
+    send("exact-boundary", "z".repeat(8192), { triggerTurn: false });
     send("oversized-array", fullNotice, { triggerTurn: true });
     await waitFor(() => boundedNotice.length > 0 && !slot.isBusy, "bounded notice delivered");
+    expect(exactBoundary).toBe("z".repeat(8192));
     expect(boundedNotice.reduce((bytes, text) => bytes + Buffer.byteLength(text), 0)).toBeLessThanOrEqual(8192);
     expect(boundedNotice.join("")).toContain(`[Full text: read ${JSON.stringify(slot.sessionFile)}`);
     expect(boundedNotice.join("")).not.toContain("ARRAY_TAIL");
@@ -338,7 +343,7 @@ it("attributes real workflow completion and supervisor delivery to their managed
         && (receipt.data as { targetEntryId?: string }).targetEntryId === entry!.id), type).toMatchObject({ data: { delivery, origin: { owner: expectedOwner } } });
       if (entry?.type === "custom_message") {
         if (type === "idle-stored" || type === "idle-triggered" || type === "busy-stored") expect(typeof entry.content, type).toBe("string");
-        else expect(entry.content, type).toEqual([{ type: "text", text: `${noticePrefix}reused array` }]);
+        else expect(entry.content, type).toEqual([{ type: "text", text: noticePrefix }, ...reused]);
         const text = typeof entry.content === "string" ? entry.content : entry.content.filter(part => part.type === "text").map(part => part.text).join("");
         expect(text).toBe(`${noticePrefix}${["idle-stored", "idle-triggered", "busy-stored"].includes(type) ? type.replace("-", " ") : "reused array"}`);
         expect(reused).toEqual([{ type: "text", text: "reused array" }]);

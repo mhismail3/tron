@@ -40,5 +40,6 @@ export type {
   Provider,
   SimpleStreamOptions,
   ThinkingLevel,
+  TextContent,
   Usage,
 } from "@earendil-works/pi-ai";

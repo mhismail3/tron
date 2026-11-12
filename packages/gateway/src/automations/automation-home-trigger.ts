@@ -47,7 +47,8 @@ export class AutomationHomeTrigger implements InputTriggerInbox {
     if (run.actionSnapshot.kind !== "sessionPrompt") throw new GatewayError("conflict", "Home trigger has no message");
     const title = `Automation · ${run.homeName}`;
     return { customType: INPUT_TRIGGER_MESSAGE, display: true,
-      content: injectedText(`${title}\n\n${run.actionSnapshot.text}`, "automation", "trigger", "task"),
+      content: injectedText(`${title}\n\n${run.actionSnapshot.text}`, "automation", "trigger", "task",
+          `schedule ${JSON.stringify({ action: "show", automationId: run.automationId })}`),
       details: { eventId: `automation:${run.runId}`, trigger: { kind: "automation", sourceId: record.id, eventId: run.runId, title: run.homeName! } } };
   }
 
