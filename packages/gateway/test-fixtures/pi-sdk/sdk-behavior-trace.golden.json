@@ -31,7 +31,7 @@
         "mcp_servers",
         "tron"
       ],
-      "promptHash": "sha256:4ef5c2f1667fdcfc7ec4b92d62253045fe5311d17e2a5f3a0c326033992b02a2"
+      "promptHash": "sha256:946bb7a1071245067b4a0619c3159ebdc82772fa1751ee323f371af3f2b0421b"
     },
     {
       "repeats": 6,
@@ -64,7 +64,7 @@
         "mcp_servers",
         "tron"
       ],
-      "promptHash": "sha256:4ef5c2f1667fdcfc7ec4b92d62253045fe5311d17e2a5f3a0c326033992b02a2"
+      "promptHash": "sha256:946bb7a1071245067b4a0619c3159ebdc82772fa1751ee323f371af3f2b0421b"
     },
     {
       "repeats": 1,

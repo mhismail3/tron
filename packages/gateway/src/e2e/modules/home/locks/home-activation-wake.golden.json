@@ -34,7 +34,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:45efc2439ae02a2b289012f0fd530f5cb0fa84694805fd7121868b9a2913c578",
+        "promptHash": "sha256:ba57be89ee2d2e46b4e47bc86a2428bf9117b33b94b3a6a8835b9151ea6d5162",
         "messages": [
           {
             "role": "user",
@@ -78,7 +78,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:45efc2439ae02a2b289012f0fd530f5cb0fa84694805fd7121868b9a2913c578",
+        "promptHash": "sha256:ba57be89ee2d2e46b4e47bc86a2428bf9117b33b94b3a6a8835b9151ea6d5162",
         "messages": [
           {
             "role": "user",
@@ -134,7 +134,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:45efc2439ae02a2b289012f0fd530f5cb0fa84694805fd7121868b9a2913c578",
+        "promptHash": "sha256:ba57be89ee2d2e46b4e47bc86a2428bf9117b33b94b3a6a8835b9151ea6d5162",
         "messages": [
           {
             "role": "user",
@@ -173,7 +173,7 @@
           "cwd",
           "tron"
         ],
-        "promptHash": "sha256:a91ab48b5e2a9a371c433f8d70d880f0c7e07d533be1d199152eceeea016f9ec",
+        "promptHash": "sha256:2419727f5b945cc2d974e35b5ecde97f864950089c6983b587115c359c2b8004",
         "messages": [
           {
             "role": "user",
@@ -1262,7 +1262,7 @@
           }
         },
         {
-          "description": "Create a direct-child Workspace project: an untrusted folder with a Git repository on main, then trusted after the exact shared native tap. Existing paths are never overwritten. Change an existing project's trust with the settings tool (permissions.projectTrust); use git and gh directly for everything else. No automatic replay after uncertain effects: inspect the filesystem, Git and trust before another action.",
+          "description": "Create a direct-child Workspace project: an untrusted folder with a Git repository on main, then trusted after the exact shared native tap. Existing paths are never overwritten. Only Home can change an existing project's trust with the settings tool (permissions.projectTrust); use git and gh directly for everything else. No automatic replay after uncertain effects: inspect the filesystem, Git and trust before another action.",
           "name": "projects",
           "parameters": {
             "additionalProperties": false,
@@ -1969,7 +1969,7 @@
           }
         },
         {
-          "description": "Create a direct-child Workspace project: an untrusted folder with a Git repository on main, then trusted after the exact shared native tap. Existing paths are never overwritten. Change an existing project's trust with the settings tool (permissions.projectTrust); use git and gh directly for everything else. No automatic replay after uncertain effects: inspect the filesystem, Git and trust before another action.",
+          "description": "Create a direct-child Workspace project: an untrusted folder with a Git repository on main, then trusted after the exact shared native tap. Existing paths are never overwritten. Only Home can change an existing project's trust with the settings tool (permissions.projectTrust); use git and gh directly for everything else. No automatic replay after uncertain effects: inspect the filesystem, Git and trust before another action.",
           "name": "projects",
           "parameters": {
             "additionalProperties": false,
