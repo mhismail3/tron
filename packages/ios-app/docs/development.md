@@ -288,7 +288,10 @@ are reader buttons. Generated navigation-title snippets are not transcript
 retention evidence and cannot satisfy the full-label query. `status`, `logs`, `stop` and `clean` act only on this worktree's fixture; run
 `clean` before deleting a worktree. DTO changes need Gateway tests and Swift decoding.
 The fixture's installation root is its isolated `HOME/.tron`; subagent state stays inside
-that HOME at `.tron/state/subagents`. Its canonical lifecycle root is `HOME/Workspace` (exact spelling).
+that HOME at `.tron/state/subagents`. The harness forwards its canonical `TRON_E2E_TRON_HOME`
+to XCTest; `RealGatewayUIFixture` requires it and owns the root used by every on-disk Gateway
+witness. The separate Pi agent directory is not a source for deriving the Gateway root.
+Its canonical lifecycle root is `HOME/Workspace` (exact spelling).
 `testProjectLifecycleApproveCreatesUntrustsAndTrusts`, `testProjectLifecycleDenialRetainsUntrustedRepository`,
 `testProjectLifecycleRefusedApprovalShowsItsReason` and `testProjectLifecycleBusyTrustUsesCanonicalReason`
 exercise the native project pages;

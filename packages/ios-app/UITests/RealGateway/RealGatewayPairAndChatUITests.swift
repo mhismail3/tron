@@ -1938,16 +1938,22 @@ struct RealGatewayUIFixture {
     let port: Int
     let code: String
     let workspace: String
+    let tronHome: URL
     var agentDirectory: String? = nil
 
     static func fromEnvironment() throws -> RealGatewayUIFixture {
         let environment = ProcessInfo.processInfo.environment
+        guard let tronHome = environment["TRON_E2E_TRON_HOME"], !tronHome.isEmpty else {
+            throw NSError(domain: "RealGatewayUIFixture", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "TRON_E2E_TRON_HOME is required from the canonical Gateway fixture."])
+        }
         guard let portText = environment["TRON_E2E_PORT"], let port = Int(portText),
               let code = environment["TRON_E2E_CODE"],
               let workspace = environment["TRON_E2E_WORKSPACE"] else {
             throw XCTSkip("Run through scripts/ios-gateway-e2e-test run-ui to provide the real Gateway fixture.")
         }
-        return RealGatewayUIFixture(port: port, code: code, workspace: workspace, agentDirectory: environment["TRON_E2E_AGENT_DIR"])
+        return RealGatewayUIFixture(port: port, code: code, workspace: workspace,
+                                    tronHome: URL(fileURLWithPath: tronHome), agentDirectory: environment["TRON_E2E_AGENT_DIR"])
     }
 
     func invitationLink(code: String? = nil) -> String {

@@ -16,8 +16,7 @@ extension RealGatewayPairAndChatUITests {
     private func homeQueueEditor(appearance: String) throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
-        let agent = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory))
-        let tron = agent.deletingLastPathComponent().appendingPathComponent("tron/state")
+        let tron = fixture.tronHome.appendingPathComponent("state")
         let homeFile = tron.appendingPathComponent("home/profile.json")
         let globalFile = tron.appendingPathComponent("settings/gateway.json")
         func queue(_ file: URL, field: String) -> [String]? {
@@ -91,7 +90,7 @@ extension RealGatewayPairAndChatUITests {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
         let agent = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory))
-        let store = agent.deletingLastPathComponent().appendingPathComponent("tron/state/settings/gateway.json")
+        let store = fixture.tronHome.appendingPathComponent("state/settings/gateway.json")
         let settingsFile = agent.appendingPathComponent("settings.json")
         var settings = try JSONSerialization.jsonObject(with: Data(contentsOf: settingsFile)) as! [String: Any]
         settings["compaction"] = ["reserveTokens": 24_576]

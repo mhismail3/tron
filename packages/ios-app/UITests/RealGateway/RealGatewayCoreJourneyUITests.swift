@@ -116,7 +116,7 @@ extension RealGatewayPairAndChatUITests {
         confirm.tap()
         XCTAssertTrue(waitUntil(timeout: 60) { !app.staticTexts["Before"].exists }, "Undo did not complete: \(app.debugDescription)")
         keepScreenshot(app, name: "2233-session-model-undone")
-        let tronHome = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory)).deletingLastPathComponent().appendingPathComponent("tron")
+        let tronHome = fixture.tronHome
         let sessionChanges = settingsHistory(tronHome, key: "model.ref[role=chat]").filter { ($0["target"] as? [String: Any])?["kind"] as? String == "session" }
         XCTAssertEqual(sessionChanges.count, 2, "one Session change and its one Undo: \(sessionChanges)")
         XCTAssertEqual(sessionChanges.last?["undoOf"] as? String, sessionChanges.first?["changeId"] as? String)
@@ -132,7 +132,7 @@ extension RealGatewayPairAndChatUITests {
     func testHomeSettingsCardDeclineAppliesNothingAndDoubleApproveAppliesOnce() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
-        let tronHome = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory)).deletingLastPathComponent().appendingPathComponent("tron")
+        let tronHome = fixture.tronHome
         func budget() -> Int? {
             let document = (try? JSONSerialization.jsonObject(with: Data(contentsOf: tronHome.appendingPathComponent("state/home/profile.json")))) as? [String: Any]
             return ((document?["budget"] as? [String: Any])?["task"] as? [String: Any])?["outputTokens"] as? Int

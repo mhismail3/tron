@@ -29,6 +29,7 @@ ENVIRONMENT_KEYS = (
     "TRON_E2E_PROXY_TOKEN",
     "TRON_E2E_SETTINGS_INVENTORY",
     "TRON_E2E_AGENT_DIR",
+    "TRON_E2E_TRON_HOME",
 )
 
 
@@ -110,9 +111,9 @@ def patch_file(path: Path, target_blueprint: str, values: dict[str, str]) -> Non
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 10:
+    if len(argv) != 11:
         print(
-            "usage: patch-ios-gateway-e2e-xctestrun.py XCTESTRUN TARGET PORT CODE WORKSPACE PI_VERSION PROXY_TOKEN SETTINGS_INVENTORY AGENT_DIR",
+            "usage: patch-ios-gateway-e2e-xctestrun.py XCTESTRUN TARGET PORT CODE WORKSPACE PI_VERSION PROXY_TOKEN SETTINGS_INVENTORY AGENT_DIR TRON_HOME",
             file=sys.stderr,
         )
         print(f"       TARGET is one of: {', '.join(sorted(TARGETS))}", file=sys.stderr)
