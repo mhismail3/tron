@@ -1185,17 +1185,22 @@ class RuntimeMigrationTests(unittest.TestCase):
                 metadata.unlink()
                 outside = user / "external.json"
                 outside.write_text("{}")
-                for unsafe in ("symlink", "fifo"):
+                for unsafe in ("symlink", "fifo", "directory", "directory-slot-file"):
+                    path = metadata.parent / "nested-subagent-runs" if unsafe == "directory-slot-file" else metadata
                     if unsafe == "symlink":
-                        metadata.symlink_to(outside)
+                        path.symlink_to(outside)
+                    elif unsafe == "fifo":
+                        os.mkfifo(path)
+                    elif unsafe == "directory":
+                        path.mkdir()
                     else:
-                        os.mkfifo(metadata)
+                        path.write_text("{}")
                     result = fixture.run("migrate", "--home", str(home), "--dry-run", env={"HOME": str(user)})
                     self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                     self.assertEqual([error["reason"] for error in json.loads(result.stdout)["errors"]],
                                      ["rewrite_symlink" if unsafe == "symlink" else "rewrite_unsafe_type"])
                     self.assertEqual(outside.read_text(), "{}")
-                    metadata.unlink()
+                    path.rmdir() if unsafe == "directory" else path.unlink()
 
     def test_offline_runtime_move_rewrites_only_owned_fields_and_carries_new_data_back(self) -> None:
         with tempfile.TemporaryDirectory(prefix="home-layout-runtime-") as temporary:
@@ -1230,14 +1235,31 @@ class RuntimeMigrationTests(unittest.TestCase):
             sdk = self.sdk("create", base, home)
             old_session = home / sdk["session"]
             _, body = old_session.read_bytes().split(b"\n", 1)
+            nested_run = home / "internal/subagents/nested-subagent-runs/parent" / sdk["runId"]
+            shutil.copytree(home / sdk["asyncDir"], nested_run)
+            results = home / "internal/subagents/async-subagent-results"
+            result_files = list(results.rglob("*.json"))
+            for path in result_files:
+                destination = results / "nested/parent" / path.relative_to(results)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(path, destination)
+            pending = results / "nested/parent/result-pending" / sdk["sessionId"] / (sdk["runId"] + ".json")
+            pending.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(results / (sdk["runId"] + ".json"), pending)
             records = {
                 "gateway/network.json": {"host": "fixture"},
                 "gateway/settings/observed.json": {"version": 1, "stores": {"trust": {"digest": hashlib.sha256(json.dumps({old_cwd: True}).encode()).hexdigest(), "values": {"permissions.projectTrust\u0000" + json.dumps({"project": old_cwd}, separators=(",", ":")): {"key": "permissions.projectTrust", "qualifiers": {"project": old_cwd}, "value": True}}, "tron": {}, "outside": {}}}},
                 "gateway/uploads/one/metadata.json": {"path": str(home / "gateway/uploads/one/file")},
                 "gateway/uploads/two/metadata.json": {"path": new_cwd + "/preexisting-new-prefix"},
-                "gateway/home/tasks/one.json": {"target": {"cwd": old_cwd}, "brief": "history quotes " + old_cwd},
+                "gateway/home/tasks/one.json": {"target": old_cwd, "brief": "history quotes " + old_cwd},
                 "agent/trust.json": {old_cwd: True},
                 "agent/missions/one.json": {"runs": [{"asyncDir": str(home / sdk["asyncDir"])}], "notes": old_cwd},
+                "agent/missions/projects/project/mission.json": {"runs": [{"asyncDir": str(home / sdk["asyncDir"])}]},
+                "agent/missions/index/mission.json": {"artifacts": [{"path": old_cwd}]},
+                "agent/missions/projects/project/mission/state.json": {"artifacts": [{"path": old_cwd}]},
+                "agent/missions/index/mission/state.json": {"artifacts": [{"path": old_cwd}]},
+                "agent/missions/events.jsonl": {"artifacts": [{"path": old_cwd}]},
+                "agent/sessions/direct.jsonl": {"type": "session", "cwd": old_cwd},
             }
             for relative, value in records.items():
                 path = home / relative
@@ -1262,6 +1284,16 @@ class RuntimeMigrationTests(unittest.TestCase):
             plan = migrate("--dry-run")
             self.assertEqual(snapshot(home.parent, contents_first=False), before)
             self.assertGreaterEqual(len(plan["rewrites"]), 8)
+            selected = {str(Path(record["file"]).relative_to(home)): record["kind"] for record in plan["rewrites"]}
+            self.assertEqual(set(selected.values()), {"session", "trust", "observed", "upload", "target", "mission", "subagent", "subagent_config", "terminal", "budget", "candidate"})
+            expected_paths = set(records) - {"gateway/network.json", "gateway/uploads/two/metadata.json"}
+            expected_paths.update(str(path.relative_to(home)) for path in (old_session, pending, home / sdk["config"]))
+            expected_paths.add("mac-terminal/sshd_config")
+            for root in (home / sdk["asyncDir"], nested_run):
+                expected_paths.update(str((root / name).relative_to(home)) for name in ("status.json", "recovery-descriptor.json", "run-fanout-budget.json", "process-terminal-candidate.json"))
+            expected_paths.update(str(path.relative_to(home)) for path in result_files)
+            expected_paths.update(str((results / "nested/parent" / path.relative_to(results)).relative_to(home)) for path in result_files)
+            self.assertEqual(set(selected), expected_paths)
             applied = migrate("--apply")
             journal = json.loads(Path(applied["journal"]).read_text())
             self.assertTrue(any(row["kind"] == "session" for row in journal["layouts"][str(home)]["rewrites"].values()))
@@ -1290,6 +1322,18 @@ class RuntimeMigrationTests(unittest.TestCase):
             self.assertEqual(mission["runs"][0]["asyncDir"], str(home / sdk["asyncDir"].replace("internal/subagents/", "state/subagents/")))
             self.assertEqual(mission["notes"], old_cwd)
             self.assertEqual(json.loads((home / "agent/trust.json").read_text()), {new_cwd: True})
+            hidden = session.parent / "artifacts" / session.name
+            hidden.parent.mkdir()
+            session.rename(hidden)
+            before_refusal = snapshot(home)
+            journal_bytes = Path(applied["journal"]).read_bytes()
+            refused = fixture.run("migrate", "--home", str(home), "--rollback", env={"HOME": str(home.parent)})
+            self.assertEqual(refused.returncode, 1, refused.stdout + refused.stderr)
+            self.assertEqual(json.loads(refused.stdout)["errors"][0]["reason"], "rewrite_selection_changed")
+            self.assertEqual(normalize_lease_parent(snapshot(home, contents_first=False)), normalize_lease_parent(before_refusal))
+            self.assertEqual(Path(applied["journal"]).read_bytes(), journal_bytes)
+            hidden.rename(session)
+            hidden.parent.rmdir()
             self.sdk("append", base, home)
             appended = session.read_bytes().split(b"\n", 1)[1][len(body):]
             (home / "state/home/workspace/new-only-copy").write_text("new workspace data")
