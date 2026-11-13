@@ -121,6 +121,38 @@ the build that stamped it). The iOS shards count as one entry there (their statu
 failed and deferred tests), because packing and lanes vary between runs. Python unittest counts exclude skipped and expected-failure
 cases; a file with no executed passes cannot hide beside a passing neighbour.
 
+## Test ledger
+
+The append-only per-test ledger is `~/.tron-maintenance/test-ledger/results.sqlite3`, outside
+all checkouts and outside Gateway state. `TRON_TEST_LEDGER` may select an external fixture
+or evidence file; a destination inside any repository or `~/.tron` is refused. SQLite transactions
+serialize concurrent appenders; reads never create a store. The ledger stores test identities and
+metrics, not test output, prompts or failure payloads; raw logs stay with their existing owners.
+
+`scripts/tron flakes [--tree HASH] [--json]` ranks tests that both passed and failed on the same
+tree, with pass/fail counts, failure rate and last seen. Always-failing tests are broken, not flaky.
+Different trees are never pooled. Dirty-tree runs retain their HEAD tree and an explicit dirty
+marker, but are excluded from flake classification because that hash cannot prove their source.
+Set `TRON_TEST_CONTENDED=1` for a known contended run: its raw outcomes and host readings remain
+recorded, but it counts as neither red nor green in flake ranking. This is evidence annotation,
+not a retry, timeout change or load-admission mechanism.
+
+Gateway Vitest, Python unittest, Node test and XCTest runners append one result per test identity,
+including failed and skipped cases. Vitest and XCTest durations come from their native reports;
+Node uses its native test-event stream while preserving TAP output; Python records unittest result
+callbacks, including subtest failures and unexpected successes. Each record contains the commit SHA,
+HEAD tree hash, duration, lane, actual host, CPU idle percentage and memory-free percentage from
+a lane-start host sample (not load average), its measurement time and completion time. The mini
+spools records outside its checkout and returns them through its existing nonce-bound transport
+to the invoking Mac's ledger, preserving the mini's readings. No result creates no invented cases.
+XCTest uses the result bundle's test tree, with completed XCTest console cases retained when a
+bundle is unavailable. Parameterized native tests use the identities supplied by their native report.
+
+Verify's Python/shell file groups collect all selected files' failures before returning; a failing
+file cannot hide the later cheap files. Direct `scripts/tron test tooling` uses the same Python
+recorder. The canonical iOS and real-Gateway journey runners and the Mac test owner record their
+native test results, so verify, batch and direct invocations share one ledger, not separate histories.
+
 ## Static checks (existing tools only)
 1. `scripts/tron ownership`, including the repository layout
 2. `scripts/tron tidy --here --landing`: no untracked file or ignored path without a named writer

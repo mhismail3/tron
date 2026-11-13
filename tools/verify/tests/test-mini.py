@@ -22,6 +22,7 @@ import json
 import os
 import shutil
 import signal
+import sqlite3
 import subprocess
 import tempfile
 import time
@@ -79,7 +80,7 @@ class MiniGatewayLane(unittest.TestCase):
         self.temporary = Path(tempfile.mkdtemp(prefix='tron-mini-test-'))
         self.addCleanup(shutil.rmtree, self.temporary, True)
         self.local, self.mini = self.temporary / 'local', self.temporary / 'mini-home'
-        for path in ('tools/verify/mini.py', 'scripts/tron-node', '.node-version', 'config/ci-toolchain.env'):
+        for path in ('tools/verify/mini.py', 'tools/verify/ledger.py', 'tools/verify/ledger-node.mjs', 'scripts/tron-node', '.node-version', 'config/ci-toolchain.env'):
             (self.local / path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / path, self.local / path)
         self.write('tools/verify/gateway.py', LANE)
@@ -102,7 +103,8 @@ class MiniGatewayLane(unittest.TestCase):
         version = (ROOT / '.node-version').read_text().strip()
         (self.mini / '.nvm/versions/node').mkdir(parents=True)
         (self.mini / f'.nvm/versions/node/v{version}').symlink_to(node.parent.parent)
-        self.env = {**os.environ, 'PATH': f'{bin_dir}:{os.environ["PATH"]}', 'MINI_HOME': str(self.mini)}
+        self.env = {**os.environ, 'PATH': f'{bin_dir}:{os.environ["PATH"]}', 'MINI_HOME': str(self.mini),
+                    'TRON_TEST_LEDGER': str(self.temporary / 'local-ledger.sqlite3')}
         self.env.pop('TRON_UPDATE_LOCKS', None)
 
     def write(self, path: str, text: str) -> None:
@@ -234,6 +236,15 @@ class MiniGatewayLane(unittest.TestCase):
         failed = self.lane('node', 'scripts/fail.test.mjs')
         self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
         self.assertRegex(failed.stdout, r'(?m)^[#ℹ] fail 1$')
+        with sqlite3.connect(self.env['TRON_TEST_LEDGER']) as connection:
+            rows = connection.execute('SELECT test_id, commit_sha, tree_hash, outcome, lane, host, cpu_idle_percent, memory_free_percent FROM results').fetchall()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual({row[3] for row in rows}, {'passed', 'failed'})
+        self.assertEqual({row[1] for row in rows}, {sha})
+        self.assertEqual({row[2] for row in rows}, {self.git('rev-parse', 'HEAD^{tree}')})
+        self.assertTrue(all(row[0].startswith('packages/gateway/scripts/') and row[4] == 'node' and row[5] for row in rows))
+        self.assertTrue(all(0 <= row[6] <= 100 and 0 <= row[7] <= 100 for row in rows))
+        self.assertEqual(list((self.mini / 'tron-ci/results').iterdir()), [])
 
     def pool(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(['python3', str(self.local / 'tools/verify/mini.py'), 'pool', *args], cwd=self.local / 'packages/gateway',

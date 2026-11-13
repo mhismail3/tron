@@ -16,6 +16,11 @@ GATEWAY = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(GATEWAY)
 
 
+def commit_fixture(root: Path) -> None:
+    for arguments in (['init', '-q'], ['add', '-A'], ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture']):
+        subprocess.run(['git', '-C', str(root), *arguments], check=True, capture_output=True)
+
+
 class GatewayTestHomeIsolation(unittest.TestCase):
     def run_gateway(self, root: Path, arguments: list[str]) -> subprocess.CompletedProcess:
         caller_home = root / "caller-home"
@@ -79,7 +84,7 @@ class GatewayTestScratchCleanup(unittest.TestCase):
             base = Path(temporary).resolve()
             verify = base / "tools/verify"
             verify.mkdir(parents=True)
-            for name in ("gateway.py", "vitest_configs.py"):
+            for name in ("gateway.py", "vitest_configs.py", "ledger.py"):
                 (verify / name).write_text((ROOT / "tools/verify" / name).read_text())
             lock = (ROOT / "tools/verify/host_lock.py").read_text()
             self.assertIn("'/tmp/tron-full-gateway.lock'", lock)
@@ -92,6 +97,7 @@ class GatewayTestScratchCleanup(unittest.TestCase):
             vitest.write_text(f'#!/bin/bash\necho "$HOME" > {base}/home\nsleep 60 & wait\n')
             for script in (node, vitest):
                 script.chmod(0o755)
+            commit_fixture(base)
             env = {key: value for key, value in os.environ.items() if key != GATEWAY.HELD_BY_CALLER}
             runner = subprocess.Popen([sys.executable, str(verify / "gateway.py"), "x.test.ts"], env=env,
                                       stderr=subprocess.DEVNULL, start_new_session=True)
@@ -136,6 +142,7 @@ class GatewayTestConfigRouting(unittest.TestCase):
             for path in ("src/a/nested.e2e.test.ts", "src/a/plain.test.ts", "src/b/terminal.e2e.test.ts"):
                 (gateway / path).parent.mkdir(parents=True, exist_ok=True)
                 (gateway / path).write_text("")
+            commit_fixture(base)
             nested, terminal = ["--config", "vitest.nested.config.ts"], ["--config", "vitest.mac-terminal.config.ts"]
             for words, config in ((["src/a/nested.e2e.test.ts"], nested),
                                   (["packages/gateway/src/b/terminal.e2e.test.ts", "-t", "x"], terminal),
@@ -145,7 +152,10 @@ class GatewayTestConfigRouting(unittest.TestCase):
                 with self.subTest(words=words):
                     result, argv = self.run_files(base, *words)
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                    self.assertEqual(argv, " ".join(["run", *config, *words]) + "\n")
+                    actual = argv.strip().split()
+                    report = next(word for word in actual if word.startswith('--outputFile.json='))
+                    self.assertTrue(report.startswith('--outputFile.json=/tmp/tron-gateway-tests-'))
+                    self.assertEqual(actual, ['run', *config, *words, '--reporter=json', report, '--reporter=default'])
             for words in (["src/a/nested.e2e.test.ts", "src/a/plain.test.ts"], ["src/a/"], ["SRC/A/"]):
                 with self.subTest(words=words):
                     result, argv = self.run_files(base, *words, "-t", "x")

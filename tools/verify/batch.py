@@ -21,6 +21,7 @@ from host_lock import HELD_BY_CALLER
 import mini
 import timing
 import verify
+import ledger
 
 ROOT = verify.ROOT
 MINI_JOB_WAIT_SECONDS = 45 * 60
@@ -236,6 +237,7 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
     if CANCELLED.is_set():
         return {**lane, 'exit': None, 'status': 'uncovered', 'seconds': round(time.monotonic() - start, 3),
                 'reason': 'batch stopped before this lane started; not run'}
+    capture = ledger.Capture('relay', root) if lane.get('testRoot') == 'packages/push-relay' else None
     with log.open('w') as output:
         process = subprocess.Popen(command, cwd=root / lane.get('cwd', '.'), shell=isinstance(command, str),
                                    stdout=output, stderr=subprocess.STDOUT, env=env, start_new_session=True)
@@ -254,6 +256,8 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
         finally:
             with RUNNING_LOCK:
                 RUNNING.discard(process.pid)
+    if capture is not None and vitest is not None:
+        capture.vitest(vitest)
     result = {**lane, 'exit': code, 'seconds': round(time.monotonic() - start, 3), 'startedAt': started_at, 'endedAt': time.time(),
               'log': str(log), 'executedCommand': command}
     if (isinstance(command, list) and any(word.endswith('tools/verify/mini.py') for word in command)

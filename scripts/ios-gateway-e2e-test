@@ -3,6 +3,11 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+if [[ -z "${TRON_TEST_LEDGER_WRAPPED:-}" ]]; then
+  case "${1:-}" in
+    run|run-lan|run-ui|run-ui-lane|iterate|all|check) exec python3 "$repo_root/tools/verify/ledger.py" exec swift "$repo_root/scripts/ios-gateway-e2e-test" "$@" ;;
+  esac
+fi
 gateway_dir="$repo_root/packages/gateway"
 ios_dir="$repo_root/packages/ios-app"
 # shellcheck disable=SC1091

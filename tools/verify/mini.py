@@ -33,6 +33,7 @@ import platform
 import shlex
 import shutil
 import signal
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -174,7 +175,7 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
     nonce = uuid.uuid4().hex
     wait = os.environ.get('TRON_MINI_JOB_WAIT_SECONDS')
     job = json.dumps({'sha': sha, 'lane': lane, 'args': mapped, 'outputs': len(paths), 'nonce': nonce, 'localRoot': str(ROOT),
-                      'lockWaitSeconds': float(wait) if wait else None,
+                      'lockWaitSeconds': float(wait) if wait else None, 'contended': os.environ.get('TRON_TEST_CONTENDED', '0'),
                       'requester': {'host': platform.node(), 'worktree': str(ROOT), 'pid': os.getpid()}})
     source = Path(__file__).read_text()
     remote = shlex.join(['/usr/bin/python3', '-c', source, 'remote', job])
@@ -200,6 +201,9 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
                     temporary.write_bytes(base64.b64decode(payload))
                     os.replace(temporary, target)
                     received.add(int(index))
+                elif kind == 'ledger':
+                    import ledger
+                    ledger.append_rows(json.loads(base64.b64decode(value)))
                 elif kind == 'refused':
                     refused = json.loads(value)
                 elif kind == 'exit':
@@ -265,6 +269,11 @@ def remote_main(job: dict) -> int:
     threading.Thread(target=watch, daemon=True).start()
 
     def finish(code: int) -> int:
+        ledger_path = results / 'ledger.sqlite3'
+        if ledger_path.is_file():
+            with sqlite3.connect(ledger_path.as_uri() + '?mode=ro', uri=True) as connection:
+                rows = [list(row) for row in connection.execute('SELECT * FROM results')]
+            out.write(b'\n' + frame(nonce) + b'ledger ' + base64.b64encode(json.dumps(rows).encode()) + b'\n')
         out.write(b'\n' + frame(nonce) + f'exit {code}\n'.encode())
         out.flush()
         return code
@@ -380,8 +389,13 @@ def remote_main(job: dict) -> int:
             if cancelled.is_set():
                 return refuse('stopped before the lane started')
 
+            results.mkdir(parents=True, exist_ok=True)
+            clean['TRON_TEST_LEDGER'] = str(results / 'ledger.sqlite3')
+            clean['TRON_TEST_CONTENDED'] = job.get('contended', '0')
             if job['lane'] == 'node':
-                return finish(stream(str(checkout / 'scripts/tron-node'), 'exec', 'node', '--test', '--test-concurrency=1', *job['args'],
+                return finish(stream('/usr/bin/python3', str(checkout / 'tools/verify/ledger.py'), 'exec', 'node',
+                                     str(checkout / 'scripts/tron-node'), 'exec', 'node', '--test', '--test-concurrency=1',
+                                     '--test-reporter=' + str(checkout / 'tools/verify/ledger-node.mjs'), *job['args'],
                                      cwd=checkout / 'packages/gateway'))
             if job['lane'] == 'python':
                 doctor = (run('/bin/bash', str(checkout / 'tools/proof/bootstrap.sh'), 'doctor', cwd=checkout)
@@ -408,6 +422,7 @@ def remote_main(job: dict) -> int:
             finally:
                 shutil.rmtree(results, ignore_errors=True)
     finally:
+        shutil.rmtree(results, ignore_errors=True)
         run('git', '-C', str(repository), 'update-ref', '-d', INCOMING, sha)
 
 

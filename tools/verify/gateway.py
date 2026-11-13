@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from host_lock import HELD_BY_CALLER, wait_for_full_gateway_lock  # noqa: E402  (the one host lock owner)
 import vitest_configs  # noqa: E402  (the one reader of the listing Vitest configs)
+import ledger
 
 
 def hold_full_gateway_lock():
@@ -221,12 +222,20 @@ def main() -> int:
         path = [str(provision_browser_engine(copy)), *filter(None, os.environ.get('PATH', '').split(os.pathsep))]
         fork = {BROWSER_FORK_COPY: str(copy), 'PATH': os.pathsep.join(path)}
     lock = hold_full_gateway_lock()
+    capture = ledger.Capture('gateway-nested' if 'vitest.nested.config.ts' in arguments else 'gateway')
     signal.signal(signal.SIGTERM, lambda signum, _frame: sys.exit(128 + signum))
     with tempfile.TemporaryDirectory(prefix="tron-gateway-tests-", dir="/tmp") as temporary:
         root = Path(temporary)
         home, scratch = root / "home", root / "tmp"
         home.mkdir(); scratch.mkdir()
         environment = {**os.environ, **fork, "HOME": str(home), "TMPDIR": str(scratch), "TRON_NODE_BIN": node}
+        report = next((Path(word.split('=', 1)[1]) for word in arguments if word.startswith('--outputFile.json=')), None)
+        if report is None:
+            report = root / 'vitest.json'
+            arguments = [*arguments, '--reporter=json', f'--outputFile.json={report}']
+            if not any(word.startswith('--reporter') for word in arguments[:-2]):
+                arguments.append('--reporter=default')
+        report = report if report.is_absolute() else ROOT / 'packages/gateway' / report
         with subprocess.Popen([str(ROOT / "scripts/tron-node"), "exec", str(vitest), "run", *arguments],
                               cwd=ROOT / "packages/gateway", env=environment) as child:
             def forward(signum, _frame):
@@ -238,8 +247,11 @@ def main() -> int:
             finally:
                 for sig, handler in previous.items():
                     signal.signal(sig, handler)
-                if lock:
-                    lock.close()
+                try:
+                    capture.vitest(report)
+                finally:
+                    if lock:
+                        lock.close()
 
 
 if __name__ == "__main__":
