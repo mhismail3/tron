@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { setHomeMemoryModels } from "../../../../test-support/settings-dependencies.js";
 import type { AddressInfo } from "node:net";
@@ -10,6 +11,7 @@ import type { RuntimeSlot } from "../../../kernel/run/runtime-slot.js";
 import { disposeFixtures, fixture, reportCall } from "../../../../test-support/home-task-fixture.js";
 import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
 import { WakeInboxOwner } from "../../../modules/home/home-wake-inbox.js";
+import type { HomeTaskDispatcher } from "../../../modules/home/home-task-dispatcher.js";
 
 const PROVIDER = "local-anthropic";
 const MODEL_ID = "home-wire";
@@ -76,6 +78,7 @@ function gate() {
   }) };
 }
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const argsOf = (pid: number) => { try { return execFileSync("ps", ["-o", "args=", "-p", String(pid)], { encoding: "utf8" }).trim(); } catch { return ""; } };
 
 async function promptHomeControl(home: RuntimeSlot, text: string, afterIdle?: () => Promise<void>) {
   await waitFor(() => !home.isBusy && home.snapshot().configurationBlocker === null, "Home idle");
@@ -206,7 +209,9 @@ describe("Home's task tool on the wire (#961)", () => {
       return { isError: result.is_error === true, text, json: () => JSON.parse(text) as Record<string, any> };
     };
 
-    await homeCalls("task", { action: "list" });
+    expect((await homeCalls("task", { action: "list" })).json().host).toBe("unavailable");
+    const sweep = (homeOwnerOf(f.registry) as unknown as { tasks: HomeTaskDispatcher }).tasks.commands;
+    await sweep.dispose();
     const definition = wire.requests[0]!.tools!.find(tool => tool.name === "task")!;
     const schema = definition.input_schema as { type: string; properties: Record<string, { description?: string; enum?: string[] }>; required: string[] };
     expect(schema.type).toBe("object");
@@ -224,6 +229,7 @@ describe("Home's task tool on the wire (#961)", () => {
     evidence.push({ definition, settingsDefinition });
 
     const pidFile = join(f.cwd, "stuck.pid");
+    const simulatorPidFile = join(f.cwd, "simulator.pid");
     const firstTurn = gate(), resumedTurn = gate();
     const seen: string[] = [];
     let turns = 0;
@@ -235,13 +241,14 @@ describe("Home's task tool on the wire (#961)", () => {
       if (lastMessage?.role === "toolResult") return fauxAssistantMessage("command finished");
       if (text.includes("STEER-TWO")) return fauxAssistantMessage([reportCall("tool-journey", "Resumed and steered")], { stopReason: "toolUse" });
       if (text.includes("STEER-ONE")) {
-        return fauxAssistantMessage([fauxToolCall("bash", { command: `bash -c 'echo $$ > ${pidFile}; trap "" TERM; exec sleep 600'` }, { id: "stuck" })], { stopReason: "toolUse" });
+        return fauxAssistantMessage([fauxToolCall("bash", { command: `bash -c 'ln -s /bin/sleep "$TMPDIR/launchd_sim"; "$TMPDIR/launchd_sim" 600 & echo $! > ${simulatorPidFile}; echo $$ > ${pidFile}; trap "" TERM; exec -a /usr/bin/xcodebuild sleep 600'` }, { id: "stuck" })], { stopReason: "toolUse" });
       }
       if (text.includes("Continue Home task")) { await resumedTurn.wait(options?.signal); return fauxAssistantMessage("resumed, waiting"); }
       await firstTurn.wait(options?.signal);
       return fauxAssistantMessage("working");
     }));
 
+    await sweep.sweep();
     const delegated = await homeCalls("delegate", { taskId: "wire-worker", title: "Wire worker", intent: "Finite work", target: f.cwd,
       model: { provider: f.model.provider, id: f.model.id }, reason: "The scripted worker model" });
     expect(delegated.isError, delegated.text).toBe(false);
@@ -251,6 +258,9 @@ describe("Home's task tool on the wire (#961)", () => {
     expect(row).toMatchObject({ state: "running", title: "Wire worker", actions: ["status", "steer", "interrupt", "stop", "rename"] });
     expect(row.sessionId).toEqual(expect.any(String));
     expect(row.operationId).toMatch(/^task-/u);
+    expect(listed.json().host.heavy).toEqual({ "wire-worker": "unavailable" });
+    await sweep.sweep();
+    expect((await homeCalls("task", { action: "list" })).json().host.heavy).toEqual({ "wire-worker": [] });
     const workerSession = row.sessionId as string;
 
     const worker = await f.registry.acquire(workerSession);
@@ -288,6 +298,17 @@ describe("Home's task tool on the wire (#961)", () => {
     firstTurn.open();
     await waitFor(async () => { try { return alive(Number(await readFile(pidFile, "utf8"))); } catch { return false; } }, "the stuck command running");
     const stuckPid = Number(await readFile(pidFile, "utf8"));
+    const simulatorPid = Number(await readFile(simulatorPidFile, "utf8"));
+    await waitFor(() => argsOf(stuckPid).startsWith("/usr/bin/xcodebuild ") && argsOf(simulatorPid).endsWith("/launchd_sim 600"), "the stuck command's heavy process and simulator stand-in");
+    await sweep.sweep();
+    const reading = (await homeCalls("task", { action: "status" })).json().host;
+    expect(reading).toEqual({ sampledAt: expect.any(String), cpuBusyPercent: expect.any(Number), memoryFreePercent: expect.any(Number),
+      simulatorsBooted: expect.any(Number), heavy: { "wire-worker": ["xcodebuild"] } });
+    expect(Date.parse(reading.sampledAt)).toBeGreaterThan(Date.now() - 60_000);
+    for (const percent of [reading.cpuBusyPercent, reading.memoryFreePercent]) expect(percent >= 0 && percent <= 100, String(percent)).toBe(true);
+    expect(reading.simulatorsBooted).toBeGreaterThanOrEqual(1);
+    expect((await homeCalls("task", { action: "status", taskId: "wire-worker" })).json().host).toEqual(reading);
+    evidence.push({ host: reading });
     expect(seen.some(text => text.includes("STEER-ONE"))).toBe(true);
     expect((await homeOwnerOf(f.registry).taskStatus("wire-worker")).lifecycle).toBe("active");
 
@@ -297,7 +318,9 @@ describe("Home's task tool on the wire (#961)", () => {
     await waitFor(async () => (await homeOwnerOf(f.registry).taskStatus("wire-worker")).lifecycle === "terminal", "the stopped task settling");
     const stopMs = Date.now() - stopStarted;
     expect((await homeOwnerOf(f.registry).taskStatus("wire-worker")).terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "task-stop" });
-    await waitFor(() => !alive(stuckPid), "the stuck command's process to end");
+    await waitFor(() => !alive(stuckPid) && !alive(simulatorPid), "the stuck command's processes to end");
+    await sweep.sweep();
+    expect((await homeCalls("task", { action: "list" })).json().host.heavy).toEqual({});
     expect(stopMs).toBeLessThan(30_000);
     evidence.push({ stuckPid, stopMs });
 

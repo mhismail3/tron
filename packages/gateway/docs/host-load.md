@@ -39,9 +39,9 @@ a recorded process group and an inherited anchor descriptor (fd 19). Settling th
 (report, Stop, deadline or failure) unbinds the session and reaps everything the scope
 owns, including background children re-parented to launchd and `setsid` children that
 kept the anchor, then removes its `TMPDIR`. `TaskCommandSweep` runs every 60 s (one `ps`,
-one `lsof` per scope): it reaps scopes whose task settled without a completed reap (a
-refused reap or a restart) and logs `host.load.non-task` when busy CPU ≥ 90 % comes mostly
-from processes outside task scopes. It refuses rather than guess: a task this store does not
+one `lsof` per scope, one `ps` of running tasks' process arguments, one `sysctl`): it reaps scopes whose task settled without a completed reap (a
+refused reap or a restart), logs `host.load.non-task` when busy CPU ≥ 90 % comes mostly
+from processes outside task scopes, and records [Home's host reading](#homes-host-reading). It refuses rather than guess: a task this store does not
 record for that worker, an unreadable process table or a survivor leaves the scope on disk.
 Detaching on purpose means `setsid` plus closing fd 19, as `scripts/tron dev start` does
 for the shared Debug Gateway. Files written outside `$TMPDIR` are not reaped (macOS
@@ -89,3 +89,32 @@ The Home task integration test injects monotonic sample time, kernel ticks and
 idle event-loop utilisation before constructing the real sampler. It advances
 sampling windows explicitly, then observes actual task completion and persisted
 `host.pressure` records; shared-host load and timer delays are not its oracle.
+
+## Home's host reading
+
+Home's `task` tool adds `host` to `list` (and `status` without a task) and to `status {taskId}`,
+so Home sees the Mac on every wake, including wakes where its shell is refused:
+
+```json
+{"sampledAt": "2026-11-13T08:28:31.301Z", "cpuBusyPercent": 20, "memoryFreePercent": 77,
+ "simulatorsBooted": 3, "heavy": {"settings-slice": ["xcodebuild"], "docs-pass": []}}
+```
+
+- It is the last `TaskCommandSweep` record, at most about 60 s old (`sampledAt`); the tool
+  call itself probes nothing. Before the first sweep after a start it is `"unavailable"`.
+- `cpuBusyPercent`: busy share of all CPUs over the window since the previous sweep (the
+  tick delta `HostPressure` uses).
+- `memoryFreePercent`: `kern.memorystatus_level`, the number `memory_pressure` prints
+  (`foundation/host-memory.ts`); not `os.freemem`, which counts only free pages.
+- `simulatorsBooted`: `launchd_sim` processes in the sweep's process table, one per booted
+  simulator, whoever booted it.
+- `heavy`: each task Home has running now, mapped to the heavy kinds its command scope holds
+  (`xcodebuild`, `xctest`, `simulator` for `simctl`/Simulator.app, `vitest`, `verify` for
+  `tools/verify/verify.py`), named from each owned process's `ps` arguments, skipping
+  launchers (`node`, `python`, shells, `env`, `xcrun`) and their flags. `[]` means none. A
+  simulator's own processes run under launchd, outside every scope: they count in
+  `simulatorsBooted`, never in a task's `heavy`.
+- A value the sweep could not read is `"unavailable"`, never 0: an unmeasurable CPU window,
+  no memory probe, an unreadable process table, a scope whose walk failed, or a task that
+  started after the last sweep.
+- It carries no level or threshold and decides nothing; Home reads it to plan.
