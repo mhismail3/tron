@@ -97,6 +97,12 @@ if table.exists():
 }
 
 
+def copy_ledger(checkout: Path) -> None:
+    target = checkout / 'tools/verify/ledger.py'
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ROOT / 'tools/verify/ledger.py', target)
+
+
 def host_slot_count() -> int:
     """The cap the lease entry point itself enforces, read from its one constant."""
     specification = importlib.util.spec_from_file_location("ios_test_lock", LOCK)
@@ -115,6 +121,7 @@ def device_process(udid: str, elapsed: str = "00:05") -> str:
 
 
 CONTAINMENT_VARIABLES = (
+    "TRON_TEST_LEDGER",
     "HOME",
     "TRON_IOS_TEST_STATE_DIR",
     "TRON_IOS_TEST_DISCOVERY_ROOT",
@@ -304,6 +311,7 @@ class ContainedFixture:
         environment = os.environ.copy()
         environment.update({
             "HOME": str(home),
+            "TRON_TEST_LEDGER": str(home / '.tron-maintenance/test-ledger/results.sqlite3'),
             "TRON_IOS_TEST_STATE_DIR": str(home / ".tron/internal/ios-test"),
             "TRON_IOS_TEST_RESULTS_DIR": str(home / "Library/Developer/Tron/ios/test-runs"),
             "TRON_IOS_SIMULATOR_STATE_DIR": str(home / ".tron/internal/run"),
@@ -1067,6 +1075,7 @@ shutil.copytree(source, clone)
         checkout = self.root.resolve() / "checkout"
         ignore = shutil.ignore_patterns("__pycache__")
         shutil.copytree(ROOT / "scripts", checkout / "scripts", ignore=ignore)
+        copy_ledger(checkout)
         shutil.copytree(ROOT / "config", checkout / "config", ignore=ignore)
         (checkout / "tools/work").mkdir(parents=True)
         shutil.copy2(ROOT / ".node-version", checkout / ".node-version")
@@ -4127,6 +4136,7 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         other = self.root / "other-worktree"
         ignore = shutil.ignore_patterns("__pycache__")
         shutil.copytree(ROOT / "scripts", other / "scripts", ignore=ignore)
+        copy_ledger(other)
         shutil.copytree(ROOT / "config", other / "config", ignore=ignore)
         (other / "tools/work").mkdir(parents=True)
         shutil.copy2(ROOT / ".node-version", other / ".node-version")
@@ -4143,6 +4153,7 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         worktree = self.root / ("long-" + "w" * 120) / ("tree-" + "x" * 120)
         ignore = shutil.ignore_patterns("__pycache__")
         shutil.copytree(ROOT / "scripts", worktree / "scripts", ignore=ignore)
+        copy_ledger(worktree)
         shutil.copytree(ROOT / "config", worktree / "config", ignore=ignore)
         shutil.copy2(ROOT / ".node-version", worktree / ".node-version")
         (worktree / "packages/mac-app/scripts").mkdir(parents=True)
@@ -4896,6 +4907,7 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         worktree = self.root / "clean-worktree"
         ignore = shutil.ignore_patterns("__pycache__")
         shutil.copytree(ROOT / "scripts", worktree / "scripts", ignore=ignore)
+        copy_ledger(worktree)
         shutil.copytree(ROOT / "config", worktree / "config", ignore=ignore)
         gateway = worktree / "packages/gateway"
         gateway.mkdir(parents=True)
@@ -4911,7 +4923,7 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
 
         subprocess.run(["git", "init", "--quiet"], cwd=worktree, env=self.environment, check=True)
         subprocess.run(
-            ["git", "add", ".gitignore", ".node-version", "scripts", "config", "packages/gateway"],
+            ["git", "add", ".gitignore", ".node-version", "scripts", "config", "packages/gateway", "tools/verify/ledger.py"],
             cwd=worktree, env=self.environment, check=True,
         )
         subprocess.run([
@@ -5711,6 +5723,7 @@ class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):
         ignore = shutil.ignore_patterns("__pycache__")
         for relative in ("scripts", "config"):
             shutil.copytree(ROOT / relative, self.primary / relative, ignore=ignore)
+        copy_ledger(self.primary)
         shutil.copy2(ROOT / ".node-version", self.primary / ".node-version")
         (self.primary / "tools/work").mkdir(parents=True)
         self.git(self.primary, "init", "-q")
