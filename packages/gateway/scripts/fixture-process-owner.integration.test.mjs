@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -58,6 +58,54 @@ for (const exit of ["normal", "failure", "signal"]) test(`joins a detached grand
     for (const pid of [runnerPid, writerPid].filter(Boolean)) {
       if (exists(pid)) { process.kill(-pid, "SIGKILL"); await waitFor(() => !exists(pid)); }
     }
+    await rm(fixture, { recursive: true });
+  }
+});
+
+test("joins a direct child whose exit callback is queued behind a stalled process-table scan at the deadline", { timeout: 15_000 }, async () => {
+  const fixture = await mkdtemp(join(tmpdir(), "tron-fixture-stalled-scan-"));
+  const bin = join(fixture, "bin");
+  await mkdir(bin);
+  const armFile = join(fixture, "stall-armed");
+  const failureFile = join(fixture, "process-owner-failure.jsonl");
+  await writeFile(join(bin, "ps"), `#!/bin/sh
+if [ -n "$TRON_TEST_STALL_ARM" ] && [ -f "$TRON_TEST_STALL_ARM" ] && mv "$TRON_TEST_STALL_ARM" "$TRON_TEST_STALL_ARM.taken" 2>/dev/null; then
+  pid=$(cat "$TRON_TEST_STALL_ARM.taken")
+  while :; do
+    state=$(/bin/ps -o stat= -p "$pid" | tr -d ' ')
+    case "$state" in ""|Z*) break ;; esac
+    sleep 0.01
+  done
+  sleep 5.2
+fi
+exec /bin/ps "$@"
+`);
+  await chmod(join(bin, "ps"), 0o755);
+  const host = spawn(process.execPath, ["--import", preload, "--input-type=module", "-e", `
+    import { spawn } from 'node:child_process';
+    import { writeFileSync, existsSync } from 'node:fs';
+    import assert from 'node:assert/strict';
+    import { disposeFixtureProcesses } from ${JSON.stringify(new URL(`file://${preload}`).href)};
+    const child = spawn('sleep', ['100'], { stdio: 'ignore' });
+    const nativeKill = process.kill.bind(process);
+    process.kill = (target, value) => {
+      const result = nativeKill(target, value);
+      if (target === child.pid && value === 'SIGTERM') writeFileSync(${JSON.stringify(armFile)}, String(child.pid));
+      return result;
+    };
+    await disposeFixtureProcesses();
+    assert.equal(child.signalCode, 'SIGTERM', 'direct child exit delivered before disposal resolves');
+    assert.equal(existsSync(${JSON.stringify(armFile + ".taken")}), true, 'process-table scan stall was exercised');
+  `], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TRON_TEST_PROCESS_OWNER: fixture, TRON_TEST_PROCESS_OWNER_FAILURE: failureFile, TRON_TEST_STALL_ARM: armFile }, stdio: ["ignore", "ignore", "pipe"] });
+  let stderr = "";
+  host.stderr.on("data", chunk => { stderr += chunk; });
+  const closed = once(host, "close");
+  try {
+    const [code] = await closed;
+    assert.equal(code, 0, await diagnostics(failureFile, stderr));
+  } finally {
+    if (exists(host.pid)) host.kill("SIGKILL");
+    await closed;
     await rm(fixture, { recursive: true });
   }
 });

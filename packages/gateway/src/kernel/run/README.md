@@ -127,6 +127,14 @@ actual K3 host; native frames do not select product modules or keep another list
   SDK execution, automatic adoption and exact cancellation/settlement lifetime.
 - `prompt-admission.ts` and `prompt-input.ts`: serialized ordinary admission,
   exact SDK disposition, resource/intent preparation and opaque caller fences.
+  Provenance-rendered owned inputs carry `originalText` for literal-command recognition;
+  unrendered inputs use their submitted text. Automation, Home briefs, worker steering,
+  Interrupt text and settings notices supply that original before enveloping. It is
+  admission input, not display readback or an authority grant. Scheduled extension
+  commands remain refused before prompt effects or retained operation ownership.
+  Home briefs retain their earlier binding order: `HOME_TASK_MARKER` is written before
+  command refusal and remains as task evidence; no user message or SDK prompt is admitted.
+  That binding marker is not an automation invocation or retained operation.
 - `prompt-attempt.ts`: each SDK prompt/command promise, admission finalization and
   no-agent/command settlement, preserving live successor ownership across receipt I/O.
 - `request-pipeline.ts`: per-runtime request settings scope and provider-option
@@ -232,7 +240,10 @@ live project's `.pi`, SDK-selected context files (including new ancestor files),
 and resolved external resource paths and symlink targets are watched. Only `.pi`
 and enabled resource directories use recursive watches; context files use exact-name
 parent watches. Discovery never broadens an ancestor or project root into a recursive
-whole-tree watch. Events settle for 150 ms; busy slots wait for their next idle edge.
+whole-tree watch. Events settle for 150 ms; busy slots wait for their next idle edge. The
+slot's work-settle observer is that edge: when the last session-bound work settles
+(including an accepted settings mutation's token) and nothing else runs, a pending reload
+redrives at once, so a reload refused as busy is never stranded.
 
 The SDK package resolver runs read-only with missing sources explicitly skipped;
 watching never installs a package. It supplies the same enabled resource paths as
@@ -279,9 +290,12 @@ Compaction diagnostics remain with the
 | Project-trust error details `failure` / `rollbackFailure` | Inspect both on a failed-compensation error. `Project trust is being reconfigured` from the reload itself indicates a public-read fence was re-entered by its transaction owner; the project-lifecycle successful-compensation case distinguishes this from an actual resource-loader failure. |
 | `terminal-receipt-persistence-failed` | A completion ownership write failed. For a terminal Home task whose socket snapshot still says `running` without an operation, compare its canonical replies and task marker: a root task marker must not own an individual reply completion. `home-task-continuity.e2e.test.ts` reproduces the conflicting-stamp ordering and proves same-session resume. |
 
-`session.resources-reload` records `completed`, `unchanged`, `failed` or
-`watch-failed` with an optional session ID, never resource paths or content. Failures
-warn; completed/skipped comparisons are informational.
+`session.resources-reload` records `completed`, `unchanged`, `deferred`, `failed` or
+`watch-failed` with an optional session ID, never resource paths or content. `deferred`
+means accepted work prevented reload; settling the last session-bound work must lead
+to `completed` without another resource write. The RPC-settlement case in
+`resource-freshness.e2e.test.ts` proves that edge. Failures warn; other outcomes are
+informational.
 
 ## Verify
 

@@ -2,7 +2,7 @@ import type { createAgentSessionServices, ModelRuntime } from "../pi/coding-agen
 import type { Model } from "../pi/ai.js";
 
 type ProfileResourceOptions = Pick<NonNullable<NonNullable<Parameters<typeof createAgentSessionServices>[0]>["resourceLoaderOptions"]>,
-  "noExtensions" | "noContextFiles" | "skillsOverride" | "systemPromptOverride" | "appendSystemPromptOverride">;
+  "noExtensions" | "noContextFiles" | "agentsFilesOverride" | "skillsOverride" | "systemPromptOverride" | "appendSystemPromptOverride">;
 export interface ProfileModelRuntime { runtime: ModelRuntime; ownership: "owned" | "borrowed" }
 
 interface ProfileRecipe {

@@ -396,7 +396,9 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     };
     this.phase = interrupted ? "interrupted" : "idle";
     this.unregisterConfigurationWork = dependencies.workRegistry.observeSessions((sessionId) => {
-      if (this.published && !this.disposed && sessionId === this.id) this.publishConfiguration();
+      if (!this.published || this.disposed || sessionId !== this.id) return;
+      this.publishConfiguration();
+      if (!this.isRunningWork()) this.hooks.idle?.(this);
     });
     this.ui = this.createSemanticBroker();
     this.extensionHost = new RemotePiExtensionHost(this.ui);
@@ -738,7 +740,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     try {
       const control = { taskId, operationId: worker.identity.operationId };
       const { operationId } = await this.prompt(injectedText(text, "gateway", "settings", "none"), [], "steer", undefined, undefined, {
-        operationId: randomUUID(), taskFence: control,
+        operationId: randomUUID(), originalText: text, taskFence: control,
         origin: { kind: "gateway", ownerId: taskId, title: "Settings changed", confidence: "boundary" }, onTerminal: () => {},
       });
       return { status: "queued", taskId, operationId, appliesFrom: "next-request" };
