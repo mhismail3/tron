@@ -1167,6 +1167,28 @@ class IosLaneTests(VerifyCase):
         self.assertIn("testUnowned", refused.stderr)
         self.assertEqual(calls.read_text(), before)
 
+    def test_cheap_red_collects_failures_before_any_simulator_starts(self) -> None:
+        r = self.repo
+        calls = self.ios_fixture()
+        r.write("mods/alpha/alpha.py", "VALUE = 'changed' \n")
+        r.write("mods/alpha/test-alpha.py", FAILING)
+        r.write("packages/ios-app/Sources/UI/Chat/ChatView.swift", "struct ChatView { let value = 1 }\n")
+        r.commit("cheap reds beside selected simulator coverage")
+        planned = r.verify("--changed", "--plan")
+        self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
+        plan = json.loads(planned.stdout[planned.stdout.index("{"):])
+        result = r.verify("--changed")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        report = r.report()
+        self.assertEqual(report["selection"], plan["selection"])
+        self.assertEqual(len(report["selection"]["tests"]), 2)
+        self.assertEqual(report["passingTests"], 0)
+        self.assertEqual([step["name"] for step in report["steps"] if step["status"] == "failed"],
+                         ["git diff --check", "tests: python"])
+        self.assertFalse(calls.exists(), "a cheap-tier red must not start a simulator build or test")
+        self.assertEqual([step["status"] for step in report["steps"] if step["name"] in ("ios build", "tests: ios")],
+                         ["skipped", "skipped"])
+
     def test_ios_change_builds_once_checks_references_and_runs_only_the_ui_locks(self) -> None:
         r = self.repo
         calls = self.ios_fixture()
@@ -1204,8 +1226,7 @@ class IosLaneTests(VerifyCase):
                                 env={**r.env, "FIXTURE_IOS_POLICY_EXIT": "1"}, capture_output=True, text=True)
         self.assertEqual(policy.returncode, 1, policy.stdout)
         self.assertIn("verify: FAILED — ios source policy failed", policy.stdout)
-        self.assertEqual(calls.read_text().splitlines(), ["run --only-testing TronMobileUITests/FixtureLockTests"],
-                         "a static red still runs the selected tests, so one run names every red")
+        self.assertEqual(calls.read_text(), "", "an iOS source-policy red must stop before any simulator stage")
         calls.write_text("")
         module = r.verify("--module", "ios-app/ui-tests")
         self.assertEqual(module.returncode, 1, module.stdout)
