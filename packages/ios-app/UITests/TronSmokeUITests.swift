@@ -2000,7 +2000,7 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
         XCTAssertTrue(app.buttons["Manage running session"].waitForExistence(timeout: 5))
         app.buttons["Manage running session"].tap()
-        let thinking = app.buttons["Effort"]
+        let thinking = app.buttons["Thinking"]
         let lock = app.buttons["manage-model-switch"]
         XCTAssertTrue(thinking.waitForExistence(timeout: 5), app.debugDescription)
         var samples: [String] = []
@@ -2008,9 +2008,9 @@ final class TronSmokeUITests: XCTestCase {
             let locked = lock.exists && !((lock.value as? String) ?? "").isEmpty
             samples.append("\(locked ? "L" : "-")\(thinking.exists ? (thinking.isEnabled ? "E" : "D") : "?")")
         }
-        XCTAssertEqual(Set(samples), ["LE"], "The lock must hold and Effort stay enabled across rebaselines: \(samples.joined(separator: " "))")
+        XCTAssertEqual(Set(samples), ["LE"], "The lock must hold and Thinking stay enabled across rebaselines: \(samples.joined(separator: " "))")
         thinking.tap()
-        XCTAssertTrue(app.buttons["settings-option-High"].waitForExistence(timeout: 3), "Effort opens its choices for inspection")
+        XCTAssertTrue(app.buttons["settings-option-High"].waitForExistence(timeout: 3), "Thinking opens its choices for inspection")
     }
 
     @MainActor
@@ -2023,9 +2023,9 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
         app.buttons["Stop session"].tap()
         let thinkingRow = app.descendants(matching: .any)["settings-row-model.thinking_role_chat_"]
-        let thinking = app.buttons["Effort"]
+        let thinking = app.buttons["Thinking"]
         XCTAssertTrue(thinking.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(thinking.isEnabled, "Effort remains available to inspect while configuration is settling")
+        XCTAssertTrue(thinking.isEnabled, "Thinking remains available to inspect while configuration is settling")
         keepScreenshot(named: "configuration-lock-\(appearance)")
         thinking.tap()
         let high = app.buttons["settings-option-High"]
@@ -2033,7 +2033,7 @@ final class TronSmokeUITests: XCTestCase {
         high.tap()
         app.buttons["Complete superseded thinking"].tap()
         XCTAssertFalse(app.staticTexts["Superseded receipt delivered"].exists,
-                       "A locked Effort selection must not reach the Gateway mutation socket")
+                       "A locked Thinking selection must not reach the Gateway mutation socket")
         app.buttons["Release terminal settlement"].tap()
         wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
         thinking.tap()
@@ -2062,11 +2062,11 @@ final class TronSmokeUITests: XCTestCase {
         search.typeText("Alternative")
         let alternative = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Alternative Model")).firstMatch
         XCTAssertTrue(alternative.waitForExistence(timeout: 3))
-        XCTAssertFalse(alternative.isEnabled, "A competing model choice stays unavailable while Effort owns its receipt")
+        XCTAssertFalse(alternative.isEnabled, "A competing model choice stays unavailable while Thinking owns its receipt")
         alternative.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let pickerReset = app.buttons["settings-row-model.ref_role_chat_-picker-reset"]
         XCTAssertTrue(pickerReset.exists)
-        XCTAssertFalse(pickerReset.isEnabled, "Picker reset must not compete with the pending Effort receipt")
+        XCTAssertFalse(pickerReset.isEnabled, "Picker reset must not compete with the pending Thinking receipt")
         pickerReset.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         XCTAssertTrue(search.exists, "Refused choices and resets must not dismiss browsing")
         app.buttons["Close search"].tap()
@@ -2130,7 +2130,7 @@ final class TronSmokeUITests: XCTestCase {
             }
             app.buttons["Done"].tap()
             XCTAssertTrue(app.staticTexts[order == "superseded" ? "Model requests: 1" : "Model requests: 2"].waitForExistence(timeout: 3))
-            XCTAssertEqual(app.buttons["Effort"].value as? String, "Off")
+            XCTAssertEqual(app.buttons["Thinking"].value as? String, "Off")
             app.terminate()
         }
     }
@@ -2187,7 +2187,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
         app.buttons["Stop session"].tap()
         app.buttons["Release terminal settlement"].tap()
-        let thinking = app.buttons["Effort"]
+        let thinking = app.buttons["Thinking"]
         wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
         thinking.tap()
         let high = app.buttons["settings-option-High"]
@@ -2215,9 +2215,9 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
         XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
         app.buttons["Stop session"].tap()
-        let thinking = app.buttons["Effort"]
+        let thinking = app.buttons["Thinking"]
         XCTAssertTrue(thinking.waitForExistence(timeout: 5))
-        XCTAssertTrue(thinking.isEnabled, "Effort stays inspectable while configuration settles")
+        XCTAssertTrue(thinking.isEnabled, "Thinking stays inspectable while configuration settles")
         app.buttons["Switch Model"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let explanation = app.buttons["Why configuration is unavailable"]
         XCTAssertTrue(explanation.waitForExistence(timeout: 5), app.debugDescription)
