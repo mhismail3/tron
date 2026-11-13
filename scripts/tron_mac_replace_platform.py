@@ -123,7 +123,7 @@ class MacPlatform:
 
     def active_payload(self):
         """The payload the running Stable launcher selected: the external channel when present, else bundled."""
-        channel = self.tron_home / 'gateway/payloads/stable'
+        channel = self.tron_home / 'state/payloads/stable'
         current = channel / 'current.json'
         if current.exists():
             selected = json.loads(current.read_text())
@@ -133,7 +133,7 @@ class MacPlatform:
         return self.bundled_gateway(self.installed)
 
     def stable_channel(self):
-        return self.tron_home / 'gateway/payloads/stable'
+        return self.tron_home / 'state/payloads/stable'
 
     def runner_files(self):
         return ()
@@ -154,7 +154,7 @@ class MacPlatform:
         return int(manifest['protocolVersion'])
 
     def token(self):
-        return json.loads((self.tron_home / 'gateway/local-auth.json').read_text())['bearerToken']
+        return json.loads((self.tron_home / 'state/local-auth.json').read_text())['bearerToken']
 
     def gateway_pid(self):
         code, out, err = capture(['/bin/launchctl', 'print', f'gui/{os.getuid()}/{self.gateway_label}'], timeout=15)

@@ -168,7 +168,7 @@ class TronNodeResolver(unittest.TestCase):
 
     @unittest.skipUnless(Path("/usr/bin/codesign").exists(), "macOS code signatures")
     def test_a_copied_hardened_runtime_without_library_validation_opt_out_is_refused(self) -> None:
-        signed = sorted(glob.glob(str(Path.home() / ".tron/gateway/payloads/*/versions/*/runtime/node-arm64")))
+        signed = sorted(glob.glob(str(Path.home() / ".tron/state/payloads/*/versions/*/runtime/node-arm64")))
         if not signed:
             self.skipTest("no installed signed Gateway runtime on this Mac")
         copy = self.tmp / "copied"

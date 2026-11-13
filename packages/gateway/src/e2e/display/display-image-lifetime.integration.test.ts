@@ -21,14 +21,14 @@ it("durably publishes new display bytes once and reuses them for distinct retain
     const source = "// original snapshot\n";
     await writeFile(join(root, "Snapshot.swift"), source);
     const digest = createHash("sha256").update(source).digest("hex");
-    const object = join(root, "gateway/display-artifacts/objects", digest.slice(0, 2), digest.slice(2));
+    const object = join(root, "state/display-artifacts/objects", digest.slice(0, 2), digest.slice(2));
     await mkdir(dirname(object), { recursive: true });
     await writeFile(object, source, { mode: 0o400 });
     const orphan = await stat(object);
     drainDurableWriteStats();
     const first = await store.ingest(root, "Snapshot.swift", "first-session");
     expect(drainDurableWriteStats().count).toBe(3);
-    const retained = await stat(join(root, "gateway/display-artifacts/artifacts", first.id, "content"));
+    const retained = await stat(join(root, "state/display-artifacts/artifacts", first.id, "content"));
     expect([retained.dev, retained.ino]).toEqual([orphan.dev, orphan.ino]);
     const second = await store.ingest(root, "Snapshot.swift", "second-session");
     expect(drainDurableWriteStats().count).toBe(2);
@@ -76,16 +76,16 @@ it("durably removes unowned artifact directories in one maintenance cut without 
       await store.maintain(async () => new Set(["live-session"]));
       expect(drainDurableWriteStats().count).toBe(5);
       for (const artifact of retired) {
-        await expect(stat(join(root, "gateway/display-artifacts/artifacts", artifact.id))).rejects.toMatchObject({ code: "ENOENT" });
+        await expect(stat(join(root, "state/display-artifacts/artifacts", artifact.id))).rejects.toMatchObject({ code: "ENOENT" });
         await expect(store.acquire(artifact.id, "deleted-session")).rejects.toMatchObject({ code: "not_found" });
       }
       await expect(store.acquire(reading.id, "deleted-session")).rejects.toMatchObject({ code: "not_found" });
-      expect(await readFile(join(root, "gateway/display-artifacts/artifacts", reading.id, "content"), "utf8")).toBe("// retained bytes\n");
+      expect(await readFile(join(root, "state/display-artifacts/artifacts", reading.id, "content"), "utf8")).toBe("// retained bytes\n");
       const chunks: Buffer[] = [];
       for await (const chunk of lease.stream) chunks.push(Buffer.from(chunk));
       expect(Buffer.concat(chunks).toString()).toBe("// retained bytes\n");
     } finally { await lease.release(); }
-    await expect(stat(join(root, "gateway/display-artifacts/artifacts", reading.id))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(join(root, "state/display-artifacts/artifacts", reading.id))).rejects.toMatchObject({ code: "ENOENT" });
     const reopened = new DisplayArtifactStore(root);
     await reopened.initialize();
     for (const artifact of [...retired, reading, shared]) {
@@ -143,7 +143,7 @@ it("synchronizes maintenance deletion when the last reader releases during metad
     await maintenance;
     await releasing;
     expect(drainDurableWriteStats().count).toBe(3);
-    await expect(stat(join(root, "gateway/display-artifacts/artifacts", deleted.id))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(join(root, "state/display-artifacts/artifacts", deleted.id))).rejects.toMatchObject({ code: "ENOENT" });
     await expect(store.acquire(deleted.id, "deleted-session")).rejects.toMatchObject({ code: "not_found" });
     const reopened = new DisplayArtifactStore(root);
     await reopened.initialize();
@@ -253,7 +253,7 @@ it("keeps a displayed photo viewable after source deletion and cold reopen until
     if (row?.kind !== "message" || !row.display?.artifact) throw new Error("Real Pi display result missing");
     const artifactID = row.display.artifact.id;
     const sessionID = slot.id;
-    const content = join(root, "tron", "gateway", "display-artifacts", "artifacts", artifactID, "content");
+    const content = join(root, "tron", "state", "display-artifacts", "artifacts", artifactID, "content");
     const readPreview = async () => {
       const lease = await displayOwnerOf(registry!).acquireArtifact(sessionID, artifactID);
       try {
@@ -328,7 +328,7 @@ async function displayedPhotoFixture() {
     if (row?.kind !== "message" || !row.display?.artifact) throw new Error("Real Pi display result missing");
     const artifactID = row.display.artifact.id;
     return { root, options, registry, slot, image, artifactID, rekeys, faux,
-      content: join(root, "tron", "gateway", "display-artifacts", "artifacts", artifactID, "content") };
+      content: join(root, "tron", "state", "display-artifacts", "artifacts", artifactID, "content") };
   } catch (error) {
     await registry?.dispose();
     await rm(root, { recursive: true, force: true });

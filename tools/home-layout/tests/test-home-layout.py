@@ -12,6 +12,7 @@ disposable homes.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -50,6 +51,8 @@ class Fixture:
         self.repo = base / "repo"
         (self.repo / "tools/home-layout").mkdir(parents=True)
         shutil.copy2(ROOT / TOOL, self.repo / TOOL)
+        for module in ("runtime_layout.py", "runtime_rewrites.py", "terminal_layout.py"):
+            shutil.copy2(ROOT / "tools/home-layout" / module, self.repo / "tools/home-layout" / module)
         shutil.copytree(ROOT / "tools/ownership", self.repo / "tools/ownership", ignore=shutil.ignore_patterns("tests", "__pycache__"))
         self.write("fixture.module.json", json.dumps({"layer": "L5", "owns": ["**"]}))
         self.write(REGISTRY, registry(PATHS))
@@ -99,7 +102,7 @@ class HomeLayoutTests(unittest.TestCase):
         self.assertIn("SESSION_EXPORT_MAX_ITEMS = 8;", source)
         self.assertIn("SESSION_EXPORT_MAX_TOTAL_BYTES = 4 * 1_024 * 1_024 * 1_024;", source)
         self.assertIn("SESSION_EXPORT_MAX_ITEM_BYTES = 2 * 1_024 * 1_024 * 1_024;", source)
-        self.assertEqual(paths["gateway/exports"]["prune"], {"maxAge": "30m", "maxEntries": 8, "maxBytes": 4 * 1024 ** 3,
+        self.assertEqual(paths["state/exports"]["prune"], {"maxAge": "30m", "maxEntries": 8, "maxBytes": 4 * 1024 ** 3,
                                                              "when": "2 GiB per item; 4 readers, 1 production"})
 
     def test_check_refuses_unregistered_literals_outside_tests(self) -> None:
@@ -510,6 +513,11 @@ class MigrateTests(unittest.TestCase):
         (self.home / "backup-1/only-copy").write_bytes(b"unique recovery")
         self.fixture.write(REGISTRY, registry(PATHS, self.RETIRED))
 
+    def use_recovery_registry(self) -> None:
+        declaration = json.loads((ROOT / REGISTRY).read_text())
+        declaration["retired"] = [row for row in declaration["retired"] if row["to"].startswith("~/")]
+        self.fixture.write(REGISTRY, json.dumps(declaration))
+
     def migrate(self, *args: str, home: Path | None = None) -> tuple[int, dict]:
         result = self.fixture.run("migrate", "--home", str(home or self.home), *args, env={"HOME": str(self.user)})
         self.assertEqual(result.stderr, "", result.stderr)
@@ -604,7 +612,7 @@ class MigrateTests(unittest.TestCase):
         self.assertEqual(self.migrate("--dry-run")[0], 0)
 
     def test_two_homes_share_destinations_without_claiming_each_others_moves(self) -> None:
-        self.fixture.write(REGISTRY, (ROOT / REGISTRY).read_text())
+        self.use_recovery_registry()
         stable = self.home
         debug = self.user / ".tron-dev"
         debug.mkdir()
@@ -648,7 +656,7 @@ class MigrateTests(unittest.TestCase):
         self.assertEqual((self.home / "late-backup/only-copy").read_text(), "late")
 
     def test_a_crashed_home_retains_the_only_claim_on_a_shared_pending_move(self) -> None:
-        self.fixture.write(REGISTRY, (ROOT / REGISTRY).read_text())
+        self.use_recovery_registry()
         (self.home / "gateway/home").mkdir()
         (self.home / "gateway/home/chapter-reseals.jsonl").write_text("stable")
         debug = self.user / ".tron-dev"
@@ -660,7 +668,7 @@ class MigrateTests(unittest.TestCase):
         runner.write_text(
             "import importlib.util, os\n"
             f"spec = importlib.util.spec_from_file_location('layout', {str(self.fixture.repo / TOOL)!r})\n"
-            "layout = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(layout)\n"
+            "layout = importlib.util.module_from_spec(spec)\nimport sys\nsys.modules[spec.name] = layout\nspec.loader.exec_module(layout)\n"
             "def rename(source, destination): os._exit(86)\n"
             "layout.rename_exclusive = rename\n"
             f"layout.main(['migrate', '--home', {str(self.home)!r}, '--apply'])\n")
@@ -689,7 +697,7 @@ class MigrateTests(unittest.TestCase):
             "import contextlib, importlib.util\n"
             "from pathlib import Path\n"
             f"spec = importlib.util.spec_from_file_location('layout', {str(self.fixture.repo / TOOL)!r})\n"
-            "layout = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(layout)\n"
+            "layout = importlib.util.module_from_spec(spec)\nimport sys\nsys.modules[spec.name] = layout\nspec.loader.exec_module(layout)\n"
             "original = layout.runtime_lock\n"
             "@contextlib.contextmanager\ndef acquire(path):\n"
             "    with original(path) as guard:\n"
@@ -703,7 +711,7 @@ class MigrateTests(unittest.TestCase):
         self.assertEqual(list((self.user / ".tron-maintenance/layout-v2").glob("*.json")), [])
 
     def test_rollback_releases_each_claim_durably_for_the_other_home(self) -> None:
-        self.fixture.write(REGISTRY, (ROOT / REGISTRY).read_text())
+        self.use_recovery_registry()
         for crash_after in (0, 1, 2):
             with self.subTest(crash_after=crash_after):
                 self.user = self.base / f"rollback-user-{crash_after}"
@@ -721,7 +729,7 @@ class MigrateTests(unittest.TestCase):
                     runner.write_text(
                         "import importlib.util, os\n"
                         f"spec = importlib.util.spec_from_file_location('layout', {str(self.fixture.repo / TOOL)!r})\n"
-                        "layout = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(layout)\n"
+                        "layout = importlib.util.module_from_spec(spec)\nimport sys\nsys.modules[spec.name] = layout\nspec.loader.exec_module(layout)\n"
                         "original = layout.rename_exclusive\ncount = 0\n"
                         "def rename(source, destination):\n"
                         "    global count\n    original(source, destination)\n    count += 1\n"
@@ -754,7 +762,7 @@ class MigrateTests(unittest.TestCase):
         runner.write_text(
             "import contextlib, importlib.util, os\n"
             f"spec = importlib.util.spec_from_file_location('layout', {str(self.fixture.repo / TOOL)!r})\n"
-            "layout = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(layout)\n"
+            "layout = importlib.util.module_from_spec(spec)\nimport sys\nsys.modules[spec.name] = layout\nspec.loader.exec_module(layout)\n"
             "original = layout.runtime_lock\n"
             "@contextlib.contextmanager\ndef acquire(path):\n"
             "    with original(path) as guard:\n"
@@ -802,7 +810,7 @@ class MigrateTests(unittest.TestCase):
                 runner.write_text(
                     "import importlib.util, os\n"
                     f"spec = importlib.util.spec_from_file_location('layout', {str(self.fixture.repo / TOOL)!r})\n"
-                    "layout = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(layout)\n"
+                    "layout = importlib.util.module_from_spec(spec)\nimport sys\nsys.modules[spec.name] = layout\nspec.loader.exec_module(layout)\n"
                     "original = layout.rename_exclusive\ncount = 0\n"
                     "def rename(source, destination):\n"
                     "    global count\n    original(source, destination)\n    count += 1\n"
@@ -840,7 +848,7 @@ class MigrateTests(unittest.TestCase):
         runner.write_text(
             "import importlib.util, os, time\n"
             f"spec = importlib.util.spec_from_file_location('layout', {str(self.fixture.repo / TOOL)!r})\n"
-            "layout = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(layout)\n"
+            "layout = importlib.util.module_from_spec(spec)\nimport sys\nsys.modules[spec.name] = layout\nspec.loader.exec_module(layout)\n"
             "original = layout.rename_exclusive\n"
             "def rename(source, destination):\n"
             f"    lock = {str(self.home / 'agent/.tron-gateway-runtime.lock.lock')!r}\n"
@@ -908,7 +916,7 @@ class MigrateTests(unittest.TestCase):
         runner.write_text(
             "import importlib.util, shutil\n"
             f"spec = importlib.util.spec_from_file_location('layout', {str(self.fixture.repo / TOOL)!r})\n"
-            "layout = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(layout)\n"
+            "layout = importlib.util.module_from_spec(spec)\nimport sys\nsys.modules[spec.name] = layout\nspec.loader.exec_module(layout)\n"
             "def rename(source, destination): shutil.rmtree(source)\n"
             "layout.rename_exclusive = rename\n"
             f"raise SystemExit(layout.main(['migrate', '--home', {str(self.home)!r}, '--apply']))\n")
@@ -930,16 +938,18 @@ class MigrateTests(unittest.TestCase):
     def test_the_shipped_registry_declares_slice_b_moves(self) -> None:
         result = subprocess.run(["python3", str(ROOT / TOOL), "migrate", "--home", str(self.home), "--status"],
                                 cwd=ROOT, capture_output=True, text=True, env={**os.environ, "HOME": str(self.user)})
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(json.loads(result.stdout)["state"], "nothing_to_move")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)["state"], "not_started")
         moves = json.loads(result.stdout)["moves"]
-        self.assertEqual(len(moves), 14)
+        self.assertEqual(len([row for row in moves if row["to"].startswith("~/")]), 14)
         self.assertTrue(any(row["from"].endswith("x-library-20261111T1425") for row in moves))
 
     def test_unreadable_homes_and_ambiguous_modes_are_errors(self) -> None:
         link = self.base / "linked-home"
         link.symlink_to(self.home, target_is_directory=True)
-        for home in (self.base / "missing", link):
+        ancestor = self.base / "linked-user"
+        ancestor.symlink_to(self.user, target_is_directory=True)
+        for home in (self.base / "missing", link, ancestor / self.home.name):
             with self.subTest(home=home):
                 code, report = self.migrate("--dry-run", home=home)
                 self.assertEqual(code, 2)
@@ -951,6 +961,290 @@ class MigrateTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2, arguments)
             self.assertEqual(result.stdout, "")
         self.assertEqual(snapshot(self.user, contents_first=False), before)
+
+
+class RuntimeMigrationTests(unittest.TestCase):
+    def sdk_process(self, action: str, base: Path, home: Path) -> subprocess.Popen:
+        temporary = base / "tmp"
+        temporary.mkdir(exist_ok=True)
+        return subprocess.Popen([str(ROOT / "scripts/tron-node"), "exec", "node", str(ROOT / "tools/home-layout/tests/sdk-runtime-fixture.mjs"), action, str(ROOT), str(base), str(home)], stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                env={**os.environ, "HOME": str(home.parent), "TMPDIR": str(temporary), "PI_CODING_AGENT_DIR": str(home / "agent"), "PI_SUBAGENTS_TEMP_ROOT": str(home / ("internal/subagents" if action in {"create", "hold", "old"} else "state/subagents"))}, start_new_session=True)
+
+    def sdk(self, action: str, base: Path, home: Path) -> dict:
+        process = self.sdk_process(action, base, home)
+        output, error = process.communicate(timeout=30)
+        self.assertEqual(process.returncode, 0, output + error)
+        return json.loads(output)
+
+    def test_actual_gateway_and_migrator_share_locks_and_fence_a_startup_race(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="home-layout-gateway-race-") as temporary:
+            base = Path(temporary).resolve()
+            fixture = Fixture(base)
+            fixture.write(REGISTRY, (ROOT / REGISTRY).read_text())
+            home = base / "user/.tron"
+            home.mkdir(parents=True)
+            self.sdk("create", base, home)
+            core = fixture.repo / TOOL
+            source = core.read_text()
+            anchor = "            completed = migration(home, root)"
+            self.assertEqual(source.count(anchor), 1)
+            core.write_text(source.replace(anchor, '            print("held", flush=True)\n            os.read(0, 1)\n' + anchor))
+            fixture.git("add", "-A")
+            holder = subprocess.Popen(["python3", "-B", str(core), "migrate", "--home", str(home), "--apply"], cwd=fixture.repo, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env={**os.environ, "HOME": str(home.parent)})
+            try:
+                self.assertEqual(holder.stdout.readline().strip(), "held")
+                before = {str(path.relative_to(home)): path.read_bytes() for path in home.rglob("*") if path.is_file()}
+                refused = self.sdk("probe", base, home)
+                self.assertEqual(refused["code"], 1, refused["output"])
+                self.assertIn("Another Tron Gateway already owns a canonical session directory", refused["output"])
+                after = {str(path.relative_to(home)): path.read_bytes() for path in home.rglob("*") if path.is_file()}
+                diagnostics = after.pop("logs/gateway.jsonl")
+                records = [json.loads(line) for line in diagnostics.splitlines()]
+                self.assertEqual([row["event"] for row in records], ["gateway.fatal-startup"])
+                (ROOT / "test-results/home-layout-runtime-process.json").write_text(json.dumps({"heldLease": refused, "diagnostics": records}, indent=2))
+                self.assertEqual(after, before)
+            finally:
+                output, error = holder.communicate("release", timeout=30)
+                self.assertEqual(holder.returncode, 0, output + error)
+                core.write_text(source)
+            journal = Path(json.loads(output)["journal"])
+            serving = self.sdk_process("serve", base, home)
+            try:
+                ready = json.loads(serving.stdout.readline())
+                self.assertTrue(ready.get("ready"), ready)
+                journal_before = journal.read_bytes()
+                refused = fixture.run("migrate", "--home", str(home), "--dry-run", env={"HOME": str(home.parent)})
+                self.assertNotEqual(refused.returncode, 0, refused.stdout + refused.stderr)
+                self.assertIn("gateway_running", json.loads(refused.stdout)["blockers"])
+                self.assertEqual(journal.read_bytes(), journal_before)
+            finally:
+                output, error = serving.communicate("release", timeout=30)
+                self.assertEqual(serving.returncode, 0, output + error)
+                self.assertEqual(json.loads(output)["code"], 0, output)
+            racing = self.sdk_process("race", base, home)
+            try:
+                ready = json.loads(racing.stdout.readline())
+                self.assertTrue(ready.get("ready"), ready)
+                rolled_back = fixture.run("migrate", "--home", str(home), "--rollback", env={"HOME": str(home.parent)})
+                self.assertEqual(rolled_back.returncode, 0, rolled_back.stdout + rolled_back.stderr)
+                before_release = {str(path.relative_to(home)): path.read_bytes() for path in home.rglob("*") if path.is_file()}
+            finally:
+                output, error = racing.communicate("release", timeout=30)
+                self.assertEqual(racing.returncode, 0, output + error)
+            refused = json.loads(output)
+            self.assertEqual(refused["code"], 1, refused["output"])
+            self.assertIn("home-layout migrate", refused["output"])
+            after_release = {str(path.relative_to(home)): path.read_bytes() for path in home.rglob("*") if path.is_file()}
+            previous_log = before_release.pop("logs/gateway.jsonl")
+            current_log = after_release.pop("logs/gateway.jsonl")
+            self.assertTrue(current_log.startswith(previous_log))
+            self.assertEqual([json.loads(line)["event"] for line in current_log[len(previous_log):].splitlines()], ["gateway.fatal-startup"])
+            (ROOT / "test-results/home-layout-runtime-process.json").write_text(json.dumps({"heldLease": "refused", "startupRace": refused}, indent=2))
+            self.assertEqual(after_release, before_release)
+
+    def release_dead_fixture_locks(self, fixture: Fixture, home: Path) -> None:
+        blocked = fixture.run("migrate", "--home", str(home), "--apply", env={"HOME": str(home.parent)})
+        self.assertEqual(blocked.returncode, 1, blocked.stdout + blocked.stderr)
+        self.assertIn("gateway_running", json.loads(blocked.stdout)["blockers"])
+        for lock in (home / "agent/.tron-gateway-runtime.lock.lock", home.parent / ".tron-dev/agent/.tron-gateway-runtime.lock.lock"):
+            lock.rmdir()
+
+    def test_crashes_resume_forward_and_inverse_without_restoring_runtime_bodies(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="home-layout-crash-sdk-") as temporary:
+            base = Path(temporary).resolve()
+            fixture = Fixture(base)
+            fixture.write(REGISTRY, (ROOT / REGISTRY).read_text())
+            home = base / "user/.tron"
+            home.mkdir(parents=True)
+            sdk = self.sdk("create", base, home)
+            runtime = fixture.repo / "tools/home-layout/runtime_layout.py"
+            source = runtime.read_text()
+            points = {
+                "reserved": "            phase[key] = saved\n            l.write_journal(journal_path, journal)",
+                "cloned": "            clone(l, path, destination)",
+                "rewritten": "                os.replace(temporary, path)",
+                "stamped-before-receipt": "        l.write_journal(stamp, {\"version\": 2})",
+            }
+            for name, anchor in points.items():
+                with self.subTest(point=name):
+                    self.assertEqual(source.count(anchor), 1)
+                    indentation = len(anchor.splitlines()[-1]) - len(anchor.splitlines()[-1].lstrip())
+                    runtime.write_text(source.replace(anchor, anchor + "\n" + " " * indentation + "os._exit(91)"))
+                    crashed = fixture.run("migrate", "--home", str(home), "--apply", env={"HOME": str(home.parent)})
+                    self.assertEqual(crashed.returncode, 91, crashed.stdout + crashed.stderr)
+                    self.release_dead_fixture_locks(fixture, home)
+                    runtime.write_text(source)
+                    resumed = fixture.run("migrate", "--home", str(home), "--apply", env={"HOME": str(home.parent)})
+                    self.assertEqual(resumed.returncode, 0, resumed.stdout + resumed.stderr)
+                    self.sdk("append", base, home)
+                    content = next((home / "agent/sessions").rglob(Path(sdk["session"]).name)).read_bytes().split(b"\n", 1)[1]
+                    anchor = points["rewritten"]
+                    runtime.write_text(source.replace(anchor, anchor + "\n                os._exit(92)"))
+                    crashed = fixture.run("migrate", "--home", str(home), "--rollback", env={"HOME": str(home.parent)})
+                    self.assertEqual(crashed.returncode, 92, crashed.stdout + crashed.stderr)
+                    self.assertEqual(json.loads((home / "state/layout.json").read_text()), {"version": 2, "migrating": True})
+                    self.release_dead_fixture_locks(fixture, home)
+                    runtime.write_text(source)
+                    resumed = fixture.run("migrate", "--home", str(home), "--rollback", env={"HOME": str(home.parent)})
+                    self.assertEqual(resumed.returncode, 0, resumed.stdout + resumed.stderr)
+                    self.sdk("old", base, home)
+                    self.assertEqual((home / sdk["session"]).read_bytes().split(b"\n", 1)[1], content)
+
+    def test_observed_process_close_is_required_before_a_run_can_move(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="home-layout-live-sdk-") as temporary:
+            base = Path(temporary).resolve()
+            fixture = Fixture(base)
+            fixture.write(REGISTRY, (ROOT / REGISTRY).read_text())
+            home = base / "user/.tron"
+            home.mkdir(parents=True)
+            tmp = base / "tmp"
+            tmp.mkdir()
+            process = self.sdk_process("hold", base, home)
+            try:
+                ready = process.stdout.readline()
+                self.assertTrue(ready, process.stderr.read() if not ready else "")
+                manifest = json.loads(ready)
+                self.assertIn("runId", manifest)
+                before = snapshot(home)
+                result = fixture.run("migrate", "--home", str(home), "--dry-run", env={"HOME": str(home.parent)})
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertEqual(json.loads(result.stdout)["errors"][0]["reason"], "subagent_process_unsettled")
+                self.assertEqual(snapshot(home, contents_first=False), before)
+            finally:
+                if process.poll() is None:
+                    output, error = process.communicate("release\n", timeout=30)
+                    self.assertEqual(process.returncode, 0, output + error)
+            handoff = home / manifest["asyncDir"] / "handoff.json"
+            self.sdk("handoff-pending", base, home)
+            before = snapshot(home)
+            result = fixture.run("migrate", "--home", str(home), "--dry-run", env={"HOME": str(home.parent)})
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            self.assertEqual(json.loads(result.stdout)["errors"][0]["reason"], "subagent_handoff_unsettled")
+            self.assertEqual(snapshot(home, contents_first=False), before)
+            self.sdk("handoff-complete", base, home)
+            completed = handoff.read_text()
+            result = fixture.run("migrate", "--home", str(home), "--apply", env={"HOME": str(home.parent)})
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.sdk("open", base, home)
+            self.assertEqual((home / manifest["asyncDir"].replace("internal/subagents/", "state/subagents/") / "handoff.json").read_text(), completed)
+
+    def test_non_object_settings_refuse_without_mutation(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="home-layout-settings-") as temporary:
+            fixture = Fixture(Path(temporary).resolve())
+            fixture.write(REGISTRY, (ROOT / REGISTRY).read_text())
+            home = Path(temporary).resolve() / "user/.tron"
+            (home / "agent").mkdir(parents=True)
+            (home / "agent/settings.json").write_text("[]")
+            before = snapshot(home.parent)
+            result = fixture.run("migrate", "--home", str(home), "--dry-run", env={"HOME": str(home.parent)})
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            self.assertEqual(json.loads(result.stdout)["errors"][0]["reason"], "invalid_settings_document")
+            self.assertEqual(snapshot(home.parent, contents_first=False), before)
+
+    def test_offline_runtime_move_rewrites_only_owned_fields_and_carries_new_data_back(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="home-layout-runtime-") as temporary:
+            base = Path(temporary).resolve()
+            fixture = Fixture(base)
+            home = base / "user/.tron"
+            home.mkdir(parents=True)
+            paths = {
+                "agent": entry(**{"class": "keep"}), "agent/sessions": entry(subtree=True),
+                "agent/trust.json": entry(), "agent/missions": entry(subtree=True),
+                "state": entry(**{"class": "keep"}, container=True), "state/layout.json": entry(),
+                "state/home": entry(container=True), "state/home/workspace": entry(subtree=True),
+                "state/home/tasks": entry(subtree=True), "state/uploads": entry(subtree=True),
+                "state/settings": entry(container=True), "state/settings/observed.json": entry(),
+                "state/subagents": entry(subtree=True), "state/mac-terminal": entry(subtree=True),
+                "state/mac-terminal.lock": entry(**{"class": "scratch"}, container=True),
+                "mac-terminal.lock": entry(**{"class": "scratch"}, container=True),
+                "cache": entry(**{"class": "rebuild"}, container=True), "cache/network.json": entry(),
+                "workspace": entry(**{"class": "keep"}, container=True), "workspace/builds": entry(container=True),
+                "workspace/builds/ios-ota": entry(subtree=True),
+                "internal": entry(**{"class": "scratch"}, container=True),
+            }
+            retired = [{"from": "gateway/network.json", "to": "cache/network.json"},
+                       {"from": "gateway", "to": "state"},
+                       {"from": "internal/subagents", "to": "state/subagents"},
+                       {"from": "mac-terminal", "to": "state/mac-terminal"},
+                       {"from": "ios-builds", "to": "workspace/builds/ios-ota"}]
+            fixture.write(REGISTRY, registry(paths, retired))
+            old_cwd = str(home / "gateway/home/workspace")
+            new_cwd = str(home / "state/home/workspace")
+            encode = lambda value: "--" + value.lstrip("/").replace("/", "-") + "--"
+            sdk = self.sdk("create", base, home)
+            old_session = home / sdk["session"]
+            _, body = old_session.read_bytes().split(b"\n", 1)
+            records = {
+                "gateway/network.json": {"host": "fixture"},
+                "gateway/settings/observed.json": {"version": 1, "stores": {"trust": {"digest": hashlib.sha256(json.dumps({old_cwd: True}).encode()).hexdigest(), "values": {"permissions.projectTrust\u0000" + json.dumps({"project": old_cwd}, separators=(",", ":")): {"key": "permissions.projectTrust", "qualifiers": {"project": old_cwd}, "value": True}}, "tron": {}, "outside": {}}}},
+                "gateway/uploads/one/metadata.json": {"path": str(home / "gateway/uploads/one/file")},
+                "gateway/uploads/two/metadata.json": {"path": new_cwd + "/preexisting-new-prefix"},
+                "gateway/home/tasks/one.json": {"target": {"cwd": old_cwd}, "brief": "history quotes " + old_cwd},
+                "agent/trust.json": {old_cwd: True},
+                "agent/missions/one.json": {"runs": [{"asyncDir": str(home / sdk["asyncDir"])}], "notes": old_cwd},
+            }
+            for relative, value in records.items():
+                path = home / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(value))
+            for relative, data in {
+                "gateway/uploads/one/file": b"upload", "gateway/home/workspace/only-copy": b"workspace",
+                "mac-terminal/ssh_host_ed25519_key": b"host-key",
+                "mac-terminal/sshd_config": f"HostKey {home}/mac-terminal/ssh_host_ed25519_key\n".encode(),
+                "ios-builds/latest.plist": b"unchanged install URL :8443/builds/one/manifest.plist",
+            }.items():
+                path = home / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+            original = {str(p.relative_to(home)): p.read_bytes() for p in home.rglob("*") if p.is_file()}
+            host_inode = (home / "mac-terminal/ssh_host_ed25519_key").stat().st_ino
+            def migrate(mode):
+                result = fixture.run("migrate", "--home", str(home), mode, env={"HOME": str(home.parent)})
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                return json.loads(result.stdout)
+            before = snapshot(home.parent)
+            plan = migrate("--dry-run")
+            self.assertEqual(snapshot(home.parent, contents_first=False), before)
+            self.assertGreaterEqual(len(plan["rewrites"]), 8)
+            applied = migrate("--apply")
+            journal = json.loads(Path(applied["journal"]).read_text())
+            self.assertTrue(any(row["kind"] == "session" for row in journal["layouts"][str(home)]["rewrites"].values()))
+            backup = next((home.parent / ".tron-maintenance/backups").rglob(old_session.name))
+            backup_bytes = backup.read_bytes()
+            backup.write_bytes(backup_bytes + b"body corruption after unchanged header\n")
+            tampered_before = snapshot(home)
+            refused = fixture.run("migrate", "--home", str(home), "--apply", env={"HOME": str(home.parent)})
+            self.assertEqual(refused.returncode, 1, refused.stdout + refused.stderr)
+            self.assertEqual(json.loads(refused.stdout)["errors"][0]["reason"], "rewrite_backup_changed")
+            tampered_after = snapshot(home, contents_first=False)
+            normalize_lease_parent = lambda records: {key: value[:6] + (None, None, None) + value[9:] if key == "agent" else value for key, value in records.items()}
+            self.assertEqual(normalize_lease_parent(tampered_after), normalize_lease_parent(tampered_before))
+            backup.write_bytes(backup_bytes)
+            session = home / "agent/sessions" / encode(new_cwd) / old_session.name
+            header, preserved = session.read_bytes().split(b"\n", 1)
+            self.assertEqual(json.loads(header)["cwd"], new_cwd)
+            self.assertEqual(preserved, body)
+            self.assertEqual(json.loads((home / "state/layout.json").read_text()), {"version": 2})
+            for root in ("gateway", "mac-terminal", "ios-builds"):
+                self.assertEqual((home / root).read_text(), "retired by layout 2; merge main\n")
+            self.assertEqual((home / "state/mac-terminal/ssh_host_ed25519_key").stat().st_ino, host_inode)
+            upload = json.loads((home / "state/uploads/one/metadata.json").read_text())
+            self.assertEqual(Path(upload["path"]).read_bytes(), b"upload")
+            mission = json.loads((home / "agent/missions/one.json").read_text())
+            self.assertEqual(mission["runs"][0]["asyncDir"], str(home / sdk["asyncDir"].replace("internal/subagents/", "state/subagents/")))
+            self.assertEqual(mission["notes"], old_cwd)
+            self.assertEqual(json.loads((home / "agent/trust.json").read_text()), {new_cwd: True})
+            self.sdk("append", base, home)
+            appended = session.read_bytes().split(b"\n", 1)[1][len(body):]
+            (home / "state/home/workspace/new-only-copy").write_text("new workspace data")
+            migrate("--rollback")
+            for relative, data in original.items():
+                expected = data + appended if relative == str(old_session.relative_to(home)) else data
+                self.assertEqual((home / relative).read_bytes(), expected, relative)
+            self.sdk("old", base, home)
+            self.assertEqual((home / "gateway/home/workspace/new-only-copy").read_text(), "new workspace data")
+            self.assertFalse((home / "state").exists())
+            self.assertEqual((home / "mac-terminal/ssh_host_ed25519_key").stat().st_ino, host_inode)
 
 
 if __name__ == "__main__":

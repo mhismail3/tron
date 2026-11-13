@@ -273,7 +273,7 @@ test("Debug source record is dirty when the tree changed while the candidate bui
 
 const selectDevPayload = (home, epoch) => {
   const version = `debug-${epoch.slice(-12)}`;
-  const root = join(home, "gateway", "payloads", "dev");
+  const root = join(home, "state", "payloads", "dev");
   mkdirSync(join(root, "versions", version), { recursive: true });
   writeFileSync(join(root, "current.json"), `${JSON.stringify({ schema: 1, kind: "tron-gateway-selection", channel: "dev", version, payloadFingerprint: sharedFingerprint })}\n`);
   writeFileSync(join(root, "versions", version, "manifest.json"), `${JSON.stringify({
@@ -363,8 +363,8 @@ exec "${process.execPath}" "${"$"}@"
     execFileSync("/bin/chmod", ["+x", join(fakeBin, "npm")]);
     const devHome = join(home, ".tron-dev");
     const version = selectDevPayload(devHome, epochFor(1));
-    mkdirSync(join(devHome, "gateway"), { recursive: true });
-    writeFileSync(join(devHome, "gateway", "lifecycle.json"), `${JSON.stringify({
+    mkdirSync(join(devHome, "state"), { recursive: true });
+    writeFileSync(join(devHome, "state", "lifecycle.json"), `${JSON.stringify({
       lifecycle: "ready", expectedHost: "tailscale", epoch: epochFor(1),
       ...(supervisorPid ? { supervisorPid, supervisorStartIdentity: supervisorIdentity } : {}),
       candidateSources: [{ runtimeEpoch: epochFor(1), worktree: root, branch: "feat/source", dirty }],
@@ -452,7 +452,7 @@ esac
     execFileSync("/bin/chmod", ["+x", fakeNode]);
     writeFileSync(fakeNpm, "#!/bin/sh\nexit 0\n");
     execFileSync("/bin/chmod", ["+x", fakeNpm]);
-    const stateDir = join(home, ".tron-dev", "gateway");
+    const stateDir = join(home, ".tron-dev", "state");
     mkdirSync(stateDir, { recursive: true });
     writeFileSync(join(stateDir, "lifecycle.json"), JSON.stringify({ lifecycle: "ready", childPid: child, childStartIdentity: identity }));
     execFileSync("bash", [new URL("./tron-dev", import.meta.url).pathname, "stop"], {
@@ -502,14 +502,14 @@ test("Debug stop reports a stopping transition it cannot record and still signal
   const childProcess = spawn("/bin/sleep", ["30"], { detached: true, stdio: "ignore" });
   const exited = once(childProcess, "exit");
   try {
-    mkdirSync(join(home, ".tron-dev", "gateway"), { recursive: true });
+    mkdirSync(join(home, ".tron-dev", "state"), { recursive: true });
     mkdirSync(fakeBin, { recursive: true });
     writeFileSync(fakeNode, `#!/bin/sh\nif [ "${"$"}{1:-}" = "--version" ]; then echo v${PINNED_NODE}; exit 0; fi\nexec ${process.execPath} "$@"\n`);
     execFileSync("/bin/chmod", ["+x", fakeNode]);
     writeFileSync(join(fakeBin, "npm"), "#!/bin/sh\nexit 0\n");
     execFileSync("/bin/chmod", ["+x", join(fakeBin, "npm")]);
     const identity = execFileSync("ps", ["-o", "lstart=", "-p", String(childProcess.pid)], { encoding: "utf8" }).trim();
-    const state = join(home, ".tron-dev", "gateway", "lifecycle.json");
+    const state = join(home, ".tron-dev", "state", "lifecycle.json");
     writeFileSync(state, `${JSON.stringify({ lifecycle: "bogus", childPid: childProcess.pid, childStartIdentity: identity })}\n`);
     const stop = await new Promise((resolveStop) => execFile("bash", [new URL("./tron-dev", import.meta.url).pathname, "stop"], {
       env: { PATH: process.env.PATH, HOME: home, TRON_NODE_BIN: fakeNode },
@@ -534,7 +534,7 @@ test("Debug lifecycle commands never see the caller's Stable Gateway environment
   const fakeNode = join(fakeBin, "node");
   const seen = join(root, "seen.env");
   try {
-    mkdirSync(join(home, ".tron-dev", "gateway"), { recursive: true });
+    mkdirSync(join(home, ".tron-dev", "state"), { recursive: true });
     mkdirSync(fakeBin, { recursive: true });
     writeFileSync(fakeNode, `#!/bin/sh
 if [ "${"$"}{1:-}" = "--version" ]; then echo v${PINNED_NODE}; exit 0; fi
@@ -547,7 +547,7 @@ echo '{"lifecycle":"stopped"}'
     execFileSync("bash", [new URL("./tron-dev", import.meta.url).pathname, "status"], {
       env: {
         PATH: process.env.PATH, HOME: home, TRON_NODE_BIN: fakeNode, TRON_CI_TOOLS_DIR: join(root, "tools"),
-        PI_SUBAGENTS_TEMP_ROOT: join(root, "stable", "internal", "subagents"), PI_SESSION_ID: "stable-session",
+        PI_SUBAGENTS_TEMP_ROOT: join(root, "stable", "state", "subagents"), PI_SESSION_ID: "stable-session",
         PI_CODING_AGENT_DIR: join(root, "stable", "agent"), TRON_GATEWAY_CHANNEL: "stable", TRON_GATEWAY_SUPERVISED: "1",
         TRON_GATEWAY_PAYLOAD_ROOT: join(root, "stable", "payload"), TRON_DATA_DIR: join(root, "stable"),
       },

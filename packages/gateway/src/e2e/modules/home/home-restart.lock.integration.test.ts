@@ -104,7 +104,7 @@ describe("gateway/home contention, publication and restart lock", () => {
     first.script(Array.from({ length: 8 }, () => route));
     const settings = JSON.parse(await readFile(join(first.agentDir, "settings.json"), "utf8")) as { defaultProvider: string; defaultModel: string };
     const model = { provider: settings.defaultProvider, id: settings.defaultModel };
-    const homeRoot = join(first.tronHome, "gateway", "home");
+    const homeRoot = join(first.tronHome, "state", "home");
     const ledger = () => first.file(join(homeRoot, "home.json"));
 
     const phone = await first.connect("phone", { clientRole: "mobile" });

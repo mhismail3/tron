@@ -30,7 +30,7 @@ struct GatewayPayloadStore {
     }
 
     var payloadsRoot: URL {
-        home.appendingPathComponent("gateway/payloads", isDirectory: true)
+        home.appendingPathComponent("state/payloads", isDirectory: true)
     }
 
     var channelRoot: URL {

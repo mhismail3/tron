@@ -43,7 +43,7 @@ export class ModelReleaseDateCatalog {
     broadcast?: () => void;
     workRegistry?: { runtimeEpoch: string; begin(input: { kind: string; hostEpoch: string; cancellation?: () => void }): { settle(): void } };
   }) {
-    this.path = tronHomePath(options.tronHome, "gateway/model-release-dates.json");
+    this.path = tronHomePath(options.tronHome, "cache/model-release-dates.json");
     this.aliases = options.aliases ?? aliases;
     for (const [key, date] of Object.entries(options.baseline ?? baseline)) this.baselineDates.set(key, date);
   }

@@ -69,7 +69,7 @@ export class SettingsChangeRecord {
   private readonly directory: string;
 
   constructor(tronHome: string, private readonly segmentEntries = SEGMENT_ENTRIES) {
-    this.directory = tronHomePath(tronHome, "gateway/settings/changes");
+    this.directory = tronHomePath(tronHome, "state/settings/changes");
   }
 
   get path(): string { return this.directory; }

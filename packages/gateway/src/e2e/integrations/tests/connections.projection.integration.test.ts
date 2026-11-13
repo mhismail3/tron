@@ -25,7 +25,7 @@ it("projects retained connection state read-only and redacts credential referenc
     await mkdir(home, { mode: 0o700 });
     const empty = new ConnectionOwner(home);
     expect(await empty.snapshot()).toEqual({ definitions: [], instances: [], setupOperations: [], capabilities: [], stateRevision: 0 });
-    await expect(stat(join(home, "gateway", "integrations"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(join(home, "state", "integrations"))).rejects.toMatchObject({ code: "ENOENT" });
 
     const credentialRef = "connector:raindrop:preserved-only-reference";
     const at = "2026-01-01T00:00:00.000Z";
@@ -36,7 +36,7 @@ it("projects retained connection state read-only and redacts credential referenc
       setupOperations: { "retired-operation": { operationId: "retired-operation", instanceId: "retired-source", definitionId: "knowledge.raindrop", method: "token", status: "completed", createdAt: at, updatedAt: at } },
       receipts: { "retired-complete": { operation: "setup.complete", requestHash: "fixture", createdAt: at, result: { id: "retired-source" } } },
     };
-    const directory = join(home, "gateway", "integrations");
+    const directory = join(home, "state", "integrations");
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await chmod(directory, 0o700);
     const path = join(directory, "connections.json");
@@ -66,7 +66,7 @@ it("projects retained connection state read-only and redacts credential referenc
 it("removes retired setup operations, receipts and Raindrop mappings once, behind a restorable backup", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-connections-residue-"));
   try {
-    const home = join(root, "tron"), directory = join(home, "gateway", "integrations"), path = join(directory, "connections.json");
+    const home = join(root, "tron"), directory = join(home, "state", "integrations"), path = join(directory, "connections.json");
     expect(await planConnectionsResidue(home)).toEqual({ path, setupOperations: 0, receipts: 0, collectionMappings: 0 });
     const at = "2026-01-01T00:00:00.000Z";
     const instance = { id: "raindrop", definitionId: "knowledge.raindrop", implementation: "knowledge-connector", providerAccountId: "1", credentialRef: "connector:raindrop:kept",

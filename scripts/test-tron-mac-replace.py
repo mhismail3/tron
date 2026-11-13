@@ -197,11 +197,11 @@ class Fixture:
                         'commit', '--quiet', '--allow-empty', '-m', 'unpublished worker change'], check=True)
         (self.source / 'README.md').write_text('uncommitted caller bytes, not the build source\n')
         self.old_revision = capture(['git', '-C', self.source, 'rev-parse', f'{self.revision}~1'])[1].strip()
-        (self.home / '.tron/gateway').mkdir(parents=True)
-        (self.home / '.tron/gateway/gateway.json').write_text(json.dumps({'version': 1, 'machineId': 'tron-mac-replace-e2e', 'machineName': 'Replace E2E'}))
-        for path in (self.home, self.home / '.tron', self.home / '.tron/gateway'):
+        (self.home / '.tron/state').mkdir(parents=True)
+        (self.home / '.tron/state/gateway.json').write_text(json.dumps({'version': 1, 'machineId': 'tron-mac-replace-e2e', 'machineName': 'Replace E2E'}))
+        for path in (self.home, self.home / '.tron', self.home / '.tron/state'):
             path.chmod(0o700)
-        (self.home / '.tron/gateway/gateway.json').chmod(0o600)
+        (self.home / '.tron/state/gateway.json').chmod(0o600)
         self.installed = self.home / 'Applications/Tron.app'
         self.config_path = self.root / 'fixture.json'
         self.config = {'root': str(self.root), 'home': str(self.home), 'installed': str(self.installed), 'label': self.label,
@@ -216,7 +216,7 @@ class Fixture:
                            'EnvironmentVariables': {
                                'PATH': f'{self.node.parent}:/usr/bin:/bin:/usr/sbin:/sbin', 'HOME': str(self.home),
                                'TRON_DATA_DIR': str(self.home / '.tron'), 'PI_CODING_AGENT_DIR': str(self.home / '.tron/agent'),
-                               'PI_SUBAGENTS_TEMP_ROOT': str(self.home / '.tron/internal/subagents'),
+                               'PI_SUBAGENTS_TEMP_ROOT': str(self.home / '.tron/state/subagents'),
                                'TRON_MACHINE_GROUP_ID': 'tron-mac-replace-e2e', 'TRON_GATEWAY_HOST': self.host,
                                'TRON_GATEWAY_PORT': str(self.port), 'TRON_GATEWAY_SUPERVISED': '1', 'TRON_GATEWAY_CHANNEL': 'stable',
                                'FIXTURE_ROOT': str(self.root), 'FIXTURE_NODE': str(self.node),
@@ -989,17 +989,20 @@ try:
 except replace.Failure as failure:
     sys.exit(f'Failure: {failure}')
 '''
+SNAPSHOT_LEGACY_UNKNOWN = ('gateway/local-auth.json', 'gateway/enrollment.json', 'gateway/session-search.sqlite',
+                           'gateway/payloads/stable/current.json', 'internal/subagents/run/status.json',
+                           'ios-builds/builds/1/TronMobile.ipa')
 SNAPSHOT_KEPT = ('agent/sessions/project/session.jsonl', 'agent/settings.json', 'agent/missions/index/mission.json', 'agent/auth.json',
-                 'logs/unregistered.txt', 'ios-builds/unregistered/only-copy', 'internal/run/unregistered.lock',
-                 'gateway/devices.json', 'gateway/home/home.json', 'gateway/settings/observed.json',
-                 'gateway/unregistered/only-copy', 'internal/machine-group-id', 'internal/mac/wizard-state.json',
-                 'internal/run/.onboarded', 'internal/unregistered-file', 'workspace/files/report/REPORT.md',
-                 'workspace/state/episodic/memory.json', 'backup-20200101/only-copy', 'mac-terminal/ssh_host_ed25519_key')
+                 'logs/unregistered.txt', 'workspace/builds/ios-ota/unregistered/only-copy', 'internal/run/unregistered.lock',
+                 'state/devices.json', 'state/home/home.json', 'state/settings/observed.json', 'state/subagents/run/status.json',
+                 'state/unregistered/only-copy', 'state/machine-group-id', 'state/mac/wizard-state.json',
+                 'state/mac/.onboarded', 'internal/unregistered-file', 'workspace/files/report/REPORT.md',
+                 'workspace/state/episodic/memory.json', 'backup-20200101/only-copy', 'state/mac-terminal/ssh_host_ed25519_key',
+                 *SNAPSHOT_LEGACY_UNKNOWN)
 SNAPSHOT_SKIPPED = ('agent/npm/node_modules/package/index.js', 'agent/run-history.jsonl', 'agent/.tron-gateway-runtime.lock.lock/stale',
-                    'gateway/local-auth.json', 'gateway/session-search.sqlite', 'gateway/payloads/stable/current.json',
-                    'gateway/command-receipts/receipt.json', 'internal/subagents/run/status.json',
-                    'internal/pi-subagents/1/extension.js', 'internal/run/ios-simulator.lease.lock',
-                    'internal/ios-test-lane/lease.lock', 'logs/gateway.jsonl', 'ios-builds/builds/1/TronMobile.ipa',
+                    'state/local-auth.json', 'cache/session-search.sqlite', 'state/payloads/stable/current.json',
+                    'state/command-receipts/receipt.json', 'cache/pi-subagents/1/extension.js', 'internal/run/ios-simulator.lease.lock',
+                    'internal/ios-test-lane/lease.lock', 'logs/gateway.jsonl', 'workspace/builds/ios-ota/builds/1/TronMobile.ipa',
                     'workspace/tmp/task/scratch.txt')
 
 
@@ -1019,7 +1022,9 @@ def snapshot_journey():
                 path.chmod(0o600)
             for directory_path in (home, *(path for path in home.rglob('*') if path.is_dir())):
                 directory_path.chmod(0o700)
-            (home / 'gateway/unregistered-link').symlink_to('devices.json')
+            (home / 'gateway').chmod(0o755)
+            (home / 'gateway/local-auth.json').chmod(0o644)
+            (home / 'state/unregistered-link').symlink_to('devices.json')
             journal = replace.Journal.create(operation, 'operation', 'full', 'fixture', {'revision': 'b' * 40})
             runtime = replace.stage_runner(SimpleNamespace(runner_files=lambda: ()), journal, HERE)
 
@@ -1037,25 +1042,28 @@ def snapshot_journey():
                    f'the staged runner snapshots the home without the checkout: {result.stderr.strip()}')
             missing = [relative for relative in SNAPSHOT_KEPT if not (first / relative).is_file()
                        or (first / relative).read_text() != relative or (first / relative).stat().st_mode & 0o777 != 0o600]
-            record(not missing, f'backed-up and unregistered paths are cloned with their bytes and modes; missing: {missing}')
+            record(not missing, f'backed-up and unregistered paths retain bytes with private0600 copy modes; missing: {missing}')
+            record((home / 'gateway/local-auth.json').stat().st_mode & 0o777 == 0o644,
+                   'private recovery modes never change the source credential permissions')
             present = [relative for relative in SNAPSHOT_SKIPPED if (first / relative).exists()]
             record(not present, f'regenerated credentials, caches, runtimes, scratch, locks, logs and builds are not cloned; present: {present}')
-            record((first / 'gateway/unregistered-link').is_symlink()
-                   and os.readlink(first / 'gateway/unregistered-link') == 'devices.json', 'a symlink is cloned as a link, never followed')
-            record(first.stat().st_mode & 0o777 == 0o700 and (first / 'gateway').stat().st_mode & 0o777 == 0o700
-                   and (first / 'internal').stat().st_mode & 0o777 == 0o700, 'the snapshot and its partly cloned folders stay private')
+            record((first / 'state/unregistered-link').is_symlink()
+                   and os.readlink(first / 'state/unregistered-link') == 'devices.json', 'a symlink is cloned as a link, never followed')
+            record(first.stat().st_mode & 0o777 == 0o700 and (first / 'state').stat().st_mode & 0o777 == 0o700
+                   and (first / 'internal').stat().st_mode & 0o777 == 0o700 and (first / 'gateway').stat().st_mode & 0o777 == 0o700,
+                   'the local snapshot, canonical data and unknown legacy credentials retain private folders and0600 files')
             record(json.loads((operation / 'journal.json').read_text())['swap'].get('snapshot') == str(first),
                    'the journal records the snapshot')
             result = snapshot(1)
             record(result.returncode != 0 and 'raw snapshot already exists' in result.stderr and (first / SNAPSHOT_KEPT[0]).is_file(),
                    f'an existing snapshot is preserved, not overwritten: {result.stderr.strip()}')
             interrupted = operation / 'partial-state-snapshot-2'
-            (interrupted / 'gateway').mkdir(parents=True)
-            (interrupted / 'gateway/stale').write_text('from an interrupted attempt')
+            (interrupted / 'state').mkdir(parents=True)
+            (interrupted / 'state/stale').write_text('from an interrupted attempt')
             (interrupted / '.git').write_text('gitdir: /nonexistent/worktrees/home\n')
             result = snapshot(2)
             second = operation / 'state-snapshot-2'
-            record(result.returncode == 0 and (second / SNAPSHOT_KEPT[0]).is_file() and not (second / 'gateway/stale').exists()
+            record(result.returncode == 0 and (second / SNAPSHOT_KEPT[0]).is_file() and not (second / 'state/stale').exists()
                    and not interrupted.exists(), f'an interrupted snapshot is rebuilt whole: {result.stderr.strip()}')
             (runtime / 'tron-home-layout.json').write_text(json.dumps({'version': 1, 'paths': {}}))
             result = snapshot(3)

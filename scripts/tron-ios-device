@@ -21,7 +21,7 @@ GATEWAY_PROTOCOL_TARGET="${TRON_IOS_GATEWAY_PROTOCOL_TARGET:-stable}"
 GATEWAY_MAC_APP="${TRON_IOS_GATEWAY_MAC_APP:-/Applications/Tron.app}"
 LOCKER="$ROOT_DIR/scripts/ios-test-lock.py"
 DEVICE_LEASE_DIR="$HOME/.tron/internal/run"
-SHARE_DIR="$HOME/.tron/ios-builds"
+SHARE_DIR="$HOME/.tron/workspace/builds/ios-ota"
 COMPILE_PRODUCTS_ROOT="$HOME/Library/Developer/Tron/ios/device-compile-derived-data"
 SHARE_HTTPS_PORT=8443
 SHARE_BACKEND_PORT=8444
@@ -82,7 +82,7 @@ page installs over the air from Safari on a device in the development profile
 with Developer Mode on. It keeps the newest 5 builds.
 
 `share-host enable` (once, maintainer-approved) installs the loopback server
-LaunchAgent com.tron.ios-builds (127.0.0.1:8444, serving ~/.tron/ios-builds)
+LaunchAgent com.tron.ios-builds (127.0.0.1:8444, serving ~/.tron/workspace/builds/ios-ota)
 and runs `tailscale serve --bg --https=8443 http://127.0.0.1:8444`, so the
 builds are reachable only from the tailnet at https://<this Mac>.ts.net:8443/
 with Tailscale's certificate. `disable` reverses both and keeps the builds;
@@ -559,9 +559,9 @@ share_host_enable() {
     if [[ -n "$handler" && "$handler" != "/ http://127.0.0.1:$SHARE_BACKEND_PORT" ]]; then
         die "port $SHARE_HTTPS_PORT already serves '$handler'; refusing to replace another serve config"
     fi
-    mkdir -p "$SHARE_DIR" "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
+    mkdir -p "$SHARE_DIR" "$HOME/Library/LaunchAgents" "$HOME/.tron/logs"
     python3 - "$SHARE_AGENT_PLIST" "$SHARE_AGENT_LABEL" "$ROOT_DIR/scripts/ios-share-server.py" \
-        "$SHARE_DIR" "$SHARE_BACKEND_PORT" "$HOME/Library/Logs/tron-ios-builds.log" <<'PY'
+        "$SHARE_DIR" "$SHARE_BACKEND_PORT" "$HOME/.tron/logs/ios-builds.log" <<'PY'
 import plistlib, sys
 plist, label, source, directory, port, log = sys.argv[1:]
 with open(plist, "wb") as handle:
@@ -583,7 +583,7 @@ PY
         [[ "$code" == 200 || "$code" == 404 ]] && break
         sleep 0.5
     done
-    [[ "$code" == 200 || "$code" == 404 ]] || die "loopback build server did not start; see ~/Library/Logs/tron-ios-builds.log"
+    [[ "$code" == 200 || "$code" == 404 ]] || die "loopback build server did not start; see ~/.tron/logs/ios-builds.log"
     if [[ -z "$handler" ]]; then
         echo "+ tailscale serve --bg --https=$SHARE_HTTPS_PORT http://127.0.0.1:$SHARE_BACKEND_PORT"
         "$(tailscale_cli)" serve --bg --https="$SHARE_HTTPS_PORT" "http://127.0.0.1:$SHARE_BACKEND_PORT"

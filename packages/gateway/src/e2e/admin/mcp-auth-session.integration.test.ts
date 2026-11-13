@@ -123,7 +123,7 @@ describe("MCP auth through a live Gateway session", () => {
     registries.push(registry); await registry.initialize();
     const slot = await registry.create(cwd);
     const model = faux.getModel(); await slot.setModel(model.provider, model.id);
-    const devices = new DeviceStore(join(root, "gateway"), "machine"); await devices.initialize();
+    const devices = new DeviceStore(root, "machine"); await devices.initialize();
     const service = new GatewayService({ display: displayOwnerOf(registry), config: { tronHome: root }, sessions: registry, devices, auth,
       receipts: new CommandReceiptStore(root), uploads: new UploadStore(root, 1024), broadcast: () => {},
       requestRestart: () => {}, sessionDeleted: () => {},

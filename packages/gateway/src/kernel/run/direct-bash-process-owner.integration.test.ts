@@ -230,7 +230,7 @@ describe("DirectBashProcessOwner", () => {
     const owner = new DirectBashProcessOwner(SettingsManager.create(root, join(root, "agent")), "opaque-session-561");
     const names = ["PI_SUBAGENTS_TEMP_ROOT", "PI_CODING_AGENT_DIR", "PI_SESSION_FILE", "PI_SESSION_ID", "PI_SUBAGENT_PARENT_SESSION", "TRON_GATEWAY_SUPERVISED", "TRON_GATEWAY_PAYLOAD_ROOT", "TRON_DATA_DIR", "TRON_HOME_NAME"] as const;
     const previous = new Map(names.map(name => [name, process.env[name]]));
-    process.env.PI_SUBAGENTS_TEMP_ROOT = join(root, "tron", "internal", "subagents");
+    process.env.PI_SUBAGENTS_TEMP_ROOT = join(root, "tron", "state", "subagents");
     process.env.PI_CODING_AGENT_DIR = join(root, "tron", "agent");
     process.env.PI_SESSION_FILE = join(root, "tron", "sessions", "session.jsonl");
     process.env.PI_SESSION_ID = "opaque-session-561";

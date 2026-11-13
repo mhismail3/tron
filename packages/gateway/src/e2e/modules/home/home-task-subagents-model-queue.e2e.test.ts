@@ -135,7 +135,7 @@ describe("Home task subagents: the subagent model queue", () => {
     await settings.settingsChanges.change({ kind: "global" }, [{ key: "model.queue[role=subagent]", layer: "global", op: "set", value: ["queue-child/mac"] }],
       { actor: { kind: "ui", id: "fixture" }, commandId: "mac-subagent-queue" });
     let blockedProjection: string | undefined;
-    const projectionDirectory = join(f.tronHome, "gateway", "model-queue-sessions");
+    const projectionDirectory = join(f.tronHome, "state", "model-queue-sessions");
     f.faux.setResponses([
       async () => {
         const profile = JSON.parse(readFileSync(settings.settingsModel.owner.profilePath, "utf8"));
@@ -224,6 +224,6 @@ describe("Home task subagents: the subagent model queue", () => {
     expect(f.queueDiagnostics).toContainEqual({ event: "model-queue.projection", role: "subagent",
       scope: "global", status: "published", models: ["queue-child/mac"] });
     await activeRegistry.dispose();
-    expect(await readdir(join(f.tronHome, "gateway", "model-queue-sessions"))).toEqual([]);
+    expect(await readdir(join(f.tronHome, "state", "model-queue-sessions"))).toEqual([]);
   }, 120_000);
 });

@@ -2,8 +2,8 @@
   "store": "store-home-tasks",
   "module": "gateway/home",
   "files": [
-    "gateway/home/tasks/1792435102113-corpus-task.json",
-    "gateway/home/tasks/authorization.json"
+    "state/home/tasks/1792435102113-corpus-task.json",
+    "state/home/tasks/authorization.json"
   ],
   "projection": {
     "task": {

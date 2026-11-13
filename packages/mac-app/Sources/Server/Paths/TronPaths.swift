@@ -2,8 +2,6 @@ import Foundation
 
 enum TronPaths {
     private enum HomeComponent {
-        static let internalDir = "internal"
-        static let runDir = "run"
         static let networkCacheFile = "network.json"
     }
 
@@ -45,24 +43,24 @@ enum TronPaths {
     }
 
     static func bearerTokenPath(profile: TronGatewayProfile) -> URL {
-        tronHome(profile: profile).appendingPathComponent("gateway", isDirectory: true)
+        tronHome(profile: profile).appendingPathComponent("state", isDirectory: true)
             .appendingPathComponent("local-auth.json", isDirectory: false)
     }
 
     static func enrollmentCodePath(profile: TronGatewayProfile) -> URL {
-        tronHome(profile: profile).appendingPathComponent("gateway", isDirectory: true)
+        tronHome(profile: profile).appendingPathComponent("state", isDirectory: true)
             .appendingPathComponent("enrollment.json", isDirectory: false)
     }
 
     static func networkCachePath(profile: TronGatewayProfile) -> URL {
-        tronHome(profile: profile).appendingPathComponent("gateway", isDirectory: true)
+        tronHome(profile: profile).appendingPathComponent("cache", isDirectory: true)
             .appendingPathComponent(HomeComponent.networkCacheFile, isDirectory: false)
     }
 
-    static func internalDir(profile: TronGatewayProfile) -> URL { tronHome(profile: profile).appendingPathComponent(HomeComponent.internalDir, isDirectory: true) }
-    static func runDir(profile: TronGatewayProfile) -> URL { internalDir(profile: profile).appendingPathComponent(HomeComponent.runDir, isDirectory: true) }
-
-    static var internalDir: URL { tronHome.appendingPathComponent(HomeComponent.internalDir, isDirectory: true) }
+    static func macStateDirectory(profile: TronGatewayProfile) -> URL {
+        tronHome(profile: profile).appendingPathComponent("state", isDirectory: true)
+            .appendingPathComponent("mac", isDirectory: true)
+    }
 
     static let releaseApplicationURL = URL(fileURLWithPath: "/Applications/Tron.app", isDirectory: true)
 
@@ -94,16 +92,16 @@ enum TronPaths {
     }
 
     static func onboardedMarkerPath(profile: TronGatewayProfile) -> URL {
-        runDir(profile: profile).appendingPathComponent(".onboarded", isDirectory: false)
+        macStateDirectory(profile: profile).appendingPathComponent(".onboarded", isDirectory: false)
     }
 
     static func macAppVersionMarkerPath(profile: TronGatewayProfile) -> URL {
-        runDir(profile: profile).appendingPathComponent("mac-app-version.json", isDirectory: false)
+        macStateDirectory(profile: profile).appendingPathComponent("mac-app-version.json", isDirectory: false)
     }
     static var macAppVersionMarkerPath: URL { macAppVersionMarkerPath(profile: activeProfile) }
 
     static func macWrapperLockPath(profile: TronGatewayProfile) -> URL {
-        runDir(profile: profile).appendingPathComponent(macWrapperLockFileName(bundleIdentifier: Bundle.main.bundleIdentifier), isDirectory: false)
+        macStateDirectory(profile: profile).appendingPathComponent(macWrapperLockFileName(bundleIdentifier: Bundle.main.bundleIdentifier), isDirectory: false)
     }
     static var macWrapperLockPath: URL { macWrapperLockPath(profile: activeProfile) }
 

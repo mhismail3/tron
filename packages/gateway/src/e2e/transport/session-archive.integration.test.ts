@@ -130,7 +130,7 @@ async function fixture(options: {
     await options.duringStartupRecovery?.(registry, cwd);
     await registry.recoverCanonicalAttention();
     if (options.search) {
-      searchService = new SessionSearchService(registry, await SessionSearchIndex.open(join(root, "gateway", "session-search.sqlite")));
+      searchService = new SessionSearchService(registry, await SessionSearchIndex.open(join(root, "cache", "session-search.sqlite")));
     }
     const uploads = {
       acquire: vi.fn(),
@@ -326,14 +326,14 @@ const listedIds = async (client: Client, archived: "exclude" | "only") =>
   (await list(client, archived)).sessions.map((session) => session.id);
 
 const archivedRecord = async (root: string, sessionId: string): Promise<unknown> => {
-  const document = JSON.parse(await readFile(join(root, "gateway", "session-archive.json"), "utf8")) as {
+  const document = JSON.parse(await readFile(join(root, "state", "session-archive.json"), "utf8")) as {
     sessions: Record<string, unknown>;
   };
   return document.sessions[sessionId];
 };
 
 const attentionRecord = async (root: string, sessionId: string): Promise<unknown> => {
-  const document = JSON.parse(await readFile(join(root, "gateway", "session-attention.json"), "utf8")) as {
+  const document = JSON.parse(await readFile(join(root, "state", "session-attention.json"), "utf8")) as {
     sessions: Record<string, unknown>;
   };
   return document.sessions[sessionId];
@@ -1053,7 +1053,7 @@ describe("session archive over the real Gateway", () => {
       commandId: "delete-archived-session-command", sessionId: session.id,
     });
     expect(deleted.ok, JSON.stringify(deleted)).toBe(true);
-    const store = JSON.parse(await readFile(join(f.root, "gateway", "session-archive.json"), "utf8")) as { sessions: Record<string, unknown> };
+    const store = JSON.parse(await readFile(join(f.root, "state", "session-archive.json"), "utf8")) as { sessions: Record<string, unknown> };
     expect(Object.keys(store.sessions)).toEqual([]);
     expect((await list(client, "only")).sessions).toHaveLength(0);
     expect((await list(client, "exclude")).archivedCount).toBe(0);
@@ -1805,7 +1805,7 @@ describe("command-driven session replacement over the real Gateway", () => {
     expect(originReceipts.map((receipt) => [receipt.receiptKind, receipt.lifecycle, receipt.sessionId]))
       .toEqual([["start", "staged", r.origin.id], ["terminal", "completed", r.origin.id]]);
     expect((await invocationReceiptsIn(r.replacementFile)).filter((receipt) => receipt.sessionId === r.replacementId)).toEqual([]);
-    const markers = join(r.f.root, "gateway", "runtime-markers");
+    const markers = join(r.f.root, "state", "runtime-markers");
     const markerFiles = await import("node:fs/promises").then((fs) => fs.readdir(markers).catch(() => [] as string[]));
     expect(markerFiles.filter((name) => name.startsWith(r.origin.id))).toEqual([]);
     await waitFor(() => (deliveredAuthorityFrames(r.client, r.replacementId).at(-1)?.payload as { phase?: string } | undefined)?.phase === "idle",
@@ -1961,7 +1961,7 @@ describe("command-driven session replacement over the real Gateway", () => {
     expect((await invocationReceiptsIn(origin.file)).map((receipt) => [receipt.receiptKind, receipt.lifecycle, receipt.sessionId]))
       .toEqual([["start", "staged", origin.id], ["terminal", "completed", origin.id]]);
     expect(await invocationReceiptsIn(target.file)).toEqual([]);
-    const markerFiles = await import("node:fs/promises").then((fs) => fs.readdir(join(f.root, "gateway", "runtime-markers")).catch(() => [] as string[]));
+    const markerFiles = await import("node:fs/promises").then((fs) => fs.readdir(join(f.root, "state", "runtime-markers")).catch(() => [] as string[]));
     expect(markerFiles.filter((name) => name.startsWith(origin.id))).toEqual([]);
     await openSession(client, target.id);
   }, 30_000);

@@ -284,7 +284,7 @@ describe("gateway/home scenario lock", () => {
       contextUsage: { contextWindow: "<value>", percent: "<value>", tokens: "<value>" },
       contextWindowPolicy: { default: 128000, effective: 128000, maximum: 128000, minimum: 3192, model: MODEL_REF, override: 128000, source: "session",
         ...(extra.warning === undefined ? {} : { warning: extra.warning }) },
-      cwd: "<tmp>/tron/gateway/home/workspace", diagnostics: [], eventSequence: "<n>", extensionActivityAsOf: "<timestamp>",
+      cwd: "<tmp>/tron/state/home/workspace", diagnostics: [], eventSequence: "<n>", extensionActivityAsOf: "<timestamp>",
       extensionPresentation: { hostEpoch: "<id>", pendingInteractions: [], revision: "<n>", surfaces: [], version: 3,
         capabilities: ["semantic.dialogs", "tron.form.v1", "semantic.notifications", "semantic.status", "semantic.working", "semantic.hidden-thinking-label",
           "semantic.string-widgets", "semantic.title", "semantic.revisioned-editor", "semantic.tools-expanded", "surfaces.full-frame"],
@@ -367,7 +367,7 @@ describe("gateway/home scenario lock", () => {
       "custom tron.settings.v1", "custom tron.settings.v1", "session_info", "custom tron.settings.v1", "model_change", "custom tron.settings.v1", "custom tron.settings.v1",
       "custom tron-home-task", "custom tron.chat-invocation.v1", "custom tron.chat-invocation.v1", "message system", "message user", "custom tron.chat-invocation.v1",
       "message assistant", "custom tron-home-task-report", "message toolResult", "custom tron.chat-invocation.v1"]);
-    expect(homeSessionJsonl[0], "Home's chapter runs in Home's workspace").toMatchObject({ type: "session", cwd: "<tmp>/tron/gateway/home/workspace" });
+    expect(homeSessionJsonl[0], "Home's chapter runs in Home's workspace").toMatchObject({ type: "session", cwd: "<tmp>/tron/state/home/workspace" });
     expect(workerSessionJsonl[0], "the worker runs in the task's target").toMatchObject({ type: "session", cwd: "<tmp>/workspace" });
     expect(workerSessionJsonl.find((entry) => entry.type === "session_info")?.name, "the worker session is named for the task").toBe("Lock task");
     const receipt = (entry: any) => entry.customType !== "tron.chat-invocation.v1" ? [] : [[entry.data.receiptKind, entry.data.lifecycle ?? "", entry.data.source,
@@ -462,7 +462,7 @@ describe("gateway/home scenario lock", () => {
       message: "The agent finished responding.", notificationKind: "agent_finished", requestId: "<id>", sessionId: "<id>", title: "Home", version: 1 } };
     expect(normalizeTraceValue(relayRequests as unknown as TraceValue, gateway.normalization), "each Home activation pushes finished; the worker pushes nothing").toEqual([PUSH, PUSH]);
 
-    const homeRoot = join(gateway.tronHome, "gateway", "home");
+    const homeRoot = join(gateway.tronHome, "state", "home");
     const taskFile = (await readdir(join(homeRoot, "tasks"))).find((name) => name.endsWith(`-${TASK_ID}.json`));
     expect(await gateway.tree(homeRoot), "the Home store's files").toEqual(["home.json", "profile.json", "tasks/<epoch>-lock-task.json", "tasks/authorization.json"]);
     expect(stable(await gateway.file(join(homeRoot, "home.json"))), "the designation: one active chapter whose activation started").toEqual({ bindingRevision: 1,

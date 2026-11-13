@@ -5,65 +5,65 @@
       "lock": "store-settings",
       "paths": [
         "agent/settings.json",
-        "gateway/settings"
+        "state/settings"
       ]
     },
     {
       "module": "gateway/security",
       "lock": "store-devices",
       "paths": [
-        "gateway/devices.json",
-        "gateway/local-auth.json"
+        "state/devices.json",
+        "state/local-auth.json"
       ]
     },
     {
       "module": "gateway/transport",
       "lock": "store-command-receipts",
       "paths": [
-        "gateway/command-receipts"
+        "state/command-receipts"
       ]
     },
     {
       "module": "gateway/session-catalog",
       "lock": "store-session-archive-attention",
       "paths": [
-        "gateway/session-archive.json",
-        "gateway/session-attention.json"
+        "state/session-archive.json",
+        "state/session-attention.json"
       ]
     },
     {
       "module": "gateway/run",
       "lock": "store-run-markers",
       "paths": [
-        "gateway/runtime-markers"
+        "state/runtime-markers"
       ]
     },
     {
       "module": "gateway/notifications",
       "lock": "store-notifications",
       "paths": [
-        "gateway/notifications.json"
+        "state/notifications.json"
       ]
     },
     {
       "module": "gateway/providers",
       "lock": "store-model-recents",
       "paths": [
-        "gateway/model-recents.json"
+        "state/model-recents.json"
       ]
     },
     {
       "module": "gateway/automations",
       "lock": "store-automations",
       "paths": [
-        "gateway/automations"
+        "state/automations"
       ]
     },
     {
       "module": "gateway/home",
       "lock": "store-home-tasks",
       "paths": [
-        "gateway/home/tasks",
+        "state/home/tasks",
         "workspace/state/home"
       ]
     },
@@ -78,8 +78,8 @@
       "module": "gateway/home",
       "lock": "store-home-designation",
       "paths": [
-        "gateway/home/home.json",
-        "gateway/home/workspace"
+        "state/home/home.json",
+        "state/home/workspace"
       ]
     },
     {
@@ -87,45 +87,46 @@
       "lock": "store-episodic",
       "paths": [
         "workspace/state/episodic",
-        "gateway/workspace-state/episodic-initialized.json"
+        "state/workspace-state/episodic-initialized.json"
       ]
     },
     {
       "module": "gateway/session-search",
       "lock": "store-session-search",
       "paths": [
-        "gateway/session-search.sqlite"
+        "cache/session-search.sqlite"
       ]
     },
     {
       "module": "gateway/providers",
       "lock": "store-model-queue",
       "paths": [
-        "gateway/model-queue.json",
-        "gateway/model-queue-sessions"
+        "state/model-queue.json",
+        "state/model-queue-sessions"
       ]
     },
     {
       "module": "gateway/providers",
       "lock": "store-model-release-dates",
       "paths": [
-        "gateway/model-release-dates.json"
+        "cache/model-release-dates.json"
       ]
     }
   ],
   "directories": [
     "agent",
-    "gateway",
-    "gateway/automations",
-    "gateway/command-receipts",
-    "gateway/home",
-    "gateway/home/tasks",
-    "gateway/home/workspace",
-    "gateway/model-queue-sessions",
-    "gateway/runtime-markers",
-    "gateway/settings",
-    "gateway/settings/changes",
-    "gateway/workspace-state",
+    "cache",
+    "state",
+    "state/automations",
+    "state/command-receipts",
+    "state/home",
+    "state/home/tasks",
+    "state/home/workspace",
+    "state/model-queue-sessions",
+    "state/runtime-markers",
+    "state/settings",
+    "state/settings/changes",
+    "state/workspace-state",
     "workspace",
     "workspace/state",
     "workspace/state/apps",
@@ -135,30 +136,30 @@
   ],
   "files": {
     "agent/settings.json": "38f919fefa6ef946498e4d46af8aac4fba374d1f4a2e5d783bef255c4a7bdc3d",
-    "gateway/automations/29172405-fc32-4928-812b-7f47e1e8a03d.json": "26d0ebfaae459f264903f9a92808abacf995d070ba0091b209244926b4f9071b",
-    "gateway/command-receipts/O_Sn7l_79w_fAls2GLmjFBMMfhbI16zw5A7cERTXrTk.json": "61f7ad30626035a27d31108519145f4478b83f1f7d06ff1fb353ba4bac32e02b",
-    "gateway/command-receipts/Xez6kx4e48B0whQ6MMwCNAz-1ginsys6ecq3tykyVfM.json": "2547a8b06827db42a5cf00fd2c904a4982ce3753ad870a33ff98af0826771d39",
-    "gateway/devices.json": "3c6d08adf2342a593e9e08a74ef4de5a920e0e648ff5902893dd685e897f6d9d",
-    "gateway/enrollment.json": "2eb60d96fff740085fe595b279b9267c7c75b957c4a18166fc82ac4e90257f02",
-    "gateway/home/home.json": "7226df9ed521e42bca4abec0db16df6f307576df77d6990ec0fe4ee6aff029a1",
-    "gateway/home/tasks/1792435102113-corpus-task.json": "7cefe2b64f66f348545e3abe99d89308c1da0f0de7c7606f4884fa39bffce20b",
-    "gateway/home/tasks/authorization.json": "169476794894cfb98793c6235a35e736721c41412239a65157a4d2d925fa1a60",
-    "gateway/local-auth.json": "0166db639f5fbab9e808248bd66f478f1c43bb6adc2267f4890873cf2ecc4a21",
-    "gateway/model-queue-sessions/a6391f109d3f70dda387c8af21482f5538d2aab99af046c770545f96ee078a86.json": "bc88361f3d0bf3c9f06169a7d276f08439be3f581e6ba9b6cbeac52c74a1a4f9",
-    "gateway/model-queue.json": "61c8315fc638b4a80d909c1cc84e0f6f1a7e0bb3b942ac4cf57bc749fa06d338",
-    "gateway/model-recents.json": "1ca222939cd7bccb9e83a8e822e155bb492e0d4e403383170e1741e7331777e7",
-    "gateway/model-release-dates.json": "ebbb81a5e59de7be22546e82de27f6e6b5573fa6d246cd4beaa219071f4eda15",
-    "gateway/notifications.json": "d0df9cc6b1e608cd16473e2866866ef69c08c77da74ee120fcbd0a4296db3665",
-    "gateway/runtime-markers/01a00000-0000-7000-8000-00000000c0a1.json": "7701c2c3e277fa52b435ab3248e4215c715adf853c1eebbaaecd9da282ff21a2",
-    "gateway/session-archive.json": "a486ec47088784aeb032dc7e15cebcd5f4dc090dcb61e8da5988048b4ab8ca36",
-    "gateway/session-attention.json": "b6df86b20e7c5b32d2f8ea7c19de32de4cd592082c223bc166177be8777e3aab",
-    "gateway/session-search.sqlite": "55db79eb148dab788296fd2a2ba143fd327a6013034f2b08e7124db30aa47e35",
-    "gateway/settings/changes/000000.jsonl": "971050866bd50e441cbce8058811ef92aa58d7d16fc36eba5ef7e5d92e8456f2",
-    "gateway/settings/changes/index.json": "68367de7bf446cbc4adbff5391d4f946551fd8ac44586786a7d2827a6994e98d",
-    "gateway/workspace-state/apps-initialized.json": "4b8894d57dfa621e534ef4eb25263e8f00254cbcb4327f1f98796314ac279dde",
-    "gateway/workspace-state/episodic-initialized.json": "4b8894d57dfa621e534ef4eb25263e8f00254cbcb4327f1f98796314ac279dde",
-    "gateway/workspace-state/home-tasks-initialized.json": "4b8894d57dfa621e534ef4eb25263e8f00254cbcb4327f1f98796314ac279dde",
-    "gateway/workspace-state/initialized.json": "4b8894d57dfa621e534ef4eb25263e8f00254cbcb4327f1f98796314ac279dde",
+    "state/automations/29172405-fc32-4928-812b-7f47e1e8a03d.json": "26d0ebfaae459f264903f9a92808abacf995d070ba0091b209244926b4f9071b",
+    "state/command-receipts/O_Sn7l_79w_fAls2GLmjFBMMfhbI16zw5A7cERTXrTk.json": "61f7ad30626035a27d31108519145f4478b83f1f7d06ff1fb353ba4bac32e02b",
+    "state/command-receipts/Xez6kx4e48B0whQ6MMwCNAz-1ginsys6ecq3tykyVfM.json": "2547a8b06827db42a5cf00fd2c904a4982ce3753ad870a33ff98af0826771d39",
+    "state/devices.json": "3c6d08adf2342a593e9e08a74ef4de5a920e0e648ff5902893dd685e897f6d9d",
+    "state/enrollment.json": "2eb60d96fff740085fe595b279b9267c7c75b957c4a18166fc82ac4e90257f02",
+    "state/home/home.json": "7226df9ed521e42bca4abec0db16df6f307576df77d6990ec0fe4ee6aff029a1",
+    "state/home/tasks/1792435102113-corpus-task.json": "7cefe2b64f66f348545e3abe99d89308c1da0f0de7c7606f4884fa39bffce20b",
+    "state/home/tasks/authorization.json": "169476794894cfb98793c6235a35e736721c41412239a65157a4d2d925fa1a60",
+    "state/local-auth.json": "0166db639f5fbab9e808248bd66f478f1c43bb6adc2267f4890873cf2ecc4a21",
+    "state/model-queue-sessions/a6391f109d3f70dda387c8af21482f5538d2aab99af046c770545f96ee078a86.json": "bc88361f3d0bf3c9f06169a7d276f08439be3f581e6ba9b6cbeac52c74a1a4f9",
+    "state/model-queue.json": "61c8315fc638b4a80d909c1cc84e0f6f1a7e0bb3b942ac4cf57bc749fa06d338",
+    "state/model-recents.json": "1ca222939cd7bccb9e83a8e822e155bb492e0d4e403383170e1741e7331777e7",
+    "cache/model-release-dates.json": "ebbb81a5e59de7be22546e82de27f6e6b5573fa6d246cd4beaa219071f4eda15",
+    "state/notifications.json": "d0df9cc6b1e608cd16473e2866866ef69c08c77da74ee120fcbd0a4296db3665",
+    "state/runtime-markers/01a00000-0000-7000-8000-00000000c0a1.json": "7701c2c3e277fa52b435ab3248e4215c715adf853c1eebbaaecd9da282ff21a2",
+    "state/session-archive.json": "a486ec47088784aeb032dc7e15cebcd5f4dc090dcb61e8da5988048b4ab8ca36",
+    "state/session-attention.json": "b6df86b20e7c5b32d2f8ea7c19de32de4cd592082c223bc166177be8777e3aab",
+    "cache/session-search.sqlite": "55db79eb148dab788296fd2a2ba143fd327a6013034f2b08e7124db30aa47e35",
+    "state/settings/changes/000000.jsonl": "971050866bd50e441cbce8058811ef92aa58d7d16fc36eba5ef7e5d92e8456f2",
+    "state/settings/changes/index.json": "68367de7bf446cbc4adbff5391d4f946551fd8ac44586786a7d2827a6994e98d",
+    "state/workspace-state/apps-initialized.json": "4b8894d57dfa621e534ef4eb25263e8f00254cbcb4327f1f98796314ac279dde",
+    "state/workspace-state/episodic-initialized.json": "4b8894d57dfa621e534ef4eb25263e8f00254cbcb4327f1f98796314ac279dde",
+    "state/workspace-state/home-tasks-initialized.json": "4b8894d57dfa621e534ef4eb25263e8f00254cbcb4327f1f98796314ac279dde",
+    "state/workspace-state/initialized.json": "4b8894d57dfa621e534ef4eb25263e8f00254cbcb4327f1f98796314ac279dde",
     "workspace/state/apps/corpus-counter/app.json": "1817c687513e5c604bb970cafc24cd46e62bf9d6bc2265e4e7d20a3553edad26",
     "workspace/state/apps/corpus-counter/App.swift": "95476ff64ef0e735bf94770540c78b1f5cb31b4142e849f750ebd0f56f2b1fef",
     "workspace/state/apps/corpus-counter/data.sqlite": "06830f3af7a47da455fa657b008c82199beccd56729bb6f012f3f8fdc0fba20e",

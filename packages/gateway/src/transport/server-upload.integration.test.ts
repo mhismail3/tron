@@ -163,14 +163,14 @@ describe("Gateway upload HTTP streaming", () => {
       outgoing.write("1234");
     });
     await uploads.waitForFirstChunk();
-    expect(await readdir(join(home, "gateway", "uploads"))).toEqual([]);
+    expect(await readdir(join(home, "state", "uploads"))).toEqual([]);
     outgoingRequest.end("5678");
     const response = await responseTask;
 
     expect(response.status).toBe(201);
     const id = JSON.parse(response.body).upload.id as string;
-    expect(await readFile(join(home, "gateway", "uploads", id, "content.txt"), "utf8")).toBe("12345678");
-    expect(await readdir(join(home, "gateway", "upload-bodies"))).toEqual([]);
+    expect(await readFile(join(home, "state", "uploads", id, "content.txt"), "utf8")).toBe("12345678");
+    expect(await readdir(join(home, "state", "upload-bodies"))).toEqual([]);
   });
 
   it.each([false, true])("cleans a lost upload receipt without deleting claimed bytes (claimed=%s)", async (claimed) => {
@@ -211,8 +211,8 @@ describe("Gateway upload HTTP streaming", () => {
           timer = setTimeout(() => reject(new Error("abandoned staging was not retired")), 2_000);
         })]);
       } finally { clearTimeout(timer); }
-      if (claimed) expect(await readFile(join(home, "gateway", "uploads", id, "content.txt"), "utf8")).toBe("draft");
-      else expect(await entries(join(home, "gateway", "uploads"))).not.toContain(id);
+      if (claimed) expect(await readFile(join(home, "state", "uploads", id, "content.txt"), "utf8")).toBe("draft");
+      else expect(await entries(join(home, "state", "uploads"))).not.toContain(id);
     } finally {
       published();
       outgoing.destroy();
@@ -224,7 +224,7 @@ describe("Gateway upload HTTP streaming", () => {
     const abandonedResponse = await uploadRequest(port, 5, (outgoing) => outgoing.end("draft"));
     const abandonedID = JSON.parse(abandonedResponse.body).upload.id as string;
     await expect(deleteUploadRequest(port, abandonedID)).resolves.toMatchObject({ status: 204, body: "" });
-    expect(await entries(join(home, "gateway", "uploads"))).not.toContain(abandonedID);
+    expect(await entries(join(home, "state", "uploads"))).not.toContain(abandonedID);
 
     const claimedResponse = await uploadRequest(port, 6, (outgoing) => outgoing.end("prompt"));
     const claimedID = JSON.parse(claimedResponse.body).upload.id as string;
@@ -262,13 +262,13 @@ describe("Gateway upload HTTP streaming", () => {
     const declaredResponse = await uploadRequest(declared.port, 9, (outgoing) => outgoing.end());
     expect(declaredResponse.status).toBe(400);
     expect(JSON.parse(declaredResponse.body)).toMatchObject({ error: { code: "invalid_request" } });
-    expect(await entries(join(declared.home, "gateway", "upload-bodies"))).toEqual([]);
+    expect(await entries(join(declared.home, "state", "upload-bodies"))).toEqual([]);
 
     const observed = await fixture();
     const observedResponse = await uploadRequest(observed.port, undefined, (outgoing) => outgoing.end("123456789"));
     expect(observedResponse.status).toBe(400);
-    expect(await entries(join(observed.home, "gateway", "uploads"))).toEqual([]);
-    expect(await entries(join(observed.home, "gateway", "upload-bodies"))).toEqual([]);
+    expect(await entries(join(observed.home, "state", "uploads"))).toEqual([]);
+    expect(await entries(join(observed.home, "state", "upload-bodies"))).toEqual([]);
   });
 
   it("reports bounded concurrent admission as retryable HTTP overload", async () => {
@@ -327,7 +327,7 @@ describe("Gateway upload HTTP streaming", () => {
       () => loggerRecords.some(({ metadata }) => metadata.event === "http.upload" && metadata.requestID === failedID),
       "the failed upload record",
     );
-    expect(await readdir(join(home, "gateway", "upload-bodies"))).toEqual([]);
+    expect(await readdir(join(home, "state", "upload-bodies"))).toEqual([]);
     const failedRecords = loggerRecords.filter(({ metadata }) => metadata.event === "http.upload");
     expect(failedRecords).toHaveLength(1);
     const failedRecord = failedRecords[0];

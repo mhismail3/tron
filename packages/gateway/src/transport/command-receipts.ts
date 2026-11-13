@@ -129,7 +129,7 @@ export class CommandReceiptStore {
     private readonly writeReceipt: (path: string, value: unknown, mode?: number) => Promise<void> = durableAtomicWriteJson,
     capacity: CommandReceiptCapacity = {},
   ) {
-    this.directory = tronHomePath(tronHome, "gateway/command-receipts");
+    this.directory = tronHomePath(tronHome, "state/command-receipts");
     this.maximumEntries = capacity.maximumEntries ?? COMMAND_RECEIPT_MAX_ENTRIES;
     this.maximumAggregateBytes = capacity.maximumAggregateBytes ?? COMMAND_RECEIPT_MAX_AGGREGATE_BYTES;
     this.maximumAgeMs = capacity.maximumAgeMs ?? COMMAND_RECEIPT_MAX_AGE_MS;

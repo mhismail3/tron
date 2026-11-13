@@ -122,7 +122,7 @@ function publish(f: Fixture, title: string): void {
   const ipa = join(f.root, "fixture.ipa");
   execFileSync("/usr/bin/python3", ["-c", "import sys,zipfile,plistlib\nwith zipfile.ZipFile(sys.argv[1],'w') as z: z.writestr('Payload/Tron.app/Info.plist',plistlib.dumps({'CFBundleIdentifier':'com.tron.mobile','CFBundleShortVersionString':'1.0'}))", ipa]);
   execFileSync("/usr/bin/python3", [fileURLToPath(new URL("../../../../../../scripts/ios-share-publish.py", import.meta.url)), "--ipa", ipa,
-    "--dir", join(f.root, "tron/ios-builds"), "--base-url", "https://mac.example.ts.net:8443", "--title", title, "--notes", "Read the full notes", "--commit", "a".repeat(40), "--branch", "feature/builds"]);
+    "--dir", join(f.root, "tron/workspace/builds/ios-ota"), "--base-url", "https://mac.example.ts.net:8443", "--title", title, "--notes", "Read the full notes", "--commit", "a".repeat(40), "--branch", "feature/builds"]);
 }
 
 describe("reviewed Swift app lifecycle through the Gateway", () => {
@@ -176,7 +176,7 @@ describe("reviewed Swift app lifecycle through the Gateway", () => {
     const [directory] = await readdir(root);
     const path = join(root, directory!, "App.swift");
     const offered = await stat(path);
-    const displayed = await stat(join(f.root, "tron/gateway/display-artifacts/artifacts", reference.artifactId, "content"));
+    const displayed = await stat(join(f.root, "tron/state/display-artifacts/artifacts", reference.artifactId, "content"));
     expect([offered.dev, offered.ino]).toEqual([displayed.dev, displayed.ino]);
     await displayOwnerOf(f.registry).artifacts.revoke(reference.artifactId, reference.sessionId);
     expect(await readFile(path, "utf8")).toBe(source);
@@ -266,7 +266,7 @@ describe("reviewed Swift app lifecycle through the Gateway", () => {
     await tool(f, offerArgs(["ios-builds"]));
     await rpc(f, "apps.install", installParams(await rpc(f, "apps.review", { sourceSha256: sha(source) }), "canonical-home-install"));
     expect((await rpc(f, "apps.open", { appId: "builds" })).feeds["ios-builds"].status).toBe("ready");
-    const publisher = join(f.root, "tron/ios-builds");
+    const publisher = join(f.root, "tron/workspace/builds/ios-ota");
     await rename(publisher, publisher + "-target"); await symlink(publisher + "-target", publisher, "dir");
     expect((await rpc(f, "apps.open", { appId: "builds" })).feeds["ios-builds"].status).toBe("unavailable");
     results.push("canonical configured home versus refused linked publisher root");
@@ -397,7 +397,7 @@ describe("reviewed Swift app lifecycle through the Gateway", () => {
   });
   it.skipIf(process.platform !== "darwin")("injects the real feed into a fresh native interpreter and fences exact install URLs to explicit user actions", async () => {
     const f = await fixture(); publish(f, "Native feed build");
-    const id = (await readdir(join(f.root, "tron/ios-builds/builds"))).find(name => !name.startsWith("."))!;
+    const id = (await readdir(join(f.root, "tron/workspace/builds/ios-ota/builds"))).find(name => !name.startsWith("."))!;
     const manifest = `https://mac.example.ts.net:8443/builds/${id}/manifest.plist`;
     const install = (value: string) => `itms-services://?action=download-manifest&url=${encodeURIComponent(value)}`;
     const program = `import SwiftUI
@@ -437,7 +437,7 @@ struct ContentView: View {
   });
   it("lists retained timestamp/commit publications alongside UUID publications without relaxing safe reads", async () => {
     const f = await fixture(); publish(f, "Retained build");
-    const publisher = join(f.root, "tron/ios-builds/builds");
+    const publisher = join(f.root, "tron/workspace/builds/ios-ota/builds");
     const retainedId = "20261024T013208Z-aaaaaaaaa";
     execFileSync("/usr/bin/python3", ["-c", `import json, pathlib, plistlib, sys
 root = pathlib.Path(sys.argv[1])
@@ -521,11 +521,11 @@ struct ContentView: View {
     expect(next.app.revision).toBe(2);
     expect(next.app.instanceId).toBe(installed.app.instanceId);
     expect(next.feeds["ios-builds"].builds.map((build: Record<string, unknown>) => build.title)).toEqual(["Second build", "First build"]);
-    await mkdir(join(f.root, "tron/ios-builds/builds/.staging-incomplete"));
-    await writeFile(join(f.root, "tron/ios-builds/builds/.staging-incomplete/build.json"), "broken");
+    await mkdir(join(f.root, "tron/workspace/builds/ios-ota/builds/.staging-incomplete"));
+    await writeFile(join(f.root, "tron/workspace/builds/ios-ota/builds/.staging-incomplete/build.json"), "broken");
     expect((await rpc(f, "apps.open", { appId: "builds" })).feeds["ios-builds"].builds).toHaveLength(2);
-    const ids = (await readdir(join(f.root, "tron/ios-builds/builds"))).filter(id => !id.startsWith("."));
-    await writeFile(join(f.root, "tron/ios-builds/builds", ids[0]!, "build.json"), "broken");
+    const ids = (await readdir(join(f.root, "tron/workspace/builds/ios-ota/builds"))).filter(id => !id.startsWith("."));
+    await writeFile(join(f.root, "tron/workspace/builds/ios-ota/builds", ids[0]!, "build.json"), "broken");
     expect((await rpc(f, "apps.open", { appId: "builds" })).feeds["ios-builds"]).toMatchObject({ status: "unavailable", builds: [] });
     results.push("declared live publisher feed, refresh without reinstall, staging exclusion and malformed refusal");
   });
