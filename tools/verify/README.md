@@ -17,6 +17,7 @@ scripts/tron verify --batch --base <main-anchor> # initialize coverage in a clea
 scripts/tron verify --batch [--repeat] [--plan] # next pinned batch, or rerun every lane at the green HEAD
 scripts/tron verify --batch --review <culprit> --decision ACCEPT|BLOCK --reviewer <id> --binding <digest>
 scripts/tron verify --update-locks <id>         # rewrite <id>'s goldens (lock or approved migration slices)
+scripts/tron verify ... --ios-jobs 1             # serialize native shards and real-UI journeys (1|2|3; default 3)
 scripts/tron verify ... --skip ios,mac,relay    # accept, explicitly, selections this run will not run
 scripts/tron verify ... --gateway-host local    # override the test-host pool: run the Gateway Vitest lanes here
 ```

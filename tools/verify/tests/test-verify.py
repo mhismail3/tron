@@ -1340,6 +1340,14 @@ class IosLaneTests(VerifyCase):
         with self.subTest("cross-file test callers remain covered"):
             self.assertEqual(cross_test.returncode, 0, cross_test.stdout + cross_test.stderr)
             self.assertEqual(calls.read_text().splitlines(), [all_journeys])
+        selected = r.report()["selection"]
+        for jobs in (1, 2, 3):
+            calls.write_text("")
+            serial = r.verify("--changed", "--ios-jobs", str(jobs))
+            self.assertEqual(serial.returncode, 0, serial.stdout + serial.stderr)
+            self.assertEqual(calls.read_text().splitlines(), [all_journeys.replace("lanes=3", f"lanes={jobs}")])
+            self.assertEqual(r.report()["selection"], selected)
+            self.assertEqual(r.report()["passingTests"], 4)
 
         r.git("branch", "-f", "base")
         calls.write_text("")
@@ -1867,6 +1875,36 @@ class IosLaneTests(VerifyCase):
         self.assertEqual([step["name"] for step in r.report()["steps"] if step["name"].startswith("tests: ios")],
                          ["tests: ios 1/3", "tests: ios 2/3", "tests: ios 3/3"])
         r.env.pop("FIXTURE_IOS_FAIL"); r.env.pop("FIXTURE_IOS_FAIL_IN")
+
+        selected = r.report()["selection"]
+        for jobs in (1, 2, 3):
+            calls.write_text("")
+            spans.write_text("")
+            planned = r.verify("--module", "ios-app/ui-tests", "--plan", "--ios-jobs", str(jobs))
+            self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
+            plan = json.loads(planned.stdout[planned.stdout.index("{"):])
+            self.assertEqual(plan["iosJobs"], jobs)
+            self.assertEqual(len(plan["iosLanes"]), jobs + 1)
+            executed = r.verify("--module", "ios-app/ui-tests", "--skip", "mac", "--ios-jobs", str(jobs))
+            self.assertEqual(executed.returncode, 0, executed.stdout + executed.stderr)
+            report = r.report()
+            self.assertEqual(report["selection"], selected)
+            self.assertEqual(report["passingTests"], len(methods) + 1)
+            self.assertEqual(len([step for step in report["steps"] if step["name"].startswith("tests: ios")]), 3)
+            bounds = sorted((float(line.split()[0]), float(line.split()[1])) for line in spans.read_text().splitlines())
+            self.assertEqual(len(bounds), 3)
+            if jobs == 1:
+                self.assertTrue(all(end <= start for (_, end), (start, _) in zip(bounds, bounds[1:])), bounds)
+            events = sorted([(start, 1) for start, _ in bounds] + [(end, -1) for _, end in bounds])
+            active = 0
+            peak = 0
+            for _, delta in events:
+                active += delta
+                peak = max(peak, active)
+            self.assertEqual(peak, jobs, bounds)
+        for jobs in ("0", "4", "serial"):
+            invalid = r.verify("--plan", "--ios-jobs", jobs)
+            self.assertEqual(invalid.returncode, 2, invalid.stdout + invalid.stderr)
 
         calls.write_text("")
         r.env.update(FIXTURE_IOS_BUSY="run", FIXTURE_IOS_BUSY_IN=lane("iphone2"))
