@@ -17,6 +17,7 @@ import signal
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 import unittest
 import uuid
@@ -83,15 +84,35 @@ def reading() -> dict:
 
 class Capture:
     def __init__(self, lane: str, root: Path = ROOT):
+        destination()
         self.root = root.resolve()
-        revisions = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD', 'HEAD^{tree}'], text=True).splitlines()
-        dirty = bool(subprocess.check_output(['git', '-C', str(root), 'status', '--porcelain', '--untracked-files=normal'], text=True).strip())
+        environment = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+        revisions = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD', 'HEAD^{tree}'], text=True, env=environment).splitlines()
+        dirty = bool(subprocess.check_output(['git', '-C', str(root), 'status', '--porcelain', '--untracked-files=normal'], text=True, env=environment).strip())
         self.context = {'runId': uuid.uuid4().hex, 'commit': revisions[0], 'tree': revisions[1], 'dirty': int(dirty),
                         'lane': lane, 'contended': int(os.environ.get('TRON_TEST_CONTENDED') == '1'), **reading()}
 
-    def record(self, identity: str, outcome: str, seconds: float) -> dict:
-        return {**self.context, 'testId': identity, 'outcome': outcome, 'seconds': max(0, float(seconds)),
+    def record(self, identity: str, outcome: str, seconds: float, host_reading: dict | None = None) -> dict:
+        return {**self.context, **(host_reading or {}), 'testId': identity, 'outcome': outcome, 'seconds': max(0, float(seconds)),
                 'seenAt': datetime.now(timezone.utc).isoformat()}
+
+    def events(self, report: Path) -> None:
+        if not report.is_file():
+            return
+        records = []
+        for line in report.read_text().split('\n'):
+            if not line:
+                continue
+            case = json.loads(line)
+            path = Path(case['file']).resolve()
+            external = not path.is_relative_to(self.root)
+            file = 'external/' + path.name if external else path.relative_to(self.root).as_posix()
+            host_reading = {key: case[key] for key in ('host', 'cpuIdlePercent', 'memoryFreePercent', 'measuredAt')}
+            record = self.record(file + '::' + case['fullName'], case['outcome'], case['seconds'], host_reading)
+            if external:
+                record['dirty'] = 1
+            records.append(record)
+        append(records)
 
     def vitest(self, report: Path) -> None:
         if not report.is_file():
@@ -137,7 +158,7 @@ class Capture:
         while pending:
             node = pending.pop()
             pending.extend(node.get('children', []))
-            if node.get('nodeType') != 'Test Case':
+            if node.get('nodeType') != 'Test Case' or not node.get('nodeIdentifierURL'):
                 continue
             path = unquote(urlsplit(node['nodeIdentifierURL']).path).strip('/').split('/')
             identity = '/'.join(path[1:])
@@ -180,23 +201,37 @@ def execute(kind: str, command: list[str], env: dict | None = None, cwd: Path | 
     capture = Capture(kind)
     output, cases = [], []
     begun = time.monotonic()
-    env = {**os.environ, **(env or {}), 'TRON_TEST_LEDGER_WRAPPED': '1'}
-    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors='replace', env=env, cwd=cwd) as child:
+    env = {**os.environ, **(env or {}), 'TRON_TEST_LEDGER_WRAPPED': '1',
+           'TRON_TEST_LEDGER_CPU_IDLE': str(capture.context['cpuIdlePercent'])}
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors='replace', env=env, cwd=cwd) as child:
         def forward(signum, _frame):
             if child.poll() is None:
                 child.send_signal(signum)
         previous = {sig: signal.signal(sig, forward) for sig in (signal.SIGINT, signal.SIGTERM)}
+        errors = []
+
+        def pump(source, target):
+            for line in source:
+                try:
+                    if line.startswith(NODE_CASE):
+                        case = json.loads(line[len(NODE_CASE):])
+                        file = Path(case['file']).resolve().relative_to(ROOT).as_posix()
+                        host_reading = {key: case[key] for key in ('host', 'cpuIdlePercent', 'memoryFreePercent', 'measuredAt')}
+                        cases.append(capture.record(file + '::' + case['name'], case['outcome'], case['seconds'], host_reading))
+                    else:
+                        print(line, end='', file=target, flush=True)
+                        output.append(line)
+                except Exception as error:
+                    errors.append(error)
+
+        threads = [threading.Thread(target=pump, args=(source, target)) for source, target in ((child.stdout, sys.stdout), (child.stderr, sys.stderr))]
+        for thread in threads:
+            thread.start()
         try:
-            for line in child.stdout:
-                if line.startswith(NODE_CASE):
-                    case = json.loads(line[len(NODE_CASE):])
-                    file = Path(case['file']).resolve().relative_to(ROOT).as_posix()
-                    cases.append(capture.record(file + '::' + case['name'], case['outcome'], case['seconds']))
-                else:
-                    print(line, end='', flush=True)
-                    output.append(line)
             code = child.wait()
         finally:
+            for thread in threads:
+                thread.join()
             for sig, handler in previous.items():
                 signal.signal(sig, handler)
             append(cases)
@@ -204,6 +239,8 @@ def execute(kind: str, command: list[str], env: dict | None = None, cwd: Path | 
                 append([capture.record(Path(command[-1]).resolve().relative_to(ROOT).as_posix(), 'passed' if child.returncode == 0 else 'failed', time.monotonic() - begun)])
             if kind == 'swift':
                 capture.swift(''.join(output), [Path(command[index + 1]) for index, word in enumerate(command[:-1]) if word == '-resultBundlePath'])
+    if errors:
+        raise errors[0]
     return code if code >= 0 else 128 - code
 
 

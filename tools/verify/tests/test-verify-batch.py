@@ -19,11 +19,14 @@ ARTIFACTS = ROOT / 'test-results/verify-batch'
 def shipped_runner(root, lock):
     """The shipped Gateway runner, its config reader and its host lock under `root`, pointed at this test's lock path, not the host's."""
     (root / 'tools/verify').mkdir(parents=True, exist_ok=True)
-    for name in ('gateway.py', 'vitest_configs.py'):
+    for name in ('gateway.py', 'vitest_configs.py', 'ledger.py', 'ledger-host.mjs', 'ledger-vitest.mjs'):
         (root / 'tools/verify' / name).write_text((ROOT / 'tools/verify' / name).read_text())
     source = (ROOT / 'tools/verify/host_lock.py').read_text()
     assert "'/tmp/tron-full-gateway.lock'" in source, 'the host lock path moved; point this fixture at its new spelling'
     (root / 'tools/verify/host_lock.py').write_text(source.replace("'/tmp/tron-full-gateway.lock'", repr(str(lock))))
+    subprocess.run(['git', 'init', '-q', str(root)], check=True)
+    subprocess.run(['git', '-C', str(root), '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                    'commit', '-q', '--allow-empty', '-m', 'runner fixture'], check=True)
     return root / 'tools/verify/gateway.py'
 
 
@@ -1786,7 +1789,8 @@ class FullGatewayLockTests(unittest.TestCase):
         err = errors.read_text()
         self.assertEqual(run.returncode, 0, out + err)
         self.assertIn('waiting for ' + str(self.lock), err)
-        self.assertEqual(self.ran.read_text().split(), ['run', 'some.test.ts'])
+        self.assertEqual(self.ran.read_text().split(), ['run', 'some.test.ts', '--reporter=default',
+                         '--reporter=' + str(self.gateway.with_name('ledger-vitest.mjs').resolve())])
         self.assertIn('"purpose": "gateway vitest some.test.ts"', self.lock.read_text())
 
     def test_a_batch_lane_that_holds_the_lock_runs_without_waiting(self):

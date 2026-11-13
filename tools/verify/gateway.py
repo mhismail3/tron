@@ -228,14 +228,12 @@ def main() -> int:
         root = Path(temporary)
         home, scratch = root / "home", root / "tmp"
         home.mkdir(); scratch.mkdir()
-        environment = {**os.environ, **fork, "HOME": str(home), "TMPDIR": str(scratch), "TRON_NODE_BIN": node}
-        report = next((Path(word.split('=', 1)[1]) for word in arguments if word.startswith('--outputFile.json=')), None)
-        if report is None:
-            report = root / 'vitest.json'
-            arguments = [*arguments, '--reporter=json', f'--outputFile.json={report}']
-            if not any(word.startswith('--reporter') for word in arguments[:-2]):
-                arguments.append('--reporter=default')
-        report = report if report.is_absolute() else ROOT / 'packages/gateway' / report
+        report = root / 'cases.jsonl'
+        environment = {**os.environ, **fork, "HOME": str(home), "TMPDIR": str(scratch), "TRON_NODE_BIN": node,
+                       'TRON_TEST_LEDGER_CASES': str(report), 'TRON_TEST_LEDGER_CPU_IDLE': str(capture.context['cpuIdlePercent'])}
+        if not any(word.startswith('--reporter') for word in arguments):
+            arguments.append('--reporter=default')
+        arguments.append('--reporter=' + str(ROOT / 'tools/verify/ledger-vitest.mjs'))
         with subprocess.Popen([str(ROOT / "scripts/tron-node"), "exec", str(vitest), "run", *arguments],
                               cwd=ROOT / "packages/gateway", env=environment) as child:
             def forward(signum, _frame):
@@ -248,7 +246,7 @@ def main() -> int:
                 for sig, handler in previous.items():
                     signal.signal(sig, handler)
                 try:
-                    capture.vitest(report)
+                    capture.events(report)
                 finally:
                     if lock:
                         lock.close()

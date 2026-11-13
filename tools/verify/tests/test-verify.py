@@ -47,7 +47,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 ARTIFACTS = ROOT / "test-results" / "verify-cli"
-COPIED = ["tools/verify/ledger-node.mjs", "scripts/tron", "scripts/check-documentation-policy.py", "scripts/check-agent-policy.sh", "scripts/personal-info-guard.sh",
+COPIED = ["tools/verify/ledger-node.mjs", "tools/verify/ledger-host.mjs", "tools/verify/ledger-vitest.mjs", "scripts/tron", "scripts/check-documentation-policy.py", "scripts/check-agent-policy.sh", "scripts/personal-info-guard.sh",
           "scripts/ios-test-build-identity.py", "tools/work/work.json",
           *[str(p.relative_to(ROOT)) for d in ("tools/verify", "tools/ownership", "tools/metrics", "tools/layers", "tools/work", "tools/docs", "tools/home-layout")
             for p in (ROOT / d).glob("*.py")]]
@@ -641,7 +641,7 @@ class LedgerTests(VerifyCase):
         package = r.path / 'packages/gateway'
         (package / 'node_modules').symlink_to(ROOT / 'packages/gateway/node_modules', target_is_directory=True)
         r.write('packages/gateway/package.json', '{"type":"module"}\n')
-        r.write('packages/gateway/src/cases.test.ts', "import { test, expect } from 'vitest';\ntest('pass', () => expect(1).toBe(1));\ntest.skip('skip', () => {});\ntest('fail', () => expect(1).toBe(2));\n")
+        r.write('packages/gateway/src/cases.test.ts', "import { test, expect } from 'vitest';\ntest('pass\u2028separator', () => expect(1).toBe(1));\ntest.skip('skip', () => {});\ntest('fail', () => expect(1).toBe(2));\n")
         r.commit('real Vitest cases')
         result = subprocess.run([str(r.path / 'scripts/tron'), 'test', 'gateway', '--local', 'src/cases.test.ts'], cwd=r.path,
                                 env=r.env, capture_output=True, text=True)
