@@ -396,9 +396,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     };
     this.phase = interrupted ? "interrupted" : "idle";
     this.unregisterConfigurationWork = dependencies.workRegistry.observeSessions((sessionId) => {
-      if (!this.published || this.disposed || sessionId !== this.id) return;
-      this.publishConfiguration();
-      if (!this.isRunningWork()) this.hooks.idle?.(this);
+      if (this.published && !this.disposed && sessionId === this.id) this.publishConfiguration();
     });
     this.ui = this.createSemanticBroker();
     this.extensionHost = new RemotePiExtensionHost(this.ui);
