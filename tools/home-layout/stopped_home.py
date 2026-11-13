@@ -27,11 +27,11 @@ def process_owner(home):
         raise OSError("stopped_proof_unavailable")
     libc = ctypes.CDLL(None, use_errno=True)
     proc = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
-    count = proc.proc_listpids(5, os.geteuid(), None, 0)
+    count = proc.proc_listpids(4, os.geteuid(), None, 0)
     if count <= 0 or count > 4 * 100000:
         raise OSError("process_inventory_unavailable")
     pids = (ctypes.c_int * (count // 4 + 1024))()
-    used = proc.proc_listpids(5, os.geteuid(), pids, ctypes.sizeof(pids))
+    used = proc.proc_listpids(4, os.geteuid(), pids, ctypes.sizeof(pids))
     if used <= 0 or used >= ctypes.sizeof(pids):
         raise OSError("process_inventory_unavailable")
     for pid in pids[:used // 4]:
@@ -43,7 +43,7 @@ def process_owner(home):
         if libc.sysctl(mib, 3, buffer, ctypes.byref(size), None, 0):
             if ctypes.get_errno() == errno.ESRCH:
                 continue
-            raise OSError("process_owner_unreadable")
+            raise OSError(ctypes.get_errno(), "process_owner_unreadable", str(pid))
         data = buffer.raw[:size.value]
         if len(data) < 4:
             raise OSError("process_owner_unreadable")
