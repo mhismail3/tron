@@ -33,7 +33,7 @@ export class SessionArchiveStore {
   private changeRevision = 0;
 
   constructor(tronHome: string, options: SessionArchiveStoreOptions = {}) {
-    this.path = tronHomePath(tronHome, "gateway/session-archive.json");
+    this.path = tronHomePath(tronHome, "state/session-archive.json");
     this.now = options.now ?? (() => new Date());
   }
 

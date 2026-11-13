@@ -134,7 +134,7 @@ extension RealGatewayPairAndChatUITests {
         let fixture = try RealGatewayUIFixture.fromEnvironment()
         let tronHome = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory)).deletingLastPathComponent().appendingPathComponent("tron")
         func budget() -> Int? {
-            let document = (try? JSONSerialization.jsonObject(with: Data(contentsOf: tronHome.appendingPathComponent("gateway/home/profile.json")))) as? [String: Any]
+            let document = (try? JSONSerialization.jsonObject(with: Data(contentsOf: tronHome.appendingPathComponent("state/home/profile.json")))) as? [String: Any]
             return ((document?["budget"] as? [String: Any])?["task"] as? [String: Any])?["outputTokens"] as? Int
         }
         func budgetHistory() -> [[String: Any]] { settingsHistory(tronHome, key: "permissions.budget.task") }
@@ -184,7 +184,7 @@ extension RealGatewayPairAndChatUITests {
     }
 
     private func settingsHistory(_ tronHome: URL, key: String) -> [[String: Any]] {
-        let directory = tronHome.appendingPathComponent("gateway/settings/changes")
+        let directory = tronHome.appendingPathComponent("state/settings/changes")
         let segments = ((try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? [])
             .filter { $0.pathExtension == "jsonl" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
         return segments.flatMap { segment in

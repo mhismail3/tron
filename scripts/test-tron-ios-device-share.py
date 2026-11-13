@@ -308,7 +308,7 @@ def share_host_disable(tmp: Path, name: str, config: dict | None) -> dict:
     case = tmp / name
     home, bin_dir = case / "home", case / "bin"
     plist = home / "Library" / "LaunchAgents" / "com.tron.ios-builds.plist"
-    build = home / ".tron" / "ios-builds" / "builds" / "20261019T000000Z-abc" / "build.json"
+    build = home / ".tron" / "workspace" / "builds" / "ios-ota" / "builds" / "20261019T000000Z-abc" / "build.json"
     for path in (plist.parent, build.parent, bin_dir, case / "tmp"):
         path.mkdir(parents=True)
     plist.write_bytes(b"fixture LaunchAgent")
@@ -327,7 +327,8 @@ def share_host_disable(tmp: Path, name: str, config: dict | None) -> dict:
     calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
     return {"returncode": run.returncode, "output": run.stdout + run.stderr, "calls": calls,
             "before": before, "after": json.loads(state.read_text()), "plist": plist.exists(),
-            "build": build.read_text() == '{"title": "retained"}'}
+            "build": build.read_text() == '{"title": "retained"}',
+            "build_location": f"builds remain in {build.parents[2]} " in run.stdout}
 
 
 def share_host_journey() -> None:
@@ -335,7 +336,7 @@ def share_host_journey() -> None:
         tmp = Path(tmp)
         owned = share_host_disable(tmp, "owned", serve_config(OWNED, {"HTTPS": True}))
         check(owned["returncode"] == 0 and ["tailscale", "serve", "--https=8443", "off"] in owned["calls"]
-              and owned["after"] == serve_config() and not owned["plist"] and owned["build"]
+              and owned["after"] == serve_config() and not owned["plist"] and owned["build"] and owned["build_location"]
               and any(c[:2] == ["launchctl", "bootout"] for c in owned["calls"]),
               "disable removes its own exact :8443 handler and LaunchAgent, keeping other ports and builds")
 
@@ -355,7 +356,7 @@ def share_host_journey() -> None:
 
         absent = share_host_disable(tmp, "absent", serve_config())
         check(absent["returncode"] == 0 and absent["after"] == serve_config() and not absent["plist"]
-              and absent["build"] and not any(c[:2] == ["tailscale", "serve"] and c[-1] == "off" for c in absent["calls"]),
+              and absent["build"] and absent["build_location"] and not any(c[:2] == ["tailscale", "serve"] and c[-1] == "off" for c in absent["calls"]),
               "disable with no :8443 handler removes only the LaunchAgent")
 
 

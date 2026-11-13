@@ -95,7 +95,7 @@ cleanup reclaims a recognized interrupted retirement without relisting the app.
 
 Only v2 may declare `feeds: ["ios-builds"]` (or `[]`). A v2 open reads a new,
 immutable snapshot; v1's response stays unchanged. The feed reads
-`<configured Gateway home>/ios-builds`, not an arbitrary client path. The trusted
+`<configured Gateway home>/workspace/builds/ios-ota`, not an arbitrary client path. The trusted
 home is canonicalized; linked publisher roots and children refuse. Debug's
 `~/.tron-dev` is separate from Stable's publisher home; there is no implicit
 cross-home fallback or live-data copy.

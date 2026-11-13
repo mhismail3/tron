@@ -423,10 +423,10 @@ class FixtureGateway:
             raise
 
     def prepare(self) -> None:
-        for directory in (self.home, self.workspace, self.tron_home / "gateway", self.agent_dir / "extensions"):
+        for directory in (self.home, self.workspace, self.tron_home / "state", self.agent_dir / "extensions"):
             directory.mkdir(parents=True, exist_ok=True)
             directory.chmod(0o700)
-        gateway_json = self.tron_home / "gateway/gateway.json"
+        gateway_json = self.tron_home / "state/gateway.json"
         gateway_json.write_text(json.dumps({"version": 1, "machineId": "tron-profile", "machineName": "Tron Profile"}) + "\n")
         gateway_json.chmod(0o600)
         shutil.copyfile(EXTENSION, self.agent_dir / "extensions/tron-profile.ts")
@@ -490,7 +490,7 @@ class FixtureGateway:
             "HOME": str(self.home),
             "TRON_DATA_DIR": str(self.tron_home),
             "PI_CODING_AGENT_DIR": str(self.agent_dir),
-            "PI_SUBAGENTS_TEMP_ROOT": str(self.home / "internal/subagents"),
+            "PI_SUBAGENTS_TEMP_ROOT": str(self.tron_home / "state/subagents"),
             "TRON_MACHINE_GROUP_ID": "tron-profile",
             "TRON_GATEWAY_HOST": "127.0.0.1",
             "TRON_GATEWAY_PORT": str(self.port),
@@ -510,7 +510,7 @@ class FixtureGateway:
         with self.log_path.open("ab") as output:
             self.process = subprocess.Popen(command, cwd=self.workspace, env=environment, stdin=subprocess.DEVNULL,
                                             stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
-        enrollment = self.tron_home / "gateway/enrollment.json"
+        enrollment = self.tron_home / "state/enrollment.json"
         deadline = time.monotonic() + deadline_seconds
         while time.monotonic() < deadline:
             if self.process.poll() is not None:

@@ -28,7 +28,7 @@ async function startGateway() {
   const root = await mkdtemp(join(tmpdir(), "tron-server-compression-"));
   const devices = new DeviceStore(root, "machine");
   await devices.initialize();
-  const localToken = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken as string;
+  const localToken = JSON.parse(await readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken as string;
   const pairedToken = (await devices.pair((await devices.ensureEnrollment()).code, "Phone")).token;
   const port = await unusedPort();
   const logger = { log: vi.fn() };

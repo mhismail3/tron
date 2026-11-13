@@ -348,7 +348,7 @@ describe("resuming a stopped Home worker in place", () => {
     f.faux.setResponses([fauxAssistantMessage([reportCall("valid-lineage-result")], { stopReason: "toolUse" })]);
     const task = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "invalid-lineage", intent: "Finite work", target: f.cwd });
     await task.completion;
-    const directory = join(f.tronHome, "gateway/home/tasks");
+    const directory = join(f.tronHome, "state/home/tasks");
     const file = join(directory, (await readdir(directory)).find(name => name.endsWith(`-${task.taskId}.json`))!);
     const record = JSON.parse(await readFile(file, "utf8"));
     record.resumes = { taskId: "missing-parent", operationId: "missing-operation" };
@@ -547,7 +547,7 @@ class Fixture(MacPlatform):
     # This test process hosts the fixture Gateway; without this the platform
     # asks launchd for the live com.tron.server job and probes Stable (#1072).
     def gateway_pid(self): return int(sys.argv[9])
-    def token(self): return json.loads((Path(sys.argv[4]) / 'gateway/local-auth.json').read_text())['bearerToken']
+    def token(self): return json.loads((Path(sys.argv[4]) / 'state/local-auth.json').read_text())['bearerToken']
     def node(self): return Path(sys.argv[5]), Path(sys.argv[6])
     def protocol(self): return int(sys.argv[7])
     # The Gateway is this test process, not the installed launchd job: endpoint discovery

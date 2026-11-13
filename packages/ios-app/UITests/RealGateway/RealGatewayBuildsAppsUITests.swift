@@ -231,7 +231,7 @@ extension RealGatewayPairAndChatUITests {
 
     private func seedBuild(tron: URL, second: Bool) throws {
         let id = "20261028T\(second ? "090000" : "080000")Z-\(second ? String(repeating: "b", count: 32) : String(repeating: "a", count: 32))-abcdef012"
-        let root = tron.appendingPathComponent("ios-builds")
+        let root = tron.appendingPathComponent("workspace/builds/ios-ota")
         let directory = root.appendingPathComponent("builds/\(id)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let lock = root.appendingPathComponent(".publish.lock")

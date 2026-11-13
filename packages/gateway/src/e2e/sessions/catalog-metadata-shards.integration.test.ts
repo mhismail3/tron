@@ -28,7 +28,7 @@ async function storeFixture(label: string) {
   const root = join(base, "agent", "sessions");
   await mkdir(root, { recursive: true });
   const canonical = await realpath(root);
-  const gateway = join(base, "tron", "gateway");
+  const gateway = join(base, "tron", "cache");
   const failures: Failure[] = [];
   const pressure: CatalogMetadataIndexPressure[] = [];
   const index = new CatalogMetadataIndex(gateway, (stage, _durationMs, detail) => { failures.push({ stage, ...detail }); },
@@ -118,7 +118,7 @@ describe("catalog metadata store (#2164)", () => {
     await settleCatalog(fixture.registry);
     expect(failures).toEqual([]);
     const sessionRoot = await realpath(join(fixture.agentDir, "sessions"));
-    const stored = await new CatalogMetadataIndex(join(fixture.root, "tron", "gateway")).load(sessionRoot);
+    const stored = await new CatalogMetadataIndex(join(fixture.root, "tron", "cache")).load(sessionRoot);
     expect(stored?.length).toBe(count + 1);
     expect(Buffer.byteLength(JSON.stringify({ version: 3, root: sessionRoot, rows: stored }))).toBeGreaterThan(LEGACY_BOUND);
     expect(sortedCatalogRows(stored)).toEqual(sortedCatalogRows(catalogOwner(fixture.registry).rows()
@@ -144,7 +144,7 @@ describe("catalog metadata store (#2164)", () => {
     await session(child, "child-session");
     await settleCatalog(fixture.registry);
     const sessionRoot = await realpath(join(fixture.agentDir, "sessions"));
-    const reader = new CatalogMetadataIndex(join(fixture.root, "tron", "gateway"));
+    const reader = new CatalogMetadataIndex(join(fixture.root, "tron", "cache"));
     const ids = async () => (await reader.load(sessionRoot))?.map((row) => row.id).sort();
     const parentId = fixture.manager.getSessionId();
     expect(await ids()).toEqual(["child-session", "kept-session", parentId, "removed-session", "unprovable-session"].sort());
@@ -256,7 +256,7 @@ describe("catalog metadata store (#2164)", () => {
     const { root, gateway, base } = await storeFixture("sigkill");
     const count = 1_500;
     const cuts = [sortedCatalogRows(realisticCatalogRows(root, count, 1)), sortedCatalogRows(realisticCatalogRows(root, count, 2))];
-    const preload = pathToFileURL(fileURLToPath(new URL("../../../test-support/home-ledger-crash-preload.mjs", import.meta.url))).href;
+    const preload = pathToFileURL(fileURLToPath(new URL("../../../test-support/source-ts-resolver-preload.mjs", import.meta.url))).href;
     const program = fileURLToPath(new URL("../../../test-support/catalog-metadata-crash-child.ts", import.meta.url));
     const outcomes = { whole: 0, none: 0 };
     for (let kill = 0; kill < 12; kill += 1) {

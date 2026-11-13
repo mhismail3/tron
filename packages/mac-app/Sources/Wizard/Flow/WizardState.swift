@@ -5,8 +5,7 @@ import Observation
 @Observable
 final class WizardState {
     static let stateFileVersion = 1
-    static let defaultStateURL = TronPaths.internalDir
-        .appendingPathComponent("mac", isDirectory: true)
+    static let defaultStateURL = TronPaths.macStateDirectory(profile: TronPaths.activeProfile)
         .appendingPathComponent("wizard-state.json", isDirectory: false)
 
     private let stateURL: URL

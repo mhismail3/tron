@@ -292,7 +292,7 @@ function runningCandidateSource(state) {
 }
 
 async function selectedDevManifest(devHome) {
-  const root = join(resolve(devHome), "gateway", "payloads", "dev");
+  const root = join(resolve(devHome), "state", "payloads", "dev");
   const selected = await readState(join(root, "current.json"));
   if (selected.schema !== 1 || selected.kind !== "tron-gateway-selection" || selected.channel !== "dev"
     || typeof selected.version !== "string" || !/^[A-Za-z0-9._-]{1,128}$/u.test(selected.version)

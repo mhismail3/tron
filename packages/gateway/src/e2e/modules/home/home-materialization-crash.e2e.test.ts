@@ -88,7 +88,7 @@ async function fixture() {
   const root = await realpath(await mkdtemp(join(tmpdir(), "tron-home-materialization-crash-")));
   roots.push(root);
   const tronHome = join(root, "tron");
-  const directory = join(tronHome, "gateway", "home");
+  const directory = join(tronHome, "state", "home");
   const cwd = join(directory, "workspace");
   await mkdir(cwd, { recursive: true });
   await mkdir(join(root, "agent"), { recursive: true });

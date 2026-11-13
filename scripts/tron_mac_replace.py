@@ -403,6 +403,12 @@ class Runner:
                 private_mkdir(target)
             elif LIBC.clonefile(os.fsencode(source), os.fsencode(target), CLONE_NOFOLLOW) != 0:
                 raise Failure(f'could not snapshot {source}: {os.strerror(ctypes.get_errno())}')
+        for directory, _children, files in os.walk(partial, followlinks=False):
+            os.chmod(directory, 0o700, follow_symlinks=False)
+            for name in files:
+                path = Path(directory) / name
+                if stat.S_ISREG(path.lstat().st_mode):
+                    os.chmod(path, 0o600, follow_symlinks=False)
         os.rename(partial, snapshot)
         self.data['swap']['snapshot'] = str(snapshot)
         self.journal.save()
@@ -475,7 +481,7 @@ class Runner:
                 return self.wait_healthy('rebuild', self.platform.start_timeout)
             if status['state'] in ('failure', 'failed', 'rolled-back'):
                 raise Failure(f'Gateway source update {status["state"]}: {status.get("error") or "no error recorded"} '
-                              f'(log: {self.platform.tron_home}/gateway/payloads/stable/update-progress.json)')
+                              f'(log: {self.platform.tron_home}/state/payloads/stable/update-progress.json)')
         raise Failure('the Gateway source update did not settle within 30 minutes')
 
     def step_finish(self):
@@ -647,7 +653,7 @@ def stage_runner(platform, journal, script_dir):
     runtime = private_mkdir(journal.directory / 'runner')
     for name in (*(f'tron_mac_replace{part}.py' for part in ('', '_journal', '_platform', '_rpc')), 'tron_rebuild_lock.py', *platform.runner_files()):
         shutil.copy2(Path(script_dir) / name, runtime / name)
-    for source in ('tools/home-layout/home_layout.py', home_layout.REGISTRY):
+    for source in ('tools/home-layout/home_layout.py', 'tools/home-layout/runtime_layout.py', 'tools/home-layout/runtime_rewrites.py', 'tools/home-layout/terminal_layout.py', home_layout.REGISTRY):
         shutil.copy2(Path(script_dir).parent / source, runtime / Path(source).name)
     staged_registry(runtime)
     return runtime

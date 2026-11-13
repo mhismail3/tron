@@ -41,8 +41,8 @@ describe("recent model usage", { concurrent: false }, () => {
     const child = SessionManager.forkFrom(parentFile, cwd, forksDirectory);
     child.appendMessage(fauxAssistantMessage("delegated child"));
     if (seed) {
-      await mkdir(join(tronHome, "gateway"), { recursive: true });
-      await writeFile(join(tronHome, "gateway", "model-recents.json"), `${JSON.stringify({ version: 1, models: seed }, null, 2)}\n`, "utf8");
+      await mkdir(join(tronHome, "state"), { recursive: true });
+      await writeFile(join(tronHome, "state", "model-recents.json"), `${JSON.stringify({ version: 1, models: seed }, null, 2)}\n`, "utf8");
     }
     const faux = fauxProvider({ provider: `tron-recent-${label}`, models: [{ id: "recent-a" }, { id: "recent-b" }], tokensPerSecond: 10_000 });
     faux.setResponses([fauxAssistantMessage("done")]);
@@ -129,7 +129,7 @@ describe("recent model usage", { concurrent: false }, () => {
     try {
       const slot = await fixture_.registry.acquire(fixture_.parentId);
       await run(slot, model, "record before disposal");
-      const path = join(fixture_.root, "tron", "gateway", "model-recents.json");
+      const path = join(fixture_.root, "tron", "state", "model-recents.json");
       await fixture_.registry.dispose();
       const document = JSON.parse(await readFile(path, "utf8")) as { models: Array<{ id: string }> };
       expect(document.models.map((entry) => entry.id)).toContain("recent-a");
@@ -145,8 +145,8 @@ describe("recent model usage", { concurrent: false }, () => {
     const root = await mkdtemp(join(tmpdir(), "tron-recent-models-malformed-"));
     const agentDir = join(root, "agent");
     const tronHome = join(root, "tron");
-    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(join(tronHome, "gateway"), { recursive: true })]);
-    await writeFile(join(tronHome, "gateway", "model-recents.json"), "{ not json", "utf8");
+    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(join(tronHome, "state"), { recursive: true })]);
+    await writeFile(join(tronHome, "state", "model-recents.json"), "{ not json", "utf8");
     const registry = await createTestRegistry({
       agentDir,
       tronHome,

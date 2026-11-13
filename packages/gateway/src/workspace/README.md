@@ -53,7 +53,7 @@ moving its product copy or changing prompt timing.
 - **Shared web capability.** Workspace's `web-research.ts` owns bounded public-web
   evidence; `tron-web-research` registers its definition from `web-research-contract.ts`.
   Native children load it through required-child extensions, not ambient discovery.
-  Scope-bound0600 modules under `gateway/web-research-children/` are disposable
+  Scope-bound0600 modules under `state/web-research-children/` are disposable
   runtime projections: a reopened parent recreates the same path so retained child
   launches can resume against the current service. The private Unix socket and
   grants are joined and removed on shutdown; no provider credentials enter prompts

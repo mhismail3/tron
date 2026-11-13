@@ -133,11 +133,11 @@ payload_meets_current_runtime_contract() {
 
 payload_for() {
   local home="$1" channel="$2" bundled="$3" current version manifest fingerprint actual
-  current="$home/gateway/payloads/$channel/current.json"
+  current="$home/state/payloads/$channel/current.json"
   if regular_file "$current"; then
     version="$(plist_value version "$current")"
     if [[ "$version" =~ ^[A-Za-z0-9._-]+$ && "$version" != . && "$version" != .. ]]; then
-      manifest="$home/gateway/payloads/$channel/versions/$version/manifest.json"
+      manifest="$home/state/payloads/$channel/versions/$version/manifest.json"
       if regular_file "$manifest"; then
         fingerprint="$(plist_value payloadFingerprint "$manifest")"
         if [[ "$(plist_value schema "$current")" == 1 ]] && [[ "$(plist_value kind "$current")" == tron-gateway-selection ]] \
@@ -147,10 +147,10 @@ payload_for() {
           && [[ "$(plist_value protocolVersion "$manifest")" == "$APP_PROTOCOL_VERSION" ]] \
           && [[ "$(plist_value minProtocolVersion "$manifest")" == "$APP_MIN_PROTOCOL_VERSION" ]] \
           && [[ "$(plist_value payloadFingerprint "$current")" == "$fingerprint" ]]; then
-          actual="$(hash_payload "$home/gateway/payloads/$channel/versions/$version" 2>/dev/null || true)"
+          actual="$(hash_payload "$home/state/payloads/$channel/versions/$version" 2>/dev/null || true)"
           if [[ "$actual" == "$fingerprint" ]] \
-            && payload_meets_current_runtime_contract "$home/gateway/payloads/$channel/versions/$version"; then
-            printf '%s\n' "$home/gateway/payloads/$channel/versions/$version"
+            && payload_meets_current_runtime_contract "$home/state/payloads/$channel/versions/$version"; then
+            printf '%s\n' "$home/state/payloads/$channel/versions/$version"
             return 0
           fi
         fi
@@ -171,8 +171,8 @@ verify_payload() {
   manifest="$payload/manifest.json"
   if ! regular_file "$manifest"; then fail "$label payload manifest missing"; return; fi
   selected_version=""
-  if [[ "$ARTIFACT_ONLY" == false ]] && regular_file "$home/gateway/payloads/$channel/current.json"; then
-    selected_version="$(plist_value version "$home/gateway/payloads/$channel/current.json")"
+  if [[ "$ARTIFACT_ONLY" == false ]] && regular_file "$home/state/payloads/$channel/current.json"; then
+    selected_version="$(plist_value version "$home/state/payloads/$channel/current.json")"
     if [[ -n "$selected_version" ]]; then
       if [[ "$payload" == "$bundled" ]]; then
         pass "$label incompatible or invalid external selection rejected; bundled payload selected"
@@ -306,7 +306,7 @@ fi
 
 authenticated_system_info() {
   local host="$1" port="$2" home="$3" payload_root="$4" token node_runtime url_host
-  token="$(plist_value bearerToken "$home/gateway/local-auth.json")"
+  token="$(plist_value bearerToken "$home/state/local-auth.json")"
   [[ -n "$token" ]] || return 1
   node_runtime="$payload_root/runtime/node-arm64"
   [[ "$(uname -m)" == x86_64 ]] && node_runtime="$payload_root/runtime/node-x64"
@@ -441,7 +441,7 @@ observe_debug() {
   listener_pid="$listener_pids"
   [[ "$listener_pid" =~ ^[0-9]+$ ]] || { fail "Debug listener PID is invalid"; return; }
 
-  lifecycle="$HOME/.tron-dev/gateway/lifecycle.json"
+  lifecycle="$HOME/.tron-dev/state/lifecycle.json"
   regular_file "$lifecycle" || { fail "Debug listener has no regular scripts/tron-dev lifecycle record"; return; }
   lifecycle_state="$(plist_value lifecycle "$lifecycle")"
   expected_port="$(plist_value expectedPort "$lifecycle")"
@@ -467,7 +467,7 @@ observe_debug() {
     && pass "Debug child PID/start identity is live and exact" \
     || { fail "Debug child PID/start identity mismatch"; return; }
 
-  regular_file "$HOME/.tron-dev/gateway/payloads/dev/current.json" \
+  regular_file "$HOME/.tron-dev/state/payloads/dev/current.json" \
     || { fail "Debug listener has no immutable dev selection"; return; }
   verify_payload dev "$HOME/.tron-dev" dev "$BUNDLED"
   command_line="$(ps -ww -o command= -p "$listener_pid" 2>/dev/null || true)"

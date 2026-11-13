@@ -45,8 +45,8 @@ test("CLI authenticates locally, lists paired IDs, and sends one explicit bindin
     });
   });
   try {
-    await mkdir(join(home, "gateway"));
-    await writeFile(join(home, "gateway", "local-auth.json"), JSON.stringify({
+    await mkdir(join(home, "state"));
+    await writeFile(join(home, "state", "local-auth.json"), JSON.stringify({
       version: 2, purpose: "local-wrapper-health", bearerToken: token, lastUpdated: "2026-09-01T00:00:00Z",
     }), { mode: 0o600 });
     for (const args of [["--list"], ["--device-id", "phone", "--target-identifier", targetIdentifier]]) {

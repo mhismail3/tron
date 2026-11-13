@@ -221,7 +221,7 @@ private final class QuitGatewayFixture: @unchecked Sendable {
         root = fm.temporaryDirectory.appendingPathComponent("tron-mac-quit-\(UUID().uuidString)", isDirectory: true)
         home = root.appendingPathComponent("tron", isDirectory: true)
         log = home.appendingPathComponent("logs/gateway.jsonl")
-        receipt = home.appendingPathComponent("gateway/stop-completed.json")
+        receipt = home.appendingPathComponent("state/stop-completed.json")
         do {
             for path in ["", "home", "tmp", "agent", "project", "payload/app/dist"] {
                 try fm.createDirectory(at: root.appendingPathComponent(path), withIntermediateDirectories: true)
@@ -239,7 +239,7 @@ private final class QuitGatewayFixture: @unchecked Sendable {
             import {createServer as httpServer} from 'node:http';
             import {appendFileSync, writeFileSync, readFileSync, existsSync, mkdirSync, rmSync} from 'node:fs';
             const root = process.env.QUIT_ROOT;
-            const receipt = root + '/tron/gateway/stop-completed.json';
+            const receipt = root + '/tron/state/stop-completed.json';
             appendFileSync(root + '/launches', process.pid + '\n');
             const server = netServer();
             await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -296,7 +296,7 @@ private final class QuitGatewayFixture: @unchecked Sendable {
                 "PATH": "/usr/bin:/bin", "HOME": root.appendingPathComponent("home").path,
                 "TMPDIR": root.appendingPathComponent("tmp").path,
                 "TRON_DATA_DIR": home.path, "PI_CODING_AGENT_DIR": root.appendingPathComponent("agent").path,
-                "PI_SUBAGENTS_TEMP_ROOT": home.appendingPathComponent("internal/subagents").path,
+                "PI_SUBAGENTS_TEMP_ROOT": home.appendingPathComponent("state/subagents").path,
                 "TRON_GATEWAY_HOST": "127.0.0.1", "TRON_GATEWAY_SUPERVISED": "1",
                 "TRON_GATEWAY_PAYLOAD_ROOT": root.appendingPathComponent("payload").path,
                 "QUIT_ROOT": root.path, "QUIT_SCENARIO": scenario.rawValue,
@@ -323,7 +323,7 @@ private final class QuitGatewayFixture: @unchecked Sendable {
 
     func port() throws -> Int { try #require(Int(String(contentsOf: root.appendingPathComponent("port"), encoding: .utf8))) }
     func token() throws -> String {
-        let data = try Data(contentsOf: home.appendingPathComponent("gateway/local-auth.json"))
+        let data = try Data(contentsOf: home.appendingPathComponent("state/local-auth.json"))
         return try #require((JSONSerialization.jsonObject(with: data) as? [String: Any])?["bearerToken"] as? String)
     }
 

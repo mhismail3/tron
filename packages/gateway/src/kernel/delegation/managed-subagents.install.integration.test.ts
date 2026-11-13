@@ -166,7 +166,7 @@ it("refuses a tampered installed byte for both admission and discovery", async (
   await expect(provider.loaderOptions(settings)).rejects.toThrow(/installed closure mismatch/);
   expect(() => ManagedSubagents.activateForStartup(home)).toThrow(/installed closure mismatch/);
   expect(readFileSync(providerEntry)).toEqual(bytes);
-  expect(readdirSync(join(home, "internal", "pi-subagents"))).toEqual([basename(privateRoot)]);
+  expect(readdirSync(join(home, "cache", "pi-subagents"))).toEqual([basename(privateRoot)]);
   const catalog = await loadSubagentCatalog({ agentDir, cwd: home, settingsManager: settings, managedSubagents: provider });
   expect(catalog.subagents).toEqual([]);
   expect(catalog.diagnostic).toContain("installed closure mismatch");
@@ -203,5 +203,5 @@ it("refuses a forged receipt and exposes no uninstalled provider", () => {
   expect(() => ManagedSubagents.activateForStartup(home)).toThrow(/install receipt mismatch/);
   expect(JSON.parse(readFileSync(join(root, "tron-install-receipt.json"), "utf8")))
     .toEqual({ version: "0.59.0", sha512: "forged" });
-  expect(readdirSync(join(home, "internal", "pi-subagents"))).toEqual([basename(root)]);
+  expect(readdirSync(join(home, "cache", "pi-subagents"))).toEqual([basename(root)]);
 });

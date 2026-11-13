@@ -9,7 +9,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { waitFor } from "../../test-support/wait-for.js";
 
 const gatewayRoot = fileURLToPath(new URL("../..", import.meta.url));
-const resolverPreload = join(gatewayRoot, "test-support", "home-ledger-crash-preload.mjs");
+const resolverPreload = join(gatewayRoot, "test-support", "source-ts-resolver-preload.mjs");
 const deployModule = pathToFileURL(join(gatewayRoot, "..", "..", "scripts", "gateway-payload-deploy.mjs")).href;
 const reportPath = process.env.TRON_EXIT_AFTER_SHUTDOWN_REPORT
   ?? join(gatewayRoot, "test-results", "exit-after-shutdown.e2e.json");
@@ -39,7 +39,7 @@ async function readLog(tronHome: string): Promise<LogRecord[]> {
 
 type ExitHang = false | "exit-listener" | "threadpool-worker";
 
-async function restartSupervisedGateway(options: { hangExit: ExitHang; method?: "gateway.restart" | "gateway.stop" }) {
+async function restartSupervisedGateway(options: { hangExit: ExitHang; method?: "gateway.restart" | "gateway.stop"; legacyHome?: boolean }) {
   const root = await mkdtemp(join(tmpdir(), "tron-exit-after-shutdown-"));
   roots.push(root);
   const tronHome = join(root, "tron");
@@ -48,6 +48,10 @@ async function restartSupervisedGateway(options: { hangExit: ExitHang; method?: 
     await mkdir(join(root, directory), { recursive: true });
   }
   await writeFile(join(payloadRoot, "app", "dist", "index.js"), "");
+  if (options.legacyHome) {
+    await mkdir(join(tronHome, "gateway"), { recursive: true });
+    await writeFile(join(tronHome, "gateway", "only-copy"), "legacy state");
+  }
   const preloads = ["--import", pathToFileURL(resolverPreload).href];
   if (options.hangExit === "exit-listener") {
     const hang = join(root, "hang-exit.mjs");
@@ -72,7 +76,7 @@ async function restartSupervisedGateway(options: { hangExit: ExitHang; method?: 
       TMPDIR: join(root, "tmp"),
       TRON_DATA_DIR: tronHome,
       PI_CODING_AGENT_DIR: join(root, "agent"),
-      PI_SUBAGENTS_TEMP_ROOT: join(tronHome, "internal", "subagents"),
+      PI_SUBAGENTS_TEMP_ROOT: join(tronHome, "state", "subagents"),
       TRON_GATEWAY_HOST: "127.0.0.1",
       TRON_GATEWAY_PORT: String(port),
       TRON_GATEWAY_SUPERVISED: "1",
@@ -84,16 +88,18 @@ async function restartSupervisedGateway(options: { hangExit: ExitHang; method?: 
   child.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); });
   child.stderr.on("data", (chunk: Buffer) => { output += chunk.toString(); });
   const exited = once(child, "exit") as Promise<[number | null, NodeJS.Signals | null]>;
+  try {
   await waitFor(async () => {
     if (child.exitCode !== null || child.signalCode !== null) throw new Error(`Gateway exited during startup: ${output}`);
     return (await readLog(tronHome)).some((record) => record.event === "gateway.startup-budget") || undefined;
   }, "the source Gateway is serving");
 
+  if (options.legacyHome) throw new Error("The legacy layout started instead of refusing");
   const { authenticatedRequest, readLocalCredential } = await import(deployModule) as {
     authenticatedRequest: (options: Record<string, unknown>) => Promise<unknown>;
     readLocalCredential: (path: string) => Promise<string>;
   };
-  const token = await readLocalCredential(join(tronHome, "gateway", "local-auth.json"));
+  const token = await readLocalCredential(join(tronHome, "state", "local-auth.json"));
   const requestedAt = performance.now();
   const method = options.method ?? "gateway.restart";
   await authenticatedRequest({
@@ -112,6 +118,11 @@ async function restartSupervisedGateway(options: { hangExit: ExitHang; method?: 
   }, "the Gateway left the process table", { boundMs: options.hangExit === "threadpool-worker" ? 20_000 : 60_000 });
   const records = await readLog(tronHome);
   return { pid: child.pid, code, signal, records, exitMs: Math.round(performance.now() - requestedAt) };
+  } catch (error) {
+    report.push({ case: options, failure: String(error), code: child.exitCode, signal: child.signalCode,
+      output, records: await readLog(tronHome) });
+    throw error;
+  }
 }
 
 afterEach(async () => {
@@ -130,6 +141,14 @@ afterAll(async () => {
 });
 
 describe("Gateway exit after a supervised restart", () => {
+  it("refuses a legacy home before creating new canonical state", async () => {
+    await expect(restartSupervisedGateway({ hangExit: false, legacyHome: true })).rejects.toThrow(/home-layout migrate/);
+    const tronHome = join(roots.at(-1)!, "tron");
+    expect(await readFile(join(tronHome, "gateway", "only-copy"), "utf8")).toBe("legacy state");
+    await expect(readFile(join(tronHome, "state", "gateway.json"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(join(tronHome, "state", "layout.json"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("exits with the relaunch code and is never killed when exit completes", async () => {
     const result = await restartSupervisedGateway({ hangExit: false });
     report.push({ case: "exit completes", code: result.code, signal: result.signal, exitMs: result.exitMs });

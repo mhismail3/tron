@@ -32,7 +32,7 @@ export class RecentModelStore {
   private closed = false;
 
   constructor(tronHome: string) {
-    this.path = tronHomePath(tronHome, "gateway/model-recents.json");
+    this.path = tronHomePath(tronHome, "state/model-recents.json");
     this.document = emptyDocument();
   }
 

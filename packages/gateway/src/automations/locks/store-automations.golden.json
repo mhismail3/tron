@@ -2,7 +2,7 @@
   "store": "store-automations",
   "module": "gateway/automations",
   "files": [
-    "gateway/automations/29172405-fc32-4928-812b-7f47e1e8a03d.json"
+    "state/automations/29172405-fc32-4928-812b-7f47e1e8a03d.json"
   ],
   "projection": {
     "status": {

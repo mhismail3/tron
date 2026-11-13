@@ -173,10 +173,10 @@ export class DeviceStore {
     private readonly machineId: string,
     options: { maximumDevices?: number } = {},
   ) {
-    this.gatewayDir = tronHomePath(tronHome, "gateway");
-    this.authPath = tronHomePath(tronHome, "gateway/local-auth.json");
-    this.devicePath = tronHomePath(tronHome, "gateway/devices.json");
-    this.enrollmentPath = tronHomePath(tronHome, "gateway/enrollment.json");
+    this.gatewayDir = tronHomePath(tronHome, "state");
+    this.authPath = tronHomePath(tronHome, "state/local-auth.json");
+    this.devicePath = tronHomePath(tronHome, "state/devices.json");
+    this.enrollmentPath = tronHomePath(tronHome, "state/enrollment.json");
     this.maximumDevices = options.maximumDevices ?? MAXIMUM_PAIRED_DEVICES;
     if (typeof machineId !== "string" || Buffer.byteLength(machineId) < 1 || Buffer.byteLength(machineId) > 256) {
       throw new Error("Machine identity is invalid");

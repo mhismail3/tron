@@ -38,15 +38,15 @@ esac
 
 NODE_BIN="$("$ROOT/scripts/tron-node")"
 export PATH="$(dirname "$NODE_BIN")${PATH:+:$PATH}"
-STATE_DIR="$HOME/.tron-dev/gateway"
+STATE_DIR="$HOME/.tron-dev/state"
 STATE_FILE="$STATE_DIR/lifecycle.json"
 PID_FILE="$STATE_DIR/dev.pid"
-LOG_FILE="$STATE_DIR/dev.log"
+LOG_FILE="$HOME/.tron-dev/logs/dev.log"
 COMMAND_LOCK="$STATE_DIR/command.lock"
 COMMAND_LOCK_HELD=no
 STATE_HELPER="$ROOT/scripts/tron-dev-state.mjs"
 ensure_state_dir() {
-  (umask 077 && mkdir -p "$STATE_DIR")
+  (umask 077 && mkdir -p "$STATE_DIR" "$(dirname "$LOG_FILE")")
   chmod 700 "$STATE_DIR"
 }
 LAUNCHER="/Applications/Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"

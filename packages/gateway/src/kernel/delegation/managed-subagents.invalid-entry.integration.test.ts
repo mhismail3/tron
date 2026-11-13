@@ -72,7 +72,7 @@ if (leg) it("refuses the staged invalid extension entry", async () => {
   const agentDir = join(root, "agent");
   const cwd = join(root, "workspace");
   const tronHome = join(root, "tron");
-  const overrides = { PI_CODING_AGENT_DIR: agentDir, PI_SUBAGENTS_TEMP_ROOT: join(tronHome, "internal", "subagents"),
+  const overrides = { PI_CODING_AGENT_DIR: agentDir, PI_SUBAGENTS_TEMP_ROOT: join(tronHome, "state", "subagents"),
     PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT: join(root, "unavailable-inherited-host"),
     npm_config_cache: join(root, "npm-cache"), npm_config_offline: "true", npm_config_registry: "http://registry.invalid" };
   Object.assign(process.env, overrides);

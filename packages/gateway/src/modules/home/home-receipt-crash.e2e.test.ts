@@ -9,7 +9,7 @@ import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
 
 const childProgram = fileURLToPath(new URL("../../../test-support/home-receipt-crash-child.ts", import.meta.url));
-const preload = fileURLToPath(new URL("../../../test-support/home-ledger-crash-preload.mjs", import.meta.url));
+const preload = fileURLToPath(new URL("../../../test-support/source-ts-resolver-preload.mjs", import.meta.url));
 const binding = { homeId: "receipt-crash-home", bindingRevision: 1, physicalSessionId: "receipt-crash-chapter" };
 const result = { logicalSessionId: "home", homeId: binding.homeId, bindingRevision: 1,
   sessionId: binding.physicalSessionId, operationId: "accepted-before-crash" };
@@ -27,7 +27,7 @@ describe("Home receipts at real-process crash cuts", () => {
     try {
       const marker = join(root, "barrier");
       const ledgerPath = join(root, "home.json");
-      const receiptDirectory = join(root, "gateway", "command-receipts");
+      const receiptDirectory = join(root, "state", "command-receipts");
       await writeFile(ledgerPath, JSON.stringify({ enabled: true, binding }));
       const child = spawn(process.execPath, ["--experimental-transform-types", "--import", pathToFileURL(preload).href,
         childProgram, root, cut, marker], { stdio: ["pipe", "pipe", "pipe"] });

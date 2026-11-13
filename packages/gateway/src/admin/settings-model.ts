@@ -64,12 +64,12 @@ export class SettingsStoreAdapter {
   get macTerminalKeys(): SettingsModelDependencies["macTerminalKeys"] { return this.dependencies.macTerminalKeys; }
 
   get profilePath(): string {
-    return tronHomePath(this.dependencies.tronHome, "gateway/home/profile.json");
+    return tronHomePath(this.dependencies.tronHome, "state/home/profile.json");
   }
 
 
   get gatewaySettingsPath(): string {
-    return tronHomePath(this.dependencies.tronHome, "gateway/settings/gateway.json");
+    return tronHomePath(this.dependencies.tronHome, "state/settings/gateway.json");
   }
 
   resolveOptions(runtime: ModelRuntime): Pick<ResolveOptions, "format" | "options"> {

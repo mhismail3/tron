@@ -162,7 +162,7 @@ describe("GitWorktreeService", () => {
     const { root, tronHome } = await repository();
     const outside = await mkdtemp(join(tmpdir(), "tron-worktree-escape-"));
     try {
-      const managed = join(tronHome, "gateway", "worktrees");
+      const managed = join(tronHome, "state", "worktrees");
       await mkdir(managed, { recursive: true });
       await symlink(outside, join(managed, basename(root)));
       const service = new GitWorktreeService(tronHome);

@@ -30,7 +30,7 @@ export class ModelUsageLedgerError extends Error {
 }
 
 export function modelUsageLedgerPath(tronHome: string): string {
-  return tronHomePath(tronHome, "gateway/model-usage.json");
+  return tronHomePath(tronHome, "state/model-usage.json");
 }
 
 function object(value: unknown): value is { [key: string]: unknown } {

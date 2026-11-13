@@ -19,7 +19,7 @@ it("persists observed state only when a comparison changed it", async () => {
   roots.push(root);
   const tronHome = join(root, "tron"), agentDir = join(root, "agent");
   await mkdir(agentDir, { recursive: true });
-  await mkdir(join(tronHome, "gateway", "settings"), { recursive: true });
+  await mkdir(join(tronHome, "state", "settings"), { recursive: true });
   const settingsPath = join(agentDir, "settings.json");
   await writeFile(settingsPath, `${JSON.stringify({ defaultThinkingLevel: "low" })}\n`);
   const outside = new OutsideChanges(TEST_SETTINGS_SCHEMA, tronHome, agentDir, new SettingsChangeRecord(tronHome), {

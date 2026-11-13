@@ -243,7 +243,9 @@ def manifest_digest(manifest):
     return hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
-def copied_entry_matches(actual, expected):
+def copied_entry_matches(actual, expected, private=False):
+    if private and expected['type'] in ('file', 'dir'):
+        expected = {**expected, 'mode': 0o700 if expected['type'] == 'dir' else 0o600}
     if sys.platform != 'darwin':
         return actual == expected
     def portable(entry):
@@ -254,11 +256,11 @@ def copied_entry_matches(actual, expected):
     return actual_quarantine == expected_quarantine and portable(actual) == portable(expected)
 
 
-def copied_tree_matches(actual, expected):
+def copied_tree_matches(actual, expected, private=False):
     if actual is None or expected is None:
         return actual is expected
     return actual.keys() == expected.keys() and all(
-        copied_entry_matches(actual[name], item) for name, item in expected.items())
+        copied_entry_matches(actual[name], item, private) for name, item in expected.items())
 
 
 def retired_channel_matches(actual, expected):
@@ -305,7 +307,7 @@ def copy_metadata(source, destination, data=False):
         shutil.copystat(source, destination, follow_symlinks=False)
 
 
-def copy_tree(source, destination, expected, scratch, share=None):
+def copy_tree(source, destination, expected, scratch, share=None, private=False):
     """Resume only the recorded copy, publishing each leaf after its data is synced."""
     if exists(destination):
         actual = tree_manifest(destination)
@@ -313,7 +315,7 @@ def copy_tree(source, destination, expected, scratch, share=None):
             require(name in expected and item['type'] == expected[name]['type'],
                     'backup-collision: unexpected entry in partial backup; preserve for review')
             if item['type'] != 'dir':
-                require(copied_entry_matches(item, expected[name]),
+                require(copied_entry_matches(item, expected[name], private),
                         'backup-corrupt: partial backup entry differs; preserve for review')
     else:
         actual = {}
@@ -335,6 +337,8 @@ def copy_tree(source, destination, expected, scratch, share=None):
                 copy_metadata(src, temporary)
             else:
                 copy_metadata(src, temporary, data=True)
+                if private:
+                    temporary.chmod(0o600)
                 with temporary.open('rb') as stream:
                     os.fsync(stream.fileno())
             rename_exclusive(temporary, dst)
@@ -345,8 +349,10 @@ def copy_tree(source, destination, expected, scratch, share=None):
     for name, item in reversed(list(expected.items())):
         if item['type'] == 'dir':
             copy_metadata(source / name, destination / name)
+            if private:
+                (destination / name).chmod(0o700)
     require(tree_manifest(source, share) == expected, 'source-changed: backup source changed; do not proceed')
-    require(copied_tree_matches(tree_manifest(destination), expected),
+    require(copied_tree_matches(tree_manifest(destination), expected, private),
             'backup-mismatch: copied bytes or metadata differ')
     sync_tree(destination, expected)
 
@@ -542,7 +548,7 @@ class Reinstall:
 
     @property
     def stable_channel(self):
-        return safe_path(self.home / '.tron/gateway/payloads/stable')
+        return safe_path(self.home / '.tron/state/payloads/stable')
 
     def selection_evidence(self):
         selection = self.receipt.get('bundledSelection')
@@ -645,7 +651,7 @@ class Reinstall:
     def sources(self):
         sources = {'agent': self.source_agent(), 'old-app': self.platform.installed,
                    'browser-config': self.home / '.pi/config/pi-agent-browser-native/config.json',
-                   'machine-group': self.home / '.tron/internal/machine-group-id'}
+                   'machine-group': self.home / '.tron/state/machine-group-id'}
         for path in sorted((self.home / '.tron').iterdir()):
             if path.name not in self.excluded_state_entries() \
                     and self.share(path)(path, path.is_dir() and not path.is_symlink()) != 'none':
@@ -663,7 +669,7 @@ class Reinstall:
             expected = read_json(self.operation / f'{name}.json')
             require(manifest_digest(expected) == self.receipt['components'][name], 'manifest-corrupt: evidence changed')
             backup = self.operation / 'backups' / name
-            require(copied_tree_matches(tree_manifest(backup) if exists(backup) else None, expected),
+            require(copied_tree_matches(tree_manifest(backup) if exists(backup) else None, expected, private=name != 'old-app'),
                     f'backup-mismatch: {name}; preserve operation and repair backup before proceeding')
 
     def restart(self):
@@ -740,7 +746,7 @@ class Reinstall:
             if expected is None:
                 continue
             print(f'Checking/copying {name} backup…', flush=True)
-            copy_tree(source, backups / name, expected, scratch, self.share(source))
+            copy_tree(source, backups / name, expected, scratch, self.share(source), private=name != 'old-app')
         self.platform.offline()
 
     def required_copy_bytes(self, sizes):

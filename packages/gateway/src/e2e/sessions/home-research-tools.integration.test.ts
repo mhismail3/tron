@@ -164,7 +164,7 @@ async function fixture(
 
   const store = new ProfileStore(registry.moduleHost.contract(workspaceModule));
   knowledge = store;
-  const indexPath = join(tronHome, "gateway", "session-search.sqlite");
+  const indexPath = join(tronHome, "cache", "session-search.sqlite");
   await seedIndex?.(registry, indexPath);
   const index = await SessionSearchIndex.open(indexPath);
   indexes.push(index);
@@ -486,7 +486,7 @@ describe("Tron Home research tools", () => {
     await writeFile(localFile, "shared file content");
     const link = join(f.project, "linked.txt");
     await symlink(localFile, link);
-    const homeWorkspaceFile = join(f.tronHome, "gateway", "home", "workspace", "inside-home.txt");
+    const homeWorkspaceFile = join(f.tronHome, "state", "home", "workspace", "inside-home.txt");
     await writeFile(homeWorkspaceFile, "home workspace content");
     const [localRead, linked, relative, missing] = await toolAnswers(f, "use the shared reader", [
       { name: "read", args: { path: localFile } },
@@ -653,7 +653,7 @@ describe("Tron Home research tools", () => {
     });
     const canonical = await readFile(sourcePath, "utf8");
     await f.search.warm();
-    const database = new DatabaseSync(join(f.tronHome, "gateway", "session-search.sqlite"), { readOnly: true });
+    const database = new DatabaseSync(join(f.tronHome, "cache", "session-search.sqlite"), { readOnly: true });
     try {
       expect(JSON.stringify(database.prepare("SELECT term FROM passage_terms").all())).not.toContain("oldcachecredentialfixture");
       expect(JSON.stringify(database.prepare("SELECT title FROM sessions").all())).not.toContain("oldcachecredentialfixture");
@@ -836,7 +836,7 @@ describe("Tron Home research tools", () => {
     f.faux.setResponses([async () => {
       const entry = f.slot.canonicalSessionEntries().find(item => item.type === "message" && item.message.role === "user");
       if (!entry) throw new Error("fixture Home activation was not persisted");
-      await rm(join(f.tronHome, "gateway", "home", "home.json"));
+      await rm(join(f.tronHome, "state", "home", "home.json"));
       await homeOwnerOf(f.registry).initialize();
       return fauxAssistantMessage(fauxToolCall("session_read", { sessionId: f.sessionId, entryId: entry.id }));
     }]);

@@ -105,7 +105,7 @@ export class HomeTaskStore {
   }
 
   constructor(private readonly tronHome: string, private readonly workspace: TronWorkspace, private readonly options: Options = {}) {
-    this.home = tronHomePath(tronHome, "gateway/home");
+    this.home = tronHomePath(tronHome, "state/home");
     this.directory = join(this.home, "tasks");
     this.authorizationPath = join(this.directory, "authorization.json");
     this.authorization = {
@@ -138,7 +138,7 @@ export class HomeTaskStore {
       await assertDirectory(this.home);
       await mkdir(this.directory, { mode: 0o700 });
       await this.publish(this.authorizationPath, { version: 1, revision: 1, scopes: [], requests: [], decisions: [], grants: [] }, AUTHORIZATION_BYTES);
-      for (const path of [this.home, tronHomePath(this.tronHome, "gateway")]) {
+      for (const path of [this.home, tronHomePath(this.tronHome, "state")]) {
         const handle = await open(path, "r");
         try { await syncDurably(handle); } finally { await handle.close(); }
       }
@@ -299,8 +299,8 @@ export class HomeTaskStore {
   private async assertNamespace(): Promise<boolean> {
     if (!(await this.workspace.describe()).available) throw new HomeTaskStoreError("unsafe-state");
     await assertDirectory(this.tronHome);
-    await assertDirectory(tronHomePath(this.tronHome, "gateway"));
-    await assertDirectory(tronHomePath(this.tronHome, "gateway/workspace-state"));
+    await assertDirectory(tronHomePath(this.tronHome, "state"));
+    await assertDirectory(tronHomePath(this.tronHome, "state/workspace-state"));
     const initialized = await this.workspace.featureInitialized("home-tasks").catch(() => { throw new HomeTaskStoreError("invalid-record"); });
     const homePresent = await directoryPresent(this.home);
     const present = homePresent && await directoryPresent(this.directory);

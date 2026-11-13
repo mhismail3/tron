@@ -4,6 +4,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd -P)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/tron-launcher-fixture.XXXXXX")"
 trap 'chmod -R u+w "$TMP" 2>/dev/null || true; rm -rf "$TMP"' EXIT
+export HOME="$TMP/home" TMPDIR="$TMP/tmp"
+mkdir -p "$HOME" "$TMPDIR"
 APP_ROOT="$TMP/Contents"
 BUNDLE="$APP_ROOT/Resources/Gateway"
 HELPER="$APP_ROOT/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
@@ -313,10 +315,10 @@ for invalid_alias in missing regular wrong-target absolute-target; do
     echo "launcher admitted invalid runtime Pi alias: $invalid_alias" >&2; exit 1
   fi
 done
-EXTERNAL="$TMP/home/.tron/gateway/payloads/stable/versions/v2"
+EXTERNAL="$TMP/home/.tron/state/payloads/stable/versions/v2"
 make_payload "$EXTERNAL" v2 external
 mkdir -p "$(dirname "$EXTERNAL")"
-printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v2","payloadFingerprint":"%s"}\n' "$(sed -n 's/.*payloadFingerprint":"\([0-9a-f]*\)".*/\1/p' "$EXTERNAL/manifest.json")" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
+printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v2","payloadFingerprint":"%s"}\n' "$(sed -n 's/.*payloadFingerprint":"\([0-9a-f]*\)".*/\1/p' "$EXTERNAL/manifest.json")" > "$TMP/home/.tron/state/payloads/stable/current.json"
 LAUNCHER_LOG="$TMP/home/.tron/logs/deploy.jsonl"
 mkdir -p "$(dirname "$LAUNCHER_LOG")"
 : > "$LAUNCHER_LOG"
@@ -352,7 +354,7 @@ grep -q '^fixture Gateway stderr$' "$TMP/unwritable-logs.stderr" || { echo "fail
 chmod a-w "$TMP/home/.tron/logs"
 BUNDLE_REAL="$(cd "$BUNDLE" && pwd -P)"
 chmod -R u+w "$TMP/home"
-INCOMPATIBLE="$TMP/home/.tron/gateway/payloads/stable/versions/v3-protocol"
+INCOMPATIBLE="$TMP/home/.tron/state/payloads/stable/versions/v3-protocol"
 cp -R "$EXTERNAL" "$INCOMPATIBLE"
 chmod -R u+w "$INCOMPATIBLE"
 python3 - "$INCOMPATIBLE/manifest.json" <<'PY'
@@ -368,7 +370,7 @@ with open(path, "w", encoding="utf-8") as handle:
     handle.write("\n")
 PY
 INCOMPATIBLE_FINGERPRINT="$(sed -n 's/.*payloadFingerprint":"\([0-9a-f]*\)".*/\1/p' "$INCOMPATIBLE/manifest.json")"
-printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v3-protocol","payloadFingerprint":"%s"}\n' "$INCOMPATIBLE_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
+printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v3-protocol","payloadFingerprint":"%s"}\n' "$INCOMPATIBLE_FINGERPRINT" > "$TMP/home/.tron/state/payloads/stable/current.json"
 chmod -R a-w "$TMP/home"
 reset_launcher_log
 incompatible_result="$(HOME="$TMP/home" "$HELPER" --version 2> "$TMP/incompatible-error")"
@@ -387,7 +389,7 @@ assert record["payloadVersion"] == "fixture" and record["runtimeEpoch"] == epoch
 assert "v3-protocol" in record["message"] and fingerprint in record["message"], record
 PY
 chmod -R u+w "$TMP/home"
-printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v2","payloadFingerprint":"%s"}\n' "$(sed -n 's/.*payloadFingerprint":"\([0-9a-f]*\)".*/\1/p' "$EXTERNAL/manifest.json")" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
+printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v2","payloadFingerprint":"%s"}\n' "$(sed -n 's/.*payloadFingerprint":"\([0-9a-f]*\)".*/\1/p' "$EXTERNAL/manifest.json")" > "$TMP/home/.tron/state/payloads/stable/current.json"
 chmod -R a-w "$TMP/home"
 for supported_channel in stable dev; do
   supported_result="$(TRON_GATEWAY_CHANNEL="$supported_channel" HOME="$TMP/home" "$HELPER" --version)"
@@ -401,18 +403,18 @@ for invalid_channel in debug ../ a/b "$(printf 'x%.0s' {1..65})"; do
   INVALID_STATUS=$?
   set -e
   [[ "$INVALID_STATUS" -eq 78 ]] || { echo "invalid channel was not rejected: $invalid_channel ($INVALID_STATUS)" >&2; exit 1; }
-  [[ ! -e "$TMP/home/.tron/gateway/pending-attempt.json" && ! -e "$TMP/home/.tron/gateway/pending-attempt.json.lock" ]] || { echo "invalid channel touched an outside marker or lock: $invalid_channel" >&2; exit 1; }
+  [[ ! -e "$TMP/home/.tron/state/pending-attempt.json" && ! -e "$TMP/home/.tron/state/pending-attempt.json.lock" ]] || { echo "invalid channel touched an outside marker or lock: $invalid_channel" >&2; exit 1; }
 done
 chmod -R u+w "$TMP/home"
 mkdir -p "$TMP/outside"
-ln -s "$TMP/outside" "$TMP/home/.tron/gateway/payloads/dev"
+ln -s "$TMP/outside" "$TMP/home/.tron/state/payloads/dev"
 set +e
 TRON_GATEWAY_CHANNEL=dev HOME="$TMP/home" "$HELPER" --version > "$TMP/symlink-result" 2> "$TMP/symlink-error"
 SYMLINK_STATUS=$?
 set -e
 [[ "$SYMLINK_STATUS" -eq 78 ]] || { echo "symlinked channel root was accepted: $SYMLINK_STATUS" >&2; exit 1; }
 [[ ! -e "$TMP/outside/pending-attempt.json" && ! -e "$TMP/outside/current.json" ]] || { echo "symlinked channel escaped into outside store" >&2; exit 1; }
-rm "$TMP/home/.tron/gateway/payloads/dev"
+rm "$TMP/home/.tron/state/payloads/dev"
 chmod -R a-w "$TMP/home"
 chmod -R u+w "$EXTERNAL"
 printf '# tampered\n' >> "$EXTERNAL/app/dist/index.js"
@@ -424,7 +426,7 @@ set -e
 [[ "$tampered_status" -eq 0 ]] || { echo "tampered existing external payload did not use bundled fallback: $tampered_status" >&2; exit 1; }
 [[ "$tampered_result" == "$BUNDLE_REAL" ]] || { echo "tampered external payload did not fall back to bundled payload: $tampered_result" >&2; exit 1; }
 chmod -R u+w "$TMP/home"
-LEGACY="$TMP/home/.tron/gateway/payloads/stable/versions/legacy"
+LEGACY="$TMP/home/.tron/state/payloads/stable/versions/legacy"
 make_payload "$LEGACY" legacy legacy
 chmod -R u+w "$LEGACY"
 rm -rf "$LEGACY/runtime/bin-arm64" "$LEGACY/runtime/bin-x64"
@@ -439,22 +441,22 @@ with open(path, "w", encoding="utf-8") as handle:
     json.dump(manifest, handle, separators=(",", ":"))
     handle.write("\n")
 PY
-printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"legacy","payloadFingerprint":"%s"}\n' "$LEGACY_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
+printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"legacy","payloadFingerprint":"%s"}\n' "$LEGACY_FINGERPRINT" > "$TMP/home/.tron/state/payloads/stable/current.json"
 chmod -R a-w "$TMP/home"
 legacy_result="$(HOME="$TMP/home" "$HELPER" --version 2> "$TMP/legacy-error")"
 [[ "$legacy_result" == "$BUNDLE_REAL" ]] || { echo "legacy external payload without aliases did not use bundled fallback: $legacy_result" >&2; exit 1; }
 chmod -R u+w "$TMP/home"
-PREVIOUS="$TMP/home/.tron/gateway/payloads/stable/versions/v1"
-CANDIDATE="$TMP/home/.tron/gateway/payloads/stable/versions/v3"
+PREVIOUS="$TMP/home/.tron/state/payloads/stable/versions/v1"
+CANDIDATE="$TMP/home/.tron/state/payloads/stable/versions/v3"
 make_payload "$PREVIOUS" v1 previous
 CANDIDATE_EPOCH="fedcba98-7654-3210-fedc-ba9876543210"
 make_payload "$CANDIDATE" v3 candidate "$CANDIDATE_EPOCH"
 CANDIDATE_FINGERPRINT="$(sed -n 's/.*payloadFingerprint":"\([0-9a-f]*\)".*/\1/p' "$CANDIDATE/manifest.json")"
 PREVIOUS_FINGERPRINT="$(sed -n 's/.*payloadFingerprint":"\([0-9a-f]*\)".*/\1/p' "$PREVIOUS/manifest.json")"
-printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v3","payloadFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
-printf '{"schema":1,"kind":"tron-gateway-pending-attempt","channel":"stable","attempt":"pending","version":"v3","payloadFingerprint":"%s","previousVersion":"v1","previousFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" "$PREVIOUS_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json"
+printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v3","payloadFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" > "$TMP/home/.tron/state/payloads/stable/current.json"
+printf '{"schema":1,"kind":"tron-gateway-pending-attempt","channel":"stable","attempt":"pending","version":"v3","payloadFingerprint":"%s","previousVersion":"v1","previousFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" "$PREVIOUS_FINGERPRINT" > "$TMP/home/.tron/state/payloads/stable/pending-attempt.json"
 chmod -R a-w "$TMP/home"
-chmod u+w "$TMP/home/.tron/gateway/payloads/stable"
+chmod u+w "$TMP/home/.tron/state/payloads/stable"
 reset_launcher_log
 first_attempt="$(HOME="$TMP/home" "$HELPER" --version)"
 CANDIDATE_REAL="$(cd "$CANDIDATE" && pwd -P)"
@@ -501,30 +503,30 @@ for key in ("byVersion", "byEpoch"):
 assert result["unrelated"] is None, result
 PY
 chmod -R u+w "$TMP/home"
-printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v3","payloadFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
-printf '{"schema":1,"kind":"tron-gateway-pending-attempt","channel":"stable","attempt":"launched","version":"v3","payloadFingerprint":"%s","previousVersion":"v1","previousFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" "$PREVIOUS_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json"
-mkdir "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json.lock"
+printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v3","payloadFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" > "$TMP/home/.tron/state/payloads/stable/current.json"
+printf '{"schema":1,"kind":"tron-gateway-pending-attempt","channel":"stable","attempt":"launched","version":"v3","payloadFingerprint":"%s","previousVersion":"v1","previousFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" "$PREVIOUS_FINGERPRINT" > "$TMP/home/.tron/state/payloads/stable/pending-attempt.json"
+mkdir "$TMP/home/.tron/state/payloads/stable/pending-attempt.json.lock"
 chmod -R a-w "$TMP/home"
-chmod u+w "$TMP/home/.tron/gateway/payloads/stable"
+chmod u+w "$TMP/home/.tron/state/payloads/stable"
 HOME="$TMP/home" "$HELPER" --version > "$TMP/committed-result" &
 RACING_LAUNCHER=$!
 sleep 0.1
 kill -0 "$RACING_LAUNCHER" 2>/dev/null || { echo "launcher did not honor the shared attempt lock" >&2; exit 1; }
-printf '{"schema":1,"kind":"tron-gateway-pending-attempt","channel":"stable","attempt":"committed","version":"v3","payloadFingerprint":"%s","previousVersion":"v1","previousFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" "$PREVIOUS_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json.tmp-commit"
-mv "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json.tmp-commit" "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json"
-rmdir "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json.lock"
+printf '{"schema":1,"kind":"tron-gateway-pending-attempt","channel":"stable","attempt":"committed","version":"v3","payloadFingerprint":"%s","previousVersion":"v1","previousFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" "$PREVIOUS_FINGERPRINT" > "$TMP/home/.tron/state/payloads/stable/pending-attempt.json.tmp-commit"
+mv "$TMP/home/.tron/state/payloads/stable/pending-attempt.json.tmp-commit" "$TMP/home/.tron/state/payloads/stable/pending-attempt.json"
+rmdir "$TMP/home/.tron/state/payloads/stable/pending-attempt.json.lock"
 wait "$RACING_LAUNCHER"
 committed_attempt="$(cat "$TMP/committed-result")"
 [[ "$committed_attempt" == "$CANDIDATE_REAL" ]] || { echo "committed candidate was incorrectly rolled back: $committed_attempt" >&2; exit 1; }
-[[ ! -e "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json" ]] || { echo "committed candidate marker was not consumed" >&2; exit 1; }
+[[ ! -e "$TMP/home/.tron/state/payloads/stable/pending-attempt.json" ]] || { echo "committed candidate marker was not consumed" >&2; exit 1; }
 
 chmod -R u+w "$TMP/home"
-printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v3","payloadFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
-printf '{"schema":1,"kind":"tron-gateway-pending-attempt","channel":"stable","attempt":"launched","version":"v3","payloadFingerprint":"%s","previousVersion":"v1","previousFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" "$PREVIOUS_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json"
-LOCK="$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json.lock"
+printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v3","payloadFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" > "$TMP/home/.tron/state/payloads/stable/current.json"
+printf '{"schema":1,"kind":"tron-gateway-pending-attempt","channel":"stable","attempt":"launched","version":"v3","payloadFingerprint":"%s","previousVersion":"v1","previousFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" "$PREVIOUS_FINGERPRINT" > "$TMP/home/.tron/state/payloads/stable/pending-attempt.json"
+LOCK="$TMP/home/.tron/state/payloads/stable/pending-attempt.json.lock"
 mkdir "$LOCK"
 chmod -R a-w "$TMP/home"
-chmod u+w "$TMP/home/.tron/gateway/payloads/stable"
+chmod u+w "$TMP/home/.tron/state/payloads/stable"
 set +e
 HOME="$TMP/home" "$HELPER" --version > "$TMP/held-lock-result" 2> "$TMP/held-lock-error"
 HELD_LOCK_STATUS=$?
@@ -538,8 +540,8 @@ stale_recovery="$(HOME="$TMP/home" "$HELPER" --version)"
 [[ "$stale_recovery" == "$PREVIOUS_REAL" ]] || { echo "stale lock recovery did not roll back before launch: $stale_recovery" >&2; exit 1; }
 [[ ! -e "$LOCK" ]] || { echo "stale attempt lock was not removed" >&2; exit 1; }
 
-printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v3","payloadFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
-printf '{"schema":1,"kind":"tron-gateway-pending-attempt","channel":"stable","attempt":"launched"}\n' > "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json"
+printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v3","payloadFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" > "$TMP/home/.tron/state/payloads/stable/current.json"
+printf '{"schema":1,"kind":"tron-gateway-pending-attempt","channel":"stable","attempt":"launched"}\n' > "$TMP/home/.tron/state/payloads/stable/pending-attempt.json"
 reset_launcher_log
 set +e
 HOME="$TMP/home" "$HELPER" --version > "$TMP/malformed-result" 2> "$TMP/malformed-error"
@@ -560,8 +562,8 @@ assert "payloadVersion" not in record and "runtimeEpoch" not in record, record
 assert "malformed" in record["message"], record
 PY
 
-printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v1","payloadFingerprint":"%s"}\n' "$PREVIOUS_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
-printf '{"schema":1,"kind":"tron-gateway-pending-attempt","channel":"stable","attempt":"launched","version":"v3","payloadFingerprint":"%s","previousVersion":"v1","previousFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" "$PREVIOUS_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json"
+printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v1","payloadFingerprint":"%s"}\n' "$PREVIOUS_FINGERPRINT" > "$TMP/home/.tron/state/payloads/stable/current.json"
+printf '{"schema":1,"kind":"tron-gateway-pending-attempt","channel":"stable","attempt":"launched","version":"v3","payloadFingerprint":"%s","previousVersion":"v1","previousFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" "$PREVIOUS_FINGERPRINT" > "$TMP/home/.tron/state/payloads/stable/pending-attempt.json"
 reset_launcher_log
 set +e
 HOME="$TMP/home" "$HELPER" --version > "$TMP/mismatch-result" 2> "$TMP/mismatch-error"
