@@ -393,10 +393,12 @@ def remote_main(job: dict) -> int:
             clean['TRON_TEST_LEDGER'] = str(results / 'ledger.sqlite3')
             clean['TRON_TEST_CONTENDED'] = job.get('contended', '0')
             if job['lane'] == 'node':
+                root_node = job['args'][:1] == ['--root']
+                arguments = job['args'][1:] if root_node else job['args']
                 return finish(stream('/usr/bin/python3', str(checkout / 'tools/verify/ledger.py'), 'exec', 'node',
                                      str(checkout / 'scripts/tron-node'), 'exec', 'node', '--test', '--test-concurrency=1',
-                                     '--test-reporter=' + str(checkout / 'tools/verify/ledger-node.mjs'), *job['args'],
-                                     cwd=checkout / 'packages/gateway'))
+                                     '--test-reporter=' + str(checkout / 'tools/verify/ledger-node.mjs'), *arguments,
+                                     cwd=checkout if root_node else checkout / 'packages/gateway'))
             if job['lane'] == 'python':
                 doctor = (run('/bin/bash', str(checkout / 'tools/proof/bootstrap.sh'), 'doctor', cwd=checkout)
                           if (checkout / 'tools/proof/dafny.pin').is_file() else None)
