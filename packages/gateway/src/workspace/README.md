@@ -26,6 +26,10 @@ moving its product copy or changing prompt timing.
 
 ## Contract
 
+- **Approval wording.** `APPROVAL_RULE` in `tron-core-extension.ts` is the one literal
+  approval list. Core context, Home's role text and the direct child handoff render it.
+  Core renders it even when no desktop tools are active; repository rules retain their
+  repository-specific approval routing, not a second list. Wording grants no authority.
 - `tron-core` appends Tron identity, the resolved workspace path and availability,
   and active-tool guidance to the parent runtime's prompt. It does not change `cwd`,
   load workspace contents, replace Pi's base prompt or write JSONL. It is inline, so

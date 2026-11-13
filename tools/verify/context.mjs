@@ -45,7 +45,7 @@ export function audit(layers, sources = []) {
     }
   }
   for (const [rule, pattern] of [["D1-checkin-owner", /(?:send|ask workers to send) (?:a )?(?:short |lightweight )?checkin[^.!?]*30 minutes|`checkin` at milestones\/~30 min|30-minute SHA\/change\/blocker check-ins/i], ["D2-approval-owner", /Ask (?:him )?only for spend[^.!?]*2FA/i]]) {
-    const owners = sources.filter(source => pattern.test(source.text)).map(source => source.name);
+    const owners = sources.flatMap(source => [...source.text.matchAll(new RegExp(pattern, "gi"))].map(() => source.name));
     if (owners.length > 1) diagnostics.push({ rule, owners });
   }
   if (sources.some(source => /\.filter\(tool => homeToolAvailable\(tool.name, (?:activation.kind|kind)\)\)/.test(source.text))) diagnostics.push({ rule: "N1-kind-dependent-tools", role: "home" });
@@ -58,7 +58,7 @@ export function audit(layers, sources = []) {
   return { diagnostics, sizes, comparisons, budgets, unavailable: ["tool declarations", "installed skills", "global user rules", "workflow child prompts"], budgetPolicy: "PRINCIPLES section 9; byte/4 estimates; review signal, not a gate" };
 }
 
-async function render() {
+export async function render() {
   const require = createRequire(resolve(root, "packages/gateway/node_modules/@earendil-works/pi-coding-agent/package.json"));
   const { createJiti } = require("jiti");
   const jiti = createJiti(import.meta.url, { moduleCache: false, fsCache: false });
