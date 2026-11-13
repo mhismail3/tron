@@ -186,11 +186,11 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   const runtimeLifecycle: RuntimeLifecycleRecord[] = [];
   let homeTriggers: AutomationHomeTrigger | undefined;
   let knowledge: ProfileStore | undefined;
-  let profileSettings: { model: SettingsModel; changes: SettingsChangePath } | undefined;
+  let settingsAccess: { model: SettingsModel; changes: SettingsChangePath } | undefined;
   const registry = await createTestRegistry({
     triggerSources: () => homeTriggers ? [homeTriggers] : [],
     knowledge: () => knowledge,
-    ...(options.knowledge ? { settings: () => profileSettings } : {}),
+    settings: () => settingsAccess,
     agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: runtimeFactory, trust,
     ...(notificationService ? { notifications: notificationService, machineId: "lock-machine" } : {}),
     ...(options.automations ? {
@@ -220,9 +220,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
       async (inspection) => { await registry.commitProjectReload(inspection.projectDir); },
       async (inspection) => { await registry.abortProjectReload(inspection.projectDir); }),
   });
-  if (knowledge) {
-    profileSettings = { model: settingsModel, changes: settingsChanges };
-  }
+  settingsAccess = { model: settingsModel, changes: settingsChanges };
   registry.setSettings(settingsModel, settingsChanges);
 
   const notifications: TraceValue[] = [];

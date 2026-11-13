@@ -78,8 +78,9 @@ dispatcher records pending intent, authorizes the snapshot, creates the worker t
 
 - Each admission step has a 60 s deadline and follows the delegating turn's Stop; a refused
   step fails `delegate` and a pending task settles `unknown` (`admission-cancelled`,
-  `admission-timeout`); slow steps log `home.task.dispatch-stage`. No worker cap; heavy steps
-  wait in the host-wide queue ([host load](../../../docs/host-load.md)).
+  `admission-timeout`); slow steps log `home.task.dispatch-stage`. Admissions atomically reserve
+  `run.workers.maxConcurrent` (global, default 4); a refusal names the limit and settlement
+  releases the slot. Heavy steps wait in the host-wide queue ([host load](../../../docs/host-load.md)).
 - Model: the first available `model.queue[role=worker]` (else Home's model) and
   `model.thinking[role=worker]` (else Home's), clamped; an explicit choice needs a `reason`.
   Choices are fixed in the brief and reported (`worker`, `subagentModels`; subagents default to

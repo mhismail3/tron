@@ -137,6 +137,26 @@ describe("Home's global skills and prompt templates follow the agent directory l
     expect(globalResources(await commands(chat.id))).toEqual(expected);
   }, 60_000);
 
+  it("completes a deferred resource reload when the last session RPC mutation settles", async () => {
+    const { f, home, commands } = await liveHome();
+    await writePrompt(f.agentDir, "rpc-settlement", "Before settlement", "BODY");
+    await waitFor(async () => (await commands(home.id)).some(command => command.name === "rpc-settlement"), "initial prompt discovered");
+    const chat = await f.registry.create(f.cwd);
+    const work = f.registry.administrativeWorkRegistry.begin({
+      kind: "rpc-mutation", sessionId: chat.id, method: "settings.change", hostEpoch: f.registry.administrativeWorkRegistry.runtimeEpoch,
+    });
+    const start = f.signals.length;
+    const recorded = (reason: string) => f.signals.slice(start).some(record => record.sessionId === chat.id
+      && record.outcome === "resources-reload" && record.reason === reason);
+    try {
+      await writePrompt(f.agentDir, "rpc-settlement", "After settlement", "BODY");
+      await waitFor(() => recorded("deferred"), "freshness drain deferred behind the accepted RPC mutation");
+      expect(recorded("completed")).toBe(false);
+    } finally { work.settle(); }
+    await waitFor(() => recorded("completed"), "RPC settlement completes the deferred freshness drain");
+    expect((await commands(chat.id)).find(command => command.name === "rpc-settlement")?.description).toBe("After settlement");
+  }, 60_000);
+
   it("does not reload Home for agent-directory writes made before its watchers started (#1694)", async () => {
     const userHome = await mkdtemp(join(tmpdir(), "tron-home-resources-"));
     homes.push(userHome);
