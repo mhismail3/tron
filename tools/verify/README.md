@@ -100,9 +100,12 @@ installed there, a job refuses with the `scripts/tron-node install` or (Python l
 Execution reads committed state: uncommitted or untracked changes are refused
 (exit 2). `--plan` additionally includes staged, working and untracked paths; add new
 files to Git before relying on their ownership. Each step prints `[i/N] name …`, its
-live log, result and wall time. A red step prints its tail and the run goes on, so one run names every red;
-the verdict lists them in step order, first red first. Only work a red makes meaningless is skipped: a failed
-`ios build` skips `layers ios`, the iOS shards and the real-UI journeys.
+live log, result and wall time. The cheap tier runs static/type checks, iOS source policy,
+Python tooling tests, shell/Node tests and selected Gateway/Relay tests before any simulator build,
+UI journey or Mac test stage. It collects every cheap-tier failure; the verdict lists them in
+step order, first red first. A cheap-tier failure prevents all expensive stages from starting.
+After that boundary, expensive stages stop on red; pending stages remain selected and are
+reported as skipped, never passed. A failed `ios build` also skips `layers ios`.
 `test-results/verify/<sha>.json` is atomically updated before/after every step;
 `running` and `interrupted` are not passes. SIGINT/SIGTERM stops and joins the owned
 step process group while retaining partial results. Full logs are in
@@ -167,9 +170,10 @@ native test results, so verify, batch and direct invocations share one ledger, n
    generated files are out of its scope
 6. When the selection touches the Gateway: `npm run check` (production and test
    support typecheck), `npm run lint`, and `scripts/tron layers gateway`.
-7. `scripts/tron layers ios` on this commit's Xcode index store (see the iOS lane
-   below). A selection without the iOS lane runs it only when a fresh index
-   exists; otherwise it is reported as skipped, never as passed.
+7. Unlike the source-based static checks above, `scripts/tron layers ios` needs this
+   commit's built Xcode index store (see the iOS lane below), so it runs at the build
+   boundary after the cheap tier passes. A selection without the iOS lane runs it
+   only when a fresh index exists; otherwise it is skipped, never passed.
 
 ### Context audit
 
