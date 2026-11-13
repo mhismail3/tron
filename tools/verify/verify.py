@@ -1470,7 +1470,7 @@ def main(argv: list[str]) -> int:
             else:
                 for label, shard in zip(test_step_names(group, shards, False),
                                         shards if group == "ios" else [boundaries] if group == "ios-boundary" else [journeys] if group == "ios-journeys" else [profile_scenario_names(files)] if group.startswith("ios-scenarios:") else [owner_jobs[group]["command"]] if group in owner_jobs else [selectors]):
-                    command, cwd, _ = test_spec(group, files, shard, ROOT / "test-results/verify" / sha, ios_wait=name != "all", gateway_host=gateway_host)
+                    command, cwd, _ = test_spec(group, files, shard, ROOT / "test-results/verify" / sha, ios_wait=name != "all", gateway_host=gateway_host, node_host=node_host)
                     commands.append({"name": label, "command": command, "cwd": str(cwd.relative_to(ROOT)),
                                      **({"estimatedSeconds": round(shard.seconds, 1)} if group == "ios" else {})})
         deferred_commands = []

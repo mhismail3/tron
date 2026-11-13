@@ -294,6 +294,9 @@ class ExternalVerificationTests(VerifyCase):
         r.write("packages/gateway/consumer.module.json", json.dumps({"layer": "L3", "owns": ["**"]}))
         self.declare("alpha", ["scripts/tron test gateway scripts/contract.test.mjs"])
         r.commit("Gateway node-only consumer declaration")
+        r.git("branch", "-f", "base")
+        r.write("packages/gateway/scripts/contract.test.mjs", "export const selectionOnly = false;\n")
+        r.commit("the node-only script changes")
         bin_dir = Path(self.temp.name) / "node-only-bin"
         bin_dir.mkdir()
         probed = Path(self.temp.name) / "probed"
@@ -301,8 +304,11 @@ class ExternalVerificationTests(VerifyCase):
         (bin_dir / "ssh").chmod(0o755)
         r.env["PATH"] = f"{bin_dir}{os.pathsep}{r.env['PATH']}"
         r.git("config", "tron.verify.mini", "mini.test")
-        planned = r.verify("--module", "repo/alpha", "--plan")
+        planned = r.verify("--plan")
         self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
+        selected = json.loads(planned.stdout[planned.stdout.index("{"):])
+        self.assertEqual(selected["selection"]["paths"], ["packages/gateway/scripts/contract.test.mjs"], planned.stdout)
+        self.assertEqual(selected["groups"], {"node-gateway": ["packages/gateway/scripts/contract.test.mjs"]}, planned.stdout)
         self.assertFalse(probed.exists(), "a node-only selection must not probe the mini")
         self.assertIn("node lane: on this Mac (the default; --gateway-host mini moves it to the mini)", planned.stdout)
         self.assertNotIn("gateway and python lanes", planned.stdout)
