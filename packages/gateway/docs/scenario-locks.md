@@ -42,8 +42,11 @@ request and both system entries.
   `root` option pointing to `<tron-home>/state/mac-terminal`, not the home
   container; production, locks and store builders use the same contract. A
   `session.create` conflict saying `Private SSH directory is unsafe` before a
-  provider request calls for inspecting that root before changing permissions. The faux provider is the only scripted party, and owners a scenario must not reach throw if touched. It
-  records each request with its normalized response, every event topic with
+  provider request calls for inspecting that root before changing permissions.
+  Production and shared builders are typechecked; `src/**/*.test.ts` callers
+  require a separate audit of direct constructions, aliases and subclasses.
+  The faux provider is the only scripted party, and owners a scenario must not
+  reach throw if touched. It records each request with its normalized response, every event topic with
   the union of its payload structure (in-flight subtrees pruned), each provider
   request (tools, prompt sections, prompt hash, messages), canonical JSONL,
   named store files, notifications enqueued at the relay boundary, and the

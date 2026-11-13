@@ -306,7 +306,7 @@ describe("settings.resolve request span", () => {
         }
       }
     }
-    const macTerminalKeys = new FixtureMacTerminalService(root, { launchAgentDirectory: join(root, "agents") });
+    const macTerminalKeys = new FixtureMacTerminalService({ root: join(root, "state/mac-terminal"), launchAgentDirectory: join(root, "agents") });
     const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome: root, trust, modelRuntime, macTerminalKeys }));
     const registry = await createTestRegistry({
       agentDir,
