@@ -38,8 +38,11 @@ request and both system entries.
 - `test-support/gateway-lock-harness.ts` starts a real Gateway for a lock: the
   production `RuntimeRegistry`, `GatewayService` and `GatewayServer` on a
   loopback WebSocket with a paired device. It also wires the settings model,
-  its change path and the real upload store. The faux provider is the only
-  scripted party, and owners a scenario must not reach throw if touched. It
+  its change path and the real upload store. The SSH service requires a named
+  `root` option pointing to `<tron-home>/state/mac-terminal`, not the home
+  container; production, locks and store builders use the same contract. A
+  `session.create` conflict saying `Private SSH directory is unsafe` before a
+  provider request calls for inspecting that root before changing permissions. The faux provider is the only scripted party, and owners a scenario must not reach throw if touched. It
   records each request with its normalized response, every event topic with
   the union of its payload structure (in-flight subtrees pruned), each provider
   request (tools, prompt sections, prompt hash, messages), canonical JSONL,

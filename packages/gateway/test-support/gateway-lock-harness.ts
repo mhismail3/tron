@@ -210,7 +210,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   await (registry as unknown as { sessionCatalog: { whenPublished(): Promise<void> } }).sessionCatalog.whenPublished();
 
   if (options.knowledge) knowledge = new ProfileStore(registry.moduleHost.contract(workspaceModule));
-  const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: new MacTerminalService(tronHome, { launchAgentDirectory: join(root, "agents") }) }));
+  const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: new MacTerminalService({ root: join(tronHome, "state/mac-terminal"), launchAgentDirectory: join(root, "agents") }) }));
   const settingsRecord = new SettingsChangeRecord(tronHome);
   const outside = new OutsideChanges(TEST_SETTINGS_SCHEMA, tronHome, agentDir, settingsRecord, settingsModel.owner.observedReaders);
   settingsModel.owner.observeOutside(outside);

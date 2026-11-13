@@ -372,7 +372,7 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
   });
   owner.registries.push(registry);
   await registry.initialize();
-  const privateService = new MacTerminalService(join(tronHome, "state/mac-terminal"), { launchAgentDirectory: join(root, "agents") });
+  const privateService = new MacTerminalService({ root: join(tronHome, "state/mac-terminal"), launchAgentDirectory: join(root, "agents") });
   const macTerminalKeys = new MacTerminalKeys(privateService.root);
   const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: privateService }));
   const record = new SettingsChangeRecord(tronHome, options.segmentEntries);

@@ -69,7 +69,7 @@ async function settingsPath(home: string, knowledge?: ProfileStore) {
   await mkdir(agentDir, { recursive: true });
   const trust = new TrustService(agentDir);
   const modelRuntime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
-  const model = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome: home, trust, modelRuntime, macTerminalKeys: new MacTerminalService(home, { launchAgentDirectory: join(home, "agents") }) }));
+  const model = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome: home, trust, modelRuntime, macTerminalKeys: new MacTerminalService({ root: join(home, "state/mac-terminal"), launchAgentDirectory: join(home, "agents") }) }));
   const record = new SettingsChangeRecord(home);
   const path: SettingsChangePath = new SettingsChangePath(model, record, {
     setTrust: async () => { throw new Error("The settings corpus sets no trust"); },

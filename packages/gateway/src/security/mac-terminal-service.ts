@@ -47,7 +47,8 @@ export class MacTerminalService {
   private readonly run = runBoundedCommand;
   private readonly username = userInfo().username;
 
-  constructor(root: string, options: { port?: number; launchAgentDirectory?: string } = {}) {
+  constructor(options: { root: string; port?: number; launchAgentDirectory?: string }) {
+    const { root } = options;
     let ancestor = dirname(resolve(root));
     const remaining = [basename(root)];
     while (!existsSync(ancestor)) {

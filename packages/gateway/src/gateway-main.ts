@@ -167,7 +167,7 @@ const uploads = new UploadStore(config.tronHome, config.maxUploadBytes);
 const browserLiveViews = new BrowserLiveViewRegistry();
 const displayArtifacts = new DisplayArtifactStore(config.tronHome);
 const display = new DisplayOwner(displayArtifacts, browserLiveViews, () => sessions);
-const macTerminalKeys = new MacTerminalService(tronHomePath(config.tronHome, "state/mac-terminal"));
+const macTerminalKeys = new MacTerminalService({ root: tronHomePath(config.tronHome, "state/mac-terminal") });
 await macTerminalKeys.restore().catch(error => {
   logger.log("warning", "Private SSH startup failed", { event: "mac-terminal.startup-failed", error: String(error) });
 });

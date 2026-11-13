@@ -9,7 +9,7 @@ async function main(): Promise<void> {
     throw new Error("Usage: scripts/tron terminal-ssh status|start|stop|recover --home <existing-tron-home>");
   }
   await assertHomeLayout(home);
-  const service = new MacTerminalService(join(home, "state/mac-terminal"));
+  const service = new MacTerminalService({ root: join(home, "state/mac-terminal") });
   if (command === "start") await service.setEnabled(true);
   else if (command === "stop") await service.setEnabled(false);
   else if (command === "recover") await service.recover();

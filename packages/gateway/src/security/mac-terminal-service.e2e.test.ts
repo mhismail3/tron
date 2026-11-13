@@ -37,7 +37,7 @@ async function freePort(): Promise<number> {
 async function fixture() {
   const root = await realpath(await mkdtemp(join(execFileSync("/usr/bin/getconf", ["DARWIN_USER_TEMP_DIR"], { encoding: "utf8" }).trim(), "tron-private-sshd-")));
   roots.push(root);
-  const service = new MacTerminalService(join(root, "state/mac-terminal"), { port: await freePort(), launchAgentDirectory: join(root, "agents") });
+  const service = new MacTerminalService({ root: join(root, "state/mac-terminal"), port: await freePort(), launchAgentDirectory: join(root, "agents") });
   services.push(service);
   return { root, service };
 }
@@ -189,8 +189,8 @@ for (const enabled of [true, false]) it(`restores previously ${enabled ? "enable
   await mkdir(join(home, "gateway"), { recursive: true, mode: 0o700 });
   await writeFile(join(home, "gateway/gateway.json"), "{}", { mode: 0o600 });
   const options = { port: await freePort(), launchAgentDirectory: agents };
-  const old = new MacTerminalService(join(home, "mac-terminal"), options);
-  const next = new MacTerminalService(join(home, "state/mac-terminal"), options);
+  const old = new MacTerminalService({ root: join(home, "mac-terminal"), ...options });
+  const next = new MacTerminalService({ root: join(home, "state/mac-terminal"), ...options });
   const migrate = async (direction: "--apply" | "--rollback", crash = false) => new Promise<string>((resolve, reject) => {
     const program = `import sys,os\nsys.path.insert(0,${JSON.stringify(join(process.cwd(), "../../tools/home-layout"))})\nimport home_layout,runtime_layout\noriginal=runtime_layout.terminal_layout.retire\ndef retire(*args):\n original(*args)\n os._exit(93)\n${crash ? "runtime_layout.terminal_layout.retire=retire" : ""}\nraise SystemExit(home_layout.main(sys.argv[1:]))`;
     execFile("/usr/bin/python3", ["-B", "-c", program, "migrate", "--home", home, direction], { cwd: process.cwd(), env: { ...process.env, HOME: user, PYTHONDONTWRITEBYTECODE: "1" }, timeout: 30_000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => error ? reject(new Error(`exit=${error.code}\n${stdout}${stderr}`)) : resolve(stdout));
