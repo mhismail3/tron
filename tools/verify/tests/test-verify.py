@@ -933,7 +933,7 @@ IOS_TEST_STUB = r"""#!/bin/bash
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 echo "$*" >>"$FIXTURE_IOS_CALLS"
-if [[ "${FIXTURE_IOS_BUSY:-}" == "$1" && "$*" == *"${FIXTURE_IOS_BUSY_IN:-}"* ]]; then echo 'host slot wait expired; deferred'; exit 73; fi
+if [[ "${FIXTURE_IOS_BUSY:-}" == "$1" && "$*" == *"${FIXTURE_IOS_BUSY_IN:-}"* ]]; then echo 'iOS lane acquisition refused'; exit 73; fi
 # A run's wall-clock span, for proving that shards on different lanes overlap.
 if [[ "$1" == run && -n "${FIXTURE_IOS_PIDS:-}" ]]; then echo "$$" >>"$FIXTURE_IOS_PIDS"; fi
 if [[ "$1" == run && -n "${FIXTURE_IOS_SECONDS:-}" ]]; then
@@ -975,7 +975,7 @@ fault = os.environ.get("FIXTURE_PROFILE_FAULT", "")
 if args[:1] != ["ios"]:
     sys.exit(2)
 if fault == "busy":
-    print("host slot wait expired; deferred")
+    print("iOS lane acquisition refused")
     sys.exit(73)
 tests = {}
 controls = set()
@@ -1699,10 +1699,10 @@ class IosLaneTests(VerifyCase):
         self.assertIn("ios build failed", broken.stdout)
         self.assertEqual(calls.read_text(), "", "a failed current build never invokes the profiler")
         r.env["FIXTURE_IOS_BUILD_EXIT"] = "73"
-        deferred = r.verify("--changed")
-        self.assertEqual(deferred.returncode, 1, deferred.stdout)
-        self.assertEqual(r.report()["verdict"], "incomplete")
-        self.assertEqual(calls.read_text(), "", "a deferred build never invokes the profiler")
+        refused = r.verify("--changed")
+        self.assertEqual(refused.returncode, 1, refused.stdout)
+        self.assertEqual(r.report()["verdict"], "failed")
+        self.assertEqual(calls.read_text(), "", "a refused current build never invokes the profiler")
         del r.env["FIXTURE_IOS_BUILD_EXIT"]
 
         r.git("branch", "-f", "base")

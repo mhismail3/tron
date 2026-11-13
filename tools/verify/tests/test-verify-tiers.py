@@ -37,7 +37,7 @@ class IosAcquisitionTests(fixture.VerifyCase):
     def test_unexpected_build_refusal_fails_without_deferring_named_tests(self):
         r = self.repo
         fixture.IosLaneTests.ios_fixture(self)
-        r.write('scripts/tron-ios-test', '#!/bin/sh\necho "host slot wait expired; deferred"\nexit 73\n')
+        r.write('scripts/tron-ios-test', '#!/bin/sh\necho "iOS lane acquisition refused"\nexit 73\n')
         (r.path / 'scripts/tron-ios-test').chmod(0o755)
         r.write('packages/ios-app/Sources/UI/Chat/ChatView.swift', 'struct Changed {}\n')
         r.commit('busy admission')
