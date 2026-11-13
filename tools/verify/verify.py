@@ -44,7 +44,6 @@ IOS_HARNESSED = {"RealGatewayPairAndChatUITests": "scripts/ios-gateway-e2e-test"
 NOT_DRIVEN = ("ios-lanes",)
 JOURNEY_CLASS = "RealGatewayPairAndChatUITests"
 JOURNEY_HARNESS = "scripts/ios-gateway-e2e-test"
-JOURNEY_LANES = 3
 PROFILE_SOURCES = f"{IOS}/ProfilingTests"
 PROFILE_HARNESS = "scripts/tron-profile"
 PROFILE_TABLE = "scripts/tron-profile-ios"
@@ -1339,6 +1338,8 @@ def main(argv: list[str]) -> int:
     mode.add_argument("--all", action="store_true")
     mode.add_argument("--update-locks", metavar="ID")
     parser.add_argument("--base", default="origin/main")
+    parser.add_argument("--ios-jobs", type=int, choices=(1, 2, 3), default=3,
+                        help="maximum concurrent iOS shards and real-UI journey lanes (default: 3)")
     parser.add_argument("--skip", default="", help=f"comma-separated runner groups to skip explicitly: {', '.join(SKIPPABLE)}")
     parser.add_argument("--plan", action="store_true", help="print the selection and steps without running them")
     parser.add_argument("--gateway-host", choices=("pool", "local", "mini"), default="pool",
@@ -1480,7 +1481,8 @@ def main(argv: list[str]) -> int:
         print(json.dumps({"selection": selection, "delta": change, "groups": groups, "steps": plan_steps, "commands": commands,
                           "gatewayHost": {"host": gateway_host, "reason": gateway_reason},
                           "deferredCommands": deferred_commands,
-                          "iosLanes": [lane or "(this worktree's lane)" for lane in ios_phone_lanes()] + [ios_pad_lane()] if "ios" in groups and "ios" not in skip else [],
+                          "iosJobs": args.ios_jobs,
+                          "iosLanes": [lane or "(this worktree's lane)" for lane in ios_phone_lanes()[:args.ios_jobs]] + [ios_pad_lane()] if "ios" in groups and "ios" not in skip else [],
                           "batchCommand": [tron, "verify", "--batch"] if selection["tier"] == "full" else None}, indent=2))
         return 0
 
@@ -1595,7 +1597,7 @@ def main(argv: list[str]) -> int:
                         run.steps[-1].update(status="deferred", deferredTests=files)
                     continue
                 env = {"TEST_RUNNER_TRON_UPDATE_LOCKS": args.update_locks} if args.update_locks else {}
-                failed_shards, ios_deferred = run_ios_shards(run, shards, labels, files, name != "all", env, ios_phone_lanes())
+                failed_shards, ios_deferred = run_ios_shards(run, shards, labels, files, name != "all", env, ios_phone_lanes()[:args.ios_jobs])
                 reds.extend(failed_shards)
                 continue
             if group == "ios-boundary":
@@ -1615,7 +1617,7 @@ def main(argv: list[str]) -> int:
                 continue
             if group == "ios-journeys":
                 command, cwd, _ = test_spec(group, files, journeys, run.logs)
-                result = run.step(label, command, cwd=cwd, env={"TRON_IOS_E2E_UI_LANES": str(min(JOURNEY_LANES, len(journeys)))})
+                result = run.step(label, command, cwd=cwd, env={"TRON_IOS_E2E_UI_LANES": str(min(args.ios_jobs, len(journeys)))})
                 reports, failed, missing = journey_evidence((ROOT / result["log"]).read_text(errors="replace"), journeys, sha)
                 result.update(journeyReports=reports, tests=len(journeys) - len(missing))
                 if failed or result["status"] == "failed":

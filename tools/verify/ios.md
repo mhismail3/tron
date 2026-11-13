@@ -36,12 +36,15 @@ lane, failed cases included) records for it; a method with no record counts 190 
 methods run three to a process. A method estimated above 570 s runs alone; a class run whole counts
 the full 570 s. Estimates only pack processes: they never select, skip, order within a process or
 judge a test. `--plan` prints each shard's `estimatedSeconds`, its command as it runs alone, and the
-lanes shards may use beside each other (`iosLanes`).
+lanes shards may use beside each other (`iosLanes`), plus the concurrency limit (`iosJobs`).
 
-**Lanes.** Shards run at once, longest estimate first, on one lane per host slot: the
+**Lanes.** `--ios-jobs 1|2|3` limits concurrent native shards and real-UI journey lanes
+(default 3); at 1, phone and iPad shards run one at a time. It changes neither selection nor
+packing nor the runner's three host-wide slots. Shards run longest estimate first on up to
+that many phone lanes: the
 worktree's own lane, then this worktree's `verify-iphone2-<hash>` and `verify-iphone3-<hash>`
 lanes (the canonical iPhone; one per further slot of `scripts/ios-test-lock.py`'s `HOST_SLOTS`),
-with iPad-only shards on the iPad lane, never more shards than slots. Each lane is the runner's own
+with iPad-only shards on the iPad lane, never more shards than the selected job limit. Each lane is the runner's own
 leased lane with its own simulator; the lanes share this worktree's test products, and the sweep
 reclaims them with the worktree. A shard started while none of the run's other shards is in flight
 acquires its slot exactly as a serial run did (below). A shard started beside one in flight takes a
@@ -63,4 +66,4 @@ The batch covers those files. Genuine build/test errors and zero-test runs still
 
 The [verify CLI tests](README.md#verify) drive this lane through a stand-in runner
 (`IosLaneTests`): selection, build reuse, extensions, iPad lanes, packing by recorded times,
-concurrent lanes, requeued and deferred admission, interrupts, and short or empty runs.
+serial ordering and unchanged selection/counts at each job limit, concurrent lanes, requeued and deferred admission, interrupts, and short or empty runs.
