@@ -1167,6 +1167,66 @@ class IosLaneTests(VerifyCase):
         self.assertIn("testUnowned", refused.stderr)
         self.assertEqual(calls.read_text(), before)
 
+    def test_cheap_red_collects_failures_before_any_simulator_starts(self) -> None:
+        r = self.repo
+        calls = self.ios_fixture()
+        r.write("mods/alpha/alpha.py", "VALUE = 'changed' \n")
+        r.write("mods/alpha/test-alpha.py", FAILING)
+        r.write("packages/ios-app/Sources/UI/Chat/ChatView.swift", "struct ChatView { let value = 1 }\n")
+        r.commit("cheap reds beside selected simulator coverage")
+        planned = r.verify("--changed", "--plan")
+        self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
+        plan = json.loads(planned.stdout[planned.stdout.index("{"):])
+        result = r.verify("--changed")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        report = r.report()
+        self.assertEqual(report["selection"], plan["selection"])
+        self.assertEqual(len(report["selection"]["tests"]), 2)
+        self.assertEqual(report["passingTests"], 0)
+        self.assertEqual([step["name"] for step in report["steps"] if step["status"] == "failed"],
+                         ["git diff --check", "tests: python"])
+        self.assertFalse(calls.exists(), "a cheap-tier red must not start a simulator build or test")
+        self.assertEqual([step["status"] for step in report["steps"] if step["name"] in ("ios build", "tests: ios")],
+                         ["skipped", "skipped"])
+
+    def test_expensive_red_stops_later_stages_but_undriven_tests_do_not(self) -> None:
+        r = self.repo
+        calls = self.ios_fixture()
+        mac = "packages/mac-app/Tests"
+        r.write(f"{mac}/tests.module.json", json.dumps({"layer": "L5", "owns": ["**"]}))
+        r.write(f"{mac}/Integration/FixtureTests.swift", "struct FixtureTests {}\n")
+        r.write("tools/verify/mac.py", "from pathlib import Path\nPath('test-results/mac-ran').touch()\nprint('Test run with 1 test in 1 suite passed after 1.0 seconds.')\n")
+        r.write("mods/alpha/alpha.module.json", json.dumps({"layer": "L3", "owns": ["**"], "verify": [
+            "scripts/tron test ios run --only-testing TronMobileUITests/FixtureLockTests --only-testing TronMobileUITests/TronMacTerminalUITests",
+            "scripts/tron test mac"]}))
+        r.commit("selected expensive and undriven coverage")
+        passed = r.verify("--module", "repo/alpha")
+        self.assertEqual(passed.returncode, 1, passed.stdout + passed.stderr)
+        self.assertIn("selected tests were not run: ios-lanes", passed.stdout)
+        marker = r.path / "test-results/mac-ran"
+        self.assertTrue(marker.exists(), "an undriven group is not a red and must not suppress later stages")
+        marker.unlink()
+        calls.write_text("")
+        r.env["FIXTURE_IOS_FAIL"] = "TronMobileUITests/FixtureLockTests/testChat()"
+        failed = r.verify("--module", "repo/alpha")
+        self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
+        self.assertFalse(marker.exists(), "an expensive red must stop the later Mac stage")
+        self.assertEqual(next(step["status"] for step in r.report()["steps"] if step["name"] == "tests: mac"), "skipped")
+        r.env.pop("FIXTURE_IOS_FAIL")
+        r.write("scripts/ios-gateway-e2e-test", E2E_STUB.replace('echo "$* lanes=', 'exit 73\necho "$* lanes='))
+        (r.path / "scripts/ios-gateway-e2e-test").chmod(0o755)
+        tooling = json.loads((r.path / "tooling.module.json").read_text())
+        tooling["owns"].append("scripts/ios-gateway-e2e-test")
+        r.write("tooling.module.json", json.dumps(tooling))
+        folder = "packages/ios-app/E2ETests"
+        r.write(f"{folder}/e2e-tests.module.json", json.dumps({"layer": "L5", "owns": ["**"]}))
+        r.write(f"{folder}/RealGatewayPiBoundaryTests.swift", "class RealGatewayPiBoundaryTests { func testWire() {}\n func testLAN() {} }\n")
+        r.commit("busy boundary alongside selected Mac tests")
+        busy = r.verify("--changed")
+        self.assertEqual(busy.returncode, 1, busy.stdout + busy.stderr)
+        self.assertEqual(r.report()["verdict"], "incomplete")
+        self.assertTrue(marker.exists(), "a busy boundary is incomplete, not a red that suppresses Mac tests")
+
     def test_ios_change_builds_once_checks_references_and_runs_only_the_ui_locks(self) -> None:
         r = self.repo
         calls = self.ios_fixture()
@@ -1204,8 +1264,7 @@ class IosLaneTests(VerifyCase):
                                 env={**r.env, "FIXTURE_IOS_POLICY_EXIT": "1"}, capture_output=True, text=True)
         self.assertEqual(policy.returncode, 1, policy.stdout)
         self.assertIn("verify: FAILED — ios source policy failed", policy.stdout)
-        self.assertEqual(calls.read_text().splitlines(), ["run --only-testing TronMobileUITests/FixtureLockTests"],
-                         "a static red still runs the selected tests, so one run names every red")
+        self.assertEqual(calls.read_text(), "", "an iOS source-policy red must stop before any simulator stage")
         calls.write_text("")
         module = r.verify("--module", "ios-app/ui-tests")
         self.assertEqual(module.returncode, 1, module.stdout)
