@@ -177,6 +177,7 @@ next startup; it is not treated as a successful cleanup.
 - Home's `task` tool (`list`, `status`, `report`, `metrics`, `steer`, `interrupt`, `stop`,
   `resume`, `rename`) acts only on its own identity and generation; refusals name the
   state and action to use (`home.task.control`). Rename writes the canonical session name.
+  `list` and `status` add Home's [host reading](../../../docs/host-load.md#homes-host-reading).
 - `task {action:"metrics", from?, to?, taskId?, limit?}` is a read-only current-record
   retro projection. Default: roots created in the last 72 hours, inclusive `from`,
   exclusive `to`; explicit UTC ISO windows are at most 31 days. A named task selects

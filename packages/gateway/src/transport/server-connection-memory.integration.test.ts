@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeviceStore } from "../security/device-store.js";
 import { GATEWAY_CONNECTION_POLICY } from "./connection-policy.js";
 import { GatewayServer } from "./server.js";
-import { StallSampler, type HostMemory } from "./stall-diagnostics.js";
+import type { HostMemory } from "../foundation/host-memory.js";
+import { StallSampler } from "./stall-diagnostics.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
 const DURING_SQUEEZE: HostMemory = {

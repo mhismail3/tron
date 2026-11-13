@@ -43,6 +43,39 @@ class ContextAuditTests(unittest.TestCase):
         self.assertEqual(report_code, 0)
         self.assertEqual(report, result)
 
+    def test_hard_wrapped_prose_preserves_duplicate_and_entry_boundaries(self):
+        sentence = 'Keep credentials in their owned stores and never publish secret values to source files.'
+        wrapped = 'Keep credentials in their owned\nstores and never publish secret\nvalues to source files.'
+        core = {'role': 'worker', 'name': 'core', 'text': sentence, 'kind': 'system', 'always': True}
+        rules = {'role': 'worker', 'name': 'rules', 'kind': 'rules', 'always': True}
+        expected = [{'rule': 'duplicate', 'role': 'worker', 'layers': ['core', 'rules']}]
+        for text in [sentence, wrapped, '- ' + wrapped, '1. ' + wrapped]:
+            with self.subTest(text=text):
+                code, result = self.run_audit([core, {**rules, 'text': text}])
+                self.assertEqual((code, result['diagnostics']), (1, expected))
+                report_code, report = self.run_audit([core, {**rules, 'text': text}], report=True)
+                self.assertEqual((report_code, report), (0, result))
+        fragments = ['Keep credentials in their owned', 'stores and never publish secret', 'values to source files.']
+        separated = [
+            '\n\n'.join(fragments),
+            '\n'.join('- ' + part for part in fragments),
+            '\n'.join(f'{i}. {part}' for i, part in enumerate(fragments, 1)),
+            '<index name="skills" open="read the file" kind="procedure">\n' + '\n'.join(
+                f'- {name}: {part} | source' for name, part in zip(['keep', 'stores', 'values'], fragments)
+            ) + '\n</index>',
+        ]
+        for text in separated:
+            with self.subTest(text=text):
+                code, result = self.run_audit([core, {**rules, 'text': text, 'tools': ['read']}])
+                self.assertEqual((code, result['diagnostics']), (0, []))
+        for overrides in [{'role': 'home'}, {'always': False}]:
+            with self.subTest(overrides=overrides):
+                code, result = self.run_audit([core, {**rules, 'text': wrapped, **overrides}])
+                self.assertEqual((code, result['diagnostics']), (0, []))
+        short = 'Keep credentials in their owned stores.'
+        code, result = self.run_audit([{**core, 'text': short}, {**rules, 'text': short}])
+        self.assertEqual((code, result['diagnostics']), (0, []))
+
     def test_source_ownership_and_kind_dependence(self):
         prose = 'Send a short checkin at milestones and about every 30 minutes. Ask only for spend, sends and 2FA.'
         for owners in [[{'name': 'one', 'text': prose}, {'name': 'two', 'text': prose}], [{'name': 'one', 'text': prose + '\n' + prose}]]:

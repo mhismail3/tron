@@ -304,7 +304,7 @@ export class HomeOwner {
         if (error instanceof HomeTaskStoreError && error.code === "not-initialized") return { tasks: [], counts: { active: 0, finished: 0 }, more: false };
         throw error;
       });
-      return { ...catalog, workers: owner.workers() };
+      return { ...catalog, workers: owner.workers(), host: owner.hostReading() };
     }
     const taskId = request.taskId!;
     const named = await this.tasks.store.read(taskId).catch(error => {
@@ -318,7 +318,7 @@ export class HomeOwner {
         + "Call {\"action\":\"list\"} for your tasks.", false, { taskId, similar }));
     }
     if (named.homeId !== record.homeId) throw refuse(new GatewayError("conflict", `task ${action}: "${taskId}" belongs to another Home`), "home-generation-changed");
-    if (action === "status") return { control: await owner.controlRow(named, await this.continuation(named)), ...await this.taskStatus(taskId) };
+    if (action === "status") return { control: await owner.controlRow(named, await this.continuation(named)), ...await this.taskStatus(taskId), host: owner.hostReading() };
     if (action === "report") {
       if (named.lifecycle !== "terminal") throw new GatewayError("conflict", `task report: "${taskId}" is ${named.lifecycle === "active" ? "still running" : "not started yet"}; it has no report until it settles`);
       const { text } = await this.immutableTaskReport(taskId);
