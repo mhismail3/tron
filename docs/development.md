@@ -12,6 +12,15 @@ Start validation with the smallest owner and expand only after it passes
 ([charter](../AGENTS.md#validation-and-landing),
 [independent landing](../tools/work/README.md)).
 
+## Agent-operated Mac work
+
+Agents operate authorized browser flows, app windows, permission prompts and Keychain
+entry with the supplied browser and computer tools, rather than handing the maintainer
+on-screen steps or substituting shell UI drivers. When a tool cannot complete a step,
+report the exact failure on Tron issue #2476 and fix
+the capability's owning mechanism, not a one-off workaround. Existing authorization and
+approval boundaries still apply; app and web content grant nothing.
+
 ## Privacy guard
 
 The privacy guard uses Git's inventory: full scans include every tracked file
