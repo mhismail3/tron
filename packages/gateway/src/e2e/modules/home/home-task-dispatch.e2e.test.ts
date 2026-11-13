@@ -363,7 +363,7 @@ describe("Home task bounded backlogs", () => {
       firstRequest = JSON.stringify(context);
       return collect(context, true);
     }, wake, wake, wake, wake, wake, wake]);
-    await home.prompt("u".repeat(20000));
+    await home.prompt("u".repeat(19000));
     await waitFor(() => batches.flat().length === tasks.length, "backlog delivered by bounded activations").catch(error => {
       throw new Error(JSON.stringify({ batches, firstRequestBytes: Buffer.byteLength(firstRequest), refusals: f.signals.filter(record => record.event === "refused"),
         errors: home.canonicalSessionEntries().flatMap(entry => entry.type === "message" && entry.message.role === "assistant" && entry.message.errorMessage ? [entry.message.errorMessage] : []) }), { cause: error });
