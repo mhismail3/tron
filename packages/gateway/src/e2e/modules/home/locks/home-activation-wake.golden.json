@@ -34,7 +34,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:8526d924d700aeb4dc8b2d3482fec69f35ba26573a0a8283188895a937f12d99",
+        "promptHash": "sha256:57935d34a8a9ca9eee61c2cdf244a2dfb009bc0538473dd06b3b557e32bda44c",
         "messages": [
           {
             "role": "user",
@@ -78,7 +78,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:8526d924d700aeb4dc8b2d3482fec69f35ba26573a0a8283188895a937f12d99",
+        "promptHash": "sha256:57935d34a8a9ca9eee61c2cdf244a2dfb009bc0538473dd06b3b557e32bda44c",
         "messages": [
           {
             "role": "user",
@@ -134,7 +134,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:8526d924d700aeb4dc8b2d3482fec69f35ba26573a0a8283188895a937f12d99",
+        "promptHash": "sha256:57935d34a8a9ca9eee61c2cdf244a2dfb009bc0538473dd06b3b557e32bda44c",
         "messages": [
           {
             "role": "user",
@@ -473,7 +473,7 @@
           }
         },
         {
-          "description": "Open the line id+n of the view into the two lines of n/2 under it; n = 1 gives the message whole.",
+          "description": "Open the line id+n of the view into the two lines of n/2 under it; n = 1 gives the message whole. Nothing before this turn is replayed in full: zoom the lines you need. Say in your reply whatever you learned that will matter later: summaries keep little of tool output.",
           "name": "zoom",
           "parameters": {
             "additionalProperties": false,
@@ -623,7 +623,7 @@
           }
         },
         {
-          "description": "Inspect and control the tasks you delegated. list (or status without taskId): your newest tasks with taskId, title, state, worker sessionId, operationId and the actions each allows. status {taskId}: one task's durable record, spend and live subagent runs; no control effect. report {taskId, offset?, limit?}: a UTF-8 byte page (limit up to 4096) of a settled task's immutable report. metrics {from?, to?, taskId?, limit?}: read-only task retro projection; default roots delegated in the last 72 hours, at most 31 days, up to 50 lineages. UTC from/to form [from,to); taskId selects its whole lineage regardless of creation time. Retained progress is partial; missing landed, steering, wait, billing and verify data stays unavailable. No sessions opened or live state changed. steer {taskId, text}: send a message to a running worker without stopping it. interrupt {taskId, text?}: cancel only the worker's in-flight command or tool call (its child processes too); the worker keeps running, reads that the call was interrupted, then text as a steer. Use it to end a long or stuck command without stopping the worker. stop {taskId}: stop a running or queued worker; its session, worktree, branch and commits are kept. resume {taskId, text?}: continue a stopped or settled worker in place (same session and worktree; it re-asks any question the stop interrupted); the reply names the new taskId. Never delegate a replacement. rename {taskId, title}: rename the worker's session, running or settled, without interrupting it; the title shows in the session list and task list, persists, and a resume keeps it. The brief is unchanged. Control actions need only taskId: the Gateway uses the worker's current task and operation, including a later resume of the task you name. Pass operationId only to guard against acting on a newer operation than the one you read. To read or change a worker's model, thinking or other session settings, use the settings tool with taskId: a running worker uses a model, thinking or Run change from its next model request and is signalled in its steering lane; resolve's worker.lastResponse shows what its latest response ran on.",
+          "description": "Inspect and control the tasks you delegated. list (or status without taskId): your newest tasks with taskId, title, state, worker sessionId, operationId, latest timestamped check-ins and the actions each allows. status {taskId}: one task's recent check-ins, durable record, spend and live subagent runs; no control effect. report {taskId, offset?, limit?}: a UTF-8 byte page (limit up to 4096) of a settled task's immutable report. metrics {from?, to?, taskId?, limit?}: read-only task retro projection; default roots delegated in the last 72 hours, at most 31 days, up to 50 lineages. UTC from/to form [from,to); taskId selects its whole lineage regardless of creation time. Retained progress is partial; missing landed, steering, wait, billing and verify data stays unavailable. No sessions opened or live state changed. steer {taskId, text}: send a message to a running worker without stopping it. interrupt {taskId, text?}: cancel only the worker's in-flight command or tool call (its child processes too); the worker keeps running, reads that the call was interrupted, then text as a steer. Use it to end a long or stuck command without stopping the worker. stop {taskId}: stop a running or queued worker; its session, worktree, branch and commits are kept. resume {taskId, text?}: continue a stopped or settled worker in place (same session and worktree; it re-asks any question the stop interrupted); the reply names the new taskId. Never delegate a replacement. rename {taskId, title}: rename the worker's session, running or settled, without interrupting it; the title shows in the session list and task list, persists, and a resume keeps it. The brief is unchanged. Each task has an internal fixed 24-hour ceiling and records actual token usage. Routine check-ins never wake or push. A worker needsAttention check-in with a blocker may wake Home, rate-limited across resumes; it does not stop the worker. Use status or steer to help. A settled result wakes Home with its attributed work message; a result the wake cannot take arrives on the next maintainer message. Oversized reports arrive by immutable reference: use report with taskId and offset to read UTF-8 byte pages. A pending-count line describes the remaining inbox. Task completion wakes Home once with its results and sends one push for that wake, or the task-finished push while Home is paused, disabled or blocked; do not assume task success from admission. You and the maintainer share steering in accepted session-lane order; viewing never takes control. Control actions need only taskId: the Gateway uses the worker's current task and operation, including a later resume of the task you name. Pass operationId only to guard against acting on a newer operation than the one you read. To read or change a worker's model, thinking or other session settings, use the settings tool with taskId: a running worker uses a model, thinking or Run change from its next model request and is signalled in its steering lane; resolve's worker.lastResponse shows what its latest response ran on.",
           "name": "task",
           "parameters": {
             "properties": {
@@ -690,7 +690,7 @@
           }
         },
         {
-          "description": "Read the seven-area personal profile index, an explicit path, inferred holding notes or prior organization. Home decides relevance and worker brief content; no note text is automatically inserted. Learn/refine/supersede/retire only durable statements with evidence. Explicit reorganize assigns only placement with a backed-up, logged, undoable group; retry uses its original command after an unacknowledged result. Use defer with the exact index arrival version for receipt-backed Not now, only on a maintainer turn. Declare sensitive capture with sensitive=true: never infer it, quote this maintainer message verbatim, and keep it unsorted for exact review. Home writes remain inferred, never binding by inference. Existing explicit standing/safety rules retain their authority; confirmation and provenance must not be silently weakened.",
+          "description": "Read explicit paths, inspect provenance and confirmation, and decide relevance yourself. New notes go unsorted unless the maintainer supplies a destination. Corrections link the wrong claim and stay in Corrections. At the START of a maintainer turn, offer sorting at 8 unsorted notes, at most 8 per batch. Follow the activation’s Sorting offer state; no timers/polling or background-completion suggestions. Not now suppresses offers until a NEW note, not an edit, move, restart or time passing. Do not split or promote notes merely to sort them. Read the seven-area personal profile index, an explicit path, inferred holding notes or prior organization. Home decides relevance and worker brief content; no note text is automatically inserted. Learn/refine/supersede/retire only durable statements with evidence. Explicit reorganize assigns only placement with a backed-up, logged, undoable group and no additional tap; content, confirmation and authority stay unchanged. retry uses its original command after an unacknowledged result. Use defer with the exact index arrival version for receipt-backed Not now, only on a maintainer turn. Declare sensitive capture with sensitive=true: never infer it, quote this maintainer message verbatim, and keep it unsorted for exact review. Home writes remain inferred, never binding by inference. Existing explicit standing/safety rules retain their authority; confirmation and provenance must not be silently weakened.",
           "name": "profile",
           "parameters": {
             "additionalProperties": false,
