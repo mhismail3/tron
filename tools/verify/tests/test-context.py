@@ -45,10 +45,12 @@ class ContextAuditTests(unittest.TestCase):
 
     def test_source_ownership_and_kind_dependence(self):
         prose = 'Send a short checkin at milestones and about every 30 minutes. Ask only for spend, sends and 2FA.'
-        sources = [{'name': 'one', 'text': prose}, {'name': 'two', 'text': prose}, {'name': 'request', 'text': 'context.tools.filter(tool => homeToolAvailable(tool.name, activation.kind))'}]
-        code, result = self.run_audit([], sources)
-        self.assertEqual(code, 1)
-        self.assertEqual({item['rule'] for item in result['diagnostics']}, {'D1-checkin-owner', 'D2-approval-owner', 'N1-kind-dependent-tools'})
+        for owners in [[{'name': 'one', 'text': prose}, {'name': 'two', 'text': prose}], [{'name': 'one', 'text': prose + '\n' + prose}]]:
+            with self.subTest(owners=owners):
+                sources = owners + [{'name': 'request', 'text': 'context.tools.filter(tool => homeToolAvailable(tool.name, activation.kind))'}]
+                code, result = self.run_audit([], sources)
+                self.assertEqual(code, 1)
+                self.assertEqual({item['rule'] for item in result['diagnostics']}, {'D1-checkin-owner', 'D2-approval-owner', 'N1-kind-dependent-tools'})
 
     def test_well_formed_sorted_openable_index(self):
         layer = {'role': 'worker', 'name': 'skills', 'kind': 'index', 'tools': ['read'], 'text': '<index name="skills" open="read the file" kind="procedure">\n- alpha: Build the app. | /skills/alpha/SKILL.md\n- beta: Test the app. | /skills/beta/SKILL.md\n</index>'}

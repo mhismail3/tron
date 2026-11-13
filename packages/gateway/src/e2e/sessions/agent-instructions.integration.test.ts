@@ -1,3 +1,4 @@
+import { APPROVAL_RULE } from "../../workspace/tron-core-extension.js";
 import { createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
@@ -186,6 +187,7 @@ describe("Agent Instructions projection through the pinned runtime", () => {
     await f.slot.setTools(["fixture_tool"]);
     const preview = await instructions(f.slot);
     const next = await turn(f);
+    expect(next.received.split(APPROVAL_RULE)).toHaveLength(2);
     for (const projection of [preview, next.during, await instructions(f.slot)]) {
       expect(projection.text).toBe(next.received);
       expect(projection.sections.filter(section => section.id === "mcp_servers")).toHaveLength(1);
