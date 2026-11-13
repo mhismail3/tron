@@ -257,16 +257,15 @@ def profile_scenario_names(files: list[str]) -> list[str]:
     return [name for name, test in table.items() if test.split("/")[0] in classes]
 
 
-def profile_command(scenarios: list[str], wait: bool) -> list[str]:
+def profile_command(scenarios: list[str]) -> list[str]:
     return [str(ROOT / PROFILE_HARNESS), "ios", "--iterations", str(PROFILE_ITERATIONS),
-            *(["--host-slot-wait-seconds", "30"] if wait else []),
             *[arg for name in scenarios for arg in ("--scenario", name)]]
 
 
-def profile_run(run: "Run", label: str, scenarios: list[str], wait: bool, sha: str) -> tuple[str, str] | None:
+def profile_run(run: "Run", label: str, scenarios: list[str], sha: str) -> tuple[str, str] | None:
     root = run.logs / "profile"
     shutil.rmtree(root, ignore_errors=True)
-    result = run.step(label, profile_command(scenarios, wait), env={"TRON_PROFILE_RESULTS_DIR": str(root)})
+    result = run.step(label, profile_command(scenarios), env={"TRON_PROFILE_RESULTS_DIR": str(root)})
     if result["exit"] == 73:
         result.update(status="no result", tests=0, reason="owner validation could not acquire its iOS lane")
         return "no result", "owner validation could not acquire its iOS lane"
@@ -1036,12 +1035,6 @@ class Run:
             print(f"    full log: {result['log']}", flush=True)
         return result
 
-    def withdraw(self, launched: "Launched") -> None:
-        """Forget a launch that admitted no work (an opportunistic shard refused a slot); its retry reuses the log."""
-        self.live.remove(launched)
-        self.steps.remove(launched.result)
-        self.on_update()
-
     def reused(self, name: str, detail: str, command: list[str]) -> None:
         """A step whose evidence already exists for this commit; it compares equal to running it (exit 0)."""
         self.index += 1
@@ -1069,10 +1062,9 @@ def comparable_steps(steps: list[dict]) -> list[dict]:
         elif step is shards[0]:
             statuses = {shard["status"] for shard in shards}
             kept.append({"name": "tests: ios", "tests": sum(shard.get("tests") or 0 for shard in shards),
-                         "status": next((status for status in ("interrupted", "failed", "deferred", "running", "skipped")
+                         "status": next((status for status in ("interrupted", "failed", "running", "skipped")
                                          if status in statuses), "ok"),
-                         "failedTests": sorted(name for shard in shards for name in shard.get("failedTests", [])),
-                         "deferredTests": sorted({name for shard in shards for name in shard.get("deferredTests", [])})})
+                         "failedTests": sorted(name for shard in shards for name in shard.get("failedTests", []))})
     return kept
 
 
@@ -1189,11 +1181,8 @@ def test_step_names(group: str, shards: list[list[str]], skipped: bool) -> list[
     return [f"tests: ios {index}/{len(shards)}" for index in range(1, len(shards) + 1)]
 
 
-def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, ios_wait: bool = True, gateway_host: str = "local", node_host: str = "local",
-              lane: str | None = None, opportunistic: bool = False):
-    """One command definition shared by planning and execution. An iOS shard runs on `lane` (else
-    the worktree's own lane, or the iPad lane for a `pad` shard); an `opportunistic` one takes a
-    host slot only if one is free at once."""
+def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, gateway_host: str = "local", node_host: str = "local",
+              lane: str | None = None):
     node = [str(ROOT / "scripts/tron-node"), "exec"]
     if group in ("gateway", "gateway-nested"):
         report = logs / f"{group}-vitest.json"
@@ -1206,12 +1195,11 @@ def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, io
         pad = getattr(selectors, "pad", False)
         lane = lane or (ios_pad_lane() if pad else None)
         lanes = [*(["--lane", lane] if lane else []), *(["--device-type", IOS_PAD_DEVICE_TYPE] if pad else [])]
-        wait = ["--host-slot-wait-seconds", "0"] if opportunistic else ["--host-slot-wait-seconds", "30"] if ios_wait else []
-        return ([str(ROOT / "scripts/tron-ios-test"), "run", *lanes, *wait, *[arg for owner in selectors for arg in ("--only-testing", owner)]], ROOT, ios_count)
+        return ([str(ROOT / "scripts/tron-ios-test"), "run", *lanes, *[arg for owner in selectors for arg in ("--only-testing", owner)]], ROOT, ios_count)
     if group.startswith("ios-lanes:"):
         return ([sys.executable, str(ROOT / selectors[0]), *selectors[1:]], ROOT, ios_owner_count)
     if group.startswith("ios-scenarios:"):
-        return (profile_command(selectors, ios_wait), ROOT, None)
+        return (profile_command(selectors), ROOT, None)
     if group == "ios-boundary":
         return ([str(ROOT / JOURNEY_HARNESS), "check", *[arg for owner in selectors for arg in ("--only-testing", owner)]], ROOT, None)
     if group == "ios-journeys":
@@ -1244,67 +1232,38 @@ def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, io
 IOS_POLL_SECONDS = 0.5
 
 
-def run_ios_shards(run: Run, shards: list[IosShard], labels: list[str], files: list[str], ios_wait: bool,
-                   env: dict, phone_lanes: list[str | None]) -> tuple[list[str], bool]:
-    """Run every shard to its outcome, one per lane and at most one per host slot at once, longest
-    estimate first; returns the failures and whether admission was deferred.
-
-    A shard started while none of the run's others is in flight acquires its slot as a serial run
-    would, and its busy exit 73 defers it and every unstarted shard, never passed. A shard started
-    beside one in flight is opportunistic: it takes a slot only if one is free at once. Refused, it
-    admitted no work, so it is requeued, and no further lane starts until a running shard ends.
-    Every admitted shard runs to its outcome, so one red cannot hide another's."""
+def run_ios_shards(run: Run, shards: list[IosShard], labels: list[str], files: list[str],
+                   env: dict, phone_lanes: list[str | None]) -> list[str]:
     base = run.index
     run.index += len(shards)
     queue = sorted(range(len(shards)), key=lambda index: -shards[index].seconds)
     order = {lane: position for position, lane in enumerate(phone_lanes)}
-    refused: set[str | None] = set()
-    rank = lambda name: (name in refused, order.get(name, 0))  # noqa: E731
     free: dict[bool, list[str | None]] = {False: list(phone_lanes), True: [ios_pad_lane()]}
     limit = len(phone_lanes)
-    running: dict[int, tuple[Launched, str | None, bool]] = {}
+    running: dict[int, tuple[Launched, str | None]] = {}
     failures: list[tuple[int, str]] = []
-    deferred = False
     try:
         while queue or running:
-            while not deferred and len(running) < limit:
+            while len(running) < limit:
                 index = next((index for index in queue if free[shards[index].pad]), None)
                 if index is None:
                     break
                 queue.remove(index)
                 lane = free[shards[index].pad].pop(0)
-                opportunistic = bool(running)
-                command, cwd, _ = test_spec("ios", files, shards[index], run.logs, ios_wait=ios_wait, lane=lane,
-                                            opportunistic=opportunistic)
+                command, cwd, _ = test_spec("ios", files, shards[index], run.logs, lane=lane)
                 note = (f" on lane {lane}" if lane else " on this worktree's lane") if len(phone_lanes) > 1 or shards[index].pad else ""
-                running[index] = (run.launch(base + index + 1, labels[index], command, cwd, env, note=note), lane, opportunistic)
+                running[index] = (run.launch(base + index + 1, labels[index], command, cwd, env, note=note), lane)
             if not running:
                 break
-            finished = [index for index, (launched, _, _) in running.items() if launched.process.poll() is not None]
+            finished = [index for index, (launched, _) in running.items() if launched.process.poll() is not None]
             if not finished:
                 time.sleep(IOS_POLL_SECONDS)
                 continue
             for index in finished:
-                launched, lane, opportunistic = running.pop(index)
+                launched, lane = running.pop(index)
                 shard = shards[index]
-                free[shard.pad] = sorted(free[shard.pad] + [lane], key=rank)
-                code = launched.process.returncode
-                if code == 73 and opportunistic:
-                    refused.add(lane)
-                    free[shard.pad].sort(key=rank)
-                    run.withdraw(launched)
-                    print(f"{launched.label}: no host slot free beside this run's other lanes; requeued", flush=True)
-                    queue.insert(0, index)
-                    limit = max(1, len(running))
-                    continue
-                refused.discard(lane)
-                free[shard.pad].sort(key=rank)
-                result = run.settle(launched, code, ios_count, (0,))
-                if code == 73:
-                    result.update(status="deferred", deferredTests=files)
-                    deferred = True
-                    continue
-                limit = len(phone_lanes)
+                free[shard.pad] = sorted(free[shard.pad] + [lane], key=lambda name: order.get(name, 0))
+                result = run.settle(launched, launched.process.returncode, ios_count, (0,))
                 if result["status"] == "failed":
                     result["failedTests"] = ios_failures(launched.log.read_text(errors="replace"))
                     print("\n".join(f"    failed: {name}" for name in result["failedTests"]), flush=True)
@@ -1318,13 +1277,10 @@ def run_ios_shards(run: Run, shards: list[IosShard], labels: list[str], files: l
     except KeyboardInterrupt:
         run.stop(list(run.live))
         raise
-    for index in sorted(queue):
-        run.skipped(labels[index], "iOS acquisition deferred to batch", index=base + index + 1)
-        run.steps[-1].update(status="deferred", deferredTests=files)
     shard_steps = sorted((step for step in run.steps if step["name"] in labels), key=lambda step: labels.index(step["name"]))
     run.steps[:] = [step for step in run.steps if step["name"] not in labels] + shard_steps
     run.on_update()
-    return [message for _, message in sorted(failures)], deferred
+    return [message for _, message in sorted(failures)]
 
 
 def main(argv: list[str]) -> int:
@@ -1338,8 +1294,8 @@ def main(argv: list[str]) -> int:
     mode.add_argument("--all", action="store_true")
     mode.add_argument("--update-locks", metavar="ID")
     parser.add_argument("--base", default="origin/main")
-    parser.add_argument("--ios-jobs", type=int, choices=(1, 2, 3), default=3,
-                        help="maximum concurrent iOS shards and real-UI journey lanes (default: 3)")
+    parser.add_argument("--ios-jobs", type=int, choices=(1, 2, 3), default=1,
+                        help="maximum concurrent iOS shards and real-UI journey lanes (default: 1)")
     parser.add_argument("--skip", default="", help=f"comma-separated runner groups to skip explicitly: {', '.join(SKIPPABLE)}")
     parser.add_argument("--plan", action="store_true", help="print the selection and steps without running them")
     parser.add_argument("--gateway-host", choices=("pool", "local", "mini"), default="pool",
@@ -1463,7 +1419,7 @@ def main(argv: list[str]) -> int:
                          for label, command in gateway_checks]
         if ios_lane:
             commands.append({"name": "ios source policy", "command": ios_policy})
-            commands.append({"name": "ios build", "command": [ios_test, "build", *(["--host-slot-wait-seconds", "30"] if name != "all" else [])], "reuse": "only if current build stamp is fresh"})
+            commands.append({"name": "ios build", "command": [ios_test, "build"], "reuse": "only if current build stamp is fresh"})
         commands.append({"name": "layers ios", "command": [tron, "layers", "ios", "--base", base], "requires": "fresh iOS index"})
         for group, files in sorted(groups.items()):
             if group in NOT_DRIVEN or skipped_group(group):
@@ -1471,7 +1427,7 @@ def main(argv: list[str]) -> int:
             else:
                 for label, shard in zip(test_step_names(group, shards, False),
                                         shards if group == "ios" else [boundaries] if group == "ios-boundary" else [journeys] if group == "ios-journeys" else [profile_scenario_names(files)] if group.startswith("ios-scenarios:") else [owner_jobs[group]["command"]] if group in owner_jobs else [selectors]):
-                    command, cwd, _ = test_spec(group, files, shard, ROOT / "test-results/verify" / sha, ios_wait=name != "all", gateway_host=gateway_host, node_host=node_host)
+                    command, cwd, _ = test_spec(group, files, shard, ROOT / "test-results/verify" / sha, gateway_host=gateway_host, node_host=node_host)
                     commands.append({"name": label, "command": command, "cwd": str(cwd.relative_to(ROOT)),
                                      **({"estimatedSeconds": round(shard.seconds, 1)} if group == "ios" else {})})
         deferred_commands = []
@@ -1510,9 +1466,6 @@ def main(argv: list[str]) -> int:
     report_path = ROOT / "test-results" / "verify" / f"{sha}.json"
 
     def finish(verdict: str, message: str, announce: bool = True) -> int:
-        if verdict == "passed" and any(step["status"] == "deferred" for step in run.steps):
-            verdict = "deferred"
-            message += "; iOS acquisition deferred to batch, NOT a test pass"
         comparable = {"commit": sha, "selection": selection, "steps": comparable_steps(run.steps), "verdict": verdict}
         case_steps = [step for step in run.steps if step['name'].startswith('tests:')]
         report = {"schema": "tron.verify.v1", "commit": sha, "verdict": verdict, "message": message,
@@ -1530,7 +1483,7 @@ def main(argv: list[str]) -> int:
         if announce:
             print(f"verify: {verdict.upper()} — {message}", flush=True)
             print(f"verify: report {report_path.relative_to(ROOT)} (result digest {report['resultDigest'][:16]})", flush=True)
-        return 0 if verdict in ("passed", "deferred") else 1
+        return 0 if verdict == "passed" else 1
 
     run.on_update = lambda: finish("interrupted" if any(s["status"] == "interrupted" for s in run.steps) else "running",
                                    "partial results; verification is not complete", announce=False)
@@ -1548,26 +1501,21 @@ def main(argv: list[str]) -> int:
                 if run.step(label, command, cwd=cwd)["status"] == "failed":
                     reds.append(f"{label} failed")
         stale = ios_index_stale()
-        ios_deferred = ios_broken = False
+        ios_broken = False
         if ios_lane:
             if run.step("ios source policy", ios_policy)["status"] == "failed":
                 reds.append("ios source policy failed")
             if stale is None:
-                run.reused("ios build", "the test products are already stamped for this commit", [ios_test, "build", *(["--host-slot-wait-seconds", "30"] if name != "all" else [])])
+                run.reused("ios build", "the test products are already stamped for this commit", [ios_test, "build"])
             else:
-                built = run.step("ios build", [ios_test, "build", *(["--host-slot-wait-seconds", "30"] if name != "all" else [])])
-                if built["exit"] == 73:
-                    built.update(status="deferred", deferredTests=groups.get("ios", []))
-                    ios_deferred = True
-                elif built["status"] == "failed":
+                built = run.step("ios build", [ios_test, "build"])
+                if built["status"] == "failed":
                     reds.append("ios build failed")
                     ios_broken = True
-            if not ios_deferred and not ios_broken:
+            if not ios_broken:
                 stale = None
         if ios_broken:
             run.skipped("layers ios", "ios build failed")
-        elif ios_deferred:
-            run.skipped("layers ios", "iOS slot unavailable; build/index/tests deferred to batch")
         elif stale is not None:
             run.skipped("layers ios", f"no fresh iOS index for this commit: {stale}")
         elif run.step("layers ios", [tron, "layers", "ios", "--base", base])["status"] == "failed":
@@ -1591,13 +1539,8 @@ def main(argv: list[str]) -> int:
                     for label in labels:
                         run.skipped(label, "ios build failed")
                     continue
-                if ios_deferred:
-                    for label in labels:
-                        run.skipped(label, "iOS acquisition deferred to batch")
-                        run.steps[-1].update(status="deferred", deferredTests=files)
-                    continue
                 env = {"TEST_RUNNER_TRON_UPDATE_LOCKS": args.update_locks} if args.update_locks else {}
-                failed_shards, ios_deferred = run_ios_shards(run, shards, labels, files, name != "all", env, ios_phone_lanes()[:args.ios_jobs])
+                failed_shards = run_ios_shards(run, shards, labels, files, env, ios_phone_lanes()[:args.ios_jobs])
                 reds.extend(failed_shards)
                 continue
             if group == "ios-boundary":
@@ -1628,18 +1571,18 @@ def main(argv: list[str]) -> int:
                     result["status"] = "failed"
                     reds.append(f"{label}: no passing report for this commit from {', '.join(missing)}")
                 continue
-            if group in owner_jobs and (ios_broken or any(step["name"] == "ios build" and step["status"] == "deferred" for step in run.steps)):
+            if group in owner_jobs and ios_broken:
                 run.skipped(label, "owner validation needs a successful current iOS build")
                 no_result.append(f"{label}: owner validation could not run")
                 continue
             if group.startswith("ios-scenarios:"):
-                outcome = profile_run(run, label, profile_scenario_names(files), name != "all", sha)
+                outcome = profile_run(run, label, profile_scenario_names(files), sha)
                 if outcome is not None:
                     verdict, reason = outcome
                     (no_result if verdict == "no result" else reds).append(f"{label}: {reason}")
                 continue
             payload = owner_jobs[group]["command"] if group in owner_jobs else selectors
-            command, cwd, count = test_spec(group, files, payload, run.logs, ios_wait=name != "all", gateway_host=gateway_host, node_host=node_host)
+            command, cwd, count = test_spec(group, files, payload, run.logs, gateway_host=gateway_host, node_host=node_host)
             report = run.logs / f"{group}-vitest.json"
             report.unlink(missing_ok=True)
             on_mini = (node_host if group == "node-gateway" else gateway_host) == "mini" and (group.startswith("gateway") or group in ("node-gateway", "python"))
@@ -1671,8 +1614,6 @@ def main(argv: list[str]) -> int:
             return finish("incomplete", "; ".join(no_result))
         if not_run:
             return finish("incomplete", f"selected tests were not run: {', '.join(not_run)} (pass --skip to accept explicitly)")
-        if passing == 0 and any(step["status"] == "deferred" for step in run.steps):
-            return finish("passed", "affected checks passed; iOS tests deferred to full batch")
         if passing == 0 and selection["docsOnly"]:
             return finish("passed", "Empty or documentation-only change: static/documentation checks are its evidence")
         if passing == 0 and selection["deferredTests"]:

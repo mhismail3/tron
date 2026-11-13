@@ -39,31 +39,25 @@ judge a test. `--plan` prints each shard's `estimatedSeconds`, its command as it
 lanes shards may use beside each other (`iosLanes`), plus the concurrency limit (`iosJobs`).
 
 **Lanes.** `--ios-jobs 1|2|3` limits concurrent native shards and real-UI journey lanes
-(default 3); at 1, phone and iPad shards run one at a time. It changes neither selection nor
-packing nor the runner's three host-wide slots. Shards run longest estimate first on up to
-that many phone lanes: the
-worktree's own lane, then this worktree's `verify-iphone2-<hash>` and `verify-iphone3-<hash>`
-lanes (the canonical iPhone; one per further slot of `scripts/ios-test-lock.py`'s `HOST_SLOTS`),
-with iPad-only shards on the iPad lane, never more shards than the selected job limit. Each lane is the runner's own
-leased lane with its own simulator; the lanes share this worktree's test products, and the sweep
-reclaims them with the worktree. A shard started while none of the run's other shards is in flight
-acquires its slot exactly as a serial run did (below). A shard started beside one in flight takes a
-slot only if one is free at once (`--host-slot-wait-seconds 0`), so the run never queues behind its
-own work or holds a waiter against another worktree's job. Refused, it admitted no work: its attempt
-is withdrawn (`requeued`), its lane is tried last until it next admits a shard, and no further lane starts until one of
-the run's shards ends. A refusal while nothing else of the run is in flight is the busy exit 73:
-that shard and every unstarted one are `deferred`, never passed; admitted shards keep their
-outcomes. SIGINT/SIGTERM stops and joins every lane's process group.
+(default 1); phone and iPad shards run one at a time unless the caller explicitly widens it.
+Home plans heavy work within the three-slot ceiling; follow the brief's "Heavy work" paragraph.
+The option changes neither selection nor packing nor the runner's three host-wide slots.
+Shards run longest estimate first on up to that many phone lanes: the worktree's own lane, then
+this worktree's `verify-iphone2-<hash>` and `verify-iphone3-<hash>` lanes (the canonical iPhone;
+one per further slot of `scripts/ios-test-lock.py`'s `HOST_SLOTS`), with iPad-only shards on the
+iPad lane, never more shards than the selected job limit. Each lane is the runner's own leased
+lane with its own simulator; the lanes share this worktree's test products, and the sweep reclaims
+them with the worktree. Every shard waits for a slot, printing its holders, then runs to its
+outcome. SIGINT/SIGTERM stops and joins every lane's process group.
 
-The existing runner owns lanes, leases, cleanup and the three host-wide slots; run
-one verify per worktree. Pre-land build/run passes `--host-slot-wait-seconds 30`, bounding
-only acquisition, never admitted work. No option retains unbounded waiting (including
-batch `--all`). Busy exit 73 records named checks/tests as `deferred`, exit 0, never
-passed. A deferred build also defers its index/tests; other affected checks still run.
-The batch covers those files. Genuine build/test errors and zero-test runs still fail.
+The existing runner owns lanes, leases, cleanup and the three host-wide slots; run one verify
+per worktree. Build, shards and scenario profiling use unbounded slot acquisition in ordinary
+runs and `--all` alike. No iOS acquisition result is deferred to batch. Build/test errors,
+unexpected acquisition refusals and zero-test runs fail. `verify --batch` explicitly requests
+three lanes for its full verifier and real-UI journeys.
 
 ## Verify
 
 The [verify CLI tests](README.md#verify) drive this lane through a stand-in runner
 (`IosLaneTests`): selection, build reuse, extensions, iPad lanes, packing by recorded times,
-serial ordering and unchanged selection/counts at each job limit, concurrent lanes, requeued and deferred admission, interrupts, and short or empty runs.
+default serial ordering and unchanged selection/counts at each job limit, explicit concurrent lanes, failed acquisition, interrupts, and short or empty runs.
