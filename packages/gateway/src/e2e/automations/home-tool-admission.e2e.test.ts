@@ -1,3 +1,4 @@
+import { APPROVAL_RULE } from "../../workspace/tron-core-extension.js";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, getCurrentSystemMessage, getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai";
@@ -70,6 +71,7 @@ async function resumedHome(label: string, seedStale = true, initialNotifications
   const sessionId = designated.result.sessionId as string;
   await gateway.settled(sessionId);
   expect(homePrompt).toContain("GLOBAL_HOME_RULES_MARKER");
+  expect(homePrompt.split(APPROVAL_RULE)).toHaveLength(2);
   expect(homePrompt).not.toContain("PROJECT_HOME_RULES_MARKER");
   expect([...gateway.record().providerRequests[0]!.tools].sort()).toEqual(userTools.filter(name => initialNotifications || name !== "notify"));
   const slot = await gateway.registry.acquire(sessionId);
