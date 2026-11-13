@@ -1165,6 +1165,10 @@ class RuntimeMigrationTests(unittest.TestCase):
                         path.parent.mkdir(parents=True, exist_ok=True)
                         path.write_text("opaque artifact, not JSON")
                     metadata = home / "internal/subagents/async-cfg-fixture.json"
+                    empty_artifact = metadata.parent / "async-cfg-empty-directory.json"
+                    empty_artifact.mkdir()
+                    file_artifact = metadata.parent / "nested-subagent-runs"
+                    file_artifact.write_text("opaque artifact, not a directory")
                     old = str(home / "gateway/home/workspace")
                     metadata.write_text(json.dumps({"cwd": old}))
                     inode = (folder / "0.json").stat().st_ino
@@ -1184,25 +1188,24 @@ class RuntimeMigrationTests(unittest.TestCase):
                     expected = str(home / ("state/home/workspace" if mode == "--apply" else "gateway/home/workspace"))
                     self.assertEqual(json.loads((root / "async-cfg-fixture.json").read_text())["cwd"], expected)
                     self.assertEqual((root / "async-subagent-runs/run/artifacts/0.json").stat().st_ino, inode)
+                    self.assertTrue((root / empty_artifact.name).is_dir())
+                    self.assertEqual(list((root / empty_artifact.name).iterdir()), [])
+                    self.assertEqual((root / file_artifact.name).read_text(), "opaque artifact, not a directory")
                 metadata.unlink()
                 outside = user / "external.json"
                 outside.write_text("{}")
-                for unsafe in ("symlink", "fifo", "directory", "directory-slot-file"):
-                    path = metadata.parent / "nested-subagent-runs" if unsafe == "directory-slot-file" else metadata
+                for unsafe in ("symlink", "fifo"):
+                    path = metadata
                     if unsafe == "symlink":
                         path.symlink_to(outside)
-                    elif unsafe == "fifo":
-                        os.mkfifo(path)
-                    elif unsafe == "directory":
-                        path.mkdir()
                     else:
-                        path.write_text("{}")
+                        os.mkfifo(path)
                     result = fixture.run("migrate", "--home", str(home), "--dry-run", env={"HOME": str(user)})
                     self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                     self.assertEqual([error["reason"] for error in json.loads(result.stdout)["errors"]],
                                      ["rewrite_symlink" if unsafe == "symlink" else "rewrite_unsafe_type"])
                     self.assertEqual(outside.read_text(), "{}")
-                    path.rmdir() if unsafe == "directory" else path.unlink()
+                    path.unlink()
 
     def test_offline_runtime_move_rewrites_only_owned_fields_and_carries_new_data_back(self) -> None:
         with tempfile.TemporaryDirectory(prefix="home-layout-runtime-") as temporary:
