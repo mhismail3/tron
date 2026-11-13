@@ -467,6 +467,7 @@ start_fresh_fixture() {
   mkdir -p "$tron_home/state" "$workspace"
   chmod 700 "$tron_home" "$tron_home/state" "$gateway_home" "$workspace"
   gateway_home="$(realpath "$gateway_home")"
+  tron_home="$(realpath "$tron_home")"
   workspace="$(realpath "$workspace")"
   printf '# E2E Project Rules\n\nKeep the boundary fixture honest.\n' >"$workspace/AGENTS.md"
   cp "$repo_root/packages/gateway/src/modules/apps/fixtures/InstalledPersistence.swift" "$workspace/InstalledPersistence.swift"
