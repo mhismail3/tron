@@ -139,8 +139,10 @@ cap and selects owned directory/name shapes before descending: session JSONL hea
 upload metadata, flat Home tasks, mission records/state, and pinned subagent run,
 configuration and result-index records. Session, upload, task, mission and subagent
 artifact trees are not traversed; their directory entries still count in the admitted
-parent. Owned-name collisions of the wrong filesystem type refuse rather than being
-silently skipped. Rollback refuses without changing home contents or journal bytes
+parent. File patterns select regular files, and directory patterns descend only into
+directories. Other regular-file/directory artifacts remain opaque, including empty
+config-named directories; matching symlinks and special files still refuse.
+Rollback refuses without changing home contents or journal bytes
 when a journaled record is missing from the current selection, including a record moved
 into an artifact tree; the runtime lock is taken and released first. Keep rollback and
 old data until the live migration is verified; only then may retention or deletion run.

@@ -83,10 +83,12 @@ def files(l, root, patterns):
                 info = child.stat(follow_symlinks=False)
                 if stat.S_ISLNK(info.st_mode):
                     raise l.LayoutError("rewrite_symlink")
-                if stat.S_ISDIR(info.st_mode) and any(matches):
-                    pending.append((path, tuple(pattern for pattern in matches if pattern)))
-                elif stat.S_ISREG(info.st_mode) and () in matches:
-                    yield path
+                if stat.S_ISDIR(info.st_mode):
+                    if any(matches):
+                        pending.append((path, tuple(pattern for pattern in matches if pattern)))
+                elif stat.S_ISREG(info.st_mode):
+                    if () in matches:
+                        yield path
                 else:
                     raise l.LayoutError("rewrite_unsafe_type")
         finally:
