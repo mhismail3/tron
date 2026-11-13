@@ -738,7 +738,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     try {
       const control = { taskId, operationId: worker.identity.operationId };
       const { operationId } = await this.prompt(injectedText(text, "gateway", "settings", "none"), [], "steer", undefined, undefined, {
-        operationId: randomUUID(), taskFence: control,
+        operationId: randomUUID(), originalText: text, taskFence: control,
         origin: { kind: "gateway", ownerId: taskId, title: "Settings changed", confidence: "boundary" }, onTerminal: () => {},
       });
       return { status: "queued", taskId, operationId, appliesFrom: "next-request" };
@@ -3649,6 +3649,19 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   tree(): SessionTreeNode[] {
     this.assertNoTrustReload();
     return projectTree(this.displayProjection, this.runtime.session.sessionManager, this.dependencies.blobs);
+  }
+
+  readResources<T>(read: () => T | Promise<T>, signal?: AbortSignal): Promise<T> {
+    this.assertNoTrustReload();
+    return this.lane.run(async () => {
+      this.assertUsable();
+      this.assertNoTrustReload();
+      const value = await read();
+      signal?.throwIfAborted();
+      this.assertUsable();
+      this.assertNoTrustReload();
+      return value;
+    }, signal);
   }
 
   commands(): CommandInfo[] {
