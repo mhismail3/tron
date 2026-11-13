@@ -672,6 +672,30 @@ class LedgerTests(VerifyCase):
         self.assertEqual({row[1] for row in rows}, {'passed', 'failed', 'skipped'})
         self.assertTrue(all(row[0].startswith('mods/alpha/ledger.test.mjs::') and row[2] >= 0 for row in rows))
 
+    def test_public_tooling_records_fixture_and_file_failures_without_inventing_empty_cases(self) -> None:
+        r = self.repo
+        sources = {
+            'fixtures': 'import unittest\nclass Broken(unittest.TestCase):\n    @classmethod\n    def setUpClass(cls):\n        raise RuntimeError("fixture failed")\n    def test_never(self):\n        self.fail("must not run")\nclass Skipped(unittest.TestCase):\n    @classmethod\n    def setUpClass(cls):\n        raise unittest.SkipTest("fixture skipped")\n    def test_never(self):\n        self.fail("must not run")\nunittest.main()\n',
+            'passed': 'print("file passed")\n',
+            'failed': 'import sys\nsys.exit("file failed")\n',
+            'empty': 'import unittest\nunittest.main()\n',
+        }
+        for name, source in sources.items():
+            r.write(f'mods/alpha/test-{name}.py', source)
+        r.commit('fixture and standalone file outcomes')
+        for name, code in (('fixtures', 1), ('passed', 0), ('failed', 1), ('empty', 0)):
+            result = subprocess.run([str(r.path / 'scripts/tron'), 'test', 'tooling', f'mods/alpha/test-{name}.py'], cwd=r.path,
+                                    env=r.env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, code, result.stdout + result.stderr)
+            if name == 'failed':
+                self.assertIn('file failed', result.stderr)
+        with sqlite3.connect(Path(r.env['HOME']) / '.tron-maintenance/test-ledger/results.sqlite3') as connection:
+            rows = connection.execute('SELECT test_id, outcome FROM results ORDER BY test_id').fetchall()
+        self.assertEqual(rows, [('mods/alpha/test-failed.py', 'failed'),
+                                ('mods/alpha/test-fixtures.py::setUpClass (Broken)', 'failed'),
+                                ('mods/alpha/test-fixtures.py::setUpClass (Skipped)', 'skipped'),
+                                ('mods/alpha/test-passed.py', 'passed')])
+
     def test_public_tooling_run_appends_real_cases_and_flakes_means_same_tree_pass_and_fail(self) -> None:
         r = self.repo
         r.write('mods/alpha/test-alpha.py', 'import os, unittest\nclass Cases(unittest.TestCase):\n    def test_variable(self):\n        self.assertFalse(os.environ.get("LEDGER_FIXTURE_FAIL"))\n    def test_broken(self):\n        self.fail("always broken")\n    def test_cross_tree(self):\n        self.assertFalse(os.environ.get("LEDGER_OTHER_TREE_FAIL"))\nunittest.main()\n')

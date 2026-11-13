@@ -126,24 +126,32 @@ cases; a file with no executed passes cannot hide beside a passing neighbour.
 The append-only per-test ledger is `~/.tron-maintenance/test-ledger/results.sqlite3`, outside
 all checkouts and outside Gateway state. `TRON_TEST_LEDGER` may select an external fixture
 or evidence file; a destination inside any repository or `~/.tron` is refused. SQLite transactions
-serialize concurrent appenders; reads never create a store. The ledger stores test identities and
-metrics, not test output, prompts or failure payloads; raw logs stay with their existing owners.
+serialize concurrent appenders; reads never create a store. Recording is fail-closed: a capture or
+storage error fails the recording command, even if its child passed. That infrastructure error
+creates no invented failed-test row. The ledger stores test identities and metrics, not test output,
+prompts or failure payloads; raw logs stay with their existing owners.
 
 `scripts/tron flakes [--tree HASH] [--json]` ranks tests that both passed and failed on the same
-tree, with pass/fail counts, failure rate and last seen. Always-failing tests are broken, not flaky.
+tree, with pass/fail counts, failure rate, lanes, hosts and last seen. Always-failing tests are broken,
+not flaky, and are not listed by this query.
 Different trees are never pooled. Dirty-tree runs retain their HEAD tree and an explicit dirty
 marker, but are excluded from flake classification because that hash cannot prove their source.
 Set `TRON_TEST_CONTENDED=1` for a known contended run: its raw outcomes and host readings remain
 recorded, but it counts as neither red nor green in flake ranking. This is evidence annotation,
-not a retry, timeout change or load-admission mechanism.
+not a retry, timeout change or load-admission mechanism. The caller annotates known contention from
+host evidence; neither concurrency nor a numeric host threshold automatically changes that flag.
 
 Gateway Vitest, Python unittest, Node test and XCTest runners append one result per test identity,
 including failed and skipped cases. Vitest uses native result callbacks without replacing caller
 reporters or output paths; Node preserves TAP output; XCTest reads native result bundles; Python
-records unittest result callbacks, including subtest failures and unexpected successes. Each record
+records unittest result callbacks, including subtest failures and unexpected successes. Class/module
+fixture errors and skips have their own fixture identity; a standalone Python script has one file
+identity. A zero-test unittest run invents no case. Each record
 contains the commit SHA, HEAD tree hash, duration, lane, actual host, CPU idle percentage and memory-free
 percentage (not load average), the host measurement time and completion time. Vitest and Node sample
-host metrics on native case completion; other runners retain the lane-start host sample. The mini
+host metrics on native case completion; other runners retain the lane-start host sample. Free memory
+is raw OS free pages divided by physical memory (Node's `os.freemem()` definition on macOS), not the
+available-memory percentage reported by `memory_pressure`. The mini
 spools records outside its checkout and returns them through its existing nonce-bound transport
 to the invoking Mac's ledger, preserving the mini's readings. No result creates no invented cases.
 XCTest uses the result bundle's test tree, with completed XCTest console cases retained when a

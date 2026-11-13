@@ -19,6 +19,12 @@ ARTIFACTS = ROOT / 'test-results/verify-batch'
 def shipped_runner(root, lock):
     """The shipped Gateway runner, its config reader and its host lock under `root`, pointed at this test's lock path, not the host's."""
     (root / 'tools/verify').mkdir(parents=True, exist_ok=True)
+    defaults = root / 'fixture-node'
+    defaults.write_text('#!/bin/sh\nprintf \'["default"]\\n\'\n')
+    defaults.chmod(0o755)
+    config = root / 'packages/gateway/node_modules/vitest/config.js'
+    config.parent.mkdir(parents=True)
+    config.write_text('exports.configDefaults = { reporters: ["default"] };\n')
     for name in ('gateway.py', 'vitest_configs.py', 'ledger.py', 'ledger-host.mjs', 'ledger-vitest.mjs'):
         (root / 'tools/verify' / name).write_text((ROOT / 'tools/verify' / name).read_text())
     source = (ROOT / 'tools/verify/host_lock.py').read_text()
@@ -59,7 +65,7 @@ class GatewayRuns:
         self.gateway = shipped_runner(directory, lock)
         node = directory / 'scripts/tron-node'
         node.parent.mkdir()
-        node.write_text('#!/bin/bash\n[[ $# == 0 ]] && { echo /usr/bin/true; exit 0; }\nshift; exec "$@"\n')
+        node.write_text(f'#!/bin/bash\n[[ $# == 0 ]] && {{ echo {directory / "fixture-node"}; exit 0; }}\nshift; exec "$@"\n')
         vitest = directory / 'packages/gateway/node_modules/.bin/vitest'
         vitest.parent.mkdir(parents=True)
         vitest.write_text(f'#!/bin/bash\necho "$2" >> {self.order}\n'
@@ -1529,7 +1535,7 @@ class BrowserForkProvisionTests(unittest.TestCase):
         self.adapter.parent.mkdir(parents=True)
         self.adapter.write_text(f'const sources = [\n  "git:github.com/fitchmultz/pi-agent-browser-native",\n  "git:github.com/fitchmultz/pi-agent-browser-native@{self.PIN}",\n];\n')
         (root / 'scripts').mkdir()
-        (root / 'scripts/tron-node').write_text('#!/bin/bash\n[[ $# == 0 ]] && { echo /usr/bin/true; exit 0; }\nshift; exec "$@"\n')
+        (root / 'scripts/tron-node').write_text(f'#!/bin/bash\n[[ $# == 0 ]] && {{ echo {root / "fixture-node"}; exit 0; }}\nshift; exec "$@"\n')
         vitest = root / 'packages/gateway/node_modules/.bin/vitest'
         vitest.parent.mkdir(parents=True)
         vitest.write_text(f'#!/bin/bash\necho "${{TRON_P99_17_BROWSER_FORK_COPY:-unset}}" >> {self.seen}\n')
@@ -1756,7 +1762,7 @@ class FullGatewayLockTests(unittest.TestCase):
         self.ran = root / 'ran'
         shipped_runner(root, self.lock)
         (root / 'scripts').mkdir()
-        (root / 'scripts/tron-node').write_text('#!/bin/bash\n[[ $# == 0 ]] && { echo /usr/bin/true; exit 0; }\nshift; exec "$@"\n')
+        (root / 'scripts/tron-node').write_text(f'#!/bin/bash\n[[ $# == 0 ]] && {{ echo {root / "fixture-node"}; exit 0; }}\nshift; exec "$@"\n')
         vitest = root / 'packages/gateway/node_modules/.bin/vitest'
         vitest.parent.mkdir(parents=True)
         vitest.write_text(f'#!/bin/bash\necho "$@" >> {self.ran}\n')

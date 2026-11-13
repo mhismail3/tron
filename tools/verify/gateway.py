@@ -3,6 +3,7 @@
 from __future__ import annotations
 from pathlib import Path
 import fcntl
+import json
 import os
 import platform
 import re
@@ -232,7 +233,9 @@ def main() -> int:
         environment = {**os.environ, **fork, "HOME": str(home), "TMPDIR": str(scratch), "TRON_NODE_BIN": node,
                        'TRON_TEST_LEDGER_CASES': str(report), 'TRON_TEST_LEDGER_CPU_IDLE': str(capture.context['cpuIdlePercent'])}
         if not any(word.startswith('--reporter') for word in arguments):
-            arguments.append('--reporter=default')
+            defaults = subprocess.check_output([node, '-p', "JSON.stringify(require('vitest/config').configDefaults.reporters)"],
+                                               cwd=ROOT / 'packages/gateway', env=environment, text=True)
+            arguments.extend('--reporter=' + reporter for reporter in json.loads(defaults))
         arguments.append('--reporter=' + str(ROOT / 'tools/verify/ledger-vitest.mjs'))
         with subprocess.Popen([str(ROOT / "scripts/tron-node"), "exec", str(vitest), "run", *arguments],
                               cwd=ROOT / "packages/gateway", env=environment) as child:

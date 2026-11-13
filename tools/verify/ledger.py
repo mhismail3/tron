@@ -75,9 +75,11 @@ def reading() -> dict:
         if len(samples) == 2:
             delta = [(end - start) % (2 ** 32) for start, end in zip(*samples)]
             cpu = round(100 * delta[2] / sum(delta), 2) if sum(delta) else None
-        pressure = subprocess.run(['memory_pressure'], capture_output=True, text=True, timeout=15)
-        free = re.search(r'System-wide memory free percentage:\s*(\d+)%', pressure.stdout)
-        memory = float(free[1]) if free else None
+        pages, count = (ctypes.c_uint32 * 15)(), ctypes.c_uint32(15)
+        total, size = ctypes.c_uint64(), ctypes.c_size_t(8)
+        if (library.host_statistics(library.mach_host_self(), 2, pages, ctypes.byref(count)) == 0
+                and library.sysctlbyname(b'hw.memsize', ctypes.byref(total), ctypes.byref(size), None, 0) == 0 and total.value):
+            memory = 100 * pages[0] * os.sysconf('SC_PAGE_SIZE') / total.value
     return {'host': platform.node(), 'cpuIdlePercent': cpu, 'memoryFreePercent': memory,
             'measuredAt': datetime.now(timezone.utc).isoformat()}
 
@@ -172,8 +174,25 @@ def python_main(arguments: list[str]) -> int:
     path = Path(arguments[0]).resolve()
     capture = Capture('python')
     identity = path.relative_to(ROOT).as_posix()
+    runner_used = False
+    begun = time.monotonic()
 
     class Result(unittest.TextTestResult):
+        def __init__(self, *args, **kwargs):
+            nonlocal runner_used
+            runner_used = True
+            super().__init__(*args, **kwargs)
+
+        def addError(self, test, error):
+            super().addError(test, error)
+            if not isinstance(test, unittest.TestCase):
+                append([capture.record(identity + '::' + test.id().replace('__main__.', ''), 'failed', 0)])
+
+        def addSkip(self, test, reason):
+            super().addSkip(test, reason)
+            if not isinstance(test, unittest.TestCase):
+                append([capture.record(identity + '::' + test.id().replace('__main__.', ''), 'skipped', 0)])
+
         def startTest(self, test):
             self.begun = time.monotonic()
             self.before = len(self.failures) + len(self.errors)
@@ -193,8 +212,19 @@ def python_main(arguments: list[str]) -> int:
     unittest.TextTestRunner.resultclass = Result
     sys.argv = arguments
     sys.path[0] = str(path.parent)
-    runpy.run_path(str(path), run_name='__main__')
-    return 0
+    code = 0
+    try:
+        runpy.run_path(str(path), run_name='__main__')
+    except SystemExit as error:
+        code = error.code if isinstance(error.code, int) else int(error.code is not None)
+        raise
+    except BaseException:
+        code = 1
+        raise
+    finally:
+        if not runner_used:
+            append([capture.record(identity, 'failed' if code else 'passed', time.monotonic() - begun)])
+    return code
 
 
 def execute(kind: str, command: list[str], env: dict | None = None, cwd: Path | None = None) -> int:
@@ -249,7 +279,7 @@ def flakes(tree: str | None = None) -> list[dict]:
     if connection is None:
         return []
     with closing(connection):
-        rows = connection.execute('SELECT test_id, tree_hash, SUM(outcome = \'passed\') AS passes, SUM(outcome = \'failed\') AS failures, MAX(seen_at) AS last_seen FROM results WHERE dirty = 0 AND contended = 0 AND outcome IN (\'passed\', \'failed\') AND (? IS NULL OR tree_hash = ?) GROUP BY test_id, tree_hash HAVING passes > 0 AND failures > 0 ORDER BY CAST(failures AS REAL) / (passes + failures) DESC, failures DESC, last_seen DESC', (tree, tree)).fetchall()
+        rows = connection.execute('SELECT test_id, tree_hash, SUM(outcome = \'passed\') AS passes, SUM(outcome = \'failed\') AS failures, MAX(seen_at) AS last_seen, GROUP_CONCAT(DISTINCT lane) AS lanes, GROUP_CONCAT(DISTINCT host) AS hosts FROM results WHERE dirty = 0 AND contended = 0 AND outcome IN (\'passed\', \'failed\') AND (? IS NULL OR tree_hash = ?) GROUP BY test_id, tree_hash HAVING passes > 0 AND failures > 0 ORDER BY CAST(failures AS REAL) / (passes + failures) DESC, failures DESC, last_seen DESC', (tree, tree)).fetchall()
         return [{**dict(row), 'failure_rate': row['failures'] / (row['passes'] + row['failures'])} for row in rows]
 
 
@@ -269,7 +299,7 @@ def main(arguments: list[str]) -> int:
         print(f'Test ledger: {destination()}')
         print('Same-tree flakes (uncontended committed runs only):')
         for row in rows:
-            print(f"{row['failures']}/{row['passes'] + row['failures']} failed ({row['failure_rate']:.1%})  pass={row['passes']}  tree={row['tree_hash'][:12]}  last={row['last_seen']}  {row['test_id']}")
+            print(f"{row['failures']}/{row['passes'] + row['failures']} failed ({row['failure_rate']:.1%})  pass={row['passes']}  tree={row['tree_hash'][:12]}  last={row['last_seen']}  lanes={row['lanes']}  hosts={row['hosts']}  {row['test_id']}")
         if not rows:
             print('No test has both passed and failed on the same recorded tree.')
     return 0

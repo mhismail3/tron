@@ -16,6 +16,13 @@ GATEWAY = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(GATEWAY)
 
 
+def fixture_node(node: Path) -> None:
+    defaults = node.with_name('fixture-node')
+    defaults.write_text('#!/bin/sh\nprintf \'["default"]\\n\'\n')
+    defaults.chmod(0o755)
+    node.write_text(f'#!/bin/bash\n[[ $# == 0 ]] && {{ echo {defaults}; exit 0; }}\nshift; exec "$@"\n')
+
+
 def commit_fixture(root: Path) -> None:
     for arguments in (['init', '-q'], ['add', '-A'], ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture']):
         subprocess.run(['git', '-C', str(root), *arguments], check=True, capture_output=True)
@@ -91,7 +98,7 @@ class GatewayTestScratchCleanup(unittest.TestCase):
             (verify / "host_lock.py").write_text(lock.replace("'/tmp/tron-full-gateway.lock'", repr(str(base / "full.lock"))))
             node = base / "scripts/tron-node"
             node.parent.mkdir()
-            node.write_text('#!/bin/bash\n[[ $# == 0 ]] && { echo /usr/bin/true; exit 0; }\nshift; exec "$@"\n')
+            fixture_node(node)
             vitest = base / "packages/gateway/node_modules/.bin/vitest"
             vitest.parent.mkdir(parents=True)
             vitest.write_text(f'#!/bin/bash\necho "$HOME" > {base}/home\nsleep 60 & wait\n')
@@ -130,7 +137,7 @@ class GatewayTestConfigRouting(unittest.TestCase):
                 (verify / source.name).write_text(source.read_text())
             node = base / "scripts/tron-node"
             node.parent.mkdir()
-            node.write_text('#!/bin/bash\n[[ $# == 0 ]] && { echo /usr/bin/true; exit 0; }\nshift; exec "$@"\n')
+            fixture_node(node)
             gateway = base / "packages/gateway"
             vitest = gateway / "node_modules/.bin/vitest"
             vitest.parent.mkdir(parents=True)
