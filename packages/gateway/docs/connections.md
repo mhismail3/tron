@@ -1,7 +1,7 @@
 # Connection management owner
 
 `ConnectionOwner` is a read-only projection of the retained generic account
-envelopes under `gateway/integrations/connections.json`. It does not own provider
+envelopes under `state/integrations/connections.json`. It does not own provider
 credentials or execute provider operations, and it never initializes, migrates or
 writes that file. Credential values never enter this state: an envelope holds only
 an opaque reference, omitted from presentation snapshots.

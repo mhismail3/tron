@@ -3,8 +3,8 @@
   "module": "gateway/admin",
   "files": [
     "agent/settings.json",
-    "gateway/settings/changes/000000.jsonl",
-    "gateway/settings/changes/index.json"
+    "state/settings/changes/000000.jsonl",
+    "state/settings/changes/index.json"
   ],
   "projection": {
     "history": [

@@ -210,7 +210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             shutdownCompleted: { pid, drainID in
                 await MacQuitCoordinator.hasCompletedShutdown(
                     pid: pid, drainID: drainID,
-                    receiptURL: setup.tronHome.appendingPathComponent("gateway/stop-completed.json")
+                    receiptURL: setup.tronHome.appendingPathComponent("state/stop-completed.json")
                 )
             },
             readDrain: setup.readDrainForQuit,

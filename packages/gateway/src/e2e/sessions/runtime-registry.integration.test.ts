@@ -434,7 +434,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect((await cold.list("user")).find((session) => session.id === sessionId))
       .toMatchObject({ creationOrigin: { kind: "automation", automationId } });
     await cold.list("all");
-    const indexPath = join(fixture.root, "tron-cold", "gateway", "catalog-metadata-v3", "manifest.json");
+    const indexPath = join(fixture.root, "tron-cold", "cache", "catalog-metadata-v3", "manifest.json");
     await settleCatalog(cold);
     expect(existsSync(indexPath)).toBe(true);
     await cold.dispose();
@@ -1490,7 +1490,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     secondManager.appendMessage(fauxAssistantMessage("unchanged canonical body"));
     fixture.manager.appendMessage(fauxAssistantMessage("initial canonical body"));
     await fixture.registry.catalog("all");
-    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v3", "manifest.json");
+    const indexPath = join(fixture.root, "tron", "cache", "catalog-metadata-v3", "manifest.json");
     await settleCatalog(fixture.registry);
     expect(existsSync(indexPath)).toBe(true);
     await fixture.registry.dispose();
@@ -1531,9 +1531,9 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
   it("writes the durable catalog document from its owner, not from a reader cut", async () => {
     const fixture = await coldFixture("owner-only-index-writer");
     await settleCatalog(fixture.registry);
-    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v3", "manifest.json");
+    const indexPath = join(fixture.root, "tron", "cache", "catalog-metadata-v3", "manifest.json");
     expect(existsSync(indexPath)).toBe(true);
-    await rm(join(fixture.root, "tron", "gateway", "catalog-metadata-v3"), { recursive: true, force: true });
+    await rm(join(fixture.root, "tron", "cache", "catalog-metadata-v3"), { recursive: true, force: true });
     (fixture.registry as unknown as { catalogStructuralIndex: unknown }).catalogStructuralIndex = undefined;
     const save = vi.spyOn(CatalogMetadataIndex.prototype, "save");
     try {
@@ -1549,7 +1549,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     it("rejects an unowned append that races durable-index reconciliation", async () => {
     const fixture = await coldFixture("unowned-index-append-race");
     await fixture.registry.catalog("all");
-    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v3", "manifest.json");
+    const indexPath = join(fixture.root, "tron", "cache", "catalog-metadata-v3", "manifest.json");
     await settleCatalog(fixture.registry);
     expect(existsSync(indexPath)).toBe(true);
     await fixture.registry.dispose();
@@ -1691,7 +1691,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(fixture.registry.isArchived(sessionId)).toBe(true);
     await fixture.registry.dispose();
     registries.splice(registries.indexOf(fixture.registry), 1);
-    await rm(join(fixture.root, "tron", "gateway", "catalog-metadata-v3"), { recursive: true, force: true });
+    await rm(join(fixture.root, "tron", "cache", "catalog-metadata-v3"), { recursive: true, force: true });
     const completeBytes = (await fsPromises.stat(fixture.sessionFile)).size;
     await appendFile(fixture.sessionFile, '{"type":"message"');
 
@@ -2668,7 +2668,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await settleCatalog(registry);
     const before = await registry.catalog("user");
     expect(before.sessions.some(session => session.id === childId)).toBe(false);
-    const initialIndex = new CatalogMetadataIndex(join(fixture.root, "tron", "gateway"));
+    const initialIndex = new CatalogMetadataIndex(join(fixture.root, "tron", "cache"));
     expect((await initialIndex.load(originalRoot))?.some(row => row.id === childId)).toBe(true);
 
     const nextRoot = join(originalRoot, "workspace", "parent");
@@ -8432,7 +8432,7 @@ export default function (pi) {
     }
     await disposal;
     spy.mockRestore();
-    const markerPath = join(root, "tron", "gateway", "runtime-markers", `${slot.id}.json`);
+    const markerPath = join(root, "tron", "state", "runtime-markers", `${slot.id}.json`);
     const markerAtDispose = existsSync(markerPath) ? readFileSync(markerPath, "utf8") : undefined;
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(existsSync(markerPath) ? readFileSync(markerPath, "utf8") : undefined, "a marker write landed after dispose").toEqual(markerAtDispose);
@@ -9018,7 +9018,7 @@ export default function (pi) {
       message: "A manual compaction is already pending for this session",
     });
     expect(compact).toHaveBeenCalledTimes(1);
-    const markerPath = join(root, "tron", "gateway", "runtime-markers", `${slot.id}.json`);
+    const markerPath = join(root, "tron", "state", "runtime-markers", `${slot.id}.json`);
     expect(JSON.parse(await readFile(markerPath, "utf8")).operations).toHaveLength(1);
 
     releaseCompaction();
@@ -10862,7 +10862,7 @@ export default function (pi) {
     expect(derivedAdmissions.mock.calls.some(([admission]) =>
       admission.kind === "foreground-agent-operation"
     )).toBe(true);
-    const markerPath = join(root, "tron", "gateway", "runtime-markers", `${slot.id}.json`);
+    const markerPath = join(root, "tron", "state", "runtime-markers", `${slot.id}.json`);
     if (existsSync(markerPath)) {
       const marker = JSON.parse(await readFile(markerPath, "utf8")) as { operations: unknown[] };
       expect(marker.operations).toEqual([]);
@@ -10913,7 +10913,7 @@ export default function (pi) {
       phase: "complete", blockerCount: 0, suspectProjectionCount: 0,
     });
     expect(slot.snapshot().pendingPrompt).toBeUndefined();
-    const markerPath = join(fixture.root, "tron", "gateway", "runtime-markers", `${slot.id}.json`);
+    const markerPath = join(fixture.root, "tron", "state", "runtime-markers", `${slot.id}.json`);
     if (existsSync(markerPath)) {
       const marker = JSON.parse(await readFile(markerPath, "utf8")) as { operations: unknown[] };
       expect(marker.operations).toEqual([]);
@@ -11091,7 +11091,7 @@ export default function (pi) {
     expect(during.phase).toBe("running");
     expect(during.operation?.kind).toBe("prompt");
     expect((slot as any).pendingExtensionCommand?.kind).toBe("command");
-    const marker = JSON.parse(await readFile(join(root, "tron", "gateway", "runtime-markers", `${slot.id}.json`), "utf8")) as {
+    const marker = JSON.parse(await readFile(join(root, "tron", "state", "runtime-markers", `${slot.id}.json`), "utf8")) as {
       operations: Array<{ operationId: string }>;
     };
     expect(marker.operations.map((operation) => operation.operationId)).toContain((slot as any).pendingExtensionCommand?.id);
@@ -12007,7 +12007,7 @@ export default function (pi) {
     expect(internal.activityHeartbeat).toBeDefined();
     expect(slot.snapshot().processActivities ?? []).toEqual([]);
     const markerPath = join((registry as unknown as { options: { tronHome: string } }).options.tronHome,
-      "gateway", "runtime-markers", `${slot.id}.json`);
+      "state", "runtime-markers", `${slot.id}.json`);
     expect(JSON.parse(await readFile(markerPath, "utf8")).operations).toHaveLength(1);
     let drained = false;
     const drain = registry.waitUntilIdle().then(() => { drained = true; });
@@ -12029,7 +12029,7 @@ export default function (pi) {
     const slot = await registry.acquire(manager.getSessionId());
     const names = ["PI_SUBAGENTS_TEMP_ROOT", "PI_CODING_AGENT_DIR", "PI_SESSION_FILE", "PI_SUBAGENT_PARENT_SESSION", "TRON_GATEWAY_SUPERVISED", "TRON_GATEWAY_PAYLOAD_ROOT"] as const;
     const previous = new Map(names.map(name => [name, process.env[name]]));
-    process.env.PI_SUBAGENTS_TEMP_ROOT = join(homedir(), ".tron", "internal", "subagents");
+    process.env.PI_SUBAGENTS_TEMP_ROOT = join(homedir(), ".tron", "state", "subagents");
     process.env.PI_CODING_AGENT_DIR = join(homedir(), ".tron", "agent");
     process.env.PI_SESSION_FILE = join(homedir(), ".tron", "sessions", "private.jsonl");
     process.env.PI_SUBAGENT_PARENT_SESSION = "supervision-parent";

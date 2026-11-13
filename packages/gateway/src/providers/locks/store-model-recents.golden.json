@@ -2,7 +2,7 @@
   "store": "store-model-recents",
   "module": "gateway/providers",
   "files": [
-    "gateway/model-recents.json"
+    "state/model-recents.json"
   ],
   "projection": {
     "entries": [

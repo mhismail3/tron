@@ -353,7 +353,7 @@ export async function payloadFingerprint(root) {
   return payloadTreeFingerprint(root);
 }
 
-async function payloadTreeFingerprint(root) {
+export async function payloadTreeFingerprint(root) {
   return digestEntries(root, [...(await regularFiles(root, "app")), ...(await regularFiles(root, "runtime"))]);
 }
 
@@ -576,7 +576,7 @@ export async function validatePayload(root, expected = {}, checkFingerprint = tr
 
 function store(home, channel) {
   if (!isAbsolute(home) || !validComponent(channel, 64)) throw new Error("invalid home or channel");
-  const channelRoot = join(home, "gateway", "payloads", channel);
+  const channelRoot = join(home, "state", "payloads", channel);
   return {
     home, channel, channelRoot,
     versionsRoot: join(channelRoot, "versions"),
@@ -585,7 +585,7 @@ function store(home, channel) {
     state: join(channelRoot, "deployment-state.json"),
     progress: join(channelRoot, "update-progress.json"),
     pending: join(channelRoot, "pending-attempt.json"),
-    config: join(home, "gateway", "update-config.json"),
+    config: join(home, "state", "update-config.json"),
     lock: join(channelRoot, ".update.lock"),
     operationLock: join(channelRoot, ".operation.lock"),
   };
@@ -806,7 +806,7 @@ async function publishImmutablePayload(temporary, target) {
 
 async function assertStoreRoots(paths) {
   const home = paths.home ?? resolve(paths.channelRoot, "../../..");
-  const roots = [join(home, "gateway"), join(home, "gateway", "payloads"), paths.channelRoot, paths.versionsRoot];
+  const roots = [join(home, "state"), join(home, "state", "payloads"), paths.channelRoot, paths.versionsRoot];
   for (const root of roots) {
     const components = resolve(root).split("/").filter(Boolean);
     let cursor = "/";
@@ -2675,7 +2675,7 @@ async function applyPayloadInternal(value, paths) {
   const port = Number(process.env.TRON_GATEWAY_PORT ?? (value.channel === "dev" ? "9848" : "9847"));
   if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) throw new Error("invalid Gateway port");
   const timeoutMs = deploymentTimeoutMs();
-  const token = await readLocalCredential(join(home, "gateway", "local-auth.json"));
+  const token = await readLocalCredential(join(home, "state", "local-auth.json"));
   await writeProgress(paths, "promoting", value.commandId);
   let result;
   try {
@@ -2853,7 +2853,7 @@ async function main() {
     const stableBundledRoot = resolve(argument("--stable-bundled-root") ?? "/Applications/Tron.app/Contents/Resources/Gateway");
     const requested = argument("--host") ?? "127.0.0.1";
     const host = resolveDeploymentHost(requested);
-    const token = await readLocalCredential(join(devHome, "gateway", "local-auth.json"));
+    const token = await readLocalCredential(join(devHome, "state", "local-auth.json"));
     const result = await handoffDebugCandidate({
       devHome, stableHome, stableBundledRoot, host, token,
       version: argument("--version"), expectedFingerprint: argument("--fingerprint"),
@@ -2866,7 +2866,7 @@ async function main() {
   const port = Number(argument("--port") ?? process.env.TRON_GATEWAY_PORT ?? (channel === "dev" ? "9848" : "9847"));
   if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) throw new Error("invalid Gateway port");
   const timeoutMs = commandTimeoutMs(argument("--timeout-ms"));
-  const tokenPath = join(home, "gateway", "local-auth.json");
+  const tokenPath = join(home, "state", "local-auth.json");
   const token = await readLocalCredential(tokenPath);
   const callerCommandId = argument("--command-id");
   if (callerCommandId !== undefined && !validCommandId(callerCommandId)) throw new Error("--command-id must contain 8–160 safe characters");

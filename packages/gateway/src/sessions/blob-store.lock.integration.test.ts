@@ -11,7 +11,7 @@ it("blob-store-paths: limits, register, lease ranges, bounds, prune and dispose"
   vi.setSystemTime(Date.parse("2026-01-01T00:00:00.000Z"));
   onTestFinished(async () => { vi.useRealTimers(); await rm(join(home, ".."), { recursive: true, force: true }); });
   const advance = (ms: number) => { vi.setSystemTime(Date.now() + ms); };
-  const directory = join(home, "gateway", "blobs");
+  const directory = join(home, "state", "blobs");
   const sources = join(home, "sources");
   await mkdir(sources, { recursive: true });
   const source = async (name: string, content: string) => { const path = join(sources, name); await writeFile(path, content); return path; };
@@ -179,7 +179,7 @@ it("blob-store-paths: limits, register, lease ranges, bounds, prune and dispose"
   expect(await files(), "before it is copied").toEqual(withEmpty);
 
   expect(await outcome(async () => {
-    const floor = new BlobStore({ ...limits, minimumFreeBytes: Number.MAX_SAFE_INTEGER - 64 }, Date.now, join(home, "gateway", "blobs-floor"));
+    const floor = new BlobStore({ ...limits, minimumFreeBytes: Number.MAX_SAFE_INTEGER - 64 }, Date.now, join(home, "state", "blobs-floor"));
     await floor.initialize();
     try { return await floor.registerFile(exported, "text/plain"); } finally { await floor.dispose(); }
   }), "file storage reports a full disk floor").toEqual(refusal("Blob file storage does not have enough free space", "busy", true));
@@ -190,7 +190,7 @@ it("blob-store-paths: limits, register, lease ranges, bounds, prune and dispose"
   }), "a store with no directory refuses files").toEqual(fileStorageUnavailable);
 
   {
-    const shared = join(home, "gateway", "blobs-shared");
+    const shared = join(home, "state", "blobs-shared");
     const twice = new BlobStore(limits, Date.now, shared);
     await twice.initialize();
     const id = await twice.registerFile(exported, "text/plain");

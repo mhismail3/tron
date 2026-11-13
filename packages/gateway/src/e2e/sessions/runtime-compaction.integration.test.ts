@@ -106,7 +106,7 @@ describe("compaction cancellation with the pinned runtime", { concurrent: false 
       expect(slot.snapshot()).toMatchObject({ phase: "idle", compactionQueued: false });
       expect(slot.snapshot().operation).toBeUndefined();
       expect(registry.administrativeWorkRegistry.size).toBe(0);
-      expect(await readdir(join(root, "tron", "gateway", "runtime-markers"))).toEqual([]);
+      expect(await readdir(join(root, "tron", "state", "runtime-markers"))).toEqual([]);
       const entries = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n").map((line) => JSON.parse(line));
       expect(entries.filter((entry) => entry.type === "compaction")).toEqual([]);
       expect(entries.filter((entry) => entry.message?.role === "assistant").at(-1)?.message)
@@ -216,7 +216,7 @@ async function expectSettled(item: Awaited<ReturnType<typeof boundaryFixture>>) 
   expect(item.slot.snapshot().operation).toBeUndefined();
   expect(item.slot.snapshot().compactionPolicy?.active).toBeUndefined();
   expect(item.registry.administrativeWorkRegistry.size).toBe(0);
-  expect(await readdir(join(item.root, "tron", "gateway", "runtime-markers"))).toEqual([]);
+  expect(await readdir(join(item.root, "tron", "state", "runtime-markers"))).toEqual([]);
 }
 
 describe("compaction operation admission and authoritative reconciliation", { concurrent: false }, () => {
@@ -980,7 +980,7 @@ describe("compaction operation admission and authoritative reconciliation", { co
       expect(item.slot.snapshot()).toMatchObject({ phase: "running", operation: { id: successor.operation!.id } });
       expect(item.slot.snapshot().compactionPolicy?.active).toBeUndefined();
       expect(item.snapshots.slice(start).every(snapshot => snapshot.phase !== "idle")).toBe(true);
-      const markers = JSON.parse(await readFile(join(item.root, "tron", "gateway", "runtime-markers", `${item.slot.id}.json`), "utf8"));
+      const markers = JSON.parse(await readFile(join(item.root, "tron", "state", "runtime-markers", `${item.slot.id}.json`), "utf8"));
       expect(markers.operations.map((operation: { operationId: string }) => operation.operationId)).toEqual([successor.operation!.id]);
       releaseSuccessor!();
       await stopping;

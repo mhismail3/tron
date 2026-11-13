@@ -4,11 +4,11 @@
   "live": "current-format Profile notes and their Changes entries recorded by their owning stores",
   "files": [
     {
-      "path": "gateway/settings/changes/000000.jsonl",
+      "path": "state/settings/changes/000000.jsonl",
       "content": "<5112 bytes>"
     },
     {
-      "path": "gateway/settings/changes/index.json",
+      "path": "state/settings/changes/index.json",
       "content": {
         "segments": [
           {

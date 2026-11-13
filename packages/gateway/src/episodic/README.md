@@ -20,7 +20,7 @@ The contract owns the shared chapter count used by both the Home ledger and
 its memory source/cursor state; Home retains ledger and wake orchestration.
 State: `state/episodic/<sourceSessionId>/` (`initialized.json`, `catalog.jsonl`,
 `nodes.jsonl`, `state.json`, `checkpoint.current.json`, `checkpoint-*/`) and the
-workspace record `gateway/workspace-state/episodic-initialized.json`.
+workspace record `state/workspace-state/episodic-initialized.json`.
 
 ## Contract
 

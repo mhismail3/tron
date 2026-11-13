@@ -185,7 +185,7 @@ agent home and every other `~/.tron` entry as the [home registry](../../../docs/
 selects them, the old app, machine-group file, browser config; never Keychain or browser
 profiles) and SHA-256 manifests with modes, ACLs, xattrs and link text; only
 `com.apple.provenance`/`quarantine` copy values may differ. `--select-bundled-offline` renames
-the whole `gateway/payloads/stable` into `retired-stable-payloads` and must finish before
+the whole `state/payloads/stable` into `retired-stable-payloads` and must finish before
 `--confirm-offline`; `--verify` then requires the bundled runtime (`scripts/tron mac verify
 --require-bundled`). One lock serializes the commands; reruns resume; `--restart` begins a
 fresh inventory (refused mid-step or after verify); `--abandon` archives a superseded operation;
@@ -264,7 +264,7 @@ scripts/tron dev handoff     # maintainer only: tested Debug artifact → inacti
 ```
 
 Debug builds the selected worktree directly, runs the installed signed launcher with the `dev`
-selection and keeps `~/.tron-dev` (provider install in `~/.tron-dev/internal/pi-subagents/`,
+selection and keeps `~/.tron-dev` (provider install in `~/.tron-dev/cache/pi-subagents/`,
 [Gateway install contract](../../gateway/README.md#tron-owned-pi-subagents-build)). It is
 loopback unless `--tailscale`; later commands inherit the recorded host and reject a conflict.
 A short atomic command lock fails concurrent commands closed; an orphan child with the exact

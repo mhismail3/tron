@@ -155,7 +155,7 @@ describe("notification inbox RPCs over a real credential document", () => {
 
   it("keeps the credential document unchanged across read-only listing", async () => {
     const { root, store, service } = await fixture();
-    const path = join(root, "gateway", "notifications.json");
+    const path = join(root, "state", "notifications.json");
     const before = await stat(path);
     const bytes = await readFile(path);
     await invoke(service, "notification.inbox.list", { limit: 10, filter: "unread" });

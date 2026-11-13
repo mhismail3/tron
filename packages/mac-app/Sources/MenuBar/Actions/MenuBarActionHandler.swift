@@ -179,7 +179,7 @@ final class MenuBarActionHandler {
             target: nil,
             action: nil
         )
-        resetCredentialsCheckbox.toolTip = "Also removes gateway/local-auth.json. Provider and device credentials are never removed."
+        resetCredentialsCheckbox.toolTip = "Also removes state/local-auth.json. Provider and device credentials are never removed."
 
         resetSettingsCheckbox.sizeToFit()
         resetCredentialsCheckbox.sizeToFit()

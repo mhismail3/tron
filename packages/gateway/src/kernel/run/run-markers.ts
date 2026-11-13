@@ -54,7 +54,7 @@ export class RunMarkerStore {
   private readonly fileSystem: RunMarkerFileSystem;
 
   constructor(tronHome: string, options: RunMarkerStoreOptions = {}) {
-    this.directory = tronHomePath(tronHome, "gateway/runtime-markers");
+    this.directory = tronHomePath(tronHome, "state/runtime-markers");
     this.fileSystem = options.fileSystem ?? productionFileSystem;
   }
 

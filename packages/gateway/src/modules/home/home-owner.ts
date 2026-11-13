@@ -112,7 +112,7 @@ export interface HomeOwnerOptions {
 }
 
 export function homeWorkspaceDirectory(tronHome: string): string {
-  return tronHomePath(tronHome, "gateway/home/workspace");
+  return tronHomePath(tronHome, "state/home/workspace");
 }
 
 export class HomeOwner {
@@ -136,7 +136,7 @@ export class HomeOwner {
   private lastWakeDelivered = false;
 
   constructor(private readonly options: HomeOwnerOptions) {
-    this.directory = tronHomePath(options.tronHome, "gateway/home");
+    this.directory = tronHomePath(options.tronHome, "state/home");
     this.recordPath = join(this.directory, "home.json");
     this.workspacePath = homeWorkspaceDirectory(options.tronHome);
     const store = new HomeTaskStore(options.tronHome, options.workspace, options.taskDiagnostic ? { diagnostic: options.taskDiagnostic } : {});

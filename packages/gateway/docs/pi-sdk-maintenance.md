@@ -149,7 +149,7 @@ prompt-keyword handler is not part of that pin.
   and retained refusals, not only an ordinary session's child execution.
 - **Advertisement lifetime:** global npm discovery runs through the provider's owned setup-command primitive. Reload cancels and joins superseded lookups; session shutdown cancels and joins the current lookup before returning. Unavailable global discovery still permits local agents. The real Gateway prompt/restart journey holds an npm lookup open and checks its PID is gone before the replacement process launches.
 - **Install and activation:** `npm run install:pi-subagents -- <gateway-home>` extracts the
-  closure offline into `<gateway-home>/internal/pi-subagents/<version>` with a receipt and
+  closure offline into `<gateway-home>/cache/pi-subagents/<version>` with a receipt and
   publishes by rename; valid roots are reused, damaged ones refused, none pruned. Every startup
   activates its payload's closure before extension discovery and fails closed on damage.
   Stable installation is maintainer-only.
@@ -163,7 +163,7 @@ prompt-keyword handler is not part of that pin.
   `pi-coding-agent`, confines `pi.extensions|skills|prompts` to the verified root, and gives the
   extension a build-bound `tron:pi-subagents@…#…` owner, the only one allowed to register
   `subagent`. Its factory and discovery loads use the closure's jiti with a private
-  `<gateway-home>/internal/pi-subagents-transform-cache/<version>`. The first factory load of a
+  `<gateway-home>/cache/pi-subagents-transform-cache/<version>`. The first factory load of a
   process waits (asynchronously) for a worker to transform the whole build into that cache, and a
   discovery read (catalog, `packages.list`) only for the modules its entry reaches, so the
   Gateway thread never runs Babel; if the worker cannot fill the cache the load is refused (`busy`, retryable) and the next

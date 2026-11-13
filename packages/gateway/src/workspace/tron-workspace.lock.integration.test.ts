@@ -7,7 +7,7 @@ import { TronWorkspace, type TronWorkspaceFeature, type TronWorkspaceUnavailable
 it("workspace-state-paths: initialize, mark features, admission and availability", async () => {
   const home = join(await realpath(await mkdtemp(join(tmpdir(), "tron-workspace-state-"))), "home");
   onTestFinished(() => rm(join(home, ".."), { recursive: true, force: true }));
-  const state = join(home, "gateway", "workspace-state");
+  const state = join(home, "state", "workspace-state");
   const root = join(home, "workspace");
   const features: TronWorkspaceFeature[] = ["profile", "episodic", "home-tasks", "apps"];
   const opened: TronWorkspace[] = [];

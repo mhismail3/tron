@@ -55,7 +55,7 @@ The same registry-owned K5 service owns worker orchestration and cold artifact p
 Home computes its subagent projection from the selected native cut through K5's reader.
 Composition supplies the same late K6 settings, Profile and raw model owners.
 
-- **Record.** `<tronHome>/gateway/home/home.json` (`0600`, atomic durable publish): `version`
+- **Record.** `<tronHome>/state/home/home.json` (`0600`, atomic durable publish): `version`
   `2`, `homeId`, ordered `chapters` (`{ sessionId, ordinal, state: active | sealed | reserved
   | materializing, createdAt, activationStarted, … }`), `bindingRevision`, `generation`
   (advances on every profile change, fences in-flight work), `routeGeneration` (advances only
@@ -79,7 +79,7 @@ Composition supplies the same late K6 settings, Profile and raw model owners.
   durable-conversation checks. Native ports provide only current runtime and
   canonical path reads; cold measurement fences the finite file cut by size,
   time and identity, and publication requires an untorn conversation branch.
-- **Workspace.** `<tronHome>/gateway/home/workspace` (`0700`, empty) is recorded **untrusted**.
+- **Workspace.** `<tronHome>/state/home/workspace` (`0700`, empty) is recorded **untrusted**.
   Global skills appear in the system prompt; prompt templates feed the composer.
   The kernel [resource freshness owner](../../kernel/run/README.md#resource-freshness)
   watches global resources for Home and project resources for ordinary sessions.

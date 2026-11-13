@@ -14,7 +14,7 @@ export function createWebResearchModule(transport: () => WebResearchTransport | 
       const service = new WebResearch(transport);
       const grants = new Map<string, { token: string; path: string }>();
       const tokens = new Map<string, string>();
-      const childDirectory = tronHomePath(host.tronHome, "gateway/web-research-children");
+      const childDirectory = tronHomePath(host.tronHome, "state/web-research-children");
       let directory: string | undefined;
       let server: Server | undefined;
       let opening: Promise<void> | undefined;

@@ -42,7 +42,7 @@ module or a Gateway child. Stock Remote Login, system SSH files and PF are untou
   Tailscale Self IPv4 in 100.64.0.0/10. No DNS, LAN, loopback, wildcard, IPv6 or
   alternate-port fallback. CLI and enrollment share one canonical-home lifecycle
   lock; launchd directly runs sshd in the ordinary user's GUI domain.
-- **Private state:** `<tronHome>/mac-terminal` is 0700; persistent Ed25519 host key,
+- **Private state:** `<tronHome>/state/mac-terminal` is 0700; persistent Ed25519 host key,
   config and authorized_keys are 0600. Missing/corrupt initialized identity fails
   closed, never regenerates. Configuration binds one address and disables
   password/PAM/keyboard-interactive login and forwarding.

@@ -360,7 +360,7 @@ describe("Home's task tool on the wire (#961)", () => {
     expect(report.isError, report.text).toBe(false);
     expect(report.json()).toMatchObject({ taskId: "wire-worker", offset: 0 });
 
-    const taskDirectory = join(f.tronHome, "gateway", "home", "tasks");
+    const taskDirectory = join(f.tronHome, "state", "home", "tasks");
     const files = (await readdir(taskDirectory)).sort();
     const beforeMetrics = await Promise.all(files.map(file => readFile(join(taskDirectory, file), "utf8")));
     const metricsCall = await homeCalls("task", { action: "metrics", taskId: "wire-worker" });

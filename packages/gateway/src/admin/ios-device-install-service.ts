@@ -243,7 +243,7 @@ async function readDocument(path: string): Promise<unknown | undefined> {
 }
 
 function installRoot(tronHome: string): string {
-  return tronHomePath(tronHome, "gateway/ios-device-installs");
+  return tronHomePath(tronHome, "state/ios-device-installs");
 }
 
 function configPath(tronHome: string, deviceId: string): string {

@@ -10,7 +10,7 @@ import { durableAtomicWriteJson } from "./foundation/durable-json.js";
 import { readSecureJson, SecureJsonFileError } from "./foundation/secure-json.js";
 import { GatewayError } from "./errors.js";
 import { resolveTronHome } from "./tron-home.js";
-import { tronHomePath } from "./foundation/tron-home-layout.js";
+import { assertHomeLayout, initializeHomeLayout, tronHomePath } from "./foundation/tron-home-layout.js";
 
 export interface GatewayConfig {
   readonly host: string;
@@ -287,7 +287,7 @@ function machineGroupIdentityPath(
   if (override && !isAbsolute(override)) {
     throw new GatewayError("invalid_request", "TRON_MACHINE_GROUP_PATH must be absolute");
   }
-  return override ?? tronHomePath(join(userHome, ".tron"), "internal/machine-group-id");
+  return override ?? tronHomePath(join(userHome, ".tron"), "state/machine-group-id");
 }
 
 async function loadMachineGroupID(environment: NodeJS.ProcessEnv): Promise<string> {
@@ -299,6 +299,7 @@ async function loadMachineGroupID(environment: NodeJS.ProcessEnv): Promise<strin
     return injected;
   }
   const path = machineGroupIdentityPath(environment);
+  if (!environment.TRON_MACHINE_GROUP_PATH?.trim()) await assertHomeLayout(dirname(dirname(path)));
   try {
     await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     const value = await updateJsonLocked<unknown>(
@@ -338,21 +339,27 @@ async function loadProductPushOrigin(): Promise<string | undefined> {
   return undefined;
 }
 
+export function resolveAgentDir(tronHome: string, environment: NodeJS.ProcessEnv = process.env): string {
+  const explicitAgentDir = environment.PI_CODING_AGENT_DIR;
+  if (explicitAgentDir && !isAbsolute(explicitAgentDir)) {
+    throw new GatewayError("invalid_request", "PI_CODING_AGENT_DIR must be absolute");
+  }
+  return resolve(explicitAgentDir ?? tronHomePath(tronHome, "agent"));
+}
+
 export async function loadConfig(
   args = process.argv.slice(2),
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<GatewayConfig> {
   const tronHome = resolveTronHome(environment);
+  await assertHomeLayout(tronHome);
   const machineGroupID = await loadMachineGroupID(environment);
-  const configPath = tronHomePath(tronHome, "gateway/gateway.json");
+  await initializeHomeLayout(tronHome);
+  const configPath = tronHomePath(tronHome, "state/gateway.json");
   const next = await loadOrCreateStoredGatewayConfig(configPath);
   const pushServiceOrigin = await loadProductPushOrigin();
 
-  const explicitAgentDir = environment.PI_CODING_AGENT_DIR;
-  if (explicitAgentDir && !isAbsolute(explicitAgentDir)) {
-    throw new GatewayError("invalid_request", "PI_CODING_AGENT_DIR must be absolute");
-  }
-  const agentDir = resolve(explicitAgentDir ?? tronHomePath(tronHome, "agent"));
+  const agentDir = resolveAgentDir(tronHome, environment);
   const host = resolveBindHost(valueAfter(args, "--host") ?? environment.TRON_GATEWAY_HOST);
   return {
     host,
@@ -373,7 +380,7 @@ export async function loadConfig(
     maxSynchronizationBytes: 2 * 1_048_576,
     lanEndpoint: {
       enabled: parseLanEndpointEnabled(valueAfter(args, "--lan-endpoint") ?? environment.TRON_GATEWAY_LAN_ENDPOINT, host),
-      stateDirectory: tronHomePath(tronHome, "gateway/lan-endpoint"),
+      stateDirectory: tronHomePath(tronHome, "state/lan-endpoint"),
     },
     ...(pushServiceOrigin ? { pushServiceOrigin } : {}),
   };

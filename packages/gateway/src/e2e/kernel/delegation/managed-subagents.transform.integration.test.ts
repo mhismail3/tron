@@ -44,7 +44,7 @@ it("starts managed-subagent sessions from a fresh build without transforming Typ
       expect(resources.tools.find(tool => tool.name === "subagent"), "the managed factory ran").toMatchObject({ source: MANAGED_SUBAGENTS_SOURCE });
       expect(closureRequire.cache[transform], "no Babel transform loaded on the Gateway thread").toBeUndefined();
     }
-    const cache = await stat(join(tronHome, "internal", "pi-subagents-transform-cache", managedSubagents.root.split("/").at(-1)!));
+    const cache = await stat(join(tronHome, "cache", "pi-subagents-transform-cache", managedSubagents.root.split("/").at(-1)!));
     expect(cache.isDirectory() && (cache.mode & 0o777)).toBe(0o700);
   } finally {
     clearInterval(sampler);
@@ -62,7 +62,7 @@ it("refuses a managed load whose transforms could not be prepared instead of tra
   const root = await mkdtemp(join(tmpdir(), "tron-subagent-transform-refusal-"));
   const tronHome = join(root, "tron");
   const previous = process.env[DELEGATED_PROVIDER_ROOT_ENV];
-  const cache = join(tronHome, "internal", "pi-subagents-transform-cache");
+  const cache = join(tronHome, "cache", "pi-subagents-transform-cache");
   try {
     delegatedProviderEnvironment(delegatedArtifactRoot(tronHome));
     const managedSubagents = ManagedSubagents.activateForStartup(tronHome);
@@ -92,7 +92,7 @@ it("prepares only the catalog's own module graph for a discovery read, not the w
     const managedSubagents = ManagedSubagents.activateForStartup(tronHome);
     const closureRequire = createRequire(join(managedSubagents.root, "package.json"));
     const transform = join(dirname(await realpath(closureRequire.resolve("jiti/package.json"))), "dist", "babel.cjs");
-    const buildCache = join(tronHome, "internal", "pi-subagents-transform-cache", managedSubagents.root.split("/").at(-1)!);
+    const buildCache = join(tronHome, "cache", "pi-subagents-transform-cache", managedSubagents.root.split("/").at(-1)!);
     await expect(managedSubagents.loadDiscovery()).resolves.toMatchObject({ discoverAgentsAll: expect.any(Function) });
     const discoveryTransforms = (await readdir(buildCache)).length;
     expect(discoveryTransforms).toBeGreaterThan(0);

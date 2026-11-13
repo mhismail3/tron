@@ -14,7 +14,7 @@ export interface ResiduePlan { path: string; setupOperations: number; receipts: 
 interface Manifest { version: 1; path: string; before: string; after: string }
 
 export async function planConnectionsResidue(tronHome: string): Promise<ResiduePlan> {
-  const path = tronHomePath(tronHome, "gateway/integrations", "connections.json");
+  const path = tronHomePath(tronHome, "state/integrations", "connections.json");
   const plan: ResiduePlan = { path, setupOperations: 0, receipts: 0, collectionMappings: 0 };
   const info = await lstat(path).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return undefined; throw error; });
   if (!info) return plan;

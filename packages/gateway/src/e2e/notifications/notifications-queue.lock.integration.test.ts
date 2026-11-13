@@ -148,7 +148,7 @@ async function pushLock(name: string, extensions: Array<{ name: string; source: 
     service: () => current,
     freeze: () => { frozen = Date.now(); },
     advance: (milliseconds) => { skew += milliseconds; },
-    document: async () => JSON.parse(await readFile(join(gateway.tronHome, "gateway", "notifications.json"), "utf8")) as PushDocument,
+    document: async () => JSON.parse(await readFile(join(gateway.tronHome, "state", "notifications.json"), "utf8")) as PushDocument,
     prompt: (text) => phone.send("session.prompt", { commandId: gateway.commandId(), sessionId, text }),
   };
 }

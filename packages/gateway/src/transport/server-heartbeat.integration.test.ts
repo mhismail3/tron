@@ -109,7 +109,7 @@ async function observeHeartbeats(script: ClientScript, ticks: number, options: H
   const root = await mkdtemp(join(tmpdir(), "tron-server-heartbeat-"));
   const devices = new DeviceStore(root, "machine");
   await devices.initialize();
-  const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+  const token = JSON.parse(await readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken;
   const port = await unusedPort();
   const logger = { log: vi.fn() };
   gatewayLog = logger.log;

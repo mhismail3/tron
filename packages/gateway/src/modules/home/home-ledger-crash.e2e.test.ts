@@ -8,7 +8,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { waitFor } from "../../../test-support/wait-for.js";
 
 const childProgram = fileURLToPath(new URL("../../../test-support/home-ledger-crash-child.ts", import.meta.url));
-const preload = fileURLToPath(new URL("../../../test-support/home-ledger-crash-preload.mjs", import.meta.url));
+const preload = fileURLToPath(new URL("../../../test-support/source-ts-resolver-preload.mjs", import.meta.url));
 const roots: string[] = [];
 const children: Array<ReturnType<typeof spawn>> = [];
 const report: Array<{ barrier: string; observed: string; signal: string }> = [];
@@ -40,9 +40,9 @@ async function runCrashCut() {
   const root = await mkdtemp(join(tmpdir(), "tron-home-ledger-crash-"));
   roots.push(root);
   const tronHome = join(root, "tron");
-  const recordPath = join(tronHome, "gateway", "home", "home.json");
+  const recordPath = join(tronHome, "state", "home", "home.json");
   const marker = join(root, "barrier-reached");
-  await mkdir(join(tronHome, "gateway", "home"), { recursive: true });
+  await mkdir(join(tronHome, "state", "home"), { recursive: true });
   await writeFile(recordPath, `${JSON.stringify(initialRecord(), null, 2)}\n`, { mode: 0o600 });
   const child = spawn(process.execPath, [
     "--experimental-transform-types", "--import", pathToFileURL(preload).href,

@@ -23,11 +23,11 @@ and [payload staging and selection](scripts/README.md).
 User-facing names are Tron or Tron Agent; `com.tron.server` stays the internal launchd label.
 The wrapper writes redacted JSONL to `<Tron home>/logs/mac.jsonl` through `TronLog` (a serial
 utility queue). Wrapper and Gateway share no memory; only owner-only Gateway files
-(`gateway/local-auth.json`, enrollment) cross. The wrapper never scans, syncs or recreates the
+(`state/local-auth.json`, enrollment) cross. The wrapper never scans, syncs or recreates the
 internal workspace (`<tronHome>/workspace`); replacement and `TronUninstaller.removeLocalState`
-preserve it and `gateway/workspace-state`
+preserve it and `state/workspace-state`
 ([contract](../gateway/docs/internal-workspace.md)); wizard state is
-`<tronHome>/internal/mac/wizard-state.json`.
+`<tronHome>/state/mac/wizard-state.json`.
 
 ## Variants
 
@@ -44,7 +44,7 @@ Debug never creates a LaunchAgent.
 
 Stable passes `--host tailscale` (eligible IPv4 before IPv6, then address and interface order;
 an explicit host wins); the CLI is loopback unless `--tailscale`. Debug pairing appends `(Dev)`.
-Both share `~/.tron/internal/machine-group-id`; everything else is per profile, and credential,
+Both share `~/.tron/state/machine-group-id`; everything else is per profile, and credential,
 enrollment, network-cache and marker paths need an explicit `TronGatewayProfile`. Launch-management policy evaluates the runtime variant, Gateway profile and isolated-install
 mode: only installed Release may manage Stable, never an isolated install. It observes an authenticated Debug Gateway (exact supervisor and child identities,
 sole 9848 listener, selected manifest, `system.info`) and may show its pairing, never controls it.
@@ -87,7 +87,7 @@ sole 9848 listener, selected manifest, `system.info`) and may show its pairing, 
 receipt-backed `gateway.stop`, and waits for that process to go with no replacement; launchd job
 absence or missing `ps` metadata does not prove the exact process is offline. Retries retain the
 original PID fence and never adopt a replacement. A reachable
-preparing or waiting drain is unbounded. Only the Gateway's `gateway/stop-completed.json` receipt
+preparing or waiting drain is unbounded. Only the Gateway's `state/stop-completed.json` receipt
 starts the 5 s exit-stall grace; five seconds without it or a reachable drain is reported
 uncertainty and Quit fails, work untouched. A proven stall rechecks identity and boots out only
 that job, after its effective loaded `exit timeout` plus 5 s (missing, infinite or > 120 s
@@ -103,7 +103,7 @@ Mac App uses the same owner through a private `~/.tron-maintenance/replace/quit/
 `WizardState` owns one Install/Retry task (duplicates share it; navigation never cancels it) and
 publishes progress atomically (`wizard.progress-write`); malformed or newer records stop at
 Welcome. Completion counts only once `.onboarded` is written. Pairing reads
-`gateway/enrollment.json` (0600, 10 minutes, one-time code) after an authenticated `system.info`
+`state/enrollment.json` (0600, 10 minutes, one-time code) after an authenticated `system.info`
 admission, re-checked before reading; refreshes carry a latest-request fence. The QR is
 `tron://pair?host=<tailscale>&port=<port>&code=<one-time>&label=<mac>`; tokens never enter it.
 Pairing needs a healthy Gateway, an unexpired enrollment, a Tailscale address and an 8–32

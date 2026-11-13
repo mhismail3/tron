@@ -1,4 +1,7 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -37,9 +40,46 @@ it("the Gateway update configuration is synchronized before configure returns, a
   drainDurableWriteStats();
   const config = await update.configure({ sourceRoot });
   expect(drainDurableWriteStats().count).toBe(2);
-  const path = join(tronHome, "gateway", "update-config.json");
+  const path = join(tronHome, "state", "update-config.json");
   expect(await readFile(path, "utf8")).toBe(`${JSON.stringify(config)}\n`);
   expect((await stat(path)).mode & 0o777).toBe(0o600);
+});
+
+it.each([{ layout: "normal", linkedState: false }, { layout: "linked", linkedState: true }])("records an actual updater spawn failure for $layout state", async ({ linkedState }) => {
+  const { root, tronHome } = await fixture();
+  const payload = join(root, "payload");
+  const helper = join(payload, "helper.mjs");
+  const node = join(root, "node");
+  const script = join(root, "spawn-failure.mjs");
+  await mkdir(payload, { recursive: true });
+  await mkdir(tronHome);
+  const outside = join(root, "outside");
+  await mkdir(outside);
+  if (linkedState) await symlink(outside, join(tronHome, "state"));
+  await writeFile(helper, 'throw new Error("fixture helper must never execute");');
+  await copyFile(process.execPath, node);
+  await chmod(node, 0o700);
+  const module = pathToFileURL(resolve(import.meta.dirname, "../../admin/gateway-update-service.ts")).href;
+  await writeFile(script, `import { unlink } from "node:fs/promises";
+import { GatewayUpdateService } from ${JSON.stringify(module)};
+const service = new GatewayUpdateService({ tronHome: ${JSON.stringify(tronHome)}, runtimeChannel: "dev", environment: {
+  TRON_GATEWAY_SUPERVISED: "1", TRON_GATEWAY_UPDATE_HELPER: ${JSON.stringify(helper)}, TRON_GATEWAY_PAYLOAD_ROOT: ${JSON.stringify(payload)}
+} });
+await unlink(process.execPath);
+await service.update({ channel: "dev", mode: "auto", commandId: "fixture-spawn-failure" });
+process.once("beforeExit", async () => { process.stdout.write(JSON.stringify(await service.status("dev"))); });\n`);
+  const { stdout } = await promisify(execFile)(node, ["--experimental-transform-types", "--no-warnings", "--import",
+    resolve(import.meta.dirname, "../../../test-support/source-ts-resolver-preload.mjs"), script],
+  { timeout: 15_000, env: { PATH: process.env.PATH, HOME: tronHome, TMPDIR: root } });
+  if (linkedState) {
+    expect(JSON.parse(stdout)).toMatchObject({ state: "unknown", channel: "dev", commandId: null, error: null });
+    expect(await readdir(outside)).toEqual([]);
+    await expect(stat(join(tronHome, "state/payloads/dev/update-progress.json"))).rejects.toThrow(/ENOENT/u);
+  } else {
+    expect(JSON.parse(stdout)).toMatchObject({ state: "failure", channel: "dev", commandId: "fixture-spawn-failure", error: expect.stringContaining("ENOENT") });
+    expect((await stat(join(tronHome, "state/payloads/dev/update-progress.json"))).mode & 0o777).toBe(0o600);
+  }
+  await expect(stat(join(tronHome, "gateway"))).rejects.toThrow(/ENOENT/u);
 });
 
 it("all rebuilds share repository identity, preserve invalid-path errors, and reject linked markers", async () => {
@@ -69,8 +109,8 @@ it("Gateway and Mac replacement RPCs return the same invalid repository diagnosi
   const gateway = await startLockGateway("source-repository");
   try {
     const sourceRoot = await realpath(gateway.cwd);
-    await mkdir(join(gateway.tronHome, "gateway"), { recursive: true });
-    await writeFile(join(gateway.tronHome, "gateway/update-config.json"), JSON.stringify({
+    await mkdir(join(gateway.tronHome, "state"), { recursive: true });
+    await writeFile(join(gateway.tronHome, "state", "update-config.json"), JSON.stringify({
       schema: 1, kind: "tron-gateway-update-config", sourceRoot, updatedAt: "2026-10-30T00:00:00.000Z",
     }));
     const phone = await gateway.connect("phone");

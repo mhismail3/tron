@@ -5,7 +5,8 @@ import { homedir } from "node:os";
 import { existsSync, renameSync, writeFileSync, rmSync } from "node:fs";
 import { SettingsManager } from "./kernel/pi/coding-agent.js";
 import { piCliBundle } from "./kernel/pi/packages.js";
-import { loadConfig } from "./config.js";
+import { loadConfig, resolveAgentDir } from "./config.js";
+import { resolveTronHome } from "./tron-home.js";
 import { GatewayError } from "./errors.js";
 import { DeviceStore } from "./security/device-store.js";
 import { TrustService } from "./kernel/resources/trust-service.js";
@@ -79,24 +80,26 @@ import { admitSearchEmbeddingHelper, NaturalLanguageEmbeddingClient } from "./se
 import { ConnectionOwner } from "./integrations/connection-owner.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./kernel/delegation/delegated-provider.js";
 import { runtimeIdentity } from "./transport/runtime-identity.js";
-import { tronHomePath } from "./foundation/tron-home-layout.js";
+import { assertHomeLayout, tronHomePath } from "./foundation/tron-home-layout.js";
 
 const moduleGraphLoadedAt = performance.now();
+const tronHome = resolveTronHome();
+const agentDir = resolveAgentDir(tronHome);
+await assertHomeLayout(tronHome);
+const configuredSessionDir = SettingsManager.create(process.cwd(), agentDir, { projectTrusted: false }).getSessionDir();
+const releaseRuntimeLock = await acquireAgentRuntimeLocks([
+  agentDir,
+  ...(configuredSessionDir ? [configuredSessionDir] : []),
+]);
+try {
 const config = await loadConfig();
 const delegatedRoot = delegatedArtifactRoot(config.tronHome);
 await ensureDelegatedArtifactRoot(delegatedRoot);
 delegatedProviderEnvironment(delegatedRoot);
 process.env[MODEL_QUEUE_PROJECTION_ENV] = modelQueueProjectionPath(config.tronHome);
-const configuredSessionDir = SettingsManager.create(process.cwd(), config.agentDir, { projectTrusted: false }).getSessionDir();
 configureSupervisedNodeCommandEnvironment();
 configureAgentBinEnvironment(config.agentDir);
 configureHomebrewPath();
-const releaseAgentRuntimeLock = await acquireAgentRuntimeLocks([
-  config.agentDir,
-  ...(configuredSessionDir ? [configuredSessionDir] : []),
-]);
-const releaseRuntimeLock = releaseAgentRuntimeLock;
-try {
 process.env.PI_CODING_AGENT_DIR = config.agentDir;
 process.env.PI_CODING_AGENT ??= "true";
 process.env.AI_AGENT ??= "pi";
@@ -164,7 +167,10 @@ const uploads = new UploadStore(config.tronHome, config.maxUploadBytes);
 const browserLiveViews = new BrowserLiveViewRegistry();
 const displayArtifacts = new DisplayArtifactStore(config.tronHome);
 const display = new DisplayOwner(displayArtifacts, browserLiveViews, () => sessions);
-const macTerminalKeys = new MacTerminalService(config.tronHome);
+const macTerminalKeys = new MacTerminalService({ root: tronHomePath(config.tronHome, "state/mac-terminal") });
+await macTerminalKeys.restore().catch(error => {
+  logger.log("warning", "Private SSH startup failed", { event: "mac-terminal.startup-failed", error: String(error) });
+});
 const settingsSchema = createGatewaySettingsSchema();
 const settingsModel = new SettingsModel(new SettingsStoreAdapter({
   schema: settingsSchema,
@@ -457,7 +463,7 @@ const searchHelperCandidate = developmentHelperOverride ?? (bundledSearchHelper 
 let sessionSearch: SessionSearchService | undefined;
 let sessionSearchIndex: SessionSearchIndex | undefined;
 try {
-  sessionSearchIndex = await SessionSearchIndex.open(tronHomePath(config.tronHome, "gateway/session-search.sqlite"));
+  sessionSearchIndex = await SessionSearchIndex.open(tronHomePath(config.tronHome, "cache/session-search.sqlite"));
   sessionSearch = new SessionSearchService(sessions, sessionSearchIndex);
 } catch (error) {
   sessionSearchIndex?.close();
@@ -580,7 +586,7 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
     await shutdownStep("runtime-lock-release", () => releaseRuntimeLock(), recordShutdownStep);
     if (forced) clearTimeout(forced);
     if (exitCode === 0 && stopDrainId) {
-      const path = tronHomePath(config.tronHome, "gateway/stop-completed.json");
+      const path = tronHomePath(config.tronHome, "state/stop-completed.json");
       const temporary = `${path}.${process.pid}.tmp`;
       try {
         writeFileSync(temporary, JSON.stringify({ version: 1, pid: process.pid, drainId: stopDrainId }), { mode: 0o600 });
