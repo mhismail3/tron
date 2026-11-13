@@ -4,7 +4,7 @@
 
 Gateway-owned project creation and the paired-native trust review for Workspace
 projects, using the existing native change-card authority and the canonical Project
-trust store. Agents change an existing project's trust with the settings tool
+trust store. Only Home changes an existing project's trust with the settings tool
 (`permissions.projectTrust`); renames, archives and GitHub repositories use ordinary
 `git`/`gh`. Delegated workers share the ordinary tool surface, but cannot approve
 their own requests.

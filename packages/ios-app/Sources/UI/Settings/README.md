@@ -97,7 +97,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 - **Chat and Home settings.** Manage Session and Manage Home open `SessionSettingsView` (scopes:
   Project, Session, Global); Home writes its saved settings, a chat its own Session scope.
   Both reuse Global's renderer and editors. Manage model cards select the three chat-model keys:
-  catalog header/Switch Model, Effort and an explicit model-qualified Context Window for inspection/Revert. They use the
+  catalog header/Switch Model, Thinking and an explicit model-qualified Context Window for inspection/Revert. They use the
   same writes, approvals and Revert path; changing the card changes no scope semantics. The model
   header is one line with a leading CPU glyph and no provider subtitle; model cards omit Overridden.
   Home Settings embeds the former Models, Tools and More Settings sections directly under logical
