@@ -61,7 +61,7 @@ class ContextAuditTests(unittest.TestCase):
             '\n'.join('- ' + part for part in fragments),
             '\n'.join(f'{i}. {part}' for i, part in enumerate(fragments, 1)),
             '<index name="skills" open="read the file" kind="procedure">\n' + '\n'.join(
-                f'- {name}: {part} | /skills/{name}' for name, part in zip(['alpha', 'beta', 'gamma'], fragments)
+                f'- {name}: {part} | source' for name, part in zip(['keep', 'stores', 'values'], fragments)
             ) + '\n</index>',
         ]
         for text in separated:
@@ -72,7 +72,8 @@ class ContextAuditTests(unittest.TestCase):
             with self.subTest(overrides=overrides):
                 code, result = self.run_audit([core, {**rules, 'text': wrapped, **overrides}])
                 self.assertEqual((code, result['diagnostics']), (0, []))
-        code, result = self.run_audit([core, {**rules, 'text': 'Keep credentials in their owned stores.'}])
+        short = 'Keep credentials in their owned stores.'
+        code, result = self.run_audit([{**core, 'text': short}, {**rules, 'text': short}])
         self.assertEqual((code, result['diagnostics']), (0, []))
 
     def test_source_ownership_and_kind_dependence(self):
