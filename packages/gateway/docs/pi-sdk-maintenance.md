@@ -142,8 +142,10 @@ prompt-keyword handler is not part of that pin.
   (current kept as previous). `.pi-subagents-update-staging` is the exclusive lease; an
   interrupted update leaves it for the operator. It never edits the fork, homes or manifests.
 - **Home task gate:** every pin change also re-reviews the fork's launch/control contract
-  and updates the reviewed version in `src/kernel/delegation/task-worker-extension.ts`.
-  An unreviewed version is refused before launch. Validate actual Home-task launch/resume
+  and updates the reviewed version in `src/kernel/delegation/delegated-provider.ts`.
+  That owner alone compares the canonical pin with the reviewed version and verifies
+  installed-tool identity; the finite-task guard consumes its decision. A missing or
+  unreviewed version is refused before launch. Validate actual Home-task launch/resume
   and retained refusals, not only an ordinary session's child execution.
 - **Advertisement lifetime:** global npm discovery runs through the provider's owned setup-command primitive. Reload cancels and joins superseded lookups; session shutdown cancels and joins the current lookup before returning. Unavailable global discovery still permits local agents. The real Gateway prompt/restart journey holds an npm lookup open and checks its PID is gone before the replacement process launches.
 - **Install and activation:** `npm run install:pi-subagents -- <gateway-home>` extracts the
