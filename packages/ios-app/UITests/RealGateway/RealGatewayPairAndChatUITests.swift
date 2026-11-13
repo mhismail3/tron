@@ -531,7 +531,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         }
 
         let agent = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory))
-        let log = try String(contentsOf: agent.deletingLastPathComponent().appending(path: "tron/logs/gateway.jsonl"), encoding: .utf8)
+        let log = try String(contentsOf: fixture.tronHome.appending(path: "logs/gateway.jsonl"), encoding: .utf8)
         let events = try log.split(separator: "\n").map { try JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: Any] }
         let evictionIndex = try XCTUnwrap(events.firstIndex { $0["event"] as? String == "runtime.evicted" && $0["reason"] as? String == "capacity" })
         let sessionID = try XCTUnwrap(events[evictionIndex]["sessionId"] as? String)
@@ -567,8 +567,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     func testMacReplacementRowAndProgressFollowTheJournal() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
-        guard let agentDirectory = fixture.agentDirectory else { throw XCTSkip("the harness provides the fixture agent directory") }
-        let store = URL(fileURLWithPath: agentDirectory).deletingLastPathComponent().appending(path: ".tron-maintenance/replace")
+        let store = fixture.tronHome.deletingLastPathComponent().appending(path: ".tron-maintenance/replace")
         let operation = UUID().uuidString.lowercased()
         func writeJournal(state: String, current: String?, done: Int, failed: String? = nil) throws {
             let names = ["preflight", "build", "verify-signature", "drain-workers", "stop-gateway", "swap-app", "start", "verify", "finish"]
