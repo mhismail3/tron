@@ -60,7 +60,7 @@ def extra_moves(report, registry):
     return [{"from": "agent/sessions/" + old, "to": "agent/sessions/" + new}]
 
 
-def files(l, root, patterns):
+def files(l, root, patterns, leaf_directories=False):
     if l.observed(str(root)) is None:
         return
     count = 0
@@ -83,7 +83,7 @@ def files(l, root, patterns):
                 if stat.S_ISLNK(info.st_mode):
                     raise l.LayoutError("rewrite_symlink")
                 if stat.S_ISDIR(info.st_mode):
-                    if () in matches and path.name == "status.json":
+                    if () in matches and leaf_directories:
                         yield path
                     if any(matches):
                         pending.append((path, tuple(pattern for pattern in matches if pattern)))
@@ -205,7 +205,7 @@ def carried_records(l, report, registry):
     subagents = physical(l, report["home"], "internal/subagents", "state/subagents")
     patterns = ("async-subagent-runs/*/status.json", "nested-subagent-runs/*/*/status.json")
     result = []
-    for path in files(l, subagents, patterns):
+    for path in files(l, subagents, patterns, leaf_directories=True):
         record = carried_status(l, path)
         if record is not None:
             result.append({"path": canonical_record(path, report["home"], registry), **record})

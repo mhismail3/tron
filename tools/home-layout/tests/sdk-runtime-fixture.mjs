@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { dirname, join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -194,6 +194,8 @@ if (action.startsWith("handoff-")) {
       writeFileSync(gate, `import fs from "node:fs"; import { syncBuiltinESMExports } from "node:module"; const original = fs.promises.mkdir; let held = false; fs.promises.mkdir = async (path, ...args) => { if (!held && String(path) === ${JSON.stringify(join(home, "agent"))}) { held = true; process.stdout.write("fixture-before-agent-lock\\n"); await new Promise(resolve => process.stdin.once("data", resolve)); process.stdin.pause(); } return original(path, ...args); }; syncBuiltinESMExports();`);
       preloads.push("--import", pathToFileURL(gate).href);
     }
+    const gatewayLog = join(home, "logs/gateway.jsonl");
+    const initialGatewayLog = existsSync(gatewayLog) ? readFileSync(gatewayLog, "utf8") : "";
     const child = spawn(process.execPath, ["--experimental-transform-types", "--no-warnings", ...preloads, join(gateway, "src/index.ts")], { cwd: gateway, stdio: ["pipe", "pipe", "pipe"], env: { PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR, TRON_DATA_DIR: home, PI_CODING_AGENT_DIR: join(home, "agent"), PI_SUBAGENTS_TEMP_ROOT: join(home, "state/subagents"), TRON_GATEWAY_HOST: "127.0.0.1", TRON_GATEWAY_PORT: String(port) } });
     let output = "";
     child.stdout.on("data", chunk => { output += chunk; });
@@ -204,14 +206,20 @@ if (action.startsWith("handoff-")) {
         await waitFor(() => {
           if (child.exitCode !== null || child.signalCode !== null) throw new Error(`Gateway exited before its boundary: ${output}`);
           if (action === "race") return output.includes("fixture-before-agent-lock");
-          try { return readFileSync(join(home, "logs/gateway.jsonl"), "utf8").includes('"gateway.startup-budget"'); }
+          try { return readFileSync(gatewayLog, "utf8").slice(initialGatewayLog.length).includes('"gateway.startup-budget"'); }
           catch (error) { if (error.code !== "ENOENT") throw error; return false; }
         }, "actual Gateway reached its controlled runtime boundary");
         console.log(JSON.stringify({ ready: true }));
         await new Promise(resolve => process.stdin.once("data", resolve));
         process.stdin.pause();
-        if (action === "race") child.stdin.end("release");
-        else child.kill("SIGTERM");
+        if (action === "race") {
+          child.stdin.end("release");
+          await waitFor(() => {
+            if (child.exitCode !== null || child.signalCode !== null) throw new Error(`Gateway exited after stopped-proof refusal: ${output}`);
+            return readFileSync(gatewayLog, "utf8").slice(initialGatewayLog.length).includes('"gateway.startup-budget"');
+          }, "actual Gateway starts after refused migration leaves layout ready");
+        }
+        child.kill("SIGTERM");
       }
       const result = await awaitsWithin(closed, "actual Gateway exited");
       console.log(JSON.stringify({ ...result, output }));

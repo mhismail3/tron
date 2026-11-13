@@ -1008,7 +1008,7 @@ class RuntimeMigrationTests(unittest.TestCase):
             self.sdk("create", base, home)
             core = fixture.repo / TOOL
             source = core.read_text()
-            anchor = "            completed = migration(home, root)"
+            anchor = "            completed = migration(home, root, owned)"
             self.assertEqual(source.count(anchor), 1)
             core.write_text(source.replace(anchor, '            print("held", flush=True)\n            os.read(0, 1)\n' + anchor))
             fixture.git("add", "-A")
@@ -1049,22 +1049,19 @@ class RuntimeMigrationTests(unittest.TestCase):
             try:
                 ready = json.loads(racing.stdout.readline())
                 self.assertTrue(ready.get("ready"), ready)
-                rolled_back = fixture.run("migrate", "--home", str(home), "--rollback", env={"HOME": str(home.parent)})
-                self.assertEqual(rolled_back.returncode, 0, rolled_back.stdout + rolled_back.stderr)
                 before_release = {str(path.relative_to(home)): path.read_bytes() for path in home.rglob("*") if path.is_file()}
+                rolled_back = fixture.run("migrate", "--home", str(home), "--rollback", env={"HOME": str(home.parent)})
+                self.assertEqual(rolled_back.returncode, 1, rolled_back.stdout + rolled_back.stderr)
+                self.assertIn("home_process_present", json.loads(rolled_back.stdout)["blockers"])
+                self.assertEqual({str(path.relative_to(home)): path.read_bytes() for path in home.rglob("*") if path.is_file()}, before_release)
             finally:
                 output, error = racing.communicate("release", timeout=30)
                 self.assertEqual(racing.returncode, 0, output + error)
-            refused = json.loads(output)
-            self.assertEqual(refused["code"], 1, refused["output"])
-            self.assertIn("home-layout migrate", refused["output"])
-            after_release = {str(path.relative_to(home)): path.read_bytes() for path in home.rglob("*") if path.is_file()}
-            previous_log = before_release.pop("logs/gateway.jsonl")
-            current_log = after_release.pop("logs/gateway.jsonl")
-            self.assertTrue(current_log.startswith(previous_log))
-            self.assertEqual([json.loads(line)["event"] for line in current_log[len(previous_log):].splitlines()], ["gateway.fatal-startup"])
-            (ROOT / "test-results/home-layout-runtime-process.json").write_text(json.dumps({"heldLease": "refused", "startupRace": refused}, indent=2))
-            self.assertEqual(after_release, before_release)
+            started = json.loads(output)
+            self.assertEqual(started["code"], 0, started["output"])
+            events = [json.loads(line)["event"] for line in (home / "logs/gateway.jsonl").read_text().splitlines()]
+            self.assertIn("gateway.startup-budget", events)
+            (ROOT / "test-results/home-layout-runtime-process.json").write_text(json.dumps({"heldLease": "refused", "startingOwner": json.loads(rolled_back.stdout), "startupAfterRefusal": started}, indent=2))
 
     def release_dead_fixture_locks(self, fixture: Fixture, home: Path) -> None:
         blocked = fixture.run("migrate", "--home", str(home), "--apply", env={"HOME": str(home.parent)})
@@ -1274,6 +1271,11 @@ class RuntimeMigrationTests(unittest.TestCase):
                     empty_artifact.mkdir()
                     file_artifact = metadata.parent / "nested-subagent-runs"
                     file_artifact.write_text("opaque artifact, not a directory")
+                    opaque_metadata = ("gateway/home/tasks/status.json", "agent/missions/status.json", "gateway/uploads/upload/metadata.json")
+                    for relative in opaque_metadata:
+                        directory = home / relative
+                        directory.mkdir(parents=True)
+                        (directory / "artifact.bin").write_bytes(b"opaque status-named artifact\n")
                     old = str(home / "gateway/home/workspace")
                     metadata.write_text(json.dumps({"cwd": old}))
                     inode = (folder / "0.json").stat().st_ino
@@ -1296,6 +1298,9 @@ class RuntimeMigrationTests(unittest.TestCase):
                     self.assertTrue((root / empty_artifact.name).is_dir())
                     self.assertEqual(list((root / empty_artifact.name).iterdir()), [])
                     self.assertEqual((root / file_artifact.name).read_text(), "opaque artifact, not a directory")
+                    for relative in opaque_metadata:
+                        current = relative.replace("gateway/", "state/", 1) if mode == "--apply" else relative
+                        self.assertEqual((home / current / "artifact.bin").read_bytes(), b"opaque status-named artifact\n")
                 metadata.unlink()
                 outside = user / "external.json"
                 outside.write_text("{}")

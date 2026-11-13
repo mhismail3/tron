@@ -799,8 +799,7 @@ def execute_migration(home: str, rollback: bool, root: Path = ROOT) -> tuple[int
                 return 0, report
             guards = [locks.enter_context(maintenance_lock(journal_path.parent)),
                       *(locks.enter_context(runtime_lock(lock)) for lock in lock_paths)]
-            owned = locks.enter_context(stopped_home.claim(sys.modules[__name__], report["home"])) if runtime_layout.enabled(load(root)) else set()
-            current = migration(home, root, owned)
+            current = migration(home, root, set())
             if current["errors"] or current["blockers"] or any(row["refusals"] for row in current["moves"]):
                 report["blockers"].append("plan_changed")
                 return 1, report
@@ -816,6 +815,7 @@ def execute_migration(home: str, rollback: bool, root: Path = ROOT) -> tuple[int
             if journal is None:
                 journal = {"registry": report["source"]["manifest_sha256"], "moves": [], "layouts": {}}
             registry = load(root)
+            owned = locks.enter_context(stopped_home.claim(sys.modules[__name__], report["home"])) if runtime_layout.enabled(registry) else set()
             runtime_layout.adopt_current(sys.modules[__name__], journal, report)
             if not rollback:
                 claims = {row["destination"] for row in journal["moves"]}
