@@ -164,6 +164,7 @@ e2e_diagnostic_test_filters=(
   "TronMobileE2ETests/PushRegistrationRetryTests/testUnflaggedStoredKeyRejectedInAssertionRotatesExactlyOnce"
   "TronMobileE2ETests/PushRegistrationRetryTests/testInvalidKeyAssertionRecoveryConsumesTheOneLaunchBudget"
   "TronMobileE2ETests/PushRegistrationRetryTests/testOnlyAPushRetryCardWithATapYieldsAFence"
+  "TronMobileE2ETests/PushRegistrationRetryTests/testTransientAttestationThenAssertionRejectionStopsWithCardEligibleKey"
 )
 e2e_lan_test_filters=(
   "TronMobileE2ETests/RealGatewayPiBoundaryTests/testRacesLanAndTailscaleLanes"
