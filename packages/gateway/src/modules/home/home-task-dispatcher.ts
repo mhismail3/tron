@@ -32,7 +32,7 @@ import { basename } from "node:path";
 import { TRON_ASK_USER_INTERRUPTED } from "../../extensions/tron-ask-user-contract.js";
 import { abortableRead } from "../../util/abortable-read.js";
 import { HostPressure, type HostPressureDiagnostic } from "./host-pressure.js";
-import { TaskCommandSweep, type TaskCommandDiagnostic } from "./task-command-sweep.js";
+import { TaskCommandSweep, type HeavyProcessKind, type TaskCommandDiagnostic } from "./task-command-sweep.js";
 import { homeTaskNeedsAttention } from "./home-task-lineage.js";
 import { readHomeTaskHistory } from "./home-task-history.js";
 
@@ -169,6 +169,14 @@ function providerFailure(message: AssistantMessage | undefined): HomeTaskFailure
     ? isUsageLimitError(message.errorMessage) ? "provider-usage-limit" : "provider-error"
     : undefined;
 }
+
+export type HomeHostReading = "unavailable" | {
+  sampledAt: string;
+  cpuBusyPercent: number | "unavailable";
+  memoryFreePercent: number | "unavailable";
+  simulatorsBooted: number | "unavailable";
+  heavy: Record<string, readonly HeavyProcessKind[] | "unavailable">;
+};
 
 export class HomeTaskDispatcher {
   private readonly listFlights = new Map<string, ListFlight>();
@@ -681,6 +689,15 @@ export class HomeTaskDispatcher {
   }
 
   hostPressure() { return this.pressure.sample(); }
+
+  hostReading(): HomeHostReading {
+    const reading = this.commands.reading();
+    if (!reading) return "unavailable";
+    const known = <T>(value: T | undefined): T | "unavailable" => value ?? "unavailable";
+    return { sampledAt: reading.sampledAt, cpuBusyPercent: known(reading.cpuBusy === undefined ? undefined : Math.round(reading.cpuBusy * 100)),
+      memoryFreePercent: known(reading.memoryFreePercent), simulatorsBooted: known(reading.simulatorsBooted),
+      heavy: Object.fromEntries([...this.running].sort().map(taskId => [taskId, known(reading.heavy.get(taskId))])) };
+  }
 
   async validateWorkerMarker(sessionId: string, marker: unknown): Promise<void> {
     await this.assertAvailable();
