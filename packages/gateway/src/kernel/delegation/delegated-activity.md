@@ -96,7 +96,9 @@ root's listing (one root stat per pass), an active artifact, one of a live slot'
 attributed runs it has not accepted at the current stat identity (ctime included), or a
 sweep. Startup, a
 watcher error, a nameless event and every 5 minutes start a full sweep; an unwatchable
-root is swept back to back. Directories a pass's 4,096-stat budget does not reach stay
+root is swept back to back. With an installed watcher and outside a sweep, observing
+a post-inventory rewrite of a terminal run exercises the event path; initial inventory
+publication does not. Directories a pass's 4,096-stat budget does not reach stay
 queued, so no root size hides an artifact. Disposal joins the in-flight pass, then
 closes the watchers.
 Native process rows, exact process-to-child projection bindings, canonical append and

@@ -93,7 +93,7 @@ async function countFilesystemRequests(work: () => Promise<unknown>): Promise<nu
   return requests;
 }
 
-async function passesUntil(owner: ExtensionArtifactDiscovery, settled: () => boolean, label: string, limit = 200): Promise<number> {
+async function passesUntil(owner: Pick<ExtensionArtifactDiscovery, "runPass">, settled: () => boolean, label: string, limit = 200): Promise<number> {
   for (let passes = 1; passes <= limit; passes += 1) {
     await owner.runPass();
     if (settled()) return passes;
@@ -174,6 +174,12 @@ describe("ambient extension artifact discovery change detection", () => {
     const live = recordingSlot(new Set([target]));
     const owner = discovery(live.slots, { delegatedArtifactRoot: watched.delegatedRoot });
     await passesUntil(owner, () => live.offers.includes(join(watched.runsRoot, target)), "first offer");
+    live.offers.length = 0;
+    await passesUntil({ runPass: async () => {
+      await writeStatus(watched.runsRoot, target, "complete", completedAt);
+      await utimes(file, pinned, pinned);
+      return owner.runPass();
+    } }, () => live.offers.includes(join(watched.runsRoot, target)), "watcher observes a post-inventory write");
     live.offers.length = 0;
     await rewriteInPlace(file, target);
     await passesUntil(owner, () => live.offers.includes(join(watched.runsRoot, target)), "watched in-place rewrite");
