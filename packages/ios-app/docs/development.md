@@ -232,7 +232,7 @@ must match the owner's unchanged worktree fingerprint. The pair requires one sim
 a time. `scripts/ios.module.json` declares this class's owner command: normal verification selects
 it after the ordinary phone/Pad matrix joins, not in the default Python lane or a combined UI shard.
 The selected replacement owns both fresh runs and their artifact assertions; ordinary-shard exclusion
-requires that replacement to be selected. Failed or deferred current builds prevent its invocation.
+requires that replacement to be selected. Failed current builds prevent its invocation.
 
 The artifact oracle checks real XCTest completion, exact run/simulator/app PID and kernel-birth
 provenance, external main-thread stacks, live repeating CA animation and canonical surface counts.

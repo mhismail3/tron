@@ -56,7 +56,7 @@ def lanes(root: Path, base: str) -> list[dict]:
     """Compose existing owners, not a second test catalog."""
     apple = apple_lane(root)
     lane_only = {key: apple[key] for key in ('TRON_IOS_TEST_LANE', 'TRON_IOS_TEST_LANE_REPOSITORY')}
-    result = [{'name': 'full verify', 'chain': 'node', 'command': ['scripts/tron', 'verify', '--all', '--base', base, '--gateway-host', 'mini', '--ios-jobs', str(UI_JOURNEY_LANES)]}]
+    result = [{'name': 'full verify', 'chain': 'node', 'command': ['scripts/tron', 'verify', '--all', '--base', base, '--ios-jobs', str(UI_JOURNEY_LANES), '--gateway-host', 'mini']}]
     for name, config in [('Gateway default', []), ('Gateway nested', ['--config', 'vitest.nested.config.ts'])]:
         result.append({'name': name, 'chain': 'node', 'command': ['python3', 'tools/verify/mini.py', *config],
                        'vitest': True, 'requires': 'packages/gateway/package-lock.json'})

@@ -99,8 +99,8 @@ Host-wide, at most 3 simulator-heavy jobs run at once across every worktree and 
 --host-slot-wait-seconds N, acquisition exits 73 after N seconds if no slot is free;
 the bound never times out an admitted build or test. By default a fourth waits, printing
 who holds the slots and how long it has waited, and starts the moment one frees; a
-killed or crashed holder frees its slot. Do not hand-serialize Xcode or simulator work
-below that cap. Run one simulator job per worktree at a time; every lane has its own
+killed or crashed holder frees its slot. The slots are a ceiling, not a number to fill;
+Home plans heavy work across workers. Run one simulator job per worktree at a time; every lane has its own
 simulator and DerivedData. There is no CPU/memory admission.
 Every command that provisions the simulator first releases orphaned owned lanes
 and prunes results and products; lanes a live process holds are never touched.

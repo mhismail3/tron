@@ -93,7 +93,7 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 - Home plans heavy work across workers; follow your brief's "Heavy work" paragraph and the global Shared machines rules. `verify` runs one simulator lane unless the brief says `--ios-jobs 2|3`. Host slots (`scripts/ios-test-lock.py --host-slot`; `scripts/tron-ios-test slots`) are a ceiling of 3 simulator jobs on this Mac, not a number to fill; a job that needs a slot waits for it.
 - No broad kills (`pkill node`, `simctl shutdown all`). Stop only what you started; ask
   when unsure; never touch another session's process, lane or lease, nor Stable or its
-  children. Reproduce load in-process; if slow, check swap and report foreign hogs.
+  children. Reproduce load in-process; if the Mac is slow, take a host reading (`host-resources` skill) and report what is using it.
 
 ## Validation and landing
 [Principles](docs/PRINCIPLES.md) own delivery policy: a commit is gated by the local tests of the modules

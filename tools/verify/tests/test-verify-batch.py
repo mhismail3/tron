@@ -1082,7 +1082,7 @@ if sys.argv[1] == 'clean':
         report = self.reports()[-1]
         self.assertEqual(report['verdict'], 'green')
         full = next(lane for lane in report['lanes'] if lane['name'] == 'full verify')
-        self.assertEqual(full['command'][-2:], ['--ios-jobs', '3'])
+        self.assertEqual(full['command'][-4:], ['--ios-jobs', '3', '--gateway-host', 'mini'])
         self.assertEqual([lane['name'] for lane in report['results']], [lane['name'] for lane in report['lanes']])
         lanes = {lane['name']: lane for lane in report['results']}
         self.assertLess(lanes['real Gateway boundary']['endedAt'], lanes['Gateway default']['endedAt'])
