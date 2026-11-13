@@ -17,7 +17,7 @@ scripts/tron verify --batch --base <main-anchor> # initialize coverage in a clea
 scripts/tron verify --batch [--repeat] [--plan] # next pinned batch, or rerun every lane at the green HEAD
 scripts/tron verify --batch --review <culprit> --decision ACCEPT|BLOCK --reviewer <id> --binding <digest>
 scripts/tron verify --update-locks <id>         # rewrite <id>'s goldens (lock or approved migration slices)
-scripts/tron verify ... --ios-jobs 1             # serialize native shards and real-UI journeys (1|2|3; default 3)
+scripts/tron verify ... --ios-jobs 3             # more simulator lanes (1|2|3; default 1), when the brief says the Mac is free
 scripts/tron verify ... --skip ios,mac,relay    # accept, explicitly, selections this run will not run
 scripts/tron verify ... --gateway-host local    # override the test-host pool: run the Gateway Vitest lanes here
 ```
@@ -143,8 +143,10 @@ cases; a file with no executed passes cannot hide beside a passing neighbour.
 
 `scripts/tron context audit` renders source-owned core, Home, worker-contract and direct
 child-handoff layers plus this repository's rules and Home profile index. Diagnostics name
-layer/source owners without printing their text. Sentence comparison is normalized and
-near-duplicate (Jaccard ≥0.8); budgets and byte/4 token estimates are review signals, not
+layer/source owners without printing their text. Sentence comparison joins prose hard wraps,
+including list-item continuations, but keeps paragraphs, separate list/index entries and
+Markdown heading, tag, table and fence lines apart. Normalized sentences of at least 60
+characters are near-duplicates at Jaccard ≥0.8; budgets and byte/4 token estimates are review signals, not
 provider counts. Source checks count each check-in/approval literal, including repeats within one owner,
 and locate the current kind-filtered Home declaration expression; they do not prove runtime wiring. `--input <json>` accepts `{layers, sources}` for isolated regression
 proofs; errors exit 2, diagnostics exit 1.
@@ -263,8 +265,8 @@ guessed call graph. Deleted journey files retain that selection through their ba
 when no surviving journey file changed. `--module` and full
 selections stay complete. An empty ownership set or a discovered test absent from the harness's
 `ui_owned_journeys` fails selection (exit 2). They run
-through the harness, which takes its own host slots, on up to 3 lanes
-(`TRON_IOS_E2E_UI_LANES`), as `verify --batch`'s UI journey lane does. A journey passes only with a
+through the harness, which takes its own host slots, on one lane by default or up to `--ios-jobs`
+(`TRON_IOS_E2E_UI_LANES`); `verify --batch` explicitly requests 3 lanes for both shards and journeys. A journey passes only with a
 `report.json` whose `report.sha256` matches, `journey_status` is 0, `evidence_complete` is true and
 `source` is this commit, clean; the step's `journeyReports` records each report's path, sha256,
 status and revision. `--skip ios` skips them.
@@ -328,9 +330,9 @@ executed test on this commit from a clean tree, with this iteration count, a wor
 `scenario.` measurement that is not `scenario.render.`), and, for product scenarios, a render counter
 (`scenario.render.`; the self-test controls have no render check). Workload key presence is not an independent
 completion oracle: the real harness's passing XCTest enforces workload completion and render checks.
-Measured values, numeric budgets and deltas are never judged. The profiler's `--host-slot-wait-seconds` bounds
-only host-slot acquisition; normal changed verification uses 30 seconds, without changing XCTest deadlines. A missing, stale, wrong, duplicate or failed
-receipt fails the run; a busy lane (exit 73) is incomplete. A failed or deferred current iOS build prevents the
+Measured values, numeric budgets and deltas are never judged. Scenario profiling waits for a host slot,
+printing the holders, without changing XCTest deadlines. A missing, stale, wrong, duplicate or failed
+receipt fails the run; a busy lane (exit 73) is incomplete. A failed current iOS build prevents the
 invocation. An undeclared ProfilingTests class is `ios-lanes` and stays incomplete.
 
 ## Manifest `verify` declarations
@@ -397,7 +399,7 @@ drives real Git/CLI fixtures: affected selection, known-bad small changes, zero-
 refusal, reproducible digests, dirty planning, unnamed ignored residue failing the run, descendant cleanup, batch ranges/overlap,
 bisection, causal revert publication and refused issue authority. The iOS stand-in compiles real Swift indexes
 and stamps, exercises real `layers ios`, and emits XCTest-style summaries: locks-only
-selection, reuse, extensions, empty/failing runs and busy deferral. Every Gateway case
+selection, reuse, extensions, empty/failing runs, default serial lanes and failed acquisition. Every Gateway case
 failure is a raw red; deleted non-Markdown docs pass static checks while zero-test code still fails.
 Hardware-free
 `scripts/test-ios-test-infrastructure.py HostSlotFixture RunnerFixture.test_run_forwards_bounded_host_slot_wait_before_simulator_work RunnerFixture.test_run_waits_for_a_host_slot_while_all_are_held`

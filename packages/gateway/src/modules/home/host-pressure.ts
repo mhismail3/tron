@@ -32,18 +32,18 @@ export function readCpuTicks(): CpuTicks[] {
   });
 }
 
-export function busyShare(previous: readonly CpuTicks[], current: readonly CpuTicks[]): number {
-  if (current.length === 0 || previous.length !== current.length) return 0;
+export function busyShare(previous: readonly CpuTicks[], current: readonly CpuTicks[]): number | undefined {
+  if (current.length === 0 || previous.length !== current.length) return undefined;
   let busy = 0;
   let total = 0;
   for (let index = 0; index < current.length; index += 1) {
     const busyDelta = current[index]!.busy - previous[index]!.busy;
     const totalDelta = current[index]!.total - previous[index]!.total;
-    if (!(busyDelta >= 0 && totalDelta >= 0)) return 0;
+    if (!(busyDelta >= 0 && totalDelta >= 0)) return undefined;
     busy += busyDelta;
     total += totalDelta;
   }
-  return total > 0 ? Math.min(1, busy / total) : 0;
+  return total > 0 ? Math.min(1, busy / total) : undefined;
 }
 
 export class HostPressure {
@@ -63,7 +63,7 @@ export class HostPressure {
     if (now - this.mark.at >= SAMPLE_REUSE_MS) {
       const current = performance.eventLoopUtilization();
       utilization = performance.eventLoopUtilization(current, this.mark.utilization).utilization;
-      cpuBusy = busyShare(this.mark.cpus, cpus);
+      cpuBusy = busyShare(this.mark.cpus, cpus) ?? 0;
       this.mark = { at: now, utilization: current, cpus };
     }
     const load1PerCpu = os.loadavg()[0]! / Math.max(1, cpus.length);

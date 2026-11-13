@@ -1,23 +1,29 @@
 # Host load and independent workers
 
-Home starts every authorized task without a running cap or queue.
-`home.status.workers.running` reports live workers. Host pressure is an
-observation, never permission to start work or a reason to delay landing.
+Home owns how heavy work is spread across this Mac and the Mac mini: what runs, when, where and in what
+shape. Heavy work is a simulator test run, a large build, a full test suite or a load test. The Gateway
+itself starts every authorized task without a cap or queue. Home plans each task's heavy phases in its
+brief and adjusts by steer, using the `resource-stewardship` skill. Host pressure is one of its inputs.
 
-Workers run their relevant tests directly. There is no shared CPU/memory
-admission, gate, merge lock, hosted check workflow or automatic main revert; the
-post-land batch ([principles P2](../../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-batch-signal-not-a-commit-gate)) never blocks a worker.
-One worktree runs at most one iOS simulator job at a time, and at most three
-simulator jobs run at once across all worktrees: a fourth waits for a free slot
-(`scripts/ios-test-lock.py --host-slot`) and never while one is free. A job may spread
-over several of its worktree's own lanes, each taking a slot (verify's iOS shards,
-the real-UI journeys); verify's extra lanes take only a slot that is already free. Exact-device/simulator leases
-still prevent simultaneous use of the same resource, and each command cleans
-up its own processes and simulator. Do not kill another worker or Stable.
+There is no shared CPU, memory or load-average admission, no gate, no merge lock and no load guard. Do
+not add one. Earlier ones were removed for cause (#1253), and worker-written load guards interrupted
+passing runs (the 2026-11-13 resource audit). Decisions belong to Home. Code keeps only exclusion and
+cleanup:
 
-Use ordinary Git/gh to inspect current branches, worktrees and issues. A parked
-claim is not proof of live work; Home coordinates overlapping writes using actual
-task state, not a duplicate status projection or admission queue.
+- Each simulator lane and physical device has an exclusive lease.
+- Host slots (`scripts/ios-test-lock.py --host-slot`) are a ceiling of three simulator jobs on this Mac.
+  The ceiling is not a number to fill. A job that needs a slot waits for it and names the holder.
+- `verify` runs one simulator lane unless its caller passes `--ios-jobs 2` or `3`. Home says so in the
+  brief when the Mac is otherwise free.
+- Local full-Gateway runs take `/tmp/tron-full-gateway.lock` in arrival order. The mini runs one job at
+  a time under its own lock.
+- Each command cleans up its own processes and simulator. Settling a task reaps what its commands left
+  (below). Do not kill another worker or Stable.
+
+Workers follow the "Heavy work" paragraph of their brief, announce heavy phases in check-ins that begin
+`Heavy start:` and `Heavy done:`, and read the host with the `host-resources` skill before they start.
+Use ordinary Git/gh to inspect current branches, worktrees and issues. A parked claim is not proof of
+live work.
 See the [Git/gh skill](../../../.agents/skills/tron-work/SKILL.md).
 
 ## Agent command priority
@@ -39,10 +45,12 @@ a recorded process group and an inherited anchor descriptor (fd 19). Settling th
 (report, Stop, deadline or failure) unbinds the session and reaps everything the scope
 owns, including background children re-parented to launchd and `setsid` children that
 kept the anchor, then removes its `TMPDIR`. `TaskCommandSweep` runs every 60 s (one `ps`,
-one `lsof` per scope): it reaps scopes whose task settled without a completed reap (a
-refused reap or a restart) and logs `host.load.non-task` when busy CPU ≥ 90 % comes mostly
-from processes outside task scopes. It refuses rather than guess: a task this store does not
-record for that worker, an unreadable process table or a survivor leaves the scope on disk.
+one `lsof` per scope, one `ps` of running tasks' arguments, one `sysctl`): it reaps scopes
+whose task settled without a completed reap (a refused reap or a restart), logs
+`host.load.non-task` when busy CPU ≥ 90 % comes mostly from processes outside task scopes,
+and records [Home's host reading](#homes-host-reading). It refuses rather than guess: a
+task this store does not record for that worker, an unreadable process table or a survivor
+leaves the scope on disk.
 Detaching on purpose means `setsid` plus closing fd 19, as `scripts/tron dev start` does
 for the shared Debug Gateway. Files written outside `$TMPDIR` are not reaped (macOS
 `mktemp` without a template ignores `TMPDIR`).
@@ -82,10 +90,38 @@ from the busy share of all CPUs and the event-loop utilisation:
   be rebuilt from the Gateway log (#1103; before that, the writer kept only the log
   level). Host memory and swap are not in the level: they are in the stall and
   connection records (`swapUsedBytes`, `memoryPressure`).
-- The level informs; it does not hold workers back. Home starts each authorized
-  worker at once at any level.
+- The level informs Home's plan. The Gateway does not hold workers back on it.
 
 The Home task integration test injects monotonic sample time, kernel ticks and
 idle event-loop utilisation before constructing the real sampler. It advances
 sampling windows explicitly, then observes actual task completion and persisted
 `host.pressure` records; shared-host load and timer delays are not its oracle.
+
+## Home's host reading
+
+Home's `task` tool adds `host` to `list` (and `status` without a task) and to `status {taskId}`,
+so Home sees the Mac on every wake, including wakes where its shell is refused:
+
+```json
+{"sampledAt": "2026-11-13T08:28:31.301Z", "cpuBusyPercent": 20, "memoryFreePercent": 77,
+ "simulatorsBooted": 3, "heavy": {"settings-slice": ["xcodebuild"], "docs-pass": []}}
+```
+
+- It is the last `TaskCommandSweep` record, at most about 60 s old (`sampledAt`); the tool
+  call itself probes nothing. Before the first sweep after a start it is `"unavailable"`.
+- `cpuBusyPercent`: busy share of all CPUs over the window since the previous sweep (the
+  tick delta `HostPressure` uses).
+- `memoryFreePercent`: `kern.memorystatus_level`, the number `memory_pressure` prints
+  (`foundation/host-memory.ts`); not `os.freemem`, which counts only free pages.
+- `simulatorsBooted`: `launchd_sim` processes in the sweep's process table, one per booted
+  simulator, whoever booted it.
+- `heavy`: each task Home has running now, mapped to the heavy kinds its command scope holds
+  (`xcodebuild`, `xctest`, `simulator` for `simctl`/Simulator.app, `vitest`, `verify` for
+  `tools/verify/verify.py`), named from each owned process's `ps` arguments, skipping
+  launchers (`node`, `python`, shells, `env`, `xcrun`) and their flags. `[]` means none. A
+  simulator's own processes run under launchd, outside every scope: they count in
+  `simulatorsBooted`, never in a task's `heavy`.
+- A value the sweep could not read is `"unavailable"`, never 0: an unmeasurable CPU window,
+  no memory probe, an unreadable process table, a scope whose walk or argument read failed,
+  or a task that started after the last sweep.
+- It carries no level or threshold and decides nothing; Home reads it to plan.

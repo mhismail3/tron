@@ -96,6 +96,18 @@ export async function readProcessTable(): Promise<ProcessTable | undefined> {
   return rows.has(process.pid) ? rows : undefined;
 }
 
+export async function readProcessArgs(pids: readonly number[]): Promise<Map<number, string> | undefined> {
+  if (pids.length === 0) return new Map();
+  const result = await run("ps", ["-o", "pid=,args=", "-p", pids.join(",")]);
+  if (result.code !== 0 && !(result.code === 1 && result.stdout.trim() === "")) return undefined;
+  const args = new Map<number, string>();
+  for (const line of result.stdout.split("\n")) {
+    const match = line.match(/^\s*(\d+)\s+(.*)$/u);
+    if (match) args.set(Number(match[1]), match[2]!);
+  }
+  return args;
+}
+
 async function anchorHolders(scope: TaskCommandScope): Promise<number[] | undefined> {
   if (!existsSync(scope.anchor)) return [];
   const result = await run("lsof", ["-t", "--", scope.anchor]);

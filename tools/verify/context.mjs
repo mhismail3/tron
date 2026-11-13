@@ -6,7 +6,20 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const sentences = text => text.split(/(?<=[.!?])\s+|\n+/).map(value => value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()).filter(value => value.length >= 60);
+const sentences = text => {
+  const blocks = [];
+  let prose = [];
+  const flush = () => { blocks.push(prose.join(" ")); prose = []; };
+  for (const line of text.split(/\r?\n/)) {
+    const entry = /^\s*(?:[-*+]\s+|\d+[.)]\s+)/.test(line);
+    const boundary = /^\s*(?:$|#{1,6}\s|[<>|]|`{3,}|~{3,}|(?:[-*_]\s*){3,}$)/.test(line);
+    if (entry || boundary) flush();
+    prose.push(line.trim());
+    if (boundary) flush();
+  }
+  flush();
+  return blocks.flatMap(value => value.split(/(?<=[.!?])\s+/)).map(value => value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()).filter(value => value.length >= 60);
+};
 const words = text => new Set(text.split(" "));
 
 export function audit(layers, sources = []) {

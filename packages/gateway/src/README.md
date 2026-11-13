@@ -17,6 +17,9 @@ and removal (including the process-wide fsync counters), secure owner-only reads
 and locked preference updates. Stores retain document admission and per-record
 bounds; these primitives do not own domain state. The three implementation
 modules stay separate, so read-only consumers do not gain a lockfile dependency.
+`foundation/host-memory.ts` is the one host memory probe (`os` free/total and, on macOS,
+swap, pressure level and `kern.memorystatus_level` through one `sysctl` bounded at 1 s),
+read by the transport stall sampler and Home's host reading.
 
 ## Contract
 

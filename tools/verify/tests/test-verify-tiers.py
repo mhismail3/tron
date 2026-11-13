@@ -33,41 +33,42 @@ class DocumentationAssetTests(fixture.VerifyCase):
         self.assertIn('zero tests ran', result.stdout)
 
 
-class IosDeferralTests(fixture.VerifyCase):
-    def test_busy_build_defers_named_tests_without_passing_them(self):
+class IosAcquisitionTests(fixture.VerifyCase):
+    def test_unexpected_build_refusal_fails_without_deferring_named_tests(self):
         r = self.repo
         fixture.IosLaneTests.ios_fixture(self)
-        r.write('scripts/tron-ios-test', '#!/bin/sh\necho "host slot wait expired; deferred"\nexit 73\n')
+        r.write('scripts/tron-ios-test', '#!/bin/sh\necho "iOS lane acquisition refused"\nexit 73\n')
         (r.path / 'scripts/tron-ios-test').chmod(0o755)
         r.write('packages/ios-app/Sources/UI/Chat/ChatView.swift', 'struct Changed {}\n')
         r.commit('busy admission')
         result = r.verify()
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         report = r.report()
-        self.assertEqual(report['verdict'], 'deferred')
+        self.assertEqual(report['verdict'], 'failed')
         self.assertFalse(report['checkpointEligible'])
         self.assertEqual(report['passingTests'], 0)
         tests = next(s for s in report['steps'] if s['name'] == 'tests: ios')
-        self.assertEqual(tests['status'], 'deferred')
-        self.assertEqual(tests['deferredTests'], ['packages/ios-app/UITests/Locks/FixtureLockTests.swift'])
-        self.assertIn('--host-slot-wait-seconds', next(s for s in report['steps'] if s['name'] == 'ios build')['command'])
+        self.assertEqual(tests['status'], 'skipped')
+        self.assertNotIn('deferred', {s['status'] for s in report['steps']})
+        self.assertNotIn('--host-slot-wait-seconds', next(s for s in report['steps'] if s['name'] == 'ios build')['command'])
 
 
-    def test_busy_run_defers_after_successful_build_without_hiding_real_errors(self):
+    def test_unexpected_run_refusal_fails_after_successful_build(self):
         r = self.repo
         fixture.IosLaneTests.ios_fixture(self)
         r.write('packages/ios-app/Sources/UI/Chat/ChatView.swift', 'struct Changed {}\n')
         r.commit('selected iOS source')
         r.env['FIXTURE_IOS_BUSY'] = 'run'
         result = r.verify()
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         report = r.report()
-        self.assertEqual(report['verdict'], 'deferred')
+        self.assertEqual(report['verdict'], 'failed')
         self.assertEqual(report['passingTests'], 0)
         self.assertEqual(next(s for s in report['steps'] if s['name'] == 'ios build')['status'], 'ok')
         step = next(s for s in report['steps'] if s['name'] == 'tests: ios')
-        self.assertEqual(step['status'], 'deferred')
-        self.assertEqual(len(step['deferredTests']), 1)
+        self.assertEqual(step['status'], 'failed')
+        self.assertNotIn('deferred', {s['status'] for s in report['steps']})
+        self.assertNotIn('--host-slot-wait-seconds', step['command'])
         del r.env['FIXTURE_IOS_BUSY']
         r.env['FIXTURE_IOS_FAIL'] = 'TronMobileUITests/FixtureLockTests/testChat()'
         failed = r.verify()
