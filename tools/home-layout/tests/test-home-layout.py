@@ -1001,7 +1001,9 @@ class RuntimeMigrationTests(unittest.TestCase):
                 diagnostics = after.pop("logs/gateway.jsonl")
                 records = [json.loads(line) for line in diagnostics.splitlines()]
                 self.assertEqual([row["event"] for row in records], ["gateway.fatal-startup"])
-                (ROOT / "test-results/home-layout-runtime-process.json").write_text(json.dumps({"heldLease": refused, "diagnostics": records}, indent=2))
+                evidence = ROOT / "test-results/home-layout-runtime-process.json"
+                evidence.parent.mkdir(parents=True, exist_ok=True)
+                evidence.write_text(json.dumps({"heldLease": refused, "diagnostics": records}, indent=2))
                 self.assertEqual(after, before)
             finally:
                 output, error = holder.communicate("release", timeout=30)
