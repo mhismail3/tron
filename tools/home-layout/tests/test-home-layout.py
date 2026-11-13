@@ -1144,8 +1144,9 @@ class RuntimeMigrationTests(unittest.TestCase):
             self.assertEqual(snapshot(home.parent, contents_first=False), before)
 
     def test_metadata_walk_ignores_large_artifact_trees_but_refuses_over_budget_metadata(self) -> None:
-        for artifacts in (True, False):
-            with self.subTest(artifacts=artifacts), tempfile.TemporaryDirectory(prefix="home-layout-metadata-") as temporary:
+        for kind in ("artifacts", "metadata", "unmatched"):
+            artifacts = kind == "artifacts"
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory(prefix="home-layout-metadata-") as temporary:
                 base = Path(temporary).resolve()
                 fixture = Fixture(base)
                 fixture.write(REGISTRY, (ROOT / REGISTRY).read_text())
@@ -1154,8 +1155,9 @@ class RuntimeMigrationTests(unittest.TestCase):
                 (home / "gateway").mkdir(parents=True)
                 folder = home / ("internal/subagents/async-subagent-runs/run/artifacts" if artifacts else "gateway/home/tasks")
                 folder.mkdir(parents=True)
+                suffix = ".txt" if kind == "unmatched" else ".json"
                 for index in range(100001):
-                    (folder / f"{index}.json").touch()
+                    (folder / f"{index}{suffix}").touch()
                 if artifacts:
                     for relative in ("agent/sessions/cwd/artifacts/status.json", "gateway/uploads/upload/artifacts/metadata.json",
                                      "gateway/home/tasks/artifacts/status.json", "agent/missions/artifacts/status.json"):
