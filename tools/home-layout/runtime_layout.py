@@ -5,7 +5,6 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import json
-import math
 import os
 import re
 import stat
@@ -84,6 +83,8 @@ def files(l, root, patterns):
                 if stat.S_ISLNK(info.st_mode):
                     raise l.LayoutError("rewrite_symlink")
                 if stat.S_ISDIR(info.st_mode):
+                    if () in matches and path.name == "status.json":
+                        yield path
                     if any(matches):
                         pending.append((path, tuple(pattern for pattern in matches if pattern)))
                 elif stat.S_ISREG(info.st_mode):
@@ -168,46 +169,47 @@ def snapshots(l, record, paths):
     return before, after
 
 
-def closed_run(l, path, status):
-    handoff = path.parent / "handoff.json"
-    descriptor = status.get("parallelHandoff")
-    if descriptor is not None and (not isinstance(descriptor, dict) or descriptor.get("path") != str(handoff)):
-        raise l.LayoutError("subagent_handoff_unsettled")
-    if descriptor is not None or l.observed(str(handoff)) is not None:
-        if l.observed(str(handoff)) is None:
-            raise l.LayoutError("subagent_handoff_unsettled")
-        value = json.loads(read_record(l, handoff)[0])
-        if (not isinstance(value, dict) or value.get("version") != 1 or not isinstance(value.get("groups"), list) or not value["groups"]
-                or any(not isinstance(group, dict) or not isinstance(group.get("cleanup"), dict) or group["cleanup"].get("state") != "complete" for group in value["groups"])):
-            raise l.LayoutError("subagent_handoff_unsettled")
-    proof_path = path.parent / "process-terminal.json"
-    if l.observed(str(proof_path)) is None:
-        raise l.LayoutError("subagent_process_unsettled")
-    proof = json.loads(read_record(l, proof_path)[0])
-    if (not isinstance(proof, dict) or proof.get("version") != 1 or proof.get("state") != "observed"
-            or not isinstance(status.get("runId"), str) or proof.get("runId") != status["runId"]
-            or not isinstance(proof.get("runnerProcessInstanceId"), str) or not proof["runnerProcessInstanceId"]
-            or not isinstance(proof.get("observedAt"), (int, float)) or not math.isfinite(proof["observedAt"])
-            or not isinstance(proof.get("instances"), list) or not proof["instances"]):
-        raise l.LayoutError("subagent_process_unsettled")
-    runner = False
-    for instance in proof["instances"]:
-        if (not isinstance(instance, dict) or instance.get("kind") not in {"runner", "pi-writer"}
-                or not isinstance(instance.get("closeObservedAt"), (int, float)) or not math.isfinite(instance["closeObservedAt"])):
-            raise l.LayoutError("subagent_process_unsettled")
-        if instance["kind"] == "runner" and instance.get("processInstanceId") == proof["runnerProcessInstanceId"]:
-            runner = True
-        if instance["kind"] == "pi-writer" and instance.get("processTree", {}).get("state") != "observed":
-            raise l.LayoutError("subagent_process_unsettled")
-    if not runner:
-        raise l.LayoutError("subagent_process_unsettled")
-    candidate_path = path.parent / "process-terminal-candidate.json"
-    if l.observed(str(candidate_path)) is not None:
-        candidate = json.loads(read_record(l, candidate_path)[0])
-        if (not isinstance(candidate, dict) or candidate.get("runId") != proof["runId"]
-                or candidate.get("runnerProcessInstanceId") != proof["runnerProcessInstanceId"]
-                or candidate.get("revivalLeaseToken") and candidate.get("revivalLeaseReleaseAcknowledged") is not True):
-            raise l.LayoutError("subagent_process_unsettled")
+def carried_status(l, path):
+    info = os.lstat(path)
+    if stat.S_ISDIR(info.st_mode):
+        return {"type": "directory", "reason": "opaque-status-directory", "sha256": None}
+    if info.st_size > 16777216:
+        return {"type": "file", "reason": "opaque-oversized-status", "sha256": file_sha(path)}
+    data, _ = read_record(l, path)
+    try:
+        value = json.loads(data)
+        if not isinstance(value, dict) or not isinstance(value.get("state"), str):
+            raise ValueError("status_shape")
+        pending = [value]
+        interrupted = False
+        while pending:
+            item = pending.pop()
+            if not isinstance(item, dict):
+                raise ValueError("status_shape")
+            if item.get("state", item.get("status")) not in TERMINAL:
+                interrupted = True
+            for key in ("steps", "children"):
+                children = item.get(key, [])
+                if not isinstance(children, list):
+                    raise ValueError("status_shape")
+                pending.extend(children)
+        if not interrupted:
+            return None
+        reason = "interrupted-at-migration"
+    except (ValueError, UnicodeError, RecursionError):
+        reason = "malformed-status"
+    return {"type": "file", "reason": reason, "sha256": hashlib.sha256(data).hexdigest()}
+
+
+def carried_records(l, report, registry):
+    subagents = physical(l, report["home"], "internal/subagents", "state/subagents")
+    patterns = ("async-subagent-runs/*/status.json", "nested-subagent-runs/*/*/status.json")
+    result = []
+    for path in files(l, subagents, patterns):
+        record = carried_status(l, path)
+        if record is not None:
+            result.append({"path": canonical_record(path, report["home"], registry), **record})
+    return sorted(result, key=lambda record: record["path"])
 
 
 def rewrites(l, report, registry, reverse=False, layout=None):
@@ -242,6 +244,8 @@ def rewrites(l, report, registry, reverse=False, layout=None):
     for path, kind in selections:
         if l.observed(str(path)) is None:
             continue
+        if kind == "subagent" and path.name == "status.json" and carried_status(l, path) is not None:
+            continue
         data, info = read_record(l, path, kind == "session")
         text = data.decode("utf-8")
         key = canonical_record(path, home, registry)
@@ -263,10 +267,6 @@ def rewrites(l, report, registry, reverse=False, layout=None):
                 raise l.LayoutError("invalid_rewrite_document")
             if kind == "session" and parsed.get("type") != "session":
                 raise l.LayoutError("invalid_session_header")
-            if kind == "subagent" and path.name == "status.json":
-                if parsed.get("state") not in TERMINAL or any(step.get("status") in {"pending", "running", "paused"} for step in parsed.get("steps", [])):
-                    raise l.LayoutError("subagent_running")
-                closed_run(l, path, parsed)
         if reverse and layout["direction"] == "rollback-partial" and forward is None:
             output = data
         elif reverse and forward and hashlib.sha256(data).hexdigest() == forward["before"]:
@@ -294,6 +294,7 @@ def rewrites(l, report, registry, reverse=False, layout=None):
 def plan(l, report, registry):
     if not enabled(registry):
         return
+    report["carried_lifecycle_records"] = carried_records(l, report, registry)
     report["rewrites"] = [record for record, _ in rewrites(l, report, registry) if record["before"] != record["after"]]
     terminal_layout.plan(l, sys.modules[__name__], report, physical(l, report["home"], "mac-terminal", "state/mac-terminal"))
     settings = Path(report["home"]) / "agent/settings.json"
@@ -364,7 +365,7 @@ def clone(l, source, destination):
 def validate_journal(l, journal, registry, report):
     for home, layout in journal["layouts"].items():
         if (not isinstance(home, str) or not os.path.isabs(home) or os.path.abspath(home) != home
-                or not isinstance(layout, dict) or layout.keys() != {"id", "direction", "rewrites", "inverse", "parents", "slots", "terminal"}
+                or not isinstance(layout, dict) or layout.keys() != {"id", "direction", "rewrites", "inverse", "parents", "slots", "terminal", "carried_lifecycle_records"}
                 or not isinstance(layout["id"], str) or re.fullmatch(r"[a-f0-9]{32}", layout["id"]) is None
                 or layout["direction"] not in {"forward", "applied", "rollback", "rollback-partial"}
                 or not isinstance(layout["rewrites"], dict) or not isinstance(layout["inverse"], dict) or not isinstance(layout["parents"], list)
@@ -375,6 +376,17 @@ def validate_journal(l, journal, registry, report):
             raise l.LayoutError("invalid_layout_journal")
         if any(not isinstance(parent, str) or not parent.startswith(home + "/") or os.path.abspath(parent) != parent for parent in layout["parents"]):
             raise l.LayoutError("invalid_layout_journal")
+        carried = layout["carried_lifecycle_records"]
+        if not isinstance(carried, list):
+            raise l.LayoutError("invalid_layout_journal")
+        for record in carried:
+            if (not isinstance(record, dict) or record.keys() != {"path", "type", "reason", "sha256"}
+                    or not isinstance(record["path"], str) or not l.relative_parts(record["path"])
+                    or not record["path"].startswith("state/subagents/") or not record["path"].endswith("/status.json")
+                    or record["type"] not in {"file", "directory"}
+                    or record["reason"] not in {"interrupted-at-migration", "malformed-status", "opaque-status-directory", "opaque-oversized-status"}
+                    or (record["sha256"] is not None if record["type"] == "directory" else not isinstance(record["sha256"], str) or re.fullmatch(r"[a-f0-9]{64}", record["sha256"]) is None)):
+                raise l.LayoutError("invalid_layout_journal")
         terminal_layout.validate(l, layout["terminal"])
         for relative, record in [*layout["rewrites"].items(), *layout["inverse"].items()]:
             if (not l.relative_parts(relative) or not isinstance(record, dict)
@@ -439,6 +451,7 @@ def prepare(l, report, registry, journal, journal_path, reverse, locks, guards):
                 parents.add(str(parent))
                 parent = parent.parent
         layout = {"id": os.urandom(16).hex(), "direction": "forward", "rewrites": {}, "inverse": {}, "terminal": {}, "parents": sorted(parents),
+                  "carried_lifecycle_records": report["carried_lifecycle_records"],
                   "slots": [{"from": row["from"], "to": row["to"]} for row in report["moves"] if not row["from"].startswith("~/") and not row["to"].startswith("~/")]}
         journal["layouts"][home] = layout
     if not reverse and layout["direction"] == "applied":

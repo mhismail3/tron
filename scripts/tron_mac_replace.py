@@ -653,7 +653,7 @@ def stage_runner(platform, journal, script_dir):
     runtime = private_mkdir(journal.directory / 'runner')
     for name in (*(f'tron_mac_replace{part}.py' for part in ('', '_journal', '_platform', '_rpc')), 'tron_rebuild_lock.py', *platform.runner_files()):
         shutil.copy2(Path(script_dir) / name, runtime / name)
-    for source in ('tools/home-layout/home_layout.py', 'tools/home-layout/runtime_layout.py', 'tools/home-layout/runtime_rewrites.py', 'tools/home-layout/terminal_layout.py', home_layout.REGISTRY):
+    for source in ('tools/home-layout/home_layout.py', 'tools/home-layout/runtime_layout.py', 'tools/home-layout/runtime_rewrites.py', 'tools/home-layout/terminal_layout.py', 'tools/home-layout/stopped_home.py', home_layout.REGISTRY):
         shutil.copy2(Path(script_dir).parent / source, runtime / Path(source).name)
     staged_registry(runtime)
     return runtime

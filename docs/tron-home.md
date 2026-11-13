@@ -151,11 +151,30 @@ Planning never creates/clears locks, writes configuration or actuates launchd. D
 **2** unreadable/unsupported. Status exit **0** means no pending move, **1** pending or
 conflicting; blockers are printed without changing that status exit rule.
 
-Unsafe files, symlinked components, occupied targets, cross-volume moves, unregistered
-relocated entries and live runtime/lifecycle locks refuse. A provider result marked
-complete is insufficient: authoritative process-terminal evidence must record actual
-close and acknowledged writers. Unresolved worktree handoffs refuse; completed handoff
-contents remain historical bytes.
+Stop Gateway and Mac app → migrate → start. Unsafe files, symlinked components,
+occupied targets, cross-volume moves and unregistered relocated entries refuse.
+Admission requires a stopped home: the Gateway runtime lease is absent or stale,
+the Mac wrapper's whole-file kernel locks are released, and same-user kernel process
+arguments, environment and open-file owners do not bind any process to the target.
+Unreadable ownership refuses as `stopped_proof_unavailable`; a live owner refuses as
+`gateway_running`, `mac_wrapper_running` or `home_process_present`. These probes are
+target-scoped, not a production-global process-name grep: a private copy may be
+rehearsed while another home is running. Apply reclaims only stale runtime leases
+after the stopped proof, holds Gateway leases and Mac wrapper kernel locks through
+the operation, and checks ownership again before publishing ready. The sibling Debug
+lease also serializes the shared maintenance journal. A new standalone writer must
+not be launched during the offline window.
+
+Historical lifecycle projections are not liveness. Nonterminal status records are
+carried byte-for-byte and listed as `interrupted-at-migration` in
+`carried_lifecycle_records` in the report and per-home journal receipt. Malformed
+status JSON, oversized status files and opaque status-named directories are also
+carried unchanged and listed with their reason; file receipts include SHA-256.
+Opaque directory contents are not traversed or repaired. No status is marked terminal,
+no process-terminal or handoff projection grants/refuses migration, and no cleanup
+runs. Terminal status records still receive only owned address rewrites. Normal
+Gateway/SDK startup owns lifecycle reconciliation; migration neither resumes work
+nor introduces an alternative reconciliation reader.
 
 `--apply` and `--rollback` are prepared capabilities, not permission to migrate a live
 installation. Keep both Gateways offline through the maintainer-approved operation and
