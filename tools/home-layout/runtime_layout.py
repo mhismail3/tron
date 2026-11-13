@@ -73,12 +73,12 @@ def files(l, root, patterns):
             with os.scandir(fd) as entries:
                 children = sorted(entries, key=lambda item: item.name)
             for child in children:
-                matches = [pattern[1:] for pattern in remaining if fnmatch.fnmatchcase(child.name, pattern[0])]
-                if not matches:
-                    continue
                 count += 1
                 if count > 100000:
                     raise l.LayoutError("rewrite_file_budget_exceeded")
+                matches = [pattern[1:] for pattern in remaining if fnmatch.fnmatchcase(child.name, pattern[0])]
+                if not matches:
+                    continue
                 path = directory / child.name
                 info = child.stat(follow_symlinks=False)
                 if stat.S_ISLNK(info.st_mode):
@@ -134,6 +134,8 @@ def receipt(record):
 def reserve_journal(l, report, registry, journal, layout, reverse):
     planned = {canonical_record(record["file"], report["home"], registry): receipt(record)
                for record, _ in rewrites(l, report, registry, reverse, layout)}
+    if reverse and (layout["rewrites"].keys() | layout["inverse"].keys()) - planned.keys():
+        raise l.LayoutError("rewrite_selection_changed")
     forward = layout["rewrites"] if reverse else {**layout["rewrites"], **planned}
     inverse = {**layout["inverse"], **planned} if reverse else {**forward, **layout["inverse"]}
     terminal = {phase: layout["terminal"].get(phase, {"enabled": True, "sha256": "0" * 64, "source": "canonical" if phase == "rollback" else "legacy"}) for phase in ("forward", "rollback")}
