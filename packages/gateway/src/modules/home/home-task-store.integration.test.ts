@@ -15,7 +15,7 @@ vi.mock("../../foundation/secure-json.js", async (importOriginal) => {
   return {
     ...actual,
     readSecureJson: (async (path: string, maximumBytes: number) => {
-      if (fileReads.active && path.includes("/gateway/home/tasks/")) {
+      if (fileReads.active && path.includes("/state/home/tasks/")) {
         if (path.endsWith("/authorization.json")) fileReads.authority += 1;
         else fileReads.tasks += 1;
       }
@@ -63,8 +63,8 @@ async function fixture() {
   await workspace.initialize();
   const diagnostics: HomeTaskStoreDiagnostic[] = [];
   const store = new HomeTaskStore(root, workspace, { diagnostic: record => diagnostics.push(record) });
-  const directory = join(root, "gateway", "home", "tasks");
-  const marker = join(root, "gateway", "workspace-state", "home-tasks-initialized.json");
+  const directory = join(root, "state", "home", "tasks");
+  const marker = join(root, "state", "workspace-state", "home-tasks-initialized.json");
   return { root, workspace, store, diagnostics, directory, marker, taskPath: async () => join(directory, (await readdir(directory)).find(name => name.endsWith("-task-1.json"))!), authPath: join(directory, "authorization.json") };
 }
 

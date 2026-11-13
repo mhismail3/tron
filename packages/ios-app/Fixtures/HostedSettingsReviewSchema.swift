@@ -95,7 +95,7 @@ enum HostedSettingsReviewSchema {
         key("model.thinking[role=summarizer]", "context", "Summary thinking", .string("inherit"), "Same as chat", order: 80, help: "Thinking level for compaction summaries."),
         key("tools.active", "tools", "Tools", .array(tools.map(JSONValue.string)), "15 tools", "checklist", essential: true, layer: "session"),
         key("tools.codemode.mode", "tools", "Code mode", .string("on"), "On", "choice", order: 20, help: "Let the model call tools from a script.", options: [.object(["value": .string("on"), "label": .string("On")])]),
-        key("tools.codemode.inlineBudget", "tools", "Inline budget", .number(16_000), "16000", order: 30, help: "Bytes of script output returned inline."),
+        key("tools.codemode.inlineBudget", "tools", "Inline budget", .number(16_000), "16000", order: 30, help: "Estimated tokens available for inline codemode tool declarations."),
         key("tools.shell.path", "tools", "Shell", .string("/bin/bash"), "/bin/bash", "text", order: 40, help: "The shell the bash tool runs."),
         key("tools.shell.commandPrefix", "tools", "Command prefix", .string(""), "—", "text", order: 50, help: "Text run before every shell command."),
         key("context.images.autoResize", "tools", "Resize images", .bool(true), "On", order: 60, help: "Shrink large images before they are sent.", subgroup: "Images"),

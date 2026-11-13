@@ -8,7 +8,7 @@ const gateways: GatewayProcess[] = [];
 afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
 
 async function managedBuild(gateway: GatewayProcess): Promise<{ root: string; cache: string; modules: number }> {
-  const installs = join(gateway.tronHome, "internal", "pi-subagents");
+  const installs = join(gateway.tronHome, "cache", "pi-subagents");
   const version = (await readdir(installs)).find((name) => !name.startsWith("."))!;
   const root = join(installs, version);
   let modules = 0;
@@ -19,7 +19,7 @@ async function managedBuild(gateway: GatewayProcess): Promise<{ root: string; ca
     }
   };
   await visit(root);
-  return { root, cache: join(gateway.tronHome, "internal", "pi-subagents-transform-cache", version), modules };
+  return { root, cache: join(gateway.tronHome, "cache", "pi-subagents-transform-cache", version), modules };
 }
 
 const cached = async (cache: string) => (await readdir(cache).catch(() => [])).length;

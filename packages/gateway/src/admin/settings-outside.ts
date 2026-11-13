@@ -133,7 +133,7 @@ export class OutsideChanges {
     private readonly now: () => Date = () => new Date(),
   ) {}
 
-  get path(): string { return tronHomePath(this.tronHome, "gateway/settings/observed.json"); }
+  get path(): string { return tronHomePath(this.tronHome, "state/settings/observed.json"); }
 
   observe(observer: OutsideObserver): void {
     if (this.observer && this.observer !== observer) throw new Error("Outside changes already have an observer");

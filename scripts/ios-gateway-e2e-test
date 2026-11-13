@@ -412,7 +412,7 @@ load_state() {
   source "$state_file"
   [[ "${TRON_E2E_WORKSPACE:-}" == "$(realpath "$run_root/home/Workspace")" \
       && "${TRON_E2E_GATEWAY_HOME:-}" == "$(realpath "$run_root/home")" \
-      && "${TRON_E2E_TRON_HOME:-}" == "$run_root/tron" \
+      && "${TRON_E2E_TRON_HOME:-}" == "$(realpath "$run_root/home/.tron")" \
       && "${TRON_E2E_AGENT_DIR:-}" == "$run_root/agent" \
       && "${TRON_E2E_PI_VERSION:-}" == "$(manifest_pi_version)" \
       && "${TRON_E2E_PORT:-}" =~ ^[1-9][0-9]*$ \
@@ -462,16 +462,17 @@ detach() {
 start_fresh_fixture() {
   stop_gateway
   require_gateway_node
-  local tron_home="$run_root/tron" agent_dir="$run_root/agent" gateway_home="$run_root/home" workspace="$run_root/home/Workspace" port code pi_version
-  rm -rf "$tron_home" "$agent_dir" "$gateway_home"
-  mkdir -p "$tron_home/gateway" "$workspace"
-  chmod 700 "$tron_home" "$tron_home/gateway" "$gateway_home" "$workspace"
+  local tron_home="$run_root/home/.tron" agent_dir="$run_root/agent" gateway_home="$run_root/home" workspace="$run_root/home/Workspace" port code pi_version
+  rm -rf "$agent_dir" "$gateway_home"
+  mkdir -p "$tron_home/state" "$workspace"
+  chmod 700 "$tron_home" "$tron_home/state" "$gateway_home" "$workspace"
   gateway_home="$(realpath "$gateway_home")"
+  tron_home="$(realpath "$tron_home")"
   workspace="$(realpath "$workspace")"
   printf '# E2E Project Rules\n\nKeep the boundary fixture honest.\n' >"$workspace/AGENTS.md"
   cp "$repo_root/packages/gateway/src/modules/apps/fixtures/InstalledPersistence.swift" "$workspace/InstalledPersistence.swift"
   cp "$repo_root/tools/web/apps/builds/Builds.swift" "$workspace/Builds.swift"
-  python3 - "$tron_home/gateway/gateway.json" <<'PY'
+  python3 - "$tron_home/state/gateway.json" <<'PY'
 import json, os, sys
 path = sys.argv[1]
 with open(path, "x", encoding="utf-8") as handle:
@@ -496,7 +497,7 @@ PY
   local spawned_pid
   detach nohup /usr/bin/env -i "${fixture_environment[@]}" \
     "HOME=$gateway_home" "TRON_DATA_DIR=$tron_home" "PI_CODING_AGENT_DIR=$agent_dir" \
-    "PI_SUBAGENTS_TEMP_ROOT=$gateway_home/internal/subagents" \
+    "PI_SUBAGENTS_TEMP_ROOT=$tron_home/state/subagents" \
     "TRON_MACHINE_GROUP_ID=tron-ios-e2e" \
     "TRON_GATEWAY_HOST=127.0.0.1" "TRON_GATEWAY_PORT=$port" \
     "TRON_GATEWAY_LAN_ENDPOINT=$e2e_lan_endpoint" "$@" \
@@ -506,7 +507,7 @@ PY
 
   sleep 0.1
   for _ in {1..200}; do
-    [[ -s "$tron_home/gateway/enrollment.json" ]] \
+    [[ -s "$tron_home/state/enrollment.json" ]] \
       && curl -fsS "http://127.0.0.1:$port/health" >/dev/null 2>&1 \
       && break
     if ! kill -0 "$spawned_pid" 2>/dev/null; then
@@ -515,11 +516,11 @@ PY
     fi
     sleep 0.1
   done
-  [[ -s "$tron_home/gateway/enrollment.json" ]] \
+  [[ -s "$tron_home/state/enrollment.json" ]] \
     || { retire_spawned "$spawned_pid"; rm -f "$pid_file"; die "gateway fixture did not become ready"; }
   gateway_running \
     || { retire_spawned "$spawned_pid"; rm -f "$pid_file"; die "ready Gateway fixture does not match its owned command"; }
-  code="$(python3 - "$tron_home/gateway/enrollment.json" <<'PY'
+  code="$(python3 - "$tron_home/state/enrollment.json" <<'PY'
 import json, sys
 with open(sys.argv[1]) as handle:
     print(json.load(handle)["code"])
@@ -1375,7 +1376,7 @@ case "$command" in
     ;;
   status) show_status ;;
   logs) touch "$log_file"; tail -f "$log_file" ;;
-  stop) stop_gateway; rm -rf "$run_root/tron" "$run_root/agent" "$run_root/home" "$run_root/payload" "$state_file" ;;
+  stop) stop_gateway; rm -rf "$run_root/agent" "$run_root/home" "$run_root/payload" "$state_file" ;;
   clean)
     stop_gateway
     python3 "$simulator_owner" delete "${simulator_args[@]}"

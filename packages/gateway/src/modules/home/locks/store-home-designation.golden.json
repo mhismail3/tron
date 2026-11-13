@@ -2,7 +2,7 @@
   "store": "store-home-designation",
   "module": "gateway/home",
   "files": [
-    "gateway/home/home.json"
+    "state/home/home.json"
   ],
   "projection": {
     "status": {

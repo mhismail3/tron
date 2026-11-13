@@ -219,7 +219,7 @@ const empty = (): NotificationDocument => ({
 export class NotificationGrantStore {
   private readonly path: string;
   private readonly mutex = new AsyncMutex();
-  constructor(tronHome: string, path = tronHomePath(tronHome, "gateway/notifications.json")) { this.path = path; }
+  constructor(tronHome: string, path = tronHomePath(tronHome, "state/notifications.json")) { this.path = path; }
 
   async initialize(): Promise<void> {
     await this.mutex.run(async () => {

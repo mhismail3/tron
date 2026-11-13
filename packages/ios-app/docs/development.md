@@ -287,7 +287,8 @@ label before and after foreground, independent of AX role: overflowing prompts
 are reader buttons. Generated navigation-title snippets are not transcript
 retention evidence and cannot satisfy the full-label query. `status`, `logs`, `stop` and `clean` act only on this worktree's fixture; run
 `clean` before deleting a worktree. DTO changes need Gateway tests and Swift decoding.
-The fixture's canonical lifecycle root is its isolated `HOME/Workspace` (exact spelling).
+The fixture's installation root is its isolated `HOME/.tron`; subagent state stays inside
+that HOME at `.tron/state/subagents`. Its canonical lifecycle root is `HOME/Workspace` (exact spelling).
 `testProjectLifecycleApproveCreatesUntrustsAndTrusts`, `testProjectLifecycleDenialRetainsUntrustedRepository`,
 `testProjectLifecycleRefusedApprovalShowsItsReason` and `testProjectLifecycleBusyTrustUsesCanonicalReason`
 exercise the native project pages;

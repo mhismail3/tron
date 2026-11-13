@@ -13,7 +13,7 @@ import { PROTOCOL_VERSION } from "../src/version.js";
 import { awaitsWithin, HOOK_HANG_BOUND_MS, waitFor } from "./wait-for.js";
 
 const gatewayRoot = fileURLToPath(new URL("..", import.meta.url));
-const preloads = ["home-ledger-crash-preload.mjs", "attention-recovery-hold-preload.mjs"]
+const preloads = ["source-ts-resolver-preload.mjs", "attention-recovery-hold-preload.mjs"]
   .map((name) => join(gatewayRoot, "test-support", name));
 
 export const SCRIPTED_PROVIDER = "scripted";
@@ -198,7 +198,7 @@ async function launchGatewayProcess(
     TMPDIR: join(root, "tmp"),
     TRON_DATA_DIR: tronHome,
     PI_CODING_AGENT_DIR: agentDir,
-    PI_SUBAGENTS_TEMP_ROOT: join(tronHome, "internal", "subagents"),
+    PI_SUBAGENTS_TEMP_ROOT: join(tronHome, "state", "subagents"),
     TRON_GATEWAY_HOST: "127.0.0.1",
     TRON_GATEWAY_PORT: String(port),
   };
@@ -237,7 +237,7 @@ async function launchGatewayProcess(
     pid: () => child.pid!,
     log: readLog,
     async pair(deviceName) {
-      const { code } = JSON.parse(await readFile(join(tronHome, "gateway", "enrollment.json"), "utf8")) as { code: string };
+      const { code } = JSON.parse(await readFile(join(tronHome, "state", "enrollment.json"), "utf8")) as { code: string };
       const response = await fetch(`http://127.0.0.1:${port}/v1/pair`, {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code, deviceName }),
       });

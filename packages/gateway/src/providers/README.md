@@ -96,7 +96,7 @@ and before worker controls, reading canonical fixed settings and the worker fact
 - **Background call ledger.** `ModelQueueOwner.complete` is the sole observation seam;
   every `runtime.completeSimple` call settles to one row, including queue fallbacks,
   returned errors/aborts and thrown failures. `model-usage-ledger.ts` alone stores these
-  counters in `<tronHome>/gateway/model-usage.json` (version 1, 0600, included in backups).
+  counters in `<tronHome>/state/model-usage.json` (version 1, 0600, included in backups).
   Missing initializes empty; malformed, oversized, non-regular or unreadable data refuses
   startup or the next call before dispatch, never resets. Durable atomic publications
   serialize, fsync and prune oldest first: newest 30 days, at most 10,000 rows and 8 MiB,
@@ -152,7 +152,7 @@ failures. OpenCode Go's usage endpoint retains its distinct entitlement/auth/oth
 
 | Signal | Level | Meaning |
 |---|---|---|
-| `model-queue.usage-failed` | error | The local counters ledger refused startup/call or failed publication: `source: models`, fixed `code` (`invalid-store`, `read-failed`, `write-failed`); no provider exception text; inspect `gateway/model-usage.json` locally and preserve corrupt bytes |
+| `model-queue.usage-failed` | error | The local counters ledger refused startup/call or failed publication: `source: models`, fixed `code` (`invalid-store`, `read-failed`, `write-failed`); no provider exception text; inspect `state/model-usage.json` locally and preserve corrupt bytes |
 | `model-queue.skip` | warning | A fallback queue skipped a model for a background call, or a call hit a usage limit: `source: models`, `code` (queue role); the message names `provider/id` and the reason |
 | `model-queue.projection` | info when published; warning on failure | A parent published the exact child model-queue projection before launch (`global` or `task-launch`, ordered model IDs), or publication failed and the child tool call was blocked |
 | `model.release-dates` | info on refresh; warning on failure or ignored persisted data | A release-date fetch completed or persisted state was rejected: `updated`, `providers`, `unrecognizedDates`, up to three `unknownDateSamples`, `reason` |

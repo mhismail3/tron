@@ -44,7 +44,7 @@ enum DebugGatewayObserver {
     }
 
     static func lifecycleURL(home: URL) -> URL {
-        home.appendingPathComponent("gateway/lifecycle.json", isDirectory: false)
+        home.appendingPathComponent("state/lifecycle.json", isDirectory: false)
     }
 
     static func observe(

@@ -185,7 +185,7 @@ test("deploy writers emit the shared payload and selection contract", async () =
     const { manifest } = await stagePayload({
       home, channel: "dev", source, version: "contract", sourceRevision: "0123456789abcdef0123456789abcdef01234567",
     });
-    const channelRoot = join(home, "gateway", "payloads", "dev");
+    const channelRoot = join(home, "state", "payloads", "dev");
     const staged = JSON.parse(await readFile(join(channelRoot, "versions", "contract", "manifest.json"), "utf8"));
     assert.deepEqual(Object.keys(staged).sort(), [...payloadContract.manifestKeys].sort());
     assert.equal(staged.schema, payloadContract.schema);
@@ -225,12 +225,12 @@ test("source apply uses the trusted checkout builder and retains installed promo
       }
       export function applyPayload() { throw new Error("source must not own apply"); }
     `);
-    await mkdir(join(home, "gateway"), { recursive: true });
-    await writeFile(join(home, "gateway/update-config.json"), JSON.stringify({
+    await mkdir(join(home, "state"), { recursive: true });
+    await writeFile(join(home, "state", "update-config.json"), JSON.stringify({
       schema: 1, kind: "tron-gateway-update-config", sourceRoot: checkout,
       updatedAt: new Date().toISOString(),
     }));
-    const channelRoot = join(home, "gateway/payloads/stable");
+    const channelRoot = join(home, "state", "payloads", "stable");
     const environment = {
       PATH: process.env.PATH, HOME: home, TMPDIR: scratch,
       TRON_DATA_DIR: home, TRON_GATEWAY_SUPERVISED: "1", TRON_GATEWAY_CHANNEL: "stable",
@@ -257,7 +257,7 @@ test("source apply uses the trusted checkout builder and retains installed promo
     assert.equal(builderRecord.commandId, "source-build-new-builder");
     assert.match(builderRecord.builderSha256, /^[a-f0-9]{64}$/);
 
-    await writeFile(join(home, "gateway/local-auth.json"), JSON.stringify({
+    await writeFile(join(home, "state", "local-auth.json"), JSON.stringify({
       version: 2, purpose: "local-wrapper-health", bearerToken: "f".repeat(32), lastUpdated: new Date().toISOString(),
     }), { mode: 0o600 });
     await writeFile(sourceBuilder, `
@@ -361,7 +361,7 @@ test("a crash inside the rollback keeps a startable selection (#2316 F8)", async
   for (const marker of [false, true]) for (const crashAt of ["current.json", "previous.json"]) {
     const root = await mkdtemp(join(tmpdir(), "tron-rollback-crash-"));
     try {
-      const channelRoot = join(root, "gateway", "payloads", "dev");
+      const channelRoot = join(root, "state", "payloads", "dev");
       await mkdir(channelRoot, { recursive: true });
       const pointer = (version, digit) => ({ schema: 1, kind: "tron-gateway-selection", channel: "dev", version, payloadFingerprint: digit.repeat(64) });
       const paths = { channel: "dev", channelRoot, current: join(channelRoot, "current.json"), previous: join(channelRoot, "previous.json"),
@@ -443,7 +443,7 @@ test("a failed Debug promotion restores the prior selection and never takes the 
       staged[name] = result.manifest;
     }
     await selectInitialDevCandidate({ home, version: "prior", expectedFingerprint: staged.prior.payloadFingerprint });
-    await writeFile(join(home, "gateway", "local-auth.json"), JSON.stringify({
+    await writeFile(join(home, "state", "local-auth.json"), JSON.stringify({
       version: 2, purpose: "local-wrapper-health", bearerToken: "d".repeat(32), lastUpdated: new Date().toISOString(),
     }), { mode: 0o600 });
     const gatewayScript = join(root, "fake-gateway.mjs");
@@ -458,7 +458,7 @@ test("a failed Debug promotion restores the prior selection and never takes the 
       await once(probe, "close");
       return port;
     };
-    const currentVersion = async () => JSON.parse(await readFile(join(home, "gateway", "payloads", "dev", "current.json"), "utf8")).version;
+    const currentVersion = async () => JSON.parse(await readFile(join(home, "state", "payloads", "dev", "current.json"), "utf8")).version;
     const launch = (port, manifest) => {
       const child = spawn(process.execPath, [gatewayScript, wsPackage, String(port), JSON.stringify({
         buildFingerprint: manifest.payloadFingerprint, sourceRevision: manifest.sourceRevision, runtimeEpoch: manifest.runtimeEpoch,
@@ -500,7 +500,7 @@ test("a failed Debug promotion restores the prior selection and never takes the 
       assert.ok(result.error, `the failed candidate is reported (${label})`);
       assert.doesNotMatch(result.stderr, /Stable/u, `Debug recovery never takes the Stable path (${label}): ${result.stderr}`);
       assert.equal(await currentVersion(), "prior", `prior selection restored (${label})`);
-      const state = JSON.parse(await readFile(join(home, "gateway", "payloads", "dev", "deployment-state.json"), "utf8"));
+      const state = JSON.parse(await readFile(join(home, "state", "payloads", "dev", "deployment-state.json"), "utf8"));
       if (supervisorLive) {
         assert.equal(state.state, "rolled-back", `${label}: ${result.stderr}`);
         const health = await (await fetch(`http://127.0.0.1:${port}/health`)).json();

@@ -1,7 +1,7 @@
 import { execFile, execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:net";
-import { mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, rmdir, writeFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, it } from "vitest";
@@ -37,7 +37,7 @@ async function freePort(): Promise<number> {
 async function fixture() {
   const root = await realpath(await mkdtemp(join(execFileSync("/usr/bin/getconf", ["DARWIN_USER_TEMP_DIR"], { encoding: "utf8" }).trim(), "tron-private-sshd-")));
   roots.push(root);
-  const service = new MacTerminalService(root, { port: await freePort(), launchAgentDirectory: join(root, "agents") });
+  const service = new MacTerminalService({ root: join(root, "state/mac-terminal"), port: await freePort(), launchAgentDirectory: join(root, "agents") });
   services.push(service);
   return { root, service };
 }
@@ -163,9 +163,14 @@ it("owns authorization and launchd recovery while preserving host identity and t
   expect((await readFile(service.hostKeyPath)).equals(key)).toBe(true);
   expect((await service.status()).hostKeys).toEqual(host);
   expect((await phone.ssh(`${tmux} display-message -p -t ${name} '#{pane_pid}'`)).trim()).toBe(shell);
+  const enabledPlist = await readFile(service.plistPath);
   await rename(service.hostKeyPath, `${service.hostKeyPath}.saved`);
   try {
-    expect((await service.status()).serviceState).toBe("failed");
+    await expect(service.restore()).rejects.toThrow(/automatic rotation is forbidden/u);
+    expect(await service.enabled()).toBe(true);
+    expect(await readFile(service.plistPath)).toEqual(enabledPlist);
+    expect(await service.status()).toMatchObject({ serviceState: "failed", detail: expect.stringContaining("automatic rotation is forbidden") });
+    await expect(lstat(service.hostKeyPath)).rejects.toThrow(/ENOENT/u);
     await expect(service.setEnabled(true)).rejects.toThrow(/automatic rotation is forbidden/u);
     await expect(service.recover()).rejects.toThrow(/automatic rotation is forbidden/u);
   } finally { await rename(`${service.hostKeyPath}.saved`, service.hostKeyPath); }
@@ -174,6 +179,78 @@ it("owns authorization and launchd recovery while preserving host identity and t
   expect(await service.read()).toEqual({});
   expect(await service.enabled()).toBe(false);
   await expect(phone.ssh("printf MUST_NOT_RUN")).rejects.toThrow();
+});
+
+for (const enabled of [true, false]) it(`restores previously ${enabled ? "enabled" : "disabled"} SSH intent across migration and inverse without rotating keys`, async () => {
+  const { root } = await fixture();
+  const user = join(root, "user");
+  const home = join(user, ".tron");
+  const agents = join(user, "Library/LaunchAgents");
+  await mkdir(join(home, "gateway"), { recursive: true, mode: 0o700 });
+  await writeFile(join(home, "gateway/gateway.json"), "{}", { mode: 0o600 });
+  const options = { port: await freePort(), launchAgentDirectory: agents };
+  const old = new MacTerminalService({ root: join(home, "mac-terminal"), ...options });
+  const next = new MacTerminalService({ root: join(home, "state/mac-terminal"), ...options });
+  const migrate = async (direction: "--apply" | "--rollback", crash = false) => new Promise<string>((resolve, reject) => {
+    const program = `import sys,os\nsys.path.insert(0,${JSON.stringify(join(process.cwd(), "../../tools/home-layout"))})\nimport home_layout,runtime_layout\noriginal=runtime_layout.terminal_layout.retire\ndef retire(*args):\n original(*args)\n os._exit(93)\n${crash ? "runtime_layout.terminal_layout.retire=retire" : ""}\nraise SystemExit(home_layout.main(sys.argv[1:]))`;
+    execFile("/usr/bin/python3", ["-B", "-c", program, "migrate", "--home", home, direction], { cwd: process.cwd(), env: { ...process.env, HOME: user, PYTHONDONTWRITEBYTECODE: "1" }, timeout: 30_000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => error ? reject(new Error(`exit=${error.code}\n${stdout}${stderr}`)) : resolve(stdout));
+  });
+  const absent = async (service: MacTerminalService) => {
+    try { await run("/bin/launchctl", ["print", `gui/${process.getuid!()}/${service.label}`]); return false; }
+    catch (error) { if (String(error).includes("Could not find service")) return true; throw error; }
+  };
+  const digest = async (path: string) => createHash("sha256").update(await readFile(path)).digest("hex");
+  try {
+    if (enabled) await old.setEnabled(true);
+    else {
+      await mkdir(old.root, { recursive: true, mode: 0o700 });
+      await run("/usr/bin/ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", old.hostKeyPath]);
+      await chmod(`${old.hostKeyPath}.pub`, 0o600);
+    }
+    const key = await digest(old.hostKeyPath);
+    const inode = (await lstat(old.hostKeyPath)).ino;
+    const plist = enabled ? await digest(old.plistPath) : undefined;
+    const config = enabled ? await digest(old.configPath) : undefined;
+    if (enabled) {
+      await expect(migrate("--apply", true)).rejects.toThrow(/exit=93/u);
+      expect(await absent(old)).toBe(true);
+      for (const path of [join(home, "agent/.tron-gateway-runtime.lock.lock"), join(user, ".tron-dev/agent/.tron-gateway-runtime.lock.lock"), `${old.root}.lock`, join(home, "gateway/mac-terminal.lock")]) await rmdir(path);
+      await migrate("--rollback");
+      await until(async () => (await old.status()).serviceState === "running");
+      expect(await digest(old.hostKeyPath)).toBe(key);
+      expect((await lstat(old.hostKeyPath)).ino).toBe(inode);
+    }
+    await migrate("--apply");
+    expect(await absent(old)).toBe(true);
+    if (enabled) {
+      const directory = join(user, ".tron-maintenance/backups");
+      const hashes: string[] = [];
+      for (const name of await readdir(directory, { recursive: true })) {
+        const path = join(directory, name);
+        if ((await lstat(path)).isFile()) hashes.push(await digest(path));
+      }
+      expect(hashes).toContain(plist);
+      expect(hashes).toContain(config);
+    }
+    await next.restore();
+    expect(await next.enabled()).toBe(enabled);
+    if (enabled) expect((await next.status()).serviceState).toBe("running");
+    expect(await digest(next.hostKeyPath)).toBe(key);
+    expect((await lstat(next.hostKeyPath)).ino).toBe(inode);
+    await migrate("--rollback");
+    expect(await old.enabled()).toBe(enabled);
+    if (enabled) await until(async () => (await old.status()).serviceState === "running");
+    expect(await digest(old.hostKeyPath)).toBe(key);
+    expect((await lstat(old.hostKeyPath)).ino).toBe(inode);
+  } finally {
+    for (const service of [old, next]) {
+      let job: string;
+      try { job = await run("/bin/launchctl", ["print", `gui/${process.getuid!()}/${service.label}`]); }
+      catch (error) { if (String(error).includes("Could not find service")) continue; throw error; }
+      expect(job.includes(service.plistPath) && job.includes(service.configPath)).toBe(true);
+      await run("/bin/launchctl", ["bootout", `gui/${process.getuid!()}/${service.label}`]);
+    }
+  }
 });
 
 it("refuses an occupied port without stopping its owner or selecting a fallback", async () => {

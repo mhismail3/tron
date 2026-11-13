@@ -35,7 +35,7 @@ Owner: `gateway/session-catalog` (`session-catalog.ts`, `catalog-jsonl.ts`,
   first, ≤ 64 KiB each within a 64 MiB aggregate, 16 files per batch. Names and
   previews are capped at 1,024 UTF-8 bytes. Raw lines are bounded to 64 MiB before
   decoding; an oversized row stays unproven (`catalog-index.failure step=line-limit`).
-- `gateway/catalog-metadata-v3/` is the owner's debounced acceleration only
+- `cache/catalog-metadata-v3/` is the owner's debounced acceleration only
   (identity, classification, file identity, size/mtime/EOF, tail hash; never text),
   root-bound, 0600. Rows hash by root-relative path into 64 `shard-XX.json` files
   (each ≤ 8 MiB, warned once per process past 2 MiB; ~160 KiB each at 6,500
@@ -99,7 +99,7 @@ attention and archive); an equal token gets `notModified: true`.
 
 ## Read attention
 
-`gateway/session-attention.json` stores only completion and read-through revisions,
+`state/session-attention.json` stores only completion and read-through revisions,
 manual unread, a recent-completion set and a recovery cursor. Only an accepted prompt
 turn's assistant entry ending `stop` or `length` advances completion. A per-session
 marker keeps ≤ 16 operations with exact completion stamps (full means newer admission

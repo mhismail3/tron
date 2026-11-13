@@ -181,14 +181,14 @@ async function gatewayFixture(options: { enabled?: boolean } = {}): Promise<Gate
     logger: log as never,
     lanEndpoint: {
       enabled: options.enabled ?? true,
-      stateDirectory: join(home, "gateway", "lan-endpoint"),
+      stateDirectory: join(home, "state", "lan-endpoint"),
       lanAddresses: () => [...addresses],
       reconcileIntervalMs: 25,
     },
   });
   await gateway.listen();
   cleanups.push(() => gateway.close());
-  return { root: home, log: log.log, stateDirectory: join(home, "gateway", "lan-endpoint"), addresses, gateway, devices, port };
+  return { root: home, log: log.log, stateDirectory: join(home, "state", "lan-endpoint"), addresses, gateway, devices, port };
 }
 
 function gatewayHello(socket: WebSocket): Promise<Record<string, unknown>> {
@@ -198,7 +198,7 @@ function gatewayHello(socket: WebSocket): Promise<Record<string, unknown>> {
 }
 
 async function localToken(home: string): Promise<string> {
-  return (JSON.parse(await readFile(join(home, "gateway", "local-auth.json"), "utf8")) as { bearerToken: string }).bearerToken;
+  return (JSON.parse(await readFile(join(home, "state", "local-auth.json"), "utf8")) as { bearerToken: string }).bearerToken;
 }
 
 describe("LAN endpoint", () => {
@@ -293,7 +293,7 @@ describe("LAN endpoint", () => {
     const home = await tempRoot("tron-lan-key-only-");
     const stored = generateKeyPairSync("ec", { namedCurve: "prime256v1" }).privateKey;
     const storedKey = stored.export({ type: "pkcs8", format: "pem" }).toString();
-    const stateDirectory = join(home, "gateway");
+    const stateDirectory = join(home, "state");
     await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
     const keyPath = join(stateDirectory, "tls-key.pem");
     const certificatePath = join(stateDirectory, "tls-certificate.pem");

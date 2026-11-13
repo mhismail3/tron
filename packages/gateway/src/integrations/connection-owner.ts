@@ -13,7 +13,7 @@ import { tronHomePath } from "../foundation/tron-home-layout.js";
 const STATE_MAX_BYTES = 4 * 1_048_576;
 
 function initialState(): ConnectionOwnerState { return { schemaVersion: CONNECTION_STATE_SCHEMA_VERSION, stateRevision: 0, instances: {}, setupOperations: {}, receipts: {} }; }
-function statePath(tronHome: string): string { return tronHomePath(tronHome, "gateway/integrations", "connections.json"); }
+function statePath(tronHome: string): string { return tronHomePath(tronHome, "state/integrations", "connections.json"); }
 function copy<T>(value: T): T { return structuredClone(value); }
 
 export class ConnectionOwner implements ConnectionAccess {

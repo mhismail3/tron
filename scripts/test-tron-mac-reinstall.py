@@ -51,7 +51,7 @@ def fixture_main(root, arguments):
         def verify_installed(self, require_bundled=False):
             reinstall.require((root / 'resumed').exists(), 'fixture-not-resumed')
             if require_bundled:
-                reinstall.require(not (root / 'home/.tron/gateway/payloads/stable').exists(),
+                reinstall.require(not (root / 'home/.tron/state/payloads/stable').exists(),
                                   'fixture-external-payload-present')
 
     try:
@@ -119,7 +119,7 @@ class ReinstallWindow(unittest.TestCase):
         self.assertEqual(child.returncode, 2 if error else 0, child.stdout + child.stderr)
         if error:
             self.assertIn(error, child.stderr)
-        return child.stdout
+        return child.stdout + child.stderr
 
     def operation(self):
         store = self.home / '.tron-maintenance'
@@ -167,11 +167,11 @@ class ReinstallWindow(unittest.TestCase):
 
     def test_backups_hold_what_the_home_registry_backs_up_and_every_unknown_path(self):
         tron = self.home / '.tron'
-        kept = ('agent/sessions/project/session.jsonl', 'agent/auth.json', 'gateway/devices.json', 'gateway/unregistered/only-copy',
-                'internal/machine-group-id', 'unregistered/only-copy', 'logs/unregistered.txt', 'ios-builds/unregistered/only-copy')
-        skipped = ('agent/npm/node_modules/package/index.js', 'agent/.tron-gateway-runtime.lock.lock/stale', 'gateway/local-auth.json',
-                   'gateway/session-search.sqlite', 'internal/subagents/run/status.json', 'logs/gateway.jsonl',
-                   'ios-builds/builds/1/TronMobile.ipa')
+        kept = ('agent/sessions/project/session.jsonl', 'agent/auth.json', 'state/devices.json', 'state/unregistered/only-copy',
+                'state/machine-group-id', 'state/subagents/run/status.json', 'unregistered/only-copy', 'logs/unregistered.txt',
+                'workspace/builds/ios-ota/unregistered/only-copy')
+        skipped = ('agent/npm/node_modules/package/index.js', 'agent/.tron-gateway-runtime.lock.lock/stale', 'state/local-auth.json',
+                   'cache/session-search.sqlite', 'logs/gateway.jsonl', 'workspace/builds/ios-ota/builds/1/TronMobile.ipa')
         for relative in (*kept, *skipped):
             path = tron / relative
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -191,13 +191,13 @@ class ReinstallWindow(unittest.TestCase):
         self.assertEqual({relative: backup(relative).read_text() for relative in kept}, {relative: relative for relative in kept})
         self.assertEqual([relative for relative in skipped if os.path.lexists(backup(relative))], [])
         self.assertEqual(set(self.receipt()['components']), {'agent', 'old-app', 'browser-config', 'machine-group',
-                                                           label('gateway'), label('internal'), label('unregistered'),
-                                                           label('logs'), label('ios-builds')})
+                                                           label('state'), label('cache'), label('unregistered'),
+                                                           label('logs'), label('workspace')})
         staged = json.loads((operation / 'tron-home-layout.json').read_text())
         self.assertEqual(staged, json.loads((REPO / 'packages/gateway/src/foundation/tron-home-layout.json').read_text()))
         staged_path = operation / 'tron-home-layout.json'
         self.assertEqual(self.receipt()['layoutRegistrySha256'], hashlib.sha256(staged_path.read_bytes()).hexdigest())
-        for relative in ('logs/gateway.jsonl', 'gateway/session-search.sqlite', 'gateway/local-auth.json'):
+        for relative in ('logs/gateway.jsonl', 'cache/session-search.sqlite', 'state/local-auth.json'):
             (tron / relative).write_text('changed after the inventory froze')
         (tron / 'logs/gateway.jsonl.1').write_text('a new log segment')
         self.cli('--confirm-offline')
@@ -206,14 +206,48 @@ class ReinstallWindow(unittest.TestCase):
         self.cli('--confirm-offline', error='source-changed')
         (tron / 'logs/unregistered.txt').write_text('logs/unregistered.txt')
         self.cli('--confirm-offline')
-        (tron / 'gateway/devices.json').write_text('late writer changed a backed-up record')
+        (tron / 'state' / 'devices.json').write_text('late writer changed a backed-up record')
         self.cli('--confirm-offline', error='source-changed')
-        (tron / 'gateway/devices.json').write_text('gateway/devices.json')
-        staged['paths']['gateway/devices.json']['backup'] = False
+        (tron / 'state' / 'devices.json').write_text('state/devices.json')
+        staged['paths']['state/devices.json']['backup'] = False
         staged_path.write_text(json.dumps(staged))
         self.cli('--confirm-offline', error='layout-registry-digest')
         staged_path.write_text(json.dumps({'version': 1, 'paths': {}}))
         self.cli('--confirm-offline', error='layout-registry')
+
+    def test_unmigrated_unknown_paths_stay_in_a_local_private_recovery_copy(self):
+        tron = self.home / '.tron'
+        secret = 'fixture-legacy-credential-never-export'
+        paths = ('gateway/local-auth.json', 'gateway/enrollment.json', 'internal/subagents/run/status.json',
+                 'ios-builds/builds/1/TronMobile.ipa')
+        for relative in paths:
+            source = tron / relative
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text(secret + relative)
+            source.chmod(0o644)
+        for top in ('gateway', 'internal', 'ios-builds'):
+            for directory in (tron / top, *(path for path in (tron / top).rglob('*') if path.is_dir())):
+                directory.chmod(0o755)
+        executable = self.installed / 'fixture-executable'
+        executable.write_text('fixture executable metadata')
+        executable.chmod(0o755)
+        self.begin()
+        output = self.cli('--confirm-offline')
+        operation = self.operation()
+        self.assertTrue(operation.is_relative_to(self.home / '.tron-maintenance'))
+        self.assertNotIn(secret, output)
+        self.assertNotIn(secret, (operation / 'receipt.json').read_text())
+        self.assertEqual((operation / 'backups/old-app/fixture-executable').stat().st_mode & 0o777, 0o755)
+        for relative in paths:
+            top, _, rest = relative.partition('/')
+            component = next(name for name, source in self.receipt()['sourcePaths'].items() if source == str(tron / top))
+            recovered = operation / 'backups' / component / rest
+            self.assertTrue(recovered.resolve().is_relative_to(operation / 'backups'))
+            self.assertEqual(recovered.read_text(), secret + relative)
+            self.assertEqual(recovered.stat().st_mode & 0o777, 0o600)
+            self.assertEqual((tron / relative).stat().st_mode & 0o777, 0o644)
+            for directory in (parent for parent in recovered.parents if parent.is_relative_to(self.home / '.tron-maintenance')):
+                self.assertEqual(directory.stat().st_mode & 0o777, 0o700)
 
     def test_finish_requires_verified_candidate_and_keeps_recovery_bytes(self):
         self.prepare()
@@ -243,7 +277,7 @@ class ReinstallWindow(unittest.TestCase):
         self.assertEqual((operation / 'backups/old-app/identity.json').read_bytes(), old_identity)
 
     def test_channel_retirement_and_restart_keep_original_evidence_owner(self):
-        channel = self.home / '.tron/gateway/payloads/stable'
+        channel = self.home / '.tron/state/payloads/stable'
         channel.mkdir(parents=True, mode=0o700)
         (channel / 'current.json').write_bytes(b'{"version":"fixture-old"}')
         (channel / 'previous.json').write_bytes(b'{"version":"fixture-previous"}')

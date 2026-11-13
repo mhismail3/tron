@@ -95,5 +95,5 @@ await workspace.dispose();throw new Error('Requested crash cut was not reached')
     if (child.exitCode === null && child.signalCode === null) { const exited = once(child, "exit"); child.kill("SIGKILL"); await exited; }
   }
   const past = new Date(Date.now() - 120_000);
-  await utimes(join(home, "gateway", "workspace-state.lock"), past, past);
+  await utimes(join(home, "state", "workspace-state.lock"), past, past);
 }

@@ -12,7 +12,7 @@ it("session-archive-paths: archive, rekey, prune, remove and admission", async (
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(Date.parse(T0));
   onTestFinished(async () => { vi.useRealTimers(); await rm(home, { recursive: true, force: true }); });
-  const path = join(home, "gateway", "session-archive.json");
+  const path = join(home, "state", "session-archive.json");
   const committed = async () => readFile(path, "utf8").then((text) => JSON.parse(text) as unknown,
     (error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return undefined; throw error; });
   const sessions = (records: Record<string, string>) =>
@@ -23,7 +23,7 @@ it("session-archive-paths: archive, rekey, prune, remove and admission", async (
   expect(view("a"), "read before initialize").toEqual({ revision: 0, archivedAt: { a: null } });
   await expect(store.archive("a"), "archive before initialize").rejects.toThrow(expect.objectContaining({ message: "Session archive store is not initialized" }));
   expect(await committed()).toBeUndefined();
-  await mkdir(join(home, "gateway"), { recursive: true });
+  await mkdir(join(home, "state"), { recursive: true });
   await store.initialize();
   expect(view("a"), "initialize empty").toEqual({ revision: 1, archivedAt: { a: null } });
   expect(await committed()).toEqual(sessions({}));

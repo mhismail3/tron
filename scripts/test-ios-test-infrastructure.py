@@ -3655,7 +3655,7 @@ for (let index = 0; index < Math.max(connections[0], connections[1]); index++) {
     fs.appendFileSync(`${{logs}}/gateway.jsonl`, JSON.stringify({{ event: "connection.closed", connectionId }}) + "\\n");
   }}
 }}
-const enrollment = `${{process.env.TRON_DATA_DIR}}/gateway/enrollment.json`;
+const enrollment = `${{process.env.TRON_DATA_DIR}}/state/enrollment.json`;
 fs.writeFileSync(enrollment, JSON.stringify({{ code: "fixture-pairing-code" }}), {{ mode: 0o600 }});
 const server = http.createServer((request, response) => {{
   response.writeHead(request.url === "/health" ? 200 : 404);
@@ -5074,7 +5074,7 @@ exec "$FAKE_SYSTEM_PYTHON" "$@"
             "TRON_GATEWAY_RUNTIME_EPOCH": "stable-epoch-sentinel",
             "TRON_GATEWAY_CHANNEL": "stable",
             "TRON_GATEWAY_SUPERVISED": "1",
-            "TRON_GATEWAY_PAYLOAD_ROOT": "/Users/someone/.tron/gateway/payloads/stable",
+            "TRON_GATEWAY_PAYLOAD_ROOT": "/Users/someone/.tron/state/payloads/stable",
             "PI_SESSION_ID": "stable-session-sentinel",
         })
 
@@ -5097,7 +5097,7 @@ exec "$FAKE_SYSTEM_PYTHON" "$@"
         self.assertEqual(gateway.get("TRON_GATEWAY_LAN_ENDPOINT"), "off")
         self.assertEqual(gateway.get("TRON_MACHINE_GROUP_ID"), "tron-ios-e2e")
         self.assertRegex(gateway.get("TRON_GATEWAY_PORT", ""), r"^[1-9][0-9]*$")
-        self.assertEqual(os.path.realpath(gateway["TRON_DATA_DIR"]), os.path.realpath(fixture_root / "tron"))
+        self.assertEqual(os.path.realpath(gateway["TRON_DATA_DIR"]), os.path.realpath(fixture_root / "home/.tron"))
         self.assertEqual(os.path.realpath(gateway["HOME"]), os.path.realpath(fixture_root / "home"))
         self.assertEqual(os.path.realpath(gateway["PI_CODING_AGENT_DIR"]), os.path.realpath(fixture_root / "agent"))
         self.assertTrue(gateway["PI_SUBAGENTS_TEMP_ROOT"].startswith(str(gateway["HOME"])))

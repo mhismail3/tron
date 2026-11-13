@@ -158,7 +158,7 @@ describe("settings.resolve", () => {
       changes: [{ key: "model.thinking[role=worker]", layer: "session", op: "set", value: "high" }],
     }) as { status: string };
     expect(response.status).toBe("applied");
-    const profile = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "profile.json"), "utf8"));
+    const profile = JSON.parse(await readFile(join(f.tronHome, "state", "home", "profile.json"), "utf8"));
     expect(profile).toEqual({ thinking: { worker: "high" } });
     const resolution = await f.service.invoke(subscribed(), "settings.resolve", { target }) as Resolution;
     expect(row(resolution, "model.thinking[role=worker]")).toMatchObject({ value: "high", layer: "session" });
@@ -167,11 +167,11 @@ describe("settings.resolve", () => {
       commandId: "home-profile-invalid-thinking", target,
       changes: [{ key: "model.thinking[role=worker]", layer: "session", op: "set", value: "unbounded" }],
     })).rejects.toThrow();
-    expect(JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "profile.json"), "utf8"))).toEqual(profile);
+    expect(JSON.parse(await readFile(join(f.tronHome, "state", "home", "profile.json"), "utf8"))).toEqual(profile);
 
-    await writeFile(join(f.tronHome, "gateway", "home", "profile.json"), JSON.stringify({ thinking: { worker: "unbounded" } }));
+    await writeFile(join(f.tronHome, "state", "home", "profile.json"), JSON.stringify({ thinking: { worker: "unbounded" } }));
     await expect(f.service.invoke(subscribed(), "settings.resolve", { target })).rejects.toThrow("Home profile value for model.thinking[role=worker] is invalid");
-    await writeFile(join(f.tronHome, "gateway", "home", "profile.json"), JSON.stringify({ oversized: "x".repeat(256 * 1024) }));
+    await writeFile(join(f.tronHome, "state", "home", "profile.json"), JSON.stringify({ oversized: "x".repeat(256 * 1024) }));
     await expect(f.service.invoke(subscribed(), "settings.resolve", { target })).rejects.toThrow("Home profile exceeds its 262144-byte limit");
   });
   it("resolves three scopes for every target, shows an untrusted project as not applied, and matches pi and a live chat", async () => {
@@ -237,8 +237,8 @@ describe("settings.resolve", () => {
     expect(row(session, "run.retry.maxRetries")).toMatchObject({ value: 7, layer: "project" });
     expect(session.keys.some(key => key.key === "model.thinking[role=worker]")).toBe(false);
 
-    await mkdir(join(tronHome, "gateway", "home"), { recursive: true });
-    await writeFile(join(tronHome, "gateway", "home", "profile.json"), JSON.stringify({ thinking: { worker: "low" } }));
+    await mkdir(join(tronHome, "state", "home"), { recursive: true });
+    await writeFile(join(tronHome, "state", "home", "profile.json"), JSON.stringify({ thinking: { worker: "low" } }));
     const home = await resolve({ kind: "home" });
     expect(home.layers).toEqual(["session", "global"]);
     expect(row(home, "model.queue[role=worker]")).toMatchObject({ value: [], layer: "global", display: "Same as Home" });
@@ -350,7 +350,7 @@ describe("settings renderer contract", () => {
       expect(row(await resolve({ kind: "home" }), key)).toMatchObject({ value: [], overridden: true });
       await change("home", "unset");
       expect(row(await resolve({ kind: "home" }), key).value).toEqual(values);
-      const file = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "profile.json"), "utf8"));
+      const file = JSON.parse(await readFile(join(f.tronHome, "state", "home", "profile.json"), "utf8"));
       expect(file.modelQueue?.[role]).toBeUndefined();
       evidence.push(await resolve({ kind: "home" }));
     }

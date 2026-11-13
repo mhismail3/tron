@@ -90,7 +90,7 @@ describe("Gateway HTTP admission and retirement", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-http-upgrade-admission-"));
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
-    const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const token = JSON.parse(await readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken;
     const port = await unusedPort();
     let authenticateStarted!: () => void;
     let releaseAuthentication!: () => void;
@@ -131,7 +131,7 @@ describe("Gateway HTTP admission and retirement", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-http-admission-"));
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
-    const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const token = JSON.parse(await readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken;
     const port = await unusedPort();
     const logger = { log: vi.fn() };
     const stream = new PassThrough();
