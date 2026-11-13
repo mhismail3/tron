@@ -84,7 +84,7 @@ class GatewayTestScratchCleanup(unittest.TestCase):
             base = Path(temporary).resolve()
             verify = base / "tools/verify"
             verify.mkdir(parents=True)
-            for name in ("gateway.py", "vitest_configs.py", "ledger.py"):
+            for name in ("gateway.py", "vitest_configs.py", "ledger.py", "ledger-host.mjs", "ledger-vitest.mjs"):
                 (verify / name).write_text((ROOT / "tools/verify" / name).read_text())
             lock = (ROOT / "tools/verify/host_lock.py").read_text()
             self.assertIn("'/tmp/tron-full-gateway.lock'", lock)
@@ -126,7 +126,7 @@ class GatewayTestConfigRouting(unittest.TestCase):
             base = Path(temporary).resolve()
             verify = base / "tools/verify"
             verify.mkdir(parents=True)
-            for source in (ROOT / "tools/verify").glob("*.py"):
+            for source in [*(ROOT / 'tools/verify').glob('*.py'), *(ROOT / 'tools/verify').glob('ledger-*.mjs')]:
                 (verify / source.name).write_text(source.read_text())
             node = base / "scripts/tron-node"
             node.parent.mkdir()
@@ -153,9 +153,7 @@ class GatewayTestConfigRouting(unittest.TestCase):
                     result, argv = self.run_files(base, *words)
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                     actual = argv.strip().split()
-                    report = next(word for word in actual if word.startswith('--outputFile.json='))
-                    self.assertTrue(report.startswith('--outputFile.json=/tmp/tron-gateway-tests-'))
-                    self.assertEqual(actual, ['run', *config, *words, '--reporter=json', report, '--reporter=default'])
+                    self.assertEqual(actual, ['run', *config, *words, '--reporter=default', '--reporter=' + str(base / 'tools/verify/ledger-vitest.mjs')])
             for words in (["src/a/nested.e2e.test.ts", "src/a/plain.test.ts"], ["src/a/"], ["SRC/A/"]):
                 with self.subTest(words=words):
                     result, argv = self.run_files(base, *words, "-t", "x")

@@ -80,7 +80,7 @@ class MiniGatewayLane(unittest.TestCase):
         self.temporary = Path(tempfile.mkdtemp(prefix='tron-mini-test-'))
         self.addCleanup(shutil.rmtree, self.temporary, True)
         self.local, self.mini = self.temporary / 'local', self.temporary / 'mini-home'
-        for path in ('tools/verify/mini.py', 'tools/verify/ledger.py', 'tools/verify/ledger-node.mjs', 'scripts/tron-node', '.node-version', 'config/ci-toolchain.env'):
+        for path in ('tools/verify/mini.py', 'tools/verify/ledger.py', 'tools/verify/ledger-node.mjs', 'tools/verify/ledger-host.mjs', 'scripts/tron-node', '.node-version', 'config/ci-toolchain.env'):
             (self.local / path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / path, self.local / path)
         self.write('tools/verify/gateway.py', LANE)

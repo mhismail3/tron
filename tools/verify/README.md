@@ -138,11 +138,12 @@ recorded, but it counts as neither red nor green in flake ranking. This is evide
 not a retry, timeout change or load-admission mechanism.
 
 Gateway Vitest, Python unittest, Node test and XCTest runners append one result per test identity,
-including failed and skipped cases. Vitest and XCTest durations come from their native reports;
-Node uses its native test-event stream while preserving TAP output; Python records unittest result
-callbacks, including subtest failures and unexpected successes. Each record contains the commit SHA,
-HEAD tree hash, duration, lane, actual host, CPU idle percentage and memory-free percentage from
-a lane-start host sample (not load average), its measurement time and completion time. The mini
+including failed and skipped cases. Vitest uses native result callbacks without replacing caller
+reporters or output paths; Node preserves TAP output; XCTest reads native result bundles; Python
+records unittest result callbacks, including subtest failures and unexpected successes. Each record
+contains the commit SHA, HEAD tree hash, duration, lane, actual host, CPU idle percentage and memory-free
+percentage (not load average), the host measurement time and completion time. Vitest and Node sample
+host metrics on native case completion; other runners retain the lane-start host sample. The mini
 spools records outside its checkout and returns them through its existing nonce-bound transport
 to the invoking Mac's ledger, preserving the mini's readings. No result creates no invented cases.
 XCTest uses the result bundle's test tree, with completed XCTest console cases retained when a
