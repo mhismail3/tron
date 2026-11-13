@@ -1189,6 +1189,30 @@ class IosLaneTests(VerifyCase):
         self.assertEqual([step["status"] for step in report["steps"] if step["name"] in ("ios build", "tests: ios")],
                          ["skipped", "skipped"])
 
+    def test_expensive_red_stops_later_stages_but_undriven_tests_do_not(self) -> None:
+        r = self.repo
+        calls = self.ios_fixture()
+        mac = "packages/mac-app/Tests"
+        r.write(f"{mac}/tests.module.json", json.dumps({"layer": "L5", "owns": ["**"]}))
+        r.write(f"{mac}/Integration/FixtureTests.swift", "struct FixtureTests {}\n")
+        r.write("tools/verify/mac.py", "from pathlib import Path\nPath('test-results/mac-ran').touch()\nprint('Test run with 1 test in 1 suite passed after 1.0 seconds.')\n")
+        r.write("mods/alpha/alpha.module.json", json.dumps({"layer": "L3", "owns": ["**"], "verify": [
+            "scripts/tron test ios run --only-testing TronMobileUITests/FixtureLockTests --only-testing TronMobileUITests/TronMacTerminalUITests",
+            "scripts/tron test mac"]}))
+        r.commit("selected expensive and undriven coverage")
+        passed = r.verify("--module", "repo/alpha")
+        self.assertEqual(passed.returncode, 1, passed.stdout + passed.stderr)
+        self.assertIn("selected tests were not run: ios-lanes", passed.stdout)
+        marker = r.path / "test-results/mac-ran"
+        self.assertTrue(marker.exists(), "an undriven group is not a red and must not suppress later stages")
+        marker.unlink()
+        calls.write_text("")
+        r.env["FIXTURE_IOS_FAIL"] = "TronMobileUITests/FixtureLockTests/testChat()"
+        failed = r.verify("--module", "repo/alpha")
+        self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
+        self.assertFalse(marker.exists(), "an expensive red must stop the later Mac stage")
+        self.assertEqual(next(step["status"] for step in r.report()["steps"] if step["name"] == "tests: mac"), "skipped")
+
     def test_ios_change_builds_once_checks_references_and_runs_only_the_ui_locks(self) -> None:
         r = self.repo
         calls = self.ios_fixture()
