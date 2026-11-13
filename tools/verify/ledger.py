@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 import platform
+import pwd
 import re
 import runpy
 import signal
@@ -28,8 +29,8 @@ NODE_CASE = '@@tron-test-case '
 
 def destination() -> Path:
     path = Path(os.environ.get('TRON_TEST_LEDGER', str(Path.home() / '.tron-maintenance/test-ledger/results.sqlite3'))).expanduser().resolve()
-    protected = Path.home() / '.tron'
-    if path == protected or protected in path.parents or any((parent / '.git').exists() for parent in path.parents):
+    protected = {(Path.home() / '.tron').resolve(), (Path(pwd.getpwuid(os.getuid()).pw_dir) / '.tron').resolve()}
+    if any(path == root or root in path.parents for root in protected) or any((parent / '.git').exists() for parent in path.parents):
         raise ValueError('test ledger must be outside repositories and ~/.tron')
     return path
 
@@ -173,7 +174,10 @@ class Capture:
 def python_main(arguments: list[str]) -> int:
     path = Path(arguments[0]).resolve()
     capture = Capture('python')
-    identity = path.relative_to(ROOT).as_posix()
+    external = not path.is_relative_to(ROOT)
+    identity = 'external/' + path.name if external else path.relative_to(ROOT).as_posix()
+    if external:
+        capture.context['dirty'] = 1
     runner_used = False
     begun = time.monotonic()
 

@@ -7,6 +7,7 @@ from pathlib import Path
 import platform
 import shutil
 import signal
+import sqlite3
 import subprocess
 import tempfile
 import time
@@ -117,6 +118,7 @@ class BatchTests(unittest.TestCase):
         self.root = Path(self.temporary.name) / 'repo'
         self.root.mkdir()
         self.env = {**os.environ, 'HOME': self.temporary.name, 'TMPDIR': self.temporary.name,
+                    'TRON_TEST_LEDGER': str(Path(self.temporary.name) / 'test-ledger/results.sqlite3'),
                     'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1',
                     'GIT_AUTHOR_NAME': 'Fixture', 'GIT_AUTHOR_EMAIL': 'fixture@example.invalid',
                     'GIT_COMMITTER_NAME': 'Fixture', 'GIT_COMMITTER_EMAIL': 'fixture@example.invalid'}
@@ -367,6 +369,9 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertEqual(json.loads((self.common / 'verify/green.json').read_text())['commit'], self.git('rev-parse', 'HEAD'))
         self.assertIn('no uncovered commits', self.run_batch().stdout)
         self.assertEqual(len(self.reports()), 1)
+        with sqlite3.connect(self.env['TRON_TEST_LEDGER']) as connection:
+            self.assertEqual(connection.execute('SELECT test_id, outcome FROM results').fetchall(),
+                             [('packages/push-relay/tests/worker.test.ts::relay case', 'passed')])
 
     def test_an_inherited_held_lock_marker_reaches_no_lane(self):
         self.land('good', 'yes')

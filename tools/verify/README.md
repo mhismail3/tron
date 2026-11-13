@@ -140,13 +140,16 @@ Set `TRON_TEST_CONTENDED=1` for a known contended run: its raw outcomes and host
 recorded, but it counts as neither red nor green in flake ranking. This is evidence annotation,
 not a retry, timeout change or load-admission mechanism. The caller annotates known contention from
 host evidence; neither concurrency nor a numeric host threshold automatically changes that flag.
+Verify and batch do not annotate their own overlapping lanes: without a caller-set flag, even
+same-Mac batch overlap remains unannotated in the ledger. Raw runner verdicts are unchanged.
 
 Gateway Vitest, Python unittest, Node test and XCTest runners append one result per test identity,
 including failed and skipped cases. Vitest uses native result callbacks without replacing caller
 reporters or output paths; Node preserves TAP output; XCTest reads native result bundles; Python
 records unittest result callbacks, including subtest failures and unexpected successes. Class/module
 fixture errors and skips have their own fixture identity; a standalone Python script has one file
-identity. A zero-test unittest run invents no case. Each record
+identity. A zero-test unittest run invents no case. External Python files remain runnable, but their
+records are marked dirty because the checkout's HEAD does not identify their source. Each record
 contains the commit SHA, HEAD tree hash, duration, lane, actual host, CPU idle percentage and memory-free
 percentage (not load average), the host measurement time and completion time. Vitest and Node sample
 host metrics on native case completion; other runners retain the lane-start host sample. Free memory
