@@ -48,7 +48,7 @@ export function homeMemoryTools(memoryTools: () => HomeMemoryToolAccess | undefi
       name: "zoom",
       annotations: { openWorldHint: false },
       label: "Zoom",
-      description: "Open the line id+n of the view into the two lines of n/2 under it; n = 1 gives the message whole.",
+      description: "Open the line id+n of the view into the two lines of n/2 under it; n = 1 gives the message whole. Nothing before this turn is replayed in full: zoom the lines you need. Say in your reply whatever you learned that will matter later: summaries keep little of tool output.",
       parameters: ZOOM_PARAMETERS,
       executionMode: "sequential",
       execute: async (_toolCallId, request: { id: number; n: number }, signal) => {

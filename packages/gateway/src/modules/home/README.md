@@ -1,5 +1,10 @@
 # gateway/home
 
+Profile reading/sorting mechanics belong to `home-profile-tool.ts`, memory expansion to
+`home-memory-tools.ts`, and task inspection/control mechanics to the task description in
+`tron-home-extension.ts`. Home's role text keeps purpose, authority and safety limits;
+these tool descriptions carry their parameters and operational steps.
+
 ## Purpose
 
 Tron Home: one opt-in persistent conversation per Gateway installation (`~/.tron` and
