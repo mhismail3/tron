@@ -143,8 +143,10 @@ cases; a file with no executed passes cannot hide beside a passing neighbour.
 
 `scripts/tron context audit` renders source-owned core, Home, worker-contract and direct
 child-handoff layers plus this repository's rules and Home profile index. Diagnostics name
-layer/source owners without printing their text. Sentence comparison is normalized and
-near-duplicate (Jaccard ≥0.8); budgets and byte/4 token estimates are review signals, not
+layer/source owners without printing their text. Sentence comparison joins prose hard wraps,
+including list-item continuations, but keeps paragraphs, separate list/index entries and
+Markdown heading, tag, table and fence lines apart. Normalized sentences of at least 60
+characters are near-duplicates at Jaccard ≥0.8; budgets and byte/4 token estimates are review signals, not
 provider counts. Source checks count each check-in/approval literal, including repeats within one owner,
 and locate the current kind-filtered Home declaration expression; they do not prove runtime wiring. `--input <json>` accepts `{layers, sources}` for isolated regression
 proofs; errors exit 2, diagnostics exit 1.
