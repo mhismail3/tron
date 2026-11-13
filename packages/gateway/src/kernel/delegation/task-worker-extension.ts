@@ -1,6 +1,5 @@
 import type { ExtensionFactory } from "../pi/coding-agent.js";
 
-const HOME_TASK_SUBAGENT_VERSION = "0.76.1-tron.14";
 export const HOME_TASK_PRODUCER_REFUSAL_REASON = "Home tasks can't schedule work, launch or attach a mission, subscribe to a wake, control a run the task did not start, or use an unverified producer; do the work directly or report back.";
 export const HOME_TASK_SEALED_REASON = "The task report is sealed, so this task has ended; no further work runs.";
 export type HomeTaskProducerRefusal = "subagent-mutation" | "unverified-provider" | "schedule" | "wake-subscription";
@@ -24,7 +23,7 @@ async function supervisorRefusal(input: Record<string, unknown>, ownsRequest: (r
 }
 
 export function createHomeTaskWorkerExtension(input: {
-  providerVersion: (toolName: string) => string | undefined;
+  isVerifiedProvider: (toolName: string) => boolean;
   refused: (reason: HomeTaskProducerRefusal) => void;
   reportSealed: () => boolean;
   ownsSubagentRun: (runId: string) => Promise<boolean>;
@@ -37,7 +36,7 @@ export function createHomeTaskWorkerExtension(input: {
       let reason: HomeTaskProducerRefusal | undefined;
       if (event.toolName === "schedule") reason = "schedule";
       else if (event.toolName === "subagent" || event.toolName === "subagent_supervisor" || event.toolName === "bg_wait") {
-        if (input.providerVersion(event.toolName) !== HOME_TASK_SUBAGENT_VERSION) reason = "unverified-provider";
+        if (!input.isVerifiedProvider(event.toolName)) reason = "unverified-provider";
         else if (event.toolName === "bg_wait") {
           if (event.input.nonBlocking === true) reason = "wake-subscription";
         } else if (event.toolName === "subagent_supervisor") reason = await supervisorRefusal(event.input, input.ownsSupervisorRequest);

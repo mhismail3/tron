@@ -93,7 +93,10 @@ dispatcher records pending intent, authorizes the snapshot, creates the worker t
   attention without stamping the task's root run marker. A notice or report reminder
   can continue the same invocation without conflicting with an earlier reply's
   completion. Terminal invocation cleanup or final task acknowledgement retires it.
-- Workers (not Home) load the managed subagent provider; the task extension admits launches,
+- Workers (not Home) load the managed subagent provider. Its canonical admission predicate
+  compares the pin with the reviewed Home-task version and verifies installed-tool identity.
+  A missing or unreviewed pin or unknown tool fails closed; the task guard consumes that
+  decision without a second version comparison. The task extension admits launches,
   reads, run controls and supervisor `reply` only for runs the task owns (by `id`/`runId`,
   never `dir`) and refuses missions, scheduling and non-blocking `bg_wait`, also in nested
   codemode. Trusted extensions are not a sandbox.

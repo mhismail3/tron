@@ -14,7 +14,7 @@ import type { SessionConfigurationBlocker } from "../../protocol/types.js";
 import { boundedSummaryText } from "../../util/bounded-text.js";
 import { catalogActivityTimestamp } from "../../sessions/catalog-metadata-index.js";
 import { historyPage, historyEntry, type HistoryCursor } from "../projection/history.js";
-import { delegatedProviderToolVersion } from "../delegation/delegated-provider.js";
+import { isVerifiedDelegatedProviderTool } from "../delegation/delegated-provider.js";
 import type { AgentMessage, ThinkingLevel } from "../pi/agent-core.js";
 import { SESSION_SETTINGS_ENTRY, changeSessionSetting, readSessionSettings, readSessionRequestPins, readSessionFixedSettings, readSessionToolChoice } from "../../sessions/session-settings.js";
 import { constants, existsSync, lstatSync, realpathSync, statSync } from "node:fs";
@@ -1210,7 +1210,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
             ...(modelRuntimePolicy?.extensions(sessionContext,
               managedSubagents?.requireChildExtensions.bind(managedSubagents)) ?? []),
             ...(this.ownedTurns.worker ? [{ name: "tron-home-task-worker", factory: createHomeTaskWorkerExtension({
-              providerVersion: toolName => delegatedProviderToolVersion(this.runtime?.session.resourceLoader.getExtensions().extensions ?? [], toolName),
+              isVerifiedProvider: toolName => isVerifiedDelegatedProviderTool(this.runtime?.session.resourceLoader.getExtensions().extensions ?? [], toolName),
               refused: reason => this.dependencies.homeTaskDiagnostic?.({ event: "home.task.producer-refused",
                 taskHash: createHash("sha256").update(this.ownedTurns.worker!.identity.taskId).digest("hex").slice(0, 16), reason }),
               reportSealed: () => this.ownedTurns.worker!.reportSealed,

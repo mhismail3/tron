@@ -130,9 +130,11 @@ export function delegatedProviderOrigin(extensions: readonly Extension[]): Exten
   return { source: DELEGATED_PROVIDER_SOURCE };
 }
 
-export function delegatedProviderToolVersion(extensions: readonly Extension[], toolName: string): string | undefined {
-  const extension = extensions.find(candidate => isManagedSubagentExtension(candidate) && candidate.tools.has(toolName));
-  return extension ? MANAGED_SUBAGENTS_VERSION : undefined;
+const REVIEWED_HOME_TASK_PROVIDER_VERSION = "0.76.1-tron.15";
+
+export function isVerifiedDelegatedProviderTool(extensions: readonly Extension[], toolName: string): boolean {
+  return MANAGED_SUBAGENTS_VERSION === REVIEWED_HOME_TASK_PROVIDER_VERSION
+    && extensions.some(candidate => isManagedSubagentExtension(candidate) && candidate.tools.has(toolName));
 }
 
 export function isInstalledDelegatedTool(
