@@ -412,7 +412,7 @@ load_state() {
   source "$state_file"
   [[ "${TRON_E2E_WORKSPACE:-}" == "$(realpath "$run_root/home/Workspace")" \
       && "${TRON_E2E_GATEWAY_HOME:-}" == "$(realpath "$run_root/home")" \
-      && "${TRON_E2E_TRON_HOME:-}" == "$run_root/tron" \
+      && "${TRON_E2E_TRON_HOME:-}" == "$(realpath "$run_root/home/.tron")" \
       && "${TRON_E2E_AGENT_DIR:-}" == "$run_root/agent" \
       && "${TRON_E2E_PI_VERSION:-}" == "$(manifest_pi_version)" \
       && "${TRON_E2E_PORT:-}" =~ ^[1-9][0-9]*$ \
@@ -462,8 +462,8 @@ detach() {
 start_fresh_fixture() {
   stop_gateway
   require_gateway_node
-  local tron_home="$run_root/tron" agent_dir="$run_root/agent" gateway_home="$run_root/home" workspace="$run_root/home/Workspace" port code pi_version
-  rm -rf "$tron_home" "$agent_dir" "$gateway_home"
+  local tron_home="$run_root/home/.tron" agent_dir="$run_root/agent" gateway_home="$run_root/home" workspace="$run_root/home/Workspace" port code pi_version
+  rm -rf "$agent_dir" "$gateway_home"
   mkdir -p "$tron_home/state" "$workspace"
   chmod 700 "$tron_home" "$tron_home/state" "$gateway_home" "$workspace"
   gateway_home="$(realpath "$gateway_home")"
@@ -1375,7 +1375,7 @@ case "$command" in
     ;;
   status) show_status ;;
   logs) touch "$log_file"; tail -f "$log_file" ;;
-  stop) stop_gateway; rm -rf "$run_root/tron" "$run_root/agent" "$run_root/home" "$run_root/payload" "$state_file" ;;
+  stop) stop_gateway; rm -rf "$run_root/agent" "$run_root/home" "$run_root/payload" "$state_file" ;;
   clean)
     stop_gateway
     python3 "$simulator_owner" delete "${simulator_args[@]}"

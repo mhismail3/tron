@@ -5097,7 +5097,7 @@ exec "$FAKE_SYSTEM_PYTHON" "$@"
         self.assertEqual(gateway.get("TRON_GATEWAY_LAN_ENDPOINT"), "off")
         self.assertEqual(gateway.get("TRON_MACHINE_GROUP_ID"), "tron-ios-e2e")
         self.assertRegex(gateway.get("TRON_GATEWAY_PORT", ""), r"^[1-9][0-9]*$")
-        self.assertEqual(os.path.realpath(gateway["TRON_DATA_DIR"]), os.path.realpath(fixture_root / "tron"))
+        self.assertEqual(os.path.realpath(gateway["TRON_DATA_DIR"]), os.path.realpath(fixture_root / "home/.tron"))
         self.assertEqual(os.path.realpath(gateway["HOME"]), os.path.realpath(fixture_root / "home"))
         self.assertEqual(os.path.realpath(gateway["PI_CODING_AGENT_DIR"]), os.path.realpath(fixture_root / "agent"))
         self.assertTrue(gateway["PI_SUBAGENTS_TEMP_ROOT"].startswith(str(gateway["HOME"])))
