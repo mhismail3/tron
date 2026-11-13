@@ -291,12 +291,12 @@ def rewrites(l, report, registry, reverse=False, layout=None):
                "source_sha256": file_sha(path)}, output
 
 
-def plan(l, report, registry):
+def plan(l, report, registry, owned=None):
     if not enabled(registry):
         return
     report["carried_lifecycle_records"] = carried_records(l, report, registry)
     report["rewrites"] = [record for record, _ in rewrites(l, report, registry) if record["before"] != record["after"]]
-    terminal_layout.plan(l, sys.modules[__name__], report, physical(l, report["home"], "mac-terminal", "state/mac-terminal"))
+    terminal_layout.plan(l, sys.modules[__name__], report, physical(l, report["home"], "mac-terminal", "state/mac-terminal"), owned)
     settings = Path(report["home"]) / "agent/settings.json"
     if l.observed(str(settings)) is not None:
         data, _ = read_record(l, settings)
@@ -434,7 +434,7 @@ def adopt_current(l, journal, report):
                 row["identity"] = l.metadata(current)
 
 
-def prepare(l, report, registry, journal, journal_path, reverse, locks, guards):
+def prepare(l, report, registry, journal, journal_path, reverse, locks, guards, owned):
     if not enabled(registry):
         return
     home = report["home"]
@@ -477,7 +477,7 @@ def prepare(l, report, registry, journal, journal_path, reverse, locks, guards):
         raise l.LayoutError("migration_direction_changed")
     reserve_journal(l, report, registry, journal, layout, reverse)
     l.write_journal(journal_path, journal)
-    terminal_layout.lock(l, sys.modules[__name__], report, locks, guards)
+    terminal_layout.lock(l, sys.modules[__name__], report, locks, guards, owned)
     directory = Path(home) / "state" if reverse else physical(l, home, "gateway", "state")
     if not reverse or l.observed(str(directory)) is not None:
         l.private_directory(directory)

@@ -40,7 +40,9 @@ JOURNAL_MAX_BYTES = 16 * 1024 * 1024
 
 
 class LayoutError(Exception):
-    pass
+    def __init__(self, reason, path=None):
+        super().__init__(reason)
+        self.path = path
 
 
 def load(root: Path = ROOT) -> dict:
@@ -525,7 +527,7 @@ def migration(home: str, root: Path = ROOT, owned=None) -> dict:
         report["source"] = source_identity(registry, root)
         os.close(open_home(report["home"]))
         lock = observed(os.path.join(report["home"], RUNTIME_LOCK))
-        if owned is None and lock is not None and time.time() - lock.st_mtime < RUNTIME_LOCK_STALE_SECONDS:
+        if lock is not None and time.time() - lock.st_mtime < RUNTIME_LOCK_STALE_SECONDS and (owned is None or (lock.st_dev, lock.st_ino) not in owned):
             report["blockers"].append("gateway_running")
         refusal = stopped_home.probe(sys.modules[__name__], report["home"], owned) if not report["blockers"] else None
         if refusal:
@@ -558,9 +560,9 @@ def migration(home: str, root: Path = ROOT, owned=None) -> dict:
         report["state"] = ("nothing_declared" if not report["moves"] else "conflict" if "conflict" in states
                            else "partly_applied" if {"pending", "done"} <= states else "not_started" if "pending" in states
                            else "applied" if "done" in states else "nothing_to_move")
-        runtime_layout.plan(sys.modules[__name__], report, registry)
+        runtime_layout.plan(sys.modules[__name__], report, registry, owned)
     except LayoutError as failure:
-        report["errors"].append({"path": REGISTRY, "reason": str(failure), "errno": None})
+        report["errors"].append({"path": failure.path or REGISTRY, "reason": str(failure), "errno": None})
     except OSError as failure:
         report["errors"].append({"path": ".", "reason": "home_unavailable", "errno": failure.errno})
     except ValueError:
@@ -662,7 +664,7 @@ def maintenance_lock(path: Path):
 
 
 @contextlib.contextmanager
-def runtime_lock(path: Path, locate=None, interval=10):
+def runtime_lock(path: Path, locate=None, interval=10, owned=None):
     private_directory(path.parent)
     previous = observed(str(path))
     if previous is not None:
@@ -676,6 +678,9 @@ def runtime_lock(path: Path, locate=None, interval=10):
     path.mkdir(mode=0o700)
     fd = open_home(str(path))
     identity = os.fstat(fd)
+    token = (identity.st_dev, identity.st_ino)
+    if owned is not None:
+        owned.add(token)
     stop = threading.Event()
     errors = []
 
@@ -700,6 +705,8 @@ def runtime_lock(path: Path, locate=None, interval=10):
         stop.set()
         heartbeat.join()
         os.close(fd)
+        if owned is not None:
+            owned.discard(token)
         current_path = locate() if locate else path
         current = observed(str(current_path))
         if current is not None and (current.st_dev, current.st_ino) == (identity.st_dev, identity.st_ino):
@@ -714,7 +721,7 @@ def move_position(row: dict) -> str:
     if (before is not None and after is not None or current is None
             or (current.st_dev, current.st_ino) != (row["identity"]["device"], row["identity"]["inode"])
             or linked_component(row["source"], "/") or linked_component(row["destination"], "/")):
-        raise LayoutError("move_identity_changed")
+        raise LayoutError("move_identity_changed", row["source"])
     return "pending" if before is not None else "done"
 
 
@@ -797,9 +804,10 @@ def execute_migration(home: str, rollback: bool, root: Path = ROOT) -> tuple[int
             if rollback and not any(row["home"] == report["home"] for row in journal["moves"]) and report["home"] not in journal["layouts"]:
                 report["state"] = "nothing_to_rollback"
                 return 0, report
+            owned = set()
             guards = [locks.enter_context(maintenance_lock(journal_path.parent)),
-                      *(locks.enter_context(runtime_lock(lock)) for lock in lock_paths)]
-            current = migration(home, root, set())
+                      *(locks.enter_context(runtime_lock(lock, owned=owned)) for lock in lock_paths)]
+            current = migration(home, root, owned)
             if current["errors"] or current["blockers"] or any(row["refusals"] for row in current["moves"]):
                 report["blockers"].append("plan_changed")
                 return 1, report
@@ -815,7 +823,8 @@ def execute_migration(home: str, rollback: bool, root: Path = ROOT) -> tuple[int
             if journal is None:
                 journal = {"registry": report["source"]["manifest_sha256"], "moves": [], "layouts": {}}
             registry = load(root)
-            owned = locks.enter_context(stopped_home.claim(sys.modules[__name__], report["home"])) if runtime_layout.enabled(registry) else set()
+            if runtime_layout.enabled(registry):
+                owned.update(locks.enter_context(stopped_home.claim(sys.modules[__name__], report["home"])))
             runtime_layout.adopt_current(sys.modules[__name__], journal, report)
             if not rollback:
                 claims = {row["destination"] for row in journal["moves"]}
@@ -824,7 +833,7 @@ def execute_migration(home: str, rollback: bool, root: Path = ROOT) -> tuple[int
                         journal["moves"].append({**row, "home": report["home"]})
                         claims.add(row["destination"])
             private_directory(journal_path.parent)
-            runtime_layout.prepare(sys.modules[__name__], current, registry, journal, journal_path, rollback, locks, guards)
+            runtime_layout.prepare(sys.modules[__name__], current, registry, journal, journal_path, rollback, locks, guards, owned)
             moves = [row for row in journal["moves"] if row["home"] == report["home"]]
             if rollback:
                 moves.reverse()
@@ -861,14 +870,14 @@ def execute_migration(home: str, rollback: bool, root: Path = ROOT) -> tuple[int
             runtime_layout.finish(sys.modules[__name__], report, registry, journal, journal_path, rollback)
             completed = migration(home, root, owned)
             if completed["errors"] or completed["blockers"] or any(row["refusals"] for row in completed["moves"]):
-                report["completion"] = {"errors": completed["errors"], "refusals": [{"from": row["from"], "reasons": row["refusals"]} for row in completed["moves"] if row["refusals"]]}
+                report["completion"] = {"errors": completed["errors"], "blockers": completed["blockers"], "stopped_proof": completed["stopped_proof"], "refusals": [{"from": row["from"], "reasons": row["refusals"]} for row in completed["moves"] if row["refusals"]]}
                 raise LayoutError("plan_changed")
             if not rollback and any(row["state"] == "pending" for row in completed["moves"]):
                 raise LayoutError("plan_changed")
             report["state"] = "rolled_back" if rollback else "applied"
             return 0, report
         except (OSError, ValueError, KeyError, TypeError, LayoutError) as failure:
-            report["errors"].append({"path": str(journal_path), "reason": str(failure) if isinstance(failure, LayoutError) else type(failure).__name__,
+            report["errors"].append({"path": (failure.path or str(journal_path)) if isinstance(failure, LayoutError) else str(journal_path), "reason": str(failure) if isinstance(failure, LayoutError) else type(failure).__name__,
                                      "errno": failure.errno if isinstance(failure, OSError) else None})
             return 1, report
 

@@ -674,7 +674,7 @@ class MigrateTests(unittest.TestCase):
             f"layout.main(['migrate', '--home', {str(self.home)!r}, '--apply'])\n")
         result = subprocess.run(["python3", "-B", str(runner)], env={**os.environ, "HOME": str(self.user)}, capture_output=True)
         self.assertEqual(result.returncode, 86, result.stderr)
-        for lock in (self.home / "agent/.tron-gateway-runtime.lock.lock", debug / "agent/.tron-gateway-runtime.lock.lock"):
+        for lock in (self.home / "agent/.tron-gateway-runtime.lock.lock",):
             lock.rmdir()
         for mode in ("--dry-run", "--apply"):
             before = snapshot(self.user)
@@ -820,7 +820,7 @@ class MigrateTests(unittest.TestCase):
                 identities = {name: (home / name).stat().st_ino for name in ("backup-a", "backup-b")}
                 result = subprocess.run(["python3", "-B", str(runner)], env={**os.environ, "HOME": str(self.user)}, capture_output=True)
                 self.assertEqual(result.returncode, 86, result.stderr)
-                for lock in (home / "agent/.tron-gateway-runtime.lock.lock", self.user / ".tron-dev/agent/.tron-gateway-runtime.lock.lock"):
+                for lock in (home / "agent/.tron-gateway-runtime.lock.lock",):
                     self.assertTrue(lock.is_dir())
                     lock.rmdir()
                 code, report = self.migrate("--apply", home=home)
@@ -1330,7 +1330,7 @@ class RuntimeMigrationTests(unittest.TestCase):
                 "state/home": entry(container=True), "state/home/workspace": entry(subtree=True),
                 "state/home/tasks": entry(subtree=True), "state/uploads": entry(subtree=True),
                 "state/settings": entry(container=True), "state/settings/observed.json": entry(),
-                "state/subagents": entry(subtree=True), "state/mac-terminal": entry(subtree=True),
+                "state/subagents": entry(subtree=True), "state/mac": entry(subtree=True), "state/mac-terminal": entry(subtree=True),
                 "state/mac-terminal.lock": entry(**{"class": "scratch"}, container=True),
                 "mac-terminal.lock": entry(**{"class": "scratch"}, container=True),
                 "cache": entry(**{"class": "rebuild"}, container=True), "cache/network.json": entry(),
