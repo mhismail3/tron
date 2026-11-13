@@ -36,6 +36,7 @@ class GatewayTestHomeIsolation(unittest.TestCase):
         scratch.mkdir(parents=True)
         node = subprocess.check_output([str(ROOT / "scripts/tron-node")], text=True).strip()
         env = {**os.environ, "HOME": str(caller_home), "TMPDIR": str(scratch),
+               'TRON_TEST_LEDGER': str(caller_home / '.tron-maintenance/test-ledger/results.sqlite3'),
                "TRON_NODE_BIN": node, "ISOLATION_CALLER_HOME": str(caller_home),
                "ISOLATION_CALLER_TMPDIR": str(scratch)}
         lock = GATEWAY.hold_full_gateway_lock()

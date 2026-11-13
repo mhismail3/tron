@@ -672,6 +672,14 @@ class LedgerTests(VerifyCase):
         self.assertEqual({row[1] for row in rows}, {'passed', 'failed', 'skipped'})
         self.assertTrue(all(row[0].startswith('mods/alpha/ledger.test.mjs::') and row[2] >= 0 for row in rows))
 
+    def test_batch_fixture_keeps_synthetic_cases_out_of_the_callers_ledger(self) -> None:
+        inherited = Path(self.temp.name) / 'parent-ledger.sqlite3'
+        result = subprocess.run([sys.executable, str(ROOT / 'tools/verify/tests/test-verify-batch.py'),
+                                 'BatchTests.test_green_exact_range_repeat_and_read_only_plan'], cwd=ROOT,
+                                env={**self.repo.env, 'TRON_TEST_LEDGER': str(inherited)}, capture_output=True, text=True, timeout=90)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(inherited.exists(), 'synthetic batch cases escaped into the parent recording destination')
+
     def test_public_tooling_records_fixture_and_file_failures_without_inventing_empty_cases(self) -> None:
         r = self.repo
         sources = {
@@ -689,9 +697,16 @@ class LedgerTests(VerifyCase):
             self.assertEqual(result.returncode, code, result.stdout + result.stderr)
             if name == 'failed':
                 self.assertIn('file failed', result.stderr)
+        external = Path(self.temp.name) / 'external-case.py'
+        external.write_text('print("external file passed")\n')
+        result = subprocess.run([str(r.path / 'scripts/tron'), 'test', 'tooling', str(external)], cwd=r.path,
+                                env=r.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         with sqlite3.connect(Path(r.env['HOME']) / '.tron-maintenance/test-ledger/results.sqlite3') as connection:
+            self.assertEqual(connection.execute('SELECT test_id, dirty FROM results WHERE test_id LIKE \'external/%\'').fetchall(),
+                             [('external/external-case.py', 1)])
             rows = connection.execute('SELECT test_id, outcome FROM results ORDER BY test_id').fetchall()
-        self.assertEqual(rows, [('mods/alpha/test-failed.py', 'failed'),
+        self.assertEqual(rows, [('external/external-case.py', 'passed'), ('mods/alpha/test-failed.py', 'failed'),
                                 ('mods/alpha/test-fixtures.py::setUpClass (Broken)', 'failed'),
                                 ('mods/alpha/test-fixtures.py::setUpClass (Skipped)', 'skipped'),
                                 ('mods/alpha/test-passed.py', 'passed')])
