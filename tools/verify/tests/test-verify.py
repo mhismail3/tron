@@ -933,7 +933,7 @@ IOS_TEST_STUB = r"""#!/bin/bash
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 echo "$*" >>"$FIXTURE_IOS_CALLS"
-if [[ "${FIXTURE_IOS_BUSY:-}" == "$1" && "$*" == *"${FIXTURE_IOS_BUSY_IN:-}"* ]]; then echo 'host slot wait expired; deferred'; exit 73; fi
+if [[ "${FIXTURE_IOS_BUSY:-}" == "$1" && "$*" == *"${FIXTURE_IOS_BUSY_IN:-}"* ]]; then echo 'iOS lane acquisition refused'; exit 73; fi
 # A run's wall-clock span, for proving that shards on different lanes overlap.
 if [[ "$1" == run && -n "${FIXTURE_IOS_PIDS:-}" ]]; then echo "$$" >>"$FIXTURE_IOS_PIDS"; fi
 if [[ "$1" == run && -n "${FIXTURE_IOS_SECONDS:-}" ]]; then
@@ -975,7 +975,7 @@ fault = os.environ.get("FIXTURE_PROFILE_FAULT", "")
 if args[:1] != ["ios"]:
     sys.exit(2)
 if fault == "busy":
-    print("host slot wait expired; deferred")
+    print("iOS lane acquisition refused")
     sys.exit(73)
 tests = {}
 controls = set()
@@ -1186,8 +1186,8 @@ class IosLaneTests(VerifyCase):
                               steps["tests: ios"]["tests"]), ("ok", "ok", "ok", 1))
         self.assertEqual(digests[0], digests[1])
         self.assertIn("already stamped for this commit", steps["ios build"]["detail"])
-        self.assertEqual(calls.read_text().splitlines(), ["build --host-slot-wait-seconds 30", "run --host-slot-wait-seconds 30 --only-testing TronMobileUITests/FixtureLockTests",
-                                                          "run --host-slot-wait-seconds 30 --only-testing TronMobileUITests/FixtureLockTests"])
+        self.assertEqual(calls.read_text().splitlines(), ["build", "run --only-testing TronMobileUITests/FixtureLockTests",
+                                                          "run --only-testing TronMobileUITests/FixtureLockTests"])
 
         failed = subprocess.run([str(r.path / "scripts/tron"), "verify", "--base", "base", "--changed"], cwd=r.path,
                                 env={**r.env, "FIXTURE_IOS_FAIL": "TronMobileUITests/FixtureLockTests/testChat()"},
@@ -1204,14 +1204,14 @@ class IosLaneTests(VerifyCase):
                                 env={**r.env, "FIXTURE_IOS_POLICY_EXIT": "1"}, capture_output=True, text=True)
         self.assertEqual(policy.returncode, 1, policy.stdout)
         self.assertIn("verify: FAILED — ios source policy failed", policy.stdout)
-        self.assertEqual(calls.read_text().splitlines(), ["run --host-slot-wait-seconds 30 --only-testing TronMobileUITests/FixtureLockTests"],
+        self.assertEqual(calls.read_text().splitlines(), ["run --only-testing TronMobileUITests/FixtureLockTests"],
                          "a static red still runs the selected tests, so one run names every red")
         calls.write_text("")
         module = r.verify("--module", "ios-app/ui-tests")
         self.assertEqual(module.returncode, 1, module.stdout)
         self.assertIn("selected tests were not run: ios-lanes", module.stdout)
         self.assertEqual(calls.read_text().splitlines(), [
-            "run --host-slot-wait-seconds 30 --only-testing TronMobileUITests/FixtureJourneyUITests --only-testing TronMobileUITests/FixtureLockTests"])
+            "run --only-testing TronMobileUITests/FixtureJourneyUITests --only-testing TronMobileUITests/FixtureLockTests"])
 
     def test_source_module_baseline_runs_the_ui_locks_that_launch_it_not_its_consumers(self) -> None:
         r = self.repo
@@ -1238,7 +1238,7 @@ class IosLaneTests(VerifyCase):
         self.assertEqual(report["selection"]["tests"], [f"{ios}/UITests/Locks/FixtureLockTests.swift"])
         self.assertEqual(report["passingTests"], 1)
         self.assertEqual(calls.read_text().splitlines(), [
-            "build --host-slot-wait-seconds 30", "run --host-slot-wait-seconds 30 --only-testing TronMobileUITests/FixtureLockTests"])
+            "build", "run --only-testing TronMobileUITests/FixtureLockTests"])
         self.assertNotIn("widened to every lock", baseline.stdout)
         recording = r.verify("--update-locks", "ios-app/state", "--plan")
         self.assertEqual(recording.returncode, 0, recording.stderr)
@@ -1327,7 +1327,7 @@ class IosLaneTests(VerifyCase):
         all_journeys = ("run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testAppsLight"
                         " --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsDark"
                         " --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testChatDark"
-                        " --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testPairLight lanes=3")
+                        " --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testPairLight lanes=1")
         extension = extension.replace("testAppsLight() { reveal() }", "testAppsLight() { reveal(); testPairLight() }")
         r.write(f"{journeys}/RealGatewayBuildsUITests.swift", extension)
         r.commit("another extension reuses a journey as executable code")
@@ -1345,7 +1345,7 @@ class IosLaneTests(VerifyCase):
             calls.write_text("")
             serial = r.verify("--changed", "--ios-jobs", str(jobs))
             self.assertEqual(serial.returncode, 0, serial.stdout + serial.stderr)
-            self.assertEqual(calls.read_text().splitlines(), [all_journeys.replace("lanes=3", f"lanes={jobs}")])
+            self.assertEqual(calls.read_text().splitlines(), [all_journeys.replace("lanes=1", f"lanes={jobs}")])
             self.assertEqual(r.report()["selection"], selected)
             self.assertEqual(r.report()["passingTests"], 4)
 
@@ -1512,7 +1512,7 @@ class IosLaneTests(VerifyCase):
         self.assertEqual(module.returncode, 1, module.stdout + module.stderr)
         self.assertIn("ios-lanes: 2 file(s)", module.stdout)
         self.assertEqual(calls.read_text().splitlines()[-1],
-                         "run --host-slot-wait-seconds 30 --only-testing TronMobileUITests/FixtureJourneyUITests --only-testing TronMobileUITests/FixtureLockTests")
+                         "run --only-testing TronMobileUITests/FixtureJourneyUITests --only-testing TronMobileUITests/FixtureLockTests")
         r.write(f"{ios}/FixtureJourneyUITests.swift", "class FixtureJourneyUITests {\n    func testPhone() {}\n}\n")
         r.write("packages/ios-app/Sources/UI/Chat/ChatView.swift", "struct ChatView {}\n"
                 "enum FixtureIdiom: Sendable { case pad }\n"
@@ -1671,7 +1671,7 @@ class IosLaneTests(VerifyCase):
         self.assertEqual((step["status"], step["tests"]), ("ok", 2))
         self.assertEqual(report["verdict"], "passed")
         self.assertEqual(calls.read_text().splitlines(), [
-            "ios --iterations 1 --host-slot-wait-seconds 30 --scenario idle-dashboard --scenario summary-storm"])
+            "ios --iterations 1 --scenario idle-dashboard --scenario summary-storm"])
         self.assertFalse(any(name.startswith("ios-lanes") for name in report["groups"]))
 
         for fault in ("missing", "fail", "stale", "wrong-test", "dirty", "duplicate", "no-workload", "no-render", "summary-failed"):
@@ -1699,10 +1699,10 @@ class IosLaneTests(VerifyCase):
         self.assertIn("ios build failed", broken.stdout)
         self.assertEqual(calls.read_text(), "", "a failed current build never invokes the profiler")
         r.env["FIXTURE_IOS_BUILD_EXIT"] = "73"
-        deferred = r.verify("--changed")
-        self.assertEqual(deferred.returncode, 1, deferred.stdout)
-        self.assertEqual(r.report()["verdict"], "incomplete")
-        self.assertEqual(calls.read_text(), "", "a deferred build never invokes the profiler")
+        refused = r.verify("--changed")
+        self.assertEqual(refused.returncode, 1, refused.stdout)
+        self.assertEqual(r.report()["verdict"], "failed")
+        self.assertEqual(calls.read_text(), "", "a refused current build never invokes the profiler")
         del r.env["FIXTURE_IOS_BUILD_EXIT"]
 
         r.git("branch", "-f", "base")
@@ -1820,9 +1820,9 @@ class IosLaneTests(VerifyCase):
     def test_a_class_larger_than_one_shard_runs_every_method_in_bounded_processes_on_concurrent_lanes(self) -> None:
         """#2173: a selected class runs as method shards, each its own runner process under the
         unchanged deadline, packed by the longest time this Mac's runner logs record for each method
-        (unmeasured methods three to a process), on one lane per host slot at once. A red shard does
-        not stop the rest; a lane refused a slot beside the run's others requeues its shard, only a
-        refusal with nothing else in flight defers it and the rest, and SIGTERM stops every lane."""
+        (unmeasured methods three to a process). One lane is the default; explicit parallelism
+        preserves selection and deadlines. A red shard does not stop the rest, an unexpected slot
+        refusal fails, and SIGTERM stops every lane."""
         r = self.repo
         calls = self.ios_fixture()
         ios = "packages/ios-app/UITests"
@@ -1850,20 +1850,24 @@ class IosLaneTests(VerifyCase):
             plan = json.loads(planned.stdout[planned.stdout.index("{"):])
             return [" ".join(c["command"][2:]) for c in plan["commands"] if c["name"].startswith("tests: ios") and "command" in c]
 
-        self.assertEqual(planned_shards(), [f"--host-slot-wait-seconds 30 {selectors(ordered[:3])}",
-                                            f"--host-slot-wait-seconds 30 {selectors(ordered[3:])}",
-                                            f"--host-slot-wait-seconds 30 --only-testing {lock}"])
+        planned = r.verify("--module", "ios-app/ui-tests", "--plan")
+        plan = json.loads(planned.stdout[planned.stdout.index("{"):])
+        self.assertEqual(plan["iosJobs"], 1)
+        self.assertEqual(len(plan["iosLanes"]), 2)
+        self.assertEqual(planned_shards(), [f"{selectors(ordered[:3])}",
+                                            f"{selectors(ordered[3:])}",
+                                            f"--only-testing {lock}"])
 
         spans = Path(self.temp.name) / "spans.txt"
         red = ordered[0]
         r.env.update(FIXTURE_IOS_SECONDS="2", FIXTURE_IOS_SPANS=str(spans),
                      FIXTURE_IOS_FAIL=f"{owner}/{red}()", FIXTURE_IOS_FAIL_IN=f"{owner}/{red} ")
-        result = r.verify("--module", "ios-app/ui-tests", "--skip", "mac")
+        result = r.verify("--module", "ios-app/ui-tests", "--skip", "mac", "--ios-jobs", "3")
         runs = [line for line in calls.read_text().splitlines() if line.startswith("run ")]
         self.assertEqual(sorted(runs), sorted([
-            f"run --host-slot-wait-seconds 30 {selectors(ordered[:3])}",
-            f"run --lane {lane('iphone2')} --host-slot-wait-seconds 0 --only-testing {lock}",
-            f"run --lane {lane('iphone3')} --host-slot-wait-seconds 0 {selectors(ordered[3:])}"]), result.stdout)
+            f"run {selectors(ordered[:3])}",
+            f"run --lane {lane('iphone2')} --only-testing {lock}",
+            f"run --lane {lane('iphone3')} {selectors(ordered[3:])}"]), result.stdout)
         bounds = [line.split()[:2] for line in spans.read_text().splitlines()]
         self.assertLess(max(float(begun) for begun, _ in bounds), min(float(ended) for _, ended in bounds),
                         f"the three shards must overlap: {bounds}")
@@ -1877,15 +1881,17 @@ class IosLaneTests(VerifyCase):
         r.env.pop("FIXTURE_IOS_FAIL"); r.env.pop("FIXTURE_IOS_FAIL_IN")
 
         selected = r.report()["selection"]
-        for jobs in (1, 2, 3):
+        for jobs in (None, 1, 2, 3):
             calls.write_text("")
             spans.write_text("")
-            planned = r.verify("--module", "ios-app/ui-tests", "--plan", "--ios-jobs", str(jobs))
+            job_args = ["--ios-jobs", str(jobs)] if jobs is not None else []
+            jobs = jobs or 1
+            planned = r.verify("--module", "ios-app/ui-tests", "--plan", *job_args)
             self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
             plan = json.loads(planned.stdout[planned.stdout.index("{"):])
             self.assertEqual(plan["iosJobs"], jobs)
             self.assertEqual(len(plan["iosLanes"]), jobs + 1)
-            executed = r.verify("--module", "ios-app/ui-tests", "--skip", "mac", "--ios-jobs", str(jobs))
+            executed = r.verify("--module", "ios-app/ui-tests", "--skip", "mac", *job_args)
             self.assertEqual(executed.returncode, 0, executed.stdout + executed.stderr)
             report = r.report()
             self.assertEqual(report["selection"], selected)
@@ -1908,20 +1914,13 @@ class IosLaneTests(VerifyCase):
 
         calls.write_text("")
         r.env.update(FIXTURE_IOS_BUSY="run", FIXTURE_IOS_BUSY_IN=lane("iphone2"))
-        requeued = r.verify("--module", "ios-app/ui-tests", "--skip", "mac")
-        self.assertEqual(requeued.returncode, 0, requeued.stdout + requeued.stderr)
-        self.assertIn("requeued", requeued.stdout)
-        self.assertEqual(r.report()["verdict"], "passed")
-        self.assertEqual(r.report()["passingTests"], len(methods) + 1)
+        refused = r.verify("--module", "ios-app/ui-tests", "--skip", "mac", "--ios-jobs", "3")
+        self.assertEqual(refused.returncode, 1, refused.stdout + refused.stderr)
+        self.assertEqual(r.report()["verdict"], "failed")
+        self.assertEqual(r.report()["passingTests"], len(methods))
         locks = [line for line in calls.read_text().splitlines() if line.endswith(f"--only-testing {lock}")]
-        self.assertIn(f"--lane {lane('iphone2')} --host-slot-wait-seconds 0", locks[0], calls.read_text())
-        self.assertNotIn(lane("iphone2"), locks[-1], calls.read_text())
-
-        r.env.update(FIXTURE_IOS_BUSY_IN=f"{owner}/{ordered[3]} ")
-        deferred = r.verify("--module", "ios-app/ui-tests", "--skip", "mac")
-        steps = {step["name"]: step["status"] for step in r.report()["steps"]}
-        self.assertEqual([steps[f"tests: ios {index}/3"] for index in (1, 2, 3)], ["ok", "deferred", "ok"], deferred.stdout)
-        self.assertEqual(r.report()["verdict"], "deferred", deferred.stdout)
+        self.assertEqual(locks, [f"run --lane {lane('iphone2')} --only-testing {lock}"])
+        self.assertNotIn("requeued", refused.stdout)
 
         results = Path(self.temp.name) / "ios-runs"
         case = lambda name, outcome, seconds: f"Test Case '-[TronMobileUITests.FixtureJourneyUITests {name}]' {outcome} ({seconds} seconds).\n"  # noqa: E731
@@ -1930,17 +1929,17 @@ class IosLaneTests(VerifyCase):
                                                  + case(ordered[2], "passed", shipped.IOS_SHARD_SECONDS + 100))
         (results / "b-run.2").mkdir()
         (results / "b-run.2/test.log").write_text(case(ordered[1], "failed", shipped.IOS_SHARD_SECONDS) + case(ordered[3], "passed", "0.5"))
-        self.assertEqual(planned_shards(), [f"--host-slot-wait-seconds 30 {selectors(ordered[:1])}",
-                                            f"--host-slot-wait-seconds 30 {selectors(ordered[1:2])}",
-                                            f"--host-slot-wait-seconds 30 {selectors(ordered[2:3])}",
-                                            f"--host-slot-wait-seconds 30 {selectors(ordered[3:])}",
-                                            f"--host-slot-wait-seconds 30 --only-testing {lock}"])
+        self.assertEqual(planned_shards(), [f"{selectors(ordered[:1])}",
+                                            f"{selectors(ordered[1:2])}",
+                                            f"{selectors(ordered[2:3])}",
+                                            f"{selectors(ordered[3:])}",
+                                            f"--only-testing {lock}"])
         calls.write_text("")
         r.env.update(FIXTURE_IOS_BUSY_IN="")
         refused = r.verify("--module", "ios-app/ui-tests", "--skip", "mac")
-        self.assertEqual(refused.returncode, 0, refused.stdout + refused.stderr)
-        self.assertEqual(r.report()["verdict"], "deferred", refused.stdout)
-        self.assertEqual({step["status"] for step in r.report()["steps"] if step["name"].startswith("tests: ios")}, {"deferred"})
+        self.assertEqual(refused.returncode, 1, refused.stdout + refused.stderr)
+        self.assertEqual(r.report()["verdict"], "failed", refused.stdout)
+        self.assertEqual({step["status"] for step in r.report()["steps"] if step["name"].startswith("tests: ios")}, {"failed"})
         self.assertEqual(len([step for step in r.report()["steps"] if step["name"].startswith("tests: ios")]), 5)
         r.env.pop("FIXTURE_IOS_BUSY"); r.env.pop("FIXTURE_IOS_BUSY_IN")
         for item in results.iterdir():
@@ -1950,7 +1949,7 @@ class IosLaneTests(VerifyCase):
         calls.write_text("")
         r.env.update(FIXTURE_IOS_SECONDS="120", FIXTURE_IOS_PIDS=str(pids))
         process = subprocess.Popen([str(r.path / "scripts/tron"), "verify", "--base", "base", "--module", "ios-app/ui-tests",
-                                    "--skip", "mac"], cwd=r.path, env=r.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                                    "--skip", "mac", "--ios-jobs", "3"], cwd=r.path, env=r.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         try:
             deadline = time.monotonic() + 60
             while (not pids.exists() or len(pids.read_text().split()) < 3) and time.monotonic() < deadline:

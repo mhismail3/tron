@@ -90,10 +90,10 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 - The Mac is shared. Inspect `scripts/tron-ios-test status --all`; reuse resources and
   stop/remove only what you start, on every exit. Isolate suite `HOME`/`TMPDIR`; tooling
   owns lanes (never hand-erase). Never `git stash`. Prefer commands that exit; long workflows show live progress, fail early and loudly, and keep partial results. [check: review only]
-- Up to 3 simulator-heavy jobs run at once across all workers (one/worktree), enforced by `scripts/ios-test-lock.py --host-slot` (a 4th waits; `scripts/tron-ios-test slots`); never hand-serialize Xcode/simulator work below the cap.
+- Home plans heavy work across workers; follow your brief's "Heavy work" paragraph and the global Shared machines rules. `verify` runs one simulator lane unless the brief says `--ios-jobs 2|3`. Host slots (`scripts/ios-test-lock.py --host-slot`; `scripts/tron-ios-test slots`) are a ceiling of 3 simulator jobs on this Mac, not a number to fill; a job that needs a slot waits for it.
 - No broad kills (`pkill node`, `simctl shutdown all`). Stop only what you started; ask
   when unsure; never touch another session's process, lane or lease, nor Stable or its
-  children. Reproduce load in-process; if slow, check swap and report foreign hogs.
+  children. Reproduce load in-process; if the Mac is slow, take a host reading (`host-resources` skill) and report what is using it.
 
 ## Validation and landing
 [Principles](docs/PRINCIPLES.md) own delivery policy: a commit is gated by the local tests of the modules

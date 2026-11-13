@@ -56,7 +56,7 @@ def lanes(root: Path, base: str) -> list[dict]:
     """Compose existing owners, not a second test catalog."""
     apple = apple_lane(root)
     lane_only = {key: apple[key] for key in ('TRON_IOS_TEST_LANE', 'TRON_IOS_TEST_LANE_REPOSITORY')}
-    result = [{'name': 'full verify', 'chain': 'node', 'command': ['scripts/tron', 'verify', '--all', '--base', base, '--gateway-host', 'mini']}]
+    result = [{'name': 'full verify', 'chain': 'node', 'command': ['scripts/tron', 'verify', '--all', '--base', base, '--ios-jobs', str(UI_JOURNEY_LANES), '--gateway-host', 'mini']}]
     for name, config in [('Gateway default', []), ('Gateway nested', ['--config', 'vitest.nested.config.ts'])]:
         result.append({'name': name, 'chain': 'node', 'command': ['python3', 'tools/verify/mini.py', *config],
                        'vitest': True, 'requires': 'packages/gateway/package-lock.json'})
@@ -272,12 +272,11 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
             report = json.loads(source.read_text())
             verdict = report.get('verdict')
             result['verifierVerdict'] = verdict
-            if report.get('commit') != sha or verdict not in ('passed', 'deferred', 'failed'):
+            if report.get('commit') != sha or verdict not in ('passed', 'failed'):
                 result.update(status='uncovered', reason='incomplete or wrong-SHA verifier report')
             if (verdict == 'passed' and not report.get('passingTests')):
                 result.update(status='uncovered', reason='empty verifier test evidence')
-            if (verdict == 'deferred' or report.get('skipped') or report.get('selection', {}).get('deferredTests')
-                    or any(step.get('status') == 'deferred' for step in report.get('steps', []))):
+            if report.get('skipped') or report.get('selection', {}).get('deferredTests'):
                 result.update(status='uncovered', reason='verifier deferred/skipped required work')
             if missing := [step for step in report.get('steps', []) if step.get('status') == 'no result']:
                 result.update(exit=None, status='uncovered', noResult=True,
