@@ -160,8 +160,11 @@ Unreadable ownership refuses as `stopped_proof_unavailable`; a live owner refuse
 `gateway_running`, `mac_wrapper_running` or `home_process_present`. These probes are
 target-scoped, not a production-global process-name grep: a private copy may be
 rehearsed while another home is running. Apply reclaims only stale runtime leases
-after the stopped proof, holds Gateway leases and Mac wrapper kernel locks through
-the operation, and checks ownership again before publishing ready. A kernel lock on the private
+after the stopped proof, holds Gateway leases and existing Mac wrapper kernel locks
+through the operation, and checks ownership again before publishing ready. Wrapper
+locks follow the declared `internal/mac` → `state/mac` move; admission never creates
+wrapper data. Held lifecycle directory leases are recognized by their device/inode,
+not by ignoring all blockers. A kernel lock on the private
 journal directory serializes maintenance across homes without claiming a sibling
 Gateway lease. A new standalone writer must
 not be launched during the offline window.

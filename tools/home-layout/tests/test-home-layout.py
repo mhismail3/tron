@@ -1152,7 +1152,8 @@ class RuntimeMigrationTests(unittest.TestCase):
             fixture = Fixture(base)
             fixture.write(REGISTRY, (ROOT / REGISTRY).read_text())
             home = base / "user/.tron"
-            lock = home / "gateway/mac/.mac-wrapper.com.tron.mac.lock"
+            (home / "gateway/home/workspace").mkdir(parents=True)
+            lock = home / "internal/mac/.mac-wrapper.com.tron.mac.lock"
             lock.parent.mkdir(parents=True)
             lock.write_text("stale owner text is not authority\n")
             lock.chmod(0o600)
@@ -1170,6 +1171,13 @@ class RuntimeMigrationTests(unittest.TestCase):
                     self.assertEqual(owner.returncode, 0)
             result = fixture.run("migrate", "--home", str(home), "--dry-run", env={"HOME": str(home.parent)})
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            identity = lock.stat().st_ino
+            for mode in ("--apply", "--rollback"):
+                result = fixture.run("migrate", "--home", str(home), mode, env={"HOME": str(home.parent)})
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                current = home / "state/mac" / lock.name if mode == "--apply" else lock
+                self.assertEqual(current.stat().st_ino, identity)
+                self.assertEqual(current.read_text(), "stale owner text is not authority\n")
 
     def test_stopped_home_carries_interrupted_malformed_and_opaque_statuses_both_ways(self) -> None:
         with tempfile.TemporaryDirectory(prefix="home-layout-interrupted-") as temporary:

@@ -466,13 +466,13 @@ def prepare(l, report, registry, journal, journal_path, reverse, locks, guards, 
     if reverse and not layout["direction"].startswith("rollback"):
         layout["direction"] = "rollback" if stamp_valid(l, Path(home) / "state/layout.json") else "rollback-partial"
     if reverse:
-        owned = {row["destination"] for row in journal["moves"]}
+        destinations = {row["destination"] for row in journal["moves"]}
         for row in report["moves"]:
-            if row["state"] == "done" and row["destination"] not in owned and {"from": row["from"], "to": row["to"]} in layout["slots"]:
+            if row["state"] == "done" and row["destination"] not in destinations and {"from": row["from"], "to": row["to"]} in layout["slots"]:
                 journal["moves"].append({**row, "home": home})
         order = {(row["from"], row["to"]): index for index, row in enumerate(report["moves"])}
-        owned = iter(sorted((row for row in journal["moves"] if row["home"] == home), key=lambda row: order[row["from"], row["to"]]))
-        journal["moves"] = [next(owned) if row["home"] == home else row for row in journal["moves"]]
+        ordered = iter(sorted((row for row in journal["moves"] if row["home"] == home), key=lambda row: order[row["from"], row["to"]]))
+        journal["moves"] = [next(ordered) if row["home"] == home else row for row in journal["moves"]]
     if not reverse and layout["direction"].startswith("rollback"):
         raise l.LayoutError("migration_direction_changed")
     reserve_journal(l, report, registry, journal, layout, reverse)

@@ -99,7 +99,7 @@ def process_owner(home):
 
 def wrapper_paths(l, home):
     paths = set()
-    for relative in ("gateway/mac", "state/mac"):
+    for relative in ("internal/mac", "state/mac"):
         directory = Path(home) / relative
         if l.observed(str(directory)) is None:
             continue
@@ -150,14 +150,8 @@ def claim(l, home):
     owned = set()
     descriptors = []
     try:
-        directory = Path(home) / ("gateway/mac" if (Path(home) / "gateway").is_dir() else "state/mac")
-        l.private_directory(directory)
-        paths = set(wrapper_paths(l, home)) | {directory / f".mac-wrapper.{name}.lock" for name in ("com.tron.mac", "com.tron.mac.dev", "unknown")}
-        for path in sorted(paths):
-            if l.observed(str(path)) is None:
-                fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-            else:
-                fd = wrapper_fd(l, path)
+        for path in wrapper_paths(l, home):
+            fd = wrapper_fd(l, path)
             descriptors.append(fd)
             try:
                 fcntl.lockf(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
