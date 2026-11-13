@@ -1212,6 +1212,20 @@ class IosLaneTests(VerifyCase):
         self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
         self.assertFalse(marker.exists(), "an expensive red must stop the later Mac stage")
         self.assertEqual(next(step["status"] for step in r.report()["steps"] if step["name"] == "tests: mac"), "skipped")
+        r.env.pop("FIXTURE_IOS_FAIL")
+        r.write("scripts/ios-gateway-e2e-test", E2E_STUB.replace('echo "$* lanes=', 'exit 73\necho "$* lanes='))
+        (r.path / "scripts/ios-gateway-e2e-test").chmod(0o755)
+        tooling = json.loads((r.path / "tooling.module.json").read_text())
+        tooling["owns"].append("scripts/ios-gateway-e2e-test")
+        r.write("tooling.module.json", json.dumps(tooling))
+        folder = "packages/ios-app/E2ETests"
+        r.write(f"{folder}/e2e-tests.module.json", json.dumps({"layer": "L5", "owns": ["**"]}))
+        r.write(f"{folder}/RealGatewayPiBoundaryTests.swift", "class RealGatewayPiBoundaryTests { func testWire() {}\n func testLAN() {} }\n")
+        r.commit("busy boundary alongside selected Mac tests")
+        busy = r.verify("--changed")
+        self.assertEqual(busy.returncode, 1, busy.stdout + busy.stderr)
+        self.assertEqual(r.report()["verdict"], "incomplete")
+        self.assertTrue(marker.exists(), "a busy boundary is incomplete, not a red that suppresses Mac tests")
 
     def test_ios_change_builds_once_checks_references_and_runs_only_the_ui_locks(self) -> None:
         r = self.repo

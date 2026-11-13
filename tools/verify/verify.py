@@ -1514,7 +1514,7 @@ def main(argv: list[str]) -> int:
         ios_broken = False
         for group in [*cheap_groups, None, *expensive_groups]:
             if group is None:
-                if reds or no_result:
+                if reds:
                     if ios_lane:
                         run.skipped("ios build", "cheap tier did not pass")
                     run.skipped("layers ios", "cheap tier did not pass")
@@ -1536,7 +1536,7 @@ def main(argv: list[str]) -> int:
                     reds.append("layers ios failed")
                 continue
             files = groups[group]
-            if group in expensive_groups and (reds or no_result):
+            if group in expensive_groups and reds:
                 for label in test_step_names(group, shards, skipped_group(group)):
                     run.skipped(label, "ios build failed" if ios_broken else "earlier tier did not pass")
                 continue

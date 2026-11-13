@@ -138,9 +138,10 @@ cases; a file with no executed passes cannot hide beside a passing neighbour.
    generated files are out of its scope
 6. When the selection touches the Gateway: `npm run check` (production and test
    support typecheck), `npm run lint`, and `scripts/tron layers gateway`.
-7. `scripts/tron layers ios` on this commit's Xcode index store (see the iOS lane
-   below). A selection without the iOS lane runs it only when a fresh index
-   exists; otherwise it is reported as skipped, never as passed.
+7. Unlike the source-based static checks above, `scripts/tron layers ios` needs this
+   commit's built Xcode index store (see the iOS lane below), so it runs at the build
+   boundary after the cheap tier passes. A selection without the iOS lane runs it
+   only when a fresh index exists; otherwise it is skipped, never passed.
 
 ### Context audit
 
