@@ -134,8 +134,12 @@ scripts/tron home-layout migrate --home /absolute/installation --status
 These modes observe only the explicit home and `$HOME`, printed as `user_home`. They
 list retired moves, device/inode/mode, pending/done/conflict/absent state, refusals,
 owned runtime-address changes and private SSH intent. Planning reads bounded metadata
-and private journals, not transcript bodies. It never creates/clears locks, writes
-configuration or actuates launchd. Dry-run exit **0** is clear, **1** refused/blocked,
+and private journals, not transcript bodies. Each metadata walk keeps its 100,000-entry
+cap and selects owned directory/name shapes before descending: session JSONL headers,
+upload metadata, flat Home tasks, mission records/state, and pinned subagent run,
+configuration and result-index records. Session, upload, task, mission and subagent
+artifact trees are not traversed or charged to that metadata budget. It never
+creates/clears locks, writes configuration or actuates launchd. Dry-run exit **0** is clear, **1** refused/blocked,
 **2** unreadable/unsupported. Status exit **0** means no pending move, **1** pending or
 conflicting; blockers are printed without changing that status exit rule.
 

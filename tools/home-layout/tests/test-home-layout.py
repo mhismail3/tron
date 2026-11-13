@@ -1141,6 +1141,60 @@ class RuntimeMigrationTests(unittest.TestCase):
             self.assertEqual(json.loads(result.stdout)["errors"][0]["reason"], "invalid_settings_document")
             self.assertEqual(snapshot(home.parent, contents_first=False), before)
 
+    def test_metadata_walk_ignores_large_artifact_trees_but_refuses_over_budget_metadata(self) -> None:
+        for artifacts in (True, False):
+            with self.subTest(artifacts=artifacts), tempfile.TemporaryDirectory(prefix="home-layout-metadata-") as temporary:
+                base = Path(temporary).resolve()
+                fixture = Fixture(base)
+                fixture.write(REGISTRY, (ROOT / REGISTRY).read_text())
+                user = base / "user"
+                home = user / ".tron"
+                (home / "gateway").mkdir(parents=True)
+                folder = home / ("internal/subagents/async-subagent-runs/run/artifacts" if artifacts else "gateway/home/tasks")
+                folder.mkdir(parents=True)
+                for index in range(100001):
+                    (folder / f"{index}.json").touch()
+                if artifacts:
+                    for relative in ("agent/sessions/cwd/artifacts/status.json", "gateway/uploads/upload/artifacts/metadata.json",
+                                     "gateway/home/tasks/artifacts/status.json", "agent/missions/artifacts/status.json"):
+                        path = home / relative
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_text("opaque artifact, not JSON")
+                    metadata = home / "internal/subagents/async-cfg-fixture.json"
+                    old = str(home / "gateway/home/workspace")
+                    metadata.write_text(json.dumps({"cwd": old}))
+                    inode = (folder / "0.json").stat().st_ino
+                result = fixture.run("migrate", "--home", str(home), "--dry-run", env={"HOME": str(user)})
+                report = json.loads(result.stdout)
+                self.assertEqual(result.returncode, 0 if artifacts else 2, report)
+                if not artifacts:
+                    self.assertEqual([error["reason"] for error in report["errors"]], ["rewrite_file_budget_exceeded"])
+                    self.assertFalse((home / "state").exists())
+                    continue
+                self.assertEqual(report["errors"], [])
+                self.assertEqual([record["kind"] for record in report["rewrites"]], ["subagent_config"])
+                for mode in ("--apply", "--rollback"):
+                    result = fixture.run("migrate", "--home", str(home), mode, env={"HOME": str(user)})
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    root = home / ("state/subagents" if mode == "--apply" else "internal/subagents")
+                    expected = str(home / ("state/home/workspace" if mode == "--apply" else "gateway/home/workspace"))
+                    self.assertEqual(json.loads((root / "async-cfg-fixture.json").read_text())["cwd"], expected)
+                    self.assertEqual((root / "async-subagent-runs/run/artifacts/0.json").stat().st_ino, inode)
+                metadata.unlink()
+                outside = user / "external.json"
+                outside.write_text("{}")
+                for unsafe in ("symlink", "fifo"):
+                    if unsafe == "symlink":
+                        metadata.symlink_to(outside)
+                    else:
+                        os.mkfifo(metadata)
+                    result = fixture.run("migrate", "--home", str(home), "--dry-run", env={"HOME": str(user)})
+                    self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                    self.assertEqual([error["reason"] for error in json.loads(result.stdout)["errors"]],
+                                     ["rewrite_symlink" if unsafe == "symlink" else "rewrite_unsafe_type"])
+                    self.assertEqual(outside.read_text(), "{}")
+                    metadata.unlink()
+
     def test_offline_runtime_move_rewrites_only_owned_fields_and_carries_new_data_back(self) -> None:
         with tempfile.TemporaryDirectory(prefix="home-layout-runtime-") as temporary:
             base = Path(temporary).resolve()

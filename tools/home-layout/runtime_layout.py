@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import math
@@ -60,18 +61,21 @@ def extra_moves(report, registry):
     return [{"from": "agent/sessions/" + old, "to": "agent/sessions/" + new}]
 
 
-def files(l, root, recursive=True):
+def files(l, root, patterns):
     if l.observed(str(root)) is None:
         return
     count = 0
-    pending = [Path(root)]
+    pending = [(Path(root), tuple(tuple(pattern.split("/")) for pattern in patterns))]
     while pending:
-        directory = pending.pop()
+        directory, remaining = pending.pop()
         fd = l.open_home(str(directory))
         try:
             with os.scandir(fd) as entries:
                 children = sorted(entries, key=lambda item: item.name)
             for child in children:
+                matches = [pattern[1:] for pattern in remaining if fnmatch.fnmatchcase(child.name, pattern[0])]
+                if not matches:
+                    continue
                 count += 1
                 if count > 100000:
                     raise l.LayoutError("rewrite_file_budget_exceeded")
@@ -79,10 +83,9 @@ def files(l, root, recursive=True):
                 info = child.stat(follow_symlinks=False)
                 if stat.S_ISLNK(info.st_mode):
                     raise l.LayoutError("rewrite_symlink")
-                if stat.S_ISDIR(info.st_mode):
-                    if recursive:
-                        pending.append(path)
-                elif stat.S_ISREG(info.st_mode):
+                if stat.S_ISDIR(info.st_mode) and any(matches):
+                    pending.append((path, tuple(pattern for pattern in matches if pattern)))
+                elif stat.S_ISREG(info.st_mode) and () in matches:
                     yield path
                 else:
                     raise l.LayoutError("rewrite_unsafe_type")
@@ -211,12 +214,18 @@ def rewrites(l, report, registry, reverse=False, layout=None):
     state = physical(l, home, "gateway", "state")
     subagents = physical(l, home, "internal/subagents", "state/subagents")
     terminal = physical(l, home, "mac-terminal", "state/mac-terminal")
-    selections = [(path, "session") for path in files(l, Path(home) / "agent/sessions") if path.suffix == ".jsonl"]
+    selections = [(path, "session") for path in files(l, Path(home) / "agent/sessions", ("*.jsonl", "*/*.jsonl"))]
     selections += [(Path(home) / "agent/trust.json", "trust"), (state / "settings/observed.json", "observed")]
-    selections += [(path, "upload") for path in files(l, state / "uploads") if path.name == "metadata.json"]
-    selections += [(path, "target") for path in files(l, state / "home/tasks") if path.suffix == ".json"]
-    selections += [(path, "mission") for path in files(l, Path(home) / "agent/missions") if path.suffix in (".json", ".jsonl")]
-    for path in files(l, subagents):
+    selections += [(path, "upload") for path in files(l, state / "uploads", ("*/metadata.json",))]
+    selections += [(path, "target") for path in files(l, state / "home/tasks", ("*.json",))]
+    selections += [(path, "mission") for path in files(l, Path(home) / "agent/missions", ("*.json", "*.jsonl", "index/*.json", "projects/*/*.json",
+                                                                                    "index/*/state.json", "projects/*/*/state.json"))]
+    run_names = ("run-fanout-budget.json", "process-terminal-candidate.json", "status.json", "recovery-descriptor.json")
+    patterns = ["async-cfg-*.json", *(f"{folder}/{name}" for folder in ("async-subagent-runs/*", "nested-subagent-runs/*/*") for name in run_names)]
+    for folder in ("async-subagent-results", "async-subagent-results/nested/*"):
+        patterns.extend(f"{folder}/{suffix}" for suffix in ("*.json", "result-index/runs/*.json", "result-index/sessions/*/*.json",
+                                                           "result-index/tool-calls/*/*.json", "result-index/observers/*/*.json", "result-pending/*/*.json"))
+    for path in files(l, subagents, patterns):
         if path.name == "run-fanout-budget.json":
             selections.append((path, "budget"))
         elif path.name == "process-terminal-candidate.json":
