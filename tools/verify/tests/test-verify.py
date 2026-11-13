@@ -40,6 +40,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -592,6 +593,133 @@ class GatewayDependenciesTests(VerifyCase):
         self.assertEqual(tests.returncode, 0, tests.stdout + tests.stderr)
         self.assertEqual((r.path / "test-results/mac-ran").read_text(), "WizardTests")
         self.assertEqual(r.report()["passingTests"], 2)
+
+
+class HuntTests(VerifyCase):
+    def setUp(self) -> None:
+        super().setUp()
+        r = self.repo
+        r.write('packages/gateway/src/hunt/hunt.module.json', json.dumps({'layer': 'L3', 'owns': ['**']}))
+        for name in ('plain', 'nested'):
+            r.write(f'packages/gateway/src/hunt/{name}.test.ts', 'export const fixture = true;\n')
+        r.write('packages/gateway/vitest.nested.config.ts', 'export const nestedTestFiles = ["src/hunt/nested.test.ts"];\n')
+        native = "import { test } from 'node:test';\ntest('native case', () => {});\n"
+        r.write('mods/core/native.test.mjs', native)
+        r.write('packages/gateway/scripts/native.test.mjs', native)
+        module = json.loads((r.path / 'tooling.module.json').read_text())
+        module['owns'].extend(['packages/gateway/vitest.nested.config.ts', 'packages/gateway/scripts/**'])
+        r.write('tooling.module.json', json.dumps(module))
+        r.write('tools/verify/mini_transport.py', (r.path / 'tools/verify/mini.py').read_text())
+        r.write('tools/verify/mini.py', 'from mini_transport import no_result_reason\nif __name__ == "__main__":\n' + textwrap.indent('''import json, os, subprocess, sys
+from pathlib import Path
+from mini_transport import no_result_reason
+import ledger
+ROOT = Path(__file__).resolve().parents[2]
+args = sys.argv[1:]
+if os.environ.get('HUNT_BUSY'):
+    print('mini: no result: fixture lease held', file=sys.stderr)
+    raise SystemExit(75)
+kind = ('node' if '--root' in args else 'node-gateway') if args[0] == 'node' else 'python' if args[0] == 'python' else 'gateway-nested' if '--config' in args else 'gateway'
+order = ROOT / 'test-results/hunt-order.jsonl'
+prior = order.read_text().splitlines() if order.exists() else []
+with order.open('a') as out:
+    out.write(json.dumps({'lane': kind, 'wait': os.environ.get('TRON_MINI_JOB_WAIT_SECONDS')}) + '\\n')
+active = ROOT / 'test-results/active'
+if active.exists():
+    raise RuntimeError('overlapping jobs')
+active.touch()
+try:
+    if kind == 'python':
+        code = subprocess.call(['/bin/bash', '-c', args[1]], cwd=ROOT)
+    elif kind.startswith('node'):
+        files = args[2:] if kind == 'node' else args[1:]
+        code = ledger.execute('node', [os.environ['HUNT_NODE'], '--test', '--test-reporter=' + str(ROOT / 'tools/verify/ledger-node.mjs'), *files], cwd=ROOT if kind == 'node' else ROOT / 'packages/gateway')
+    else:
+        failed = bool(os.environ.get('HUNT_FAIL_FIRST') and not prior)
+        report = Path(next(word.split('=', 1)[1] for word in args if word.startswith('--outputFile.json=')))
+        file = ROOT / 'packages/gateway/src/hunt' / ('nested.test.ts' if kind == 'gateway-nested' else 'plain.test.ts')
+        report.write_text(json.dumps({'numPassedTests': int(not failed), 'numFailedTests': int(failed), 'testResults': [{'name': str(file), 'assertionResults': [{'fullName': 'changing', 'status': 'failed' if failed else 'passed', 'duration': 1}]}]}))
+        ledger.Capture(kind).vitest(report)
+        code = int(failed)
+    if os.environ.get('HUNT_ADVANCE') and not prior:
+        subprocess.run(['git', 'push', '--quiet', 'origin', os.environ['HUNT_ADVANCE'] + ':main'], cwd=ROOT, check=True)
+finally:
+    active.unlink()
+raise SystemExit(code)
+''', '    '))
+        r.commit('hunt fixture')
+        self.origin = Path(self.temp.name) / 'origin.git'
+        subprocess.run(['git', 'clone', '--bare', '--quiet', str(r.path), str(self.origin)], env=r.env, check=True)
+        r.git('remote', 'add', 'origin', str(self.origin))
+        r.env['HUNT_NODE'] = subprocess.check_output([str(ROOT / 'scripts/tron-node')], text=True).strip()
+
+    def hunt(self, *args):
+        r = self.repo
+        result = subprocess.run([str(r.path / 'scripts/tron'), 'verify', '--hunt', *args], cwd=r.path,
+                                env=r.env, capture_output=True, text=True, timeout=90)
+        paths = [line[len('hunt: report: '):] for line in result.stdout.splitlines() if line.startswith('hunt: report: ')]
+        report = json.loads((r.path / paths[-1]).read_text()) if paths else None
+        return result, report
+
+    def test_repeats_unchanged_main_serially_on_mini_and_keeps_the_first_red(self) -> None:
+        r = self.repo
+        r.env['HUNT_FAIL_FIRST'] = '1'
+        result, report = self.hunt('--rounds', '2', '--hours', '1')
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(report['completion'], 'completed')
+        self.assertEqual(report['commit'], r.git('rev-parse', 'HEAD'))
+        self.assertEqual(report['tree'], r.git('rev-parse', 'HEAD^{tree}'))
+        self.assertEqual(report['completedRounds'], 2)
+        self.assertEqual(report['steps'][0]['exit'], 1)
+        self.assertEqual([step['tests'] for step in report['steps'][1:]], [1, 3, 1, 1, 1, 1, 3, 1, 1])
+        self.assertEqual(report['firstFailure'], report['steps'][0]['log'])
+        self.assertTrue((r.path / report['firstFailure']).is_file())
+        order = [json.loads(line) for line in (r.path / 'test-results/hunt-order.jsonl').read_text().splitlines()]
+        self.assertEqual([row['lane'] for row in order], ['gateway', 'gateway-nested', 'python', 'node', 'node-gateway'] * 2)
+        self.assertEqual({row['wait'] for row in order}, {'0'})
+        self.assertFalse((r.path / 'test-results/active').exists())
+        self.assertEqual(len(report['flakes']), 1)
+        self.assertEqual((report['flakes'][0]['passes'], report['flakes'][0]['failures']), (1, 1))
+        self.assertEqual(r.git('status', '--porcelain'), '')
+
+    def test_rejects_non_main_or_dirty_sources_and_never_queues_on_a_busy_mini(self) -> None:
+        r = self.repo
+        r.write('README.md', 'dirty\n')
+        rejected, _ = self.hunt('--rounds', '1')
+        self.assertEqual(rejected.returncode, 2, rejected.stdout + rejected.stderr)
+        r.git('restore', 'README.md')
+        r.write('README.md', 'another commit\n')
+        r.commit('not origin main')
+        rejected, _ = self.hunt('--rounds', '1')
+        self.assertEqual(rejected.returncode, 2, rejected.stdout + rejected.stderr)
+        self.assertFalse((r.path / 'test-results/hunt-order.jsonl').exists())
+        planned, report = self.hunt('--plan')
+        self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
+        self.assertIsNone(report)
+        self.assertFalse(json.loads(planned.stdout)['matchesMain'])
+        r.git('push', '--quiet', 'origin', 'HEAD:main')
+        r.env['HUNT_BUSY'] = '1'
+        stopped, report = self.hunt('--rounds', '2')
+        self.assertEqual(stopped.returncode, 75, stopped.stdout + stopped.stderr)
+        self.assertEqual(report['completion'], 'no-result')
+        self.assertEqual(len(report['steps']), 1)
+        self.assertFalse((r.path / 'test-results/hunt-order.jsonl').exists())
+
+    def test_origin_advance_and_budget_stop_before_the_next_lane(self) -> None:
+        r = self.repo
+        future = r.git('commit-tree', r.git('rev-parse', 'HEAD^{tree}'), '-p', 'HEAD', '-m', 'origin advances')
+        r.env['HUNT_ADVANCE'] = future
+        stopped, report = self.hunt('--rounds', '2')
+        self.assertEqual(stopped.returncode, 75, stopped.stdout + stopped.stderr)
+        self.assertEqual(report['completion'], 'source-changed')
+        self.assertEqual(len(report['steps']), 1)
+        r.env.pop('HUNT_ADVANCE')
+        r.git('checkout', '--quiet', '--detach', future)
+        stopped, report = self.hunt('--rounds', '2', '--hours', '0.000000000001')
+        self.assertEqual(stopped.returncode, 75, stopped.stdout + stopped.stderr)
+        self.assertEqual(report['completion'], 'budget')
+        self.assertEqual(report['steps'], [])
+        self.assertEqual(len((r.path / 'test-results/hunt-order.jsonl').read_text().splitlines()), 1)
 
 
 class LedgerTests(VerifyCase):
