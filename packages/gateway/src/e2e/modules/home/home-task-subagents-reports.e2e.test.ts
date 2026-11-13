@@ -1,9 +1,14 @@
+import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { dispatch, fixture, reportCall } from "../../../../test-support/home-task-fixture.js";
+import { copyPayload, refuseUnjoinedFixture } from "../../../../test-support/nested-vitest-payload.js";
 import { DETACHED_WORKFLOW_SCRIPT, HELD_WORKFLOW_SCRIPT } from "../../../../test-support/home-task-subagent-child.js";
 import { HOME_TASK_PRODUCER_REFUSAL_REASON } from "../../../kernel/delegation/task-worker-extension.js";
 import * as subagentSettlement from "../../../kernel/delegation/subagent-settlement.js";
@@ -14,13 +19,71 @@ import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
 afterEach(closeSubagentFixtures);
 
 describe("Home task subagents: refusals, restarts and reports", () => {
+  it("refuses unverified controls when the canonical pin has no version", async () => {
+    if (process.env.TRON_HOME_TASK_MISSING_PIN_FIXTURE) {
+      const f = await fixture(true);
+      let controls: Array<ReturnType<typeof toolResultText>> | undefined;
+      f.faux.setResponses([
+        fauxAssistantMessage([
+          fauxToolCall("subagent", { action: "list" }, { id: "missing-pin-list" }),
+          fauxToolCall("bg_wait", {}, { id: "missing-pin-wait" }),
+        ], { stopReason: "toolUse" }),
+        (context: FauxContext) => {
+          controls = ["missing-pin-list", "missing-pin-wait"].map(id => toolResultText(context, id));
+          return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" });
+        },
+      ]);
+      const run = await dispatch(f);
+      await run.completion;
+      expect(controls).toEqual(Array.from({ length: 2 }, () => ({ isError: true, text: HOME_TASK_PRODUCER_REFUSAL_REASON })));
+      expect(f.signals.filter(record => record.event === "home.task.producer-refused")).toEqual(Array.from({ length: 2 }, () => expect.objectContaining({ reason: "unverified-provider" })));
+      expect(existsSync(join(f.cwd, "subagent-effect.json"))).toBe(false);
+      expect(existsSync(join(f.cwd, "wait-effect.json"))).toBe(false);
+      return;
+    }
+    const gatewayRoot = fileURLToPath(new URL("../../../../", import.meta.url));
+    const root = await mkdtemp(join(tmpdir(), "tron-home-task-missing-pin-"));
+    try {
+      const payload = join(root, "payload");
+      await copyPayload(payload, "home-task-subagents-reports.e2e.test.ts");
+      const pin = JSON.parse(await readFile(join(gatewayRoot, "pi-subagents-pin.json"), "utf8"));
+      delete pin.version;
+      await writeFile(join(payload, "pi-subagents-pin.json"), JSON.stringify(pin));
+      for (const directory of ["home", "tmp"]) await mkdir(join(root, directory));
+      const report = join(gatewayRoot, "test-results", "home-task-undefined-pin.json");
+      await mkdir(dirname(report), { recursive: true });
+      await promisify(execFile)(process.execPath, [join(gatewayRoot, "node_modules", "vitest", "vitest.mjs"), "run", "--config", "vitest.nested.config.ts", "src/e2e/modules/home/home-task-subagents-reports.e2e.test.ts", "-t", "refuses unverified controls when the canonical pin has no version", "--reporter=default", "--reporter=json", `--outputFile.json=${report}`], {
+        cwd: payload, timeout: bound.boundMs, maxBuffer: 1024 * 1024,
+        env: { PATH: process.env.PATH!, HOME: join(root, "home"), TMPDIR: join(root, "tmp"),
+          TRON_HOME_TASK_MISSING_PIN_FIXTURE: root, TRON_TEST_PROCESS_OWNER: root,
+          TRON_TEST_PROCESS_OWNER_FAILURE: process.env.TRON_TEST_PROCESS_OWNER_FAILURE ?? join(root, "process-owner-failure.jsonl"),
+          NODE_OPTIONS: `--import=${join(payload, "test-support", "fixture-process-owner.mjs")}` },
+      });
+      expect(JSON.parse(await readFile(report, "utf8"))).toMatchObject({ numPassedTests: 1, numFailedTests: 0 });
+    } finally {
+      await refuseUnjoinedFixture(root);
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it("aborts a foreground run through the operation's tool signal when the task is stopped", async () => {
     const f = await fixture(false, false, undefined, true);
     const child = await childModel(f);
+    let controls: Array<ReturnType<typeof toolResultText>> | undefined;
     f.faux.setResponses([
-      fauxAssistantMessage([fauxToolCall("subagent", { agent: "task-child", task: "HOLD-CHILD foreground search", async: false }, { id: "fg-launch" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([
+        fauxToolCall("subagent", { action: "list" }, { id: "verified-list" }),
+        fauxToolCall("subagent_supervisor", { action: "list" }, { id: "verified-supervisor" }),
+        fauxToolCall("bg_wait", {}, { id: "verified-wait" }),
+      ], { stopReason: "toolUse" }),
+      (context: FauxContext) => {
+        controls = ["verified-list", "verified-supervisor", "verified-wait"].map(id => toolResultText(context, id));
+        return fauxAssistantMessage([fauxToolCall("subagent", { agent: "task-child", task: "HOLD-CHILD foreground search", async: false }, { id: "fg-launch" })], { stopReason: "toolUse" });
+      },
     ]);
     const run = await dispatch(f);
+    await waitFor(() => controls !== undefined, "verified managed controls returned", bound);
+    expect(controls).toEqual(Array.from({ length: 3 }, () => expect.objectContaining({ isError: false })));
     await waitFor(() => child.heldRequests() === 1, "foreground child live", bound);
     await homeOwnerOf(f.registry).stopTask({ taskId: run.taskId, operationId: run.operationId });
     const result = await run.completion;
