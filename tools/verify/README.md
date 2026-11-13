@@ -165,6 +165,27 @@ file cannot hide the later cheap files. Direct `scripts/tron test tooling` uses 
 recorder. The canonical iOS and real-Gateway journey runners and the Mac test owner record their
 native test results, so verify, batch and direct invocations share one ledger, not separate histories.
 
+## Repeat-suite hunt
+
+`scripts/tron verify --hunt --rounds 20 --hours 8` repeats all registered default Gateway,
+nested Gateway, portable Python, root Node and Gateway Node suites, serially on the mini.
+It never selects Apple-hosted, relay or shell groups or falls back to this Mac. `--plan`
+previews the selected files without running them. Execution requires a clean checkout whose
+HEAD equals live `origin/main`; that fence is checked before every lane and after the last.
+Run from a checkout containing the hunt tooling at that main commit, not a feature branch.
+The normal mini lease has zero wait, so a busy lease or other no-result stops the hunt without
+queuing or retrying. Honor Home's resource order before invoking it.
+
+The hours limit bounds admission: an in-flight lane finishes normally, then no further lane
+starts after the budget expires. SIGINT/SIGTERM stops and joins the owned process group through
+verify's existing runner. Each invocation retains unique logs and an atomically updated
+`test-results/hunt/<sha>-<time>/summary.json` with selection, elapsed time, completed rounds,
+raw step exits, the first red's log and the ledger's same-tree flake ranking. A later pass never
+erases an earlier red: completed hunts exit 1 if any lane failed, otherwise 0. Budget expiry,
+source drift, no-result or an undriven lane exits 75 with partial evidence; interruption stays
+nonzero. These repetitions measure variability, not retry-to-green verification. Zero ranked
+flakes is not proof of absence, especially for partial hunts or always-failing cases.
+
 ## Static checks (existing tools only)
 1. `scripts/tron ownership`, including the repository layout
 2. `scripts/tron tidy --here --landing`: no untracked file or ignored path without a named writer
