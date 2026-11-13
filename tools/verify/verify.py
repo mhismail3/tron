@@ -1225,6 +1225,8 @@ def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, ga
         return ([sys.executable, str(ROOT / 'tools/verify/ledger.py'), 'exec', 'node', *node, 'node', '--test', '--test-concurrency=1',
                  '--test-reporter=' + str(ROOT / 'tools/verify/ledger-node.mjs'), *relative], ROOT / GATEWAY, tap_count)
     if group == "node":
+        if node_host == 'mini':
+            return (['python3', str(ROOT / 'tools/verify/mini.py'), 'node', '--root', *files], ROOT, tap_count)
         return ([sys.executable, str(ROOT / 'tools/verify/ledger.py'), 'exec', 'node', *node, 'node', '--test', '--test-concurrency=1',
                  '--test-reporter=' + str(ROOT / 'tools/verify/ledger-node.mjs'), *files], ROOT, tap_count)
     if group == "python-here":
@@ -1383,7 +1385,7 @@ def main(argv: list[str]) -> int:
         print(f"  gateway and python lanes: {'on the Mac mini' if gateway_host == 'mini' else 'on this Mac'} ({gateway_reason})", flush=True)
     else:
         gateway_host, gateway_reason = "local", "no Gateway or Python lane selected"
-    if "node-gateway" in groups and not skipped_group("node-gateway"):
+    if any(group in groups and not skipped_group(group) for group in ('node', 'node-gateway')):
         print(f"  node lane: {'on the Mac mini' if node_host == 'mini' else 'on this Mac'} ({node_reason})", flush=True)
     if "python-here" in groups and not skipped_group("python-here"):
         print("  python-here lane: on this Mac (its tests read this Mac's Pi session store)", flush=True)
@@ -1606,7 +1608,7 @@ def main(argv: list[str]) -> int:
             command, cwd, count = test_spec(group, files, payload, run.logs, gateway_host=gateway_host, node_host=node_host)
             report = run.logs / f"{group}-vitest.json"
             report.unlink(missing_ok=True)
-            on_mini = (node_host if group == "node-gateway" else gateway_host) == "mini" and (group.startswith("gateway") or group in ("node-gateway", "python"))
+            on_mini = (node_host if group in ('node', 'node-gateway') else gateway_host) == "mini" and (group.startswith("gateway") or group in ("node", "node-gateway", "python"))
             env = {**update, "TRON_VERIFY_COMMIT": sha} if on_mini else update
             capture = ledger.Capture('relay') if group == 'relay' else None
             result = run.step(label, command, cwd=cwd, count=count, env=env)

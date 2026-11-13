@@ -245,6 +245,14 @@ class MiniGatewayLane(unittest.TestCase):
         self.assertTrue(all(row[0].startswith('packages/gateway/scripts/') and row[4] == 'node' and row[5] for row in rows))
         self.assertTrue(all(0 <= row[6] <= 100 and 0 <= row[7] <= 100 for row in rows))
         self.assertEqual(list((self.mini / 'tron-ci/results').iterdir()), [])
+        self.write('scripts/root.test.mjs', "import test from 'node:test';\nimport { strict as assert } from 'node:assert';\ntest('root cwd', () => assert.ok(!process.cwd().endsWith('/packages/gateway')));\n")
+        root_sha = self.commit('root Node case')
+        root_run = self.lane('node', '--root', 'scripts/root.test.mjs')
+        self.assertEqual(root_run.returncode, 0, root_run.stdout + root_run.stderr)
+        with sqlite3.connect(self.env['TRON_TEST_LEDGER']) as connection:
+            root_rows = connection.execute("SELECT test_id, commit_sha, outcome FROM results WHERE test_id LIKE 'scripts/root.test.mjs::%'").fetchall()
+        self.assertEqual(len(root_rows), 1)
+        self.assertEqual(root_rows[0][1:], (root_sha, 'passed'))
 
     def pool(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(['python3', str(self.local / 'tools/verify/mini.py'), 'pool', *args], cwd=self.local / 'packages/gateway',
