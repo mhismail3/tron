@@ -9,7 +9,7 @@ import type { RuntimeSlot } from "./runtime-slot.js";
 
 export interface ResourceFreshnessRecord {
   sessionId?: string;
-  reason: "completed" | "unchanged" | "failed" | "watch-failed";
+  reason: "completed" | "unchanged" | "deferred" | "failed" | "watch-failed";
 }
 
 interface PendingResource {
@@ -175,6 +175,7 @@ export class ResourceFreshness {
       } catch (error) {
         if (error instanceof GatewayError && error.code === "busy") {
           if (idles !== state.idles) continue;
+          this.record(slot, "deferred");
         } else this.record(slot, "failed");
         return;
       }

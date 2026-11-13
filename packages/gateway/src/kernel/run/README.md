@@ -290,9 +290,12 @@ Compaction diagnostics remain with the
 | Project-trust error details `failure` / `rollbackFailure` | Inspect both on a failed-compensation error. `Project trust is being reconfigured` from the reload itself indicates a public-read fence was re-entered by its transaction owner; the project-lifecycle successful-compensation case distinguishes this from an actual resource-loader failure. |
 | `terminal-receipt-persistence-failed` | A completion ownership write failed. For a terminal Home task whose socket snapshot still says `running` without an operation, compare its canonical replies and task marker: a root task marker must not own an individual reply completion. `home-task-continuity.e2e.test.ts` reproduces the conflicting-stamp ordering and proves same-session resume. |
 
-`session.resources-reload` records `completed`, `unchanged`, `failed` or
-`watch-failed` with an optional session ID, never resource paths or content. Failures
-warn; completed/skipped comparisons are informational.
+`session.resources-reload` records `completed`, `unchanged`, `deferred`, `failed` or
+`watch-failed` with an optional session ID, never resource paths or content. `deferred`
+means accepted work prevented reload; settling the last session-bound work must lead
+to `completed` without another resource write. The RPC-settlement case in
+`resource-freshness.e2e.test.ts` proves that edge. Failures warn; other outcomes are
+informational.
 
 ## Verify
 
