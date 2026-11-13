@@ -8,7 +8,7 @@ import type { HomeTaskReportOwner } from "./task-report.js";
 export function taskWorkerSteeringInput(control: TaskWorkerControl, text: string, from: "tron-home" | "maintainer") {
   const images: ImageContent[] = [];
   return [injectedText(text, from, "steer", "task"), images, "steer", undefined, undefined, {
-    operationId: randomUUID(), taskFence: structuredClone(control),
+    operationId: randomUUID(), originalText: text, taskFence: structuredClone(control),
     origin: { kind: "gateway", ownerId: control.taskId, title: "Home steering", confidence: "boundary" }, onTerminal: () => {},
   }] as const;
 }

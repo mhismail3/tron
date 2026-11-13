@@ -82,8 +82,13 @@ Composition supplies the same late K6 settings, Profile and raw model owners.
 - **Workspace.** `<tronHome>/gateway/home/workspace` (`0700`, empty) is recorded **untrusted**.
   Global skills appear in the system prompt; prompt templates feed the composer.
   The kernel [resource freshness owner](../../kernel/run/README.md#resource-freshness)
-  watches global and project resources for every live session, including Home.
-  It reloads changed inputs at idle, skips unchanged inputs and retains failed work.
+  watches global resources for Home and project resources for ordinary sessions.
+  Home disables default context discovery and its override reads only
+  `<agentDir>/AGENTS.md`; absence is empty and other read errors refuse loading.
+  That same global file is already an explicit freshness input. Workspace/ancestor
+  context and SDK `SYSTEM.md`/`APPEND_SYSTEM.md` are excluded, so changing them does
+  not reload Home. No additional watcher is installed. The owner reloads changed
+  inputs at idle, skips unchanged inputs and retains failed work.
 - **Identity.** Every chapter is titled **Home** (no JSONL rewrite) and omitted from
   `session.list` (`scope: "user"`); search and `session.open` are unfiltered.
 - **Rollover.** At a quiescent boundary, the soft limit (24 MiB or 50,000 entries) seals the

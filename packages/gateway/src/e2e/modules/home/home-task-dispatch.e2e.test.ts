@@ -18,6 +18,8 @@ import { estimateTokens } from "../../../kernel/pi/coding-agent.js";
 import { UploadStore } from "../../../machine/upload-store.js";
 import { EpisodicMemoryError } from "../../../errors.js";
 import { RuntimeRegistry } from "../../../kernel/session/runtime-registry.js";
+import { RunOperations } from "../../../kernel/run/run-operations.js";
+import { HOME_TASK_MARKER } from "../../../kernel/delegation/task-report.js";
 import { delegatedArtifactRoot } from "../../../kernel/delegation/delegated-provider.js";
 import { RunMarkerStore } from "../../../kernel/run/run-markers.js";
 import { stopTaskWorker, taskWorkerSteeringInput } from "../../../kernel/delegation/worker-control.js";
@@ -1172,6 +1174,25 @@ describe("Home task list RPC", () => {
 });
 
 describe("Home task production dispatch", () => {
+  it("reloads Home for global rules but not excluded workspace or system context", async () => {
+    const f = await fixture();
+    const globalRules = join(f.agentDir, "AGENTS.md");
+    const home = await f.registry.acquire(f.home.sessionId);
+    const before = f.signals.length;
+    for (const path of [join(home.cwd, "AGENTS.md"), join(f.agentDir, "SYSTEM.md"), join(f.agentDir, "APPEND_SYSTEM.md")]) {
+      await writeFile(path, "IGNORED_HOME_CONTEXT_MARKER\n");
+    }
+    const settingsPath = join(f.agentDir, "settings.json");
+    await writeFile(settingsPath, await readFile(settingsPath));
+    await waitFor(() => f.signals.slice(before).some(event => event.outcome === "resources-reload" && event.sessionId === home.id && event.reason === "unchanged"), "Home freshness observes the edit batch");
+    expect(f.signals.slice(before).filter(event => event.outcome === "resources-reload" && event.sessionId === home.id && event.reason === "completed")).toHaveLength(0);
+    expect(home.runtime.session.resourceLoader.getAgentsFiles().agentsFiles).toEqual([]);
+    const afterIgnored = f.signals.length;
+    await writeFile(globalRules, "GLOBAL_HOME_FRESHNESS_UPDATED\n");
+    await waitFor(() => f.signals.slice(afterIgnored).some(event => event.outcome === "resources-reload" && event.sessionId === home.id && event.reason === "completed"), "global rules reload Home through the existing freshness owner");
+    expect(home.runtime.session.resourceLoader.getAgentsFiles().agentsFiles).toEqual([{ path: globalRules, content: "GLOBAL_HOME_FRESHNESS_UPDATED\n" }]);
+  });
+
   it("reserves a typed worker limit atomically and releases it after settlement", async () => {
     const f = await fixture();
     await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
@@ -1198,7 +1219,7 @@ describe("Home task production dispatch", () => {
     const after = await (await dispatch(f, "cap-after")).completion;
     expect(after.terminalEvidence?.outcome).toBe("final");
     evidence.push({ case: "typed-worker-limit", limit: 1, admitted: outcomes.filter(result => result.status === "fulfilled").length, after: after.taskId });
-  }, 30_000);
+  });
 
   it.each(["file", "directory"] as const)("settles unknown without replay when the live canonical %s sync is refused", async target => {
     const f = await fixture();
@@ -1577,8 +1598,38 @@ describe("Home task production dispatch", () => {
     } finally { release(); await slot.abort("agent").catch(() => {}); await run.completion.catch(() => {}); }
   }, 20_000);
 
+  it("refuses extension commands in an owned Home task brief", async () => {
+    const f = await fixture();
+    const refusals: Array<{ operationId: string | undefined; error: unknown }> = [];
+    const prompt = RunOperations.prototype.prompt;
+    vi.spyOn(RunOperations.prototype, "prompt").mockImplementation(async function (...args) {
+      try { return await prompt.apply(this, args); }
+      catch (error) { refusals.push({ operationId: args[5]?.operationId, error }); throw error; }
+    });
+    const extensions = join(f.cwd, ".pi", "extensions");
+    await mkdir(extensions, { recursive: true });
+    await writeFile(join(extensions, "owned-command.ts"), `export default pi => pi.registerCommand("owned-command", { handler: async () => { throw new Error("must not execute"); } });`);
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const run = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "command-brief", intent: "/owned-command argument", target: f.cwd });
+    await run.completion;
+    const slot = await f.registry.acquire(run.sessionId);
+    expect(slot.commands()).toContainEqual(expect.objectContaining({ name: "owned-command", source: "extension" }));
+    expect(refusals.filter(entry => entry.operationId === run.operationId).map(entry => entry.error)).toEqual([
+      expect.objectContaining({ code: "invalid_request", message: "Extension commands cannot be scheduled" }),
+    ]);
+    const entries = slot.canonicalSessionEntries();
+    expect(entries.filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER)).toEqual([
+      expect.objectContaining({ data: expect.objectContaining({ taskId: run.taskId, operationId: run.operationId }) }),
+    ]);
+    expect(entries.filter(entry => entry.type === "message" && entry.message.role === "user")).toEqual([]);
+    expect(slot.snapshot().operation).toBeUndefined();
+  });
+
   it("orders Home and maintainer steering in the same lane and refuses stale or post-report work", async () => {
     const f = await fixture();
+    const extensions = join(f.cwd, ".pi", "extensions");
+    await mkdir(extensions, { recursive: true });
+    await writeFile(join(extensions, "owned-command.ts"), `export default pi => pi.registerCommand("owned-command", { handler: async () => { throw new Error("must not execute"); } });`);
     let entered = false;
     let release!: () => void;
     let releaseSteer: (() => void) | undefined;
@@ -1623,6 +1674,13 @@ describe("Home task production dispatch", () => {
       expect(called).toEqual([homeSteer, "Maintainer second", maintainerSteer]);
       expect(f.signals.filter(record => record.event === "home.task.control" && record.action === "steer")).toHaveLength(3);
       expect((slot as any).runtime.session.getSteeringMessages()).toEqual([homeSteer, "Maintainer second", maintainerSteer]);
+      expect(slot.commands()).toContainEqual(expect.objectContaining({ name: "owned-command", source: "extension" }));
+      const command = { ...control, text: "/owned-command argument" };
+      await expect(homeOwnerOf(f.registry).steerTask(f.home.sessionId, command)).rejects.toThrow("Extension commands cannot be scheduled");
+      await expect(homeOwnerOf(f.registry).maintainTask(command)).rejects.toThrow("Extension commands cannot be scheduled");
+      await expect(homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "interrupt", ...command })).rejects.toThrow("Extension commands cannot be scheduled");
+      await expect(homeOwnerOf(f.registry).interruptTask(command)).rejects.toThrow("Extension commands cannot be scheduled");
+      expect(called).toEqual([homeSteer, "Maintainer second", maintainerSteer]);
       await expect(homeOwnerOf(f.registry).steerTask(f.home.sessionId, { ...control, operationId: "stale-operation", text: "stale" })).rejects.toThrow(/stale|changed|conflict/i);
       await expect(slot.prompt(...taskWorkerSteeringInput({ ...control, operationId: "stale-operation" }, "stale slot control", "tron-home"))).rejects.toThrow(/stale|changed|conflict/i);
       const service = new GatewayService({ display: displayOwnerOf(f.registry), config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),

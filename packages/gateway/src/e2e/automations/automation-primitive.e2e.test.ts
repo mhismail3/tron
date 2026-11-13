@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, getSystemMessageText, fauxToolCall } from "@earendil-works/pi-ai";
 import { startLockGateway, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
 import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
 import { waitFor } from "../../../test-support/wait-for.js";
@@ -73,7 +73,7 @@ it("real delegated workers cannot mutate standard automations", async () => {
   const { gateway, phone, sessionId } = await fixture();
   let homeCalls = 0; let workerCalls = 0;
   const step = (context: any) => {
-    if (context.messages.some((message: any) => message.role === "user" && JSON.stringify(message.content).includes("This is a finite Home task"))) {
+    if (context.messages.some((message: any) => message.role === "system" && getSystemMessageText(message).includes("This is a finite Home task"))) {
       return workerCalls++ === 0
         ? fauxAssistantMessage([fauxToolCall("schedule", create)], { stopReason: "toolUse" })
         : fauxAssistantMessage([fauxToolCall("report", { resultId: "worker-authority", outcome: "final", text: "Mutation was refused.", evidence: ["Observed schedule refusal"] })], { stopReason: "toolUse" });

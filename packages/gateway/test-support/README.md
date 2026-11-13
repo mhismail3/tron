@@ -71,6 +71,13 @@ stale-lock or power-loss recovery.
   resolvers and HTTP stubs. `network-isolation.ts` refuses any non-loopback TCP
   connection from an in-process socket and fails the current test (or file). It does
   not cover child processes or DNS.
+- **Worker routing.** Scripted providers identify finite Home workers in system messages
+  through pi-ai `getSystemMessageText`, including structured sections. User-role
+  content is task input, not the worker discriminator. Canonical JSONL context guards
+  inspect message roles: structured system context is retained, never injected into users.
+- **Canonical crash cuts.** Partial automation trigger fixtures retain the producer's
+  content, event identity and full-text reference. Real delivery's contradiction guard
+  and the exact-once/order/single-push assertions remain active across restart.
 - **Authority journeys.** The lock harness's `knowledge` option constructs the real
   Knowledge store/service and supplies Home the same settings/profile approval owner as
   transport. Model tool dispatch never receives the paired client's decision RPCs.
@@ -91,7 +98,10 @@ stale-lock or power-loss recovery.
   groups, stops and joins them (TERM then one KILL) before roots are removed, and
   writes join failures to `TRON_TEST_PROCESS_OWNER_FAILURE`. A KILL permission
   denial retains its error while the existing bounded join observes terminal
-  state, without resending or extending the deadline. Only a fully joined tree
+  state, without resending or extending the deadline. At the deadline the owner
+  yields once to the event loop before failing, because a direct child's exit
+  callback can be queued behind a synchronous process-table scan; only fresh
+  unjoined PIDs fail the join. Only a fully joined tree
   succeeds; a still-live target fails with the original denial and live PIDs.
 - Home task fixtures await an offline model refresh after provider registration,
   before returning either the Gateway-wide or a session runtime. Early refusal tests

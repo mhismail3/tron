@@ -5,7 +5,8 @@ its result as this run's.
 The test-host pool is {the mini, this Mac}: `choose_host` picks the mini when it is configured, reachable and idle,
 and otherwise this Mac, always with its reason; `mini.py pool [vitest args]` runs one lane on the chosen host.
 `mini.py python <command>` runs verify's per-file Python command in the mini checkout, its stderr merged into
-stdout in order, since verify counts each file's unittest summary after that file's marker.
+stdout in order, since verify counts each file's unittest summary after that file's marker. `mini.py node <file>...`
+runs the Gateway's `node --test` files on the mini's pinned Node, its TAP output streamed back for verify to count.
 
 Local side: refuse a dirty tree, push the exact HEAD commit to the mini's bare repository, run this same file there
 (sent as source, so both halves are one version), stream its output live, and write the Vitest output files it
@@ -17,7 +18,7 @@ Mini side (`remote`): one job at a time under ~/tron-ci/jobs/gateway.lock (a cal
 caps the wait for it, naming the holder; unset waits indefinitely), check out the commit in
 ~/tron-ci/jobs/gateway, refuse a Node or npm that differs from the commit's pins, `npm ci` only when the
 commit's Gateway dependency inputs changed (Python tests import Gateway packages too), then run the commit's own
-gateway.py or, once the pinned Dafny passes `proof doctor`, the Python command. Closing the ssh session
+gateway.py, the Node test files on the pinned Node, or, once the pinned Dafny passes `proof doctor`, the Python command. Closing the ssh session
 (the local side stopped) sends that lane SIGTERM. The mini host is `git config tron.verify.mini` (an ssh
 destination) and `tron.verify.miniIdentity` (an optional key file). Runs on the mini's /usr/bin/python3.
 """
@@ -379,6 +380,9 @@ def remote_main(job: dict) -> int:
             if cancelled.is_set():
                 return refuse('stopped before the lane started')
 
+            if job['lane'] == 'node':
+                return finish(stream(str(checkout / 'scripts/tron-node'), 'exec', 'node', '--test', '--test-concurrency=1', *job['args'],
+                                     cwd=checkout / 'packages/gateway'))
             if job['lane'] == 'python':
                 doctor = (run('/bin/bash', str(checkout / 'tools/proof/bootstrap.sh'), 'doctor', cwd=checkout)
                           if (checkout / 'tools/proof/dafny.pin').is_file() else None)
@@ -415,8 +419,9 @@ if __name__ == '__main__':
     try:
         if sys.argv[1:2] == ['python'] and len(sys.argv) != 3:
             sys.exit('usage: mini.py python <command>')
-        sys.exit(pool_main(sys.argv[2:]) if sys.argv[1:2] == ['pool'] else local_main(sys.argv[2:], 'python')
-                 if sys.argv[1:2] == ['python'] else local_main(sys.argv[1:]))
+        if sys.argv[1:2] == ['pool']:
+            sys.exit(pool_main(sys.argv[2:]))
+        sys.exit(local_main(sys.argv[2:], sys.argv[1]) if sys.argv[1:2] in (['python'], ['node']) else local_main(sys.argv[1:]))
     except KeyboardInterrupt:
         sys.exit(130)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
