@@ -64,8 +64,8 @@ reads a skill before each delegation when the skill's description tells it to (i
 - **What:** on a quiet evening, one worker runs the same simulator selection with 1, 2 and 3 lanes, on
   warm and on freshly created simulators. For each it records wall time, CPU idle, the Gateway's event
   loop reading and the duration of one nested Gateway test file run on this Mac at the same time.
-- **Why:** the facts table has only "1 cold lane is safe" and "3 cold lanes are not". Two lanes and warm
-  simulators are unknown. The answer decides whether the working plan can widen.
+- **Why:** the facts table has only "one lane is safe" and "three freshly booted lanes are not". Two
+  lanes and warm simulators are unknown. The answer decides whether the working plan can widen.
 - **Who:** Home delegates it when nothing else heavy is planned, and tells Mohsin first because it is
   heavy.
 - **Risk:** it loads the Mac for about an hour.

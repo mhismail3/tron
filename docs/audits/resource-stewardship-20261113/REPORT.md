@@ -418,8 +418,8 @@ scripts that read load (target 0).
 
 ## 8. Not verified
 
-- Whether two warm simulator lanes are safe on this Mac. Only one cold lane (safe) and three cold lanes
-  (not safe) were observed.
+- Whether two simulator lanes are safe on this Mac, and how much a warm simulator saves. Only one lane
+  (safe) and three freshly booted lanes (not safe) were observed.
 - Whether the mini can run the iOS suites through the stock tools. A worker reported matching Xcode and
   runtime there, and that verify has no route to send iOS work to it.
 - The Profile store. I did not check whether Home holds a saved note about machines.

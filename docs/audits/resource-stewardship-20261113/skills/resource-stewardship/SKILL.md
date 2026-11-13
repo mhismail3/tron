@@ -57,7 +57,8 @@ snapshot on maintainer turns.
   2026-11-12: load about 480 with CPU 53 % busy.)
 - **CPU idle** and **memory free** from the snapshot are the honest numbers.
 - **Swap in use** stays high for hours after pressure ends. Ignore it.
-- **Not yet known:** whether two warm simulator lanes are safe. Until measured, plan one.
+- **Not yet known:** whether two simulator lanes are safe, and how much a warm simulator saves. Until
+  measured, plan one lane.
 
 **Working plan that follows from these facts**
 
@@ -82,7 +83,8 @@ Answer five questions. Two minutes of thought here saves hours.
 3. **What is the Mac doing?** On a maintainer turn, run the snapshot:
    `bash ~/.tron/agent/skills/host-resources/host-state.sh`. On a wake you have no shell: use the newest
    `host:` line in workers' check-ins. If you must know and nothing is fresh, ask a running worker by
-   steer to send a check-in with a reading.
+   steer to send a check-in with a reading; you will see it at your next wake, so decide the safe shape
+   now and widen later.
 4. **Is he here?** If the maintainer is chatting with you or just rebuilt, live Tron must stay fast.
 5. **Which shape fits?**
    - **Now**: nothing heavy is running, or the facts say the overlap is safe.
