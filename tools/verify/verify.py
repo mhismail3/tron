@@ -1190,7 +1190,7 @@ def test_step_names(group: str, shards: list[list[str]], skipped: bool) -> list[
     return [f"tests: ios {index}/{len(shards)}" for index in range(1, len(shards) + 1)]
 
 
-def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, ios_wait: bool = True, gateway_host: str = "local",
+def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, ios_wait: bool = True, gateway_host: str = "local", node_host: str = "local",
               lane: str | None = None, opportunistic: bool = False):
     """One command definition shared by planning and execution. An iOS shard runs on `lane` (else
     the worktree's own lane, or the iPad lane for a `pad` shard); an `opportunistic` one takes a
@@ -1228,7 +1228,10 @@ def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, io
         return (node + ["npm", "test", "--", "--reporter=default", "--reporter=json", f"--outputFile.json={report}",
                         *[path[len(RELAY) + 1:] for path in files]], ROOT / RELAY, vitest_count(report))
     if group == "node-gateway":
-        return (node + ["node", "--test", "--test-concurrency=1", *[p[len(GATEWAY) + 1:] for p in files]], ROOT / GATEWAY, tap_count)
+        relative = [p[len(GATEWAY) + 1:] for p in files]
+        if node_host == "mini":
+            return (["python3", str(ROOT / "tools/verify/mini.py"), "node", *relative], ROOT / GATEWAY, tap_count)
+        return (node + ["node", "--test", "--test-concurrency=1", *relative], ROOT / GATEWAY, tap_count)
     if group == "node":
         return (node + ["node", "--test", "--test-concurrency=1", *files], ROOT, tap_count)
     if group == "python-here":
@@ -1340,10 +1343,13 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--plan", action="store_true", help="print the selection and steps without running them")
     parser.add_argument("--gateway-host", choices=("pool", "local", "mini"), default="pool",
                         help="where the Gateway Vitest and Python test lanes run: the test-host pool (the Mac mini when reachable and idle, "
-                             "else this Mac), this Mac, or the mini (tools/verify/mini.py)")
+                             "else this Mac), this Mac, or the mini (tools/verify/mini.py); the Gateway node lane runs on this Mac "
+                             "unless the mini is named")
     args = parser.parse_args(argv)
     gateway_host = "local" if args.update_locks else args.gateway_host
     gateway_reason = "--update-locks records goldens here" if args.update_locks else f"--gateway-host {gateway_host}"
+    node_host = "mini" if gateway_host == "mini" else "local"
+    node_reason = gateway_reason if node_host == "mini" or gateway_host != "pool" else "the default; --gateway-host mini moves it to the mini"
     skip = {item for item in args.skip.split(",") if item}
     if skip - set(SKIPPABLE):
         parser.error(f"--skip accepts only {', '.join(SKIPPABLE)}")
@@ -1414,6 +1420,8 @@ def main(argv: list[str]) -> int:
         print(f"  gateway and python lanes: {'on the Mac mini' if gateway_host == 'mini' else 'on this Mac'} ({gateway_reason})", flush=True)
     else:
         gateway_host, gateway_reason = "local", "no Gateway or Python lane selected"
+    if "node-gateway" in groups and not skipped_group("node-gateway"):
+        print(f"  node lane: {'on the Mac mini' if node_host == 'mini' else 'on this Mac'} ({node_reason})", flush=True)
     if "python-here" in groups and not skipped_group("python-here"):
         print("  python-here lane: on this Mac (its tests read this Mac's Pi session store)", flush=True)
     if "mac-terminal" in groups and not skipped_group("mac-terminal"):
@@ -1462,7 +1470,7 @@ def main(argv: list[str]) -> int:
             else:
                 for label, shard in zip(test_step_names(group, shards, False),
                                         shards if group == "ios" else [boundaries] if group == "ios-boundary" else [journeys] if group == "ios-journeys" else [profile_scenario_names(files)] if group.startswith("ios-scenarios:") else [owner_jobs[group]["command"]] if group in owner_jobs else [selectors]):
-                    command, cwd, _ = test_spec(group, files, shard, ROOT / "test-results/verify" / sha, ios_wait=name != "all", gateway_host=gateway_host)
+                    command, cwd, _ = test_spec(group, files, shard, ROOT / "test-results/verify" / sha, ios_wait=name != "all", gateway_host=gateway_host, node_host=node_host)
                     commands.append({"name": label, "command": command, "cwd": str(cwd.relative_to(ROOT)),
                                      **({"estimatedSeconds": round(shard.seconds, 1)} if group == "ios" else {})})
         deferred_commands = []
@@ -1629,10 +1637,10 @@ def main(argv: list[str]) -> int:
                     (no_result if verdict == "no result" else reds).append(f"{label}: {reason}")
                 continue
             payload = owner_jobs[group]["command"] if group in owner_jobs else selectors
-            command, cwd, count = test_spec(group, files, payload, run.logs, ios_wait=name != "all", gateway_host=gateway_host)
+            command, cwd, count = test_spec(group, files, payload, run.logs, ios_wait=name != "all", gateway_host=gateway_host, node_host=node_host)
             report = run.logs / f"{group}-vitest.json"
             report.unlink(missing_ok=True)
-            on_mini = gateway_host == "mini" and (group.startswith("gateway") or group == "python")
+            on_mini = (node_host if group == "node-gateway" else gateway_host) == "mini" and (group.startswith("gateway") or group in ("node-gateway", "python"))
             env = {**update, "TRON_VERIFY_COMMIT": sha} if on_mini else update
             result = run.step(label, command, cwd=cwd, count=count, env=env)
             if group in owner_jobs and result["exit"] == 73:

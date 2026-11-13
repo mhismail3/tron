@@ -247,6 +247,13 @@ class ExternalVerificationTests(VerifyCase):
             plan = json.loads(planned.stdout[planned.stdout.index("{"):])
             self.assertEqual({c["name"]: Path(c["command"][1]).name for c in plan["commands"] if c["name"].startswith("tests: gateway")},
                              {"tests: gateway": runner, "tests: gateway-nested": runner}, options)
+            node_command = next(c["command"] for c in plan["commands"] if c["name"] == "tests: node-gateway")
+            host = options[-1] if options else "pool"
+            if host == "mini":
+                self.assertEqual([Path(node_command[1]).name, *node_command[2:]], ["mini.py", "node", files[3]], options)
+            else:
+                self.assertEqual(node_command[-1:], [files[3]], options)
+                self.assertNotIn("mini.py", " ".join(node_command), options)
             local_python = " && ".join(f"echo '### verify file: {path}' && python3 {path}"
                                        for path in ("mods/alpha/test-alpha.py", "scripts/test-pooled.py"))
             python_command = next(c["command"] for c in plan["commands"] if c["name"] == "tests: python")
@@ -255,6 +262,9 @@ class ExternalVerificationTests(VerifyCase):
                              else local_python, options)
             self.assertEqual(plan["gatewayHost"], {"host": runner.removesuffix(".py").replace("gateway", "local"), "reason": reason})
             self.assertIn(f"gateway and python lanes: on {'the Mac mini' if runner == 'mini.py' else 'this Mac'} ({reason})", planned.stdout)
+            node_reason = {"mini": "--gateway-host mini", "local": "--gateway-host local",
+                           "pool": "the default; --gateway-host mini moves it to the mini"}[host]
+            self.assertIn(f"node lane: on {'the Mac mini' if host == 'mini' else 'this Mac'} ({node_reason})", planned.stdout)
             self.assertIn("mac-terminal lane: on this Mac (it needs this host's tailnet sshd)", planned.stdout)
         r.git("config", "tron.verify.mini", "mini.test")
         self.declare("alpha", [python])
@@ -277,6 +287,34 @@ class ExternalVerificationTests(VerifyCase):
         stale = r.verify("--module", "repo/alpha", "--plan")
         self.assertEqual(stale.returncode, 2, stale.stdout + stale.stderr)
         self.assertIn("serial runner config lists untracked packages/gateway/src/deleted.e2e.test.ts", stale.stderr)
+
+    def test_a_node_only_selection_runs_here_by_default_and_never_probes_the_mini(self) -> None:
+        r = self.repo
+        r.write("packages/gateway/scripts/contract.test.mjs", "export const selectionOnly = true;\n")
+        r.write("packages/gateway/consumer.module.json", json.dumps({"layer": "L3", "owns": ["**"]}))
+        self.declare("alpha", ["scripts/tron test gateway scripts/contract.test.mjs"])
+        r.commit("Gateway node-only consumer declaration")
+        r.git("branch", "-f", "base")
+        r.write("packages/gateway/scripts/contract.test.mjs", "export const selectionOnly = false;\n")
+        r.commit("the node-only script changes")
+        bin_dir = Path(self.temp.name) / "node-only-bin"
+        bin_dir.mkdir()
+        probed = Path(self.temp.name) / "probed"
+        (bin_dir / "ssh").write_text(f'#!/bin/sh\ntouch "{probed}"\nexit 255\n')
+        (bin_dir / "ssh").chmod(0o755)
+        r.env["PATH"] = f"{bin_dir}{os.pathsep}{r.env['PATH']}"
+        r.git("config", "tron.verify.mini", "mini.test")
+        planned = r.verify("--plan")
+        self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
+        selected = json.loads(planned.stdout[planned.stdout.index("{"):])
+        self.assertEqual(selected["selection"]["paths"], ["packages/gateway/scripts/contract.test.mjs"], planned.stdout)
+        self.assertEqual(selected["groups"], {"node-gateway": ["packages/gateway/scripts/contract.test.mjs"]}, planned.stdout)
+        self.assertFalse(probed.exists(), "a node-only selection must not probe the mini")
+        self.assertIn("node lane: on this Mac (the default; --gateway-host mini moves it to the mini)", planned.stdout)
+        self.assertNotIn("gateway and python lanes", planned.stdout)
+        plan = json.loads(planned.stdout[planned.stdout.index("{"):])
+        node_command = next(c["command"] for c in plan["commands"] if c["name"] == "tests: node-gateway")
+        self.assertNotIn("mini.py", " ".join(node_command))
 
     def test_declared_ios_class_uses_existing_lane_and_explicit_skip(self) -> None:
         r = self.repo

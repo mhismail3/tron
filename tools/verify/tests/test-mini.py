@@ -223,6 +223,18 @@ class MiniGatewayLane(unittest.TestCase):
             os.kill(pid, signal.SIGKILL)
             self.fail(f'the python test {pid} outlived its stopped job:\n{output}')
 
+    def test_a_node_lane_runs_its_test_files_at_the_exact_commit_and_returns_tap_and_exit_code(self) -> None:
+        self.write('packages/gateway/scripts/pass.test.mjs', "import test from 'node:test';\ntest('passes', () => {});\n")
+        self.write('packages/gateway/scripts/fail.test.mjs', "import test from 'node:test';\ntest('fails', () => { throw new Error('red'); });\n")
+        sha = self.commit('node test files')
+        passed = self.lane('node', 'scripts/pass.test.mjs')
+        self.assertEqual(passed.returncode, 0, passed.stdout + passed.stderr)
+        self.assertIn(f'mini: node lane for {sha[:12]}', passed.stdout)
+        self.assertRegex(passed.stdout, r'(?m)^[#ℹ] pass 1$')
+        failed = self.lane('node', 'scripts/fail.test.mjs')
+        self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
+        self.assertRegex(failed.stdout, r'(?m)^[#ℹ] fail 1$')
+
     def pool(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(['python3', str(self.local / 'tools/verify/mini.py'), 'pool', *args], cwd=self.local / 'packages/gateway',
                               env={**self.env, 'HOME': str(self.temporary)}, text=True, capture_output=True, timeout=300)
