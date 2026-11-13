@@ -1130,6 +1130,75 @@ class RuntimeMigrationTests(unittest.TestCase):
             self.sdk("open", base, home)
             self.assertEqual((home / manifest["asyncDir"].replace("internal/subagents/", "state/subagents/") / "handoff.json").read_text(), completed)
 
+    def test_mac_wrapper_lock_refuses_planning_and_apply(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="home-layout-wrapper-") as temporary:
+            base = Path(temporary).resolve()
+            fixture = Fixture(base)
+            fixture.write(REGISTRY, (ROOT / REGISTRY).read_text())
+            home = base / "user/.tron"
+            lock = home / "gateway/mac/.mac-wrapper.com.tron.mac.lock"
+            lock.parent.mkdir(parents=True)
+            lock.write_text("stale owner text is not authority\n")
+            program = "import fcntl,sys; f=open(sys.argv[1],'r+'); fcntl.lockf(f,fcntl.LOCK_EX|fcntl.LOCK_NB); print('owned',flush=True); sys.stdin.read()"
+            with subprocess.Popen(["python3", "-B", "-c", program, str(lock)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True) as owner:
+                try:
+                    self.assertEqual(owner.stdout.readline().strip(), "owned")
+                    for mode in ("--dry-run", "--apply"):
+                        result = fixture.run("migrate", "--home", str(home), mode, env={"HOME": str(home.parent)})
+                        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                        self.assertIn("mac_wrapper_running", json.loads(result.stdout)["blockers"])
+                        self.assertFalse((home / "state").exists())
+                finally:
+                    owner.communicate("release", timeout=15)
+                    self.assertEqual(owner.returncode, 0)
+            result = fixture.run("migrate", "--home", str(home), "--dry-run", env={"HOME": str(home.parent)})
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_stopped_home_carries_interrupted_malformed_and_opaque_statuses_both_ways(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="home-layout-interrupted-") as temporary:
+            base = Path(temporary).resolve()
+            fixture = Fixture(base)
+            fixture.write(REGISTRY, (ROOT / REGISTRY).read_text())
+            home = base / "user/.tron"
+            (home / "gateway").mkdir(parents=True)
+            bodies = {}
+            records = {}
+            for index, state in enumerate(("pending", "running", "paused")):
+                relative = f"async-subagent-runs/run-{index}/status.json"
+                bodies[relative] = json.dumps({"state": state, "cwd": str(home / "gateway/home/workspace"), "steps": [{"status": state}]}, indent=3).encode() + b"\n"
+                records[relative] = "interrupted-at-migration"
+            relative = "nested-subagent-runs/parent/child/status.json"
+            bodies[relative] = b'{"state":"failed","steps":[{"status":"running","children":[{"state":"paused"}]}]}\n'
+            records[relative] = "interrupted-at-migration"
+            for index, data in enumerate((b'{"state": \xff', b'not json\n')):
+                relative = f"async-subagent-runs/broken-{index}/status.json"
+                bodies[relative] = data
+                records[relative] = "malformed-status"
+            directories = [f"async-subagent-runs/opaque-{index}/status.json" for index in range(2)]
+            for relative in directories:
+                path = home / "internal/subagents" / relative
+                path.mkdir(parents=True)
+                bodies[relative + "/artifact.bin"] = b"\x00opaque\xff\n"
+                records[relative] = "opaque-status-directory"
+            for relative, data in bodies.items():
+                path = home / "internal/subagents" / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+            for mode in ("--dry-run", "--apply", "--rollback"):
+                result = fixture.run("migrate", "--home", str(home), mode, env={"HOME": str(home.parent)})
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                report = json.loads(result.stdout)
+                self.assertEqual({row["path"].removeprefix("state/subagents/"): row["reason"] for row in report["carried_lifecycle_records"]}, records)
+                folder = home / ("state/subagents" if mode == "--apply" else "internal/subagents")
+                self.assertEqual({relative: (folder / relative).read_bytes() for relative in bodies}, bodies)
+                for row in report["carried_lifecycle_records"]:
+                    relative = row["path"].removeprefix("state/subagents/")
+                    if relative in bodies:
+                        self.assertEqual(row["sha256"], hashlib.sha256(bodies[relative]).hexdigest())
+                if mode == "--apply":
+                    journal = json.loads(Path(report["journal"]).read_text())
+                    self.assertEqual(journal["layouts"][str(home)]["carried_lifecycle_records"], report["carried_lifecycle_records"])
+
     def test_non_object_settings_refuse_without_mutation(self) -> None:
         with tempfile.TemporaryDirectory(prefix="home-layout-settings-") as temporary:
             fixture = Fixture(Path(temporary).resolve())
