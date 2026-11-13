@@ -1383,11 +1383,16 @@ def main(argv: list[str]) -> int:
         print("  python-here lane: on this Mac (its tests read this Mac's Pi session store)", flush=True)
     if "mac-terminal" in groups and not skipped_group("mac-terminal"):
         print("  mac-terminal lane: on this Mac (it needs this host's tailnet sshd)", flush=True)
+    cheap_groups = [group for group in ("python", "python-here", "shell", "node", "node-gateway", "gateway", "gateway-nested", "relay") if group in groups]
+    expensive_groups = sorted(set(groups) - set(cheap_groups))
+    ordered_groups = cheap_groups + expensive_groups
     plan_steps = ["ownership", "worktree residue", "documentation policy", "generated docs", "agent policy", "home layout", "privacy guard", "git diff --check",
                   "no new comments"] \
         + (["gateway typecheck", "gateway lint", "layers gateway"] if gateway_touched else []) \
-        + (["ios source policy", "ios build"] if ios_lane else []) + ["layers ios"] \
-        + [name for group in sorted(groups) for name in test_step_names(group, shards, skipped_group(group))]
+        + (["ios source policy"] if ios_lane else []) \
+        + [name for group in cheap_groups for name in test_step_names(group, shards, skipped_group(group))] \
+        + (["ios build"] if ios_lane else []) + ["layers ios"] \
+        + [name for group in expensive_groups for name in test_step_names(group, shards, skipped_group(group))]
     tron = str(ROOT / "scripts/tron")
     ios_test = str(ROOT / "scripts/tron-ios-test")
     ios_policy = [str(ROOT / "packages/ios-app/scripts/test-source-policy.sh")]
@@ -1421,7 +1426,8 @@ def main(argv: list[str]) -> int:
             commands.append({"name": "ios source policy", "command": ios_policy})
             commands.append({"name": "ios build", "command": [ios_test, "build"], "reuse": "only if current build stamp is fresh"})
         commands.append({"name": "layers ios", "command": [tron, "layers", "ios", "--base", base], "requires": "fresh iOS index"})
-        for group, files in sorted(groups.items()):
+        for group in ordered_groups:
+            files = groups[group]
             if group in NOT_DRIVEN or skipped_group(group):
                 commands.append({"name": f"tests: {group}", "notRun": "explicit skip" if skipped_group(group) else "requires owning harness"})
             else:
@@ -1430,6 +1436,7 @@ def main(argv: list[str]) -> int:
                     command, cwd, _ = test_spec(group, files, shard, ROOT / "test-results/verify" / sha, gateway_host=gateway_host, node_host=node_host)
                     commands.append({"name": label, "command": command, "cwd": str(cwd.relative_to(ROOT)),
                                      **({"estimatedSeconds": round(shard.seconds, 1)} if group == "ios" else {})})
+        commands.sort(key=lambda step: plan_steps.index(step["name"]))
         deferred_commands = []
         if selection["deferredTests"]:
             command, cwd, _ = test_spec("gateway-nested", selection["deferredTests"], [], ROOT / "test-results/verify" / sha, gateway_host=gateway_host)
@@ -1500,31 +1507,39 @@ def main(argv: list[str]) -> int:
                 cwd = ROOT if label == "layers gateway" else ROOT / GATEWAY
                 if run.step(label, command, cwd=cwd)["status"] == "failed":
                     reds.append(f"{label} failed")
-        stale = ios_index_stale()
-        ios_broken = False
-        if ios_lane:
-            if run.step("ios source policy", ios_policy)["status"] == "failed":
-                reds.append("ios source policy failed")
-            if stale is None:
-                run.reused("ios build", "the test products are already stamped for this commit", [ios_test, "build"])
-            else:
-                built = run.step("ios build", [ios_test, "build"])
-                if built["status"] == "failed":
-                    reds.append("ios build failed")
-                    ios_broken = True
-            if not ios_broken:
-                stale = None
-        if ios_broken:
-            run.skipped("layers ios", "ios build failed")
-        elif stale is not None:
-            run.skipped("layers ios", f"no fresh iOS index for this commit: {stale}")
-        elif run.step("layers ios", [tron, "layers", "ios", "--base", base])["status"] == "failed":
-            reds.append("layers ios failed")
-
+        if ios_lane and run.step("ios source policy", ios_policy)["status"] == "failed":
+            reds.append("ios source policy failed")
         update = {"TRON_UPDATE_LOCKS": args.update_locks} if args.update_locks else {}
         not_run, no_result = [], []
-        for group in sorted(groups):
+        ios_broken = False
+        for group in [*cheap_groups, None, *expensive_groups]:
+            if group is None:
+                if reds:
+                    if ios_lane:
+                        run.skipped("ios build", "cheap tier did not pass")
+                    run.skipped("layers ios", "cheap tier did not pass")
+                    continue
+                stale = ios_index_stale()
+                if ios_lane:
+                    if stale is None:
+                        run.reused("ios build", "the test products are already stamped for this commit", [ios_test, "build"])
+                    elif run.step("ios build", [ios_test, "build"])["status"] == "failed":
+                        reds.append("ios build failed")
+                        ios_broken = True
+                    if not ios_broken:
+                        stale = None
+                if ios_broken:
+                    run.skipped("layers ios", "ios build failed")
+                elif stale is not None:
+                    run.skipped("layers ios", f"no fresh iOS index for this commit: {stale}")
+                elif run.step("layers ios", [tron, "layers", "ios", "--base", base])["status"] == "failed":
+                    reds.append("layers ios failed")
+                continue
             files = groups[group]
+            if group in expensive_groups and reds:
+                for label in test_step_names(group, shards, skipped_group(group)):
+                    run.skipped(label, "ios build failed" if ios_broken else "earlier tier did not pass")
+                continue
             label = f"tests: {group}"
             if skipped_group(group):
                 run.skipped(label, f"{len(files)} file(s) skipped by --skip {group.split('-')[0]}")
