@@ -161,8 +161,9 @@ Unreadable ownership refuses as `stopped_proof_unavailable`; a live owner refuse
 target-scoped, not a production-global process-name grep: a private copy may be
 rehearsed while another home is running. Apply reclaims only stale runtime leases
 after the stopped proof, holds Gateway leases and Mac wrapper kernel locks through
-the operation, and checks ownership again before publishing ready. The sibling Debug
-lease also serializes the shared maintenance journal. A new standalone writer must
+the operation, and checks ownership again before publishing ready. A kernel lock on the private
+journal directory serializes maintenance across homes without claiming a sibling
+Gateway lease. A new standalone writer must
 not be launched during the offline window.
 
 Historical lifecycle projections are not liveness. Nonterminal status records are
@@ -177,13 +178,12 @@ Gateway/SDK startup owns lifecycle reconciliation; migration neither resumes wor
 nor introduces an alternative reconciliation reader.
 
 `--apply` and `--rollback` are prepared capabilities, not permission to migrate a live
-installation. Keep both Gateways offline through the maintainer-approved operation and
-recovery. Use the same source and registry for both homes. Review dry-run and maintenance
+installation. Keep the target Gateway, Mac wrapper and workers stopped through the
+maintainer-approved operation and recovery. Use the same source and registry for both homes. Review dry-run and maintenance
 index first; migration does not edit the index. Copies and snapshots are retained.
 
 One private journal at `$HOME/.tron-maintenance/layout-v2/<registry-sha256>.json` owns
-moves across homes. Claims bind home, logical endpoints and device/inode. The shared
-Debug lease serializes writes. A claim reserved by another home refuses even after a
+moves across homes. Claims bind home, logical endpoints and device/inode. The private journal directory's whole-operation kernel lock serializes writes. A claim reserved by another home refuses even after a
 crash. Inverse releases each claim durably after its rename; another home can then
 acquire the restored source. Unknown/replaced destinations and changed digests refuse.
 A completed rename is inferred only from its inode, never replayed speculatively.

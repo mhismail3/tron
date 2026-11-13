@@ -15,7 +15,7 @@ from runtime_rewrites import rewrite
 
 MARKER = b"retired by layout 2; merge main\n"
 ROOTS = {"gateway", "mac-terminal", "ios-builds"}
-TERMINAL = {"complete", "failed", "partial", "stopped", "rejected"}
+TERMINAL = {"complete", "completed", "failed", "partial", "stopped", "rejected"}
 
 
 def enabled(registry):

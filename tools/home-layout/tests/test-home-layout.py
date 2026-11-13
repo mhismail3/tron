@@ -930,15 +930,32 @@ class MigrateTests(unittest.TestCase):
         self.assertNotEqual(json.loads(result.stdout)["state"], "applied")
         self.assertIn("move_identity_changed", result.stdout)
 
-    def test_debug_runtime_lock_refuses_all_modes_without_mutations(self) -> None:
-        lock = self.user / ".tron-dev/agent/.tron-gateway-runtime.lock.lock"
+    def test_a_sibling_debug_home_is_not_claimed_or_mutated(self) -> None:
+        debug = self.user / ".tron-dev"
+        lock = debug / "agent/.tron-gateway-runtime.lock.lock"
         lock.mkdir(parents=True)
-        before = snapshot(self.user)
+        before = snapshot(debug)
+        code, report = self.migrate("--dry-run", home=debug)
+        self.assertEqual(code, 1, report)
+        self.assertIn("gateway_running", report["blockers"])
         for mode in ("--dry-run", "--apply", "--rollback"):
             code, report = self.migrate(mode)
-            self.assertEqual(code, 1, report)
-            self.assertIn("debug_gateway_running", report["blockers"])
-            self.assertEqual(snapshot(self.user, contents_first=False), before)
+            self.assertEqual(code, 0, report)
+            self.assertEqual(snapshot(debug, contents_first=False), before)
+        journal_directory = self.user / ".tron-maintenance/layout-v2"
+        program = "import fcntl,os,sys; fd=os.open(sys.argv[1],os.O_RDONLY); fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB); print('owned',flush=True); sys.stdin.read()"
+        with subprocess.Popen(["python3", "-B", "-c", program, str(journal_directory)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True) as owner:
+            try:
+                self.assertEqual(owner.stdout.readline().strip(), "owned")
+                stopped = snapshot(self.home)
+                code, report = self.migrate("--apply")
+                self.assertEqual(code, 1, report)
+                self.assertIn("maintenance_running", [error["reason"] for error in report["errors"]])
+                self.assertEqual(snapshot(self.home, contents_first=False), stopped)
+                self.assertEqual(snapshot(debug, contents_first=False), before)
+            finally:
+                owner.communicate("release", timeout=15)
+                self.assertEqual(owner.returncode, 0)
 
     def test_the_shipped_registry_declares_slice_b_moves(self) -> None:
         result = subprocess.run(["python3", str(ROOT / TOOL), "migrate", "--home", str(self.home), "--status"],
@@ -1053,7 +1070,7 @@ class RuntimeMigrationTests(unittest.TestCase):
         blocked = fixture.run("migrate", "--home", str(home), "--apply", env={"HOME": str(home.parent)})
         self.assertEqual(blocked.returncode, 1, blocked.stdout + blocked.stderr)
         self.assertIn("gateway_running", json.loads(blocked.stdout)["blockers"])
-        for lock in (home / "agent/.tron-gateway-runtime.lock.lock", home.parent / ".tron-dev/agent/.tron-gateway-runtime.lock.lock"):
+        for lock in (home / "agent/.tron-gateway-runtime.lock.lock",):
             lock.rmdir()
 
     def test_crashes_resume_forward_and_inverse_without_restoring_runtime_bodies(self) -> None:
@@ -1112,6 +1129,9 @@ class RuntimeMigrationTests(unittest.TestCase):
                 self.assertTrue(ready, process.stderr.read() if not ready else "")
                 manifest = json.loads(ready)
                 self.assertIn("runId", manifest)
+                lease = home / "agent/.tron-gateway-runtime.lock.lock"
+                lease.mkdir(parents=True)
+                os.utime(lease, (time.time() - 600, time.time() - 600))
                 before = snapshot(home)
                 result = fixture.run("migrate", "--home", str(home), "--dry-run", env={"HOME": str(home.parent)})
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
@@ -1198,6 +1218,22 @@ class RuntimeMigrationTests(unittest.TestCase):
                 if mode == "--apply":
                     journal = json.loads(Path(report["journal"]).read_text())
                     self.assertEqual(journal["layouts"][str(home)]["carried_lifecycle_records"], report["carried_lifecycle_records"])
+
+    def test_unreadable_kernel_ownership_refuses_without_mutation(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="home-layout-unreadable-owner-") as temporary:
+            base = Path(temporary).resolve()
+            fixture = Fixture(base)
+            fixture.write(REGISTRY, (ROOT / REGISTRY).read_text())
+            home = base / "user/.tron"
+            (home / "gateway").mkdir(parents=True)
+            fixture.git("add", "-A")
+            before = snapshot(home)
+            result = subprocess.run(["/usr/bin/sandbox-exec", "-p", "(version 1) (allow default) (deny sysctl-read)",
+                                     "python3", "-B", str(fixture.repo / TOOL), "migrate", "--home", str(home), "--apply", "--json"],
+                                    capture_output=True, text=True, env={**os.environ, "HOME": str(home.parent)})
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn("stopped_proof_unavailable", json.loads(result.stdout)["blockers"])
+            self.assertEqual(snapshot(home, contents_first=False), before)
 
     def test_non_object_settings_refuse_without_mutation(self) -> None:
         with tempfile.TemporaryDirectory(prefix="home-layout-settings-") as temporary:

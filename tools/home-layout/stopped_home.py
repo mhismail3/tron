@@ -7,6 +7,7 @@ import ctypes
 import errno
 import fcntl
 import os
+import select
 import stat
 import subprocess
 import sys
@@ -22,11 +23,34 @@ def within(value, home):
     return value == home or value.startswith(home + "/")
 
 
+def retired_process(pid):
+    queue = select.kqueue()
+    try:
+        events = queue.control([select.kevent(pid, filter=select.KQ_FILTER_PROC,
+                                             flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT,
+                                             fflags=select.KQ_NOTE_EXIT)], 1, 0)
+        for event in events:
+            if event.flags & select.KQ_EV_ERROR:
+                return event.data == errno.ESRCH
+            if event.fflags & select.KQ_NOTE_EXIT:
+                return True
+        return False
+    except ProcessLookupError:
+        return True
+    finally:
+        queue.close()
+
+
 def process_owner(home):
     if sys.platform != "darwin":
         raise OSError("stopped_proof_unavailable")
     libc = ctypes.CDLL(None, use_errno=True)
     proc = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+    argmax = ctypes.c_int()
+    length = ctypes.c_size_t(ctypes.sizeof(argmax))
+    if libc.sysctlbyname(b"kern.argmax", ctypes.byref(argmax), ctypes.byref(length), None, 0) or not 4096 <= argmax.value <= 8 * 1024 * 1024:
+        raise OSError("process_argument_capacity_unavailable")
+    buffer = ctypes.create_string_buffer(argmax.value)
     count = proc.proc_listpids(4, os.geteuid(), None, 0)
     if count <= 0 or count > 4 * 100000:
         raise OSError("process_inventory_unavailable")
@@ -38,12 +62,12 @@ def process_owner(home):
         if pid <= 0 or pid == os.getpid():
             continue
         mib = (ctypes.c_int * 3)(1, 49, pid)
-        buffer = ctypes.create_string_buffer(2 * 1024 * 1024)
         size = ctypes.c_size_t(len(buffer))
         if libc.sysctl(mib, 3, buffer, ctypes.byref(size), None, 0):
-            if ctypes.get_errno() == errno.ESRCH:
+            error = ctypes.get_errno()
+            if error == errno.ESRCH or retired_process(pid):
                 continue
-            raise OSError(ctypes.get_errno(), "process_owner_unreadable", str(pid))
+            raise OSError(error, "process_owner_unreadable", str(pid))
         data = buffer.raw[:size.value]
         if len(data) < 4:
             raise OSError("process_owner_unreadable")
@@ -59,7 +83,7 @@ def process_owner(home):
         runtime = any("/Gateway/" in value or "/gateway/" in value or "pi-coding-agent" in value or "subagent-runner" in value or "/Contents/MacOS/Tron" in value for value in args)
         if runtime:
             bindings.append(os.path.join(env.get("HOME", ""), env.get("TRON_HOME_NAME", ".tron")))
-        if any(value.startswith("/") and within(os.path.abspath(value), home) for value in bindings):
+        if any(value.startswith("/") and within(os.path.realpath(value), home) for value in bindings):
             return pid
     result = subprocess.run(["/usr/sbin/lsof", "-nP", "-u", str(os.geteuid()), "-Fpn"], capture_output=True, timeout=30)
     if result.returncode or result.stderr or len(result.stdout) > 64 * 1024 * 1024:
@@ -109,14 +133,15 @@ def probe(l, home, owned=None):
             query = Flock(0, 0, 0, fcntl.F_WRLCK, os.SEEK_SET)
             answer = Flock.from_buffer_copy(fcntl.fcntl(fd, fcntl.F_GETLK, bytes(query)))
             if answer.type != fcntl.F_UNLCK:
-                return "mac_wrapper_running"
+                return {"reason": "mac_wrapper_running", "pid": answer.pid}
         finally:
             os.close(fd)
     try:
-        if process_owner(home) is not None:
-            return "home_process_present"
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return "stopped_proof_unavailable"
+        pid = process_owner(home)
+        if pid is not None:
+            return {"reason": "home_process_present", "pid": pid}
+    except (OSError, ValueError, subprocess.SubprocessError) as failure:
+        return {"reason": "stopped_proof_unavailable", "detail": str(failure)}
     return None
 
 

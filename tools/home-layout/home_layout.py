@@ -7,6 +7,7 @@ import argparse
 import contextlib
 import ctypes
 import fnmatch
+import fcntl
 import hashlib
 import json
 import os
@@ -526,14 +527,10 @@ def migration(home: str, root: Path = ROOT, owned=None) -> dict:
         lock = observed(os.path.join(report["home"], RUNTIME_LOCK))
         if owned is None and lock is not None and time.time() - lock.st_mtime < RUNTIME_LOCK_STALE_SECONDS:
             report["blockers"].append("gateway_running")
-        debug_lock = observed(os.path.join(report["user_home"], ".tron-dev", RUNTIME_LOCK))
-        if owned is None and debug_lock is not None and time.time() - debug_lock.st_mtime < RUNTIME_LOCK_STALE_SECONDS and report["home"] != os.path.join(report["user_home"], ".tron-dev"):
-            report["blockers"].append("debug_gateway_running")
-        if not report["blockers"]:
-            refusal = stopped_home.probe(sys.modules[__name__], report["home"], owned)
-            if refusal:
-                report["blockers"].append(refusal)
-        report["stopped_proof"] = {"state": "refused" if report["blockers"] else "stopped",
+        refusal = stopped_home.probe(sys.modules[__name__], report["home"], owned) if not report["blockers"] else None
+        if refusal:
+            report["blockers"].append(refusal["reason"])
+        report["stopped_proof"] = {"state": "refused" if report["blockers"] else "stopped", "refusal": refusal,
                                    "owners": ["gateway-runtime-lease", "mac-wrapper-fcntl", "kernel-argv-environment-open-files"]}
         for move in [*registry.get("retired", []), *runtime_layout.extra_moves(report, registry)]:
             source, destination = (os.path.join(report["user_home"], value[2:]) if value.startswith("~/") else os.path.join(report["home"], value)
@@ -643,6 +640,25 @@ def rename_exclusive(source: str, destination: str) -> None:
     finally:
         os.close(source_fd)
         os.close(destination_fd)
+
+
+@contextlib.contextmanager
+def maintenance_lock(path: Path):
+    private_directory(path)
+    fd = open_home(str(path))
+    identity = os.fstat(fd)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise LayoutError("maintenance_running") from None
+        def check():
+            current = observed(str(path))
+            if current is None or (current.st_dev, current.st_ino) != (identity.st_dev, identity.st_ino):
+                raise LayoutError("maintenance_lock_lost")
+        yield check
+    finally:
+        os.close(fd)
 
 
 @contextlib.contextmanager
@@ -774,15 +790,15 @@ def execute_migration(home: str, rollback: bool, root: Path = ROOT) -> tuple[int
     report["journal"] = str(journal_path)
     with contextlib.ExitStack() as locks:
         try:
-            lock_paths = sorted({Path(report["home"]) / RUNTIME_LOCK,
-                                 Path(report["user_home"]) / ".tron-dev" / RUNTIME_LOCK})
+            lock_paths = [Path(report["home"]) / RUNTIME_LOCK]
             if rollback and journal is None:
                 report["blockers"].append("no_journal")
                 return 1, report
             if rollback and not any(row["home"] == report["home"] for row in journal["moves"]) and report["home"] not in journal["layouts"]:
                 report["state"] = "nothing_to_rollback"
                 return 0, report
-            guards = [locks.enter_context(runtime_lock(lock)) for lock in lock_paths]
+            guards = [locks.enter_context(maintenance_lock(journal_path.parent)),
+                      *(locks.enter_context(runtime_lock(lock)) for lock in lock_paths)]
             owned = locks.enter_context(stopped_home.claim(sys.modules[__name__], report["home"])) if runtime_layout.enabled(load(root)) else set()
             current = migration(home, root, owned)
             if current["errors"] or current["blockers"] or any(row["refusals"] for row in current["moves"]):
@@ -840,7 +856,8 @@ def execute_migration(home: str, rollback: bool, root: Path = ROOT) -> tuple[int
                 guard()
             refusal = stopped_home.probe(sys.modules[__name__], report["home"], owned)
             if refusal:
-                raise LayoutError(refusal)
+                report["stopped_proof"] = {**report["stopped_proof"], "state": "refused", "refusal": refusal}
+                raise LayoutError(refusal["reason"])
             runtime_layout.finish(sys.modules[__name__], report, registry, journal, journal_path, rollback)
             completed = migration(home, root, owned)
             if completed["errors"] or completed["blockers"] or any(row["refusals"] for row in completed["moves"]):
