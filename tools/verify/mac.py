@@ -14,6 +14,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import ledger
+
 ROOT = Path(__file__).resolve().parents[2]
 TARGET = "TronMacIntegrationTests"
 PROJECT = ["-project", "packages/mac-app/TronMac.xcodeproj", "-scheme", "TronMac", "-configuration", "Debug",
@@ -34,8 +36,9 @@ def main(classes: list[str]) -> int:
         (scratch / "home").mkdir(mode=0o700)
         (scratch / "tmp").mkdir(mode=0o700)
         only = [f"-only-testing:{TARGET}/{name}" for name in classes]
-        return subprocess.run(["xcodebuild", "test-without-building", *PROJECT, *only], cwd=ROOT,
-                              env={**os.environ, "HOME": str(scratch / "home"), "TMPDIR": str(scratch / "tmp")}).returncode
+        return ledger.execute('swift', ['xcodebuild', 'test-without-building', *PROJECT, *only,
+                                       '-resultBundlePath', str(scratch / 'TestResults.xcresult')],
+                              env={"HOME": str(scratch / "home"), "TMPDIR": str(scratch / "tmp")}, cwd=ROOT)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 

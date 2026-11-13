@@ -28,6 +28,7 @@ sys.path.insert(0, str(ROOT / "tools" / "verify"))
 import vitest_configs  # noqa: E402  (the one reader of the Gateway's listing Vitest configs)
 import mini  # noqa: E402  (the test-host pool's one owner)
 import swift_source
+import ledger
 
 GATEWAY = "packages/gateway"
 RELAY = "packages/push-relay"
@@ -265,7 +266,9 @@ def profile_command(scenarios: list[str]) -> list[str]:
 def profile_run(run: "Run", label: str, scenarios: list[str], sha: str) -> tuple[str, str] | None:
     root = run.logs / "profile"
     shutil.rmtree(root, ignore_errors=True)
+    capture = ledger.Capture('ios-scenarios')
     result = run.step(label, profile_command(scenarios), env={"TRON_PROFILE_RESULTS_DIR": str(root)})
+    capture.swift('', list(root.rglob('TestResults.xcresult')))
     if result["exit"] == 73:
         result.update(status="no result", tests=0, reason="owner validation could not acquire its iOS lane")
         return "no result", "owner validation could not acquire its iOS lane"
@@ -1171,7 +1174,8 @@ def ios_owner_count(output: str) -> int:
 
 
 def per_file(interpreter: str, files: list[str]) -> str:
-    return " && ".join(f"echo {shlex.quote(FILE_MARKER + path)} && {interpreter} {shlex.quote(path)}" for path in files)
+    runner = 'python3 tools/verify/ledger.py ' + ('python' if interpreter == 'python3' else 'exec shell bash')
+    return "status=0; " + "; ".join(f"echo {shlex.quote(FILE_MARKER + path)}; {runner} {shlex.quote(path)} || status=1" for path in files) + '; exit "$status"'
 
 
 def test_step_names(group: str, shards: list[list[str]], skipped: bool) -> list[str]:
@@ -1218,9 +1222,11 @@ def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, ga
         relative = [p[len(GATEWAY) + 1:] for p in files]
         if node_host == "mini":
             return (["python3", str(ROOT / "tools/verify/mini.py"), "node", *relative], ROOT / GATEWAY, tap_count)
-        return (node + ["node", "--test", "--test-concurrency=1", *relative], ROOT / GATEWAY, tap_count)
+        return ([sys.executable, str(ROOT / 'tools/verify/ledger.py'), 'exec', 'node', *node, 'node', '--test', '--test-concurrency=1',
+                 '--test-reporter=' + str(ROOT / 'tools/verify/ledger-node.mjs'), *relative], ROOT / GATEWAY, tap_count)
     if group == "node":
-        return (node + ["node", "--test", "--test-concurrency=1", *files], ROOT, tap_count)
+        return ([sys.executable, str(ROOT / 'tools/verify/ledger.py'), 'exec', 'node', *node, 'node', '--test', '--test-concurrency=1',
+                 '--test-reporter=' + str(ROOT / 'tools/verify/ledger-node.mjs'), *files], ROOT, tap_count)
     if group == "python-here":
         return (per_file("python3", files), ROOT, python_count)
     if group == "python":
@@ -1587,7 +1593,10 @@ def main(argv: list[str]) -> int:
             report.unlink(missing_ok=True)
             on_mini = (node_host if group == "node-gateway" else gateway_host) == "mini" and (group.startswith("gateway") or group in ("node-gateway", "python"))
             env = {**update, "TRON_VERIFY_COMMIT": sha} if on_mini else update
+            capture = ledger.Capture('relay') if group == 'relay' else None
             result = run.step(label, command, cwd=cwd, count=count, env=env)
+            if capture is not None:
+                capture.vitest(report)
             if group in owner_jobs and result["exit"] == 73:
                 result.update(status="no result", tests=0, reason="owner validation could not acquire its iOS lane")
                 no_result.append(f"{label}: owner validation could not acquire its iOS lane")

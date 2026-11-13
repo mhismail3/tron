@@ -36,6 +36,7 @@ import os
 import random
 import shutil
 import signal
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -46,7 +47,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 ARTIFACTS = ROOT / "test-results" / "verify-cli"
-COPIED = ["scripts/tron", "scripts/check-documentation-policy.py", "scripts/check-agent-policy.sh", "scripts/personal-info-guard.sh",
+COPIED = ["tools/verify/ledger-node.mjs", "scripts/tron", "scripts/check-documentation-policy.py", "scripts/check-agent-policy.sh", "scripts/personal-info-guard.sh",
           "scripts/ios-test-build-identity.py", "tools/work/work.json",
           *[str(p.relative_to(ROOT)) for d in ("tools/verify", "tools/ownership", "tools/metrics", "tools/layers", "tools/work", "tools/docs", "tools/home-layout")
             for p in (ROOT / d).glob("*.py")]]
@@ -254,8 +255,8 @@ class ExternalVerificationTests(VerifyCase):
             else:
                 self.assertEqual(node_command[-1:], [files[3]], options)
                 self.assertNotIn("mini.py", " ".join(node_command), options)
-            local_python = " && ".join(f"echo '### verify file: {path}' && python3 {path}"
-                                       for path in ("mods/alpha/test-alpha.py", "scripts/test-pooled.py"))
+            local_python = "status=0; " + "; ".join(f"echo '### verify file: {path}'; python3 tools/verify/ledger.py python {path} || status=1"
+                                       for path in ("mods/alpha/test-alpha.py", "scripts/test-pooled.py")) + '; exit "$status"'
             python_command = next(c["command"] for c in plan["commands"] if c["name"] == "tests: python")
             self.assertEqual([python_command[0], Path(python_command[1]).name, *python_command[2:]] if runner == "mini.py"
                              else python_command, ["python3", "mini.py", "python", local_python] if runner == "mini.py"
@@ -591,6 +592,124 @@ class GatewayDependenciesTests(VerifyCase):
         self.assertEqual(tests.returncode, 0, tests.stdout + tests.stderr)
         self.assertEqual((r.path / "test-results/mac-ran").read_text(), "WizardTests")
         self.assertEqual(r.report()["passingTests"], 2)
+
+
+class LedgerTests(VerifyCase):
+    def test_result_bundle_fixture_records_native_identity_and_duration(self) -> None:
+        r = self.repo
+        bundle = Path(self.temp.name) / 'run/TestResults.xcresult'
+        bundle.mkdir(parents=True)
+        document = {'testNodes': [{'nodeType': 'Test Plan', 'children': [
+            {'nodeType': 'Test Case', 'nodeIdentifierURL': 'test://com.apple.xcode/Project/Target/Cases/testPass', 'result': 'Passed', 'durationInSeconds': 1.25},
+            {'nodeType': 'Test Case', 'nodeIdentifierURL': 'test://com.apple.xcode/Project/Target/Cases/testFail', 'result': 'Failed', 'durationInSeconds': 2.5},
+            {'nodeType': 'Test Case', 'nodeIdentifierURL': 'test://com.apple.xcode/Project/Target/Cases/testSkip', 'result': 'Skipped'}]}]}
+        binary = Path(self.temp.name) / 'bin'
+        binary.mkdir()
+        xcrun = binary / 'xcrun'
+        xcrun.write_text('#!/bin/sh\nprintf \'%s\\n\' \'' + json.dumps(document) + "'\n")
+        xcrun.chmod(0o755)
+        result = subprocess.run([sys.executable, str(r.path / 'tools/verify/ledger.py'), 'exec', 'swift', sys.executable, '-c',
+                                 f'print("iOS test run complete: {bundle.parent}")'], cwd=r.path,
+                                env={**r.env, 'PATH': str(binary) + os.pathsep + r.env['PATH']}, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        path = Path(r.env['HOME']) / '.tron-maintenance/test-ledger/results.sqlite3'
+        with sqlite3.connect(path) as connection:
+            rows = connection.execute('SELECT test_id, outcome, seconds FROM results ORDER BY test_id').fetchall()
+        self.assertEqual(rows, [('Target/Cases/testFail', 'failed', 2.5), ('Target/Cases/testPass', 'passed', 1.25), ('Target/Cases/testSkip', 'skipped', 0.0)])
+
+    def test_real_xctest_process_records_pass_fail_and_skip_without_a_simulator(self) -> None:
+        r = self.repo
+        r.write('.gitignore', 'test-results/\n.build/\n')
+        r.write('Package.swift', '// swift-tools-version: 6.0\nimport PackageDescription\nlet package = Package(name: "LedgerFixture", targets: [.testTarget(name: "LedgerFixtureTests")])\n')
+        r.write('Tests/LedgerFixtureTests/Cases.swift', 'import XCTest\nfinal class Cases: XCTestCase {\n    func testPass() { XCTAssertEqual(1, 1) }\n    func testFail() { XCTFail("fixture red") }\n    func testSkip() throws { throw XCTSkip("fixture skip") }\n}\n')
+        r.commit('real XCTest cases')
+        result = subprocess.run([sys.executable, str(r.path / 'tools/verify/ledger.py'), 'exec', 'swift', 'swift', 'test'],
+                                cwd=r.path, env=r.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        path = Path(r.env['HOME']) / '.tron-maintenance/test-ledger/results.sqlite3'
+        with sqlite3.connect(path) as connection:
+            rows = connection.execute('SELECT test_id, outcome, seconds FROM results ORDER BY test_id').fetchall()
+        self.assertEqual(len(rows), 3, result.stdout + result.stderr)
+        self.assertEqual({row[1] for row in rows}, {'passed', 'failed', 'skipped'})
+        self.assertTrue(all(row[0].startswith('LedgerFixtureTests/Cases/test') and row[2] >= 0 for row in rows))
+
+    def test_real_gateway_runner_records_vitest_case_durations_on_failure(self) -> None:
+        r = self.repo
+        r.write('.gitignore', 'test-results/\nnode_modules/\n')
+        r.write('scripts/tron-node', '#!/bin/sh\nexec ' + str(ROOT / 'scripts/tron-node') + ' "$@"\n')
+        (r.path / 'scripts/tron-node').chmod(0o755)
+        package = r.path / 'packages/gateway'
+        (package / 'node_modules').symlink_to(ROOT / 'packages/gateway/node_modules', target_is_directory=True)
+        r.write('packages/gateway/package.json', '{"type":"module"}\n')
+        r.write('packages/gateway/src/cases.test.ts', "import { test, expect } from 'vitest';\ntest('pass', () => expect(1).toBe(1));\ntest.skip('skip', () => {});\ntest('fail', () => expect(1).toBe(2));\n")
+        r.commit('real Vitest cases')
+        result = subprocess.run([str(r.path / 'scripts/tron'), 'test', 'gateway', '--local', 'src/cases.test.ts'], cwd=r.path,
+                                env=r.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        path = Path(r.env['HOME']) / '.tron-maintenance/test-ledger/results.sqlite3'
+        with sqlite3.connect(path) as connection:
+            rows = connection.execute('SELECT test_id, outcome, seconds FROM results ORDER BY test_id').fetchall()
+        self.assertEqual(len(rows), 3, result.stdout + result.stderr)
+        self.assertEqual({row[1] for row in rows}, {'passed', 'failed', 'skipped'})
+        self.assertTrue(all(row[0].startswith('packages/gateway/src/cases.test.ts::') and row[2] >= 0 for row in rows))
+
+    def test_real_node_reporter_keeps_tap_and_records_individual_outcomes(self) -> None:
+        r = self.repo
+        r.write('mods/alpha/ledger.test.mjs', "import test from 'node:test';\ntest('pass', () => {});\ntest('skip', { skip: true }, () => {});\ntest('fail', () => { throw new Error('fixture failure'); });\n")
+        r.commit('real Node cases')
+        result = subprocess.run([sys.executable, str(r.path / 'tools/verify/ledger.py'), 'exec', 'node', str(ROOT / 'scripts/tron-node'),
+                                 'exec', 'node', '--test', '--test-reporter=' + str(r.path / 'tools/verify/ledger-node.mjs'),
+                                 'mods/alpha/ledger.test.mjs'], cwd=r.path, env=r.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('# pass 1', result.stdout)
+        self.assertIn('# fail 1', result.stdout)
+        self.assertIn('# skipped 1', result.stdout)
+        self.assertNotIn('@@tron-test-case', result.stdout)
+        path = Path(r.env['HOME']) / '.tron-maintenance/test-ledger/results.sqlite3'
+        with sqlite3.connect(path) as connection:
+            rows = connection.execute('SELECT test_id, outcome, seconds FROM results ORDER BY test_id').fetchall()
+        self.assertEqual(len(rows), 3)
+        self.assertEqual({row[1] for row in rows}, {'passed', 'failed', 'skipped'})
+        self.assertTrue(all(row[0].startswith('mods/alpha/ledger.test.mjs::') and row[2] >= 0 for row in rows))
+
+    def test_public_tooling_run_appends_real_cases_and_flakes_means_same_tree_pass_and_fail(self) -> None:
+        r = self.repo
+        r.write('mods/alpha/test-alpha.py', 'import os, unittest\nclass Cases(unittest.TestCase):\n    def test_variable(self):\n        self.assertFalse(os.environ.get("LEDGER_FIXTURE_FAIL"))\n    def test_broken(self):\n        self.fail("always broken")\n    def test_cross_tree(self):\n        self.assertFalse(os.environ.get("LEDGER_OTHER_TREE_FAIL"))\nunittest.main()\n')
+        r.commit('ledger cases on one unchanged tree')
+        for value in ('', '1', ''):
+            result = subprocess.run([str(r.path / 'scripts/tron'), 'test', 'tooling', 'mods/alpha/test-alpha.py'], cwd=r.path,
+                                    env={**r.env, 'LEDGER_FIXTURE_FAIL': value}, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        path = Path(r.env['HOME']) / '.tron-maintenance/test-ledger/results.sqlite3'
+        self.assertTrue(path.exists())
+        with sqlite3.connect(path) as connection:
+            rows = connection.execute('SELECT test_id, commit_sha, tree_hash, outcome, seconds, lane, host, cpu_idle_percent, memory_free_percent, dirty FROM results').fetchall()
+        self.assertEqual(len(rows), 9)
+        self.assertEqual({row[1] for row in rows}, {r.git('rev-parse', 'HEAD')})
+        self.assertEqual({row[2] for row in rows}, {r.git('rev-parse', 'HEAD^{tree}')})
+        self.assertTrue(all(row[4] >= 0 and row[5] == 'python' and row[6] and row[9] == 0 for row in rows))
+        self.assertTrue(all(0 <= row[7] <= 100 and 0 <= row[8] <= 100 for row in rows))
+        query = subprocess.run([str(r.path / 'scripts/tron'), 'flakes', '--json'], cwd=r.path, env=r.env, capture_output=True, text=True)
+        self.assertEqual(query.returncode, 0, query.stderr)
+        flakes = json.loads(query.stdout)
+        self.assertEqual(len(flakes), 1)
+        self.assertEqual((flakes[0]['test_id'], flakes[0]['passes'], flakes[0]['failures'], flakes[0]['failure_rate']),
+                         ('mods/alpha/test-alpha.py::Cases.test_variable', 2, 1, 1 / 3))
+        r.write('mods/alpha/alpha.py', "VALUE = 'new tree'\n")
+        r.commit('another tree')
+        other = subprocess.run([str(r.path / 'scripts/tron'), 'test', 'tooling', 'mods/alpha/test-alpha.py'], cwd=r.path,
+                               env={**r.env, 'LEDGER_FIXTURE_FAIL': '1', 'LEDGER_OTHER_TREE_FAIL': '1'}, capture_output=True, text=True)
+        self.assertEqual(other.returncode, 1)
+        contended = subprocess.run([str(r.path / 'scripts/tron'), 'test', 'tooling', 'mods/alpha/test-alpha.py'], cwd=r.path,
+                                  env={**r.env, 'TRON_TEST_CONTENDED': '1'}, capture_output=True, text=True)
+        self.assertEqual(contended.returncode, 1)
+        query = subprocess.run([str(r.path / 'scripts/tron'), 'flakes', '--json'], cwd=r.path, env=r.env, capture_output=True, text=True)
+        self.assertEqual(json.loads(query.stdout), flakes)
+        refused = subprocess.run([str(r.path / 'scripts/tron'), 'test', 'tooling', 'mods/alpha/test-alpha.py'], cwd=r.path,
+                                 env={**r.env, 'TRON_TEST_LEDGER': str(r.path / 'ledger.sqlite3')}, capture_output=True, text=True)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn('outside repositories and ~/.tron', refused.stderr)
+        self.assertFalse((r.path / 'ledger.sqlite3').exists())
 
 
 class SelectionTests(VerifyCase):
