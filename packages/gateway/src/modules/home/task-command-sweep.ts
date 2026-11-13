@@ -138,7 +138,7 @@ export class TaskCommandSweep {
   private async heavyKinds(running: ReadonlyMap<string, ReadonlySet<number> | undefined>): Promise<Map<string, HeavyProcessKind[] | undefined>> {
     const args = await readProcessArgs([...new Set([...running.values()].flatMap(pids => [...pids ?? []]))]);
     return new Map([...running].map(([taskId, pids]) => {
-      if (!pids || !args) return [taskId, undefined];
+      if (!pids || !args || (pids.size > 0 && ![...pids].some(pid => args.has(pid)))) return [taskId, undefined];
       const kinds = new Set([...pids].map(pid => heavyProcessKind(args.get(pid) ?? "")));
       return [taskId, HEAVY_PROCESS_KINDS.filter(kind => kinds.has(kind))];
     }));

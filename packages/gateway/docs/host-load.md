@@ -39,10 +39,12 @@ a recorded process group and an inherited anchor descriptor (fd 19). Settling th
 (report, Stop, deadline or failure) unbinds the session and reaps everything the scope
 owns, including background children re-parented to launchd and `setsid` children that
 kept the anchor, then removes its `TMPDIR`. `TaskCommandSweep` runs every 60 s (one `ps`,
-one `lsof` per scope, one `ps` of running tasks' process arguments, one `sysctl`): it reaps scopes whose task settled without a completed reap (a
-refused reap or a restart), logs `host.load.non-task` when busy CPU ≥ 90 % comes mostly
-from processes outside task scopes, and records [Home's host reading](#homes-host-reading). It refuses rather than guess: a task this store does not
-record for that worker, an unreadable process table or a survivor leaves the scope on disk.
+one `lsof` per scope, one `ps` of running tasks' arguments, one `sysctl`): it reaps scopes
+whose task settled without a completed reap (a refused reap or a restart), logs
+`host.load.non-task` when busy CPU ≥ 90 % comes mostly from processes outside task scopes,
+and records [Home's host reading](#homes-host-reading). It refuses rather than guess: a
+task this store does not record for that worker, an unreadable process table or a survivor
+leaves the scope on disk.
 Detaching on purpose means `setsid` plus closing fd 19, as `scripts/tron dev start` does
 for the shared Debug Gateway. Files written outside `$TMPDIR` are not reaped (macOS
 `mktemp` without a template ignores `TMPDIR`).
@@ -115,6 +117,6 @@ so Home sees the Mac on every wake, including wakes where its shell is refused:
   simulator's own processes run under launchd, outside every scope: they count in
   `simulatorsBooted`, never in a task's `heavy`.
 - A value the sweep could not read is `"unavailable"`, never 0: an unmeasurable CPU window,
-  no memory probe, an unreadable process table, a scope whose walk failed, or a task that
-  started after the last sweep.
+  no memory probe, an unreadable process table, a scope whose walk or argument read failed,
+  or a task that started after the last sweep.
 - It carries no level or threshold and decides nothing; Home reads it to plan.
