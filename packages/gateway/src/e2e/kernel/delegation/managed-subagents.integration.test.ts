@@ -119,12 +119,17 @@ it.each([
     const invalidDefinition = join(cwd, ".pi", "agents", "invalid-worker.md");
     if (conflict) await writeFile(invalidDefinition, "---\nname: invalid-worker\ndescription: Invalid definition probe\nfallbackModels: [provider/model]\n---\nRead only.\n");
     let childSystem = "";
+    let childUserMessages = "";
     faux.setResponses([
       fauxAssistantMessage([fauxToolCall("subagent", {
         agent: "offline-worker", task: "Return CHILD_OFFLINE_COMPLETE", async: false,
         acceptance: { level: "none", reason: "Read-only offline activation probe" },
       }, { id: "offline-launch" })], { stopReason: "toolUse" }),
-      context => { childSystem = JSON.stringify(context.messages.filter(message => message.role === "system")); return fauxAssistantMessage("CHILD_OFFLINE_COMPLETE"); },
+      context => {
+        childSystem = JSON.stringify(context.messages.filter(message => message.role === "system"));
+        childUserMessages = JSON.stringify(context.messages.filter(message => message.role === "user"));
+        return fauxAssistantMessage("CHILD_OFFLINE_COMPLETE");
+      },
       fauxAssistantMessage("PARENT_OFFLINE_COMPLETE"),
     ]);
     const trust = new TrustService(agentDir);
@@ -253,7 +258,7 @@ it.each([
       results: Array<{ index: number; exitCode: number; finalOutput: string; sessionFile: string; sessionOwnerId: string }>;
     };
     expect(childSystem).toContain("GLOBAL_CHILD_RULES_MARKER");
-    expect(childSystem.split(APPROVAL_RULE)).toHaveLength(2);
+    expect(childUserMessages.split(APPROVAL_RULE)).toHaveLength(2);
     expect(childSystem).not.toContain("PROJECT_CHILD_RULES_MARKER");
     expect(details.results).toHaveLength(1);
     const result = details.results[0]!;

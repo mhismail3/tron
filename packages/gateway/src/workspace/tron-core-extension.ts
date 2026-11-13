@@ -5,7 +5,7 @@ import type { JevDecisionClient } from "../providers/jev-client.js";
 import { createJevExtension } from "../providers/jev-extension.js";
 import type { ConnectionAccess } from "../modules/integrations/contract.js";
 
-export const APPROVAL_RULE = "Ask only for spend, sends, installs, irreversible or destructive effects, trust, credentials only the user knows, or 2FA on their device.";
+export const APPROVAL_RULE = "Ask only for spend, sends, installs, irreversible or destructive effects, trust or authority changes, privacy expansion, credentials only the user knows, or 2FA on their device.";
 
 const CONNECTIONS_TOOL_PARAMETERS = Type.Object({ action: Type.Literal("list") }, { additionalProperties: false });
 
