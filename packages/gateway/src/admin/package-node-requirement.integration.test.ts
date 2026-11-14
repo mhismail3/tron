@@ -441,7 +441,7 @@ describe("settings package update binds the effective installer of a trusted pro
       await writeFile(fixture.projectSettings, JSON.stringify({ npmCommand: ["sh", "-c", `touch '${marker}'; exit 1`, "--password", secret] }));
       const review = await fixture.packages.updatePackage({ cwd: fixture.cwd, source: fixture.source, version: "1.2.0", reason: "Trusted installer" }, fixture.requester);
       expect(review).toMatchObject({ status: "review", review: { items: [
-        expect.objectContaining({ label: expect.stringMatching(/^Package /), detail: expect.stringContaining("Installer: sh -c") }),
+        expect.objectContaining({ label: expect.stringMatching(/^Package /), detail: expect.stringContaining("Installer: sh with 4 argument(s); sha256 ") }),
         expect.objectContaining({ label: "Configured source" }),
       ] } });
       expect(JSON.stringify(review)).not.toContain(secret);

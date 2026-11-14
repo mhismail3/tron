@@ -15,7 +15,6 @@ import type { JsonValue, PackageInventory, PackageUpdates } from "../protocol/ty
 import type { TrustService } from "../kernel/resources/trust-service.js";
 import { loadPackageProvides, type InstalledPackage } from "./package-provides.js";
 import { AsyncMutex } from "../util/async-mutex.js";
-import { redact, redactCredentialUrls, redactCredentials } from "../util/credential-redaction.js";
 import { type OutsideChanges } from "./settings-outside.js";
 import { changeReview, type PlannedWrite } from "../kernel/settings/settings-types.js";
 import { instanceId } from "../kernel/settings/scope-resolution.js";
@@ -53,25 +52,16 @@ function configuredEntries(settings: SettingsManager): Array<{ source: string; s
   ];
 }
 
-interface Installer { digest: string; display: string }
+interface Installer { digest: string; summary: string }
 
-const SECRET_ARGUMENT = /(?:token|secret|password|passwd|credential|auth|key|cookie)/iu;
+interface PackageContext { manager: DefaultPackageManager; settings: SettingsManager; project: { cwd: string; projectDir: string } }
 
 function installerOf(argv: readonly string[] | undefined): Installer | null {
   if (!argv || argv.length === 0) return null;
-  return { digest: createHash("sha256").update(JSON.stringify(argv)).digest("hex"), display: displayInstaller(argv) };
-}
-
-function displayInstaller(argv: readonly string[]): string {
-  let maskNext = false;
-  return argv.map(argument => {
-    if (maskNext) { maskNext = false; return "[REDACTED]"; }
-    if (!SECRET_ARGUMENT.test(argument)) return redactCredentialUrls(redactCredentials(redact(argument)));
-    const equals = argument.indexOf("=");
-    if (equals >= 0) return `${argument.slice(0, equals)}=[REDACTED]`;
-    maskNext = true;
-    return argument;
-  }).join(" ");
+  const digest = createHash("sha256").update(JSON.stringify(argv)).digest("hex");
+  const name = (argv[0] ?? "").split(/[\\/]/u).pop() ?? "";
+  const command = /^[A-Za-z0-9._-]{1,64}$/u.test(name) ? name : "custom command";
+  return { digest, summary: `${command} with ${argv.length - 1} argument(s); sha256 ${digest.slice(0, 12)}` };
 }
 
 function hostNpmPlanningView(settings: SettingsManager): SettingsManager {
@@ -276,12 +266,12 @@ export class PackageService {
   async updatePackage(request: PackageUpdateRequest, requester: Actor, confirm?: ConfirmChange): Promise<ChangeResult> {
     if (!this.changes) throw new GatewayError("busy", "Package updates are not available");
     if (!request.reason.trim()) throw new GatewayError("invalid_request", "A reason is required for a package update");
-    const plan = await this.trackAdministrative(() => this.mutex.run(() => this.planUpdate(request, requester)));
+    const plan = await this.trackAdministrative(() => this.mutex.run(async () => this.planUpdate(request, requester, await this.manager(request.cwd, false))));
     if (!confirm) return { status: "review", review: plan.review, changes: [] };
     return (await confirm(plan.review, accepted => this.applyUpdate(request, plan.review.digest, requester, accepted))) ?? { status: "declined", changes: [] };
   }
 
-  private async planUpdate(request: PackageUpdateRequest, requester: Actor): Promise<PackageUpdatePlan> {
+  private async planUpdate(request: PackageUpdateRequest, requester: Actor, context: PackageContext): Promise<PackageUpdatePlan> {
     if (requester.kind !== "home") throw new GatewayError("invalid_request", "Package updates are available only in Tron Home");
     if (request.source === MANAGED_SUBAGENTS_SOURCE) {
       throw new GatewayError("conflict", "Tron manages pi-subagents; package commands cannot change its bundled payload");
@@ -291,7 +281,7 @@ export class PackageService {
     if (/^[a-z][a-z0-9+.-]*:\/\/[^/@]*@/i.test(request.source)) {
       throw new GatewayError("invalid_request", "Package sources with credentials in their URL are refused; keep credentials in their owned store");
     }
-    const { settings, project } = await this.manager(request.cwd, false);
+    const { settings, project } = context;
     const configured = configuredEntries(settings);
     if (!configured.some(entry => entry.scope === "user" && entry.source === request.source)) {
       if (configured.some(entry => entry.source === request.source)) {
@@ -341,7 +331,7 @@ export class PackageService {
 
   private planned(input: Omit<PackageUpdatePlan, "review">): PackageUpdatePlan {
     const identity = { operation: PACKAGE_UPDATE_ACTION, kind: input.kind, source: input.source, target: input.target, name: input.name, from: input.from, version: input.version, installer: input.installer?.digest ?? null };
-    const items = [{ label: `Package ${input.name}`, before: input.from, after: input.version, detail: `${input.source}\nUser package (global)${input.installer ? `\nInstaller: ${input.installer.display}` : ""}`, exact: JSON.stringify(identity) }];
+    const items = [{ label: `Package ${input.name}`, before: input.from, after: input.version, detail: `${input.source}\nUser package (global)${input.installer ? `\nInstaller: ${input.installer.summary}` : ""}`, exact: JSON.stringify(identity) }];
     if (input.target !== input.source) {
       items.push({ label: "Configured source", before: input.source, after: input.target, detail: "sources.packages (global) pin", exact: JSON.stringify({ source: input.source, target: input.target }) });
     }
@@ -354,7 +344,8 @@ export class PackageService {
   private applyUpdate(request: PackageUpdateRequest, digest: string, requester: Actor, accepted: NativeChangeAcceptance): Promise<ChangeResult> {
     const changes = this.changes!;
     return changes.withTarget({ kind: "global" }, () => this.trackAdministrative(work => this.mutex.run(async () => {
-      const plan = await this.planUpdate(request, requester);
+      const context = await this.manager(request.cwd, false);
+      const plan = await this.planUpdate(request, requester, context);
       if (plan.review.digest !== digest) throw new GatewayError("conflict", "The package changed since review; nothing was applied");
       if (plan.kind === "git" && await gitRead(plan.installedPath!, ["status", "--porcelain", "--untracked-files=no"]) !== "") {
         throw new GatewayError("conflict", "The installed checkout has local edits to tracked files; refusing to replace them");
@@ -365,7 +356,7 @@ export class PackageService {
         layer: "global" as const, key: PACKAGE_UPDATE_ACTION, op: "set" as const,
         after: { ...plan.review, requester: { kind: requester.kind, id: requester.id } }, reason: request.reason, action: true as const };
       await changes.record.append([{ ...entry, changeId, at: new Date().toISOString(), status: "started" }]);
-      const { manager, settings } = await this.manager(request.cwd, false);
+      const { manager, settings } = context;
       const writes: PlannedWrite[] = [{ store: { kind: "global" }, instance: instanceId("sources.packages", {}), changeId, value: plan.packages }];
       await this.outside?.begin(writes);
       manager.setProgressCallback(event => { work?.progress(); this.broadcast("packages.progress", { operationId: changeId, event } as unknown as JsonValue); });
