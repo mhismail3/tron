@@ -24,7 +24,7 @@ import type { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import type { SessionSearchService } from "../sessions/session-search-service.js";
-import { sessionImportModule } from "../sessions/session-import-module.js";
+import { sessionImportModule } from "../modules/session-import/session-import-module.js";
 
 export interface ModuleOwners extends RecentModelSignals {
   registry: RuntimeRegistry;

@@ -48,7 +48,6 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 
 <!-- tron docs settings -->
 45 keys, declared in `packages/gateway/src/kernel/settings/settings-schema.ts` (`KEYS`).
-Install telemetry is not a setting: the Gateway process pins the pi SDK to `PI_TELEMETRY=0` before any SDK work, so a hand-written `enableInstallTelemetry` cannot re-enable it.
 
 | Key | Qualifier | Group | Layers | Home layers | Timing | Effect | Native tap |
 | --- | --- | --- | --- | --- | --- | --- | --- |
