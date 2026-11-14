@@ -31,7 +31,7 @@ The level answers "who needs to look, and when". Debug is not retained on any st
 - A caller's mistake (invalid request, unauthorized) is warning. An expected
   transient state (warming up, busy) is info or warning, never error.
 - Debug is never written on any Tron-owned stream; `GatewayLogger.log` drops it.
-- Fast-success stage breakdowns are not retained. Slow or non-success completion records include entered
+- Fast-success stage breakdowns are not retained. Non-success completion records include entered
   timed stages, including those that round to 0 ms, subject to the 1,024-byte persisted stage bound.
   `util/request-span.ts` owns stage selection; `transport/logger.ts` owns the persisted bound.
 
