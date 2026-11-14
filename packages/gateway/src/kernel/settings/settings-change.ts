@@ -43,8 +43,8 @@ export interface ChangeContext {
   applyAgainOf?: string;
 }
 
-function outcomeValues(redacted: boolean | undefined, before: unknown, after: unknown): Pick<ChangeOutcome, "before" | "after" | "redacted"> {
-  return redacted ? { redacted: true } : { before: before ?? null, after: after ?? null };
+function outcomeValues(before: unknown, after: unknown): Pick<ChangeOutcome, "before" | "after"> {
+  return { before: before ?? null, after: after ?? null };
 }
 
 export interface SettingsWriters {
@@ -162,10 +162,10 @@ export class SettingsChangePath {
     const review = changeReview({ target, undoOf: context.undoOf, applyAgainOf: context.applyAgainOf, planned: planned.map(plan => ({
       key: plan.key.id, layer: plan.request.layer, qualifiers: plan.qualifiers, op: plan.request.op, before: plan.before ?? null, after: plan.after ?? null })) },
       { title: planned.map(plan => plan.key.label).join(", "), requiresTap, ...(context.reason ? { reason: context.reason } : {}),
-        items: planned.map(plan => ({ label: plan.key.label, before: plan.key.redacted ? "Hidden" : formatStoredSetting(plan.key.type, plan.before),
-          after: plan.key.redacted ? "Hidden" : formatStoredSetting(plan.key.type, plan.after),
+        items: planned.map(plan => ({ label: plan.key.label, before: formatStoredSetting(plan.key.type, plan.before),
+          after: formatStoredSetting(plan.key.type, plan.after),
           detail: [LAYER_LABELS[plan.request.layer] + " stored value", target.kind === "session" ? target.sessionId : target.kind === "project" ? target.cwd : target.kind, plan.key.confirm].filter(Boolean).join("\n"),
-          ...(plan.key.redacted ? {} : { exact: JSON.stringify({ target, key: plan.key.id, layer: plan.request.layer, qualifiers: plan.qualifiers, op: plan.request.op, before: plan.before ?? null, after: plan.after ?? null }) }) })) });
+          exact: JSON.stringify({ target, key: plan.key.id, layer: plan.request.layer, qualifiers: plan.qualifiers, op: plan.request.op, before: plan.before ?? null, after: plan.after ?? null }) })) });
     if (context.confirmationDigest && context.confirmationDigest !== review.digest) throw new GatewayError("conflict", "The reviewed change is stale; nothing was applied");
     if (context.dryRun) {
       let next = 0;
@@ -175,7 +175,7 @@ export class SettingsChangePath {
           if (error) return { changeId: "", key: request.key, layer: request.layer, status: "failed", error: { code: error.code, message: error.message } };
           const plan = planned[next++]!;
           return { changeId: "", key: plan.key.id, ...(Object.keys(plan.qualifiers).length ? { qualifiers: plan.qualifiers } : {}), layer: request.layer,
-            status: "applied", ...outcomeValues(plan.key.redacted, plan.before, plan.after) };
+            status: "applied", ...outcomeValues(plan.before, plan.after) };
         }) };
     }
     if (requiresTap && context.actor.kind !== "ui") return { status: "review", review, changes: [] };
@@ -364,7 +364,7 @@ export class SettingsChangePath {
         const key = this.model.schema.schemaKey(change.key);
         const shown = (value: unknown) => value === null || value === undefined ? "the default" : formatStoredSetting(key.type, value);
         return { changeId: change.changeId, label: key.label, effect: key.effect,
-          ...(change.redacted ? {} : { before: shown(change.before), after: shown(change.after) }) };
+          before: shown(change.before), after: shown(change.after) };
       }),
     });
   }
@@ -463,7 +463,7 @@ export class SettingsChangePath {
   private outcomes(applied: ReadonlyArray<{ plan: Planned; changeId: string; revision?: number; git?: GitResult; result?: unknown }>, status: ChangeStatus): ChangeOutcome[] {
     return applied.map(({ plan, changeId, revision, git, result }) => ({
       changeId, key: plan.key.id, ...(Object.keys(plan.qualifiers).length ? { qualifiers: plan.qualifiers } : {}),
-      layer: plan.request.layer, status, ...outcomeValues(plan.key.redacted, plan.before, plan.after),
+      layer: plan.request.layer, status, ...outcomeValues(plan.before, plan.after),
       ...(revision === undefined ? {} : { revision }), ...(git ? { git } : {}),
       ...(result === undefined ? {} : { result }),
     }));
@@ -576,8 +576,7 @@ export class SettingsChangePath {
       ...(context.commandId ? { commandId: context.commandId } : {}), key: plan.key.id, layer: plan.request.layer, op: plan.request.op,
       ...(Object.keys(plan.qualifiers).length ? { qualifiers: plan.qualifiers } : {}),
       ...(plan.fixedAt ? { fixedAt: plan.fixedAt } : {}),
-      ...(plan.key.redacted ? { changed: true as const, redacted: true as const } : {
-        ...(plan.before === undefined ? {} : { before: plan.before }), ...(plan.after === undefined ? {} : { after: plan.after }) }),
+      ...(plan.before === undefined ? {} : { before: plan.before }), ...(plan.after === undefined ? {} : { after: plan.after }),
       ...(context.reason ? { reason: context.reason } : {}), status,
       ...(failure ? { failure } : {}), ...(git ? { git } : {}),
       ...(context.undoOf ? { undoOf: context.undoOf } : {}), ...(context.applyAgainOf ? { applyAgainOf: context.applyAgainOf } : {}) };
