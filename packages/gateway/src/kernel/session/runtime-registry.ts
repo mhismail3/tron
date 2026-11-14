@@ -66,7 +66,7 @@ import { ExtensionArtifactDiscovery, type ExtensionArtifactDiscoveryCounts } fro
 import type { ResourceRoot } from "../resources/resource-root.js";
 import type { ModuleHost } from "../host/module-host.js";
 import { GatewayWorkRegistry } from "../run/gateway-work-registry.js";
-import { readCanonicalSessionFile } from "./canonical-reader.js";
+import { readCanonicalSession, readCanonicalSessionFile } from "./canonical-reader.js";
 import { syncDurably } from "../../foundation/durable-json.js";
 import {
   invocationProjection,
@@ -317,6 +317,7 @@ interface CatalogAcquisitionEntry {
   canonicalCwd: string;
   fileIdentity?: string;
   structuralSubagent: boolean;
+  parentSessionPath?: string;
   parentSessionId?: string;
 }
 
@@ -384,6 +385,7 @@ export interface SessionOperations extends LineageRuntimePort<RuntimeSlot>, Owne
   readTaskEvidence(sessionId: string, options?: { appendStable?: boolean }): Promise<FileEntry[]>;
   readLiveTaskEvidence(sessionId: string, operationId: string): Promise<LiveTaskEvidence>;
   readTaskWorkerEntries(sessionId: string): Promise<FileEntry[]>;
+  readTaskWorkerTranscript(sessionId: string, subagentSessionId?: string): Promise<{ sessionId: string; subagents: string[]; entries: SessionEntry[] }>;
   recordTaskWorkers(workers: Iterable<readonly [sessionId: string, taskId: string]>): void;
   taskWorkerSettled(sessionId: string, taskId: string): Promise<void>;
   taskWorkerModel(sessionId: string): Promise<{ provider: string; id: string } | undefined>;
@@ -1900,6 +1902,7 @@ export class RuntimeRegistry implements SessionOperations {
         canonicalCwd: resolve(session.cwd || process.cwd()),
         ...(session.fileIdentity ? { fileIdentity: session.fileIdentity } : {}),
         structuralSubagent: session.delegated,
+        ...(session.parentSessionPath ? { parentSessionPath: session.parentSessionPath } : {}),
         ...(parentSessionId ? { parentSessionId } : {}),
       };
       retainedBytes += Buffer.byteLength(JSON.stringify(entry));
@@ -3365,6 +3368,47 @@ export class RuntimeRegistry implements SessionOperations {
     if (live) return live.displayName;
     const path = await this.sessionFile(sessionId);
     return path ? this.sessionCatalog.row(path)?.name : undefined;
+  }
+
+  async readTaskWorkerTranscript(sessionId: string, subagentSessionId?: string): Promise<{ sessionId: string; subagents: string[]; entries: SessionEntry[] }> {
+    await this.sessionCatalog.whenReconciled();
+    const acquisition = await this.catalogAcquisition();
+    this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
+    const root = acquisition.entriesByID.get(sessionId);
+    if (!root) throw new GatewayError("not_found", "Task worker session is unavailable");
+    const catalogRoot = await realpath(this.catalogDirectory());
+    const byPath = new Map([...acquisition.entriesByID.values()].map(entry => [entry.path, entry]));
+    const owned = new Set([sessionId]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const entry of acquisition.entriesByID.values()) {
+        if (owned.has(entry.id) || !entry.structuralSubagent) continue;
+        const parentPath = delegatedSessionParentPath(entry.path, catalogRoot);
+        const parent = parentPath ? byPath.get(parentPath) : undefined;
+        if (!parent || !owned.has(parent.id) || entry.parentSessionPath && resolve(entry.parentSessionPath) !== parent.path) continue;
+        owned.add(entry.id);
+        changed = true;
+      }
+    }
+    const selected = subagentSessionId ?? sessionId;
+    this.requireUnambiguousSessionId(selected, acquisition.ambiguousIDs);
+    if (!owned.has(selected)) throw new GatewayError("not_found", "Subagent session does not belong to this task worker");
+    const subagents = [...owned].filter(id => id !== sessionId).sort();
+    const live = this.slots.get(selected);
+    if (live) {
+      const branch = validateSearchBranch(live.canonicalSessionEntries());
+      if (branch.header.id !== selected) throw new GatewayError("conflict", "Task worker session identity changed");
+      return { sessionId: selected, subagents, entries: branch.entries };
+    }
+    const entry = acquisition.entriesByID.get(selected)!;
+    const metadata = await lstat(entry.path);
+    if (!metadata.isFile() || metadata.isSymbolicLink() || await realpath(entry.path) !== entry.path) throw new GatewayError("conflict", "Task transcript path is unsafe");
+    if (metadata.size > MAX_READ_ONLY_SUBAGENT_SESSION_BYTES) throw new GatewayError("busy", "Task transcript exceeds the bounded read budget", true);
+    const source = await readCanonicalSession({ path: entry.path, sessionId: selected });
+    const after = await lstat(entry.path);
+    if (after.dev !== metadata.dev || after.ino !== metadata.ino) throw new GatewayError("conflict", "Task transcript file was replaced");
+    return { sessionId: selected, subagents, entries: source.branch.map(item => item.raw as unknown as SessionEntry) };
   }
 
   async readTaskWorkerEntries(sessionId: string): Promise<FileEntry[]> {
