@@ -1154,19 +1154,20 @@
           }
         },
         {
-          "description": "Read and change Tron settings through typed writes. Reversible changes apply and are logged. Read durable audit records with history; reverse a change with undo and its changeId. Only irreversible effects, trust/authority, privacy expansion, spend and installs need the exact shared native tap. dryRun validates and returns before/after without effects. Home may target its task worker; running workers adopt from the next model request and are signalled.",
+          "description": "Read and change Tron settings through typed writes. Reversible changes apply and are logged. Read durable audit records with history; reverse a change with undo and its changeId. Tron Home alone can update (action update) one configured package to an exact npm version or git commit SHA behind the native install card, which shows any pin change; that is never undoable. Only irreversible effects, trust/authority, privacy expansion, spend and installs need the exact shared native tap. dryRun validates and returns before/after without effects. Home may target its task worker; running workers adopt from the next model request and are signalled.",
           "name": "settings",
           "parameters": {
             "additionalProperties": false,
             "properties": {
               "action": {
-                "description": "resolve: read current values and scopes. inventory: read-only hooks by event and extension, packages, Tron modules and MCP server status for this chat's directory (credentials masked). history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card.",
+                "description": "resolve: read current values and scopes. inventory: read-only hooks by event and extension, packages, Tron modules and MCP server status for this chat's directory (credentials masked). history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card. update (Tron Home only): install one exact npm version or full git commit SHA of one configured package behind the native install card; the card shows any configured pin change; never undoable.",
                 "enum": [
                   "resolve",
                   "change",
                   "history",
                   "undo",
-                  "inventory"
+                  "inventory",
+                  "update"
                 ],
                 "type": "string"
               },
@@ -1275,9 +1276,21 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "source": {
+                "description": "update (required): the configured package source exactly as in sources.packages, e.g. npm:name.",
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+              },
               "taskId": {
                 "description": "Tron Home only: the delegated task (from task list) whose worker session to read or change instead of this chat.",
                 "maxLength": 160,
+                "minLength": 1,
+                "type": "string"
+              },
+              "version": {
+                "description": "update (required): the exact npm version (e.g. 1.2.3) or the full 40-character git commit SHA to install. Tags and ranges are refused.",
+                "maxLength": 64,
                 "minLength": 1,
                 "type": "string"
               }
@@ -1888,19 +1901,20 @@
           }
         },
         {
-          "description": "Read and change Tron settings through typed writes. Reversible changes apply and are logged. Read durable audit records with history; reverse a change with undo and its changeId. Only irreversible effects, trust/authority, privacy expansion, spend and installs need the exact shared native tap. dryRun validates and returns before/after without effects. Home may target its task worker; running workers adopt from the next model request and are signalled.",
+          "description": "Read and change Tron settings through typed writes. Reversible changes apply and are logged. Read durable audit records with history; reverse a change with undo and its changeId. Tron Home alone can update (action update) one configured package to an exact npm version or git commit SHA behind the native install card, which shows any pin change; that is never undoable. Only irreversible effects, trust/authority, privacy expansion, spend and installs need the exact shared native tap. dryRun validates and returns before/after without effects. Home may target its task worker; running workers adopt from the next model request and are signalled.",
           "name": "settings",
           "parameters": {
             "additionalProperties": false,
             "properties": {
               "action": {
-                "description": "resolve: read current values and scopes. inventory: read-only hooks by event and extension, packages, Tron modules and MCP server status for this chat's directory (credentials masked). history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card.",
+                "description": "resolve: read current values and scopes. inventory: read-only hooks by event and extension, packages, Tron modules and MCP server status for this chat's directory (credentials masked). history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card. update (Tron Home only): install one exact npm version or full git commit SHA of one configured package behind the native install card; the card shows any configured pin change; never undoable.",
                 "enum": [
                   "resolve",
                   "change",
                   "history",
                   "undo",
-                  "inventory"
+                  "inventory",
+                  "update"
                 ],
                 "type": "string"
               },
@@ -2009,9 +2023,21 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "source": {
+                "description": "update (required): the configured package source exactly as in sources.packages, e.g. npm:name.",
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+              },
               "taskId": {
                 "description": "Tron Home only: the delegated task (from task list) whose worker session to read or change instead of this chat.",
                 "maxLength": 160,
+                "minLength": 1,
+                "type": "string"
+              },
+              "version": {
+                "description": "update (required): the exact npm version (e.g. 1.2.3) or the full 40-character git commit SHA to install. Tags and ranges are refused.",
+                "maxLength": 64,
                 "minLength": 1,
                 "type": "string"
               }
