@@ -292,11 +292,6 @@ that HOME at `.tron/state/subagents`. The harness forwards its canonical `TRON_E
 to XCTest; `RealGatewayUIFixture` requires it and owns the root used by every on-disk Gateway
 witness. The separate Pi agent directory is not a source for deriving the Gateway root.
 Its canonical lifecycle root is `HOME/Workspace` (exact spelling).
-`testProjectLifecycleApproveCreatesUntrustsAndTrusts`, `testProjectLifecycleDenialRetainsUntrustedRepository`,
-`testProjectLifecycleRefusedApprovalShowsItsReason` and `testProjectLifecycleBusyTrustUsesCanonicalReason`
-exercise the native project pages;
-the busy journey seeds an empty trust store and a real linked-worktree repository only in
-that fixture. Run these selectors individually;
 `TRON_IOS_E2E_UI_RUN_TIMEOUT_SECONDS=300` bounds a journey without changing XCTest oracles.
 
 ## Manual iOS release validation and delivery

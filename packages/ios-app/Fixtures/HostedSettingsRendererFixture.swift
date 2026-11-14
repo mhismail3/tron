@@ -106,10 +106,7 @@ struct HostedSettingsRendererFixture: View {
         NavigationStack {
             if ready {
                 Group {
-                    if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-project-lifecycle-preview"),
-                       ProcessInfo.processInfo.arguments.indices.contains(index + 1) {
-                        HostedProjectLifecyclePreview(surface: ProcessInfo.processInfo.arguments[index + 1])
-                    } else if ProcessInfo.processInfo.arguments.contains("-theme-icon-boundary") {
+                    if ProcessInfo.processInfo.arguments.contains("-theme-icon-boundary") {
                         HostedThemeIconFixture()
                     } else if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-six-ui-surface"),
                        ProcessInfo.processInfo.arguments.indices.contains(index + 1) {
@@ -144,7 +141,7 @@ struct HostedSettingsRendererFixture: View {
                     if !ProcessInfo.processInfo.arguments.contains("-settings-alignment-review")
                         && !ProcessInfo.processInfo.arguments.contains("-settings-controls-review")
                         && !ProcessInfo.processInfo.arguments.contains("-six-ui-surface")
-                        && !ProcessInfo.processInfo.arguments.contains("-project-lifecycle-preview") {
+                        {
                     HStack {
                         Text("applied:\(applied)").accessibilityIdentifier("fixture.settings-renderer-applied")
                         Text("held:\(heldPreviews)").accessibilityIdentifier("fixture.settings-renderer-held")
@@ -206,7 +203,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     func releasePreview() { heldPreview?.resume(); heldPreview = nil }
 
     private var hello = true
-    private var projectReads = 0
     private var receiver: CheckedContinuation<Data, Error>?
     private var pending: [Data] = []
     private var closed = false
@@ -284,21 +280,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         case "session.workspace.list":
             result = .object(["root": .string("/Users/fixture/Workspace/tron-worktrees/six-small-ui-fixes"),
                 "path": .string(""), "parent": .null, "revision": .string("preview"), "entries": .array([])])
-        case "projects.list":
-            projectReads += 1
-            if ProcessInfo.processInfo.arguments.contains("-projects-withhold-once"), projectReads == 1 { return }
-            if ProcessInfo.processInfo.arguments.contains("-projects-fail-once"), projectReads == 1 {
-                try enqueue(.object(["type": .string("response"), "id": .string(id), "ok": .bool(false),
-                    "error": .object(["code": .string("busy"), "message": .string("Project listing is unavailable. Try again."), "retryable": .bool(true)])]))
-                return
-            }
-            result = .object(["workspace": .string("/fixture/projects"), "projects": .array([
-                .object(["name": .string("Example"), "path": .string("/fixture/projects/Example"),
-                    "trust": .object(["effectiveDecision": .bool(true)]),
-                    "eligibility": .object(Dictionary(uniqueKeysWithValues: ["trust", "untrust"].map {
-                        ($0, JSONValue.object(["allowed": .bool(true)]))
-                    }))])
-            ]), "nextCursor": .null])
         case "trust.inspect": result = .object(["requiresDecision": .bool(false), "effectiveDecision": .bool(true)])
         case "git.inspect": result = .object(["isRepository": .bool(true), "branch": .null, "dirty": .bool(false), "branches": .array([]), "commits": .array([])])
         case "model.recent": result = .object(["models": .array([])])

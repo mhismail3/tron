@@ -191,9 +191,8 @@ struct GlobalAgentBehaviorView: View {
                     SettingsRendererView(target: target, writeLayer: "global", presentation: .section(section), embedded: true,
                                          showsGroupHeadings: true)
                 }
-                TrustedProjectsSettingsView()
                 SettingsRendererView(target: target, writeLayer: "global", presentation: .section("run"), embedded: true,
-                                     showsGroupHeadings: true, selection: .allExcept(TrustedProjectsSettingsView.keys))
+                                     showsGroupHeadings: true, selection: .allExcept(["permissions.projectTrust", "permissions.defaultProjectTrust"]))
             }.padding(20)
         }
         .tronScrollEdgeChrome()

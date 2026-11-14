@@ -194,7 +194,7 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 `ChangeReviewCard` (`UI/Components/ChangeReviewCard.swift`) is the one plaintext before/after
 card; `ChangeReviewSheet` presents it. An agent, Home or worker change arrives as the native
 `change` interaction (`ExtensionInteractionSheet`); renderer rows whose dry run requires a tap
-and project lifecycle actions (`projects.change`) present the same sheet. Approve retires the
+present the same sheet. Approve retires the
 sheet at the tap and answers the typed owner once with the review's digest through the receipt executor; Cancel and native
 dismissal send nothing. Generic forms never authorize effects. The card shows Gateway text
 only and keeps exact values behind its disclosure. The app has no Changes screen: the audit is the Gateway's settings record and Undo is the

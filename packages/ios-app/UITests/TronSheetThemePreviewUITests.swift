@@ -53,24 +53,16 @@ final class TronSheetThemePreviewUITests: XCTestCase {
         }
     }
 
-    func testWorkspaceControlsFollowTwoPresentingThemes() {
+    func testWorkspaceControlsFollowThePresentingTheme() {
         for mode in ["light", "dark"] {
-            for entry in ["server", "trusted"] {
+            for entry in ["server"] {
                 let app = settings(mode)
                 defer { app.terminate() }
-                if entry == "server" {
-                    open(app, "settings-link-Connections")
-                    expand(app, title: "Connections")
-                    open(app, "Details for Fixture")
-                    expand(app, title: "Fixture")
-                    open(app, "Configure source repository")
-                } else {
-                    open(app, "settings-link-Agent Behavior")
-                    expand(app, title: "Agent Behavior")
-                    open(app, "Trusted Projects")
-                    open(app, "Add Project")
-                    open(app, "project-lifecycle-existing")
-                }
+                open(app, "settings-link-Connections")
+                expand(app, title: "Connections")
+                open(app, "Details for Fixture")
+                expand(app, title: "Fixture")
+                open(app, "Configure source repository")
                 XCTAssertTrue(app.buttons["Use current folder"].waitForExistence(timeout: 10))
                 let title = app.navigationBars.staticTexts["/fixture/projects"].firstMatch
                 for label in ["Default", "Go Up", "New Folder", "Hidden"] {

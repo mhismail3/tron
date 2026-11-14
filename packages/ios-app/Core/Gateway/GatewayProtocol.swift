@@ -27,8 +27,6 @@ enum GatewayDisposableReadPolicy {
         "session.history.entry",
         "home.memory.view",
         "home.memory.evidence",
-        "projects.list",
-        "projects.inspect",
         "model.list",
         "provider.list",
         "provider.usage"

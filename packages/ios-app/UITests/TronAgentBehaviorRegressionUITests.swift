@@ -46,47 +46,6 @@ final class TronAgentBehaviorRegressionUITests: XCTestCase {
         }
     }
 
-    func testTrustedProjectsLoadsAtMedium() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-nested", "-settings-expanded-review", "-agent-behavior-regression"]
-        app.launch()
-        defer { app.terminate() }
-        XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 15))
-        app.buttons["Open Settings"].tap()
-        expand(app, "Global Settings")
-        tap(app, "settings-link-Agent Behavior")
-        expand(app, "Agent Behavior")
-        tap(app, "Trusted Projects")
-        let add = app.buttons["Add Project"]
-        XCTAssertTrue(add.waitForExistence(timeout: 15), app.debugDescription)
-        let title = app.navigationBars.staticTexts["Trusted Projects"].firstMatch
-        XCTAssertTrue(title.exists, app.debugDescription)
-        XCTAssertGreaterThan(title.frame.minY, app.windows.firstMatch.frame.height * 0.35,
-                             "The loaded sheet must open at medium, not full height")
-        let attachment = XCTAttachment(screenshot: app.screenshot())
-        attachment.name = "2072-trusted-projects-medium"
-        attachment.lifetime = .keepAlways
-        self.add(attachment)
-    }
-
-    func testTrustedProjectsErrorCanRetryWithoutStalling() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-nested", "-settings-expanded-review", "-agent-behavior-regression", "-projects-fail-once"]
-        app.launch()
-        defer { app.terminate() }
-        XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 15))
-        app.buttons["Open Settings"].tap()
-        expand(app, "Global Settings")
-        tap(app, "settings-link-Agent Behavior")
-        expand(app, "Agent Behavior")
-        tap(app, "Trusted Projects")
-        XCTAssertTrue(app.buttons["Retry"].waitForExistence(timeout: 15), app.debugDescription)
-        app.buttons["Retry"].tap()
-        XCTAssertTrue(app.buttons["Add Project"].waitForExistence(timeout: 15), app.debugDescription)
-    }
-
     func testRetiredCompactionRowsAreNotDisplayed() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -103,24 +62,6 @@ final class TronAgentBehaviorRegressionUITests: XCTestCase {
                        "Retired Automatic compaction must not be a read-only row, even with a saved value")
         XCTAssertFalse(app.descendants(matching: .any)["settings-row-model.thinking_role_summarizer_"].exists,
                        "Retired Summary thinking must not be a read-only row, even with a saved value")
-    }
-
-    func testMissingProjectResponseShowsRetryAndCanLoad() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-nested", "-settings-expanded-review", "-agent-behavior-regression", "-projects-withhold-once"]
-        app.launch()
-        defer { app.terminate() }
-        XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 15))
-        app.buttons["Open Settings"].tap()
-        expand(app, "Global Settings")
-        tap(app, "settings-link-Agent Behavior")
-        expand(app, "Agent Behavior")
-        tap(app, "Trusted Projects")
-        XCTAssertTrue(app.buttons["Retry"].waitForExistence(timeout: 45), app.debugDescription)
-        capture(app, "projects-missing-response-error")
-        app.buttons["Retry"].tap()
-        XCTAssertTrue(app.buttons["Add Project"].waitForExistence(timeout: 15), app.debugDescription)
     }
 
     func testGlobalValuePillFollowsReset() {
@@ -161,48 +102,7 @@ final class TronAgentBehaviorRegressionUITests: XCTestCase {
             capture(app, "agent-middle-\(mode)")
             app.swipeUp()
             capture(app, "agent-bottom-\(mode)")
-            tap(app, "Trusted Projects")
-            XCTAssertTrue(app.buttons["Example"].waitForExistence(timeout: 15), app.debugDescription)
-            let title = app.navigationBars.staticTexts["Trusted Projects"].firstMatch
-            XCTAssertGreaterThan(title.frame.minY, app.windows.firstMatch.frame.height * 0.35)
-            capture(app, "trusted-medium-\(mode)")
             app.terminate()
-        }
-    }
-
-    func testTrustedProjectsInheritsAgentBehaviorTheme() {
-        continueAfterFailure = false
-        for mode in ["light", "dark"] {
-            let app = XCUIApplication()
-            app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-nested", "-settings-expanded-review", "-agent-behavior-regression",
-                                   "-themeColor", "burgundy"] + (mode == "dark" ? ["-settings-renderer-dark"] : [])
-            app.launch()
-            defer { app.terminate() }
-            XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 15))
-            app.buttons["Open Settings"].tap()
-            expand(app, "Global Settings")
-            tap(app, "settings-link-Agent Behavior")
-            expand(app, "Agent Behavior")
-            capture(app, "burgundy-agent-\(mode)")
-            let window = app.windows.firstMatch.frame.width
-            let parentTitle = app.navigationBars.staticTexts["Agent Behavior"].firstMatch
-            guard let parentInk = sheetInk(XCUIScreen.main.screenshot().image, parentTitle.frame, window: window) else {
-                XCTFail("No ink in the Agent Behavior title"); return
-            }
-            XCTAssertGreaterThan(parentInk[0], parentInk[2], "\(mode): Agent Behavior \(parentInk) must be the Burgundy theme")
-            XCTAssertGreaterThan(parentInk[2], parentInk[1], "\(mode): Agent Behavior \(parentInk) must be the Burgundy theme")
-            tap(app, "Trusted Projects")
-            XCTAssertTrue(app.buttons["Example"].waitForExistence(timeout: 15), app.debugDescription)
-            capture(app, "burgundy-trusted-\(mode)")
-            let screenshot = XCUIScreen.main.screenshot().image
-            let title = app.navigationBars.staticTexts["Trusted Projects"].firstMatch
-            let header = app.staticTexts.matching(identifier: "Projects").allElementsBoundByIndex.last { $0.frame.minY > title.frame.maxY }
-            for (name, frame) in [("title", title.frame), ("Projects header", header?.frame ?? .zero)] {
-                guard let ink = sheetInk(screenshot, frame, window: window) else { XCTFail("\(mode): no ink in \(name)"); continue }
-                let distance = zip(ink, parentInk).map { abs($0 - $1) }.max() ?? 1
-                XCTAssertLessThan(distance, 0.12, "\(mode): Trusted Projects \(name) \(ink) must match the Agent Behavior tint \(parentInk)")
-            }
-            assertToolbarTint(app, title: "Trusted Projects")
         }
     }
 

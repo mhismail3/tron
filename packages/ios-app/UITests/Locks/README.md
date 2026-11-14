@@ -80,8 +80,7 @@ the retained tool-detail interaction journey. Session Settings retain
 `TronConsolidatedUIRegressionTests.testSessionSettingsKeepsWorkerOverridesAndTrustReachable`;
 light onboarding retains `TronSmokeUITests.testOnboardingPreservesPagedSheetAndPairingJourney`.
 There are no pixel goldens: the composer placeholder and subtitle tint (#2093) and dark onboarding
-welcome have no rendered witness, nor do the project-lifecycle fixture's `busy` and
-`trust-review` surfaces, which only the retired previews opened.
+welcome have no rendered witness.
 
 ## Comparison and settling
 

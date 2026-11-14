@@ -29,7 +29,7 @@ workspace browser, the model picker and the provider authentication prompt sheet
   first-run pairing inspects an already selected workspace before enabling onward navigation.
   Its shortcut/action chips, folder glyphs and loading/editing controls inherit the presenter's
   settings theme (emerald only outside a themed presenter). All callers use this shared owner:
-  Onboarding, New Session, Automation, Trusted Projects, server and paired-device source folders.
+  Onboarding, New Session, Automation, server and paired-device source folders.
 - **Model picker.** `ModelPicker` (title **Models**) organizes one catalog read into a Recent rail
   (the Gateway's bounded recent-model history), a Latest rail (Gateway release dates) and one
   collapsible section per provider; rail cards show context window and Gateway-projected prices.
