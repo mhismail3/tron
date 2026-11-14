@@ -966,10 +966,10 @@ class Launched:
 
 
 class Run:
-    def __init__(self, sha: str, total: int):
+    def __init__(self, sha: str, total: int, logs: Path | None = None):
         self.sha, self.total, self.index, self.steps = sha, total, 0, []
         self.live: list[Launched] = []
-        self.logs = ROOT / "test-results" / "verify" / sha
+        self.logs = logs if logs is not None else ROOT / "test-results" / "verify" / sha
         self.logs.mkdir(parents=True, exist_ok=True)
         self.on_update = lambda: None
 
@@ -1295,11 +1295,15 @@ def main(argv: list[str]) -> int:
     if "--batch" in argv:
         import batch
         return batch.main([word for word in argv if word != "--batch"])
+    if "--hunt" in argv:
+        import hunt
+        return hunt.main([word for word in argv if word != "--hunt"])
     parser = argparse.ArgumentParser(prog="scripts/tron verify")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--changed", action="store_true")
     mode.add_argument("--module", metavar="ID")
     mode.add_argument("--all", action="store_true")
+    mode.add_argument("--hunt", action="store_true", help="repeat mini suites on unchanged origin/main; --hunt --help for bounds")
     mode.add_argument("--update-locks", metavar="ID")
     parser.add_argument("--base", default="origin/main")
     parser.add_argument("--ios-host", choices=("local", "mini"), default="local",
