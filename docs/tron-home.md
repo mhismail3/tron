@@ -239,11 +239,14 @@ launch agents and ports, never production labels.
 ### Interrupted operations
 
 Agent leases refresh while held. SSH leases use the proper-lockfile directory protocol
-and follow their parent by proved inode. Every existing lease, even stale, refuses apply;
-migration never steals it. A crash can leave leases behind. Keep both Gateways stopped,
-preserve journal/snapshots and obtain exact owner-reviewed recovery, rather than editing
-claims or substituting copies. Consumers have their own stale reclaim rules; these do
-not make a partly migrated home safe to start. Completion failures retain the specific
+and follow their parent by proved inode. Fresh leases refuse admission. After the target
+passes stopped ownership proof, apply reclaims stale agent and SSH leases under their
+existing directory protocol; its own leases are removed on exit, including a later
+refusal. The old stale directory is not restored: it is not historical run data or proof
+of a live owner. Initial live/unknown-owner refusal leaves it untouched. A crash can
+leave leases behind. Keep the target Gateway, Mac wrapper and workers stopped, preserve
+journal/snapshots and obtain exact owner-reviewed recovery rather than editing claims or
+substituting copies. Stale reclaim does not make a partly migrated home safe to start. Completion failures retain the specific
 metadata errors/refusals in the JSON `completion` field.
 
 ## Rules
