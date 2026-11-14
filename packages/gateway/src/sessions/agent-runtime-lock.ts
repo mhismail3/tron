@@ -5,12 +5,13 @@ import { GatewayError } from "../errors.js";
 
 const LOCK_NAME = ".tron-gateway-runtime.lock";
 
-async function acquireAgentRuntimeLock(agentDir: string): Promise<() => Promise<void>> {
+export async function acquireAgentRuntimeLock(agentDir: string): Promise<() => Promise<void>> {
   const directory = resolve(agentDir);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const path = join(directory, LOCK_NAME);
+  let unlock: () => Promise<void>;
   try {
-    return await lockfile.lock(path, {
+    unlock = await lockfile.lock(path, {
       realpath: false,
       retries: 0,
       stale: 60_000,
@@ -23,25 +24,9 @@ async function acquireAgentRuntimeLock(agentDir: string): Promise<() => Promise<
       false,
     );
   }
-}
-
-export async function acquireAgentRuntimeLocks(
-  directories: string[],
-): Promise<() => Promise<void>> {
-  const unique = [...new Set(directories.map(directory => resolve(directory)))];
-  const releases: Array<() => Promise<void>> = [];
-  try {
-    for (const directory of unique) releases.push(await acquireAgentRuntimeLock(directory));
-  } catch (error) {
-    for (const release of [...releases].reverse()) await release();
-    throw error;
-  }
-  const releaseOrder = [...releases].reverse();
-  let releasePromise: Promise<void> | undefined;
+  let release: Promise<void> | undefined;
   return (): Promise<void> => {
-    releasePromise ??= (async () => {
-      for (const release of releaseOrder) await release();
-    })();
-    return releasePromise;
+    release ??= unlock();
+    return release;
   };
 }
