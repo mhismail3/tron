@@ -39,10 +39,15 @@ export async function openLockSession(name: string, options?: LockGatewayOptions
   }
 }
 
-export async function promptStreamScenario(session: LockSession): Promise<{ admitted: { ok: boolean; result?: any } }> {
+export async function promptStreamScenario(session: LockSession, holdStreamWrites = false): Promise<{ admitted: { ok: boolean; result?: any } }> {
+  let releaseWrites: (() => void) | undefined;
   session.gateway.script([
     async () => {
       await session.gateway.observeLiveOperation(session.client, session.sessionId);
+      if (holdStreamWrites) {
+        releaseWrites = session.client.holdWrites();
+        (await session.gateway.registry.acquire(session.sessionId)).publishSnapshot();
+      }
       return fauxAssistantMessage([
         fauxThinking("Reading the lock notes."),
         { type: "text", text: "Reading notes." },
@@ -51,10 +56,12 @@ export async function promptStreamScenario(session: LockSession): Promise<{ admi
     },
     () => fauxAssistantMessage("The notes say: lock notes."),
   ]);
-  const admitted = await session.prompt("read the notes");
-  expect(admitted.ok, JSON.stringify(admitted)).toBe(true);
-  await session.gateway.settled(session.sessionId);
-  return { admitted };
+  try {
+    const admitted = await session.prompt("read the notes");
+    expect(admitted.ok, JSON.stringify(admitted)).toBe(true);
+    await session.gateway.settled(session.sessionId);
+    return { admitted };
+  } finally { releaseWrites?.(); }
 }
 
 export async function compactionScenario(session: LockSession): Promise<{ compacted: { ok: boolean; result?: any } }> {
