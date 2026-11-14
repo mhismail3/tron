@@ -54,6 +54,10 @@ export class DevicePreferenceBridge {
     if (!entry || entry.connectionId !== caller.id || entry.deviceId !== caller.identity) {
       throw new GatewayError("not_found", "Device preference request is no longer pending");
     }
+    if (entry.action === "read" && this.options.newestReadyConnection(entry.deviceId, DEVICE_PREFERENCE_CAPABILITY) !== entry.connectionId) {
+      this.settle(requestId, undefined);
+      throw new GatewayError("conflict", "Device preference read was superseded by a newer connection; no value was published");
+    }
     this.settle(requestId, parseOutcome(entry.action, body));
   }
 
