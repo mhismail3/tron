@@ -12,6 +12,31 @@ fixture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
 
 
+class SystemSectionSelectionTests(unittest.TestCase):
+    def test_system_section_producers_run_the_nested_delegation_lock_before_landing(self):
+        spec = importlib.util.spec_from_file_location('system_section_verify', ROOT / 'tools/verify/verify.py')
+        planner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(planner)
+        graph, errors = planner.ownership.check()
+        self.assertEqual(errors, [])
+        nested, mac = planner.nested_files()
+        lock = 'packages/gateway/src/e2e/kernel/delegation/delegation.lock.integration.test.ts'
+        producers = [
+            'packages/gateway/src/workspace/tron-core-extension.ts',
+            'packages/gateway/src/sessions/agent-instructions.ts',
+            'packages/gateway/src/kernel/run/runtime-slot.ts',
+            'packages/gateway/pi-coding-agent-patch.json',
+            'packages/gateway/third_party/pi-coding-agent/tron.patch',
+        ]
+        for producer in producers:
+            with self.subTest(producer=producer):
+                selection = planner.select('changed', None, 'HEAD', graph['modules'], graph['tracked'], paths=[producer])
+                self.assertIn(lock, selection['tests'])
+                self.assertNotIn(lock, selection['deferredTests'])
+                self.assertEqual(planner.runner_of(lock, nested, mac), 'gateway-nested')
+                self.assertNotIn('packages/gateway/src/e2e/transport/gateway-process-restart.e2e.test.ts', selection['tests'])
+
+
 class DocumentationAssetTests(fixture.VerifyCase):
     def test_deleted_non_markdown_doc_is_static_only_but_code_still_needs_tests(self):
         r = self.repo
