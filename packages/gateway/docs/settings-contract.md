@@ -47,7 +47,7 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 ## Keys
 
 <!-- tron docs settings -->
-46 keys, declared in `packages/gateway/src/kernel/settings/settings-schema.ts` (`KEYS`).
+47 keys, declared in `packages/gateway/src/kernel/settings/settings-schema.ts` (`KEYS`).
 
 | Key | Qualifier | Group | Layers | Home layers | Timing | Effect | Native tap |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -74,6 +74,7 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 | `tools.shell.commandPrefix` | — | tools | project, global | none | fixed | reload | trust |
 | `permissions.projectTrust` | project | trust | global | as allowed | live | reload | trust |
 | `permissions.macTerminalKey` | device | connections | global | as allowed | live | next-change | trust |
+| `experimental.swiftApps` | device | iphone | global | as allowed | live | next-change | — |
 | `permissions.macTerminalServer` | — | connections | global | as allowed | live | next-change | trust |
 | `permissions.defaultProjectTrust` | — | trust | global | as allowed | live | next-change | trust |
 | `run.workers.maxConcurrent` | — | workers | global | as allowed | live | delegate | spend |

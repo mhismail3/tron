@@ -5,7 +5,7 @@ import { asUncertainOutcome, GatewayError } from "../../errors.js";
 import { RequestSpanLane } from "../../util/request-span.js";
 import { type ConfirmChange, type ChangeRequest, type SettingsSignal, type ChangeOutcome, type ChangeResult, type ChangeStatus, type GitResult, type FixedSetting, type SettingsTarget, type Direction, type LayerId, type Qualifiers } from "./tool-contract.js";
 import type { Actor, ActorKind, ChangeEntry, SettingsChangeRecord } from "./settings-record.js";
-import { composedBelow, readBinding, resolveSettings } from "./settings-resolver.js";
+import { composedBelow, devicePreferenceRead, readBinding, resolveSettings } from "./settings-resolver.js";
 import { HOME_PROFILE_SUBJECT, keyDefault, hasSessionSettingsApplier, keyForHome, type Binding, type KeyDeclaration, type SettingsSchema } from "./settings-schema.js";
 import { changeReview, formatStoredSetting, LAYER_LABELS, type ModelRefValue, type SettingsStores, type PlannedWrite } from "./settings-types.js";
 import { canonicalSettingsTarget, scopeAdmitted, storeForScope } from "./scope-resolution.js";
@@ -92,7 +92,7 @@ const adoptsHomeRuntime = (plan: Planned) => plan.request.layer === "session" &&
   && (plan.key.layers.session?.store === "session" || plan.key.layers.session?.store === "session-settings");
 
 const STORE_ORDER: Record<Binding["store"], number> = {
-  "pi": 0, "pi-model-ref": 0, "trust": 1, "mac-terminal": 1, "mac-terminal-service": 1, "home": 3, "gateway": 4, "session": 5, "session-settings": 5, "session-launch": 5,
+  "pi": 0, "pi-model-ref": 0, "trust": 1, "mac-terminal": 1, "mac-terminal-service": 1, "device-preference": 1, "home": 3, "gateway": 4, "session": 5, "session-settings": 5, "session-launch": 5,
 };
 
 type StoreApplyResult = { revision?: number; git?: GitResult; result?: unknown };
@@ -164,7 +164,7 @@ export class SettingsChangePath {
 
   private async changeInStripe(target: SettingsTarget, requests: readonly ChangeRequest[], context: ChangeContext): Promise<ChangeResult> {
     await this.record.recover();
-    const stores = await this.model.owner.stores(target, context.session);
+    const stores = await this.model.owner.stores(target, context.session, { keys: requests.map(request => request.key) });
     const runtime = context.session?.modelRuntime ?? this.model.owner.modelRuntime;
     const planned: Planned[] = [];
     const errors = new Map<number, GatewayError>();
@@ -570,7 +570,12 @@ export class SettingsChangePath {
       fixedAt = { value: after, from: row?.layer ?? "global", at: this.now().toISOString(), ref: randomUUID(), ...(row?.qualifiers ? { qualifiers: row.qualifiers } : {}) };
       request = { ...request, op: "set", value: after };
     }
+    const device = binding.store === "device-preference" ? devicePreferenceRead(stores, qualifiers.device, key.id) : undefined;
+    if (device?.status === "unavailable") throw new GatewayError("busy", `${key.label} needs this iPhone connected; nothing was changed`, true);
+    if (device?.status === "unknown") throw new GatewayError("conflict", `${key.label}: the last write to this iPhone is unconfirmed; inspect it before changing it`);
+    if (device && request.op === "unset") throw new GatewayError("invalid_request", `${key.label} cannot be unset on an iPhone`);
     const before = binding.store === "trust" ? stores.trust[qualifiers.project!]
+      : device ? (device.status === "value" ? device.value : undefined)
       : readBinding(stores, store, binding, qualifiers, qualifiedWrite(binding, qualifiers), key.id);
     if (request.expected !== undefined && !deepEqual(request.expected, before ?? null)) {
       throw new GatewayError("conflict", `${key.label} changed since it was read; refresh and try again`, false, {

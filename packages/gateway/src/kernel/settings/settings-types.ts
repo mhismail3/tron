@@ -41,6 +41,20 @@ export interface ProjectStore {
 
 export interface OutsideMark { changeId: string; applyAgain: boolean; before: string; after: string }
 
+export type DevicePreferenceRead = { status: "value"; value: unknown } | { status: "unavailable" } | { status: "unknown" };
+export type DevicePreferenceWrite = { status: "applied" } | { status: "conflict"; current: unknown } | { status: "unavailable" } | { status: "unknown" };
+
+export interface DevicePreferencePort {
+  devices(): Promise<readonly string[]>;
+  read(device: string, keyId: string): Promise<DevicePreferenceRead>;
+  compareAndSet(device: string, keyId: string, expected: unknown, value: unknown): Promise<DevicePreferenceWrite>;
+}
+
+export interface DevicePreferenceSnapshot {
+  devices: readonly string[];
+  reads: Record<string, Record<string, DevicePreferenceRead>>;
+}
+
 export interface SettingsStores {
   layers: readonly StoreLayer[];
   session?: SessionStore;
@@ -50,6 +64,7 @@ export interface SettingsStores {
   trust: Record<string, boolean>;
   macTerminal: Record<string, string>;
   macTerminalServerEnabled?: boolean;
+  devicePreferences?: DevicePreferenceSnapshot;
   gateway: Record<string, unknown>;
   outside?: Partial<Record<"global" | "project", Record<string, OutsideMark>>>;
 }

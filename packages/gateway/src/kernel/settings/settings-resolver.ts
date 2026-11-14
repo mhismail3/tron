@@ -1,7 +1,7 @@
 import { type SettingsTarget, type Badge, type LayerValue, type ResolvedKey, type Resolution, type Qualifiers } from "./tool-contract.js";
 import { dirname, join } from "node:path";
 import { keyForHome, keyDefault, type SettingsSchema, type Binding, type KeyDeclaration } from "./settings-schema.js";
-import { LAYER_LABELS, type FormatContext, type StoreLayer, type SettingsStores, type ResolveOptions } from "./settings-types.js";
+import { LAYER_LABELS, type DevicePreferenceRead, type FormatContext, type StoreLayer, type SettingsStores, type ResolveOptions } from "./settings-types.js";
 import { canonicalSettingsTarget, scopeAdmitted, scopeForStore, instanceId } from "./scope-resolution.js";
 import { projectSettingPath, projectSettingsDiagnostics } from "./settings-project-diagnostics.js";
 import { core as precedence, type Entry, type Layer, type Opt, type Value } from "../../core/settings/precedence/facade.js";
@@ -25,6 +25,11 @@ function fill(path: readonly string[], qualifiers: Qualifiers): readonly string[
 
 function piDocument(stores: SettingsStores, layer: StoreLayer): Record<string, unknown> | undefined {
   return layer === "global" ? stores.global : layer === "project" ? stores.project?.document : undefined;
+}
+
+export function devicePreferenceRead(stores: SettingsStores, device: string | undefined, keyId: string | undefined): DevicePreferenceRead {
+  if (device === undefined || keyId === undefined) return { status: "unavailable" };
+  return stores.devicePreferences?.reads[device]?.[keyId] ?? { status: "unavailable" };
 }
 
 export function readBinding(stores: SettingsStores, layer: StoreLayer, binding: Binding, qualifiers: Qualifiers, qualifiedOnly: boolean, keyId?: string): unknown {
@@ -63,6 +68,10 @@ export function readBinding(stores: SettingsStores, layer: StoreLayer, binding: 
       return qualifiers.device === undefined ? undefined : stores.macTerminal[qualifiers.device];
     case "mac-terminal-service":
       return stores.macTerminalServerEnabled ?? false;
+    case "device-preference": {
+      const read = devicePreferenceRead(stores, qualifiers.device, keyId);
+      return read.status === "value" ? read.value : undefined;
+    }
     case "gateway":
       return qualifiedOnly || layer !== "global" ? undefined : readPath(stores.gateway, binding.path);
   }
@@ -163,6 +172,9 @@ function instances(schema: SettingsSchema, key: KeyDeclaration, target: Settings
     return model ? [{ ...fixed, model }] : onlyQualified ? [] : [fixed];
   }
   if (key.qualifier === "device") {
+    if (key.layers.global?.store === "device-preference") {
+      return target.kind === "global" || target.kind === "home" ? (stores.devicePreferences?.devices ?? []).map(device => ({ ...fixed, device })) : [];
+    }
     return target.kind === "global" ? Object.keys(stores.macTerminal).sort().map(device => ({ ...fixed, device })) : [];
   }
   if (key.qualifier === "project") {
@@ -182,6 +194,7 @@ function resolveInstance(
 ): ResolvedKey {
   const format = (value: unknown) => value === undefined ? "Not set" : key.type.format(value, options.format);
   const layerValues: LayerValue[] = [];
+  if (key.layers.global?.store === "device-preference") return devicePreferenceResolved(key, qualifiers, stores, options);
   const facts = precedenceFacts(stores, key, qualifiers);
   const resolution = precedence.Resolve(facts.key, facts.layers);
   const shown = STORED_LAYERS.flatMap(layer => {
@@ -258,6 +271,19 @@ function resolveInstance(
     overridden: localValue !== undefined,
     ...(projectValue && projectPath && stores.project ? { projectSetting: { file: join(stores.project.root, ".pi", "settings.json"), path: projectPath } } : {}),
     layers: layerValues,
+  };
+}
+
+function devicePreferenceResolved(key: KeyDeclaration, qualifiers: Qualifiers, stores: SettingsStores, options: ResolveOptions): ResolvedKey {
+  const read = devicePreferenceRead(stores, qualifiers.device, key.id);
+  const value = read.status === "value" ? read.value : undefined;
+  const display = value === undefined ? "Not set" : key.type.format(value, options.format);
+  const badges: Badge[] = read.status === "unavailable" ? [{ kind: "state", label: "Unavailable", detail: "This iPhone is not connected; no value is shown." }]
+    : read.status === "unknown" ? [{ kind: "state", label: "Unknown", detail: "The last write to this iPhone was not confirmed; inspect before changing it." }] : [];
+  return {
+    key: key.id, qualifiers, group: key.group, ...(key.subgroup ? { subgroup: key.subgroup } : {}),
+    value, display, layer: "global", applied: true, badges, overridden: false,
+    layers: [{ layer: "global", applied: true, ...(value === undefined ? {} : { value, display }) }],
   };
 }
 

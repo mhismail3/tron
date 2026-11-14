@@ -36,7 +36,7 @@ export interface SettingsReadOwner {
   readonly schema: SettingsSchema;
   readonly modelRuntime: ModelRuntime;
   readonly admitModelChoice: (runtime: ModelRuntime, provider: string, id: string) => Promise<void>;
-  stores(target: SettingsTarget, session?: SessionSettingsSource, options?: { storeState?: boolean }): Promise<SettingsStores>;
+  stores(target: SettingsTarget, session?: SessionSettingsSource, options?: { storeState?: boolean; keys?: readonly string[] }): Promise<SettingsStores>;
   resolveOptions(runtime: ModelRuntime): Pick<ResolveOptions, "format" | "options">;
   options(target: SettingsTarget, session: SessionSettingsSource | undefined, request: SettingsOptionsRequest, resolve: (keys: readonly string[]) => Promise<Resolution>): Promise<SettingsOptionsResult>;
 }
@@ -47,7 +47,7 @@ export class SettingsModel<Owner extends SettingsReadOwner = SettingsReadOwner> 
 
   async resolve(target: SettingsTarget, session?: SessionSettingsSource, keys?: readonly string[], options: { storeState?: boolean } = {}): Promise<Resolution> {
     for (const id of keys ?? []) declaredKey(this.schema, id);
-    const stores = await this.owner.stores(target, session, options);
+    const stores = await this.owner.stores(target, session, { ...options, ...(keys ? { keys } : {}) });
     const runtime = session?.modelRuntime ?? this.owner.modelRuntime;
     return resolveSettings(this.schema, target, stores, { ...this.owner.resolveOptions(runtime), ...(keys ? { keys } : {}) });
   }

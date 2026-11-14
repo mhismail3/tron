@@ -30,6 +30,7 @@ export type Binding =
   | { store: "trust" }
   | { store: "mac-terminal" }
   | { store: "mac-terminal-service" }
+  | { store: "device-preference" }
   | { store: "gateway"; path: readonly string[] };
 
 export type TimingDeclaration = Timing | { widen: Timing; narrow: Timing };
@@ -322,6 +323,12 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       help: "Lets this paired iPhone open a shell through Tron’s private Tailscale-only SSH service, even without the Gateway.",
       order: 15, importance: "advanced", control: "readOnly",
       confirm: "This iPhone’s key will authorize your Mac account through the private Tron SSH service, after you trust its host fingerprint.",
+    },
+    {
+      id: "experimental.swiftApps", sessionOverridable: false, projectSettable: false, group: "iphone", qualifier: "device",
+      type: types.boolean(["Enabled", "Off"]), layers: { global: { store: "device-preference" } }, timing: "live", effect: "next-change",
+      writers: ["ui", "home"], label: "Run Swift files", order: 10, importance: "advanced", control: "toggle",
+      help: "Adds a Run button to .swift previews on this iPhone. Sandboxed; simulator-tested only.",
     },
     {
       tap: "trust", id: "permissions.macTerminalServer", sessionOverridable: false, projectSettable: false,
