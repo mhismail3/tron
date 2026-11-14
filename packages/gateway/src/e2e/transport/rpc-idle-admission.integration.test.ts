@@ -373,6 +373,35 @@ describe("device log append RPC boundary", () => {
     expect(files.every((file) => Buffer.byteLength(file.text) <= 5 * 1024 * 1024)).toBe(true);
     const newest = files.flatMap((file) => sequencesOf(file.text)).reduce((max, value) => Math.max(max, value), 0);
     expect(newest).toBe(next - 1);
+    const expired = await client.request("append-expired-first", "client.logs.append", { commandId: "append-expired-0001", bootId, firstSequence: 1, lines: batch(1, 1) });
+    expect(expired.ok).toBe(false);
+    expect(expired.error?.code).toBe("conflict");
+  });
+
+  it("holds a same-boot replay of the first batch to the durable gap of its epoch, across a restart", async () => {
+    const fixtureValue = await fixture();
+    const client = await fixtureValue.connect();
+    await client.request("durable-old", "client.logs.append", { commandId: "durable-old-0001", bootId: "epoch-durable-old", firstSequence: 1, lines: batch(1, 3) });
+    const epoch = { commandId: "durable-new-0001", bootId: "epoch-durable-new", firstSequence: 1, gapFrom: 3, reason: "local-rotation", lines: batch(1, 2) };
+    expect((await client.request("durable-new", "client.logs.append", epoch)).result).toEqual({ bootId: "epoch-durable-new", sequence: 2 });
+    const [file] = await deviceFiles(fixtureValue.root);
+    const before = file.text;
+    const withoutGap = await client.request("durable-no-gap", "client.logs.append", { commandId: "durable-no-gap-0001", bootId: "epoch-durable-new", firstSequence: 1, lines: batch(1, 2) });
+    expect(withoutGap.ok).toBe(false);
+    expect(withoutGap.error?.code).toBe("conflict");
+    const otherFrom = await client.request("durable-other-from", "client.logs.append", { ...epoch, commandId: "durable-other-from-01", gapFrom: 2 });
+    expect(otherFrom.ok).toBe(false);
+    expect(otherFrom.error?.code).toBe("conflict");
+    expect((await deviceFiles(fixtureValue.root))[0].text).toBe(before);
+    expect((await client.request("durable-cursor", "client.logs.cursor", {})).result).toEqual({ bootId: "epoch-durable-new", sequence: 2 });
+    await fixtureValue.restart();
+    const recovered = await fixtureValue.connect();
+    const afterRestartDiffers = await recovered.request("durable-restart-differs", "client.logs.append", { ...epoch, commandId: "durable-restart-differs-01", gapFrom: 2 });
+    expect(afterRestartDiffers.error?.code).toBe("conflict");
+    const afterRestartMatches = await recovered.request("durable-restart-matches", "client.logs.append", { ...epoch, commandId: "durable-restart-matches-01" });
+    expect(afterRestartMatches.ok, JSON.stringify(afterRestartMatches)).toBe(true);
+    expect(afterRestartMatches.result).toEqual({ bootId: "epoch-durable-new", sequence: 2 });
+    expect((await deviceFiles(fixtureValue.root))[0].text).toBe(before);
   });
 
   it("refuses a local wrapper and keeps each paired device in its own file", async () => {
