@@ -3404,6 +3404,7 @@ export class RuntimeRegistry implements SessionOperations {
     const entry = acquisition.entriesByID.get(selected)!;
     const metadata = await lstat(entry.path);
     if (!metadata.isFile() || metadata.isSymbolicLink() || await realpath(entry.path) !== entry.path) throw new GatewayError("conflict", "Task transcript path is unsafe");
+    if (metadata.size > MAX_READ_ONLY_SUBAGENT_SESSION_BYTES) throw new GatewayError("busy", "Task transcript exceeds the bounded read budget", true);
     const source = await readCanonicalSession({ path: entry.path, sessionId: selected });
     const after = await lstat(entry.path);
     if (after.dev !== metadata.dev || after.ino !== metadata.ino) throw new GatewayError("conflict", "Task transcript file was replaced");
