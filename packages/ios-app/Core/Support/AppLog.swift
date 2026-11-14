@@ -187,8 +187,9 @@ package actor AppLog {
             source: bounded(IOSClientDiagnosticBuffer.redactedMessage(record.source)),
             message: bounded(IOSClientDiagnosticBuffer.redactedMessage(record.message)), process: "ios",
             requestID: record.requestID.map { bounded(IOSClientDiagnosticBuffer.redactedMessage($0)) },
-            durationMs: record.durationMs, outcome: record.outcome.map { bounded($0) },
-            code: record.code.map { bounded($0) }, profileID: record.profileID.map { bounded($0) },
+            durationMs: record.durationMs, outcome: record.outcome.map { bounded(IOSClientDiagnosticBuffer.redactedMessage($0)) },
+            code: record.code.map { bounded(IOSClientDiagnosticBuffer.redactedMessage($0)) },
+            profileID: record.profileID.map { bounded(IOSClientDiagnosticBuffer.redactedMessage($0)) },
             connectionID: record.connectionID, lifecycleGeneration: record.lifecycleGeneration
         )
         guard let data = try? JSONEncoder().encode(admitted) else { return }
