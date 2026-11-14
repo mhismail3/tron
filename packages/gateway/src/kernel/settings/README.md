@@ -52,7 +52,7 @@ worker. Its `history` action pages the durable audit (50 records by default, at 
 optionally filtered by key, using the returned cursor. The caller's actor is threaded into
 `SettingsChangePath.history` and `undo`, where `historyVisible` decides scope; `history` returns public entries (`publicHistoryEntry`: before/after only for a declared key or record subject, never for a flagged, retired or unknown key), so the RPC and the tool share one redaction: an agent sees and
 undoes only changes whose target is its session or that its session initiated (its Global changes
-included); Tron Home and the maintainer see and undo every change. `undo` takes a change id and
+included); Tron Home and the maintainer see and undo every change. `inventory` is a read-only projection of hooks, packages, modules and configured MCP servers for the chat's directory; it starts no MCP server and resolves no credential (see `admin/README.md`). `undo` takes a change id and
 reason; the target session's own store is acquired through its owner, never Home's snapshot.
 Writer grants, exact native taps, expected-value checks and busy/idle rules still apply.
 Routine reversible changes, tool selection included, apply, log and can be undone.

@@ -157,7 +157,7 @@ export interface SettingsInventory {
   };
   packages: Array<{ source: string; scope: string; filtered: boolean; provides?: Record<string, string[]>; conflict?: string; nodeRequirement?: string }>;
   modules: Array<{ name: string; purpose: string; tools: string[]; commands: string[] }>;
-  mcp: { servers: Array<{ name: string; scope: string; state: string; enabled: boolean; exposure: string; transport: string; tools: string[]; error?: string }>; errors: number };
+  mcp: { servers: Array<{ name: string; scope: "global" | "project"; state: "configured" | "disabled" | "unknown"; enabled: boolean; exposure: string; transport: "stdio" | "http" | "unknown" }>; errors: number };
 }
 
 export interface SettingsInventorySource {

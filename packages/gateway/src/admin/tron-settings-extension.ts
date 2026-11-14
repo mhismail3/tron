@@ -13,7 +13,7 @@ const CHANGE = Type.Object({
 }, { additionalProperties: false });
 
 const PARAMETERS = Type.Object({
-  action: StringEnum(["resolve", "change", "history", "undo", "inventory"] as const, { description: "resolve: read current values and scopes. inventory: read-only hooks by event and extension, packages, Tron modules and MCP server status for this chat's directory (credentials masked). history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card." }),
+  action: StringEnum(["resolve", "change", "history", "undo", "inventory"] as const, { description: "resolve: read current values and scopes. inventory: read-only hooks by event and extension, packages, Tron modules and configured MCP servers for this chat's directory (configured, disabled or unknown; nothing is started or probed; credentials masked). history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card." }),
   keys: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 200 }), { maxItems: 200, description: "resolve: the key ids to read; omit for every key." })),
   taskId: Type.Optional(Type.String({ minLength: 1, maxLength: 160,
     description: "Tron Home only: the delegated task (from task list) whose worker session to read or change instead of this chat." })),
