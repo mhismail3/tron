@@ -186,7 +186,7 @@ describe("Run Swift files device preference through the production Gateway proce
       expect(reply.ok, JSON.stringify(reply)).toBe(true);
     };
 
-    const changing = local.request("settings.change", { commandId: randomUUID(), target: { kind: "home" }, reason: "Turn off Swift files",
+    const changing = local.request("settings.change", { commandId: randomUUID(), target: { kind: "global" }, reason: "Turn off Swift files",
       changes: [{ key, layer: "global", op: "set", value: false, qualifiers: device, expected: true }] });
     await answer("read", 0, { status: "value", value: true });
     await answer("read", 1, { status: "value", value: true });
