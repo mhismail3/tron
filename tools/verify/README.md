@@ -219,7 +219,8 @@ available-memory percentage reported by `memory_pressure`. The mini
 spools records outside its checkout and returns them through its existing nonce-bound transport
 to the invoking Mac's ledger, preserving the mini's readings. iOS and whole-verifier jobs use that
 same spool and frame once; their native artifact archives exclude the temporary SQLite files.
-A transport refusal retains any completed native cases without inventing a failed-test row.
+An artifact transport refusal retains completed native cases only when the spool remains intact;
+a symlinked DB/WAL/SHM is refused without reading its target or importing any rows, never inventing a failed-test row.
 XCTest uses the result bundle's test tree, with completed XCTest console cases retained when a
 bundle is unavailable. Parameterized native tests use the identities supplied by their native report.
 

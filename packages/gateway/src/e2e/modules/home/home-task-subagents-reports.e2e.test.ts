@@ -182,7 +182,7 @@ describe("Home task subagents: refusals, restarts and reports", () => {
   it("refuses a report while an async run is live, keeps the task active, and accepts the report once the run has completed", async () => {
     const f = await fixture(false, false, undefined, true);
     const child = await childModel(f);
-    const seen: { refusal?: ReturnType<typeof toolResultText>; runDir?: string } = {};
+    const seen: { refusal?: ReturnType<typeof toolResultText>; runDir?: string; childSessionId?: string } = {};
     f.faux.setResponses([
       holdingAsyncLaunch("async-launch"),
       async () => {
@@ -192,7 +192,16 @@ describe("Home task subagents: refusals, restarts and reports", () => {
       async (context: FauxContext) => {
         seen.refusal = toolResultText(context, "call-report-early");
         seen.runDir = launchedAsyncDir(context, "async-launch");
-        expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ lifecycle: "active" });
+        const owner = homeOwnerOf(f.registry);
+        expect(await owner.taskStatus(run.taskId)).toMatchObject({ lifecycle: "active" });
+        await waitFor(async () => {
+          const page = await owner.taskTool(f.home.sessionId, { action: "transcript", taskId: run.taskId }) as { text: string };
+          seen.childSessionId = /subagentSessionId=([^\s]+)/u.exec(page.text)?.[1];
+          return seen.childSessionId !== undefined;
+        }, "owned child is discoverable in the worker transcript", bound);
+        const transcript = await owner.taskTool(f.home.sessionId, { action: "transcript", taskId: run.taskId, subagentSessionId: seen.childSessionId }) as { text: string };
+        expect(transcript.text).toContain("HOLD-CHILD background search");
+        await expect(owner.taskTool(f.home.sessionId, { action: "transcript", taskId: run.taskId, subagentSessionId: f.home.sessionId })).rejects.toThrow(/does not belong/);
         child.releaseHeld();
         const slot = await f.registry.acquire(run.sessionId);
         await waitFor(() => !slot.catalogHasActiveSubagents, "async run ended before the late report", bound);
@@ -205,6 +214,8 @@ describe("Home task subagents: refusals, restarts and reports", () => {
     expect(await asyncState(seen.runDir!)).toBe("complete");
     expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
     expect(result.reportRef).toMatchObject({ resultId: "report-late" });
+    const transcript = await homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "transcript", taskId: run.taskId, subagentSessionId: seen.childSessionId }) as { text: string };
+    expect(transcript.text).toContain("CHILD-DONE");
     expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
     expect(child.abortedRequests()).toBe(0);
   }, 60_000);
