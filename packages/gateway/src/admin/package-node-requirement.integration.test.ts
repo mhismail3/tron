@@ -384,6 +384,9 @@ describe("settings package update installs one exact version through the owner",
       ] } });
       await expect(readFile(marker)).rejects.toThrow();
       expect(await installedVersion()).toBe("1.0.0");
+      await expect(packages.updatePackage({ cwd, source: unrelated, version: "1.0.0", reason: "Missing managed install" }, requester))
+        .rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("is not installed") });
+      await expect(readFile(marker)).rejects.toThrow();
 
       await expect(packages.updatePackage({ cwd, source, version: "1.2.0", reason: "Installer changed" }, requester, async (_review, apply) => {
         await writeFile(settingsPath, JSON.stringify({ packages: [source, unrelated], npmCommand: ["sh", "-c", `touch '${replacedMarker}'; exit 1`] }));
