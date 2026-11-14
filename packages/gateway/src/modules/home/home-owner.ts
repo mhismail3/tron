@@ -29,6 +29,7 @@ import { homeMemoryRevisionChanged, homeMemorySourceUnavailable, homeMemoryToolD
 import { GatewayError } from "../../errors.js";
 import type { TrustService } from "../../kernel/resources/trust-service.js";
 import { projectBranch } from "../../episodic/episodic-projection.js";
+import { validateSearchBranch } from "../../sessions/session-branch.js";
 import { HOME_MAX_CHAPTERS, EPISODIC_DEFAULTS, type EpisodicSummarizer } from "../../episodic/episodic-contract.js";
 import { EpisodicMemoryError } from "../../errors.js";
 import { EpisodicSourceChangedError } from "../../kernel/session/canonical-reader.js";
@@ -325,7 +326,9 @@ export class HomeOwner {
       const binding = this.routeBinding();
       const entries = await this.options.runtimes.readTaskWorkerEntries(named.sessionId);
       this.assertRouteBinding(binding);
-      const messages = projectBranch(entries.map(entry => parseEntry(JSON.stringify(entry))), EPISODIC_DEFAULTS, named.sessionId);
+      const branch = validateSearchBranch(entries);
+      if (branch.header.id !== named.sessionId) throw new GatewayError("conflict", "Task worker session identity changed");
+      const messages = projectBranch(branch.entries.map(entry => parseEntry(JSON.stringify(entry))), EPISODIC_DEFAULTS, named.sessionId);
       const text = messages.map(message => `entry=${message.entryId} kind=${message.kind}\n${message.text}`).join("\n\n");
       return { taskId: named.taskId, sessionId: named.sessionId, untrusted: true, thinking: "excluded", ...utf8Page(text, "task transcript", request.offset, request.limit) };
     }
