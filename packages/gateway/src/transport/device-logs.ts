@@ -97,6 +97,7 @@ function assertPrivateFile(path: string): void {
 export class DeviceLogStore {
   private readonly mutex = new AsyncMutex();
   private readonly streams = new Map<string, Stream>();
+  private readonly owners = new Map<string, number>();
 
   constructor(private readonly directory: string) {}
 
@@ -104,17 +105,25 @@ export class DeviceLogStore {
     return this.mutex.run(() => ({ ...this.stream(deviceId).cursor }));
   }
 
-  append(deviceId: string, input: unknown): Promise<DeviceLogCursor> {
-    return this.mutex.run(() => this.appendLocked(deviceId, parseDeviceLogAppend(input)));
+  append(deviceId: string, admission: number, input: unknown): Promise<DeviceLogCursor> {
+    return this.mutex.run(() => this.appendLocked(deviceId, admission, parseDeviceLogAppend(input)));
   }
 
-  private appendLocked(deviceId: string, append: DeviceLogAppend): DeviceLogCursor {
+  private appendLocked(deviceId: string, admission: number, append: DeviceLogAppend): DeviceLogCursor {
     const stream = this.stream(deviceId);
     const held = stream.cursor;
     const sameBoot = held.bootId === append.bootId;
+    const owner = this.owners.get(deviceId) ?? Number.NEGATIVE_INFINITY;
+    if (!sameBoot && held.bootId !== null && admission < owner) {
+      throw new GatewayError("conflict", "Device log batch came from an older connection; the cursor is unchanged", false, held);
+    }
+    if (!sameBoot && append.firstSequence !== 1) {
+      throw new GatewayError("invalid_request", "A new boot starts at sequence 1", false, held);
+    }
     if (sameBoot && append.firstSequence > held.sequence + 1) {
       throw new GatewayError("invalid_request", "Device log batch leaves a gap after the held cursor", false, held);
     }
+    this.owners.set(deviceId, Math.max(owner, admission));
     const startIndex = sameBoot ? Math.max(0, held.sequence + 1 - append.firstSequence) : 0;
     if (startIndex >= append.records.length) return { ...held };
     try {

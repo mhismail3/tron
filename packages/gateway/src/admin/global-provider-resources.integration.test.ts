@@ -12,6 +12,7 @@ import { GatewayService, type ClientContext, type GatewayServiceDependencies } f
 const roots: string[] = [];
 const client: ClientContext = {
   id: "dashboard", identity: "device:dashboard", isLocal: false, signal: undefined,
+  admission: 1,
   beginSynchronization: () => "sync", establishSynchronization: () => {}, completeSynchronization: () => {},
   setPresentationVisibility: () => ({ visible: true, revision: 1 }), unsubscribe: () => false,
 

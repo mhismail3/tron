@@ -10,6 +10,7 @@ import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "../kernel/delegation
 
 const client: ClientContext = {
   id: "dashboard", identity: "device:dashboard", isLocal: false, signal: undefined,
+  admission: 1,
   beginSynchronization: () => "sync", establishSynchronization: () => {}, completeSynchronization: () => {},
   setPresentationVisibility: () => ({ visible: true, revision: 1 }), unsubscribe: () => false,
 

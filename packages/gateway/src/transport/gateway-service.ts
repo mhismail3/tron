@@ -245,6 +245,7 @@ const MAXIMUM_CONCURRENT_WORKSPACE_INSPECTIONS = 2;
 
 export interface ClientContext {
   id: string;
+  admission: number;
   identity: string;
   isLocal: boolean;
   signal?: AbortSignal;
@@ -734,7 +735,7 @@ export class GatewayService {
         return this.mutation(client, method, params, async () => {
           rejectUnknownFields(params, ["commandId", "bootId", "firstSequence", "lines"], method);
           requireDeviceLogClient(client);
-          return safeJson(await this.deviceLogStore().append(client.identity, params));
+          return safeJson(await this.deviceLogStore().append(client.identity, client.admission, params));
         });
       case "uploads.status":
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Upload status accepts no parameters");
