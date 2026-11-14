@@ -385,9 +385,11 @@ describe("settings package update installs one exact version through the owner",
       await expect(readFile(marker)).rejects.toThrow();
       expect(await installedVersion()).toBe("1.0.0");
 
-      await writeFile(settingsPath, JSON.stringify({ packages: [source, unrelated], npmCommand: ["sh", "-c", `touch '${replacedMarker}'; exit 1`] }));
-      await expect(packages.updatePackage({ cwd, source, version: "1.2.0", reason: "Installer changed" }, requester, async (_review, apply) => apply({ deviceId: "ios-device", commandId: "npm-installer-changed" })))
-        .rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("changed since review") });
+      await expect(packages.updatePackage({ cwd, source, version: "1.2.0", reason: "Installer changed" }, requester, async (_review, apply) => {
+        await writeFile(settingsPath, JSON.stringify({ packages: [source, unrelated], npmCommand: ["sh", "-c", `touch '${replacedMarker}'; exit 1`] }));
+        return apply({ deviceId: "ios-device", commandId: "npm-installer-changed" });
+      })).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("changed since review") });
+      await expect(readFile(replacedMarker)).rejects.toThrow();
       expect(await installedVersion()).toBe("1.0.0");
       expect((await changes.record.page({ filter: entry => entry.key === "package.update" })).entries).toEqual([]);
     } finally {
