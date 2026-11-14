@@ -59,14 +59,18 @@ async function homeScript(f: Awaited<ReturnType<typeof gateway>>) {
   };
   f.faux.setResponses(Array.from({ length: 20 }, () => respond as never));
   const home = await f.registry.acquire(f.home.sessionId);
-  const homeSays = async (prompt: string, name: string, args: Record<string, unknown>) => {
+  const ask = (prompt: string, name: string, args: Record<string, unknown>) => {
     homeCall = { prompt, name, args };
-    await home.prompt(prompt);
-    const result = await waitFor(() => homeResults.get(prompt), `Home result: ${prompt}`);
+    return home.prompt(prompt);
+  };
+  const resultOf = (prompt: string) => waitFor(() => homeResults.get(prompt), `Home result: ${prompt}`);
+  const homeSays = async (prompt: string, name: string, args: Record<string, unknown>) => {
+    await ask(prompt, name, args);
+    const result = await resultOf(prompt);
     await waitFor(() => home.snapshot().configurationBlocker === null || undefined, `Home settled: ${prompt}`);
     return result;
   };
-  return { home, homeSays };
+  return { home, ask, resultOf, homeSays };
 }
 
 describe("settings worker changes and Session fences", () => {
@@ -91,20 +95,25 @@ describe("settings worker changes and Session fences", () => {
 
   it("Home's default trust change needs the native card; an ordinary chat is refused", async () => {
     const f = await gateway();
-    const { homeSays } = await homeScript(f);
+    const { home, ask, resultOf } = await homeScript(f);
     const readDefaultTrust = async () => (JSON.parse(await readFile(join(f.agentDir, "settings.json"), "utf8")) as Record<string, unknown>).defaultProjectTrust;
     const changes = [{ key: "permissions.defaultProjectTrust", layer: "global", op: "set", value: "always" }];
-    const requested = await homeSays("Trust new projects by default", "settings", { action: "change", reason: "Maintainer asked to trust new projects", changes });
-    expect(requested.details).toMatchObject({ status: "review", review: { requiresTap: true } });
+    const prompt = "Trust new projects by default";
+    const asked = ask(prompt, "settings", { action: "change", reason: "Maintainer asked to trust new projects", changes });
+    const card = await waitFor(() => home.snapshot().extensionPresentation.pendingInteractions[0], "native default trust card");
+    expect(card.method).toBe("change");
+    expect(card.review).toMatchObject({ requiresTap: true });
     expect(await readDefaultTrust()).not.toBe("always");
-    const digest = (requested.details as { review: { digest: string } }).review.digest;
-    await expect(f.settingsChanges.change({ kind: "global" }, changes, { actor: { kind: "ui", id: "device:phone" },
-      reason: "Maintainer approved", confirmationDigest: digest })).resolves.toMatchObject({ status: "applied" });
+    await expect(f.service.invoke(phone(), "extension.respond", { commandId: commandId(), sessionId: home.id, interactionId: card.id,
+      hostEpoch: card.hostEpoch, presentationRevision: card.presentationRevision, value: { digest: card.review.digest, approved: true } })).resolves.toBeDefined();
+    await asked;
+    const applied = await resultOf(prompt);
+    expect(applied.details).toMatchObject({ status: "applied" });
     expect(await readDefaultTrust()).toBe("always");
     const chat = await f.registry.create(f.cwd);
     await expect(f.settingsChanges.change({ kind: "global" }, changes, { actor: { kind: "agent", id: chat.id, sessionId: chat.id },
       reason: "Ordinary chat tries" })).rejects.toMatchObject({ code: "invalid_request", message: "Default trust policy cannot be changed by agent" });
-    transcript.push({ case: "Home default trust change needs the native card", steps: [{ requested: requested.details }] });
+    transcript.push({ case: "Home default trust change needs the native card", steps: [{ applied: applied.details }] });
   }, 90_000);
 
   it("a Session-scope change without the fence it read is refused at submission, dry run included", async () => {
