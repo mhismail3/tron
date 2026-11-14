@@ -23,7 +23,7 @@ function unchanged(info: Stats, cursor: EpisodicChapterSourceCursor): boolean {
 }
 function fail(message: string): never { throw new EpisodicMemoryError("source", message); }
 
-async function* lines(handle: Awaited<ReturnType<typeof open>>, start: number, end: number, maxLineBytes: number) {
+export async function* homeSourceLines(handle: Awaited<ReturnType<typeof open>>, start: number, end: number, maxLineBytes: number) {
   const buffer = Buffer.alloc(64 * 1024);
   let pieces: Buffer[] = [];
   let pendingBytes = 0;
@@ -53,7 +53,7 @@ async function* lines(handle: Awaited<ReturnType<typeof open>>, start: number, e
 async function holdsAdmittedPrefix(handle: Awaited<ReturnType<typeof open>>, cursor: EpisodicChapterSourceCursor, size: number, maxLineBytes: number): Promise<boolean> {
   if (size < cursor.completeBytes) return false;
   let prefix = COMPLETE_PREFIX_SEED;
-  for await (const bytes of lines(handle, 0, cursor.completeBytes, maxLineBytes)) prefix = extendPrefixDigest(prefix, bytes);
+  for await (const bytes of homeSourceLines(handle, 0, cursor.completeBytes, maxLineBytes)) prefix = extendPrefixDigest(prefix, bytes);
   return prefix === cursor.completePrefixDigest;
 }
 
@@ -101,7 +101,7 @@ async function compactChapter(chapter: HomeSourceChapter, limits: EpisodicLimits
     let leafDigest = incremental ? previous!.leafLineDigest : null;
     let headerSeen = incremental;
     try {
-      for await (const bytes of lines(handle, offset, endBytes, limits.maxSourceLineBytes)) {
+      for await (const bytes of homeSourceLines(handle, offset, endBytes, limits.maxSourceLineBytes)) {
         prefix = extendPrefixDigest(prefix, bytes); completeBytes += bytes.length + 1;
         const line = bytes.toString("utf8");
         if (!headerSeen) {
@@ -296,7 +296,7 @@ async function proveChapter(chapter: HomeSourceChapter, admitted: EpisodicChapte
     let headerSeen = Boolean(base);
     const appended: string[] = [];
     let diverged = false;
-    for await (const bytes of lines(handle, position, admitted.completeBytes, limits.maxSourceLineBytes)) {
+    for await (const bytes of homeSourceLines(handle, position, admitted.completeBytes, limits.maxSourceLineBytes)) {
       const offset = position;
       prefix = extendPrefixDigest(prefix, bytes); position += bytes.length + 1;
       const line = bytes.toString("utf8");

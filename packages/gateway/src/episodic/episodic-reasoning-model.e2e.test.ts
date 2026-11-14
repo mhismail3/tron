@@ -16,7 +16,7 @@ import { EpisodicStore } from "./episodic-store.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
 import { singleChapterSource } from "../../test-support/episodic-chapter-source.js";
-type Reply = "line" | "reasoning-only" | "copy-example" | "limit" | "cache-line" | "cache-error" | "cache-unknown";
+type Reply = "line" | "reasoning-only" | "copy-example" | "limit" | "extra-limit" | "cache-line" | "cache-error" | "cache-unknown";
 
 async function endpoint(reply: (body: Record<string, unknown>) => Reply) {
   const bodies: Array<Record<string, unknown>> = [];
@@ -42,9 +42,11 @@ async function endpoint(reply: (body: Record<string, unknown>) => Reply) {
         response.end(events.map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(""));
         return;
       }
-      if (selected === "limit") {
-        response.writeHead(429, { "content-type": "application/json" });
-        response.end(JSON.stringify({ error: { message: "subscription_sharing_usage_limit_exceeded: plan usage limit reached" } }));
+      if (selected === "limit" || selected === "extra-limit") {
+        response.writeHead(selected === "extra-limit" ? 400 : 429, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: { type: "invalid_request_error", message: selected === "extra-limit"
+          ? "You're out of extra usage. Add more at claude.ai/settings/usage and keep going."
+          : "subscription_sharing_usage_limit_exceeded: plan usage limit reached" } }));
         return;
       }
       const chunk = (delta: Record<string, unknown>, finish: string | null, usage?: Record<string, number>) =>
@@ -122,9 +124,9 @@ async function fixture(reply: (body: Record<string, unknown>) => Reply) {
 }
 
 describe("the episodic summarizer on a reasoning model", () => {
-  it("finishes a real memory tree when the background model becomes plan-limited after its first leaves", async () => {
+  it.each(["limit", "extra-limit"] as const)("finishes a real memory tree when the background model returns %s after its first leaves", async limit => {
     let plainCalls = 0;
-    const f = await fixture(body => body.model === "plain" && ++plainCalls > 2 ? "limit" : "line");
+    const f = await fixture(body => body.model === "plain" && ++plainCalls > 2 ? limit : "line");
     const cwd = join(f.root, "project"), sessions = join(f.root, "sessions");
     await Promise.all([mkdir(cwd), mkdir(sessions)]);
     const manager = SessionManager.create(cwd, sessions);
@@ -163,7 +165,7 @@ describe("the episodic summarizer on a reasoning model", () => {
     }
     expect(ledger.records.filter((record: { status: string }) => record.status === "error")).toHaveLength(1);
     expect((await stat(usagePath)).mode & 0o777).toBe(0o600);
-    expect(await readFile(usagePath, "utf8")).not.toMatch(/message 0|detail |subscription_sharing_usage_limit_exceeded|summarized line|local-test-key/);
+    expect(await readFile(usagePath, "utf8")).not.toMatch(/message 0|detail |subscription_sharing_usage_limit_exceeded|out of extra usage|summarized line|local-test-key/);
     await mkdir(join(GATEWAY_ROOT, "test-results/episodic-reasoning-model"), { recursive: true });
     await writeFile(join(GATEWAY_ROOT, "test-results/episodic-reasoning-model/fallback.json"), JSON.stringify({ models: f.bodies.map(body => body.model), status: memory.status() }, null, 2) + "\n");
   });

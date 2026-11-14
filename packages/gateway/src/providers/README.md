@@ -128,6 +128,10 @@ and before worker controls, reading canonical fixed settings and the worker fact
 
 Provider queues and usage adapters consume the common upstream-error vocabulary
 in `util/upstream-error.ts`; transcript projections use that same classification.
+Anthropic's HTTP 400 `You're out of extra usage` is a usage-limit refusal, not a
+permanent source or authentication failure. Configured worker/background queues
+may use their normal fallback; this classification never enables credit or changes
+billing, and a subscription's aggregate quota does not prove a model is entitled.
 Queue eligibility still treats both usage caps and throttling as usage-limit
 failures. OpenCode Go's usage endpoint retains its distinct entitlement/auth/other
 403 outcomes; transcript copy never interprets every 403 as a subscription issue.

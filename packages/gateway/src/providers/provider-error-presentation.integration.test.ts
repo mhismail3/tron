@@ -25,6 +25,7 @@ it("projects friendly redacted errors identically through live and persisted rea
     const cases = [
       ["anthropic", '{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"},"request_id":"req_fixture"}', "Anthropic is overloaded", "overloaded"],
       ["openai", '{"error":{"type":"rate_limit_error","message":"Too many requests"}}', "Rate limited by OpenAI", "rate-limit"],
+      ["anthropic", `400 {"error":{"type":"invalid_request_error","message":"You're out of extra usage. Add more at claude.ai/settings/usage and keep going."},"request_id":"req_fixture"}`, "Usage limit reached for Anthropic", "usage-limit"],
       ["opencode-go", '{"error":{"type":"GoUsageLimitError","message":"Go usage limit exceeded"}}', "Usage limit reached for OpenCode Go", "usage-limit"],
       ["opencode-go", '403 {"error":{"type":"EntitlementError","message":"subscription required"}}', "OpenCode Go requires an active subscription", "entitlement"],
       ["opencode-go", '403 {"error":{"type":"AuthError"}}', "Authentication failed for OpenCode Go", "authentication"],
@@ -46,7 +47,7 @@ it("projects friendly redacted errors identically through live and persisted rea
       const id = manager.appendMessage(raw);
       const live = projectMessage(admitToolDisplayProjection, id, null, new Date(raw.timestamp).toISOString(), raw, new BlobStore());
       expect(live).toMatchObject({ errorInfo: { message, category } });
-      if (provider === "anthropic") expect(live).toMatchObject({ errorInfo: { type: "overloaded_error", requestId: "req_fixture" } });
+      if (provider === "anthropic") expect(live).toMatchObject({ errorInfo: { type: category === "overloaded" ? "overloaded_error" : "invalid_request_error", requestId: "req_fixture" } });
       artifacts.push(live);
     }
     const reopened = SessionManager.open(manager.getSessionFile()!);

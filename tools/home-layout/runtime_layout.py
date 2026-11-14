@@ -291,11 +291,22 @@ def rewrites(l, report, registry, reverse=False, layout=None):
                "source_sha256": file_sha(path)}, output
 
 
+def refuse_cursor_rewrites(l, report, records):
+    changed_sessions = {json.loads(read_record(l, Path(record["file"]), True)[0]).get("id") for record in records if record["kind"] == "session" and record["before"] != record["after"]}
+    if changed_sessions:
+        for path in files(l, Path(report["home"]) / "workspace/state/episodic", ("*/state.json",)):
+            state = json.loads(read_record(l, path)[0])
+            chapters = (state.get("cursor") or {}).get("home", {}).get("chapters", [])
+            if any(chapter.get("sessionId") in changed_sessions for chapter in chapters):
+                raise l.LayoutError("home_memory_cursor_requires_relocation")
+
+
 def plan(l, report, registry, owned=None):
     if not enabled(registry):
         return
     report["carried_lifecycle_records"] = carried_records(l, report, registry)
     report["rewrites"] = [record for record, _ in rewrites(l, report, registry) if record["before"] != record["after"]]
+    refuse_cursor_rewrites(l, report, report["rewrites"])
     terminal_layout.plan(l, sys.modules[__name__], report, physical(l, report["home"], "mac-terminal", "state/mac-terminal"), owned)
     settings = Path(report["home"]) / "agent/settings.json"
     if l.observed(str(settings)) is not None:
@@ -439,6 +450,7 @@ def prepare(l, report, registry, journal, journal_path, reverse, locks, guards, 
         return
     home = report["home"]
     layout = journal["layouts"].get(home)
+    refuse_cursor_rewrites(l, report, [record for record, _ in rewrites(l, report, registry, reverse, layout)])
     if layout is None:
         if reverse:
             raise l.LayoutError("no_layout_journal")
