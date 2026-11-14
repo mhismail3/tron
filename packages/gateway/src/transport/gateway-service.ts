@@ -1,5 +1,6 @@
 import type { MacTerminalService } from "../security/mac-terminal-service.js";
 import { abortableRead } from "../util/abortable-read.js";
+import type { DevicePreferenceBridge } from "./device-preference-bridge.js";
 import { offLoop, stage } from "../util/request-span.js";
 import type { AuthType } from "../kernel/pi/ai.js";
 import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
@@ -271,6 +272,7 @@ export interface GatewayServiceDependencies {
   trust: TrustService;
   settingsModel: SettingsModel<SettingsStoreAdapter>;
   settingsChanges: SettingsChangePath;
+  devicePreferences?: Pick<DevicePreferenceBridge, "reply" | "detachConnection">;
   macTerminal?: Pick<MacTerminalService, "status">;
   modelConfig: ModelConfigService;
   packages: PackageService;
@@ -417,6 +419,7 @@ export class GatewayService {
   }
 
   releaseClient(clientID: string): void {
+    this.dependencies.devicePreferences?.detachConnection(clientID);
     this.sessionListPages.releaseClient(clientID);
     this.automationPages.releaseClient(clientID);
     this.processTranscriptLeases.releaseClient(clientID);
@@ -1736,6 +1739,15 @@ export class GatewayService {
         rejectUnknownFields(params, ["operationId"], method);
         return { cancelled: this.dependencies.auth.cancel(client.identity, string(params.operationId, "operationId", { max: 100 })) };
       }
+      case "device.preference.respond":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId", "requestId", "status", "value", "current"], method);
+          const bridge = this.dependencies.devicePreferences;
+          if (!bridge) throw new GatewayError("unsupported", "This Gateway has no device preference bridge");
+          bridge.reply(client, string(params.requestId, "requestId", { max: 100 }),
+            { status: string(params.status, "status", { max: 20 }), value: params.value, current: params.current });
+          return { answered: true };
+        });
       case "auth.respond": {
         const answered = this.dependencies.auth.respond(
           client.identity,

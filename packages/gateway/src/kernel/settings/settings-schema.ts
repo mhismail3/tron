@@ -17,7 +17,7 @@ export const SECTIONS: readonly SectionDeclaration[] = [
   { id: "accounts", title: "Accounts", description: "Providers, custom models, and services", order: 60, harness: false },
   { id: "sources", title: "Sources", description: "Packages and how they install", order: 70, harness: false },
   { id: "setup", title: "Storage", description: "Import, session storage, and telemetry", order: 80, harness: false },
-  { id: "iphone", title: "This iPhone", description: "Appearance and sessions", order: 90, harness: false, note: "Stored on this iPhone. It never changes what the agent does." },
+  { id: "iphone", title: "This iPhone", description: "Appearance and sessions", order: 90, harness: false, note: "Stored on this iPhone. Run Swift files can be changed by Home for an explicitly selected iPhone; other settings stay on this iPhone." },
 ];
 
 export type Binding =

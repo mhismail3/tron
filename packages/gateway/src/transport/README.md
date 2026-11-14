@@ -76,6 +76,10 @@ write; `server-blob.integration.test.ts` checks HTTP exception/typed/domain proj
   subscription on it, and an earlier answer's `syncToken` is refused with `conflict`.
   Technical clients keep independent subscriptions.
 - Accepted prompts and durable mutations never inherit socket cancellation.
+- Device preference requests (`device-preference-bridge.ts`) go to one newest admitted ready connection of
+  the explicit device, never broadcast. A reply must match its request ID, the bound device identity and the
+  bound connection; anything else is refused and leaves the request pending. Pre-send failure is
+  `unavailable`; a loss after send (disconnect or deadline) is `unknown` for a write and never resent.
 - Every log record is redacted by the writer; a token or user path never reaches a
   file or an export.
 

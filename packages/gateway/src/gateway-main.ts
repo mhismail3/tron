@@ -43,6 +43,7 @@ import type { HomeTaskDiagnostic } from "./modules/home/home-task-dispatcher.js"
 import { homeWorkspaceDirectory } from "./modules/home/home-owner.js";
 import { CommandReceiptStore, COMMAND_RECEIPT_PRUNE_INTERVAL_MS } from "./transport/command-receipts.js";
 import { GatewayService } from "./transport/gateway-service.js";
+import { DevicePreferenceBridge } from "./transport/device-preference-bridge.js";
 import { GatewayServer } from "./transport/server.js";
 import { ResourceSampler } from "./transport/stall-diagnostics.js";
 import type { ResourceRuntimeEntry } from "./util/resource-recorder.js";
@@ -170,9 +171,15 @@ await macTerminalKeys.restore().catch(error => {
   logger.log("warning", "Private SSH startup failed", { event: "mac-terminal.startup-failed", error: String(error) });
 });
 const settingsSchema = createGatewaySettingsSchema();
+const devicePreferences = new DevicePreferenceBridge({
+  pairedDevices: async () => (await devices.listDevices()).map((device) => device.id),
+  newestReadyConnection: (deviceId) => transport?.newestReadyDeviceConnection(deviceId),
+  send: (connectionId, topic, payload) => transport?.emitToClient(connectionId, topic, payload) ?? false,
+});
 const settingsModel = new SettingsModel(new SettingsStoreAdapter({
   schema: settingsSchema,
   macTerminalKeys,
+  devicePreferences,
   agentDir: config.agentDir,
   tronHome: config.tronHome,
   trust,
@@ -746,6 +753,7 @@ const service = new GatewayService({
   trust,
   settingsModel,
   settingsChanges,
+  devicePreferences,
   macTerminal: macTerminalKeys,
   modelConfig,
   packages,

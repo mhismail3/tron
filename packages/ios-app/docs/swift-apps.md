@@ -106,10 +106,17 @@ interpreted source and synthetic publisher files; they never tap Install Build.
 
 ## Flag
 
-An iPhone-only preference (`ExperimentalSettingsContent`, UserDefaults key
-`tron.experimental.swiftApps`) read through the observable `SwiftAppExperiment.shared`, so open
-sheets gain or lose the control at once. The launch argument
-`-tron.experimental.swiftApps YES|NO` sets the same stored choice:
+The stored choice is the UserDefaults key `tron.experimental.swiftApps`, owned by the observable
+`SwiftAppExperiment.shared`, so open sheets and `canRun` readers see a change at once. The launch
+argument `-tron.experimental.swiftApps YES|NO` sets the same stored choice.
+
+Home can change it for one explicitly selected, paired iPhone (settings key `experimental.swiftApps`,
+qualifier `device`, writers `ui` and `home`, no native tap). The Gateway owns no copy: a read or
+change is a request to that phone's single newest ready authenticated connection
+(`DevicePreferenceCoordinator` answers `device.preference.request`), which compares the expected value
+with the stored one and replies `applied` or `conflict` through `device.preference.respond`. A change
+that the phone does not confirm is reported unknown and is inspected, never replayed. Changing the flag
+never installs or runs Swift source.
 
 Use the [iOS development helpers](../../../.agents/skills/tron-ios/SKILL.md) for
 simulator/device work; do not bypass their host leases.

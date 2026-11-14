@@ -932,9 +932,18 @@ export class GatewayServer {
     this.resourceSampler.recordTopicFrame(topic, prepared?.outputBytes ?? 0, recipients);
   }
 
-  emitToClient(clientId: string, topic: string, payload: JsonValue): void {
+  emitToClient(clientId: string, topic: string, payload: JsonValue): boolean {
     const client = this.clients.get(clientId);
-    if (client?.ready) this.send(client, { type: "event", topic, payload });
+    return client?.ready ? this.send(client, { type: "event", topic, payload }) : false;
+  }
+
+  newestReadyDeviceConnection(deviceId: string): string | undefined {
+    let newest: Connection | undefined;
+    for (const client of this.clients.values()) {
+      if (client.isLocal || !client.ready || client.revoked || client.closeInitiated || client.identity !== deviceId) continue;
+      if (newest === undefined || client.admittedAt > newest.admittedAt) newest = client;
+    }
+    return newest?.id;
   }
 
   notifySessionListChanged(): void {

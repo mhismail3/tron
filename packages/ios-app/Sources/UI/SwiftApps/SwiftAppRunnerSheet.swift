@@ -24,6 +24,16 @@ final class SwiftAppExperiment {
         }
     }
 
+    static let devicePreferenceKey = "experimental.swiftApps"
+
+    enum DevicePreferenceOutcome: Equatable { case applied, conflict(current: Bool) }
+
+    func compareAndSetDevicePreference(expected: Bool, to value: Bool) -> DevicePreferenceOutcome {
+        guard isEnabled == expected else { return .conflict(current: isEnabled) }
+        isEnabled = value
+        return .applied
+    }
+
     func canRun(fileNamed name: String) -> Bool {
         isEnabled && name.lowercased().hasSuffix(".swift")
     }
