@@ -49,7 +49,7 @@ destination="$1"; shift
 cd "$MINI_HOME" && HOME="$MINI_HOME" exec /usr/bin/python3 -c 'import os, sys; os.setsid(); os.execv("/bin/sh", ["sh", "-c", sys.argv[1]])' "$*"
 '''
 LANE = r'''#!/usr/bin/env python3
-import json, os, signal, sys, time
+import json, os, signal, subprocess, sys, time
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 args = sys.argv[1:]
@@ -61,7 +61,8 @@ if 'hang' in args:
     time.sleep(120)
 output = next(word.split('=', 1)[1] for word in args if word.startswith('--outputFile.json='))
 Path(output).write_text(json.dumps({'testResults': [{'name': str(ROOT / 'packages/gateway/src/a.test.ts')}], 'args': args,
-                                    'path': os.environ['PATH'], 'cwd': str(Path.cwd().relative_to(Path(os.environ['HOME']).resolve()))}))
+                                    'path': os.environ['PATH'], 'cwd': str(Path.cwd().relative_to(Path(os.environ['HOME']).resolve())),
+                                    'sha': subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip()}))
 sys.exit(3 if 'fail' in args else 0)
 '''
 
@@ -177,6 +178,79 @@ class MiniGatewayLane(unittest.TestCase):
         self.assertIn('uncommitted', dirty.stderr)
         self.assertNotIn('pushing', dirty.stdout)
         self.assertFalse(report.exists())
+
+    def test_concurrent_transfers_run_each_exact_commit_without_shared_ref_races(self) -> None:
+        repository = self.mini / 'tron-ci/tron.git'
+        hook = repository / 'hooks/pre-receive'
+        hook.write_text('''#!/usr/bin/python3
+import os, time
+from pathlib import Path
+barrier = Path(os.environ['MINI_HOME']) / 'transfers'
+barrier.mkdir(exist_ok=True)
+(barrier / str(os.getpid())).touch()
+deadline = time.monotonic() + 20
+while len(list(barrier.iterdir())) < 2:
+    if time.monotonic() >= deadline:
+        raise SystemExit('the second transfer never reached receive-pack')
+    time.sleep(0.02)
+''')
+        hook.chmod(0o755)
+        other = self.temporary / 'other'
+        self.git('clone', '--quiet', str(self.local), str(other))
+        self.git('config', 'tron.verify.mini', 'mini.test', cwd=other)
+        (other / 'README').write_text('distinct source\n')
+        self.git('add', 'README', cwd=other)
+        self.git('commit', '-qm', 'distinct source', cwd=other)
+        processes = []
+        for checkout in (self.local, other):
+            command = ['python3', str(checkout / 'tools/verify/mini.py'), '--reporter=json',
+                       '--outputFile.json=' + str(checkout / 'test-results/concurrent.json'), 'src/a.test.ts']
+            process = subprocess.Popen(command, cwd=checkout, env=self.env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            self.addCleanup(lambda process=process: process.poll() is None and process.kill())
+            processes.append((checkout, process))
+        results = [(checkout, process, process.communicate(timeout=90)[0]) for checkout, process in processes]
+        for checkout, process, output in results:
+            with self.subTest(checkout=checkout.name):
+                self.assertEqual(process.returncode, 0, output)
+                data = json.loads((checkout / 'test-results/concurrent.json').read_text())
+                self.assertEqual(data['sha'], self.git('rev-parse', 'HEAD', cwd=checkout))
+        refs = self.git('for-each-ref', '--format=%(refname)', cwd=repository).splitlines()
+        self.assertEqual(refs, ['refs/tron-jobs/gateway'])
+
+    def test_ios_lane_returns_native_artifacts_and_failure_through_the_normal_lease(self) -> None:
+        self.write('scripts/tron-ios-test', '''#!/usr/bin/python3
+import json, os, subprocess, sys
+from pathlib import Path
+root = Path(__file__).resolve().parents[1]
+results = Path(os.environ['TRON_IOS_TEST_RESULTS_DIR'])
+results.mkdir(parents=True)
+(results / 'TestResults.xcresult').mkdir()
+(results / 'TestResults.xcresult/Info.plist').write_text('native result fixture')
+(results / 'test.log').write_text('failure: fixture/native: deliberate red' if 'fail' in sys.argv else 'Executed 1 test, with 0 failures')
+(results / 'source.json').write_text(json.dumps({'sha': subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip(), 'args': sys.argv[1:], 'home': os.environ['HOME']}))
+print('Executed 1 test, with ' + ('1 failure' if 'fail' in sys.argv else '0 failures'), flush=True)
+raise SystemExit(9 if 'fail' in sys.argv else 0)
+''')
+        (self.local / 'scripts/tron-ios-test').chmod(0o755)
+        sha = self.commit('native result fixture')
+        for flag, expected in (('pass', 0), ('fail', 9)):
+            with self.subTest(outcome=flag):
+                result = self.lane('ios', 'run', flag)
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                paths = [line.removeprefix('mini: artifacts: ') for line in result.stdout.splitlines() if line.startswith('mini: artifacts: ')]
+                self.assertEqual(len(paths), 1, result.stdout + result.stderr)
+                artifacts = Path(paths[0])
+                source = json.loads((artifacts / 'ios/source.json').read_text())
+                self.assertEqual(source['sha'], sha)
+                self.assertEqual(source['args'], ['run', flag])
+                self.assertEqual(Path(source['home']).resolve(), self.mini.resolve())
+                self.assertEqual((artifacts / 'ios/TestResults.xcresult/Info.plist').read_text(), 'native result fixture')
+                self.assertEqual(json.loads((artifacts / 'receipt.json').read_text())['exit'], expected)
+                if expected:
+                    self.assertIn('deliberate red', (artifacts / 'ios/test.log').read_text())
+        with open(self.mini / 'tron-ci/jobs/gateway.lock') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        self.assertEqual(list((self.mini / 'tron-ci/results').iterdir()), [])
 
     def test_a_python_lane_runs_its_command_at_the_exact_commit_with_one_ordered_output(self) -> None:
         self.write('tools/probe.py', PROBE)
