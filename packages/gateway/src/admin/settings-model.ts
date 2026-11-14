@@ -236,7 +236,7 @@ export class SettingsStoreAdapter {
     await assertNewModelChoice(runtime, ref.provider, ref.id);
   }
 
-  async applyStore(bundleTarget: SettingsTarget, stores: SettingsStores, plan: Planned, value: unknown, bundleContext: ChangeContext, writers: Pick<SettingsWriters, "setTrust">): Promise<{ revision?: number; git?: GitResult; result?: unknown }> {
+  async applyStore(bundleTarget: SettingsTarget, stores: SettingsStores, plan: Planned, value: unknown, bundleContext: ChangeContext, writers: Pick<SettingsWriters, "setTrust">, current: unknown): Promise<{ revision?: number; git?: GitResult; result?: unknown }> {
     const { binding, qualifiers } = plan;
     const target = plan.target ?? bundleTarget;
     const context = plan.session ? { ...bundleContext, session: plan.session } : bundleContext;
@@ -272,7 +272,7 @@ export class SettingsStoreAdapter {
         if (unset) throw new GatewayError("invalid_request", `${plan.key.label} cannot be unset on an iPhone`);
         const port = this.dependencies.devicePreferences;
         if (!port) throw new GatewayError("busy", "This iPhone is not connected; nothing was changed", true);
-        const outcome = await port.compareAndSet(qualifiers.device!, plan.key.id, plan.before, value);
+        const outcome = await port.compareAndSet(qualifiers.device!, plan.key.id, current, value);
         if (outcome.status === "applied") return {};
         if (outcome.status === "conflict") throw new GatewayError("conflict", `${plan.key.label} changed on this iPhone since it was read; refresh and try again`, false, { current: outcome.current as never });
         if (outcome.status === "unavailable") throw new GatewayError("busy", "This iPhone is not connected; nothing was changed", true);

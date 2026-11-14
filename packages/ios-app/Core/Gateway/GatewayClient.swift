@@ -579,6 +579,7 @@ package actor GatewayClient {
             "protocolVersion": .number(Double(TronGatewayProtocolContract.protocolVersion)),
             "clientId": .string(uuidSource.next().uuidString),
             "clientRole": .string("mobile"),
+            "capabilities": .array([.string("device-preference")]),
             "diagnostics": .object([
                 "clientId": .string(diagnosticOwnerID),
                 "attemptId": .string(attemptID ?? "initial"),

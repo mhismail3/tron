@@ -4,6 +4,7 @@ import type { JsonValue } from "../protocol/types.js";
 
 export const DEVICE_PREFERENCE_REQUEST_TOPIC = "device.preference.request";
 export const DEVICE_PREFERENCE_DEADLINE_MS = 10_000;
+export const DEVICE_PREFERENCE_CAPABILITY = "device-preference";
 
 export type DevicePreferenceRead = { status: "value"; value: unknown } | { status: "unavailable" } | { status: "unknown" };
 export type DevicePreferenceWrite = { status: "applied" } | { status: "conflict"; current: unknown } | { status: "unavailable" } | { status: "unknown" };
@@ -11,7 +12,7 @@ type Outcome = DevicePreferenceRead | DevicePreferenceWrite;
 
 export interface DevicePreferenceBridgeOptions {
   pairedDevices(): Promise<readonly string[]>;
-  newestReadyConnection(deviceId: string): string | undefined;
+  newestReadyConnection(deviceId: string, capability: string): string | undefined;
   send(connectionId: string, topic: string, payload: JsonValue): boolean;
   deadlineMs?: number;
 }
@@ -29,6 +30,7 @@ export interface DevicePreferenceCaller { id: string; identity: string; isLocal:
 export class DevicePreferenceBridge {
   private readonly pending = new Map<string, Pending>();
   private readonly deadlineMs: number;
+  private disposed = false;
 
   constructor(private readonly options: DevicePreferenceBridgeOptions) {
     this.deadlineMs = options.deadlineMs ?? DEVICE_PREFERENCE_DEADLINE_MS;
@@ -60,11 +62,12 @@ export class DevicePreferenceBridge {
   }
 
   dispose(): void {
+    this.disposed = true;
     for (const requestId of [...this.pending.keys()]) this.settle(requestId, undefined);
   }
 
   private request(deviceId: string, action: "read" | "set", fields: Record<string, JsonValue>): Promise<Outcome> {
-    const connectionId = this.options.newestReadyConnection(deviceId);
+    const connectionId = this.disposed ? undefined : this.options.newestReadyConnection(deviceId, DEVICE_PREFERENCE_CAPABILITY);
     if (connectionId === undefined) return Promise.resolve({ status: "unavailable" });
     const requestId = randomUUID();
     return new Promise<Outcome>((resolve) => {

@@ -23,7 +23,7 @@ import { maintainerChange as maintainerRpc } from "../../../test-support/native-
 const { KEYS } = TEST_SETTINGS_SCHEMA;
 import type { Resolution, ResolvedKey, SettingsTarget } from "../../kernel/settings/tool-contract.js";
 import { UPDATE_TRON_NOTE, type PresentedKey, type PresentedResolution } from "../../admin/settings-presentation.js";
-import { CONTROLS, PI_BUILTIN_TOOL_NAMES, type DevicePreferencePort, type DevicePreferenceRead, type DevicePreferenceWrite } from "../../kernel/settings/settings-types.js";
+import { CONTROLS, PI_BUILTIN_TOOL_NAMES, type DevicePreferencePort, type DevicePreferenceRead } from "../../kernel/settings/settings-types.js";
 import { ScopeToolCatalog } from "../../admin/tool-catalog.js";
 import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
@@ -115,14 +115,13 @@ async function fixture(devicePreferences?: DevicePreferencePort) {
 
 function scriptedPhone(initial: DevicePreferenceRead) {
   let read: DevicePreferenceRead = initial;
-  let write: DevicePreferenceWrite = { status: "applied" };
-  const writes: Array<{ device: string; keyId: string; expected: unknown; value: unknown }> = [];
   const port: DevicePreferencePort = {
     devices: async () => ["device:phone"],
-    read: async () => read,
-    compareAndSet: async (device, keyId, expected, value) => { writes.push({ device, keyId, expected, value }); return write; },
+    read: async () => { phone.reads += 1; return read; },
+    compareAndSet: async () => { throw new Error("the write path is owned by the real-socket test"); },
   };
-  return { port, writes, script: (next: DevicePreferenceRead) => { read = next; }, nextWrite: (next: DevicePreferenceWrite) => { write = next; } };
+  const phone = { port, reads: 0, script: (next: DevicePreferenceRead) => { read = next; } };
+  return phone;
 }
 
 function piEffective(manager: SettingsManager, model: { provider: string; id: string }): Record<string, unknown> {
@@ -186,52 +185,23 @@ describe("settings.resolve", () => {
     await writeFile(join(f.tronHome, "state", "home", "profile.json"), JSON.stringify({ oversized: "x".repeat(256 * 1024) }));
     await expect(f.service.invoke(subscribed(), "settings.resolve", { target })).rejects.toThrow("Home profile exceeds its 262144-byte limit");
   });
-  it("reads Run Swift files from the explicit iPhone at every request and refuses offline, stale, ordinary and unconfirmed writes without replay", async () => {
+  it("SCOPE: adapter snapshot only (scripted port, no socket): one fresh read per request for the requested device key, unavailable never false, no phone traffic without the key", async () => {
     const phone = scriptedPhone({ status: "value", value: true });
     const f = await fixture(phone.port);
-    const key = "experimental.swiftApps";
-    const device = { device: "device:phone" };
     const home = { kind: "home" } as const;
-    const resolveKey = async () => row(await f.service.invoke(subscribed(), "settings.resolve", { target: home, keys: [key] }) as Resolution, key, device);
-    expect(await resolveKey()).toMatchObject({ value: true, layer: "global", qualifiers: device });
+    const device = { device: "device:phone" };
+    const resolveKey = async () => row(await f.service.invoke(subscribed(), "settings.resolve", { target: home, keys: ["experimental.swiftApps"] }) as Resolution, "experimental.swiftApps", device);
+    expect(await resolveKey()).toMatchObject({ value: true, qualifiers: device });
+    expect(phone.reads).toBe(1);
     phone.script({ status: "value", value: false });
     expect(await resolveKey()).toMatchObject({ value: false });
+    expect(phone.reads).toBe(2);
+    await f.service.invoke(subscribed(), "settings.resolve", { target: home, keys: ["model.ref[role=chat]"] });
+    expect(phone.reads).toBe(2);
     phone.script({ status: "unavailable" });
     const offline = await resolveKey();
     expect(offline.value).toBeNull();
     expect(offline.badges).toContainEqual(expect.objectContaining({ label: "Unavailable" }));
-
-    phone.script({ status: "value", value: true });
-    await expect(f.settingsChanges.change(home, [{ key, layer: "global", op: "set", value: false, qualifiers: device }],
-      { actor: { kind: "agent", id: "chat" }, reason: "Turn off Swift files" })).rejects.toThrow("cannot be changed by agent");
-    await expect(f.settingsChanges.change(home, [{ key, layer: "global", op: "set", value: false, qualifiers: device, expected: false }],
-      { actor: { kind: "home", id: "home" }, reason: "Turn off Swift files" })).rejects.toThrow("changed since it was read");
-    expect(phone.writes).toEqual([]);
-
-    phone.script({ status: "unavailable" });
-    await expect(f.settingsChanges.change(home, [{ key, layer: "global", op: "set", value: false, qualifiers: device }],
-      { actor: { kind: "home", id: "home" }, reason: "Turn off Swift files" })).rejects.toThrow("iPhone");
-    expect(phone.writes).toEqual([]);
-
-    phone.script({ status: "value", value: true });
-    const applied = await f.settingsChanges.change(home, [{ key, layer: "global", op: "set", value: false, qualifiers: device, expected: true }],
-      { actor: { kind: "home", id: "home" }, reason: "Turn off Swift files" });
-    expect(applied.status).toBe("applied");
-    expect(phone.writes).toEqual([{ device: "device:phone", keyId: key, expected: true, value: false }]);
-
-    phone.script({ status: "value", value: false });
-    phone.nextWrite({ status: "unknown" });
-    const unknown = await f.settingsChanges.change(home, [{ key, layer: "global", op: "set", value: true, qualifiers: device }],
-      { actor: { kind: "home", id: "home" }, reason: "Turn on Swift files" }).then(() => undefined, (error: Error) => error);
-    expect(unknown?.message).toContain("unknown");
-    expect(phone.writes).toHaveLength(2);
-    expect(phone.writes[1]).toEqual({ device: "device:phone", keyId: key, expected: false, value: true });
-
-    phone.nextWrite({ status: "applied" });
-    phone.script({ status: "value", value: false });
-    const undone = await f.settingsChanges.undo(applied.changes[0]!.changeId, { actor: { kind: "home", id: "home" }, reason: "Undo Swift files" });
-    expect(undone.status).toBe("applied");
-    expect(phone.writes.at(-1)).toEqual({ device: "device:phone", keyId: key, expected: false, value: true });
   });
   it("resolves three scopes for every target, shows an untrusted project as not applied, and matches pi and a live chat", async () => {
     const { service, project, registry, model, modelKey, tronHome, agentDir, trust } = await fixture();

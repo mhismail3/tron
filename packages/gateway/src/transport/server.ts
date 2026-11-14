@@ -349,6 +349,11 @@ function peerDiagnostics(value: unknown): PeerDiagnostics {
   };
 }
 
+function helloCapabilities(value: unknown): ReadonlySet<string> {
+  if (!Array.isArray(value)) return new Set();
+  return new Set(value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0 && entry.length <= 64).slice(0, 32));
+}
+
 interface Connection {
   id: string;
   identity: string;
@@ -362,6 +367,7 @@ interface Connection {
   pingOutstandingSince: number | null;
   ready: boolean;
   presentationOnly: boolean;
+  capabilities: ReadonlySet<string>;
   inFlight: Set<string>;
   requestControllers: Map<string, InFlightRpc>;
   synchronizations: Map<string, ActiveSessionSynchronization>;
@@ -937,10 +943,11 @@ export class GatewayServer {
     return client?.ready ? this.send(client, { type: "event", topic, payload }) : false;
   }
 
-  newestReadyDeviceConnection(deviceId: string): string | undefined {
+  newestReadyDeviceConnection(deviceId: string, capability: string): string | undefined {
     let newest: Connection | undefined;
     for (const client of this.clients.values()) {
       if (client.isLocal || !client.ready || client.revoked || client.closeInitiated || client.identity !== deviceId) continue;
+      if (!client.capabilities.has(capability)) continue;
       if (newest === undefined || client.admittedAt > newest.admittedAt) newest = client;
     }
     return newest?.id;
@@ -1476,6 +1483,7 @@ export class GatewayServer {
       unansweredHeartbeats: 0,
       ready: false,
       presentationOnly: false,
+      capabilities: new Set(),
       inFlight: new Set(),
       requestControllers: new Map(),
       synchronizations: new Map(),
@@ -1553,6 +1561,7 @@ export class GatewayServer {
       }
       connection.ready = true;
       connection.presentationOnly = (frame as Record<string, unknown>).clientRole === "mobile";
+      connection.capabilities = helloCapabilities(frame.capabilities);
       connection.peer = peerDiagnostics(frame.diagnostics);
       this.finishUpgrade(connection.upgrade, "opened", "hello", "hello accepted", { reason: "hello", peer: connection.peer });
       const openHostEvidence = connection.isLocal ? "" : ` ${formatHostEvidence(this.stallSampler.hostSample())}`;

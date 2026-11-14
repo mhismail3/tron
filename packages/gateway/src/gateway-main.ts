@@ -173,7 +173,7 @@ await macTerminalKeys.restore().catch(error => {
 const settingsSchema = createGatewaySettingsSchema();
 const devicePreferences = new DevicePreferenceBridge({
   pairedDevices: async () => (await devices.listDevices()).map((device) => device.id),
-  newestReadyConnection: (deviceId) => transport?.newestReadyDeviceConnection(deviceId),
+  newestReadyConnection: (deviceId, capability) => transport?.newestReadyDeviceConnection(deviceId, capability),
   send: (connectionId, topic, payload) => transport?.emitToClient(connectionId, topic, payload) ?? false,
 });
 const settingsModel = new SettingsModel(new SettingsStoreAdapter({
@@ -554,6 +554,7 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
     workRegistry.beginDrain();
     sessionSearch?.cancelWarmup();
     backgroundWork.stop();
+    await shutdownStep("device-preference", async () => devicePreferences.dispose(), recordShutdownStep);
     await shutdownStep("transport-close", () => transport.close(), recordShutdownStep);
     if (!drainAcceptedWork) {
       await shutdownStep("cancellation", async () => { await Promise.allSettled([

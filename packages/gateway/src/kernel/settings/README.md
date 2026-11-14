@@ -55,7 +55,7 @@ undoes only changes whose target is its session or that its session initiated (i
 included); Tron Home and the maintainer see and undo every change. `undo` takes a change id and
 reason; the target session's own store is acquired through its owner, never Home's snapshot.
 Writer grants, exact native taps, expected-value checks and busy/idle rules still apply.
-A device-preference key (`device-preference` store, one explicit iPhone qualifier) is read through `SettingsStores.devicePreferences`, a per-request snapshot the owner takes only for the keys requested, through the injected `DevicePreferencePort`. An unconfigured, unavailable or unknown read is shown as such and never as a default; a write refuses unless its fresh read is a value, and an unconfirmed write is reported as an uncertain outcome, never replayed.
+A device-preference key (`device-preference` store, one explicit iPhone qualifier) is read through `SettingsStores.devicePreferences`, a per-request snapshot the owner takes only for the keys requested, through the injected `DevicePreferencePort`. An unconfigured, unavailable or unknown read is shown as such and never as a default; a write refuses unless its fresh read is a value, and an unconfirmed write is reported as an uncertain outcome, never replayed. `applyStore` receives the value the store holds before the write as `current`: a forward write passes the planned `before`, and bundle compensation passes the planned `after`, so a device compensation CASes on what the phone actually holds.
 Routine reversible changes, tool selection included, apply, log and can be undone.
 Widening trust/executable authority, privacy access or spend, and any install or
 irreversible effect, require an exact native tap; narrowing them is routine. Writer

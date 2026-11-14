@@ -71,7 +71,7 @@ interface SettingsChangeOwner extends SettingsReadOwner {
   defaultContextWindow(runtime: ModelRuntime, qualifier: string): number | undefined;
   observedWrites(planned: readonly Planned[], projectRoot: string | undefined): PlannedWrite[];
   readonly outsideChanges: { begin(writes: readonly PlannedWrite[]): Promise<void>; end(writes: readonly PlannedWrite[], landed: ReadonlyMap<string, { git?: GitResult; changeId: string }>): Promise<void> } | undefined;
-  applyStore(target: SettingsTarget, stores: SettingsStores, plan: Planned, value: unknown, context: ChangeContext, writers: Pick<SettingsWriters, "setTrust">): Promise<StoreApplyResult>;
+  applyStore(target: SettingsTarget, stores: SettingsStores, plan: Planned, value: unknown, context: ChangeContext, writers: Pick<SettingsWriters, "setTrust">, current: unknown): Promise<StoreApplyResult>;
 }
 
 export interface Planned {
@@ -454,7 +454,7 @@ export class SettingsChangePath {
     let failure: { plan: Planned; error: GatewayError } | undefined;
     for (const plan of ordered) {
       try {
-        const result = await this.model.owner.applyStore(target, stores, plan, plan.after, context, this.writers);
+        const result = await this.model.owner.applyStore(target, stores, plan, plan.after, context, this.writers, plan.before);
         applied.push({ plan, ...result });
       } catch (error) {
         failure = { plan, error: error instanceof GatewayError ? error : new GatewayError("internal", error instanceof Error ? error.message : String(error)) };
@@ -464,7 +464,7 @@ export class SettingsChangePath {
     if (failure) {
       const unrestored = new Map<string, string>();
       for (const done of [...applied].reverse()) {
-        await this.model.owner.applyStore(target, stores, done.plan, done.plan.before, context, this.writers).catch((error: unknown) => {
+        await this.model.owner.applyStore(target, stores, done.plan, done.plan.before, context, this.writers, done.plan.after).catch((error: unknown) => {
           unrestored.set(done.plan.changeId, `Not rolled back: the ${done.plan.binding.store} store refused its compensating write (${error instanceof Error ? error.message : String(error)}); it may still hold the new value`);
         });
       }
