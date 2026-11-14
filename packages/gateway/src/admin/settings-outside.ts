@@ -185,6 +185,15 @@ export class OutsideChanges {
 
   private schemaKeyOrUndefined(id: string): KeyDeclaration | undefined { return this.schema.KEYS.find(key => key.id === id); }
 
+  private pruneUndeclared(state: StoreState): void {
+    for (const map of [state.values, state.outside, state.tron]) {
+      for (const instance of Object.keys(map)) {
+        const key = instance.split("\u0000")[0]!;
+        if (this.schemaKeyOrUndefined(key) === undefined && recordSubject(key) === undefined) delete map[instance];
+      }
+    }
+  }
+
   private async compareStores(stores: readonly ObservedStore[], heads?: ReadonlyMap<string, GitHeadState | undefined>): Promise<void> {
     const entries: ChangeEntry[] = [];
     await this.mutex.run(async () => {
@@ -338,6 +347,7 @@ export class OutsideChanges {
       document.stores[id] = { digest: digestOf(text), values, tron: {}, outside: {}, ...(git ? { head: git.head, staged: [] } : {}) };
       return;
     }
+    this.pruneUndeclared(state);
     for (const instance of Object.keys(state.outside)) {
       if (fingerprint(state.values[instance]) !== fingerprint(values[instance])) delete state.outside[instance];
     }
@@ -427,6 +437,7 @@ export class OutsideChanges {
       state = document.stores[id]!;
     }
     const entries: ChangeEntry[] = [];
+    this.pruneUndeclared(state);
     const instances = new Set([...Object.keys(state.values), ...current.keys()]);
     for (const instance of instances) {
       const before = state.values[instance];
