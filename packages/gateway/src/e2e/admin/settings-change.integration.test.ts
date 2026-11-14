@@ -26,6 +26,7 @@ import { type SettingsStores } from "../../kernel/settings/settings-types.js";
 import { composedBelow, readBinding } from "../../kernel/settings/settings-resolver.js";
 import { type Resolution } from "../../kernel/settings/tool-contract.js";
 import { type KeyDeclaration } from "../../kernel/settings/settings-schema.js";
+import { instanceId } from "../../kernel/settings/scope-resolution.js";
 const { KEYS } = TEST_SETTINGS_SCHEMA;
 import type { PresentedResolution } from "../../admin/settings-presentation.js";
 import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
@@ -768,6 +769,31 @@ describe("outside changes", () => {
     expect((await outsideEntries(f)).filter(entry => entry.key === "run.retry.maxRetries").map(entry => entry.after)).toEqual([2, 9]);
 
     transcript.push({ case: "outside mac", detail: await outsideEntries(f) });
+  });
+
+  caseIt("an observed state persisted before a key was retired records no outside entry or mark for it", async owner => {
+    const f = await fixture(owner);
+    const retired = (key: string) => instanceId(key, {});
+    await mkdir(dirname(f.outside.path), { recursive: true });
+    await writeFile(f.outside.path, JSON.stringify({ version: 1, stores: { global: {
+      digest: "stale",
+      values: {
+        [retired("run.httpProxy")]: { key: "run.httpProxy", hash: "a".repeat(64) },
+        [retired("setup.sessionDir")]: { key: "setup.sessionDir", value: "/elsewhere" },
+      },
+      tron: { [retired("setup.sessionDir")]: "old-change" },
+      outside: { [retired("run.httpProxy")]: { changeId: "old-outside", applyAgain: false, before: "Set", after: "Not set" } },
+    } } }));
+    await row(f, { kind: "global" }, "run.retry.maxRetries");
+    await f.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 6 }]);
+    expect(await outsideEntries(f)).toEqual([]);
+
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), retry: { maxRetries: 9 } }));
+    expect((await row(f, { kind: "global" }, "run.retry.maxRetries")).value).toBe(9);
+    expect((await outsideEntries(f)).map(entry => entry.key)).toEqual(["run.retry.maxRetries"]);
+    const stored = JSON.parse(await readFile(f.outside.path, "utf8")).stores.global;
+    expect([...Object.keys(stored.values), ...Object.keys(stored.outside), ...Object.keys(stored.tron)]
+      .filter(instance => instance.startsWith("run.httpProxy") || instance.startsWith("setup.sessionDir"))).toEqual([]);
   });
 
   caseIt("a file event alone records and broadcasts each change without a tier push", async owner => {
