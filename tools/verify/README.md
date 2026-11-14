@@ -236,13 +236,16 @@ The normal mini lease has zero wait, so a busy lease or other no-result stops th
 queuing or retrying. Honor Home's resource order before invoking it.
 
 The hours limit bounds admission: an in-flight lane finishes normally, then no further lane
-starts after the budget expires. SIGINT/SIGTERM stops and joins the owned process group through
-verify's existing runner. Each invocation retains unique logs and an atomically updated
+starts after the budget expires. The first SIGINT/SIGTERM fences repeated stop signals while
+verify's existing runner stops and joins the one owned lane; finalization then saves its receipt.
+The plan exposes explicit contention marking. Each invocation retains unique logs and an atomically updated
 `test-results/hunt/<sha>-<time>/summary.json` with selection, elapsed time, completed rounds,
 raw step exits, the first red's log and the ledger's same-tree flake ranking. A later pass never
 erases an earlier red: completed hunts exit 1 if any lane failed, otherwise 0. Budget expiry,
-source drift, no-result or an undriven lane exits 75 with partial evidence; interruption stays
-nonzero. These repetitions measure variability, not retry-to-green verification. Zero ranked
+source drift, no-result or an undriven lane exits 75 with partial evidence, or 1 if a prior lane
+already failed; interruption stays 130/143. Remote-read errors are no-result, not evidence that
+source changed. Cleanup/ranking errors are retained and make an otherwise successful hunt exit 1,
+without replacing earlier nonzero verdicts. These repetitions measure variability, not retry-to-green verification. Zero ranked
 flakes is not proof of absence, especially for partial hunts or always-failing cases.
 
 ## Static checks (existing tools only)

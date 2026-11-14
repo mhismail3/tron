@@ -6,6 +6,7 @@ import argparse
 from datetime import datetime, timezone
 import json
 import math
+import os
 import signal
 import sys
 import time
@@ -17,15 +18,19 @@ import verify as v
 GROUPS = ('gateway', 'gateway-nested', 'python', 'node', 'node-gateway')
 
 
+class SourceChanged(v.VerifyError):
+    pass
+
+
 def origin_main() -> str:
     return v.git('ls-remote', '--exit-code', 'origin', 'refs/heads/main').split()[0]
 
 
 def fence(sha: str) -> None:
     if v.git('status', '--porcelain', '--untracked-files=normal'):
-        raise v.VerifyError('hunt requires a clean committed checkout')
+        raise SourceChanged('hunt requires a clean committed checkout')
     if v.git('rev-parse', 'HEAD').strip() != sha or origin_main() != sha:
-        raise v.VerifyError('hunt requires unchanged HEAD equal to current origin/main')
+        raise SourceChanged('hunt requires unchanged HEAD equal to current origin/main')
 
 
 def main(arguments: list[str]) -> int:
@@ -53,7 +58,8 @@ def main(arguments: list[str]) -> int:
         if not groups:
             raise v.VerifyError('no mini-compatible tests selected')
         plan = {'commit': sha, 'tree': tree, 'matchesMain': origin_main() == sha and not v.git('status', '--porcelain'),
-                'rounds': args.rounds, 'hours': args.hours, 'host': 'mini', 'groups': groups}
+                'rounds': args.rounds, 'hours': args.hours, 'host': 'mini', 'groups': groups,
+                'contended': os.environ.get('TRON_TEST_CONTENDED') == '1'}
         if args.plan:
             print(json.dumps(plan, indent=2))
             return 0
@@ -74,35 +80,34 @@ def main(arguments: list[str]) -> int:
         temporary.replace(path)
 
     def interrupt(signum, frame):
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            signal.signal(sig, signal.SIG_IGN)
         raise KeyboardInterrupt
 
-    previous = {sig: signal.signal(sig, interrupt) for sig in (signal.SIGINT, signal.SIGTERM)}
-    run.on_update = save
-    code = 0
-    try:
-        save()
+    def repeat() -> int:
+        code = 0
         for round_index in range(args.rounds):
             folder = logs / f'round-{round_index + 1}'
             folder.mkdir()
             for group, files in groups.items():
                 fence(sha)
                 if time.monotonic() - started >= args.hours * 3600:
-                    report['completion'], code = 'budget', 75
-                    return code
+                    report['completion'] = 'budget'
+                    return code or 75
                 command, cwd, count = v.test_spec(group, files, [], folder, gateway_host='mini', node_host='mini')
                 step = run.step(f'round {round_index + 1}: {group}', command, cwd, count,
                                 env={'TRON_VERIFY_COMMIT': sha, 'TRON_MINI_JOB_WAIT_SECONDS': '0'})
                 output = (v.ROOT / step['log']).read_text(errors='replace')
                 missing = mini.no_result_reason(step['exit'], output)
                 if missing:
-                    report['completion'], report['reason'], code = 'no-result', missing, 75
-                    return code
+                    report['completion'], report['reason'] = 'no-result', missing
+                    return code or 75
                 if step['exit'] in (130, 143):
-                    report['completion'], code = 'interrupted', step['exit']
-                    return code
+                    report['completion'] = 'interrupted'
+                    return step['exit']
                 if step['exit'] == 0 and not step['tests']:
-                    report['completion'], report['reason'], code = 'undriven', 'lane returned no passing cases', 75
-                    return code
+                    report['completion'], report['reason'] = 'undriven', 'lane returned no passing cases'
+                    return code or 75
                 if step['exit']:
                     code = 1
                     if report['firstFailure'] is None:
@@ -111,21 +116,44 @@ def main(arguments: list[str]) -> int:
         fence(sha)
         report['completion'] = 'completed'
         return code
+
+    previous = {sig: signal.signal(sig, interrupt) for sig in (signal.SIGINT, signal.SIGTERM)}
+    run.on_update = save
+    code = 0
+    try:
+        save()
+        code = repeat()
+    except SourceChanged as error:
+        report['completion'], report['reason'], code = 'source-changed', str(error), 1 if report['firstFailure'] else 75
     except (v.VerifyError, v.ownership.GitError) as error:
-        report['completion'], report['reason'], code = 'source-changed', str(error), 75
-        return code
+        report['completion'], report['reason'], code = 'no-result', str(error), 1 if report['firstFailure'] else 75
     except KeyboardInterrupt:
         report['completion'], code = 'interrupted', 130
-        return code
+    except Exception as error:
+        report['completion'], report['reason'], code = 'error', str(error), 1
     finally:
-        if report['completion'] == 'running':
-            report['completion'], code = 'error', 1
-        run.stop(list(run.live))
-        for sig, handler in previous.items():
-            signal.signal(sig, handler)
-        report['exit'], report['flakes'] = code, ledger.flakes(tree)
-        save()
-        print(f'hunt: report: {path.relative_to(v.ROOT)}', flush=True)
+        for sig in previous:
+            signal.signal(sig, signal.SIG_IGN)
+        try:
+            try:
+                run.stop(list(run.live))
+            except Exception as error:
+                report['cleanupError'] = str(error)
+                if code == 0:
+                    report['completion'], code = 'error', 1
+            try:
+                report['flakes'] = ledger.flakes(tree)
+            except Exception as error:
+                report['rankingError'] = str(error)
+                if code == 0:
+                    report['completion'], code = 'error', 1
+            report['exit'] = code
+            save()
+            print(f'hunt: report: {path.relative_to(v.ROOT)}', flush=True)
+        finally:
+            for sig, handler in previous.items():
+                signal.signal(sig, handler)
+    return code
 
 
 if __name__ == '__main__':

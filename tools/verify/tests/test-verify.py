@@ -601,25 +601,30 @@ class HuntTests(VerifyCase):
         r = self.repo
         r.write('packages/gateway/src/hunt/hunt.module.json', json.dumps({'layer': 'L3', 'owns': ['**']}))
         for name in ('plain', 'nested'):
-            r.write(f'packages/gateway/src/hunt/{name}.test.ts', 'export const fixture = true;\n')
-        r.write('packages/gateway/vitest.nested.config.ts', 'export const nestedTestFiles = ["src/hunt/nested.test.ts"];\n')
+            r.write(f'packages/gateway/src/hunt/{name}.test.ts', "import { test, expect } from 'vitest';\ntest('changing', () => expect(process.env.HUNT_CASE_FAIL).not.toBe('1'));\n")
+        r.write('packages/gateway/vitest.nested.config.ts', 'export const nestedTestFiles = ["src/hunt/nested.test.ts"];\nexport default {};\n')
+        r.write('.gitignore', 'test-results/\nnode_modules\n')
+        r.write('scripts/tron-node', '#!/bin/sh\nexec ' + str(ROOT / 'scripts/tron-node') + ' "$@"\n')
+        (r.path / 'scripts/tron-node').chmod(0o755)
+        (r.path / 'packages/gateway/node_modules').symlink_to(ROOT / 'packages/gateway/node_modules', target_is_directory=True)
+        r.write('packages/gateway/package.json', '{"type":"module"}\n')
         native = "import { test } from 'node:test';\ntest('native case', () => {});\n"
         r.write('mods/core/native.test.mjs', native)
         r.write('packages/gateway/scripts/native.test.mjs', native)
         module = json.loads((r.path / 'tooling.module.json').read_text())
-        module['owns'].extend(['packages/gateway/vitest.nested.config.ts', 'packages/gateway/scripts/**'])
+        module['owns'].extend(['packages/gateway/vitest.nested.config.ts', 'packages/gateway/scripts/**', 'packages/gateway/package.json', 'scripts/tron-node'])
         r.write('tooling.module.json', json.dumps(module))
         r.write('tools/verify/mini_transport.py', (r.path / 'tools/verify/mini.py').read_text())
-        r.write('tools/verify/mini.py', 'from mini_transport import no_result_reason\nif __name__ == "__main__":\n' + textwrap.indent('''import json, os, subprocess, sys
+        r.write('tools/verify/mini.py', 'from mini_transport import no_result_reason\nif __name__ == "__main__":\n' + textwrap.indent('''import json, os, signal, subprocess, sys
 from pathlib import Path
 from mini_transport import no_result_reason
 import ledger
 ROOT = Path(__file__).resolve().parents[2]
 args = sys.argv[1:]
-if os.environ.get('HUNT_BUSY'):
+kind = ('node' if '--root' in args else 'node-gateway') if args[0] == 'node' else 'python' if args[0] == 'python' else 'gateway-nested' if '--config' in args else 'gateway'
+if os.environ.get('HUNT_BUSY') or kind == os.environ.get('HUNT_BUSY_GROUP'):
     print('mini: no result: fixture lease held', file=sys.stderr)
     raise SystemExit(75)
-kind = ('node' if '--root' in args else 'node-gateway') if args[0] == 'node' else 'python' if args[0] == 'python' else 'gateway-nested' if '--config' in args else 'gateway'
 order = ROOT / 'test-results/hunt-order.jsonl'
 prior = order.read_text().splitlines() if order.exists() else []
 with order.open('a') as out:
@@ -627,22 +632,36 @@ with order.open('a') as out:
 active = ROOT / 'test-results/active'
 if active.exists():
     raise RuntimeError('overlapping jobs')
-active.touch()
+active.write_text(str(os.getpid()))
 try:
+    if os.environ.get('HUNT_HANG'):
+        release = ROOT / 'test-results/hunt-release'
+        os.mkfifo(release)
+        gate = os.open(release, os.O_RDWR)
+        def stop(*_):
+            (ROOT / 'test-results/hunt-stopping').write_text(str(os.getpid()))
+            os.read(gate, 1)
+            raise SystemExit(143)
+        signal.signal(signal.SIGTERM, stop)
+        (ROOT / 'test-results/hunt-ready').write_text(str(os.getpid()))
+        signal.pause()
+    if os.environ.get('HUNT_EMPTY'):
+        raise SystemExit(0)
     if kind == 'python':
         code = subprocess.call(['/bin/bash', '-c', args[1]], cwd=ROOT)
     elif kind.startswith('node'):
         files = args[2:] if kind == 'node' else args[1:]
         code = ledger.execute('node', [os.environ['HUNT_NODE'], '--test', '--test-reporter=' + str(ROOT / 'tools/verify/ledger-node.mjs'), *files], cwd=ROOT if kind == 'node' else ROOT / 'packages/gateway')
     else:
-        failed = bool(os.environ.get('HUNT_FAIL_FIRST') and not prior)
-        report = Path(next(word.split('=', 1)[1] for word in args if word.startswith('--outputFile.json=')))
-        file = ROOT / 'packages/gateway/src/hunt' / ('nested.test.ts' if kind == 'gateway-nested' else 'plain.test.ts')
-        report.write_text(json.dumps({'numPassedTests': int(not failed), 'numFailedTests': int(failed), 'testResults': [{'name': str(file), 'assertionResults': [{'fullName': 'changing', 'status': 'failed' if failed else 'passed', 'duration': 1}]}]}))
-        ledger.Capture(kind).vitest(report)
-        code = int(failed)
-    if os.environ.get('HUNT_ADVANCE') and not prior:
+        failed = bool(os.environ.get('HUNT_FAIL_ALWAYS') or os.environ.get('HUNT_FAIL_FIRST') and not prior)
+        code = subprocess.call([sys.executable, str(ROOT / 'tools/verify/gateway.py'), *args], cwd=ROOT / 'packages/gateway',
+                               env={**os.environ, 'HUNT_CASE_FAIL': '1' if failed else '0'})
+    if os.environ.get('HUNT_ADVANCE') and (kind == 'node-gateway' if os.environ.get('HUNT_ADVANCE_LAST') else not prior):
         subprocess.run(['git', 'push', '--quiet', 'origin', os.environ['HUNT_ADVANCE'] + ':main'], cwd=ROOT, check=True)
+    if kind == 'node-gateway' and os.environ.get('HUNT_REMOVE_ORIGIN'):
+        subprocess.run(['git', 'remote', 'remove', 'origin'], cwd=ROOT, check=True)
+    if kind == 'node-gateway' and os.environ.get('HUNT_CORRUPT_LEDGER'):
+        ledger.destination().write_bytes(b'not a database')
 finally:
     active.unlink()
 raise SystemExit(code)
@@ -681,6 +700,13 @@ raise SystemExit(code)
         self.assertEqual(len(report['flakes']), 1)
         self.assertEqual((report['flakes'][0]['passes'], report['flakes'][0]['failures']), (1, 1))
         self.assertEqual(r.git('status', '--porcelain'), '')
+        r.env['HUNT_FAIL_ALWAYS'], r.env['HUNT_BUSY_GROUP'] = '1', 'gateway-nested'
+        partial, report = self.hunt('--rounds', '2')
+        self.assertEqual(partial.returncode, 1, partial.stdout + partial.stderr)
+        self.assertEqual(report['completion'], 'no-result')
+        self.assertEqual([step['exit'] for step in report['steps']], [1, 75])
+        self.assertEqual(report['firstFailure'], report['steps'][0]['log'])
+        self.assertTrue((r.path / report['firstFailure']).is_file())
 
     def test_rejects_non_main_or_dirty_sources_and_never_queues_on_a_busy_mini(self) -> None:
         r = self.repo
@@ -693,10 +719,13 @@ raise SystemExit(code)
         rejected, _ = self.hunt('--rounds', '1')
         self.assertEqual(rejected.returncode, 2, rejected.stdout + rejected.stderr)
         self.assertFalse((r.path / 'test-results/hunt-order.jsonl').exists())
+        r.env['TRON_TEST_CONTENDED'] = '1'
         planned, report = self.hunt('--plan')
+        r.env.pop('TRON_TEST_CONTENDED')
         self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
         self.assertIsNone(report)
         self.assertFalse(json.loads(planned.stdout)['matchesMain'])
+        self.assertTrue(json.loads(planned.stdout)['contended'])
         r.git('push', '--quiet', 'origin', 'HEAD:main')
         r.env['HUNT_BUSY'] = '1'
         stopped, report = self.hunt('--rounds', '2')
@@ -720,6 +749,93 @@ raise SystemExit(code)
         self.assertEqual(report['completion'], 'budget')
         self.assertEqual(report['steps'], [])
         self.assertEqual(len((r.path / 'test-results/hunt-order.jsonl').read_text().splitlines()), 1)
+        with self.subTest(contract='undriven'):
+            r.env['HUNT_EMPTY'] = '1'
+            stopped, report = self.hunt('--rounds', '1')
+            r.env.pop('HUNT_EMPTY')
+            self.assertEqual(stopped.returncode, 75, stopped.stdout + stopped.stderr)
+            self.assertEqual((report['completion'], report['completedRounds']), ('undriven', 0))
+            self.assertEqual(len(report['steps']), 1)
+            self.assertEqual(report['steps'][0]['exit'], 0)
+        with self.subTest(contract='final source fence'):
+            last = r.git('commit-tree', r.git('rev-parse', 'HEAD^{tree}'), '-p', 'HEAD', '-m', 'advance after last lane')
+            r.env['HUNT_ADVANCE'], r.env['HUNT_ADVANCE_LAST'] = last, '1'
+            stopped, report = self.hunt('--rounds', '1')
+            r.env.pop('HUNT_ADVANCE')
+            r.env.pop('HUNT_ADVANCE_LAST')
+            r.git('checkout', '--quiet', '--detach', last)
+            self.assertEqual(stopped.returncode, 75, stopped.stdout + stopped.stderr)
+            self.assertEqual((report['completion'], report['completedRounds']), ('source-changed', 1))
+            self.assertEqual(len(report['steps']), 5)
+        with self.subTest(contract='unavailable origin is not a source change'):
+            r.env['HUNT_REMOVE_ORIGIN'] = '1'
+            stopped, report = self.hunt('--rounds', '1')
+            r.env.pop('HUNT_REMOVE_ORIGIN')
+            r.git('remote', 'add', 'origin', str(self.origin))
+            self.assertEqual(stopped.returncode, 75, stopped.stdout + stopped.stderr)
+            self.assertEqual((report['completion'], report['completedRounds']), ('no-result', 1))
+        for failed in (False, True):
+            with self.subTest(contract='ranking error retains raw verdict', failed=failed):
+                r.env['TRON_TEST_LEDGER'] = str(Path(r.env['HOME']) / f'corrupt-{failed}.sqlite3')
+                r.env['HUNT_CORRUPT_LEDGER'] = '1'
+                if failed:
+                    r.env['HUNT_FAIL_ALWAYS'] = '1'
+                stopped, report = self.hunt('--rounds', '1')
+                self.assertEqual(stopped.returncode, 1, stopped.stdout + stopped.stderr)
+                self.assertIsNotNone(report, stopped.stdout + stopped.stderr)
+                self.assertIn('rankingError', report)
+                self.assertEqual(report['exit'], 1)
+                self.assertEqual(report['completedRounds'], 1)
+                self.assertEqual(report['steps'][0]['exit'], int(failed))
+                self.assertEqual(report['completion'], 'completed' if failed else 'error')
+                self.assertEqual(bool(report['firstFailure']), failed)
+
+    def test_repeated_interrupts_join_the_owned_lane_and_save_the_final_receipt(self) -> None:
+        r = self.repo
+        r.env['HUNT_HANG'] = '1'
+        process = subprocess.Popen([str(r.path / 'scripts/tron'), 'verify', '--hunt', '--rounds', '1'], cwd=r.path,
+                                   env=r.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+        child = None
+        def await_file(name):
+            path = r.path / 'test-results' / name
+            deadline = time.monotonic() + 10
+            while not path.exists():
+                self.assertIsNone(process.poll(), 'hunt exited before ' + name)
+                self.assertLess(time.monotonic(), deadline, 'hunt never reached ' + name)
+                time.sleep(0.01)
+            return path
+        try:
+            child = int(await_file('hunt-ready').read_text())
+            process.send_signal(signal.SIGTERM)
+            await_file('hunt-stopping')
+            process.send_signal(signal.SIGINT)
+            process.send_signal(signal.SIGTERM)
+            gate = os.open(r.path / 'test-results/hunt-release', os.O_WRONLY | os.O_NONBLOCK)
+            os.write(gate, b'x')
+            os.close(gate)
+            output, errors = process.communicate(timeout=10)
+            self.assertEqual(process.returncode, 130, output + errors)
+            paths = [line[len('hunt: report: '):] for line in output.splitlines() if line.startswith('hunt: report: ')]
+            self.assertTrue(paths, output + errors)
+            report = json.loads((r.path / paths[-1]).read_text())
+            self.assertEqual((report['completion'], report['exit']), ('interrupted', 130))
+            self.assertEqual(report['steps'][0]['status'], 'interrupted')
+            self.assertFalse((r.path / 'test-results/active').exists())
+            with self.assertRaises(ProcessLookupError):
+                os.kill(child, 0)
+        finally:
+            active = r.path / 'test-results/active'
+            targets = {process.pid} if process.poll() is None else set()
+            if active.exists():
+                targets.add(int(active.read_text()))
+            for pid in targets:
+                try:
+                    os.killpg(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            process.wait()
+            process.stdout.close()
+            process.stderr.close()
 
 
 class LedgerTests(VerifyCase):
