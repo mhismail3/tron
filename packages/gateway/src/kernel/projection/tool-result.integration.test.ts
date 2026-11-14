@@ -61,11 +61,12 @@ it("K3.toolResultProjection binds Chrome's consent endpoint to a retained browse
   if (typeof address !== "object" || address === null) throw new Error("Fixture did not listen");
   const endpoint = `ws://127.0.0.1:${address.port}/devtools/browser`;
   let target = "original-browser-target";
+  let responds = true;
   const commands: string[] = [];
   server.on("connection", socket => socket.on("message", raw => {
     const command = JSON.parse(String(raw));
     commands.push(command.method);
-    if (command.method === "Target.getTargetInfo") socket.send(JSON.stringify({ id: command.id,
+    if (responds && command.method === "Target.getTargetInfo") socket.send(JSON.stringify({ id: command.id,
       ...(command.params?.targetId && command.params.targetId !== target
         ? { error: { code: -32602, message: "No such target" } }
         : { result: { targetInfo: { type: "browser", targetId: target } } }) }));
@@ -106,9 +107,27 @@ it("K3.toolResultProjection binds Chrome's consent endpoint to a retained browse
     const next = admitBrowserToolReference("agent_browser", "successor", successor.details, sessionId)!.descriptor;
     expect(next.generation).not.toBe(descriptor.generation);
     expect(next.viewId).not.toBe(descriptor.viewId);
+    target = "unrelated-browser-target";
+    views.open(sessionId, next.viewId, next.generation, "mismatched-browser-viewer");
+    await waitFor(() => {
+      try { views.describe(sessionId, next.viewId, next.generation); return false; } catch { return true; }
+    }, "capture rejects a different browser before inspecting any page");
+    expect(commands.every(method => method === "Target.getTargetInfo")).toBe(true);
     views.beginSessionLoad(sessionId);
     await waitFor(() => server.clients.size === 0, "load retirement closes the browser identity socket");
     expect(await policy.observeBrowserResult(input)).toBe(result);
+    responds = false;
+    const absent = await policy.observeBrowserResult({ ...input, loadToken: views.beginSessionLoad(sessionId) }) as { details: Record<string, unknown> };
+    expect(absent.details.browserLiveViewError).toMatch(/^browser_consent_required:/);
+    expect(admitBrowserToolReference("agent_browser", "attach", absent.details, sessionId)).toBeUndefined();
+    await waitFor(() => server.clients.size === 0, "a refused browser identity connection closes");
+    const loading = policy.observeBrowserResult({ ...input, loadToken: views.beginSessionLoad(sessionId) });
+    await waitFor(() => server.clients.size === 1, "the pending identity handshake");
+    views.beginSessionLoad(sessionId);
+    const cancelled = await loading as { details: Record<string, unknown> };
+    expect(cancelled.details.browserLiveView).toBeUndefined();
+    expect(admitBrowserToolReference("agent_browser", "attach", cancelled.details, sessionId)).toBeUndefined();
+    await waitFor(() => server.clients.size === 0, "load retirement cancels the pending browser handshake");
   } finally {
     await host?.stop();
     views.dispose();

@@ -2,6 +2,16 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { FUNCTIONS, scorecard, summarize } from "./bench.mjs";
 import { DOWNLOAD_BODY, startSite } from "./fixtures/site.mjs";
+import { agentBrowser } from "./agent-browser.mjs";
+
+test("signed-in Chrome requires explicit loopback consent and never scores endpoint existence as an attach", async () => {
+  const refused = await agentBrowser().tasks["signed-in-chrome"]();
+  assert.equal(refused.ok, false);
+  assert.match(refused.detail, /^consent_required:/u);
+  for (const chromeCdp of ["https://127.0.0.1:9222/devtools/browser", "ws://example.test:9222/devtools/browser", "ws://user:password@127.0.0.1:9222/devtools/browser", "ws://127.0.0.1:9222/devtools/browser?token=private", "ws://127.0.0.1:9222/devtools/page/target"]) {
+    await assert.rejects(agentBrowser({ chromeCdp }).tasks["signed-in-chrome"](), /exact loopback browser endpoint/u);
+  }
+});
 
 test("the fixture site serves the consent redirect across origins, the cookie session and the download", async () => {
   const site = await startSite();
