@@ -545,7 +545,7 @@ export interface RecordSubject {
 
 export const RECORD_SUBJECTS: readonly RecordSubject[] = [
   { id: "tools.mcp.server", label: "MCP server", group: "tools", container: "mcpServers", qualifier: "server",
-    write: { writers: ["ui", "home"], tap: "trust", type: mcpServerType, direction: mcpServerDirection, effect: "reload", timing: "live",
+    write: { writers: ["ui", "home"], tap: "trust", type: mcpServerType, direction: mcpServerDirection, effect: "new-chat", timing: "live",
       help: "An MCP server Tron starts on this Mac. Its command runs with this Mac's permissions.",
       confirm: "Adding or enabling a server, or changing its command or address, runs it on this Mac." } },
   { id: "accounts.models.provider", label: "Custom model provider", group: "accounts", container: "providers", qualifier: "provider", },
