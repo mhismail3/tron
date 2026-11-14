@@ -340,7 +340,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
         { value: "never", label: "Never trust", detail: "Never loads a project's extensions or hooks" },
       ]),
       layers: { global: pi("defaultProjectTrust") }, defaultValue: "ask", timing: "live", effect: "next-change",
-      direction: (_b, a) => a === "always" ? "widen" : "narrow", writers: ["ui"],
+      direction: (_b, a) => a === "always" ? "widen" : "narrow", writers: ["ui", "home"],
       label: "Default trust policy", help: "What happens with a project that has no trust decision.", order: 20, importance: "advanced",
       control: "choice", confirm: "Always trust loads every new project's extensions and hooks without asking.",
     },
