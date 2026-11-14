@@ -8,8 +8,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import WebSocket from "ws";
-import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
-import { fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import { AuthBroker } from "../../admin/auth-broker.js";
 import { TrustService } from "../../kernel/resources/trust-service.js";
@@ -30,6 +29,7 @@ import { waitFor } from "../../../test-support/wait-for.js";
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { await Promise.all(cleanups.splice(0).map((cleanup) => cleanup())); });
 
+const COLD_OPEN_WAIT_BOUND_MS = 120_000;
 const REPORT_PATH = join(process.cwd(), "test-results", "request-span.integration.json");
 const SETTINGS_REPORT_PATH = join(process.cwd(), "test-results", "settings-request-span.integration.json");
 const execFileAsync = promisify(execFile);
@@ -100,6 +100,109 @@ describe("receipt-backed prompt request span", () => {
     expect(laneWaitMs).toBeGreaterThanOrEqual(lockHeldMs - 1);
     expect(laneWaitMs).toBeLessThanOrEqual(secondElapsedMs);
   });
+});
+
+describe("session.open request span", () => {
+  it("records a failed session.open with its persisted stage breakdown through the socket", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-request-span-open-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const sessionDirectory = join(agentDir, "sessions", "workspace");
+    await Promise.all([mkdir(sessionDirectory, { recursive: true }), mkdir(cwd, { recursive: true })]);
+    const registry = await createTestRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    let gateway: GatewayServer | undefined;
+    cleanups.push(async () => {
+      await gateway?.close();
+      await registry.dispose();
+      await rm(root, { recursive: true, force: true });
+    });
+    await registry.initialize();
+    await registry.recoverCanonicalAttention();
+
+    const devices = new DeviceStore(root, "machine");
+    await devices.initialize();
+    const localToken = JSON.parse(await readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken as string;
+    const logPath = join(root, "logs", "gateway.jsonl");
+    const logger = new GatewayLogger(logPath);
+    const uploads = new UploadStore(root, 1_024);
+    const auth = new AuthBroker(await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }), () => {});
+    const service = new GatewayService({
+      display: displayOwnerOf(registry),
+      config: { tronHome: root },
+      devices,
+      sessions: registry,
+      receipts: new CommandReceiptStore(root),
+      uploads,
+      auth,
+      logger,
+      requestRestart: () => {},
+      sessionDeleted: () => {},
+      broadcast: () => {},
+    } as unknown as GatewayServiceDependencies);
+    const port = await unusedPort();
+    gateway = new GatewayServer({ display: displayOwnerOf(registry),
+      host: "127.0.0.1",
+      port,
+      maxFrameBytes: 4 * 1_048_576,
+      devices,
+      uploads,
+      sessions: registry,
+      auth,
+      service,
+      logger,
+    });
+    await gateway.listen();
+
+    const frames: SocketFrame[] = [];
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${localToken}` } });
+    socket.on("message", (raw) => frames.push(JSON.parse(raw.toString()) as SocketFrame));
+    await new Promise<void>((resolve) => socket.once("open", () => resolve()));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
+    await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame", { boundMs: COLD_OPEN_WAIT_BOUND_MS });
+
+    const failedRequestId = "missing-open";
+    socket.send(JSON.stringify({
+      type: "request",
+      id: failedRequestId,
+      method: "session.open",
+      params: { sessionId: "00000000-0000-4000-8000-000000000000" },
+    }));
+    await waitFor(() => frames.some((frame) => frame.id === failedRequestId), "the failed request's response frame", { boundMs: COLD_OPEN_WAIT_BOUND_MS });
+    expect(frames.find((frame) => frame.id === failedRequestId)?.ok).toBe(false);
+    await waitFor(() => persistedLogRecords(logPath).some(
+      (record) => record.requestID === failedRequestId && record.event === "rpc.completed",
+    ), "the persisted rpc.completed record", { boundMs: COLD_OPEN_WAIT_BOUND_MS });
+    const persisted = persistedLogRecords(logPath)
+      .find((record) => record.requestID === failedRequestId && record.event === "rpc.completed")!;
+    expect(persisted.outcome).toBe("failure");
+    expect(persisted.stages, "the persisted line must carry the breakdown").toBeDefined();
+    expect(persisted.stages as string).not.toBe("");
+    expect(persisted.unaccountedMs).toBeDefined();
+    expect(persisted.unaccountedMs as number).toBeGreaterThanOrEqual(0);
+    expect(persisted.unaccountedMs as number).toBeLessThanOrEqual(persisted.durationMs as number);
+    expect(stagesOf(persisted.stages as string).has("session.open.attempt")).toBe(true);
+
+    const report = {
+      failureRecord: {
+        stages: persisted.stages,
+        unaccountedMs: persisted.unaccountedMs,
+        durationMs: persisted.durationMs,
+        recordBytes: Buffer.byteLength(JSON.stringify(persisted), "utf8"),
+      },
+    };
+    await mkdir(dirname(REPORT_PATH), { recursive: true });
+    await writeFile(REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`);
+    console.log(`request span report ${REPORT_PATH} ${JSON.stringify(report)}`);
+  }, 300_000);
 });
 
 describe("settings.resolve request span", () => {
