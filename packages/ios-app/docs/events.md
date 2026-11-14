@@ -196,9 +196,9 @@ Signposts carry only result codes and counts. `GatewayClient` emits `gateway.rpc
 coarse path changes are bounded lifecycle incidents with loop IDs. A LAN/Tailscale race stamps
 `transport=lan|tailscale` and the losing lane's stage and reason (`lan_unreachable`,
 `lan_pin_mismatch`, `lan_denied`). Nothing records content, paths, credentials or payloads.
-`AppDiagnostics` owns the client ring and Export Diagnostics (`system.logs.export` with
-`diagnostic-export.v1`, else a local artifact); the export captures its profile/lifecycle
-destination before preparation and never dispatches to a replacement.
+`AppDiagnostics` owns the client incidents and Copy Logs (offline, no Gateway request). `AppLogUploader`
+owns the app-log upload to the Gateway device file (`client.logs.append`), one task on connect, on
+background and every 60 s; it never persists a cursor, and the Gateway's cursor is authoritative.
 
 ## Covered presentation surfaces
 

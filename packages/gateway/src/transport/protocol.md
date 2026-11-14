@@ -186,7 +186,9 @@ sequence) with `reason` `local-rotation` when a different epoch was held. The ga
 into that first envelope as `gap`; a mismatched gap is refused as `conflict` and writes
 nothing. A write from an older connection admission is refused and leaves the cursor
 unchanged. The device is derived from the authenticated peer. Four 5 MiB segments are kept
-per device.
+per device. The phone's `bootId` is an opaque epoch: the SHA-256 of its oldest retained
+app-log line. Rotation that drops that line starts a new epoch and the phone declares the
+gap; the cursor is the only progress state, and the phone keeps none. Protocol not yet deployed.
 RPC records keep
 `method`, `requestID`, `outcome`, `code`, `durationMs`; catalog stages add a
 process-local `workID`; reasons are fixed codes, never exception text or parameters.

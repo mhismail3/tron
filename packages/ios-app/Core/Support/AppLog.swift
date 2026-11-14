@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 package struct AppLogRecord: Codable, Equatable, Sendable {
@@ -179,9 +180,26 @@ package actor AppLog {
         flush()
     }
 
-    private func append(_ record: AppLogRecord) {
+    package func uploadEpochs() -> [AppLogUploadEpoch] {
+        flush()
+        return [fileURL.appendingPathExtension("1"), fileURL].compactMap { url in
+            guard let data = try? Data(contentsOf: url) else { return nil }
+            var identity: String?
+            var lines: [String] = []
+            for raw in data.split(separator: 0x0A, omittingEmptySubsequences: true) {
+                guard let record = try? JSONDecoder().decode(AppLogRecord.self, from: Data(raw)) else { continue }
+                if identity == nil { identity = SHA256.hash(data: Data(raw)).map { String(format: "%02x", $0) }.joined() }
+                guard let encoded = try? JSONEncoder().encode(admitted(record)) else { continue }
+                lines.append(String(decoding: encoded, as: UTF8.self))
+            }
+            guard let identity, !lines.isEmpty else { return nil }
+            return AppLogUploadEpoch(id: identity, lines: lines)
+        }
+    }
+
+    private func admitted(_ record: AppLogRecord) -> AppLogRecord {
         let level = ["debug", "info", "warning", "error"].contains(record.level) ? record.level : "info"
-        let admitted = AppLogRecord(
+        return AppLogRecord(
             timestamp: record.timestamp, level: level,
             event: bounded(IOSClientDiagnosticBuffer.redactedMessage(record.event)),
             source: bounded(IOSClientDiagnosticBuffer.redactedMessage(record.source)),
@@ -192,9 +210,14 @@ package actor AppLog {
             profileID: record.profileID.map { bounded(IOSClientDiagnosticBuffer.redactedMessage($0)) },
             connectionID: record.connectionID, lifecycleGeneration: record.lifecycleGeneration
         )
-        guard let data = try? JSONEncoder().encode(admitted) else { return }
+    }
+
+    private func append(_ record: AppLogRecord) {
+        let level = ["debug", "info", "warning", "error"].contains(record.level) ? record.level : "info"
+        let value = admitted(record)
+        guard let data = try? JSONEncoder().encode(value) else { return }
         let line = data + Data([0x0A])
-        appendToRing(admitted)
+        appendToRing(value)
         if level != "debug" {
             bufferedLines.append(line)
             bufferedBytes += line.count

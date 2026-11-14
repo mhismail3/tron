@@ -125,7 +125,7 @@ enum RecentModelCatalogPolicy {
 
 struct ModelCatalogAccumulator {
     private(set) var models: [ModelSummary] = []
-    private(set) var rejection: String?
+    private(set) var rejection: (page: Int, reason: String)?
     private var identities = Set<ModelRef>()
     private var pageCount = 0
     private var stringBytes = 0
@@ -135,34 +135,33 @@ struct ModelCatalogAccumulator {
               !(hasNextPage && pageCount + 1 == ModelCatalogPolicy.maximumPages),
               page.count <= ModelCatalogPolicy.requestPageSize,
               page.count <= ModelCatalogPolicy.maximumItems - models.count else {
-            throw invalidPagination(reason: "page_bounds", path: "models")
+            throw invalidPagination(reason: "page_bounds")
         }
         var pageIdentities = Set<ModelRef>()
         var pageStringBytes = 0
-        for (index, model) in page.enumerated() {
-            let path = "models[\(index)]"
+        for model in page {
             guard pageIdentities.insert(model.ref).inserted, !identities.contains(model.ref) else {
-                throw invalidPagination(reason: "duplicate_identity", path: path)
+                throw invalidPagination(reason: "duplicate_identity")
             }
             let minimum = model.virtual == true ? 0 : 1
             guard model.contextWindow >= minimum else {
-                throw invalidPagination(reason: "invalid_token_limit", path: "\(path).contextWindow")
+                throw invalidPagination(reason: "invalid_token_limit")
             }
             guard model.maxTokens >= minimum else {
-                throw invalidPagination(reason: "invalid_token_limit", path: "\(path).maxTokens")
+                throw invalidPagination(reason: "invalid_token_limit")
             }
             guard model.contextWindowLimits?.isValid != false else {
-                throw invalidPagination(reason: "invalid_context_limits", path: "\(path).contextWindowLimits")
+                throw invalidPagination(reason: "invalid_context_limits")
             }
             guard let bytes = Self.stringByteCount(model), bytes <= Int.max - pageStringBytes else {
-                throw invalidPagination(reason: "string_bytes", path: path)
+                throw invalidPagination(reason: "string_bytes")
             }
             pageStringBytes += bytes
         }
         guard ModelCatalogPolicy.admitsStringBytes(
             current: stringBytes,
             candidate: pageStringBytes
-        ) else { throw invalidPagination(reason: "string_bytes", path: "models") }
+        ) else { throw invalidPagination(reason: "string_bytes") }
         identities.formUnion(pageIdentities)
         models.append(contentsOf: page)
         pageCount += 1
@@ -179,8 +178,8 @@ struct ModelCatalogAccumulator {
         return total
     }
 
-    private mutating func invalidPagination(reason: String, path: String) -> GatewayFailure {
-        rejection = "page=\(pageCount + 1) path=\(path) reason=\(reason)"
+    private mutating func invalidPagination(reason: String) -> GatewayFailure {
+        rejection = (pageCount + 1, reason)
         return GatewayFailure(
             code: "invalid_pagination",
             message: "Tron returned an invalid or oversized model catalog.",
@@ -445,7 +444,7 @@ extension ProviderAuthCoordinator {
         } catch {
             guard admits(admission) else { return false }
             if let rejection = accumulator.rejection {
-                await AppLog.shared.recordCausal(name: "model.catalog.rejected", outcome: "failure", details: rejection)
+                await AppLog.shared.recordCausal(name: "model.catalog.rejected", outcome: "failure", details: "page=\(rejection.page) reason=\(rejection.reason)")
                 guard admits(admission) else { return false }
             }
             if reportErrors { delegate?.providerAuthCoordinatorSurface(error) }

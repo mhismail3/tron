@@ -205,7 +205,7 @@ struct ProjectSettingsSections: View {
             guard current() else { return }
             trust = ProjectTrustSummary(inspection)
             if showsWorkspace {
-                let inspectedGit = try await model.gatewayDiagnostics.inspectGit(path: cwd)
+                let inspectedGit = try await model.gitInspection.inspectGit(path: cwd)
                 guard current() else { return }
                 git = inspectedGit
             }

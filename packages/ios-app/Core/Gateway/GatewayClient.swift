@@ -60,7 +60,6 @@ package actor GatewayClient {
         let profileLabel: String?
         let connectionID: Int
         let timeout: Task<Void, Never>
-        let requestBytes: Int
         var send: Task<Void, Never>?
         var transmission: GatewayRequestTransmissionState
     }
@@ -307,25 +306,6 @@ package actor GatewayClient {
     ) {
         let duration = diagnosticMilliseconds(request.startedAt.duration(to: clock.now()))
         let code = error.map(Self.diagnosticCode)
-        if request.method == "system.logs.export", let appLog {
-            let outcomeName = outcome.rawValue
-            let requestBytes = request.requestBytes
-            let connectionID = request.connectionID
-            let requestID = request.requestID
-            let terminalLevel = outcome == .success ? "info" : "warning"
-            Task {
-                await appLog.recordCausal(
-                    name: "logs.export.terminal",
-                    outcome: outcomeName,
-                    durationMilliseconds: duration,
-                    count: requestBytes,
-                    connectionID: connectionID,
-                    requestID: requestID,
-                    level: terminalLevel,
-                    details: "bytes=rpc-json"
-                )
-            }
-        }
         if let appLog {
             Task {
                 await appLog.recordRPC(
@@ -1276,20 +1256,6 @@ package actor GatewayClient {
         if let correlation { latestRequestIDByCorrelation[correlation] = id }
         let frame = GatewayRequest(id: id, method: method, params: try JSONValue.encode(params))
         let data = try JSONEncoder.gateway.encode(frame)
-        if method == "system.logs.export", let appLog {
-            let requestBytes = data.count
-            Task {
-                await appLog.recordCausal(
-                    name: "logs.export.requested",
-                    outcome: "queued",
-                    count: requestBytes,
-                    connectionID: epochID,
-                    requestID: id,
-                    level: "info",
-                    details: "bytes=rpc-json"
-                )
-            }
-        }
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 guard var current = connection, current.id == epochID else {
@@ -1314,7 +1280,6 @@ package actor GatewayClient {
                     profileLabel: current.profileLabel,
                     connectionID: epochID,
                     timeout: timeoutTask,
-                    requestBytes: data.count,
                     send: nil,
                     transmission: .queued
                 )

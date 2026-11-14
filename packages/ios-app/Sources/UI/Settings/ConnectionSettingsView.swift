@@ -118,6 +118,26 @@ struct ConnectionsSettingsView: View {
                 }
 
                 TronSettingsGroup(
+                    "Logs",
+                    detail: "The newest records from this iPhone. Works without a Mac.",
+                    accent: .tronPrimary
+                ) {
+                    Button {
+                        Task { UIPasteboard.general.string = await model.offlineLogText() }
+                    } label: {
+                        TronValueRow(
+                            icon: "doc.on.doc",
+                            title: "Copy Logs",
+                            detail: "Latest records, redacted, to the clipboard",
+                            accent: .tronPrimary
+                        )
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Copy Logs")
+                }
+
+                TronSettingsGroup(
                     "Authorized Devices",
                     detail: "Devices authorized for each paired Mac.",
                     accent: .tronPurple

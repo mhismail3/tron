@@ -36,7 +36,7 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
 | `PresentationActivityCoordinator`, `PresentationRefreshPolicy`, `ManagedSheetPresentation`, `PresentationScopedState` | Foremost read demand, native sheet graphs, binding leases and presentation-lifetime state ([parity](../../docs/presentation-parity.md#presentation-activity)). |
 | `InAppNoticeCenter` | The one in-app notice queue. |
 | `SnapshotCache` | Disposable session-summary cache. |
-| `AppDiagnostics`, `IOSMetricKitDiagnostics`, `GatewayDiagnosticsService` | Client log ring, Logs collection and export, MetricKit summaries, Git/log reads. |
+| `AppDiagnostics`, `AppLogUploader`, `IOSMetricKitDiagnostics`, `GatewayGitInspection` | Client incidents and the offline Copy Logs text, the app-log upload to the Gateway device file, MetricKit summaries, Git reads. |
 
 ## Contract
 

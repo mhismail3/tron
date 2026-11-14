@@ -46,8 +46,6 @@ struct TronMobileApp: App {
                 HostedSnapshotCacheFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-session-configuration-fixture") {
                 HostedSessionConfigurationFixture()
-            } else if ProcessInfo.processInfo.arguments.contains("-tron-diagnostics-export-fixture") {
-                HostedDiagnosticsExportFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-project-trust-fixture") {
                 HostedProjectTrustFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-subagent-parity-fixture") {

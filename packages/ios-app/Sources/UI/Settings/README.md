@@ -20,7 +20,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 - Extensions: `ExtensionsSettingsView`, `PackageDetailSheet`, `HooksSettingsView`,
   `ProjectResourcesView`, `TrustSettingsView`.
 - This iPhone and diagnostics: `AppearanceSettingsView`, `AppLocalBehaviorSettings`,
-  `PushNotificationsSettingsView`, `NotificationInboxView`, `GatewayLogsSettingsView`.
+  `PushNotificationsSettingsView`, `NotificationInboxView`.
 
 ## Contract
 
@@ -160,8 +160,8 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   action containers inherit the sheet theme; Forget Server keeps semantic red. The selected
   server shows its Gateway-declared Mac Terminal key using the standard renderer;
   other servers require Use This Server before exposing this control-plane setting.
-- **Logs.** Gateway records are fetched only while Logs is presented, merged with the iOS client
-  ring, refreshed every 15 s while visible, and exported through Export Diagnostics.
+- **Logs.** **Copy Logs** in Connections copies the newest redacted app-log records, client incidents and
+  the chat trace from this iPhone. It makes no Gateway request, so it works offline.
 - **Reloads.** Visible reads include `foregroundReconciliationGeneration` in their task identity,
   so foreground replaces stale offline errors without retrying or replaying mutations.
 
@@ -187,7 +187,7 @@ scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronMCPServerSheetsUITests \
   --only-testing TronMobileUITests/TronProjectTrustUITests \
   --only-testing TronMobileUITests/TronSettingsChangesReviewUITests \
-  --only-testing TronMobileUITests/TronDiagnosticsExportUITests \
+  --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testCopyLogsPastesTheLocalAppLogRecords \
   --only-testing TronMobileUITests/TronSmokeUITests/testSettingsRowInspectionAndActionsStayIndependent \
   --only-testing TronMobileUITests/TronSmokeUITests/testIphoneDashboardPreferencesPersistAcrossRoutesAndRelaunch
 scripts/ios-gateway-e2e-test run-ui \

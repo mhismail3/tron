@@ -696,16 +696,16 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         XCTAssertEqual(afterRecoveryConnectionID, originalConnectionID)
 
         try await control("unshape", port: port, token: proxyToken)
-        let exported = try await client.requestValue("system.logs.export", JSONValue.object([
-            "commandId": .string(UUID().uuidString),
-            "content": .string(String(repeating: "x", count: 262_144)),
-        ]), timeout: .seconds(15))
-        XCTAssertFalse(exported.objectValue?.isEmpty ?? true)
-        let logsWire = try await controlValue("link-stats", port: port, token: proxyToken)
-        let logsFrameBytes = logsWire.objectValue?["logsExportRequestBytes"]?.intValue ?? 0
-        XCTAssertGreaterThan(logsFrameBytes, 262_144)
-        XCTAssertLessThan(logsFrameBytes, 1_048_576)
-        XCTAssertGreaterThan(logsWire.objectValue?["logsExportResponseBytes"]?.intValue ?? 0, 0)
+        let largeBatch = DeviceLogAppendProbe(
+            commandId: UUID().uuidString,
+            bootId: "e2e-large-batch-\(UUID().uuidString.prefix(8))",
+            firstSequence: 1,
+            lines: (1...16).map { index in
+                #"{"timestamp":"2026-11-14T00:00:00.000Z","level":"info","event":"e2e.large-batch","source":"app","message":"\#(index) "# + String(repeating: "x", count: 15_000) + #""}"#
+            }
+        )
+        let appended = try await client.requestValue("client.logs.append", largeBatch, timeout: .seconds(15))
+        XCTAssertEqual(appended.objectValue?["sequence"]?.intValue, 16)
         let diagnostics = await client.diagnostics()
         XCTAssertFalse(diagnostics.contains { $0.outcome == .failure && $0.stage == .liveness })
         let finalConnectionID = await client.activeConnectionID()
@@ -1526,15 +1526,51 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         return opened.session
     }
 
+    @MainActor
+    func testPhoneLogMarkerReachesGatewayDeviceFile() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let portText = environment["TRON_E2E_PORT"],
+              let port = Int(portText),
+              let code = environment["TRON_E2E_CODE"],
+              let tronHome = environment["TRON_E2E_TRON_HOME"] else {
+            throw XCTSkip("Run through scripts/ios-gateway-e2e-test to provide the real Gateway fixture.")
+        }
+        let invitation = PairingInvitation(host: "127.0.0.1", port: port, code: code, machineId: "tron-ios-e2e", label: "Tron iOS E2E")
+        let (profile, token) = try await GatewayPairer().pair(invitation, deviceName: "Log upload test")
+        let client = makeClient()
+        _ = try await connectForBoundary(client, profile: profile, token: token)
+        let connectionID = try XCTUnwrap(await client.activeConnectionID())
+        let marker = "e2e-log-marker-\(UUID().uuidString)"
+        await AppLog.shared.recordCausal(name: "e2e.log-marker", outcome: "success", details: marker)
+        let uploader = AppLogUploader(log: AppLog.shared, transport: .gateway(client: client) {
+            AppLogUploader.Connection(id: connectionID, supportsDeviceLogs: true)
+        })
+        uploader.start()
+        defer { uploader.stop() }
+        let devices = URL(fileURLWithPath: tronHome).appendingPathComponent("logs/devices", isDirectory: true)
+        let clock = ContinuousClock()
+        let deadline = clock.now + .seconds(25)
+        var found = false
+        repeat {
+            let names = (try? FileManager.default.contentsOfDirectory(atPath: devices.path)) ?? []
+            found = names.contains { name in
+                (try? String(contentsOf: devices.appendingPathComponent(name), encoding: .utf8))?.contains(marker) == true
+            }
+            if found { break }
+            try await Task.sleep(for: .milliseconds(150))
+        } while clock.now < deadline
+        XCTAssertTrue(found, "the phone log marker must reach the Gateway device file in one upload pass")
+    }
+
     private func assertCorrelationKey(client: GatewayClient) async throws {
         let diagnostics = await client.diagnostics()
         let handshake = try XCTUnwrap(diagnostics.first { $0.stage == .helloReceive && $0.outcome == .success })
         let gatewayConnectionID = try XCTUnwrap(handshake.gatewayConnectionID)
         let epoch = String(try XCTUnwrap(handshake.connectionID))
-        let logs = try await client.requestValue(
-            "system.logs", JSONValue.object(["limit": .number(1_000)]), timeout: .seconds(15)
-        )
-        let opened = try XCTUnwrap(logs.objectValue?["records"]?.arrayValue?.compactMap(\.objectValue).first {
+        let tronHome = try XCTUnwrap(ProcessInfo.processInfo.environment["TRON_E2E_TRON_HOME"])
+        let logText = try String(contentsOfFile: tronHome + "/logs/gateway.jsonl", encoding: .utf8)
+        let records = logText.split(separator: "\n").compactMap { try? JSONDecoder().decode(JSONValue.self, from: Data($0.utf8)).objectValue }
+        let opened = try XCTUnwrap(records.first {
             $0["event"] == .string("connection.opened") && $0["connectionId"] == .string(gatewayConnectionID)
         }, "the Gateway must record the connection its hello named")
         XCTAssertEqual(opened["peerClientId"], .string(client.diagnosticOwnerID))
@@ -1673,4 +1709,11 @@ private final class StallingRestoreProjection: GatewayLifecycleProjectionDelegat
     func lifecycleReconcileForeground(admission: GatewayLifecycleCoordinator.Admission) async throws {}
     func lifecycleRetireProjection(final: Bool) async {}
     func lifecycleSurface(_ error: Error) {}
+}
+
+private struct DeviceLogAppendProbe: Encodable {
+    let commandId: String
+    let bootId: String
+    let firstSequence: Int
+    let lines: [String]
 }

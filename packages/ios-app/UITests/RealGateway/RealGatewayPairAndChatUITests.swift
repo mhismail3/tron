@@ -633,6 +633,39 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     }
 
     @MainActor
+    func testCopyLogsPastesTheLocalAppLogRecords() throws {
+        continueAfterFailure = false
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        let app = launchApp()
+        defer { app.terminate() }
+        open(fixture.invitationLink())
+        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
+        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
+        createSession(app, inWorkspace: fixture.workspace)
+        let gear = app.navigationBars.buttons["Settings"]
+        XCTAssertTrue(gear.waitForExistence(timeout: 30), app.debugDescription)
+        gear.tap()
+        let link = app.buttons["settings-link-Connections"]
+        for _ in 0..<20 where !link.isHittable { app.swipeDown() }
+        link.tap()
+        let copy = app.buttons["Copy Logs"]
+        for _ in 0..<8 where !copy.isHittable { app.swipeUp() }
+        XCTAssertTrue(copy.waitForExistence(timeout: 30), app.debugDescription)
+        copy.tap()
+        if app.buttons["settings-done"].waitForExistence(timeout: 5) { app.buttons["settings-done"].tap() }
+        let composer = app.textViews["Message input"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 30), app.debugDescription)
+        composer.tap()
+        composer.press(forDuration: 1.2)
+        let paste = app.menuItems["Paste"].firstMatch
+        XCTAssertTrue(paste.waitForExistence(timeout: 10), app.debugDescription)
+        paste.tap()
+        let pasted = composer.value as? String ?? ""
+        XCTAssertTrue(pasted.contains("\"process\":\"ios\""), "Copy Logs must place the local AppLog records on the pasteboard")
+        XCTAssertFalse(pasted.contains("Bearer "), "copied logs must not carry an authorization header")
+    }
+
+    @MainActor
     func testImageOnlySteerLeavesTheQueueOnceDelivered() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
