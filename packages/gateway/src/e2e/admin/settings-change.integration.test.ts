@@ -506,6 +506,25 @@ describe("settings.change", () => {
     expect(inventory.packages).toContainEqual(expect.objectContaining({ source: pkg, scope: "user" }));
     expect(inventory.mcp.servers.map(server => server.name)).toContain("inventory-http");
     expect(JSON.stringify(inventory)).not.toMatch(/inventory-secret|inventory-query-secret/);
+    const projectCwd = join(f.root, "inventory-project");
+    await mkdir(join(projectCwd, ".pi", "extensions"), { recursive: true });
+    await writeFile(join(projectCwd, ".pi", "extensions", "project-gate.ts"), "export default function (pi) { pi.on(\"tool_call\", () => {}); }\n");
+    const projectChat = await f.registry.create(projectCwd);
+    await projectChat.setModel(model.provider, model.id);
+    const projectHooks = async (id: string): Promise<string[]> => {
+      f.faux.setResponses([
+        fauxAssistantMessage([fauxToolCall("settings", { action: "inventory" }, { id })], { stopReason: "toolUse" }),
+        fauxAssistantMessage("Done"),
+      ]);
+      await projectChat.prompt("Read the settings inventory");
+      await waitFor(() => !projectChat.isBusy && !projectChat.hasActiveAgentRun || undefined, "project inventory turn settled");
+      const result = projectChat.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === id);
+      if (result?.type !== "message" || result.message.role !== "toolResult") throw new Error("No canonical settings tool result");
+      return (result.message.details as SettingsInventory).hooks.extensions.map(extension => extension.name);
+    };
+    expect(await projectHooks("inventory-untrusted-project")).not.toContain("project-gate.ts");
+    await f.trust.set(projectCwd, true);
+    expect(await projectHooks("inventory-trusted-project")).toContain("project-gate.ts");
   });
 
   caseIt("an agent pages only its own settings history, never another chat's or the maintainer's rows", async owner => {
