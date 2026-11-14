@@ -4,7 +4,6 @@ import { createQueueSummarizer } from "../src/episodic/episodic-compactor.js";
 import { ModelQueueOwner } from "../src/providers/model-queue.js";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { SettingsStoreAdapter } from "../src/admin/settings-model.js";
-import type { PackageService } from "../src/admin/package-service.js";
 import { SettingsChangePath } from "../src/kernel/settings/settings-change.js";
 import { SettingsModel } from "../src/kernel/settings/settings-model.js";
 import { SettingsChangeRecord } from "../src/kernel/settings/settings-record.js";
