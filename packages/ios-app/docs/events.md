@@ -203,8 +203,8 @@ Every uploaded line is at most 16 KiB encoded. A larger record is replaced at th
 `log.record-truncated` line (its free fields capped), and if even that is over the bound, by a minimal fixed
 record, so one record cannot stall the upload. Free text is redacted on admission (`IOSClientDiagnosticBuffer.redactedMessage`):
 Credential fields such as `token`, `authorization`, `password`, `secret`, `api_key`, `private_key`,
-`aws_secret_access_key`, separator-delimited suffixes such as `client_secret_id`, and the bounded camel-case
-suffixes `Identifier`, `Id`, `Pem`, `Key`, `Secret` and `Value` lose their value in JSON-quoted, escaped (`\"v\"`),
+`aws_secret_access_key`, separator-delimited suffixes such as `client_secret_id`, and the bounded suffixes
+`Identifier`, `Id`, `Pem`, `Key`, `Secret` and `Value`, matched case-insensitively, lose their value in JSON-quoted, escaped (`\"v\"`),
 single-quoted or bare form. A quoted value cut by the admission byte bound is redacted through the end of
 that bounded input. Keys and neighbouring fields remain; `tokenCount` and `tokenCountId` are not credential-key
 matches. Separator-suffixed metrics such as `token_count` are conservatively redacted. Free-text redaction
