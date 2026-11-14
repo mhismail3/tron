@@ -1,5 +1,5 @@
 import { MANAGED_SUBAGENTS_SOURCE, managedProviderSettingsView, type ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -15,6 +15,7 @@ import type { JsonValue, PackageInventory, PackageUpdates } from "../protocol/ty
 import type { TrustService } from "../kernel/resources/trust-service.js";
 import { loadPackageProvides, type InstalledPackage } from "./package-provides.js";
 import { AsyncMutex } from "../util/async-mutex.js";
+import { redact, redactCredentialUrls, redactCredentials } from "../util/credential-redaction.js";
 import { type OutsideChanges } from "./settings-outside.js";
 import { changeReview, type PlannedWrite } from "../kernel/settings/settings-types.js";
 import { instanceId } from "../kernel/settings/scope-resolution.js";
@@ -41,7 +42,7 @@ type ConfiguredPackages = Parameters<SettingsManager["setPackages"]>[0];
 
 interface PackageUpdatePlan {
   kind: UpdateKind; source: string; target: string; name: string; from: string; version: string; reason: string;
-  installer: readonly string[] | null; installedPath: string | undefined; packages: ConfiguredPackages; review: ChangeReview;
+  installer: Installer | null; installedPath: string | undefined; packages: ConfiguredPackages; review: ChangeReview;
 }
 
 function configuredEntries(settings: SettingsManager): Array<{ source: string; scope: "user" | "project" }> {
@@ -50,6 +51,27 @@ function configuredEntries(settings: SettingsManager): Array<{ source: string; s
     ...(settings.getGlobalSettings().packages ?? []).map(pkg => ({ source: sourceOf(pkg), scope: "user" as const })),
     ...(settings.getProjectSettings().packages ?? []).map(pkg => ({ source: sourceOf(pkg), scope: "project" as const })),
   ];
+}
+
+interface Installer { digest: string; display: string }
+
+const SECRET_ARGUMENT = /(?:token|secret|password|passwd|credential|auth|key|cookie)/iu;
+
+function installerOf(argv: readonly string[] | undefined): Installer | null {
+  if (!argv || argv.length === 0) return null;
+  return { digest: createHash("sha256").update(JSON.stringify(argv)).digest("hex"), display: displayInstaller(argv) };
+}
+
+function displayInstaller(argv: readonly string[]): string {
+  let maskNext = false;
+  return argv.map(argument => {
+    if (maskNext) { maskNext = false; return "[REDACTED]"; }
+    if (!SECRET_ARGUMENT.test(argument)) return redactCredentialUrls(redactCredentials(redact(argument)));
+    const equals = argument.indexOf("=");
+    if (equals >= 0) return `${argument.slice(0, equals)}=[REDACTED]`;
+    maskNext = true;
+    return argument;
+  }).join(" ");
 }
 
 function hostNpmPlanningView(settings: SettingsManager): SettingsManager {
@@ -279,7 +301,7 @@ export class PackageService {
     }
     const installedPath = new DefaultPackageManager({ cwd: project.cwd, projectDir: project.projectDir, agentDir: this.agentDir, settingsManager: hostNpmPlanningView(settings) })
       .getInstalledPath(request.source, "user");
-    const installer = settings.getGlobalSettings().npmCommand ?? null;
+    const installer = installerOf(settings.getSettings().npmCommand);
     const packagesAfter = (target: string): ConfiguredPackages => (settings.getGlobalSettings().packages ?? []).map(entry => {
       if (typeof entry === "string") return entry === request.source ? target : entry;
       return entry.source === request.source ? { ...entry, source: target } : entry;
@@ -318,8 +340,8 @@ export class PackageService {
   }
 
   private planned(input: Omit<PackageUpdatePlan, "review">): PackageUpdatePlan {
-    const identity = { operation: PACKAGE_UPDATE_ACTION, kind: input.kind, source: input.source, target: input.target, name: input.name, from: input.from, version: input.version, installer: input.installer };
-    const items = [{ label: `Package ${input.name}`, before: input.from, after: input.version, detail: `${input.source}\nUser package (global)`, exact: JSON.stringify(identity) }];
+    const identity = { operation: PACKAGE_UPDATE_ACTION, kind: input.kind, source: input.source, target: input.target, name: input.name, from: input.from, version: input.version, installer: input.installer?.digest ?? null };
+    const items = [{ label: `Package ${input.name}`, before: input.from, after: input.version, detail: `${input.source}\nUser package (global)${input.installer ? `\nInstaller: ${input.installer.display}` : ""}`, exact: JSON.stringify(identity) }];
     if (input.target !== input.source) {
       items.push({ label: "Configured source", before: input.source, after: input.target, detail: "sources.packages (global) pin", exact: JSON.stringify({ source: input.source, target: input.target }) });
     }
