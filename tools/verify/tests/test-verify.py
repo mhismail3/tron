@@ -1119,6 +1119,21 @@ class IosLaneTests(VerifyCase):
         r.git("branch", "-f", "base")
         return calls
 
+    def test_mini_refuses_host_bound_groups_and_golden_recording_before_any_runner(self) -> None:
+        r = self.repo
+        calls = self.ios_fixture()
+        r.write("tools/proof/tests/test-core.py", PASSING)
+        r.write("tools/verify/mini.py", "from pathlib import Path\nif __name__ == '__main__':\n    Path('test-results').mkdir(exist_ok=True)\n    Path('test-results/remote-called').touch()\n")
+        r.commit("host-bound and recording handoff boundaries")
+        for args, message in ((("--all",), "host-bound"),
+                              (("--update-locks", "ios-app/ui-tests"), "golden recording")):
+            with self.subTest(mode=args):
+                result = r.verify(*args, "--ios-host", "mini", "--gateway-host", "mini")
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn(message, result.stderr)
+                self.assertFalse(calls.exists(), "no local iOS runner starts on refusal")
+                self.assertFalse((r.path / "test-results/remote-called").exists(), "no remote runner starts on refusal")
+
     def test_mini_ios_handoff_moves_the_whole_verification_without_nested_lease_or_local_build(self) -> None:
         r = self.repo
         calls = self.ios_fixture()
