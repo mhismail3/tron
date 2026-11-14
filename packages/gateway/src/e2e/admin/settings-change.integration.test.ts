@@ -541,6 +541,18 @@ describe("settings.change", () => {
     for (const foreign of [otherSessionId, otherGlobalId, maintainerId]) expect(ids).not.toContain(foreign);
     expect(everything.every(entry => entry.actor.sessionId === slot.id || entry.target.kind === "session" && entry.target.sessionId === slot.id)).toBe(true);
     expect(JSON.stringify(everything)).not.toContain("Another chat");
+    const agentActor = { kind: "agent" as const, id: "history-agent", sessionId: slot.id };
+    const retiredSecret = { changeId: "retired-private-entry", at: new Date().toISOString(), actor: agentActor, target: { kind: "session" as const, sessionId: slot.id },
+      layer: "session" as const, key: "retired.apiToken", op: "set" as const, before: "sk-retired-old-secret", after: "sk-retired-new-secret", status: "applied" as const };
+    const flaggedSecret = { changeId: "flagged-private-entry", at: new Date().toISOString(), actor: agentActor, target: { kind: "session" as const, sessionId: slot.id },
+      layer: "session" as const, key: "run.retry.maxRetries", op: "set" as const, before: "sk-flagged-old-secret", after: "sk-flagged-new-secret", status: "applied" as const, redacted: true as const };
+    await f.record.append([retiredSecret, flaggedSecret]);
+    const privateView = JSON.stringify(entriesOf(await turn(slot, { action: "history", limit: 200 })));
+    expect(privateView).not.toContain("sk-retired");
+    expect(privateView).not.toContain("sk-flagged");
+    expect(privateView).toContain("retired-private-entry");
+    expect(JSON.stringify(await f.history({ key: "retired.apiToken" }))).not.toContain("sk-retired");
+    expect(JSON.stringify(await f.history({ key: "run.retry.maxRetries" }))).not.toContain("sk-flagged");
     const otherView = entriesOf(await turn(other, { action: "history", limit: 200 })).map(entry => entry.changeId);
     expect(otherView).toEqual([otherGlobalId, otherSessionId]);
   });
@@ -673,9 +685,8 @@ describe("settings.change", () => {
 
     await expect(f.change({ kind: "global" }, [{ key: "setup.sessionDir", layer: "global", op: "set", value: "/elsewhere" }])).rejects.toMatchObject({ code: "invalid_request" });
     await f.record.append([{ ...entry!, changeId: "retired-key-entry", key: "retired.setting", actor: { kind: "outside", id: "fixture" }, before: "old", after: "new" }]);
-    expect((await f.history({ key: "retired.setting" }))[0]).toMatchObject({
-      presentation: { label: "retired.setting", actor: "Outside Tron", display: { before: '"old"', after: '"new"' } },
-    });
+    expect((await f.history({ key: "retired.setting" }))[0]).toMatchObject({ changed: true, redacted: true, presentation: { label: "retired.setting", actor: "Outside Tron", display: { before: "Hidden", after: "Changed" } } });
+    expect(JSON.stringify(await f.history({ key: "retired.setting" }))).not.toContain("\"old\"");
     expect((await f.record.entry(entry!.changeId))?.entry).not.toHaveProperty("presentation");
     transcript.push({ case: "record, undo and redaction", detail: await f.history() });
   });
