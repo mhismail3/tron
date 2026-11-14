@@ -1,4 +1,5 @@
 import { once } from "node:events";
+import { persistedLogRecords } from "../../test-support/persisted-logs.js";
 import { createServer, request, type Server } from "node:http";
 import { createConnection, type Socket } from "node:net";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -55,7 +56,7 @@ async function fixture(maximumHttpRequests = 128) {
     finally { await rm(root, { recursive: true, force: true }); }
   });
   await gateway.listen();
-  return { root, gateway, devices, port, serverSockets, clientSockets, acquireBlob, logger: { log }, persistedLogger: logger };
+  return { root, gateway, devices, port, serverSockets, clientSockets, acquireBlob, logger: { log } };
 }
 async function health(port: number): Promise<number> {
   return awaitsWithin(new Promise((resolve, reject) => {
@@ -113,7 +114,7 @@ describe("HTTP pending-work ownership", () => {
     peer.end();
     peer.resume();
     await awaitsWithin(closed, "unused peer closed");
-    const records = new GatewayLogger(join(f.root, "gateway.jsonl")).recent().filter(r => r.event === "http.connection-unused");
+    const records = persistedLogRecords(join(f.root, "gateway.jsonl")).filter(r => r.event === "http.connection-unused");
     expect(records).toHaveLength(1);
     expect(records[0]).toMatchObject({ level: "warning", transport: "primary", reason: kind === "silent" ? "silent" : "partial_http", transportEnd: "fin" });
     expect(records[0]!.acceptToCloseMs).toBeGreaterThanOrEqual(0);
@@ -147,7 +148,7 @@ describe("HTTP pending-work ownership", () => {
     const record = await loggedRecord(f, "connection.closed");
     expect(record.message).toContain("1006");
     expect(record.fields).toMatchObject({ transportEnd: "reset" });
-    expect(f.persistedLogger.recent().find(r => r.event === "connection.closed")).toMatchObject({ transportEnd: "reset" });
+    expect(persistedLogRecords(join(f.root, "gateway.jsonl")).find(r => r.event === "connection.closed")).toMatchObject({ transportEnd: "reset" });
     expect(f.logger.log.mock.calls.filter(call => call[2]?.event === "http.connection-unused")).toHaveLength(0);
   });
 

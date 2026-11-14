@@ -35,7 +35,7 @@ the iPhone app). Never widen the advertised minimum or allow a mixed pair to byp
 that handoff. Same-major updates use the owned Gateway update flow.
 
 **Logging.** `GatewayLogger` is the one writer. The phone's own records reach the Mac
-through `client.logs.append` into `device-logs.ts`, the one owner of the per-device files. Persisted records are the file stream; debug lives only in a bounded memory buffer. Records carry `timestamp`, `level`, `event`, `source`, a
+through `client.logs.append` into `device-logs.ts`, the one owner of the per-device files. Records are the file stream; debug is dropped. Records carry `timestamp`, `level`, `event`, `source`, a
 redacted `message` and the writer-stamped `process`, `runtimeEpoch`, `payloadVersion`;
 call sites add correlation as fields (`sessionId`, `connectionId`, `commandId`,
 `requestID`, `method`, `outcome`, `code`, `reason`, `durationMs`, `step`) and pass a

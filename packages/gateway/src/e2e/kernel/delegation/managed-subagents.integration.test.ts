@@ -1,4 +1,5 @@
 import { APPROVAL_RULE } from "../../../workspace/tron-core-extension.js";
+import { persistedLogRecords } from "../../../../test-support/persisted-logs.js";
 import { createTestRegistry } from "../../../../test-support/gateway-registry.js";
 import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
@@ -98,7 +99,8 @@ it.each([
     await writeFile(join(cwd, "AGENTS.md"), "PROJECT_CHILD_RULES_MARKER");
     await mkdir(join(agentDir, "skills", "ordinary-local"), { recursive: true });
     await writeFile(join(agentDir, "skills", "ordinary-local", "SKILL.md"), "---\nname: ordinary-local\ndescription: Local resource control\n---\nLocal");
-    const logger = new GatewayLogger();
+    const logPath = join(tronHome, "gateway.jsonl");
+    const logger = new GatewayLogger(logPath);
     const managedSubagents = ManagedSubagents.activateForStartup(tronHome, logger);
     const installedRoot = managedSubagents.verify();
     const receiptPath = join(installedRoot, "tron-install-receipt.json");
@@ -175,11 +177,11 @@ it.each([
     if (conflict) {
       expect(resources.subagentDiagnostics).toContain("fallbackModels");
       expect(resources.subagentDiagnostics).toContain("invalid-worker");
-      expect(logger.recent(100).filter(row => row.event === "pi-subagents.agent-definition-invalid")).toMatchObject([
+      expect(persistedLogRecords(logPath, 100).filter(row => row.event === "pi-subagents.agent-definition-invalid")).toMatchObject([
         { counts: { definitions: 1 } },
       ]);
       await slot.resources();
-      expect(logger.recent(100).filter(row => row.event === "pi-subagents.agent-definition-invalid")).toHaveLength(1);
+      expect(persistedLogRecords(logPath, 100).filter(row => row.event === "pi-subagents.agent-definition-invalid")).toHaveLength(1);
     } else expect(resources.subagentDiagnostics).toBeUndefined();
     const assertManagedResources = (value: typeof resources) => {
       for (const name of ["pi-subagents", "council-mode"]) {
@@ -233,14 +235,14 @@ it.each([
       expect(provided.skills).toEqual(["council-mode", "pi-subagents"]);
       expect(provided.prompts).toEqual(resources.prompts.prompts.filter(prompt => prompt.path.startsWith(`${installedRoot}/prompts/`)).map(prompt => prompt.name).sort());
       expect(provided.prompts.length).toBeGreaterThan(0);
-      expect(logger.recent(100).filter(row => row.event === "pi-subagents.user-package-ignored")).toHaveLength(4);
+      expect(persistedLogRecords(logPath, 100).filter(row => row.event === "pi-subagents.user-package-ignored")).toHaveLength(4);
       expect(await stat(loadedMarker).then(() => true, () => false)).toBe(false);
       for (const [path, bytes] of untouched) expect(await readFile(path, "utf8")).toBe(bytes);
-      expect(logger.recent(100).filter(row => row.event === "pi-subagents.agent-definition-invalid")).toHaveLength(4);
+      expect(persistedLogRecords(logPath, 100).filter(row => row.event === "pi-subagents.agent-definition-invalid")).toHaveLength(4);
       await writeFile(invalidDefinition, "---\nname: invalid-worker\ndescription: Repaired definition\n---\nRead only.\n");
       await slot.reload(true, true, true);
       expect((await slot.resources() as Record<string, unknown>).subagentDiagnostics).toBeUndefined();
-      expect(logger.recent(100).filter(row => row.event === "pi-subagents.agent-definition-invalid")).toHaveLength(4);
+      expect(persistedLogRecords(logPath, 100).filter(row => row.event === "pi-subagents.agent-definition-invalid")).toHaveLength(4);
       facts.invalidDefinition = { field: "fallbackModels", reportCount: 4, readsDoNotReport: true, clearedAfterRepair: true };
       facts.ignoredPackage = { scopes: 2, diagnosticCount: 4, userCodeLoaded: false, filesUnchanged: true };
     }

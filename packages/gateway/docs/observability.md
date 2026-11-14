@@ -12,15 +12,14 @@ is collected for an incident.
 
 ## Level policy
 
-The level answers "who needs to look, and when". Only debug stays out of files:
-it lives in a bounded in-memory buffer that exports include.
+The level answers "who needs to look, and when". Debug is not retained on any stream.
 
 | Level | Meaning | Persisted | Examples |
 | --- | --- | --- | --- |
 | error | Something failed that a user sees, work was lost, or an invariant broke. Someone should look | Yes | `gateway.fatal-startup`, `gateway.shutdown-failed`, `gateway.stop-drain.failed`, `process.uncaught-exception`, `connection.write-error`, `launcher.candidate-rolled-back` |
 | warning | Degraded or abnormal but handled: retries, fallbacks, bounds hit, slow operations over a named threshold, notable rejections | Yes | `gateway.event-loop-delay`, `connection.superseded`, `gateway.restart-drain.stalled`, `extension.artifact-rejected` |
 | info | Lifecycle and state transitions, one line per boundary; enough to reconstruct a timeline | Yes | `gateway.started`, `connection.opened` for a paired device, `session.compaction.completed`, `deploy.ready`, drain progress |
-| debug | Per-request detail useful only while diagnosing | No, memory buffer only | fast successful `rpc.completed` with its stage breakdown, connection open and close for the Mac app's local probes |
+| debug | Per-request detail useful only while diagnosing | No; not retained | fast successful `rpc.completed` with its stage breakdown, connection open and close for the Mac app's local probes |
 
 - The level is fixed per event in code and listed in its Signals row; there
   are no runtime log-level settings. A level varies only with a named threshold
@@ -31,8 +30,7 @@ it lives in a bounded in-memory buffer that exports include.
   reason, next to the emitting code. A slow success is warning only past it.
 - A caller's mistake (invalid request, unauthorized) is warning. An expected
   transient state (warming up, busy) is info or warning, never error.
-- Debug never reaches disk on any Tron-owned stream. It exists so a diagnostic export can
-  carry the detail of the minutes before a failure.
+- Debug is never written on any Tron-owned stream; `GatewayLogger.log` drops it.
 
 ## Streams
 
@@ -46,7 +44,7 @@ stderr, because the launcher has already redirected stderr to
 
 | Stream | Writer | Rotation owner | Caps |
 | --- | --- | --- | --- |
-| `gateway.jsonl` | Gateway logger, `packages/gateway/src/transport/logger.ts` | Gateway logger | Eight 5 MB numbered segments (`gateway.jsonl`, `.1` … `.7`), 40 MB total; size tracked in memory; debug kept in a 4,000-record / 2 MB memory buffer; the Mac menu-bar log view reads its newest records from these files |
+| `gateway.jsonl` | Gateway logger, `packages/gateway/src/transport/logger.ts` | Gateway logger | Eight 5 MB numbered segments (`gateway.jsonl`, `.1` … `.7`), 40 MB total; size tracked in memory; the Mac menu-bar log view reads its newest records from these files |
 | `requests.jsonl` | Gateway request record, `packages/gateway/src/kernel/run/request-record.ts`, through `transport/rotating-jsonl.ts` | Gateway | Sixteen 5 MB numbered segments, 80 MB total; sizes, keyed hashes and provider usage only ([run signals](../src/kernel/run/README.md#signals)) |
 | `deploy.jsonl` | Deploy helper, `scripts/gateway-payload-deploy.mjs`; the C launcher appends its own `launcher.*` records | Deploy helper, once at operation start (`DEPLOY_LOG_MAX_BYTES`) | 1 MB plus one `deploy.jsonl.1`; each launcher record is one `O_APPEND` write of at most 4 KB |
 | `gateway-stderr.log` | C launcher, `packages/mac-app/scripts/tron-gateway-launcher.c`, redirects supervised stderr before executing Node | Mac app startup maintenance, `packages/mac-app/Sources/App/Lifecycle/MacAppStartupMaintenance.swift` | Emptied above 1 MiB (`gatewayStderrMaxBytes`). It holds launcher messages and Node aborts only, not the Gateway record stream |

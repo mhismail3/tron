@@ -1,4 +1,3 @@
-import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { RotatingJsonl } from "./rotating-jsonl.js";
 import { redact, redactCredentialField } from "../util/credential-redaction.js";
@@ -162,9 +161,6 @@ interface LoggerIdentity {
   payloadVersion?: string | undefined;
 }
 
-const PERSISTED_TAIL_RECORDS = 1_000;
-const DEBUG_BUFFER_MAX_RECORDS = 4_000;
-const DEBUG_BUFFER_MAX_BYTES = 2 * 1_024 * 1_024;
 const MAX_MESSAGE_BYTES = 2_000;
 const MAX_STAGES_BYTES = 1_024;
 const MAX_ERROR_MESSAGE_BYTES = 1_000;
@@ -173,7 +169,6 @@ const MAX_STACK_BYTES = 4_000;
 const MAX_FIELD_CHARS = 160;
 const MAX_COUNT_FIELDS = 16;
 const MAX_COUNT_NAME_CHARS = 32;
-const PERSISTED_LEVELS: ReadonlySet<LogLevel> = new Set(["info", "warning", "error"]);
 
 function boundedBytes(value: string, maximum: number): string {
   const bytes = Buffer.from(value, "utf8");
@@ -355,9 +350,6 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
 }
 
 export class GatewayLogger {
-  private readonly records: LogRecord[] = [];
-  private readonly debugRecords: Array<{ record: LogRecord; bytes: number }> = [];
-  private debugBytes = 0;
   private readonly file: RotatingJsonl | undefined;
   private readonly identity: Pick<LogRecord, "runtimeEpoch" | "payloadVersion">;
 
@@ -367,10 +359,10 @@ export class GatewayLogger {
       ...(identity.runtimeEpoch ? { runtimeEpoch: boundedDiagnosticID(identity.runtimeEpoch) } : {}),
       ...(identity.payloadVersion ? { payloadVersion: boundedDiagnosticID(identity.payloadVersion) } : {}),
     };
-    this.loadPersisted();
   }
 
   log(level: LogLevel, message: string, metadata: LogMetadata = {}): void {
+    if (level === "debug") return;
     const record: LogRecord = {
       timestamp: new Date().toISOString(),
       level,
@@ -379,74 +371,10 @@ export class GatewayLogger {
       ...this.identity,
       ...normalizedFields(metadata, false),
     };
-    if (level === "debug") {
-      this.retainDebug(record);
-      return;
-    }
-    this.records.push(record);
-    if (this.records.length > PERSISTED_TAIL_RECORDS) this.records.splice(0, this.records.length - PERSISTED_TAIL_RECORDS);
     this.file?.append(record);
     if (process.env.TRON_GATEWAY_SUPERVISED === "1") return;
     const output = `[${record.timestamp}] ${level.toUpperCase()}${record.event ? ` ${record.event}` : ""} ${record.message}\n`;
     if (level === "error") process.stderr.write(output);
     else process.stdout.write(output);
-  }
-
-  recent(limit = 200): LogRecord[] {
-    return this.records.slice(-Math.max(1, Math.min(limit, PERSISTED_TAIL_RECORDS)));
-  }
-
-  debugTail(): LogRecord[] {
-    return this.debugRecords.map((entry) => entry.record);
-  }
-
-  private retainDebug(record: LogRecord): void {
-    const bytes = Buffer.byteLength(JSON.stringify(record));
-    this.debugRecords.push({ record, bytes });
-    this.debugBytes += bytes;
-    while (this.debugRecords.length > DEBUG_BUFFER_MAX_RECORDS || this.debugBytes > DEBUG_BUFFER_MAX_BYTES) {
-      const evicted = this.debugRecords.shift();
-      if (!evicted) break;
-      this.debugBytes -= evicted.bytes;
-    }
-  }
-
-  private loadPersisted(): void {
-    const file = this.file;
-    if (!file) return;
-    try {
-      const newestFirst: LogRecord[] = [];
-      for (let index = 0; index < file.segments && newestFirst.length < PERSISTED_TAIL_RECORDS; index += 1) {
-        const candidate = file.segmentPath(index);
-        if (!existsSync(candidate)) continue;
-        const lines = readFileSync(candidate, "utf8").split("\n").filter(Boolean);
-        for (let line = lines.length - 1; line >= 0 && newestFirst.length < PERSISTED_TAIL_RECORDS; line -= 1) {
-          const record = this.parsePersisted(lines[line]!);
-          if (record) newestFirst.push(record);
-        }
-      }
-      this.records.push(...newestFirst.reverse());
-    } catch {
-    }
-  }
-
-  private parsePersisted(line: string): LogRecord | undefined {
-    try {
-      const value = JSON.parse(line) as Partial<LogRecord>;
-      if (typeof value.timestamp !== "string" || !PERSISTED_LEVELS.has(value.level as LogLevel) || typeof value.message !== "string") {
-        return undefined;
-      }
-      return {
-        timestamp: value.timestamp,
-        level: value.level as LogLevel,
-        message: boundedMessage(value.message),
-        ...(value.process === "gateway" ? { process: "gateway" as const } : {}),
-        ...(typeof value.runtimeEpoch === "string" ? { runtimeEpoch: boundedDiagnosticID(value.runtimeEpoch) } : {}),
-        ...(typeof value.payloadVersion === "string" ? { payloadVersion: boundedDiagnosticID(value.payloadVersion) } : {}),
-        ...normalizedFields(value as LogMetadata, true),
-      };
-    } catch {
-      return undefined;
-    }
   }
 }

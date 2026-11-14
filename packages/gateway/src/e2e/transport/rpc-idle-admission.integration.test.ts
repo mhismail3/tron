@@ -96,8 +96,6 @@ async function fixture(options: {
 
   const diagnosticLogger = {
     log: (level: string, message: string, metadata: Record<string, unknown> = {}) => logRecords.push({ level, message, metadata }),
-    recent: () => [],
-    debugTail: () => [],
   };
   let server: GatewayServer | undefined;
   const trust = new TrustService(agentDir);

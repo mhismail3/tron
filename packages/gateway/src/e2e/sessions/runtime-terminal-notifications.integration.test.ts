@@ -1,4 +1,5 @@
 import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import { persistedLogRecords } from "../../../test-support/persisted-logs.js";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { once } from "node:events";
@@ -421,7 +422,8 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     cleanup.push(() => rm(root, { recursive: true, force: true }));
     const store = new NotificationGrantStore(root);
     await store.initialize();
-    const logger = new GatewayLogger();
+    const logPath = join(root, "gateway.jsonl");
+    const logger = new GatewayLogger(logPath);
     const received: Array<{ envelope: Record<string, unknown>; requestId: string; signatureValid: boolean }> = [];
     let routineCount = 1_000;
     const relayServer = createServer(async (request, response) => {
@@ -582,7 +584,7 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
         && (await store.snapshot()).pending.length === 0, "the ask after routine cap");
       expect((await store.snapshot()).pending).toEqual([]);
       expect(signals).toContainEqual({ kind: "agent_finished", outcome: "rate_limited", relayReason: "daily_limit" });
-      expect(logger.recent(100).some((row) => row.event === "notification.push.rate-limited" && row.reason === "daily_limit")).toBe(true);
+      expect(persistedLogRecords(logPath, 100).some((row) => row.event === "notification.push.rate-limited" && row.reason === "daily_limit")).toBe(true);
       expect((await notifications.inbox()).notifications).toContainEqual(expect.objectContaining({ kind: "agent_finished", title: "Routine", outcome: "failed" }));
       expect(received.filter(({ envelope }) => envelope.title === "Routine")).toHaveLength(1);
       expect(received.map(({ envelope }) => envelope.notificationKind)).toEqual(["ask", "waiting", "agent_finished", "agent_finished", "ask"]);
@@ -605,7 +607,7 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
         deliveredKinds: received.map(({ envelope }) => envelope.notificationKind),
         inbox: inbox.map(({ kind, title, message, outcome }) => ({ kind, title, message, outcome })),
         capSignal: signals.find(({ kind, relayReason }) => kind === "agent_finished" && relayReason === "daily_limit"),
-        capLog: logger.recent(100).find((row) => row.event === "notification.push.rate-limited" && row.kind === "agent_finished" && row.reason === "daily_limit"),
+        capLog: persistedLogRecords(logPath, 100).find((row) => row.event === "notification.push.rate-limited" && row.kind === "agent_finished" && row.reason === "daily_limit"),
       }, null, 2)}\n`);
     } finally {
       releaseChild.release();

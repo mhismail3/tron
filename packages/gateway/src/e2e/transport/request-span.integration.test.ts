@@ -1,9 +1,9 @@
 import { TEST_SETTINGS_SCHEMA } from "../../../test-support/settings-schema.js";
+import { persistedLogRecords } from "../../../test-support/persisted-logs.js";
 import { displayOwnerOf, createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -22,7 +22,7 @@ import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import { PROTOCOL_VERSION } from "../../version.js";
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { GatewayService, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
-import { GatewayLogger, type LogRecord } from "../../transport/logger.js";
+import { GatewayLogger } from "../../transport/logger.js";
 import { GatewayServer } from "../../transport/server.js";
 import { RequestSpan, runInRequestSpan } from "../../util/request-span.js";
 import { waitFor } from "../../../test-support/wait-for.js";
@@ -30,8 +30,6 @@ import { waitFor } from "../../../test-support/wait-for.js";
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { await Promise.all(cleanups.splice(0).map((cleanup) => cleanup())); });
 
-const COLD_OPEN_MESSAGE_COUNT = 128;
-const COLD_OPEN_MESSAGE_TEXT_BYTES = 16 * 1_024;
 const REPORT_PATH = join(process.cwd(), "test-results", "request-span.integration.json");
 const SETTINGS_REPORT_PATH = join(process.cwd(), "test-results", "settings-request-span.integration.json");
 const execFileAsync = promisify(execFile);
@@ -61,20 +59,6 @@ function stagesOf(stages: string): Map<string, number> {
     parsed.set(name!, duration === null ? 0 : Number(duration[1]));
   }
   return parsed;
-}
-
-function isSessionOpenCompletion(record: LogRecord): boolean {
-  return record.event === "rpc.completed" && record.method === "session.open";
-}
-
-function completedOpens(logger: GatewayLogger): LogRecord[] {
-  return [...logger.debugTail(), ...logger.recent()].filter(isSessionOpenCompletion);
-}
-
-function persistedRecords(path: string): Array<Record<string, unknown>> {
-  if (!existsSync(path)) return [];
-  return readFileSync(path, "utf8").split("\n").filter(Boolean)
-    .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
 describe("receipt-backed prompt request span", () => {
@@ -116,160 +100,6 @@ describe("receipt-backed prompt request span", () => {
     expect(laneWaitMs).toBeGreaterThanOrEqual(lockHeldMs - 1);
     expect(laneWaitMs).toBeLessThanOrEqual(secondElapsedMs);
   });
-});
-
-const COLD_OPEN_WAIT_BOUND_MS = 120_000;
-
-describe("cold session.open request span", () => {
-  it("names a cold open's stages in the real logger's record and reports their volume", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-request-span-open-"));
-    const agentDir = join(root, "agent");
-    const cwd = join(root, "workspace");
-    const sessionDirectory = join(agentDir, "sessions", "workspace");
-    await Promise.all([mkdir(sessionDirectory, { recursive: true }), mkdir(cwd, { recursive: true })]);
-    const text = "x".repeat(COLD_OPEN_MESSAGE_TEXT_BYTES);
-    const manager = SessionManager.create(cwd, sessionDirectory);
-    for (let message = 0; message < COLD_OPEN_MESSAGE_COUNT; message += 1) {
-      manager.appendMessage(fauxAssistantMessage(`${text}-${message}`));
-    }
-    const fileBytes = (await readFile(manager.getSessionFile()!)).byteLength;
-
-    const registry = await createTestRegistry({
-      agentDir,
-      tronHome: join(root, "tron"),
-      idleRuntimeMs: 60_000,
-      modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
-      trust: new TrustService(agentDir),
-      broadcast: () => {},
-      sessionSummaryChanged: () => {},
-      sessionListChanged: () => {},
-    });
-    let gateway: GatewayServer | undefined;
-    cleanups.push(async () => {
-      await gateway?.close();
-      await registry.dispose();
-      await rm(root, { recursive: true, force: true });
-    });
-    await registry.initialize();
-    await registry.recoverCanonicalAttention();
-
-    const devices = new DeviceStore(root, "machine");
-    await devices.initialize();
-    const localToken = JSON.parse(await readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken as string;
-    const logPath = join(root, "logs", "gateway.jsonl");
-    const logger = new GatewayLogger(logPath);
-    const uploads = new UploadStore(root, 1_024);
-    const auth = new AuthBroker(await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }), () => {});
-    const service = new GatewayService({
-      display: displayOwnerOf(registry),
-      config: { tronHome: root },
-      devices,
-      sessions: registry,
-      receipts: new CommandReceiptStore(root),
-      uploads,
-      auth,
-      logger,
-      requestRestart: () => {},
-      sessionDeleted: () => {},
-      broadcast: () => {},
-    } as unknown as GatewayServiceDependencies);
-    const port = await unusedPort();
-    gateway = new GatewayServer({ display: displayOwnerOf(registry),
-      host: "127.0.0.1",
-      port,
-      maxFrameBytes: 4 * 1_048_576,
-      devices,
-      uploads,
-      sessions: registry,
-      auth,
-      service,
-      logger,
-    });
-    await gateway.listen();
-
-    const frames: SocketFrame[] = [];
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${localToken}` } });
-    socket.on("message", (raw) => frames.push(JSON.parse(raw.toString()) as SocketFrame));
-    await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
-    await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame", { boundMs: COLD_OPEN_WAIT_BOUND_MS });
-
-    const reports: Array<Record<string, unknown>> = [];
-    const requestId = "cold-open";
-    const completionOf = (): LogRecord | undefined =>
-      completedOpens(logger).find((record) => record.requestID === requestId);
-    socket.send(JSON.stringify({
-      type: "request",
-      id: requestId,
-      method: "session.open",
-      params: { sessionId: manager.getSessionId() },
-    }));
-    await waitFor(() => frames.some((frame) => frame.id === requestId), "the request's response frame", { boundMs: COLD_OPEN_WAIT_BOUND_MS });
-    const response = frames.find((frame) => frame.id === requestId);
-    expect(response?.ok, JSON.stringify(response)).toBe(true);
-    await waitFor(() => completionOf() !== undefined, "the completion", { boundMs: COLD_OPEN_WAIT_BOUND_MS });
-
-    const completion = completionOf()!;
-    const stages = completion.stages;
-    const unaccountedMs = completion.unaccountedMs;
-    const durationMs = completion.durationMs!;
-    expect(stages, "the real logger must keep the span breakdown").toBeDefined();
-    expect(unaccountedMs).toBeDefined();
-    expect(completion.level).toBe(durationMs >= 1_000 ? "warning" : "debug");
-    expect(completion.requestID).toBe(requestId);
-    const named = stagesOf(stages!);
-    expect(named.get("session.open.manager")).toBeGreaterThan(0);
-    const accountedMs = [...named.values()].reduce((total, duration) => total + duration, 0);
-    expect(unaccountedMs!).toBeGreaterThanOrEqual(0);
-    expect(unaccountedMs!).toBeLessThanOrEqual(durationMs);
-    expect(Math.abs(durationMs - unaccountedMs! - accountedMs)).toBeLessThanOrEqual(named.size + 1);
-    reports.push({
-      requestId,
-      durationMs,
-      unaccountedMs,
-      accountedMs,
-      level: completion.level,
-      stages,
-      recordBytes: Buffer.byteLength(JSON.stringify(completion), "utf8"),
-      stagesBytes: Buffer.byteLength(stages!, "utf8"),
-      sessionFilesBytes: fileBytes,
-    });
-
-    const failedRequestId = "missing-open";
-    socket.send(JSON.stringify({
-      type: "request",
-      id: failedRequestId,
-      method: "session.open",
-      params: { sessionId: "00000000-0000-4000-8000-000000000000" },
-    }));
-    await waitFor(() => frames.some((frame) => frame.id === failedRequestId), "the failed request's response frame", { boundMs: COLD_OPEN_WAIT_BOUND_MS });
-    expect(frames.find((frame) => frame.id === failedRequestId)?.ok).toBe(false);
-    await waitFor(() => persistedRecords(logPath).some(
-      (record) => record.requestID === failedRequestId && record.event === "rpc.completed",
-    ), "the persisted rpc.completed record", { boundMs: COLD_OPEN_WAIT_BOUND_MS });
-    const persisted = persistedRecords(logPath)
-      .find((record) => record.requestID === failedRequestId && record.event === "rpc.completed")!;
-    expect(persisted.outcome).toBe("failure");
-    expect(persisted.stages, "the persisted line must carry the breakdown").toBeDefined();
-    expect(persisted.stages as string).not.toBe("");
-    expect(persisted.unaccountedMs).toBeDefined();
-    expect(persisted.unaccountedMs as number).toBeGreaterThanOrEqual(0);
-    expect(persisted.unaccountedMs as number).toBeLessThanOrEqual(persisted.durationMs as number);
-
-    const report = {
-      coldOpens: reports.length,
-      runs: reports,
-      failureRecord: {
-        stages: persisted.stages,
-        unaccountedMs: persisted.unaccountedMs,
-        durationMs: persisted.durationMs,
-        recordBytes: Buffer.byteLength(JSON.stringify(persisted), "utf8"),
-      },
-    };
-    await mkdir(dirname(REPORT_PATH), { recursive: true });
-    await writeFile(REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`);
-    console.log(`request span report ${REPORT_PATH} ${JSON.stringify(report)}`);
-  }, 300_000);
 });
 
 describe("settings.resolve request span", () => {
@@ -353,17 +183,14 @@ describe("settings.resolve request span", () => {
     const projectedSetting = successfulResponse.result?.keys?.find(setting => setting.key === "run.retry.maxRetries");
     expect(projectedSetting?.value).toBe(7);
     expect(projectedSetting?.layer).toBe("global");
-    const successfulCompletion = [...logger.debugTail(), ...logger.recent()].find(record => record.event === "rpc.completed" && record.requestID === successfulId);
-    expect(successfulCompletion?.outcome).toBe("success");
-    expect(successfulCompletion?.method).toBe("settings.resolve");
 
     mode = "failure";
     const failedId = "settings-failure";
     socket.send(JSON.stringify({ type: "request", id: failedId, method: "settings.resolve", params: { target: { kind: "global" }, keys: ["run.retry.maxRetries"] } }));
     await waitFor(() => frames.some(frame => frame.id === failedId), "settings failure response");
     expect(frames.find(frame => frame.id === failedId)?.ok).toBe(false);
-    await waitFor(() => persistedRecords(logPath).some(record => record.requestID === failedId && record.event === "rpc.completed"), "persisted failed settings completion");
-    const failedCompletion = persistedRecords(logPath).find(record => record.requestID === failedId && record.event === "rpc.completed")!;
+    await waitFor(() => persistedLogRecords(logPath).some(record => record.requestID === failedId && record.event === "rpc.completed"), "persisted failed settings completion");
+    const failedCompletion = persistedLogRecords(logPath).find(record => record.requestID === failedId && record.event === "rpc.completed")!;
     expect(failedCompletion.outcome).toBe("failure");
     expect(failedCompletion.method).toBe("settings.resolve");
     await mkdir(dirname(SETTINGS_REPORT_PATH), { recursive: true });
