@@ -39,7 +39,6 @@ async function fixture() {
   const agentDir = join(root, "agent");
   await mkdir(agentDir);
   let registry: RuntimeRegistry | undefined;
-  let server: GatewayServer | undefined;
   const sockets: WebSocket[] = [];
   cleanup.push(async () => {
     sockets.forEach((socket) => socket.terminate());
@@ -69,29 +68,27 @@ async function fixture() {
   const phone = await pair("Fixture iPhone");
   const other = await pair("Other iPhone");
 
-  let bridge: DevicePreferenceBridge | undefined;
+  let server: GatewayServer | undefined;
+  const bridge = new DevicePreferenceBridge({
+    pairedDevices: async () => (await devices.listDevices()).map((device) => device.id),
+    newestReadyConnection: (deviceId) => server!.newestReadyDeviceConnection(deviceId),
+    send: (connectionId, topic, payload) => server!.emitToClient(connectionId, topic, payload as never),
+  });
   const trust = new TrustService(agentDir);
   const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome: root, trust,
-    modelRuntime: await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
-    devicePreferences: { devices: async () => bridge!.devices(), read: (device, key) => bridge!.read(device, key), compareAndSet: (device, key, expected, value) => bridge!.compareAndSet(device, key, expected, value) },
-  }));
+    modelRuntime: await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }), devicePreferences: bridge }));
   const settingsChanges = new SettingsChangePath(settingsModel, new SettingsChangeRecord(root), {
     setTrust: async () => { throw new Error("trust is not exercised here"); },
   });
   const service = new GatewayService({ display: displayOwnerOf(registry),
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: root, agentDir },
     devices, sessions: registry, receipts: new CommandReceiptStore(root), uploads: {} as never, trust,
-    settingsModel, settingsChanges, modelRuntime: settingsModel.owner.modelRuntime,
+    settingsModel, settingsChanges, devicePreferences: bridge, modelRuntime: settingsModel.owner.modelRuntime,
     broadcast: () => {}, globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
   } as never);
   server = new GatewayServer({ display: displayOwnerOf(registry), host: "127.0.0.1", port: 0, maxFrameBytes: 1_048_576,
     devices, sessions: registry, service, uploads: {} as never,
     auth: { cancelOwner: () => {}, detachClient: () => {} } as never, logger: { log: () => {} } as never,
-  });
-  bridge = new DevicePreferenceBridge({
-    pairedDevices: async () => (await devices.listDevices()).map((device) => device.id),
-    newestReadyConnection: (deviceId) => server!.newestReadyDeviceConnection(deviceId),
-    send: (connectionId, topic, payload) => server!.emitToClient(connectionId, topic, payload as never),
   });
   await server.listen();
   const port = (server as any).server.address().port as number;
@@ -122,7 +119,7 @@ async function fixture() {
     const resolution = await service.invoke({ id: "test", identity: "local", isLocal: true } as never, "settings.resolve", { target: HOME, keys: [KEY] }) as unknown as Resolution;
     return resolution.keys.find((row) => row.key === KEY)!;
   };
-  return { phone, other, connect, home, resolveKey, server: server!, service, settingsChanges, bridge: bridge!, port };
+  return { phone, other, connect, home, resolveKey, server: server!, service, settingsChanges, bridge, port };
 }
 
 describe("Run Swift files device preference over the real socket", () => {
