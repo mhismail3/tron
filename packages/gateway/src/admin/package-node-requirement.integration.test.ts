@@ -308,6 +308,42 @@ describe("settings package update installs one exact version through the owner",
       await repo.close();
     }
   });
+
+  it("plans a git update without running a configured fsmonitor or clean filter in the installed checkout before the tap", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-package-update-plan-"));
+    roots.push(root);
+    const agentDir = join(root, "agent"), cwd = join(root, "workspace"), tronHome = join(root, "tron");
+    await mkdir(agentDir, { recursive: true });
+    await mkdir(cwd, { recursive: true });
+    const repo = await gitDaemonRepository(root, "tool");
+    const source = repo.source;
+    const restoreGitConfig = repo.activate();
+    try {
+      await writeFile(join(agentDir, "settings.json"), JSON.stringify({ packages: [source] }));
+      const first = await repo.commit("a\n", "a");
+      const second = await repo.commit("b\n", "b");
+      const changes = new SettingsChangePath({} as never, new SettingsChangeRecord(tronHome), { setTrust: async () => undefined });
+      const packages = new PackageService(agentDir, new TrustService(agentDir), () => {});
+      packages.register(changes, () => {});
+      await packages.mutate("update", source, cwd, false);
+      const installedPath = (await packages.list(cwd)).packages.find(row => row.source === source)?.installedPath as string;
+      expect(await gitHead(installedPath)).toBe(first);
+
+      const fsmonitorMarker = join(root, "fsmonitor-ran"), filterMarker = join(root, "filter-ran");
+      await execFileAsync("git", ["-C", installedPath, "config", "core.fsmonitor", `touch '${fsmonitorMarker}'`]);
+      await execFileAsync("git", ["-C", installedPath, "config", "filter.marker.clean", `touch '${filterMarker}' && cat`]);
+      await writeFile(join(installedPath, ".git", "info", "attributes"), "index.txt filter=marker\n");
+
+      const review = await packages.updatePackage({ cwd, source, version: second, reason: "Plan only" }, { kind: "home", id: "home-session" });
+      expect(review).toMatchObject({ status: "review", review: { items: [expect.objectContaining({ before: first, after: second })] } });
+      await expect(readFile(fsmonitorMarker)).rejects.toThrow();
+      await expect(readFile(filterMarker)).rejects.toThrow();
+      expect(await gitHead(installedPath)).toBe(first);
+    } finally {
+      restoreGitConfig();
+      await repo.close();
+    }
+  });
 });
 
 async function gitHead(cwd: string): Promise<string> {
