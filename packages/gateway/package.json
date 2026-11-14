@@ -28,7 +28,7 @@
     "build": "echo '[gateway] production: check + emit' && tsc -p tsconfig.json && npm run check:test-support",
     "check": "echo '[gateway] production: check (no emit)' && tsc -p tsconfig.json --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tron/production-check.tsbuildinfo && npm run check:test-support",
     "check:test-support": "echo '[gateway] test support + corpus: check (no emit)' && tsc -p tsconfig.test-support.json",
-    "lint": "oxlint -c .oxlintrc.json --deny-warnings --report-unused-disable-directives src test-support test-fixtures scripts",
+    "lint": "oxlint -c .oxlintrc.json --format unix --deny-warnings --report-unused-disable-directives src test-support test-fixtures scripts",
     "test:lint": "node --test scripts/oxlint-rules.integration.test.mjs",
     "test:typescript-build": "node --test scripts/typescript-build.integration.test.mjs",
     "test:device-binding": "node --import ./test-support/tron-home-environment-preflight.mjs --test ../../scripts/tron-ios-device-bind.test.mjs",
