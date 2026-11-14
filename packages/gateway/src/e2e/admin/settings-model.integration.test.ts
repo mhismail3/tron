@@ -181,7 +181,7 @@ describe("settings.resolve", () => {
     const untrusted = await resolve({ kind: "project", cwd: project });
     for (const key of KEYS) {
       expect(key.writers.length, `${key.id} needs a writer`).toBeGreaterThan(0);
-      expect(Object.keys(key.layers).length, `${key.id} needs a store reader`).toBeGreaterThan(0);
+      expect(Object.keys(key.layers).length, `${key.id} needs a store binding`).toBeGreaterThan(0);
     }
     expect(untrusted.keys.map(key => key.key)).not.toContain("run.httpProxy");
     expect(untrusted.keys.map(key => key.key)).not.toContain("setup.sessionDir");
