@@ -311,10 +311,6 @@ and uploads through Xcode Organizer.
 
 Local-network and camera usage only. Provider credentials never enter fixtures, defaults or logs.
 
-### Diagnostic source identity
-
-`TronBuildIdentity.json` stamps the app's commit and dirty state into exports.
-
 ## Moved sections
 
 ### Dashboard controls

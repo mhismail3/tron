@@ -140,6 +140,7 @@ final class AppDiagnostics {
         var records = await appLog.snapshot()
         records += iosClientDiagnostics.records.map(Self.appLogRecord)
         records += (await client.diagnostics()).map(IOSClientDiagnosticBuffer.logRecord).map(Self.appLogRecord)
+        records += eventConsumerDiagnostics.values.map(IOSClientDiagnosticBuffer.logRecord).map(Self.appLogRecord)
         records += chatInteractionTrace.diagnosticRecords(limit: Self.maximumOfflineLines).map(Self.appLogRecord)
         var kept: [String] = []
         var bytes = 0

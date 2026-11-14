@@ -301,8 +301,8 @@ package struct IOSClientDiagnosticBuffer: Sendable {
         result = result.replacingOccurrences(
             of: #"(?i)\bBearer\h+[A-Za-z0-9._~+/=-]+"#, with: "[REDACTED]", options: .regularExpression)
         result = result.replacingOccurrences(
-            of: #"(?i)\b(?:authorization|token|api[_-]?key|password|secret)\h*[:=]\h*(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)"#,
-            with: "[REDACTED]", options: .regularExpression)
+            of: #"(?i)(\b(?:authorization|token|api[_-]?key|password|secret)\"?\h*[:=]\h*)(?:\"(?:\\.|[^\"\\])*\"|'[^']*'|[^\s,;}\]]+)"#,
+            with: "$1[REDACTED]", options: .regularExpression)
         result = redactURLs(result)
         result = result.replacingOccurrences(
             of: #"(?<![A-Za-z0-9])(?:~/|/)[^\s\"'<>]+"#, with: "[REDACTED]", options: .regularExpression)

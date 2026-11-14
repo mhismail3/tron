@@ -1541,6 +1541,13 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         _ = try await connectForBoundary(client, profile: profile, token: token)
         let connectionID = try XCTUnwrap(await client.activeConnectionID())
         let marker = "e2e-log-marker-\(UUID().uuidString)"
+        let neighbor = "e2e-neighbor-\(UUID().uuidString)"
+        let secret = "synthetic-e2e-secret-\(UUID().uuidString.prefix(8))"
+        let control = String(repeating: "\u{1}", count: 512)
+        await AppLog.shared.recordCausal(name: "e2e.log-redaction", outcome: "success",
+                                         details: #"{"token":"\#(secret)","label":"\#(neighbor)"}"#)
+        await AppLog.shared.recordRPC(event: control, method: control, requestID: control, outcome: control, code: control,
+                                      durationMilliseconds: 1, profileID: control, connectionID: nil)
         await AppLog.shared.recordCausal(name: "e2e.log-marker", outcome: "success", details: marker)
         let uploader = AppLogUploader(log: AppLog.shared, transport: .gateway(client: client) {
             AppLogUploader.Connection(id: connectionID, supportsDeviceLogs: true)
@@ -1560,6 +1567,10 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(150))
         } while clock.now < deadline
         XCTAssertTrue(found, "the phone log marker must reach the Gateway device file in one upload pass")
+        let text = try devices.contentsOfDirectoryText()
+        XCTAssertTrue(text.contains(neighbor), "non-secret neighbouring text must survive redaction")
+        XCTAssertFalse(text.contains(secret), "a JSON-quoted token value must never reach the Gateway device file")
+        XCTAssertTrue(text.contains("log.record-truncated"), "an oversize record must be replaced by a bounded line, not stall the upload")
     }
 
     private func assertCorrelationKey(client: GatewayClient) async throws {
@@ -1709,6 +1720,13 @@ private final class StallingRestoreProjection: GatewayLifecycleProjectionDelegat
     func lifecycleReconcileForeground(admission: GatewayLifecycleCoordinator.Admission) async throws {}
     func lifecycleRetireProjection(final: Bool) async {}
     func lifecycleSurface(_ error: Error) {}
+}
+
+private extension URL {
+    func contentsOfDirectoryText() throws -> String {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: path)) ?? []
+        return try names.map { try String(contentsOf: appendingPathComponent($0), encoding: .utf8) }.joined(separator: "\n")
+    }
 }
 
 private struct DeviceLogAppendProbe: Encodable {

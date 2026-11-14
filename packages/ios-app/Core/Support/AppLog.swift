@@ -189,12 +189,29 @@ package actor AppLog {
             for raw in data.split(separator: 0x0A, omittingEmptySubsequences: true) {
                 guard let record = try? JSONDecoder().decode(AppLogRecord.self, from: Data(raw)) else { continue }
                 if identity == nil { identity = SHA256.hash(data: Data(raw)).map { String(format: "%02x", $0) }.joined() }
-                guard let encoded = try? JSONEncoder().encode(admitted(record)) else { continue }
-                lines.append(String(decoding: encoded, as: UTF8.self))
+                guard let line = uploadLine(record) else { continue }
+                lines.append(line)
             }
             guard let identity, !lines.isEmpty else { return nil }
             return AppLogUploadEpoch(id: identity, lines: lines)
         }
+    }
+
+    private func uploadLine(_ record: AppLogRecord) -> String? {
+        let admitted = admitted(record)
+        guard let encoded = try? JSONEncoder().encode(admitted) else { return nil }
+        if encoded.count <= AppLogUploadPlanner.maximumLineBytes { return String(decoding: encoded, as: UTF8.self) }
+        let truncated = AppLogRecord(
+            timestamp: admitted.timestamp, level: admitted.level,
+            event: "log.record-truncated", source: admitted.source,
+            message: String(admitted.message.prefix(128)), process: "ios",
+            requestID: admitted.requestID.map { String($0.prefix(64)) }, durationMs: admitted.durationMs,
+            outcome: admitted.outcome.map { String($0.prefix(64)) }, code: admitted.code.map { String($0.prefix(64)) },
+            profileID: admitted.profileID.map { String($0.prefix(64)) },
+            connectionID: admitted.connectionID, lifecycleGeneration: admitted.lifecycleGeneration
+        )
+        guard let data = try? JSONEncoder().encode(truncated) else { return nil }
+        return String(decoding: data, as: UTF8.self)
     }
 
     private func admitted(_ record: AppLogRecord) -> AppLogRecord {

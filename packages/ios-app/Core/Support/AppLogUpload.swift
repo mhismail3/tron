@@ -20,6 +20,7 @@ package struct AppLogUploadBatch: Equatable, Sendable {
 package enum AppLogUploadPlanner {
     package static let maximumBatchLines = 256
     package static let maximumBatchBytes = 256 * 1_024
+    package static let maximumLineBytes = 16 * 1_024
     package static let gapReason = "local-rotation"
 
     package static func batches(epochs: [AppLogUploadEpoch], held: AppLogHeldCursor) -> [AppLogUploadBatch] {
