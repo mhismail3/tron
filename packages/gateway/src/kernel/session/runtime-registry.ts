@@ -66,7 +66,7 @@ import { ExtensionArtifactDiscovery, type ExtensionArtifactDiscoveryCounts } fro
 import type { ResourceRoot } from "../resources/resource-root.js";
 import type { ModuleHost } from "../host/module-host.js";
 import { GatewayWorkRegistry } from "../run/gateway-work-registry.js";
-import { readCanonicalSessionFile } from "./canonical-reader.js";
+import { readCanonicalSession, readCanonicalSessionFile } from "./canonical-reader.js";
 import { syncDurably } from "../../foundation/durable-json.js";
 import {
   invocationProjection,
@@ -384,6 +384,7 @@ export interface SessionOperations extends LineageRuntimePort<RuntimeSlot>, Owne
   readTaskEvidence(sessionId: string, options?: { appendStable?: boolean }): Promise<FileEntry[]>;
   readLiveTaskEvidence(sessionId: string, operationId: string): Promise<LiveTaskEvidence>;
   readTaskWorkerEntries(sessionId: string): Promise<FileEntry[]>;
+  readTaskWorkerTranscript(sessionId: string): Promise<SessionEntry[]>;
   recordTaskWorkers(workers: Iterable<readonly [sessionId: string, taskId: string]>): void;
   taskWorkerSettled(sessionId: string, taskId: string): Promise<void>;
   taskWorkerModel(sessionId: string): Promise<{ provider: string; id: string } | undefined>;
@@ -3365,6 +3366,19 @@ export class RuntimeRegistry implements SessionOperations {
     if (live) return live.displayName;
     const path = await this.sessionFile(sessionId);
     return path ? this.sessionCatalog.row(path)?.name : undefined;
+  }
+
+  async readTaskWorkerTranscript(sessionId: string): Promise<SessionEntry[]> {
+    const live = this.slots.get(sessionId);
+    if (live) {
+      const branch = validateSearchBranch(live.canonicalSessionEntries());
+      if (branch.header.id !== sessionId) throw new GatewayError("conflict", "Task worker session identity changed");
+      return branch.entries;
+    }
+    const path = await this.sessionFile(sessionId);
+    if (!path) throw new GatewayError("not_found", "Task worker session is unavailable");
+    const source = await readCanonicalSession({ path, sessionId });
+    return source.branch.map(entry => entry.raw as unknown as SessionEntry);
   }
 
   async readTaskWorkerEntries(sessionId: string): Promise<FileEntry[]> {
