@@ -9,7 +9,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 
 - Shell: `SettingsView` (`SettingsGroupKind` groups, `SettingsGroupCard`).
 - Renderer: `SettingsRendererView`, `SettingsRendererRow`, `SettingsValueEditors`,
-  `SettingsChoiceSlider`, `SettingsAutosave`.
+  `SettingsChoiceSlider`.
 - Audit: `SettingsChangesView`, `SettingsChangeRow`; exact reviews use the shared
   `ChangeReviewSheet`.
 - Agent configuration: `ConfigurationSlider(Surface)`,
@@ -134,7 +134,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   Providers retains credentials, usage and catalog Refresh, not a separate custom-definition editor.
   Agents edit Pi's canonical `<tronHome>/agent/models.json` through the existing file tools;
   the Gateway keeps validation, redaction, outside-change history and model loading. A native
-  source editor, guided draft, JSON draft and autosave coordinator do not mirror that file.
+  source editor, guided draft and JSON draft do not mirror that file.
   Model-registry activation still needs a maintainer-initiated Gateway restart; file edits do
   not promise hot reload.
   `compaction-policy.v1` adds per-field thinking and focus inheritance.
