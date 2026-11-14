@@ -9,6 +9,8 @@ import { WAIT_HANG_BOUND_MS } from "../test-support/wait-for.ts";
 import { PATCH_PIN_FILE } from "./check-pi-sdk.mjs";
 import { runUpdate } from "./update-pi-sdk.mjs";
 
+const gatewayDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
 test("local read cancellation propagates and closes the handle before and during streaming", (t) => {
   const root = mkdtempSync(join(tmpdir(), "tron-pi-read-abort-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -73,7 +75,6 @@ console.log("READ_ABORT_PROBE " + JSON.stringify({ phase, fd: handle.fd, streams
   }
 });
 
-const gatewayDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const checker = join(gatewayDir, "scripts", "check-pi-sdk.mjs");
 
 function fixture(t) {

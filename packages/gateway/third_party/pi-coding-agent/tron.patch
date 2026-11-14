@@ -989,3 +989,15 @@ index 71988d3a437254aeb4152793bff481f48f7dfc85..732fac5d7343b7abad69d19076fc505b
  		agentDir,
  		modelRuntime: session.modelRuntime,
  		settingsManager: session.settingsManager,
+diff --git a/packages/coding-agent/src/core/tools/read.ts b/packages/coding-agent/src/core/tools/read.ts
+index dd123cb..4e8a6d1 100644
+--- a/packages/coding-agent/src/core/tools/read.ts
++++ b/packages/coding-agent/src/core/tools/read.ts
+@@ -77,6 +77,7 @@ async function* readLocalFileChunks(path: string, { signal }: { signal?: AbortSi
+ 	try {
+ 		const stats = await handle.stat();
+ 		const end = stats.isFile() && stats.size > 0 ? stats.size - 1 : undefined;
++		signal?.throwIfAborted();
+ 		yield* handle.createReadStream({ end, signal, autoClose: false });
+ 	} finally {
+ 		await handle.close();
