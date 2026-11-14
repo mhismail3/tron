@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { lstat, mkdir, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -111,31 +111,28 @@ export class ProjectLifecycle {
     try { await lstat(path); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
     throw new GatewayError("conflict", "Destination already exists; project lifecycle never overwrites a path");
   }
-  private async command(executable: string, args: string[], cwd: string, signal?: AbortSignal): Promise<string> {
+  private async command(executable: string, args: string[], cwd: string): Promise<string> {
     const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
     for (const key of Object.keys(env)) if (key.startsWith("GIT_") && key !== "GIT_TERMINAL_PROMPT") delete env[key];
-    try { return (await exec(executable, args, { cwd, env, timeout: 60_000, maxBuffer: 1024 * 1024, ...(signal ? { signal } : {}) })).stdout.trim(); }
-    catch { signal?.throwIfAborted(); throw new GatewayError("conflict", "Git command did not complete; inspect project state before retrying"); }
+    try { return (await exec(executable, args, { cwd, env, timeout: 60_000, maxBuffer: 1024 * 1024 })).stdout.trim(); }
+    catch { throw new GatewayError("conflict", "Git command did not complete; inspect project state before retrying"); }
   }
-  private git(path: string, args: string[], signal?: AbortSignal): Promise<string> {
-    return this.command("git", ["--no-pager", "-c", "core.hooksPath=/dev/null", ...args], path, signal);
+  private git(path: string, args: string[]): Promise<string> {
+    return this.command("git", ["--no-pager", "-c", "core.hooksPath=/dev/null", ...args], path);
   }
-  private async inspect(action: Action, signal?: AbortSignal, shared?: ProjectOccupancy) {
-    signal?.throwIfAborted();
+  private async inspect(action: Action): Promise<string> {
     const path = join(this.workspace, action.name);
     await this.same(path, action.identity);
-    const gitIdentity = await this.directory(join(path, ".git"));
-    const root = await this.git(path, ["rev-parse", "--show-toplevel"], signal);
+    await this.directory(join(path, ".git"));
+    const root = await this.git(path, ["rev-parse", "--show-toplevel"]);
     if (root !== path) throw new GatewayError("invalid_request", "Lifecycle requires a standalone project repository");
-    const worktrees = await this.git(path, ["worktree", "list", "--porcelain"], signal);
+    const worktrees = await this.git(path, ["worktree", "list", "--porcelain"]);
     if (worktrees.split("\n").filter(line => line.startsWith("worktree ")).length !== 1) throw new GatewayError("busy", "Project has linked worktrees; release their owners before changing its lifecycle");
-    const occupancy = shared ?? await this.runtimes.occupancy(signal);
-    occupancy.assertIdle(path);
+    (await this.runtimes.occupancy()).assertIdle(path);
     const trust = await this.trust().inspect(path);
     if (trust.projectDir !== path) throw new GatewayError("invalid_request", "Project root changed");
-    const state = createHash("sha256").update(JSON.stringify({ gitIdentity, worktrees, saved: trust.savedDecision, effective: trust.effectiveDecision })).digest("hex");
     await this.same(path, action.identity);
-    return { path, trust, state, occupancy };
+    return path;
   }
   private async plan(action: Action): Promise<Omit<ChangeReview, "digest" | "requiresTap">> {
     await this.root();
@@ -162,7 +159,7 @@ export class ProjectLifecycle {
     await this.trust().reserveUntrustedDirectory(path);
     await this.git(path, ["-c", "init.templateDir=", "init", "--initial-branch=main"]);
     await this.same(path, identity);
-    const { path: trusted } = await this.inspect({ ...action, identity });
+    const trusted = await this.inspect({ ...action, identity });
     await this.setTrust(trusted, true);
     return { summary: `${trusted} is trusted and ready for delegation` };
   }

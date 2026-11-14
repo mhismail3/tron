@@ -60,24 +60,23 @@ path; a settled native interaction cannot apply again.
 
 ## Surface
 
-The module exposes one agent tool and no RPC; the `projects.lifecycle.v1` capability and
-its `projects.list`, `projects.inspect` and `projects.change` adapters were removed (5.8).
-The app has no project screen.
+The module exposes the `projects` agent tool and no RPC. The app has no project screen.
 
 - `projects({name, reason})` creates a direct Workspace child: an untrusted folder with a
   Git repository on `main`, trusted after the exact native card is approved. The target
   must be absent; traversal, existing paths and symlinks refuse. Creation reviews are
   bound to the Workspace identity and digest; approval revalidates the digest (`Project
   changed since review`) before any effect.
-- Creation's private trust step (`inspect` then `setTrust`) refuses linked worktrees and
-  busy occupancy and binds a state digest for the new project.
+- Creation's private trust step (`inspect` then `setTrust`) rechecks directory identity,
+  canonical standalone Git/trust roots, linked worktrees and busy occupancy before trust is granted.
 - Existing-project trust and untrust are not lifecycle actions. Home changes
   `permissions.projectTrust` with a `project` qualifier through the `settings` tool, which
   writes through `TrustService.setAndApply` with runtime reload and abort. That path has
-  no linked-worktree or busy-occupancy refusal. This is the current behavior, not a
-  new policy.
-- Native confirmation for every change is the shared `change` interaction answered by
-  `extension.respond`. Local clients cannot confirm.
+  no lifecycle eligibility preflight. Normal runtime mutation/reload fences still apply;
+  creation's linked-worktree and occupancy eligibility rules are not additional Home settings rules.
+- Creation and existing-project trust grants use the shared `change` interaction answered by
+  `extension.respond`. Narrowing existing-project untrust applies directly and is logged.
+  Local clients cannot confirm native cards.
 
 Canonical receipts bind caller + commandId + method: retries return the original
 result even if their payload differs. A new intent requires a new ID; different
@@ -107,7 +106,7 @@ state before retry.
 ## Verify
 
 ```bash
-scripts/tron test gateway src/e2e/modules/projects/project-lifecycle.e2e.test.ts
+scripts/tron test gateway --mini src/e2e/modules/projects/project-lifecycle.e2e.test.ts
 ```
 
 The real Gateway/Registry/Pi/faux-model journey retains a regenerable transcript in
@@ -116,11 +115,14 @@ Creation cases use the real Home `projects` tool, the native `change` card and
 `extension.respond`: create → approval → trust → delegate admission; decline and Stop leave
 no effect; traversal, existing-path, trailing-space and symlink names refuse; uncertain
 audit fences keep their receipt; nested exact roots pin under default-always trust.
-Home untrust and trust of an existing project use the `settings` tool's
-`permissions.projectTrust` card; that journey proves the exact path, approval and delegate
-admission. Runtime reload and compensation failure use the real trust owner's `setAndApply`.
-Linked-worktree and busy-work refusals are proven only for creation's trust step; the
-existing-project trust path has no such refusal (see Surface).
+The existing-project journey opens a persistent project runtime and observes its tool
+inventory through the public `session.context` RPC. Home untrust removes the project tool; the exact-path
+`permissions.projectTrust` card keeps it absent until approval and then restores it in
+that same runtime. Delegation admission follows the resulting trust decision.
+Separate trust-owner cases exercise reload and compensation failures, observing restored
+tools through public context responses rather than private runtime fields. Creation owns the
+standalone-root, linked-worktree and occupancy eligibility checks; those are not additional
+existing-project Home settings restrictions (see Surface).
 
 ## Not here
 

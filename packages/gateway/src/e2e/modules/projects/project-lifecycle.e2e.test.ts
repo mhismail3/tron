@@ -107,7 +107,12 @@ async function fixture() {
     expect(result.details.status).toBe("review");
     return result.details;
   }
-  return { ...f, root, workspace, path, git, request, create, decide, changes, service, settled, advance: (ms: number) => { clock += ms; } };
+  const observeProjectTools = async (project: Awaited<ReturnType<typeof f.registry.create>>) => {
+    const context = await service.invoke(phone, "session.context", { sessionId: project.id });
+    expect(context).toHaveProperty("availableTools");
+    return (context as { availableTools: Array<{ name: string }> }).availableTools.map(tool => tool.name);
+  };
+  return { ...f, root, workspace, path, git, request, create, decide, changes, service, settled, observeProjectTools, advance: (ms: number) => { clock += ms; } };
 }
 
 describe("Gateway project lifecycle", () => {
@@ -160,12 +165,30 @@ exec ${JSON.stringify(realGit)} "$@"
   it("Home creates an untrusted main repository, approval grants trust and the real delegate owner immediately admits work", async () => {
     const f = await fixture();
     await f.decide(await f.create("slim-key"));
+    const source = f.path("slim-key");
+    await mkdir(join(source, ".pi", "extensions"), { recursive: true });
+    await writeFile(join(source, ".pi", "extensions", "lifecycle-probe.ts"), `export default function(pi) {
+  pi.registerTool({ name: "lifecycle_probe", label: "Lifecycle", description: "Project trust reload proof",
+    parameters: { type: "object", properties: {} },
+    execute: async () => ({ content: [{ type: "text", text: "trusted project resource" }] }) });
+}`);
+    const project = await f.registry.create(source);
+    expect(await f.observeProjectTools(project)).toContain("lifecycle_probe");
+    const beforeUntrust = f.events.length;
     expect((await f.request({ action: "untrust", name: "slim-key" })).details).toMatchObject({ status: "applied", changes: [{ key: "permissions.projectTrust", status: "applied" }] });
+    expect(f.events.slice(beforeUntrust)).toContainEqual(expect.objectContaining({ topic: "session.resourcesChanged" }));
+    expect(await f.observeProjectTools(project)).not.toContain("lifecycle_probe");
     expect(await f.git("slim-key", ["symbolic-ref", "--short", "HEAD"])).toBe("main");
     expect((await f.trust.inspect(f.path("slim-key"))).effectiveDecision).toBe(false);
     await expect(homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "untrusted-task", target: f.path("slim-key"), intent: "Report a finite result" }).then(handle => handle.completion)).rejects.toThrow(/trust/i);
     const pending = (await f.request({ action: "trust", name: "slim-key" })).details;
+    expect(JSON.parse(pending.review!.items[0]!.exact!)).toMatchObject({ key: "permissions.projectTrust", layer: "global",
+      qualifiers: { project: source }, before: false, after: true });
+    expect(await f.observeProjectTools(project)).not.toContain("lifecycle_probe");
+    const beforeTrust = f.events.length;
     expect((await f.decide(pending)).status).toBe("applied");
+    expect(f.events.slice(beforeTrust)).toContainEqual(expect.objectContaining({ topic: "session.resourcesChanged" }));
+    expect(await f.observeProjectTools(project)).toContain("lifecycle_probe");
     expect((await f.trust.inspect(f.path("slim-key"))).effectiveDecision).toBe(true);
     const task = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "trusted-task", target: f.path("slim-key"), intent: "Report ready" });
     expect(task.taskId).toBeTruthy();
@@ -240,8 +263,7 @@ exec ${JSON.stringify(realGit)} "$@"
     execute: async () => ({ content: [{ type: "text", text: "trusted resource" }] }) });
 }`);
     const slot = await f.registry.create(source);
-    const tools = () => (slot as unknown as { runtime: { session: { getAllTools(): Array<{ name: string }> } } }).runtime.session.getAllTools().map(tool => tool.name);
-    expect(tools()).toContain("restoration_probe");
+    expect(await f.observeProjectTools(slot)).toContain("restoration_probe");
     let applications = 0;
     await expect(f.trust.setAndApply(source, false, async inspection => {
       await f.registry.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false);
@@ -251,7 +273,7 @@ exec ${JSON.stringify(realGit)} "$@"
     expect(applications).toBe(2);
     expect((await f.trust.inspect(source)).effectiveDecision).toBe(true);
     expect(slot.isDisposed).toBe(false);
-    expect(tools()).toContain("restoration_probe");
+    expect(await f.observeProjectTools(slot)).toContain("restoration_probe");
     expect((await f.registry.create(source)).cwd).toBe(source);
   });
 
