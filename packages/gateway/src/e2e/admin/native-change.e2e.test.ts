@@ -862,9 +862,9 @@ describe("package update through the registered settings tool", () => {
       await writeFile(manifest, JSON.stringify({ ...JSON.parse(await readFile(manifest, "utf8")), version: "0.9.9" }));
 
       const service = settingsService(f);
-      await service.invoke(phone, "extension.respond", { commandId: "package-update-stale-response", sessionId: home.id,
+      await expect(service.invoke(phone, "extension.respond", { commandId: "package-update-stale-response", sessionId: home.id,
         interactionId: interaction.id, hostEpoch: interaction.hostEpoch, presentationRevision: interaction.presentationRevision,
-        value: { digest: interaction.review.digest, approved: true } }).catch(() => undefined);
+        value: { digest: interaction.review.digest, approved: true } })).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("changed since review") });
       await prompting;
 
       expect(JSON.parse(await readFile(manifest, "utf8")).version).toBe("0.9.9");
@@ -872,6 +872,8 @@ describe("package update through the registered settings tool", () => {
       expect((await f.settings.settingsChanges.history({ key: "package.update" }, { kind: "ui", id: "maintainer" })).entries).toEqual([]);
       expect(home.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === "package-update-stale"))
         .toMatchObject({ type: "message", message: { role: "toolResult", isError: true } });
+      expect(JSON.stringify(home.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === "package-update-stale")))
+        .toContain("The package changed since review; nothing was applied");
     } finally {
       await registry.close();
       process.env.npm_config_registry = saved.registry;
