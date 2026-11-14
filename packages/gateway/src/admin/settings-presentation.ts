@@ -27,7 +27,6 @@ export interface KeyPresentation {
   range?: NonNullable<ValueType["range"]>;
   optionsSource?: { name: string; dependsOn: readonly string[] };
   confirm?: string;
-  redacted?: true;
   entry?: EntryGuidance;
   sessionOverridable: boolean;
   projectSettable: boolean;
@@ -56,7 +55,6 @@ function presentKey(key: KeyDeclaration, clientControls: readonly string[] | und
     ...(control && key.type.range ? { range: key.type.range } : {}),
     ...(control && key.optionsSource ? { optionsSource: key.optionsSource } : {}),
     ...(key.confirm ? { confirm: key.confirm } : {}),
-    ...(key.redacted ? { redacted: true as const } : {}),
     ...(key.entry ? { entry: key.entry } : {}),
   };
 }

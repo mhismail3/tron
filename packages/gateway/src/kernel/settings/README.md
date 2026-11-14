@@ -106,7 +106,9 @@ proofs live in `settings-three-layer.e2e.test.ts`.
 Expected-before checks, including Session-owned fields, run inside the target stripe.
 Undo checks both the original entry's history-derived consumption and its expected
 current-after value under that same stripe. Undo of Undo names the new fact, not the
-original operation. Redacted/action facts are not generically undoable.
+original operation. Redacted/action facts are not generically undoable. Key declarations
+contain no credentials or redaction mode; credential-bearing record subjects retain their
+digest-only outside audit and redaction-aware history and Undo guards.
 
 Segment replacement precedes index publication. Recovery adopts only complete,
 unambiguous bounded published bytes and never replays effects. Corrupt history

@@ -9,7 +9,7 @@ consume it. Edge cases follow from a [foundation](#foundations), never a new rul
 
 - **F1 Schema.** Each setting is one key declared once (`src/kernel/settings/settings-schema.ts`): type
   and validation, group, scope grants, store bindings, timing, effect point, native-tap classification,
-  writers, redaction and display. `sessionOverridable` and `projectSettable` govern admission;
+  writers and display. `sessionOverridable` and `projectSettable` govern admission;
   store bindings describe owned persistence. iOS renders the served metadata generically.
 - **F2 Truth.** Each layer's store is the truth; the change record is audit and undo, never
   consulted for a value. A store that differs from the last observed value is an
@@ -47,7 +47,7 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 ## Keys
 
 <!-- tron docs settings -->
-48 keys, declared in `packages/gateway/src/kernel/settings/settings-schema.ts` (`KEYS`).
+46 keys, declared in `packages/gateway/src/kernel/settings/settings-schema.ts` (`KEYS`).
 
 | Key | Qualifier | Group | Layers | Home layers | Timing | Effect | Native tap |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -89,7 +89,6 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 | `run.transport` | — | run | project, session, global | as allowed | live | next-request | — |
 | `run.httpIdleTimeoutMs` | — | run | project, session, global | as allowed | live | next-request | — |
 | `run.websocketConnectTimeoutMs` | — | run | project, session, global | as allowed | live | next-request | — |
-| `run.httpProxy` | — | run | global | as allowed | live | restart | — |
 | `run.cacheWarming` | — | run | global | none | fixed | reload | spend |
 | `sources.extensions` | — | sources | project, global | none | fixed | reload | trust |
 | `sources.skills` | — | sources | project, global | none | fixed | reload | trust |
@@ -97,7 +96,6 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 | `sources.themes` | — | sources | project, global | none | fixed | reload | — |
 | `sources.packages` | — | sources | project, global | none | fixed | reload | install |
 | `sources.npmCommand` | — | sources | global | none | live | next-change | trust |
-| `setup.sessionDir` | — | setup | global | as allowed | live | restart | — |
 | `setup.installTelemetry` | — | setup | global | as allowed | live | next-request | irreversible |
 
 Record subjects (`RECORD_SUBJECTS`), changed per instance through the same path:
@@ -110,7 +108,7 @@ Record subjects (`RECORD_SUBJECTS`), changed per instance through the same path:
 
 Other schema fields: `subgroup`, `type`, `options` or `optionsSource` (`catalog.models`,
 `catalog.thinkingLevels(model)`, `catalog.tools`, ...), `defaultValue`, `direction`, `tap`, `writers`
-(`ui`, `home`, `worker`, `agent`: the list is the grant), `redacted`, `applier`, and display
+(`ui`, `home`, `worker`, `agent`: the list is the grant), `applier`, and display
 fields (`label`, `help`, `order`, `importance`, `control`/`fallback`, `unit`/`format`,
 `confirm`, `entry`). MCP and Accounts keep their own RPCs; record subjects compare by digest.
 
@@ -145,9 +143,9 @@ tool (Home may name a `taskId`); `outside` (observed only).
 4. Append the durable record and broadcast `settings.changed`. Post-effect audit failure
    is uncertain, not permission to replay the effect.
 
-Outcomes name key, layer, status and redacted `before`/`after`; `review` includes the
+Outcomes name key, layer, status and `before`/`after`; `review` includes the
 exact digest-bound before/after projection and whether a native tap is required. A chat's own Session scope
-changes only while idle; `setup.sessionDir` has no writer; Home Chat compaction values are
+changes only while idle; Home Chat compaction values are
 refused. **Record:** `<tronHome>/state/settings/changes/`, append-only 500-entry segments
 listed in `index.json`, kept forever, paged by `settings.history` (the maintainer's full view) or the tool's `history`
 action (optional key filter, cursor and limit 1–200; a page may be empty with a
@@ -208,8 +206,8 @@ the Mac `settings.json`, `trust.json`, `mcp.json`, `models.json` and each known 
 files; first sight is the baseline. Known projects have no count bound: a project leaves
 observed state only when its root no longer exists on disk. A comparison that changed nothing but the
 read instant writes nothing, so reads never queue behind a durable write. Each differing instance is one `outside`
-entry (with `HEAD` and branch for repository files; redacted keys by digest); MCP servers and
-custom providers report only added/changed/removed, then `mcp.changed` or
+entry (with `HEAD` and branch for repository files); MCP servers and custom providers
+compare by digest and report only added/changed/removed, then `mcp.changed` or
 `models.customChanged`. Tron's own writes are bracketed (`begin`/`end`, `adopt`).
 
 ## Project git state
@@ -253,7 +251,7 @@ Words and values come from the schema and resolver; iOS decides only layout.
 `settings.resolve` serves sections (Model, Workers & delegation, Compaction, Tools,
 Connection, Trusted Projects, Mac Terminal, Accounts, Sources, Storage) and badges `{ kind, label, detail?, action? }`
 (Layer, Source, Scope, Authority, State; unknown kinds render neutrally; actions go through
-`settings.change`). Controls: `toggle`, `choice`, `text`, `secret`, `list`,
+`settings.change`). Controls: `toggle`, `choice`, `text`, `list`,
 `checklist`, `catalog`, `readOnly`; the client sends what it implements and gets the declared
 control, its `fallback`, or `readOnly` with "Update Tron to edit". Stopped-runtime settings with
 no writer are not Settings rows. A declaration without a `control` has no routine editing row:
