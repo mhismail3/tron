@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxProvider } from "@earendil-works/pi-ai";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../../kernel/resources/trust-service.js";
 import { SettingsStoreAdapter } from "../../admin/settings-model.js";
 import { SettingsChangePath } from "../../kernel/settings/settings-change.js";
@@ -21,6 +21,7 @@ import { SettingsChangeRecord, type ChangeEntry } from "../../kernel/settings/se
 import { maintainerChange } from "../../../test-support/native-change.js";
 import { OutsideChanges } from "../../admin/settings-outside.js";
 import { McpAdminService } from "../../admin/mcp-admin-service.js";
+import { createTronSettingsExtension } from "../../admin/tron-settings-extension.js";
 import { ModelConfigService } from "../../admin/model-config-service.js";
 import { type SettingsStores } from "../../kernel/settings/settings-types.js";
 import { composedBelow, readBinding } from "../../kernel/settings/settings-resolver.js";
@@ -374,7 +375,8 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
   await registry.initialize();
   const privateService = new MacTerminalService({ root: join(tronHome, "state/mac-terminal"), launchAgentDirectory: join(root, "agents") });
   const macTerminalKeys = new MacTerminalKeys(privateService.root);
-  const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: privateService }));
+  const mcpAdmin = new McpAdminService(agentDir, join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js"));
+  const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: privateService, mcpAdmin }));
   const record = new SettingsChangeRecord(tronHome, options.segmentEntries);
   const outside = new OutsideChanges(TEST_SETTINGS_SCHEMA, tronHome, agentDir, record, settingsModel.owner.observedReaders);
   settingsModel.owner.observeOutside(outside);
@@ -396,7 +398,7 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
     modelRuntime, trust, settingsModel, settingsChanges, sessions: registry, receipts: new CommandReceiptStore(tronHome), notifications,
     broadcast: (topic: string, payload: unknown) => broadcasts.push({ topic, payload }),
     globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
-    mcpAdmin: new McpAdminService(agentDir, join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js")),
+    mcpAdmin,
     modelConfig: new ModelConfigService(agentDir),
   } as unknown as GatewayServiceDependencies);
   const change = (target: Record<string, unknown>, changes: unknown[], extra: Record<string, unknown> = {}, c = client()) =>
@@ -955,6 +957,29 @@ describe("outside changes to MCP servers and custom models", () => {
     expect(aroundTron.some(entry => entry.qualifiers?.server === "tron-second")).toBe(false);
     expect((await f.history({ section: "tools" })).some(entry => entry.key === "tools.mcp.server")).toBe(true);
     transcript.push({ case: "outside mcp and models", detail: await outsideEntries(f) });
+  });
+
+  caseIt("broadcasts one mcp.changed when Home's settings tool proposes an MCP server and the native card approves it", async owner => {
+    const f = await stagedFixture(owner);
+    const stale = vi.spyOn(f.registry.freshness, "stale");
+    const tools: Array<{ execute: (...args: unknown[]) => Promise<{ details: { status: string } }> }> = [];
+    const settingsExtension = createTronSettingsExtension(() => ({
+      resolve: async () => { throw new Error("resolve is not used in this proof"); },
+      change: (changes, input) => f.settingsChanges.change({ kind: "global" }, changes, {
+        actor: { kind: "home", id: "home-session", sessionId: "home-session", toolCallId: input.toolCallId },
+        reason: input.reason, ...(input.confirm ? { confirm: input.confirm } : {}),
+      }),
+    }), async ({ apply }) => apply({ deviceId: "device:phone", commandId: "command-mcp-tool" }));
+    settingsExtension({ registerTool: tool => { tools.push(tool as never); } } as never);
+    const [tool] = tools;
+    const requests = [{ key: "tools.mcp.server", qualifiers: { server: "home-docs" }, layer: "global", op: "set", value: { command: "npx", args: ["-y", "@acme/docs-mcp"] } }];
+    const result = await tool!.execute("call-mcp", { action: "change", changes: requests, reason: "Maintainer asked for the docs server" },
+      new AbortController().signal, () => {}, { hasUI: true });
+    expect(result.details).toMatchObject({ status: "applied" });
+    expect(f.broadcasts.filter(event => event.topic === "mcp.changed")).toEqual([{ topic: "mcp.changed", payload: { scope: "global" } }]);
+    expect(stale).toHaveBeenCalledWith({});
+    expect(JSON.parse(await readFile(join(f.agentDir, "mcp.json"), "utf8")).mcpServers["home-docs"]).toEqual({ command: "npx", args: ["-y", "@acme/docs-mcp"] });
+    expect(await f.history({ key: "tools.mcp.server" })).toEqual([expect.objectContaining({ status: "applied", qualifiers: { server: "home-docs" } })]);
   });
 
   caseIt("records Project mcp.json edits from a late .pi watch, a Git pull, and the Project MCP owner under the Project root", async owner => {

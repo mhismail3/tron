@@ -3,6 +3,7 @@ import { boolean, integer, object, string, arrayOfStrings } from "../../util/val
 import { type Control, type Effect, type Timing, type ValueType, type Writer, DEFAULT_TOOL_NAMES, modelQueueType, objectType, sameAsHomeChoice, toolSelectionType, types } from "./settings-types.js";
 import { MODEL_QUEUE_ROLES, modelQueueKey, type QualifierName, type Direction } from "./tool-contract.js";
 import type { StoreLayer } from "./settings-types.js";
+import { mcpServerDirection, mcpServerType } from "./mcp-server-value.js";
 
 interface SectionDeclaration { id: string; title: string; description: string; order: number; harness: boolean; note?: string; chatInline?: boolean }
 
@@ -30,7 +31,8 @@ export type Binding =
   | { store: "trust" }
   | { store: "mac-terminal" }
   | { store: "mac-terminal-service" }
-  | { store: "gateway"; path: readonly string[] };
+  | { store: "gateway"; path: readonly string[] }
+  | { store: "mcp" };
 
 export type TimingDeclaration = Timing | { widen: Timing; narrow: Timing };
 
@@ -485,7 +487,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
     return KEYS.find(key => key.id === id) ?? recordSubject(id);
   }
 
-  return { KEYS, RECORD_SUBJECTS, schemaKey, auditSubject } as const;
+  return { KEYS, RECORD_SUBJECTS, schemaKey, auditSubject, recordKey } as const;
 }
 
 export type SettingsSchema = ReturnType<typeof createSettingsSchema>;
@@ -521,21 +523,48 @@ export function hasSessionSettingsApplier(key: KeyDeclaration): boolean {
   return hasRuntimeRequestApplier(key) || hasCompactionApplier(key);
 }
 
+export interface RecordWrite {
+  writers: readonly Writer[];
+  tap: NonNullable<KeyDeclaration["tap"]>;
+  type: ValueType;
+  direction: NonNullable<KeyDeclaration["direction"]>;
+  effect: Effect;
+  timing: Timing;
+  help: string;
+  confirm: string;
+}
+
 export interface RecordSubject {
   id: string;
   label: string;
   group: string;
   container: string;
   qualifier: QualifierName;
+  write?: RecordWrite;
 }
 
 export const RECORD_SUBJECTS: readonly RecordSubject[] = [
-  { id: "tools.mcp.server", label: "MCP server", group: "tools", container: "mcpServers", qualifier: "server", },
+  { id: "tools.mcp.server", label: "MCP server", group: "tools", container: "mcpServers", qualifier: "server",
+    write: { writers: ["ui", "home"], tap: "trust", type: mcpServerType, direction: mcpServerDirection, effect: "new-chat", timing: "live",
+      help: "An MCP server Tron starts on this Mac. Its command runs with this Mac's permissions.",
+      confirm: "Adding or enabling a server, or changing its command or address, runs it on this Mac." } },
   { id: "accounts.models.provider", label: "Custom model provider", group: "accounts", container: "providers", qualifier: "provider", },
 ];
 
 export function recordSubject(id: string): RecordSubject | undefined {
   return RECORD_SUBJECTS.find(subject => subject.id === id);
+}
+
+export function recordKey(id: string): KeyDeclaration | undefined {
+  const subject = recordSubject(id);
+  if (!subject?.write) return undefined;
+  const write = subject.write;
+  return {
+    id, group: subject.group, qualifier: subject.qualifier, type: write.type, sessionOverridable: false, projectSettable: false,
+    layers: { global: { store: "mcp" } }, timing: write.timing, effect: write.effect, tap: write.tap, direction: write.direction,
+    writers: write.writers, label: subject.label, help: write.help, confirm: write.confirm, order: 0, importance: "advanced",
+    redacted: false,
+  };
 }
 
 export const HOME_PROFILE_SUBJECT = { id: "home.profile.item", label: "Profile item", group: "context", qualifier: "note" as const, };

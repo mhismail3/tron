@@ -9,6 +9,14 @@ import { describe, expect, it, onTestFinished } from "vitest";
 import lockfile from "proper-lockfile";
 import { waitFor } from "../../test-support/wait-for.js";
 import { drainDurableWriteStats } from "../foundation/durable-json.js";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { TEST_SETTINGS_SCHEMA } from "../../test-support/settings-schema.js";
+import { TrustService } from "../kernel/resources/trust-service.js";
+import { SettingsModel } from "../kernel/settings/settings-model.js";
+import { SettingsChangePath } from "../kernel/settings/settings-change.js";
+import { SettingsChangeRecord } from "../kernel/settings/settings-record.js";
+import { SettingsStoreAdapter } from "./settings-model.js";
+import { OutsideChanges } from "./settings-outside.js";
 import { MacKeychainMcpCredentialOwner, McpAdminService, type McpCredentialOwner } from "./mcp-admin-service.js";
 
 function piCliPath(): string {
@@ -330,4 +338,152 @@ describe("McpAdminService", () => {
     }
   });
 
+});
+
+describe("MCP servers through the settings change path", () => {
+  const global = { kind: "global" as const };
+  const home = { actor: { kind: "home" as const, id: "home" }, reason: "Maintainer asked for the docs server" };
+  const set = (server: string, value: unknown, layer: "global" | "session" | "project" = "global") =>
+    ({ key: "tools.mcp.server", qualifiers: { server }, layer, op: "set" as const, value });
+  const unset = (server: string) => ({ key: "tools.mcp.server", qualifiers: { server }, layer: "global" as const, op: "unset" as const });
+
+  async function fixture() {
+    const root = await mkdtemp(join(tmpdir(), "tron-mcp-change-"));
+    onTestFinished(() => rm(root, { recursive: true, force: true }));
+    const tronHome = join(root, "tron");
+    const agentDir = join(tronHome, "agent");
+    await mkdir(agentDir, { recursive: true });
+    const modelRuntime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust: new TrustService(agentDir), modelRuntime,
+      mcpAdmin: new McpAdminService(agentDir, cliPath) }));
+    const record = new SettingsChangeRecord(tronHome);
+    settingsModel.owner.observeOutside(new OutsideChanges(TEST_SETTINGS_SCHEMA, tronHome, agentDir, record, settingsModel.owner.observedReaders));
+    const changes = new SettingsChangePath(settingsModel, record, { setTrust: async () => { throw new Error("no trust writes in this proof"); } });
+    const file = join(agentDir, "mcp.json");
+    const bytes = () => readFile(file, "utf8").catch(() => undefined);
+    const servers = async () => (JSON.parse(await readFile(file, "utf8")) as { mcpServers: Record<string, unknown> }).mcpServers;
+    return { root, file, settingsModel, record, changes, bytes, servers };
+  }
+
+  async function approve(f: Awaited<ReturnType<typeof fixture>>, requests: Parameters<SettingsChangePath["change"]>[1], review: { digest: string }) {
+    return f.changes.change(global, requests, { actor: { kind: "ui", id: "device:phone" }, reason: home.reason, confirmationDigest: review.digest });
+  }
+
+  it("shows the exact command on the card and writes only after the native tap", async () => {
+    const f = await fixture();
+    const requests = [set("docs", { command: "npx", args: ["-y", "@acme/docs-mcp"], exposure: "deferred" })];
+    const review = await f.changes.change(global, requests, home);
+    expect(review).toMatchObject({ status: "review", changes: [], review: { requiresTap: true } });
+    const exact = review.review!.items[0]!.exact!;
+    expect(exact).toContain("npx");
+    expect(exact).toContain("@acme/docs-mcp");
+    expect(await f.bytes()).toBeUndefined();
+    expect(await approve(f, requests, review.review!)).toMatchObject({ status: "applied" });
+    expect(await f.servers()).toEqual({ docs: { command: "npx", args: ["-y", "@acme/docs-mcp"], exposure: "deferred" } });
+  });
+
+  it("undoes an added server through the same change owner, with one applied audit entry each way", async () => {
+    const f = await fixture();
+    const requests = [set("docs", { command: "npx", args: ["-y", "@acme/docs-mcp"] })];
+    const review = await f.changes.change(global, requests, home);
+    const applied = await approve(f, requests, review.review!);
+    const changeId = applied.changes[0]!.changeId;
+    expect(await f.changes.undo(changeId, { actor: { kind: "home", id: "home" } })).toMatchObject({ status: "applied" });
+    expect(await f.servers()).toEqual({});
+    const entries = (await f.record.page({ filter: entry => entry.key === "tools.mcp.server" })).entries;
+    expect(entries).toHaveLength(2);
+    expect(entries.every(entry => entry.status === "applied")).toBe(true);
+    expect(entries.find(entry => entry.undoOf === changeId)).toMatchObject({ op: "unset" });
+    expect(entries.find(entry => entry.changeId === changeId)).toMatchObject({ op: "set", after: { command: "npx", args: ["-y", "@acme/docs-mcp"] } });
+    expect(entries.find(entry => entry.changeId === changeId)!.before).toBeUndefined();
+  });
+
+  it("applies a disable without a card, and taps an enable or a command change", async () => {
+    const f = await fixture();
+    const first = [set("docs", { command: "npx", args: ["a"] })];
+    await approve(f, first, (await f.changes.change(global, first, home)).review!);
+    const disable = await f.changes.change(global, [set("docs", { command: "npx", args: ["a"], enabled: false })], home);
+    expect(disable).toMatchObject({ status: "applied" });
+    expect((await f.servers()).docs).toEqual({ command: "npx", args: ["a"], enabled: false });
+    const enable = [set("docs", { command: "npx", args: ["a"] })];
+    const enableReview = await f.changes.change(global, enable, home);
+    expect(enableReview).toMatchObject({ status: "review", review: { requiresTap: true } });
+    await approve(f, enable, enableReview.review!);
+    const commandChange = [set("docs", { command: "node", args: ["a"] })];
+    expect(await f.changes.change(global, commandChange, home)).toMatchObject({ status: "review", review: { requiresTap: true } });
+    const exposureOnly = await f.changes.change(global, [set("docs", { command: "npx", args: ["a"], exposure: "hidden" })], home);
+    expect(exposureOnly).toMatchObject({ status: "applied" });
+    const widened = [set("docs", { command: "npx", args: ["a"], exposure: "direct" })];
+    const widenedReview = await f.changes.change(global, widened, home);
+    expect(widenedReview).toMatchObject({ status: "review", review: { requiresTap: true } });
+    await approve(f, widened, widenedReview.review!);
+    expect(await f.changes.change(global, [set("docs", { command: "npx", args: ["a"], exposure: "deferred" })], home)).toMatchObject({ status: "applied" });
+  });
+
+  it("refuses secret-bearing fields without echoing them, and writes nothing", async () => {
+    const f = await fixture();
+    expect(await f.changes.change(global, [set("docs", { command: "npx" })], home)).toMatchObject({ status: "review" });
+    const secret = "sk-live-never-echoed";
+    const attempts = [
+      { command: "npx", env: { API_KEY: secret } },
+      { url: "https://example.com/mcp", headers: { Authorization: `Bearer ${secret}` } },
+      { url: `https://user:${secret}@example.com/mcp` },
+      { url: `https://example.com/mcp?api_key=${secret}` },
+      { command: "npx", args: [`--api-key=${secret}`] },
+      { command: "npx", oauth: { clientSecret: secret } },
+      { command: `npx ${secret}` },
+      { command: `API_KEY=${secret} npx`, args: ["-y", "pkg"] },
+      { command: "npx", args: [`Bearer ${secret}`] },
+      { url: `https://example.com/mcp/${secret}` },
+    ];
+    for (const value of attempts) {
+      const error = await f.changes.change(global, [set("docs", value)], home).catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ code: "invalid_request" });
+      expect(String((error as Error).message)).not.toContain(secret);
+    }
+    expect(await f.bytes()).toBeUndefined();
+  });
+
+  it("refuses to change a record it cannot carry, and keeps unrelated servers and all settings working", async () => {
+    const f = await fixture();
+    const legacy = { url: "https://example.com/legacy", headers: { Authorization: "Bearer legacy-secret-value" } };
+    await writeFile(f.file, JSON.stringify({ mcpServers: { legacy, docs: { command: "node", args: ["docs.js"] } } }));
+    const before = await readFile(f.file, "utf8");
+    for (const request of [set("legacy", { url: "https://example.com/new" }), unset("legacy")]) {
+      const error = await f.changes.change(global, [request], home).catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ code: "conflict" });
+      expect(String((error as Error).message)).not.toContain("legacy-secret-value");
+    }
+    expect(await readFile(f.file, "utf8")).toBe(before);
+    expect(await f.changes.change(global, [set("docs", { command: "node", args: ["docs.js"], enabled: false })], home)).toMatchObject({ status: "applied" });
+    expect((await f.servers()).legacy).toEqual(legacy);
+    await expect(f.settingsModel.resolve(global)).resolves.toBeDefined();
+  });
+
+  it("writes only for Home and Global; ordinary chat, workers and Project layers are refused", async () => {
+    const f = await fixture();
+    expect(await f.changes.change(global, [set("docs", { command: "npx" })], home)).toMatchObject({ status: "review" });
+    const request = set("docs", { command: "npx" });
+    for (const actor of [{ kind: "agent", id: "chat" }, { kind: "worker", id: "task" }]) {
+      await expect(f.changes.change(global, [request], { actor: actor as never, reason: "try" })).rejects.toMatchObject({ code: "invalid_request" });
+    }
+    await expect(f.changes.change(global, [set("docs", { command: "npx" }, "project")], home)).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(f.changes.change(global, [set("docs", { command: "npx" }, "session")], home)).rejects.toMatchObject({ code: "invalid_request" });
+    expect(await f.bytes()).toBeUndefined();
+  });
+
+  it("records Tron's own write once, and still records a hand edit as an outside change", async () => {
+    const f = await fixture();
+    const requests = [set("docs", { command: "npx", args: ["a"] })];
+    const review = await f.changes.change(global, requests, home);
+    await approve(f, requests, review.review!);
+    await f.settingsModel.resolve(global);
+    const outside = async () => (await f.record.page({ filter: entry => entry.key === "tools.mcp.server" && entry.status === "outside" })).entries;
+    expect(await outside()).toEqual([]);
+    await writeFile(f.file, JSON.stringify({ mcpServers: { docs: { command: "npx", args: ["a"] }, hand: { url: "https://example.com/hand" } } }));
+    await f.settingsModel.resolve(global);
+    const hand = await outside();
+    expect(hand).toEqual([expect.objectContaining({ key: "tools.mcp.server", qualifiers: { server: "hand" }, op: "set", redacted: true, status: "outside" })]);
+    expect(JSON.stringify(hand)).not.toContain("https://example.com/hand");
+  });
 });
