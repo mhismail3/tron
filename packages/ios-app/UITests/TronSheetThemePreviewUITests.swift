@@ -21,8 +21,7 @@ final class TronSheetThemePreviewUITests: XCTestCase {
             close(app)
             for (id, title) in [("settings-section-tools-open", "Tools"),
                                 ("settings-link-MCP Servers", "MCP Servers"),
-                                ("settings-link-Extensions", "Extensions"),
-                                ("settings-link-Hooks", "Hooks")] {
+                                ("settings-link-Extensions", "Extensions")] {
                 open(app, id)
                 expand(app, title: title)
                 capture(app, "section-colors-\(title)-\(mode)")

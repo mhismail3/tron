@@ -30,8 +30,8 @@ lookup live in K3, not a second registry here.
   `ModuleHost` reads the started descriptors, never adapter metadata; an absent host
   has no rows. `tron-invocation-settlement` comes first and has no tools or commands.
   Each runtime supplies only `SessionContext`; capability owners stay in descriptor closures.
-- **Session-free inventory** (served by admin's package and hook services with this
-  composition): `hooks.list` (`hooks.v1`) returns the hook fields `session.resources`
+- **Session-free inventory** (admin's package and hook services with this composition;
+  the `settings` tool's `inventory` action reads the hook fields `session.resources`
   returns for one scope. No `cwd` is the global scope against an untrusted home;
   a `cwd` loads project extensions only while the canonical trust decision is true,
   re-read during the load. It never starts a session or replays provider

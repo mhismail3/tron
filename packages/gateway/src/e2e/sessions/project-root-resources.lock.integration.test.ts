@@ -37,7 +37,7 @@ async function localPackage(directory: string, name: string, tool: string): Prom
 }
 
 describe("gateway/session-catalog project-root resources lock", () => {
-  it("project-root-resources: packages and hooks listed for a subdirectory come from the project root", async () => {
+  it("project-root-resources: packages listed for a subdirectory come from the project root", async () => {
     const gateway = await startLockGateway("project-root-resources", { administrativeResources: true });
     gateways.push(gateway);
     const root = await realpath(gateway.root);
@@ -53,17 +53,14 @@ describe("gateway/session-catalog project-root resources lock", () => {
 
     const phone = await gateway.connect("phone");
     const packagesUntrusted = await phone.request("packages.list", { cwd: nested });
-    const hooksUntrusted = await phone.request("hooks.list", { cwd: nested });
     const decided = await phone.request("settings.change", {
       commandId: gateway.commandId(), target: { kind: "global" }, reason: "Trust the lock project",
       changes: [{ key: "permissions.projectTrust", layer: "global", op: "set", value: true, qualifiers: { project: nested } }],
     });
     expect(decided.ok, JSON.stringify(decided)).toBe(true);
     const packagesTrusted = await phone.request("packages.list", { cwd: nested });
-    const hooksTrusted = await phone.request("hooks.list", { cwd: nested });
-    const hooksGlobal = await phone.request("hooks.list", {});
 
-    for (const response of [packagesUntrusted, hooksUntrusted, packagesTrusted, hooksTrusted, hooksGlobal]) {
+    for (const response of [packagesUntrusted, packagesTrusted]) {
       expect(response.ok, JSON.stringify(response)).toBe(true);
     }
     expect(packagesUntrusted.result).toMatchObject({ packages: [], resources: { extensions: [], prompts: [], skills: [], themes: [] } });
@@ -72,20 +69,5 @@ describe("gateway/session-catalog project-root resources lock", () => {
       provides: { commands: [], prompts: [], skills: [], subagents: [], themes: [], tools: ["root_package_tool"] } }]);
     expect(packagesTrusted.result.resources.extensions.map((extension: { path: string }) => extension.path))
       .toEqual([join(project, ".pi", "extensions", "root-hooks.ts"), join(rootPackage, "extensions", "root-package.ts")]);
-    const hooks = (response: { result?: any }) => response.result.extensions.map((extension: { name: string; scope: string; source: string; origin: string;
-      tools: string[]; commands: string[]; handlers: Array<{ event: string; count: number }> }) =>
-      `${extension.name} ${extension.scope} ${extension.source} ${extension.origin} [${extension.tools.join(",")}] (${extension.commands.join(",")}) {${extension.handlers.map((handler) => `${handler.event}×${handler.count}`).join(",")}}`);
-    const builtins = ["builtin:codemode temporary builtin top-level [codemode] () {}", "builtin:tool-search temporary builtin top-level [tool_search] () {}",
-      "builtin:mcp temporary builtin top-level [] (mcp) {session_start×1,before_agent_start×1,tool_call×1,turn_start×1,mcp_servers_change×1,session_shutdown×1}"];
-    expect(hooks(hooksUntrusted)).toEqual(builtins);
-    expect(hooks(hooksTrusted)).toEqual(["root-hooks.ts project auto top-level [root_project_tool] () {tool_call×1}",
-      "root-package.ts project ../vendor/root-package package [root_package_tool] () {tool_call×1}", ...builtins]);
-    for (const response of [hooksUntrusted, hooksTrusted, hooksGlobal]) {
-      expect(response.result).toMatchObject({ extensionLoadErrors: [], extensionLoadWarnings: [] });
-      const total = response.result.extensions.length;
-      expect(response.result.hookInventory).toMatchObject({ encodedBytesLimit: 262_144, textFieldsOmitted: 0, extensions: { omitted: 0, retained: total, total } });
-    }
-    expect(hooksTrusted.result.extensions[0]).toMatchObject({ path: join(project, ".pi", "extensions", "root-hooks.ts") });
-    expect(hooks(hooksGlobal)).toEqual(builtins);
   }, 60_000);
 });

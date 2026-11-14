@@ -3,7 +3,7 @@
 ## Purpose
 
 Mac and iPhone settings, the generic schema renderer shared by all settings surfaces, and management sheets for
-providers, models, extensions, hooks, MCP servers, connected services, paired Macs and devices, notifications and logs.
+providers, models, extensions, MCP servers, connected services, paired Macs and devices, notifications and logs.
 
 ## Owns
 
@@ -17,7 +17,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 - Accounts: `ProviderSettingsView`, `ProviderUsageReadController`, `IntegrationsSettingsView`
   (`IntegrationSheetRoutes`), `MCPServersSettingsView`, `ConnectionSettingsView`,
   `PairedDeviceDetailView`, `MacReplacementSheet`.
-- Extensions: `ExtensionsSettingsView`, `PackageDetailSheet`, `HooksSettingsView`,
+- Extensions: `ExtensionsSettingsView`, `PackageDetailSheet`,
   `ProjectResourcesView`, `TrustSettingsView`.
 - This iPhone and diagnostics: `AppearanceSettingsView`, `AppLocalBehaviorSettings`,
   `PushNotificationsSettingsView`, `NotificationInboxView`, `GatewayLogsSettingsView`.
@@ -26,7 +26,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 
 - **Layout.** The gear opens one sheet: This iPhone (primary: Appearance, one sheet: Dashboard, Subagent Activity, Color Mode, Theme color, Text Font and Code Font),
   Accounts (primary: Connections, Model Providers),
-  Agent & Tools (primary: Agent Behavior first, Tools, MCP Servers, Extensions, Hooks),
+  Agent & Tools (primary: Agent Behavior first, Tools, MCP Servers, Extensions),
   System (steel blue: Mac Terminal, Push Notifications, Setup, Logs). Every category destination
   inherits its group tint for chrome, containers and icons; semantic statuses retain their colors.
   Primary groups use the selected theme's `tronPrimary`; System uses `tronSteel`, not the neutral `tronSlate` role.
@@ -147,8 +147,8 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   Update/Remove), the npm command, read-only Tron Modules and search paths. There is no native
   install form: an agent proposes `sources.packages` (and `sources.npmCommand`) through the exact
   install/trust card (#2172). A package's detail lists
-  what it Provides; `conflict` and `nodeRequirement` (#243) show as statuses. Hooks reads
-  `hooks.list` (`hooks.v1`) per scope; an untrusted project says its hooks are not loaded.
+  what it Provides; `conflict` and `nodeRequirement` (#243) show as statuses. The agent reads
+  hook inventory through the `settings` tool; an untrusted project's hooks are not loaded.
 - **MCP.** MCP Servers uses the Providers row layout and edits Pi's global `mcp.json`
   only. Its add/auth drafts and accepted token follow-up retain the exact destination
   and receipt owner. Jev is a provider credential, not a connection. Retired Connected
