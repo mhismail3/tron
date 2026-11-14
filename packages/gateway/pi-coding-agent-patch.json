@@ -3,12 +3,12 @@
   "package": "@earendil-works/pi-coding-agent",
   "version": "1.5.1",
   "artifact": {
-    "path": "third_party/pi-coding-agent/pi-coding-agent-1.5.1-tron.1.tgz",
-    "integrity": "sha512-XktvLfpEq2RVcCIDLYv1E3howtcXxIj3iy+bu4FEkSz2rHT07+Yvr5+rXuNTCVJfKk0DgIQgTz+bwhe01xryaQ=="
+    "path": "third_party/pi-coding-agent/pi-coding-agent-1.5.1-tron.2.tgz",
+    "integrity": "sha512-a0JgpD2psnZbTsRdgxWZWjdIOk4OVdnN1t/mVhEoNrUhlQ8n00qGS99jLe586VkLTUM8fox6ZlowXnMpjZMu8Q=="
   },
   "patch": {
     "path": "third_party/pi-coding-agent/tron.patch",
-    "sha256": "0d64c42464faf097ce032426be536a50d05a3738a90765b9c2998d5f1a59adca"
+    "sha256": "4e019e0560e06c4f0424929700a965f62a936a8a281e78c7729e7c5236df1e14"
   },
   "license": {
     "path": "third_party/pi-coding-agent/LICENSE",
@@ -31,5 +31,5 @@
     "node": "22.22.0",
     "npm": "10.9.4"
   },
-  "removeWhen": "When a published @earendil-works/pi-coding-agent release provides projectDir (or a reviewed equivalent the Gateway adopts), keeps transcript-held extension prompt sections in the idle session.systemPrompt (#1312), and ends a run start whose preflightResult(\"started\") callback throws without leaving the session busy (#1340), serializes ModelRuntime config reads so readiness cannot overtake a detached registration refresh (#2199), preserves explicitly requested pending tool names when a host narrows the restored loadout before MCP registration (#2181), and bundles undici 8.12.4 or later in both child entry points (#2470), remove the patch as the Gateway README section 'Tron-patched pi-coding-agent' lists, then npm run update:pi-sdk to that release."
+  "removeWhen": "When a published @earendil-works/pi-coding-agent release provides projectDir (or a reviewed equivalent the Gateway adopts), keeps transcript-held extension prompt sections in the idle session.systemPrompt (#1312), and ends a run start whose preflightResult(\"started\") callback throws without leaving the session busy (#1340), serializes ModelRuntime config reads so readiness cannot overtake a detached registration refresh (#2199), preserves explicitly requested pending tool names when a host narrows the restored loadout before MCP registration (#2181), bundles undici 8.12.4 or later in both child entry points (#2470), and prevents the read cancellation-window crash fixed upstream by https://github.com/earendil-works/pi/pull/12025 (#2529), remove the patch as the Gateway README section 'Tron-patched pi-coding-agent' lists, then npm run update:pi-sdk to that release."
 }
