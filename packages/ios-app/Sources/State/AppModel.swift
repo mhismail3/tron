@@ -652,7 +652,6 @@ final class AppModel {
         self.chatInteractionTrace = chatInteractionTrace
         self.diagnostics = AppDiagnostics(
             lifecycle: lifecycle,
-            dashboardConnections: dashboardConnections,
             appLog: appLog,
             chatInteractionTrace: chatInteractionTrace,
             diagnosticStore: diagnosticStore
