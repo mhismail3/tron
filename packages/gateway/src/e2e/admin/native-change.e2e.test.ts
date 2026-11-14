@@ -416,9 +416,14 @@ describe("typed changes and exact native acceptance", () => {
     expect(await valueOf()).toEqual(baseBefore);
     const trust = await service.invoke(phone, "settings.change", { commandId: `home-writer-${++sequence}`, target: { kind: "global" },
       changes: [{ key: "permissions.defaultProjectTrust", layer: "global", op: "set", value: "always" }] }) as unknown as { changes: Array<{ changeId: string }> };
-    const refused = await settingsTurn(f, home, { action: "undo", changeId: trust.changes[0]!.changeId, reason: "Home reverts the trust policy" }, "home-undo-writer");
+    const chat = await f.registry.create(f.cwd);
+    await chat.setModel(f.model.provider, f.model.id);
+    const before = await service.invoke(phone, "settings.history", { key: "permissions.defaultProjectTrust" }) as unknown as { entries: unknown[] };
+    const refused = await settingsTurn(f, chat, { action: "undo", changeId: trust.changes[0]!.changeId, reason: "Ordinary chat reverts the trust policy" }, "agent-undo-writer");
     expect(refused.isError).toBe(true);
-    expect(textOf(refused)).toBe("Default trust policy cannot be changed by home");
+    expect(textOf(refused)).toBe("An agent can undo only settings changes made by or in its own session");
+    expect(await valueOf()).toEqual(baseBefore);
+    expect(await service.invoke(phone, "settings.history", { key: "permissions.defaultProjectTrust" })).toEqual(before);
   });
 
   it("an ordinary agent's Undo that restores image visibility shows one native card; decline and stale acceptance leave the store unchanged, and accept applies the reviewed change with its undoOf logged", async () => {

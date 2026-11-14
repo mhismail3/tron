@@ -464,10 +464,14 @@ describe("settings.change", () => {
   caseIt("refuses unauthorized bundles before review and discloses no credentials in a native preview", async owner => {
     const f = await fixture(owner);
     const actor = { actor: { kind: "home" as const, id: "home-fixture" }, reason: "Change the declared setting" };
+    const agentCwd = join(f.root, "bundle-chat");
+    await mkdir(agentCwd);
+    const agentChat = await f.registry.create(agentCwd);
     await expect(f.settingsChanges.change({ kind: "global" }, [
       { key: "run.retry.maxRetries", layer: "global", op: "set", value: 8 },
       { key: "permissions.defaultProjectTrust", layer: "global", op: "set", value: "always" },
-    ], actor)).rejects.toMatchObject({ code: "invalid_request", message: "Default trust policy cannot be changed by home" });
+    ], { actor: { kind: "agent", id: agentChat.id, sessionId: agentChat.id }, reason: "Ordinary chat bundles trust with a retry" }))
+      .rejects.toMatchObject({ code: "invalid_request", message: "Default trust policy cannot be changed by agent" });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
     expect(await f.history()).toEqual([]);
     const preview = await f.settingsChanges.change({ kind: "global" }, [
