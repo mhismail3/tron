@@ -23,6 +23,8 @@ import { OutsideChanges } from "../../admin/settings-outside.js";
 import { McpAdminService } from "../../admin/mcp-admin-service.js";
 import { createTronSettingsExtension } from "../../admin/tron-settings-extension.js";
 import { ModelConfigService } from "../../admin/model-config-service.js";
+import { AuthBroker } from "../../admin/auth-broker.js";
+import { GlobalProviderResources } from "../../admin/global-provider-resources.js";
 import { type SettingsStores } from "../../kernel/settings/settings-types.js";
 import { composedBelow, readBinding } from "../../kernel/settings/settings-resolver.js";
 import { type Resolution } from "../../kernel/settings/tool-contract.js";
@@ -361,7 +363,7 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
   await mkdir(agentDir, { recursive: true });
   const faux = fauxProvider({ provider: "tron-settings-change", tokensPerSecond: 10_000, models: [{ id: "first", reasoning: true }, { id: "second", reasoning: true }] });
   const runtimeFactory = async () => {
-    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    const runtime = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json"), refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
     return runtime;
   };
@@ -392,14 +394,14 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
   });
   registry.setSettings(settingsModel, settingsChanges);
   const broadcasts: Array<{ topic: string; payload: unknown }> = [];
-  let modelRefreshes = 0;
   const pushes: Array<{ sourceId: string; title: string; message: string }> = [];
   const notifications = { enqueue: async (push: { sourceId: string; title: string; message: string }) => { pushes.push(push); } };
+  const globalProviderResources = await GlobalProviderResources.create({ cwd: root, agentDir, modelRuntime, auth: new AuthBroker(modelRuntime, () => {}), log: () => {}, broadcast: () => {} });
   const service = new GatewayService({ display: displayOwnerOf(registry),
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },
     modelRuntime, trust, settingsModel, settingsChanges, sessions: registry, receipts: new CommandReceiptStore(tronHome), notifications,
     broadcast: (topic: string, payload: unknown) => broadcasts.push({ topic, payload }),
-    globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {}, refreshModels: async () => { modelRefreshes += 1; } },
+    globalProviderResources,
     mcpAdmin,
     modelConfig,
   } as unknown as GatewayServiceDependencies);
@@ -433,7 +435,7 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
     }
     return false;
   };
-  return { root, tronHome, agentDir, trust, macTerminalKeys, registry, service, record, settingsModel, settingsChanges, broadcasts, pushes, published, outside, change, agentChange, history, macDocument, faux, modelRefreshes: () => modelRefreshes };
+  return { root, tronHome, agentDir, trust, macTerminalKeys, registry, service, record, settingsModel, settingsChanges, broadcasts, pushes, published, outside, change, agentChange, history, macDocument, faux, modelRuntime };
 }
 
 async function gitProject(root: string, name: string) {
@@ -1235,7 +1237,7 @@ describe("outside changes to MCP servers and custom models", () => {
     expect(await f.settingsChanges.change(global, [set("tron-provider", provider)], { ...home, actor: { kind: "ui", id: "device:phone" }, confirmationDigest: review.review!.digest }))
       .toMatchObject({ status: "applied" });
     expect(await providers()).toEqual({ "tron-provider": provider });
-    expect(f.modelRefreshes()).toBe(1);
+    expect(f.modelRuntime.getModel("tron-provider", "m")).toBeDefined();
     await f.settingsModel.resolve(global);
     expect((await outsideEntries(f)).filter(entry => entry.qualifiers?.provider === "tron-provider")).toEqual([]);
     const secret = "sk-provider-never-echoed";
@@ -1269,6 +1271,21 @@ describe("outside changes to MCP servers and custom models", () => {
     expect(Object.keys(served.document.providers)).toEqual(["hand-provider"]);
     expect(JSON.stringify(served)).not.toContain(secret);
     transcript.push({ case: "outside mcp and models", detail: await outsideEntries(f) });
+  });
+  caseIt("refuses a provider write while models.json holds an unrelated invalid entry, and never persists or reports it applied", async owner => {
+    const f = await fixture(owner);
+    const global = { kind: "global" as const };
+    const modelsPath = join(f.agentDir, "models.json");
+    const broken = `${JSON.stringify({ providers: { broken: { baseUrl: 5, api: "openai-completions", models: [{ id: "x" }] } } }, null, 2)}\n`;
+    await writeFile(modelsPath, broken);
+    const set = { key: "accounts.models.provider", qualifiers: { provider: "tron-provider" }, layer: "global" as const, op: "set" as const,
+      value: { baseUrl: "https://tron-models.invalid/v1", api: "openai-completions", models: [{ id: "m" }] } };
+    const home = { actor: { kind: "home" as const, id: "home" }, reason: "Add the custom model endpoint" };
+    const review = await f.settingsChanges.change(global, [set], home);
+    const error = await f.settingsChanges.change(global, [set], { ...home, actor: { kind: "ui" as const, id: "device:phone" }, confirmationDigest: review.review!.digest }).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: "invalid_request", message: expect.stringContaining("Invalid models.json schema") });
+    expect(await readFile(modelsPath, "utf8")).toBe(broken);
+    expect(f.modelRuntime.getModel("tron-provider", "m")).toBeUndefined();
   });
 });
 

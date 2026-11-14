@@ -438,4 +438,13 @@ describe("global provider resources", () => {
     expect(runtime.getModel("tron-provider", "local-model")).toBeDefined();
     expect(f.broadcast).toHaveBeenCalledTimes(1);
   });
+
+  it("fails a catalog refresh whose models.json the runtime cannot load, with its cause, and logs it", async () => {
+    const f = await fixture();
+    await writeFile(join(f.agentDir, "models.json"), `${JSON.stringify({ providers: { broken: { baseUrl: 5, api: "openai-completions" } } })}\n`);
+    const runtime = await ModelRuntime.create({ authPath: join(f.agentDir, "auth.json"), modelsPath: join(f.agentDir, "models.json"), refreshOnCreate: false });
+    const resources = await GlobalProviderResources.create({ cwd: f.root, agentDir: f.agentDir, modelRuntime: runtime, auth: f.broker, log: f.log, broadcast: f.broadcast });
+    expect(f.log).toHaveBeenCalledWith("error", expect.stringContaining("Invalid models.json schema"));
+    await expect(resources.refreshModels()).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("Invalid models.json schema") });
+  });
 });
