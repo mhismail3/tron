@@ -139,7 +139,7 @@ describe("settings worker changes and Session fences", () => {
     expect(refused).toMatchObject({ isError: true });
     expect(refused.text).toContain("Default trust policy cannot be changed by worker");
     expect(await defaultTrustOnDisk(f.agentDir)).not.toBe("always");
-    expect((await f.settingsChanges.history({ key: "permissions.defaultProjectTrust" })).entries).toEqual([]);
+    expect((await f.settingsChanges.history({ key: "permissions.defaultProjectTrust" }, { kind: "ui", id: "maintainer" })).entries).toEqual([]);
     transcript.push({ case: "registered worker default-trust change refused", steps: [{ refused: refused.text }] });
   }, 90_000);
 

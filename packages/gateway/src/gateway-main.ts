@@ -84,6 +84,7 @@ import { runtimeIdentity } from "./transport/runtime-identity.js";
 import { assertHomeLayout, tronHomePath } from "./foundation/tron-home-layout.js";
 
 const moduleGraphLoadedAt = performance.now();
+process.env.PI_TELEMETRY = "0";
 const tronHome = resolveTronHome();
 const agentDir = resolveAgentDir(tronHome);
 await assertHomeLayout(tronHome);
@@ -290,7 +291,7 @@ const homeComposition: HomeComposition = {
   homeTaskDiagnostic,
 };
 const { modules, home, projects } = await startGatewayModules({ tronHome: config.tronHome, log: logger },
-  () => ({ registry: sessions, home: homeComposition, openAIModelEligibility, connections, scheduleToolOperations, sessionSearch,
+  () => ({ registry: sessions, home: homeComposition, openAIModelEligibility, connections, scheduleToolOperations, sessionSearch, maxUploadBytes: config.maxUploadBytes,
     display,
     recentModelsChanged: () => transport?.broadcast("models.recentChanged", {}), persistenceDiagnostic }));
 const globalProviderResources = await GlobalProviderResources.create({

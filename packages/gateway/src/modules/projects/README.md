@@ -22,7 +22,7 @@ Home work once (one task-store pass for all rows), never once per folder or page
   1–64 ASCII letters, digits, underscores or hyphens, starting with a letter or digit.
   It exclusively creates `~/Workspace/<name>` and initializes Git on `main` with no
   templates/hooks. Existing paths, traversal and symlinks refuse. Creation
-  intent/completion/failure are logged in Settings Changes. The new exact directory is
+  intent/completion/failure are recorded in the settings change record. The new exact directory is
   explicitly untrusted before Git initialization, even under default-always trust or an
   enclosing repository, and becomes trusted only after the exact tap. A partial
   creation is retained, never deleted.
@@ -103,7 +103,7 @@ changes. No second project cache, change stream or approval engine is introduced
 
 ## Signals
 
-Settings Changes key `project.lifecycle` (started/applied/failed action facts) diagnoses
+Settings change record key `project.lifecycle` (started/applied/failed action facts) diagnoses
 the phase. A failed or uncertain action instructs the requester to inspect operation
 state before retry.
 

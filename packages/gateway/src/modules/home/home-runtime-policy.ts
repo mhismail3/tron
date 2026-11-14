@@ -2,7 +2,7 @@ import type { RuntimeSlot } from "../../kernel/run/runtime-slot.js";
 
 export const HOME_TOOL_NAMES: readonly string[] = [
   "ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "schedule", "profile", "obligation",
-  "web_search", "session_search", "session_read", "settings", "projects",
+  "web_search", "session_search", "session_read", "session_import", "settings", "projects",
   "read", "write", "edit", "bash", "grep", "find", "ls", "computer",
 ];
 

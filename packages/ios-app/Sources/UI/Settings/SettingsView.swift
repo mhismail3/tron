@@ -70,7 +70,7 @@ struct SettingsView: View {
                         }
                         TronSettingsDivider()
                         settingsLink("Setup", summary: "Import, session storage, telemetry, and prototypes", icon: "gearshape.2") {
-                            SetupSettingsView(onImported: onImported)
+                            SetupSettingsView()
                         }
                         TronSettingsDivider()
                         settingsLink("Logs", summary: "Diagnostics from this iPhone and your Macs", icon: "text.alignleft") {
@@ -437,14 +437,9 @@ struct SettingsProjectGroups: View {
 }
 
 struct SetupSettingsView: View {
-    let onImported: (AppModel.SessionNavigationRoute) -> Void
-
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             TronSettingsSections(alignment: .leading, spacing: 20, hidesLoneHeading: true) {
-                TronSettingsGroup("Import", detail: "Open a Tron session export in a new session.") {
-                    ImportSessionRow(onImported: onImported)
-                }
                 SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global",
                                      presentation: .section("setup"), embedded: true)
                 ExperimentalSettingsContent()

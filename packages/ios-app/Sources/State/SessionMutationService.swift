@@ -63,19 +63,6 @@ final class SessionMutationService {
         self.uuidSource = uuidSource
     }
 
-    func importSession(uploadID: String, cwd: String) async throws -> String {
-        struct Params: Codable { let uploadId, cwd, commandId: String }
-        let commandID = uuidSource.next().uuidString
-        let params = Params(uploadId: uploadID, cwd: cwd, commandId: commandID)
-        let response: SessionIDResponse = try await executor.perform(
-            method: "session.import",
-            commandID: commandID
-        ) {
-            try await client.request("session.import", params, timeout: GatewayRequestTimeout.sessionImport)
-        }
-        return response.sessionId
-    }
-
     func createSession(
         cwd: String,
         sourceControl: SessionSourceControlSelection? = nil

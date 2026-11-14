@@ -1241,23 +1241,6 @@ export class GatewayService {
         }) as { sessionId: string };
         return safeJson(created);
       }
-      case "session.import": {
-        const imported = await this.mutation(client, method, params, async () => {
-          const uploadId = string(params.uploadId, "uploadId", { max: 100 });
-          const importLease = await this.dependencies.uploads.prepareSessionImport(uploadId);
-          try {
-            const slot = await this.dependencies.sessions.importFromJsonl(
-              importLease.path,
-              string(params.cwd, "cwd", { max: 4_096 }),
-            );
-            await this.dependencies.uploads.remove(uploadId).catch(() => {});
-            return safeJson({ sessionId: slot.id });
-          } finally {
-            await importLease.release();
-          }
-        }) as { sessionId: string };
-        return safeJson(imported);
-      }
       case "session.open": {
         const sessionId = string(params.sessionId, "sessionId", { max: 200 });
         const slot = await abortableRead(client.signal, () => this.dependencies.sessions.acquire(sessionId, client.signal));

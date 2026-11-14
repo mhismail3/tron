@@ -27,7 +27,7 @@ Current behavior: [settings contract](settings-contract.md).
 - Missing/untrusted/unreadable Project settings contribute nothing. Session rows remain editable and
   show Session/Global values, never the Project pill. A notice says respectively “Project settings
   aren't applied until this project is trusted” or “Project settings couldn't be read”; details name
-  the path. Trust changes remain in Trusted Projects, not an automatic approval in this sheet.
+  the path. Trust changes stay on the native trust card, not an automatic approval in this sheet.
 - Unknown/disallowed repo keys are ignored with bounded diagnostics naming file/key/reason, never
   secret values. Permissions, trust, credentials, approval floors, grants and budgets are forbidden
   even in trusted repos. This deliberately tightens existing unsafe Project behavior, not parity loss
@@ -90,7 +90,6 @@ mechanism; its restricted execution recipe is not expanded by this redesign (dec
 | `sources.themes` | sources | P,M | no | yes | no | Resource reload |
 | `sources.packages` | sources | P,M | no | yes | no | Exact install card/resource reload; trusted code |
 | `sources.npmCommand` | sources | M | no | no | no | Next package operation |
-| `setup.installTelemetry` | setup | M | no | no | no | Next request |
 
 Model-qualified keys: chat thinking, context window, compaction reserve/recent. Dynamic instances:
 trust by project, terminal key by device, floors by key/direction. Expanding these is not a new key.
@@ -173,13 +172,14 @@ pills and passive Overridden tags reuse the shared control/status owners.
 | UI locks `settings-value-source` (light/dark) | Delete source-only golden/assertion after naming surviving row/pill/undo oracles; explicit approval before golden changes |
 | Other settings/admin goldens | Inspect semantic diffs; retain real-boundary locks; no blanket regeneration or unrelated UI updates |
 
-Global Changes filters: scope (Global, session id+title, Home Profile; searchable archived/deleted
+Retired (5.9): the app has no Changes screen. The audit is `settings.history` and the agent's history tool.
+Filters the record supports: scope (Global, session id+title, Home Profile; searchable archived/deleted
 session identity), key, group, actor (maintainer/Home/worker task with task/session identity), time,
 status. Each entry snapshots scope title/group/key at write so renames/deletion do not orphan filters;
 show redacted old→new and Undo or its precise refusal. Preserve pending approvals and receipt fencing.
 Project repo edits do not create new Tron settings entries; diagnostics/trust state have their own
 owners. Non-repo outside edits to Global remain observed changes. Historical Project entries stay
-readable in Global Changes; no request or Undo writes Project settings.
+readable in the settings history; no request or Undo writes Project settings.
 
 ## One migration, backup and verification
 

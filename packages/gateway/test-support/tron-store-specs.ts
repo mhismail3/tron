@@ -252,7 +252,7 @@ export const STORES: readonly StoreSpec[] = [
   },
   {
     module: "gateway/machine", name: "store-uploads",
-    paths: ["state/uploads", "state/upload-bodies", "state/upload-objects", "state/upload-imports"],
+    paths: ["state/uploads", "state/upload-bodies", "state/upload-objects"],
     live: "absolute body paths and hard-linked objects",
     async record(home) {
       const uploads = new UploadStore(home, 1_048_576);
