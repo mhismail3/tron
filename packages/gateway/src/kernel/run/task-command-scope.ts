@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { readdir, rm } from "node:fs/promises";
+import { appendFileSync, closeSync, constants, existsSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { lstat, open, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import { dirname, join } from "node:path";
 
@@ -164,6 +164,22 @@ export async function taskCommandProcesses(scope: TaskCommandScope, table?: Proc
   return ownedProcesses(current, liveRecordedGroups(scope, current), holders);
 }
 
+async function restoreDirectoryPermissions(path: string): Promise<void> {
+  const info = await lstat(path).catch(error => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (!info?.isDirectory()) return;
+  const directory = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  try {
+    const mode = (await directory.stat()).mode;
+    if ((mode & 0o300) !== 0o300) await directory.chmod(mode | 0o300);
+    for (const entry of await readdir(path, { withFileTypes: true })) {
+      if (entry.isDirectory()) await restoreDirectoryPermissions(join(path, entry.name));
+    }
+  } finally { await directory.close(); }
+}
+
 export type TaskScopeReap =
   | { outcome: "reaped"; processes: number; survivors: 0 }
   | { outcome: "refused"; reason: "process-table-unreadable" | "survivors" | "rebound" | "remove-failed"; processes: number; survivors: number };
@@ -189,6 +205,7 @@ export async function reapTaskCommandScope(scope: TaskCommandScope, taskId: stri
   if (survivors > 0) return { outcome: "refused", reason: "survivors", processes: owned.size, survivors };
   if (!settled()) return { outcome: "refused", reason: "rebound", processes: owned.size, survivors: 0 };
   try {
+    await restoreDirectoryPermissions(scope.tmp);
     await rm(scope.tmp, { recursive: true, force: true, maxRetries: 2 });
     await rm(scope.directory, { recursive: true, force: true, maxRetries: 2 });
   }

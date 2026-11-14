@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
@@ -75,6 +75,40 @@ describe("Home task command scope", () => {
     expect(await reapTaskCommandScope(scope, "short-task")).toEqual({ outcome: "reaped", processes: 0, survivors: 0 });
     expect(existsSync(scope.tmp)).toBe(false);
     expect(existsSync(join(taskCommandRoot(), sessionId))).toBe(false);
+  });
+
+  it("reaps read-only fixture directories without changing symlink targets outside its tmp (#2527)", async () => {
+    const f = await fixture();
+    const scope = bindTaskCommandScope("readonly-session", "readonly-task");
+    const locked = join(scope.tmp, "invalid-fixture");
+    const nested = join(locked, "nested");
+    const outside = join(f.cwd, "outside");
+    const sentinel = join(outside, "sentinel");
+    await mkdir(nested, { recursive: true });
+    await mkdir(outside);
+    await writeFile(join(nested, "fixture"), "fixture");
+    await writeFile(sentinel, "untouched", { mode: 0o400 });
+    await symlink(outside, join(locked, "outside-directory"));
+    await symlink(sentinel, join(locked, "outside-file"));
+    await symlink(scope.tmp, join(locked, "cycle"));
+    await symlink(join(f.cwd, "missing"), join(locked, "dangling"));
+    await chmod(outside, 0o500);
+    await chmod(nested, 0o400);
+    await chmod(locked, 0o500);
+    try {
+      expect(settleTaskCommandScope(scope, "readonly-task")).toBe(true);
+      expect(await reapTaskCommandScope(scope, "readonly-task")).toEqual({ outcome: "reaped", processes: 0, survivors: 0 });
+      expect(existsSync(scope.tmp)).toBe(false);
+      expect(existsSync(scope.directory)).toBe(false);
+      expect((await stat(outside)).mode & 0o777).toBe(0o500);
+      expect((await stat(sentinel)).mode & 0o777).toBe(0o400);
+      expect(await readFile(sentinel, "utf8")).toBe("untouched");
+    } finally {
+      if (existsSync(locked)) await chmod(locked, 0o700);
+      if (existsSync(nested)) await chmod(nested, 0o700);
+      await chmod(outside, 0o700);
+      await rm(scope.tmp, { recursive: true, force: true });
+    }
   });
 
   it("keeps a group recorded after the process table it prunes against", async () => {
