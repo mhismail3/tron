@@ -189,7 +189,7 @@ describe("session.open request span", () => {
     expect(persisted.unaccountedMs).toBeDefined();
     expect(persisted.unaccountedMs as number).toBeGreaterThanOrEqual(0);
     expect(persisted.unaccountedMs as number).toBeLessThanOrEqual(persisted.durationMs as number);
-    expect(stagesOf(persisted.stages as string).has("session.open.attempt")).toBe(true);
+    expect(stagesOf(persisted.stages as string).has("session.open.catalog")).toBe(true);
 
     const report = {
       failureRecord: {
