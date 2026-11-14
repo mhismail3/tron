@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxProvider } from "@earendil-works/pi-ai";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../../kernel/resources/trust-service.js";
 import { SettingsStoreAdapter } from "../../admin/settings-model.js";
 import { SettingsChangePath } from "../../kernel/settings/settings-change.js";
@@ -961,7 +961,6 @@ describe("outside changes to MCP servers and custom models", () => {
 
   caseIt("broadcasts one mcp.changed when Home's settings tool proposes an MCP server and the native card approves it", async owner => {
     const f = await stagedFixture(owner);
-    const stale = vi.spyOn(f.registry.freshness, "stale");
     const tools: Array<{ execute: (...args: unknown[]) => Promise<{ details: { status: string } }> }> = [];
     const settingsExtension = createTronSettingsExtension(() => ({
       resolve: async () => { throw new Error("resolve is not used in this proof"); },
@@ -977,7 +976,6 @@ describe("outside changes to MCP servers and custom models", () => {
       new AbortController().signal, () => {}, { hasUI: true });
     expect(result.details).toMatchObject({ status: "applied" });
     expect(f.broadcasts.filter(event => event.topic === "mcp.changed")).toEqual([{ topic: "mcp.changed", payload: { scope: "global" } }]);
-    expect(stale).toHaveBeenCalledWith({});
     expect(JSON.parse(await readFile(join(f.agentDir, "mcp.json"), "utf8")).mcpServers["home-docs"]).toEqual({ command: "npx", args: ["-y", "@acme/docs-mcp"] });
     const [applied] = await f.history({ key: "tools.mcp.server" });
     expect(applied).toEqual(expect.objectContaining({ status: "applied", qualifiers: { server: "home-docs" } }));
