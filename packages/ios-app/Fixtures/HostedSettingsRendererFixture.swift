@@ -244,10 +244,9 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     private var decided: [String: Bool] = [:]
     private var catalogRefreshes = 0
     private var customReads = 0
-    private var customWrites = 0
     private var credentialWrites = 0
     func providerOperationSummary() -> String {
-        "refresh:\(catalogRefreshes) custom-read:\(customReads) custom-write:\(customWrites) credentials:\(credentialWrites)"
+        "refresh:\(catalogRefreshes) custom-read:\(customReads) credentials:\(credentialWrites)"
     }
     func decisionSummary() -> String { "decisions:\(decided.count) approved:\(decided.values.filter { $0 }.count)" }
 
@@ -272,9 +271,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         case "models.custom.get":
             customReads += 1
             result = .object(["document": .object(["providers": .object([:])]), "redacted": .bool(false)])
-        case "models.custom.put":
-            customWrites += 1
-            result = .object([:])
         case "provider.list":
             result = .object(["providers": .array([.object([
                 "id": .string("fixture"), "name": .string("Fixture Provider"),

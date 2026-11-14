@@ -1,6 +1,6 @@
 import { GatewayError } from "../../errors.js";
-import { redactCredentials } from "../../util/credential-redaction.js";
 import { arrayOfStrings, boolean, object, oneOf, string } from "../../util/validation.js";
+import { refuseSetting as refuse, SECRET_NAME, secretFreeText as checkedText, secretFreeUrl as checkedUrl } from "./secret-free.js";
 import type { Direction } from "./tool-contract.js";
 import type { ValueType } from "./settings-types.js";
 
@@ -16,16 +16,10 @@ export interface McpServerValue {
 }
 
 const FIELDS = ["command", "args", "url", "enabled", "exposure"] as const;
-const SECRET_NAME = /(token|secret|password|passwd|api[-_]?key|apikey|credential|bearer|authorization)/iu;
-
-function refuse(label: string, reason: string): never {
-  throw new GatewayError("invalid_request", `${label} ${reason}`);
-}
+const MCP_HINT = "MCP secrets are set in mcp.json or the app, never through settings";
 
 function secretFreeText(text: string, label: string, what: string): string {
-  if (redactCredentials(text) !== text) refuse(label, `${what} carries a credential; MCP secrets are set in mcp.json or the app, never through settings`);
-  if (/[\u0000\r\n]/u.test(text)) refuse(label, `${what} has a control character`);
-  return text;
+  return checkedText(text, label, what, MCP_HINT);
 }
 
 function secretFreeToken(token: string, label: string, what: string): string {
@@ -36,15 +30,7 @@ function secretFreeToken(token: string, label: string, what: string): string {
 }
 
 function secretFreeUrl(value: string, label: string): string {
-  secretFreeText(value, label, "url");
-  let parsed: URL;
-  try { parsed = new URL(value); } catch { refuse(label, "must be an absolute URL"); }
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") refuse(label, "must use HTTP or HTTPS");
-  if (parsed.username || parsed.password) refuse(label, "must not carry credentials; MCP secrets are set in mcp.json or the app");
-  for (const name of parsed.searchParams.keys()) {
-    if (SECRET_NAME.test(name)) refuse(label, "carries a secret in its query; MCP secrets are set in mcp.json or the app");
-  }
-  return value;
+  return checkedUrl(value, label, MCP_HINT);
 }
 
 export function validateMcpServerValue(value: unknown, label: string): McpServerValue {

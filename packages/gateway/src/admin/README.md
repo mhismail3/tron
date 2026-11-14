@@ -74,8 +74,8 @@ In short:
 RPCs (shapes in the [Gateway README](../../README.md)): `settings.resolve`,
 `settings.options`, `settings.change` (with `dryRun`), `settings.undo`,
 `settings.applyAgain`, `settings.history`, plus `home.profileChange` for learned-profile notes.
-Broadcasts: `settings.changed`, `trust.changed`, `mcp.changed`,
-`models.customChanged`. Agents reach the same path through the `settings` tool
+Broadcasts: `settings.changed`, `trust.changed`, `mcp.changed`.
+Agents reach the same path through the `settings` tool
 (a thin client of resolve and change); Home's tool may target a delegated
 worker by `taskId`.
 
@@ -94,8 +94,10 @@ are installed; schema access never evaluates their late-bound service getter.
 
 - Every write of a declared key or record subject goes through
   `SettingsChangePath`; there are no per-key setters and no second store. A
-  Tron-made `mcp.json` write runs inside the outside-change bracket, so it is
-  audited once by the change path and never as a hand edit.
+  Tron-made `mcp.json` or `models.json` write runs inside the outside-change bracket, so it is
+  audited once by the change path and never as a hand edit. `ModelConfigService` is the only writer of
+  `models.json` providers; a provider change refreshes the shared runtime through
+  `GlobalProviderResources.refreshModels` before the change returns.
 - A value at a layer the key does not allow is ignored and reported, never
   applied. A repository never grants itself trust; an untrusted `.pi/` is
   present but not applied and never written.

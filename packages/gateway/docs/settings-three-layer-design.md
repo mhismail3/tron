@@ -96,8 +96,8 @@ mechanism; its restricted execution recipe is not expanded by this redesign (dec
 
 Model-qualified keys: chat thinking, context window, compaction reserve/recent. Dynamic instances:
 trust by project, terminal key by device, floors by key/direction. Expanding these is not a new key.
-Outside the resolved-key registry: `tools.mcp.server` and `accounts.models.provider` are digest-only
-record subjects; `home.profile.item` is a learned-note subject. Keep their guided editors and audit
+Outside the resolved-key registry: `tools.mcp.server` and `accounts.models.provider` are record subjects
+(outside edits compare by digest; Tron's writes carry a closed, secret-free value); `home.profile.item` is a learned-note subject. Keep their guided editors and audit
 privacy. Repo MCP credentials are never admitted; preserve repo executable definitions only behind
 trust and explicit credential separation. Learned profile notes never become an extra settings layer.
 

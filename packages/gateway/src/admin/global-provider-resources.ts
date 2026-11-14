@@ -65,6 +65,17 @@ export class GlobalProviderResources {
     return this.mutex.run(read, signal);
   }
 
+  refreshModels(): Promise<void> {
+    return this.mutex.run(async () => {
+      try {
+        const result = await this.modelRuntime.refresh({ allowNetwork: false });
+        for (const [providerId, error] of result.errors) this.log("warning", `Global provider ${providerId} refresh failed: ${error.message}`);
+      } finally {
+        this.broadcast();
+      }
+    });
+  }
+
   requestReload(): void {
     this.requestedRevision += 1;
     this.auth.requestGlobalProviderRefresh(async () => {

@@ -178,10 +178,12 @@ const mcpAdmin = new McpAdminService(
   new MacKeychainMcpCredentialOwner(),
   (level, message, event, fields) => logger.log(level, message, { event, source: "mcp", ...fields }),
 );
+const modelConfig = new ModelConfigService(config.agentDir);
 const settingsModel = new SettingsModel(new SettingsStoreAdapter({
   schema: settingsSchema,
   macTerminalKeys,
   mcpAdmin,
+  modelConfig,
   agentDir: config.agentDir,
   tronHome: config.tronHome,
   trust,
@@ -195,7 +197,6 @@ let settingsChanges: SettingsChangePath;
 const settingsRecord = new SettingsChangeRecord(config.tronHome);
 const outsideSettings = new OutsideChanges(settingsSchema, config.tronHome, config.agentDir, settingsRecord, settingsModel.owner.observedReaders);
 settingsModel.owner.observeOutside(outsideSettings);
-const modelConfig = new ModelConfigService(config.agentDir);
 const receipts = new CommandReceiptStore(config.tronHome);
 await receipts.prune();
 startupCheckpoint("command-receipts");

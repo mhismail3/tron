@@ -4,6 +4,7 @@ import { type Control, type Effect, type Timing, type ValueType, type Writer, DE
 import { MODEL_QUEUE_ROLES, modelQueueKey, type QualifierName, type Direction } from "./tool-contract.js";
 import type { StoreLayer } from "./settings-types.js";
 import { mcpServerDirection, mcpServerType } from "./mcp-server-value.js";
+import { modelProviderDirection, modelProviderType } from "./model-provider-value.js";
 
 interface SectionDeclaration { id: string; title: string; description: string; order: number; harness: boolean; note?: string; chatInline?: boolean }
 
@@ -32,7 +33,8 @@ export type Binding =
   | { store: "mac-terminal" }
   | { store: "mac-terminal-service" }
   | { store: "gateway"; path: readonly string[] }
-  | { store: "mcp" };
+  | { store: "mcp" }
+  | { store: "models" };
 
 export type TimingDeclaration = Timing | { widen: Timing; narrow: Timing };
 
@@ -524,6 +526,7 @@ export function hasSessionSettingsApplier(key: KeyDeclaration): boolean {
 }
 
 export interface RecordWrite {
+  store: "mcp" | "models";
   writers: readonly Writer[];
   tap: NonNullable<KeyDeclaration["tap"]>;
   type: ValueType;
@@ -540,15 +543,19 @@ export interface RecordSubject {
   group: string;
   container: string;
   qualifier: QualifierName;
+  pattern: RegExp;
   write?: RecordWrite;
 }
 
 export const RECORD_SUBJECTS: readonly RecordSubject[] = [
-  { id: "tools.mcp.server", label: "MCP server", group: "tools", container: "mcpServers", qualifier: "server",
-    write: { writers: ["ui", "home"], tap: "trust", type: mcpServerType, direction: mcpServerDirection, effect: "reload", timing: "live",
+  { id: "tools.mcp.server", label: "MCP server", group: "tools", container: "mcpServers", qualifier: "server", pattern: /^[A-Za-z0-9_-]{1,128}$/u,
+    write: { store: "mcp", writers: ["ui", "home"], tap: "trust", type: mcpServerType, direction: mcpServerDirection, effect: "reload", timing: "live",
       help: "An MCP server Tron starts on this Mac. Its command runs with this Mac's permissions.",
       confirm: "Adding or enabling a server, or changing its command or address, runs it on this Mac." } },
-  { id: "accounts.models.provider", label: "Custom model provider", group: "accounts", container: "providers", qualifier: "provider", },
+  { id: "accounts.models.provider", label: "Custom model provider", group: "accounts", container: "providers", qualifier: "provider", pattern: /^[a-z0-9][a-z0-9._-]{0,119}$/iu,
+    write: { store: "models", writers: ["ui", "home"], tap: "privacy", type: modelProviderType, direction: modelProviderDirection, effect: "next-request", timing: "live",
+      help: "A custom model endpoint. Its address receives the prompts of every chat that uses one of its models.",
+      confirm: "Adding a provider or changing its address or API sends your conversations to that address." } },
 ];
 
 export function recordSubject(id: string): RecordSubject | undefined {
@@ -561,7 +568,7 @@ export function recordKey(id: string): KeyDeclaration | undefined {
   const write = subject.write;
   return {
     id, group: subject.group, qualifier: subject.qualifier, type: write.type, sessionOverridable: false, projectSettable: false,
-    layers: { global: { store: "mcp" } }, timing: write.timing, effect: write.effect, tap: write.tap, direction: write.direction,
+    layers: { global: { store: write.store } }, timing: write.timing, effect: write.effect, tap: write.tap, direction: write.direction,
     writers: write.writers, label: subject.label, help: write.help, confirm: write.confirm, order: 0, importance: "advanced",
     redacted: false,
   };
