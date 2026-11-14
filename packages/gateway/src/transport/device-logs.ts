@@ -18,16 +18,25 @@ export interface DeviceLogCursor {
   sequence: number;
 }
 
+export const DEVICE_LOG_GAP_REASON = "local-rotation";
+
+export interface DeviceLogGap {
+  fromSequence: number;
+  reason: typeof DEVICE_LOG_GAP_REASON;
+}
+
 interface DeviceLogAppend {
   bootId: string;
   firstSequence: number;
   records: Record<string, unknown>[];
+  gap?: DeviceLogGap;
 }
 
 interface Envelope {
   bootId: string;
   sequence: number;
   record: Record<string, unknown>;
+  gap?: DeviceLogGap;
 }
 
 interface Stream {
@@ -42,9 +51,10 @@ function invalid(message: string): GatewayError {
 
 export function parseDeviceLogAppend(value: unknown): DeviceLogAppend {
   if (value === null || typeof value !== "object" || Array.isArray(value)) throw invalid("Device log append requires an object");
-  const { bootId, firstSequence, lines } = value as Record<string, unknown>;
+  const { bootId, firstSequence, lines, gapFrom, reason } = value as Record<string, unknown>;
   if (typeof bootId !== "string" || !BOOT_ID.test(bootId)) throw invalid("bootId is invalid");
   if (!Number.isSafeInteger(firstSequence) || (firstSequence as number) < 1) throw invalid("firstSequence must be a positive integer");
+  const gap = gapFrom === undefined && reason === undefined ? undefined : parseGap(gapFrom, reason);
   if (!Array.isArray(lines) || lines.length < 1 || lines.length > DEVICE_LOG_MAX_APPEND_LINES) {
     throw invalid(`lines must hold 1 to ${DEVICE_LOG_MAX_APPEND_LINES} records`);
   }
@@ -65,7 +75,13 @@ export function parseDeviceLogAppend(value: unknown): DeviceLogAppend {
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) throw invalid("a log record must be a JSON object");
     return parsed as Record<string, unknown>;
   });
-  return { bootId, firstSequence: firstSequence as number, records };
+  return { bootId, firstSequence: firstSequence as number, records, ...(gap ? { gap } : {}) };
+}
+
+function parseGap(gapFrom: unknown, reason: unknown): DeviceLogGap {
+  if (!Number.isSafeInteger(gapFrom) || (gapFrom as number) < 1) throw invalid("gapFrom must be the held sequence");
+  if (reason !== DEVICE_LOG_GAP_REASON) throw invalid("gap reason is not supported");
+  return { fromSequence: gapFrom as number, reason: DEVICE_LOG_GAP_REASON };
 }
 
 function envelopeCursor(text: string): DeviceLogCursor | undefined {
@@ -117,8 +133,15 @@ export class DeviceLogStore {
     if (!sameBoot && held.bootId !== null && admission < owner) {
       throw new GatewayError("conflict", "Device log batch came from an older connection; the cursor is unchanged", false, held);
     }
+    if (append.gap) {
+      if (sameBoot) {
+        if (append.firstSequence !== 1 || held.sequence < 1) throw invalid("A gap belongs to the first batch of a new epoch");
+      } else if (held.bootId === null || append.gap.fromSequence !== held.sequence) {
+        throw new GatewayError("conflict", "Device log gap does not match the held cursor", false, held);
+      }
+    }
     if (!sameBoot && append.firstSequence !== 1) {
-      throw new GatewayError("invalid_request", "A new boot starts at sequence 1", false, held);
+      throw new GatewayError("invalid_request", "A new epoch starts at sequence 1", false, held);
     }
     if (sameBoot && append.firstSequence > held.sequence + 1) {
       throw new GatewayError("invalid_request", "Device log batch leaves a gap after the held cursor", false, held);
@@ -129,7 +152,7 @@ export class DeviceLogStore {
     try {
       let sequence = append.firstSequence + startIndex;
       for (const record of append.records.slice(startIndex)) {
-        const envelope: Envelope = { bootId: append.bootId, sequence, record };
+        const envelope: Envelope = { bootId: append.bootId, sequence, record, ...(append.gap && sequence === 1 ? { gap: append.gap } : {}) };
         stream.log.appendChecked(envelope, stream.torn);
         stream.torn = false;
         sequence += 1;
