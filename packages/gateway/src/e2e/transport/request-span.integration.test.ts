@@ -190,7 +190,7 @@ describe("session.open request span", () => {
     expect(persisted.unaccountedMs as number).toBeGreaterThanOrEqual(0);
     expect(persisted.unaccountedMs as number).toBeLessThanOrEqual(persisted.durationMs as number);
     const named = stagesOf(persisted.stages as string);
-    expect(named.size, "a failed open must name at least one stage").toBeGreaterThan(0);
+    expect(named.has("session.open.catalog"), "a failed missing-session open must name the catalog stage it failed in").toBe(true);
     const accountedMs = [...named.values()].reduce((total, duration) => total + duration, 0);
     expect(Math.abs((persisted.durationMs as number) - (persisted.unaccountedMs as number) - accountedMs)).toBeLessThanOrEqual(named.size + 1);
 
