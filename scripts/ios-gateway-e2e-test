@@ -158,6 +158,13 @@ e2e_test_filters=(
 )
 e2e_diagnostic_test_filters=(
   "TronMobileE2ETests/GatewayTimeoutDiagnosticTests/testBothRawTimeoutNamesProduceTheSameTransportDiagnostic"
+  "TronMobileE2ETests/PushRegistrationRetryTests/testRetryCardRotatesOnceAfterAcceptedTapAndDuplicateApprovalDoesNot"
+  "TronMobileE2ETests/PushRegistrationRetryTests/testPresentedConnectionMismatchRefusesBeforeAnswer"
+  "TronMobileE2ETests/PushRegistrationRetryTests/testConnectionChangeAfterAcceptanceRefusesRotation"
+  "TronMobileE2ETests/PushRegistrationRetryTests/testUnflaggedStoredKeyRejectedInAssertionRotatesExactlyOnce"
+  "TronMobileE2ETests/PushRegistrationRetryTests/testInvalidKeyAssertionRecoveryConsumesTheOneLaunchBudget"
+  "TronMobileE2ETests/PushRegistrationRetryTests/testOnlyAPushRetryCardWithATapYieldsAFence"
+  "TronMobileE2ETests/PushRegistrationRetryTests/testTransientAttestationThenAssertionRejectionStopsWithCardEligibleKey"
 )
 e2e_lan_test_filters=(
   "TronMobileE2ETests/RealGatewayPiBoundaryTests/testRacesLanAndTailscaleLanes"
@@ -1295,7 +1302,7 @@ if ((${#selectors[@]})); then
     run|run-lan|iterate|all|check)
       for selector in "${selectors[@]/#-only-testing:/}"; do
         owned=0
-        for boundary_case in "${e2e_test_filters[@]}"; do
+        for boundary_case in "${e2e_test_filters[@]}" "${e2e_diagnostic_test_filters[@]}"; do
           [[ "$selector" != "$boundary_case" ]] || owned=1
         done
         ((owned)) || die "$selector is not a boundary method this command owns (see '$0 help')"

@@ -42,11 +42,10 @@ Commands:
                                     One-shot #2327 removal of retired connection setup
                                     operations, receipts and Raindrop collection mappings;
                                     dry run unless --apply; never at startup
-  migrate push-policy --tron-home <dir> [--apply --backup <new dir>]
-  migrate push-policy --restore --backup <dir>
-                                    One-shot move of the retired push policy object into the
-                                    notifications.push.* Global keys, with backups of both stores;
-                                    dry run unless --apply; never at startup
+  migrate push-policy --restore --tron-home <dir> --backup <dir>
+                                    Operator restore of the push policy move: the Gateway runs
+                                    the move itself at its first start on a v2 store, backing
+                                    up both stores first (state/migrations/push-policy-v3)
   diagnose [--since <1..9999><s|m|h|d>] [--out <path>]
                                     Write one read-only redacted diagnostic bundle
                                     to <path>, or to a new file in the system temp

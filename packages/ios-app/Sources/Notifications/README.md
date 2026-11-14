@@ -22,19 +22,36 @@ notification inbox.
   lost response may mean the Gateway already removed the grant; a re-allowed permission re-registers.
 - **Retries.** One bounded, profile-generation-owned operation: a fresh challenge and proof per
   attempt, two backoffs for timeouts and retryable 5xx, no commit across a profile or token change.
-  An assertion 401 or the typed invalid-key code clears only the App Attest key, once. Other
-  rejections stop without credential churn; APNs tokens are preserved. Registration reconciles on
-  connection, foreground, profile, permission and token changes; Worker failure leaves it pending.
+  Every key rotation goes through `rotateInvalidKey`, which spends the one automatic budget. Inside the
+  registration loop an assertion 401 or the typed `DCError.invalidKey` rotates only while the budget is unspent;
+  once it is spent, the current key is marked rejected and the attempt stops (`stoppedRejected`), so the
+  agent-requested card can offer a fresh key. The outer handler rotates a flagged key only while the budget is
+  unspent, and the card rotates once; both spend the budget. There is one automatic key rotation per app
+  launch; success never re-arms it. Every later rotation in that launch requires an approved card. Other rejections stop without
+  credential churn; APNs tokens are preserved. Registration reconciles on connection, foreground, profile,
+  permission and token changes; Worker failure leaves it pending.
+- **Agent-requested retry.** A `push-registration-retry` card (`ChangeReview.intent`, shared native change
+  card) rotates the rejected key only on the iPhone that approves it. `PushRegistrationRetryApproval.approve`
+  captures a `PushRetryFence` (the answering connection: selected profile, machine, runtime epoch and
+  lifecycle admission from `AppModel.pushRetryConnection`, the device, and the registration generation)
+  before the answer. It refuses without answering when the coordinator is not on that connection. After the
+  Gateway accepts the answer it re-reads the connection and calls `retryAfterApprovedCard`, which refuses if
+  anything changed. The Gateway request is then only "requested"; registration success is not claimed. Nothing
+  is persisted: an app death or a lost response after acceptance loses the effect (best effort, no replay).
+  Duplicate approvals are refused at the answer boundary and never rotate. The approved attempt does not
+  re-arm the automatic budget. The key is per iPhone, so the card names the other paired Macs.
+- **Residual.** Registration stage and Retry Registration left the app with the Push Notifications sheet
+  (approved in the 1.2/5.4 slice). Status is no longer shown on the phone.
 - **Secrets.** App Attest keys, token bytes and grants use a Keychain namespace separate from Gateway
   credentials; an unreadable Keychain document is never overwritten with an empty one (push fails
-  closed while the Gateway stays usable). Settings shows only a fixed local stage label; the app accepts no relay URL or push
-  credential from settings.
+  closed while the Gateway stays usable). The app shows no push settings; it accepts no relay URL or push
+  credential from anywhere but the bundled configuration.
 - **Alerts.** No badge, background fetch or notification approval actions. Exact changes
   are reviewed in the shared in-chat native card. The bundled `tron-notification.caf` sound; ask pushes are Time
   Sensitive (entitlement in every build configuration). A foreground synchronized chat's
-  presentation lease suppresses its own agent-terminal alert at the Gateway. Which alert kinds
-  send is the Global settings `notifications.push.inputNeeded|finished|waiting`; registration
-  carries no policy, and the iPhone shows no toggles.
+  presentation lease suppresses its own agent-terminal alert at the Gateway. Input needed,
+  Finished and Waiting are Global settings the agent changes; the app sends no policy with
+  `push.registration.upsert`.
 - **Icon.** iOS owns the small app icon in system notifications; there is no per-notification
   theme color or icon override in Tron's payload. Theme selection uses bundled alternate app
   icons through UIKit, not a notification extension or communication-avatar workaround. Apple
@@ -78,7 +95,7 @@ notification inbox.
 
 ## Signals
 
-Registration stage label only.
+None. The registration diagnostic stays in memory until the log upload (settings slice 3) carries it.
 
 ## Verify
 
@@ -86,7 +103,6 @@ Registration stage label only.
 scripts/tron-ios-test run --only-testing TronMobileUITests/TronNotificationInboxUITests \
   --only-testing TronMobileUITests/TronHomePushNavigationUITests \
   --only-testing TronMobileUITests/TronDeliveredNotificationUITests \
-  --only-testing TronMobileUITests/TronSmokeUITests/testPushReadinessAndRegistrationAreSeparateFromPolicyToggles
 scripts/validate-push-service-config.sh config/PushService.xcconfig
 ```
 
@@ -95,7 +111,7 @@ Notification Center local deliveries and production chat visibility over a fixtu
 `HostedDeliveredNotificationFixture` owns exact-ID cleanup. Neither suite proves APNs delivery.
 `TRON_PUSH_SERVICE_ORIGIN` is shared with the Mac payload, so a change installs the Mac first.
 Before shipping an identity, check its signed entitlements, pair a physical device, rotate its
-token by reinstalling, and verify revoke, offline retry and the Settings registration stage.
+token by reinstalling, and verify revoke and offline retry.
 
 ## Not here
 

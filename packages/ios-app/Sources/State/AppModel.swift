@@ -211,6 +211,17 @@ final class AppModel {
     var hasResolvedLaunchState: Bool { lifecycle.hasResolvedLaunchState }
     var gatewayInfo: GatewayInfo? { lifecycle.gatewayInfo }
     var gatewayConnectionID: Int? { lifecycle.connectionID }
+    var pushRetryConnection: PushConnectionIdentity? {
+        guard connectionState == .connected, let admission = lifecycle.admission,
+              let profile = lifecycle.profiles.selected, profile.id == lifecycle.selectedProfileID,
+              let runtimeEpoch = lifecycle.gatewayInfo?.runtimeEpoch else { return nil }
+        return PushConnectionIdentity(
+            profileID: profile.id,
+            machineID: profile.machineId,
+            runtimeEpoch: runtimeEpoch,
+            admission: admission
+        )
+    }
     private var sessionCatalog = SessionCatalogCoordinator()
     private let dashboardConnections: DashboardGatewayConnectionPool
     let automationCatalog: AutomationCatalogCoordinator

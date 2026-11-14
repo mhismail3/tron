@@ -2947,20 +2947,6 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    func testPushScreenShowsRegistrationWithoutAlertToggles() {
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-ui-push"]
-        app.launch(); defer { app.terminate() }
-        let any = app.descendants(matching: .any)
-        let summary = any["push-registration-summary"]
-        XCTAssertTrue(summary.waitForExistence(timeout: 10))
-        XCTAssertEqual(summary.switches.count, 0)
-        XCTAssertFalse(any["push-alert-policy"].exists)
-        XCTAssertTrue(summary.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Complete")).firstMatch.exists)
-        keepScreenshot(named: "1261-push-separate-summary")
-    }
-
-    @MainActor
     func testRendererPickOfDisplayedDefaultPinsIt() {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-settings-renderer-fixture"]
@@ -3029,7 +3015,7 @@ final class TronSmokeUITests: XCTestCase {
     @MainActor
     func testUIFixesVisualReviewCaptures() {
         continueAfterFailure = false
-        for surface in ["providers", "push", "placement"] {
+        for surface in ["providers", "placement"] {
             let app = XCUIApplication()
             app.launchArguments = ["-tron-settings-renderer-fixture"]
             if surface != "placement" { app.launchArguments.append("-settings-ui-\(surface)") }

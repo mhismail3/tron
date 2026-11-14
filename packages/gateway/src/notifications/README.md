@@ -10,10 +10,15 @@ tool and explicit lifecycle result notifications.
 ## Owns
 
 `notification-service.ts` (`NotificationService`), `grant-store.ts`, `relay-client.ts`,
-`notify-module.ts` (optional-owner descriptor) and `tron-notify-extension.ts`. Store: `state/notifications.json`, one exact 1 MiB
+`notify-module.ts` (optional-owner descriptor), `tron-notify-extension.ts` and `push-policy-migration.ts`
+(the start-time, backed-up move of the retired document policy into the Global keys; its backup and manifest are
+`state/migrations/push-policy-v3`). Store: `state/notifications.json`, one exact 1 MiB
 owner-only document holding grants (at most 64 active devices), 256 pending intents,
 512 receipts, 192 revocation tombstones and the 512-row inbox. It never stores raw
-APNs tokens; secrets and message content stay out of RPC projections, logs and JSONL.
+APNs tokens; secrets and message content stay out of RPC projections, logs and JSONL. The
+three automatic-kind switches are Global settings (`notifications.push.inputNeeded|finished|waiting`,
+default on, live, agent-changeable), resolved through the settings owner at each admission; the
+document holds no policy.
 
 ## Contract
 
@@ -24,8 +29,7 @@ APNs tokens; secrets and message content stay out of RPC projections, logs and J
   `queued`, `suppressed`, `rate_limited` or `unavailable`; APNs acceptance is never
   called delivery. Capacity refusals create no intent or inbox row. Failure is
   diagnostic only and never fails canonical settlement.
-- **Automatic kinds** (per-kind switches are the Global keys `notifications.push.inputNeeded`,
-  `.finished` and `.waiting`, default on, read live through `resolveNotificationPolicy`): `ask` (Time Sensitive, input needed), `agent_finished` (a neutral
+- **Automatic kinds** (each gated by its resolved Global setting, default on): `ask` (Time Sensitive, input needed), `agent_finished` (a neutral
   terminal category, sent only when no session-owned subagent or workflow is still
   live) and `waiting` (once per unchanged set of live background identities).
 - **Terminal alerts** fire only at Pi's final `agent_settled` at idle, never for
@@ -42,6 +46,14 @@ APNs tokens; secrets and message content stay out of RPC projections, logs and J
   `editor`, form, including the `pi-ask-user` adapter's) emits one alert from
   `SemanticUIBroker` while pending, keyed by the interaction ID; it never delays the
   interaction. `notifications.push.inputNeeded` governs all of them.
+- **Retry card.** `push_retry({reason})` asks for one exact native card (`intent: push-registration-retry`,
+  digest over session and tool call). The Gateway writes nothing: approval resolves the request with
+  `requested` and the approving iPhone alone rotates its rejected App Attest key and registers again, after
+  its own connection, device and generation fences. A duplicate approval is refused at the answer boundary and
+  never rotates. The App Attest key is per iPhone and its card names the other paired Macs. The result is
+  "requested", never "registered"; nothing is persisted, so an app death after acceptance is best effort.
+- **Automatic keys.** `notifications.push.inputNeeded|finished|waiting` are privacy-tapped: turning one on is
+  a widening that needs the native card, turning it off is routine.
 - **Presence.** A mobile subscription or local connection may publish
   `session.presentation.set` after sync: token-bound, revisioned, one per connection,
   visible leases expiring after 45 s. Visible at observation (latched before receipt

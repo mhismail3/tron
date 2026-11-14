@@ -11,6 +11,7 @@ struct ExtensionInteractionSheet: View {
     let interaction: ExtensionInteraction
     let onResolved: () -> Void
     let onLocallyClosed: () -> Void
+    @Environment(\.pushRegistrationRetryApproval) private var pushRetryApproval
     @PresentationState private var text = ""
     @PresentationState private var selectedOption: String?
     @PresentationState private var confirmValue: Bool?
@@ -41,7 +42,7 @@ struct ExtensionInteractionSheet: View {
                 VStack(alignment: .leading, spacing: 16) {
                     if interaction.method == .change, let review = interaction.review {
                         ChangeReviewCard(review: review, submitting: submitting,
-                            approve: { respond(value: .object(["digest": .string(review.digest), "approved": .bool(true)])) },
+                            approve: { respond(value: .object(["digest": .string(review.digest), "approved": .bool(true)]), approval: pushRetryGate(for: review)) },
                             cancel: { respond(value: .object(["digest": .string(review.digest), "approved": .bool(false)])) })
                     } else {
                         promptCard
@@ -278,14 +279,21 @@ struct ExtensionInteractionSheet: View {
         )
     }
 
-    private func respond(value: JSONValue?) {
+    private func pushRetryGate(for review: ChangeReview) -> PushRetryGate? {
+        guard review.intent == .pushRegistrationRetry else { return nil }
+        guard let pushRetryApproval else { return { _ in throw PushRetryRefusal.notThisConnection } }
+        return { answer in try await pushRetryApproval.approve(review, answer: answer) }
+    }
+
+    private func respond(value: JSONValue?, approval: PushRetryGate? = nil) {
         textFocused = false
         submitting = true
         submissionError = nil
         let expectedToken = presentationSurfaceToken
         Task { @MainActor in
             do {
-                try await model.answerInteraction(interaction, sessionID: sessionID, value: value, cancelled: false)
+                let answer: PushRetryAnswer = { try await model.answerInteraction(interaction, sessionID: sessionID, value: value, cancelled: false) }
+                if let approval { try await approval(answer) } else { try await answer() }
                 model.extensionInteractionDrafts.clear(sessionID: sessionID, interaction: interaction)
                 guard PresentationPublicationPolicy.allows(ambient: presentationActivity, coordinator: presentationActivityCoordinator, token: expectedToken) else { return }
                 onResolved()

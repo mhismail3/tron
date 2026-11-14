@@ -11,6 +11,9 @@ import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
 import type { ChangeResult, Resolution } from "../../kernel/settings/tool-contract.js";
 import { displayOwnerOf, homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import { NotificationGrantStore } from "../../notifications/grant-store.js";
+import { NotificationService, readNotificationPolicy } from "../../notifications/notification-service.js";
+import { PushRelayClient } from "../../notifications/relay-client.js";
 
 const evidence: Array<Record<string, unknown>> = [];
 afterEach(disposeFixtures);
@@ -308,6 +311,73 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     expect(unreadable.projectNotice).toEqual({ file: join(await realpath(f.cwd), ".pi", "settings.json"),
       message: "Project settings couldn't be read" });
     expect(JSON.stringify(unreadable)).not.toContain("unreadable-json-secret-value");
+  });
+
+  it("push alert policy is Global: default on, changed through the change path, read by the notification owner", async () => {
+    const f = await setup();
+    const readPolicy = () => readNotificationPolicy((names) => f.registry.resolveGlobalSettings(names));
+    expect(await readPolicy()).toEqual({ inputNeeded: true, finished: true, waiting: true });
+    const changed = await f.service.invoke(f.client, "settings.change", {
+      commandId: randomUUID(), target: { kind: "global" },
+      changes: [{ key: "notifications.push.finished", layer: "global", op: "set", value: false }],
+    }) as unknown as ChangeResult;
+    expect(changed.changes[0]).toMatchObject({ key: "notifications.push.finished", layer: "global", after: false });
+    expect(await readPolicy()).toEqual({ inputNeeded: true, finished: false, waiting: true });
+    const stored = JSON.parse(await readFile(join(f.tronHome, "state", "settings", "gateway.json"), "utf8"));
+    expect(stored.notifications.push).toEqual({ finished: false });
+    const history = await f.settings.settingsChanges.history({ key: "notifications.push.finished" });
+    expect(history.entries.map(entry => entry.changeId)).toContain(changed.changes[0]!.changeId);
+    evidence.push({ case: "push-policy-global-live", changed: changed.changes[0] });
+  });
+
+  it("a typed Global change gates the real push admission: finished off sends nothing, on sends one", async () => {
+    const f = await setup();
+    const envelopes: Array<Record<string, unknown>> = [];
+    const relayOrigin = "https://relay.policy.invalid";
+    const relay = new PushRelayClient(relayOrigin, async (_url, init) => {
+      envelopes.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      return new Response(JSON.stringify({ status: "accepted_by_apns" }), { status: 200 }) as never;
+    });
+    const store = new NotificationGrantStore(f.tronHome);
+    const notifications = new NotificationService(store, relay, () => readNotificationPolicy((names) => f.registry.resolveGlobalSettings(names)));
+    try {
+      await notifications.initialize();
+      await notifications.upsertGrant({ deviceId: "device_abcdefgh", installationId: "install_abcdefgh", grantId: "grant_abcdefgh",
+        secret: Buffer.alloc(32, 7).toString("base64url"), previewsEnabled: false, relayOrigin });
+      const set = (value: boolean) => f.service.invoke(f.client, "settings.change", {
+        commandId: randomUUID(), target: { kind: "global" },
+        changes: [{ key: "notifications.push.finished", layer: "global", op: "set", value }],
+      });
+      await set(false);
+      expect(await notifications.enqueue({ sessionId: "session-policy", sourceId: "finished-off", kind: "agent_finished", message: "Finished" })).toBe("suppressed");
+      await set(true);
+      expect(await notifications.enqueue({ sessionId: "session-policy", sourceId: "finished-on", kind: "agent_finished", message: "Finished" })).toBe("queued");
+      await waitFor(async () => {
+        const document = await store.snapshot();
+        return document.pending.length === 0 && document.receipts.some(receipt => receipt.result === "accepted_by_apns");
+      }, "the finished push to settle");
+      expect(envelopes).toHaveLength(1);
+      evidence.push({ case: "push-policy-real-admission", pushesWhileOff: 0, pushesWhileOn: envelopes.length });
+    } finally { notifications.dispose(); }
+  });
+
+  it("an agent may turn a push alert off, but turning one on needs the exact native tap (privacy widening)", async () => {
+    const f = await setup();
+    await f.service.invoke(f.client, "settings.change", {
+      commandId: randomUUID(), target: { kind: "global" },
+      changes: [{ key: "notifications.push.waiting", layer: "global", op: "set", value: false }],
+    });
+    const agent = { kind: "agent" as const, id: "push-agent" };
+    const widened = await f.settings.settingsChanges.change({ kind: "global" },
+      [{ key: "notifications.push.waiting", layer: "global", op: "set", value: true }],
+      { actor: agent, reason: "Alert me again" });
+    expect(widened).toMatchObject({ status: "review", changes: [] });
+    expect((await readNotificationPolicy((names) => f.registry.resolveGlobalSettings(names))).waiting).toBe(false);
+    const narrowed = await f.settings.settingsChanges.change({ kind: "global" },
+      [{ key: "notifications.push.waiting", layer: "global", op: "set", value: false }],
+      { actor: agent, reason: "Stop alerts while I am away" });
+    expect(narrowed).toMatchObject({ status: "applied" });
+    evidence.push({ case: "push-policy-privacy-tap", widened: widened.status, narrowed: narrowed.status });
   });
 
   it("keeps thinking budgets and image visibility Global-only during real SDK admission", async () => {

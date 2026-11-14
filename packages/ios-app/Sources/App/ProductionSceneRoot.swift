@@ -106,6 +106,10 @@ struct ProductionSceneRoot: View {
         )
             .environment(owner.model)
             .environment(owner.pushNotifications)
+            .environment(\.pushRegistrationRetryApproval, PushRegistrationRetryApproval(
+                connection: { owner.model.pushRetryConnection },
+                coordinator: owner.pushNotifications
+            ))
             .tronPresentation()
             .preferredColorScheme(owner.appearance.mode.colorScheme)
             .task {

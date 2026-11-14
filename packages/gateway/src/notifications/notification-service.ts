@@ -29,18 +29,21 @@ const INBOX_CURSOR = /^(-?\d{1,16})\.([A-Za-z0-9_-]{8,160})$/u;
 
 export interface NotificationPolicy { inputNeeded: boolean; finished: boolean; waiting: boolean }
 export const NOTIFICATION_POLICY_KEYS = ["notifications.push.inputNeeded", "notifications.push.finished", "notifications.push.waiting"] as const;
-export async function resolveNotificationPolicy(
-  resolve: (keys: readonly string[]) => Promise<readonly { key: string; value: unknown }[]>,
+export async function readNotificationPolicy(
+  read: (keys: readonly string[]) => Promise<Readonly<Record<string, unknown>>>,
 ): Promise<NotificationPolicy> {
-  const rows = await resolve(NOTIFICATION_POLICY_KEYS);
+  const values = await read(NOTIFICATION_POLICY_KEYS);
   const flag = (key: string): boolean => {
-    const value = rows.find(row => row.key === key)?.value;
+    const value = values[key];
     if (typeof value !== "boolean") throw new GatewayError("conflict", `${key} did not resolve to a boolean`);
     return value;
   };
-  return { inputNeeded: flag("notifications.push.inputNeeded"), finished: flag("notifications.push.finished"), waiting: flag("notifications.push.waiting") };
+  return {
+    inputNeeded: flag("notifications.push.inputNeeded"),
+    finished: flag("notifications.push.finished"),
+    waiting: flag("notifications.push.waiting"),
+  };
 }
-
 export type NotificationAdmissionStatus = "queued" | "suppressed" | "rate_limited" | "unavailable";
 interface NotificationStatus {
   available: boolean;
