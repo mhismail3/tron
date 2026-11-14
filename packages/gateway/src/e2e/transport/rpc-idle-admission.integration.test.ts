@@ -322,6 +322,40 @@ describe("device log append RPC boundary", () => {
     expect(envelopesOf(files[0].text).map((envelope) => envelope.bootId)).toEqual(["boot-logs-b", "boot-logs-b"]);
   });
 
+  it("carries a local-rotation gap in the first envelope of a new epoch, once", async () => {
+    const fixtureValue = await fixture();
+    const client = await fixtureValue.connect();
+    await client.request("gap-old", "client.logs.append", { commandId: "gap-old-0001", bootId: "epoch-old-0001", firstSequence: 1, lines: batch(1, 3) });
+    const epoch = { commandId: "gap-new-0001", bootId: "epoch-new-0001", firstSequence: 1, gapFrom: 3, reason: "local-rotation", lines: batch(1, 2) };
+    const started = await client.request("gap-new", "client.logs.append", epoch);
+    expect(started.result).toEqual({ bootId: "epoch-new-0001", sequence: 2 });
+    const replay = await client.request("gap-new-retry", "client.logs.append", epoch);
+    expect(replay.ok, JSON.stringify(replay)).toBe(true);
+    expect(replay.result).toEqual({ bootId: "epoch-new-0001", sequence: 2 });
+    const files = await deviceFiles(fixtureValue.root);
+    const envelopes = envelopesOf(files[0].text);
+    const first = envelopes.filter((envelope) => envelope.bootId === "epoch-new-0001");
+    expect(first.map((envelope) => envelope.sequence)).toEqual([1, 2]);
+    expect(first[0]).toMatchObject({ gap: { fromSequence: 3, reason: "local-rotation" } });
+    expect(first[1]).not.toHaveProperty("gap");
+    expect(envelopes.filter((envelope) => envelope.bootId === "epoch-old-0001").every((envelope) => !("gap" in envelope))).toBe(true);
+  });
+
+  it("refuses a gap that does not name the exact held cursor, and writes nothing", async () => {
+    const fixtureValue = await fixture();
+    const client = await fixtureValue.connect();
+    await client.request("stale-gap-old", "client.logs.append", { commandId: "stale-gap-old-01", bootId: "epoch-stale-01", firstSequence: 1, lines: batch(1, 3) });
+    const stale = await client.request("stale-gap-new", "client.logs.append", { commandId: "stale-gap-new-01", bootId: "epoch-stale-02", firstSequence: 1, gapFrom: 2, reason: "local-rotation", lines: batch(1, 1) });
+    expect(stale.ok).toBe(false);
+    expect(stale.error?.code).toBe("conflict");
+    const unknownReason = await client.request("stale-gap-reason", "client.logs.append", { commandId: "stale-gap-reason-01", bootId: "epoch-stale-02", firstSequence: 1, gapFrom: 3, reason: "other", lines: batch(1, 1) });
+    expect(unknownReason.ok).toBe(false);
+    expect(unknownReason.error?.code).toBe("invalid_request");
+    const files = await deviceFiles(fixtureValue.root);
+    expect(envelopesOf(files[0].text).map((envelope) => envelope.bootId)).toEqual(["epoch-stale-01", "epoch-stale-01", "epoch-stale-01"]);
+    expect((await client.request("stale-gap-cursor", "client.logs.cursor", {})).result).toEqual({ bootId: "epoch-stale-01", sequence: 3 });
+  });
+
   it("recovers the cursor after a restart and a torn tail, then continues on a fresh line", async () => {
     const fixtureValue = await fixture();
     const bootId = "boot-logs-restart";
