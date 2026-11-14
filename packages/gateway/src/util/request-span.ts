@@ -151,13 +151,13 @@ export class RequestSpan {
     );
   }
 
-  breakdown(requestMs: number): RequestSpanBreakdown | undefined {
+  breakdown(requestMs: number, failed = false): RequestSpanBreakdown | undefined {
     if (!this.finished) {
       this.finished = true;
       activeSpans -= 1;
       this.setParked(false);
     }
-    const recorded = [...this.entries.values()].filter(worthNaming)
+    const recorded = [...this.entries.values()].filter((entry) => worthNaming(entry) || (failed && entry.timed))
       .sort((left, right) => right.ms - left.ms || left.order - right.order);
     if (recorded.length === 0) return undefined;
     const coveredMs = recorded.reduce((total, entry) => total + entry.ms, 0);

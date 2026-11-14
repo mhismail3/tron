@@ -2161,7 +2161,7 @@ export class GatewayServer {
     },
   ): void {
     const durationMs = Math.max(0, Math.round(performance.now() - request.startedAt));
-    const breakdown = request.span.breakdown(durationMs);
+    const breakdown = request.span.breakdown(durationMs, request.outcome !== "success");
     if (request.shedReason !== undefined) {
       this.options.logger.log(
         "warning",
