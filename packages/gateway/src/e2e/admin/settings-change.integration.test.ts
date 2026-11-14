@@ -979,7 +979,10 @@ describe("outside changes to MCP servers and custom models", () => {
     expect(f.broadcasts.filter(event => event.topic === "mcp.changed")).toEqual([{ topic: "mcp.changed", payload: { scope: "global" } }]);
     expect(stale).toHaveBeenCalledWith({});
     expect(JSON.parse(await readFile(join(f.agentDir, "mcp.json"), "utf8")).mcpServers["home-docs"]).toEqual({ command: "npx", args: ["-y", "@acme/docs-mcp"] });
-    expect(await f.history({ key: "tools.mcp.server" })).toEqual([expect.objectContaining({ status: "applied", qualifiers: { server: "home-docs" } })]);
+    const [applied] = await f.history({ key: "tools.mcp.server" });
+    expect(applied).toEqual(expect.objectContaining({ status: "applied", qualifiers: { server: "home-docs" } }));
+    await maintainerChange(f.service, client(), "settings.undo", { commandId: commandId(), changeId: applied!.changeId });
+    expect(JSON.parse(await readFile(join(f.agentDir, "mcp.json"), "utf8")).mcpServers["home-docs"]).toBeUndefined();
   });
 
   caseIt("records Project mcp.json edits from a late .pi watch, a Git pull, and the Project MCP owner under the Project root", async owner => {
