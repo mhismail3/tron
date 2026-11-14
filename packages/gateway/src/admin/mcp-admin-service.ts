@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import lockfile from "proper-lockfile";
 import { GatewayError } from "../errors.js";
 import { durableAtomicWriteText } from "../foundation/durable-json.js";
-import { MCP_EXPOSURES, mcpServerOnDisk, type McpExposure, type McpServerValue } from "../kernel/settings/mcp-server-value.js";
+import { bearerCommand, MCP_EXPOSURES, mcpServerOnDisk, mcpServerToDisk, type McpExposure, type McpServerValue } from "../kernel/settings/mcp-server-value.js";
 
 const MAX_CONFIG_BYTES = 256 * 1_024;
 const MAX_OUTPUT_BYTES = 1_048_576;
@@ -243,7 +243,7 @@ export class McpAdminService {
       if (value === undefined) {
         if (existing === undefined) return;
         delete table[server];
-      } else table[server] = value;
+      } else table[server] = mcpServerToDisk(value);
       config.mcpServers = table;
       const output = `${JSON.stringify(config, null, 2)}\n`;
       if (Buffer.byteLength(output) > MAX_CONFIG_BYTES) throw new GatewayError("conflict", "Updated MCP configuration exceeds its size limit");
@@ -269,7 +269,7 @@ export class McpAdminService {
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new GatewayError("not_found", `MCP server ${server} was not found`);
       const definition = entry as Record<string, unknown>;
       const headers = definition.headers && typeof definition.headers === "object" && !Array.isArray(definition.headers) ? definition.headers as Record<string, unknown> : {};
-      headers.Authorization = `!/usr/bin/security find-generic-password -s tron.mcp -a ${account} -w | /usr/bin/sed 's/^/Bearer /'`;
+      headers.Authorization = bearerCommand(`keychain://tron.mcp/${account}`);
       definition.headers = headers;
       const output = `${JSON.stringify(config, null, 2)}\n`;
       if (Buffer.byteLength(output) > MAX_CONFIG_BYTES) throw new GatewayError("conflict", "Updated MCP configuration exceeds its size limit");

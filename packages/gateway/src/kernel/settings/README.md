@@ -23,8 +23,8 @@ setting and is not an approval queue.
   audited as not rolled back, naming the store, never as rolled back. Store I/O and provider admission enter through
   owner ports. `SettingsReadOwner.admitModelChoice` uses the active SDK runtime,
   including borrowed views; it captures no eligibility snapshot.
-- `mcp-server-value.ts`: the typed `tools.mcp.server` value (`{command, args?}` or `{url}`, `enabled`,
-  `exposure`), its secret refusal (credential shapes through `redactCredentials`, secret-named
+- `mcp-server-value.ts`: the typed `tools.mcp.server` value (`{command, args?}` or `{url, bearerRef?}`, `enabled`,
+  `exposure`; `bearerRef` is an `op://` or `keychain://` reference, written as the `!command` header), its secret refusal (credential shapes through `redactCredentials`, secret-named
   tokens and URL parts, every field outside the allowlist), the on-disk projection that refuses
   records it cannot carry, and the widen/narrow rule that decides the native tap. `RECORD_SUBJECTS`
   carries its `write` declaration; `schema.recordKey()` builds the change-path declaration from it.

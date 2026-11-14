@@ -11,7 +11,12 @@ trust decision for that root admits it. Its stdio servers start in the root. Ses
 MCP logs remain under the Pi agent directory; OAuth credentials are managed by
 Pi's built-in credential store. Static bearer tokens entered through Tron are
 stored by the Mac Keychain owner, with only a `!command` lookup reference in
-`mcp.json`; their values never enter RPC results. The command resolves the
+`mcp.json`; their values never enter RPC results. A settings-tool server may name its bearer as a reference
+(`bearerRef`: `op://vault/item/field` or `keychain://service/account`); the same `!command` header is written with
+absolute binaries (`/opt/homebrew/bin/op`, `/usr/bin/security`, `/usr/bin/sed`) and the validated reference as a single
+quoted argument, so no project PATH or shell interpolation applies. Pi runs it in the Gateway's session runtime when the
+server connects (uncached, so rotation takes effect on the next connect); the Gateway never reads the value, and Pi's
+stderr is discarded. Setting or changing a reference taps the native card; a literal token is refused. The command resolves the
 complete `Bearer <token>` header value. This design has an accepted local-user
 residual risk: any process running as the macOS user can invoke `/usr/bin/security`
 to read a stored bearer token without a prompt. Keychain storage protects the

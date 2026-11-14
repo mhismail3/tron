@@ -282,6 +282,61 @@ describe("McpAdminService", () => {
     await expect(readFile(projectCredential)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("resolves a bearer reference only when Pi connects, and no listing, error or record carries its value", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-mcp-reference-"));
+    const sentinel = "reference-sentinel-value";
+    const argv = join(root, "argv");
+    const received: Array<string | undefined> = [];
+    const fixture = createServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      received.push(req.headers.authorization);
+      const rpc = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}") as { id?: number; method?: string };
+      const answer = (body: unknown) => {
+        res.writeHead(200, { "content-type": "application/json", "mcp-session-id": "fixture-session", "mcp-protocol-version": "2025-03-26" });
+        res.end(JSON.stringify(body));
+      };
+      if (rpc.method === "initialize") return answer({ jsonrpc: "2.0", id: rpc.id, result: { protocolVersion: "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: "fixture", version: "1" } } });
+      if (rpc.method === "notifications/initialized") { res.writeHead(202); res.end(); return; }
+      if (rpc.method === "tools/list") return answer({ jsonrpc: "2.0", id: rpc.id, result: { tools: [] } });
+      answer({});
+    });
+    try {
+      await new Promise<void>((resolve) => fixture.listen(0, "127.0.0.1", resolve));
+      const address = fixture.address();
+      if (!address || typeof address === "string") throw new Error("MCP fixture failed to bind loopback");
+      const origin = `http://127.0.0.1:${address.port}`;
+      const service = new McpAdminService(root, cliPath, undefined, undefined, 10_000);
+      const file = join(root, "mcp.json");
+      const resolver = join(root, "resolver");
+      await writeFile(resolver, `#!/bin/sh\nprintf '%s' "$*" > ${argv}\nprintf '%s' ${sentinel}\n`);
+      await chmod(resolver, 0o700);
+      const references: Array<[string, string]> = [["op://Private/Tron Fixture/token", "/opt/homebrew/bin/op"], ["keychain://tron.mcp/tron-mcp-global-fixture", "/usr/bin/security"]];
+      for (const [ref, binary] of references) {
+        await rm(file, { force: true });
+        await service.setServer("fixture", { url: `${origin}/mcp`, bearerRef: ref });
+        const saved = await readFile(file, "utf8");
+        expect(saved).not.toContain(sentinel);
+        expect(saved).toContain(binary);
+        await writeFile(file, saved.replace(binary, resolver));
+        const listed = await service.list({ scope: "global" }) as { servers: unknown[] };
+        expect(listed.servers).toEqual([expect.objectContaining({ name: "fixture", state: "connected" })]);
+        expect(received.at(-1)).toBe(`Bearer ${sentinel}`);
+        expect(JSON.stringify(listed)).not.toContain(sentinel);
+        expect(await readFile(argv, "utf8")).toContain(ref.startsWith("op://") ? "read --no-newline op://Private/Tron Fixture/token" : "find-generic-password -s tron.mcp -a tron-mcp-global-fixture -w");
+      }
+      const failing = join(root, "failing");
+      await writeFile(failing, `#!/bin/sh\nprintf 'leaked %s' ${sentinel} >&2\nexit 1\n`);
+      await chmod(failing, 0o700);
+      await writeFile(file, (await readFile(file, "utf8")).replace(resolver, failing));
+      const failed = await service.list({ scope: "global" });
+      expect(JSON.stringify(failed)).not.toContain(sentinel);
+    } finally {
+      await new Promise<void>((resolve) => fixture.close(() => resolve()));
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("stores a token only through its credential owner and writes a !command reference Pi resolves", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-mcp-token-"));
     const captured: string[] = [];
@@ -435,6 +490,9 @@ describe("MCP servers through the settings change path", () => {
       { command: `API_KEY=${secret} npx`, args: ["-y", "pkg"] },
       { command: "npx", args: [`Bearer ${secret}`] },
       { url: `https://example.com/mcp/${secret}` },
+      { url: "https://example.com/mcp", bearerRef: secret },
+      { url: "https://example.com/mcp", bearerRef: `Bearer ${secret}` },
+      { command: "npx", bearerRef: "keychain://tron.mcp/tron-mcp-global-docs" },
     ];
     for (const value of attempts) {
       const error = await f.changes.change(global, [set("docs", value)], home).catch((caught: unknown) => caught);
@@ -470,6 +528,23 @@ describe("MCP servers through the settings change path", () => {
     await expect(f.changes.change(global, [set("docs", { command: "npx" }, "project")], home)).rejects.toMatchObject({ code: "invalid_request" });
     await expect(f.changes.change(global, [set("docs", { command: "npx" }, "session")], home)).rejects.toMatchObject({ code: "invalid_request" });
     expect(await f.bytes()).toBeUndefined();
+  });
+
+  it("taps a bearer reference when it is first set or changed, applies its removal, and writes only the reference", async () => {
+    const f = await fixture();
+    const base = [set("docs", { url: "https://example.com/mcp" })];
+    await approve(f, base, (await f.changes.change(global, base, home)).review!);
+    const ref = [set("docs", { url: "https://example.com/mcp", bearerRef: "op://Private/Tron Docs/token" })];
+    const review = await f.changes.change(global, ref, home);
+    expect(review).toMatchObject({ status: "review", review: { requiresTap: true } });
+    expect(review.review!.items[0]!.exact).toContain("op://Private/Tron Docs/token");
+    expect(await f.bytes()).toContain("\"url\"");
+    expect(await f.bytes()).not.toContain("Bearer");
+    await approve(f, ref, review.review!);
+    expect((await f.servers()).docs).toEqual({ url: "https://example.com/mcp", headers: { Authorization: "!/opt/homebrew/bin/op read --no-newline 'op://Private/Tron Docs/token' | /usr/bin/sed 's/^/Bearer /'" } });
+    expect(await f.changes.change(global, [set("docs", { url: "https://example.com/mcp", bearerRef: "op://Private/Tron Docs/token", enabled: false })], home)).toMatchObject({ status: "applied" });
+    expect(await f.changes.change(global, [set("docs", { url: "https://example.com/mcp", bearerRef: "keychain://tron.mcp/other", enabled: false })], home)).toMatchObject({ status: "review", review: { requiresTap: true } });
+    expect(await f.changes.change(global, [set("docs", { url: "https://example.com/mcp", enabled: false })], home)).toMatchObject({ status: "review", review: { requiresTap: true } });
   });
 
   it("records Tron's own write once, and still records a hand edit as an outside change", async () => {
