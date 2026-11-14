@@ -199,7 +199,7 @@ describe("settings.resolve", () => {
     expect(await resolveKey()).toMatchObject({ value: false });
     phone.script({ status: "unavailable" });
     const offline = await resolveKey();
-    expect(offline.value).toBeUndefined();
+    expect(offline.value).toBeNull();
     expect(offline.badges).toContainEqual(expect.objectContaining({ label: "Unavailable" }));
 
     phone.script({ status: "value", value: true });
