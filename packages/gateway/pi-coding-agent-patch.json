@@ -4,7 +4,7 @@
   "version": "1.5.1",
   "artifact": {
     "path": "third_party/pi-coding-agent/pi-coding-agent-1.5.1-tron.2.tgz",
-    "integrity": "sha512-XktvLfpEq2RVcCIDLYv1E3howtcXxIj3iy+bu4FEkSz2rHT07+Yvr5+rXuNTCVJfKk0DgIQgTz+bwhe01xryaQ=="
+    "integrity": "sha512-a0JgpD2psnZbTsRdgxWZWjdIOk4OVdnN1t/mVhEoNrUhlQ8n00qGS99jLe586VkLTUM8fox6ZlowXnMpjZMu8Q=="
   },
   "patch": {
     "path": "third_party/pi-coding-agent/tron.patch",
