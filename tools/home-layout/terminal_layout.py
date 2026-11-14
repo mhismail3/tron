@@ -70,8 +70,8 @@ def retire_job(l, root, path, fence):
     if job(l, root, path) is None:
         return
     fence()
-    command(l, ["/bin/launchctl", "bootout", f"gui/{os.getuid()}/{label(root)}"], RETIRE_DEADLINE)
     deadline = time.monotonic() + RETIRE_DEADLINE
+    command(l, ["/bin/launchctl", "bootout", f"gui/{os.getuid()}/{label(root)}"], RETIRE_DEADLINE)
     while job(l, root, path) is not None:
         if time.monotonic() >= deadline:
             raise l.LayoutError("terminal_job_did_not_retire")

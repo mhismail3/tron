@@ -244,8 +244,9 @@ receipt completion and app-byte restoration, not live replacement approval.
 The owned launch-agent plist is the sole enabled-intent authority. Migration backs up
 the old plist/config, proves the exact job/root/label/config, boots that job out, waits up
 to 30s for launchd to drop it (`bootout` can return while the job is still exiting), and
-removes its obsolete plist. The cutover packet retires the legacy job through the same owner. Root lifecycle leases stay fenced by inode
-through renames. Host and authorized keys move without regeneration; inodes survive.
+removes its obsolete plist. The cutover packet retires the legacy job through the same
+owner. Root lifecycle leases stay fenced by inode through renames. Host and authorized
+keys move without regeneration; inodes survive.
 
 Enabled SSH receives a plist for the new root/label. Gateway startup restores it
 automatically, generating current assigned-Tailnet-IPv4 config with its existing verified
