@@ -78,7 +78,6 @@ const STRUCTURE_MARKER = "<value>";
 
 const PACKAGE_PATH = /(?:[^\s"'`()[\]]*[/\\])?node_modules[/\\]((?:@[^/\\]+[/\\])?[^/\\]+)/g;
 const TEMP_PATH = /(?:[/\\]private)?[/\\](?:var[/\\]folders|tmp|private[/\\]tmp)[^\s"',;)]*/g;
-const SESSION_FOLDER = /([/\\]sessions[/\\])--[^/\\\s"']+--/g;
 const ISO_TIMESTAMP = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?/g;
 const FILE_TIMESTAMP = /\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z/g;
 const DIGEST_SEGMENT = /([/\\])[0-9a-f]{64}(?=[/\\])/g;
@@ -113,7 +112,6 @@ function normalizeTraceString(value: string, normalization: TraceNormalization):
   }
   text = text.replace(PACKAGE_PATH, "<pkg:$1>");
   text = text.replace(TEMP_PATH, "<tmp>/<path>");
-  text = text.replace(SESSION_FOLDER, "$1<session-cwd>");
   text = text.replace(ISO_TIMESTAMP, TIMESTAMP_MARKER);
   text = text.replace(FILE_TIMESTAMP, TIMESTAMP_MARKER);
   text = text.replace(DIGEST_SEGMENT, "$1<digest>");
