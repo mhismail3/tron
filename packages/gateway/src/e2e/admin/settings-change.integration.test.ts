@@ -487,7 +487,10 @@ describe("settings.change", () => {
     const slot = await f.registry.create(cwd);
     const model = f.faux.getModel();
     await slot.setModel(model.provider, model.id);
-    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), packages: ["npm:inventory-package"] }));
+    const pkg = join(f.root, "inventory-package");
+    await mkdir(pkg);
+    await writeFile(join(pkg, "package.json"), JSON.stringify({ name: "inventory-package", version: "1.0.0" }));
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), packages: [pkg] }));
     await f.service.invoke(client(), "mcp.add", { commandId: commandId(), scope: "global", server: "inventory-http", transport: "http", url: "http://user:inventory-secret@127.0.0.1:1/mcp?token=inventory-query-secret" });
     f.faux.setResponses([
       fauxAssistantMessage([fauxToolCall("settings", { action: "inventory" }, { id: "inventory-tool" })], { stopReason: "toolUse" }),
@@ -500,7 +503,7 @@ describe("settings.change", () => {
     expect(result.message.isError).not.toBe(true);
     const inventory = result.message.details as SettingsInventory;
     expect(inventory.hooks.extensions.find(extension => extension.name === "builtin:mcp")?.handlers).toContainEqual({ event: "session_start", count: 1 });
-    expect(inventory.packages).toContainEqual(expect.objectContaining({ source: "npm:inventory-package", scope: "user" }));
+    expect(inventory.packages).toContainEqual(expect.objectContaining({ source: pkg, scope: "user" }));
     expect(inventory.mcp.servers.map(server => server.name)).toContain("inventory-http");
     expect(JSON.stringify(inventory)).not.toMatch(/inventory-secret|inventory-query-secret/);
   });
