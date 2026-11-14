@@ -60,7 +60,7 @@ defines scoped permissions and runtime admission.
 In short:
 
 - **One key, declared once on the Gateway** (F1). The schema holds type,
-  group, allowed layers, timing, effect point, native-tap classification, writers, redaction and
+  group, allowed layers, timing, effect point, native-tap classification, writers and
   display. iOS renders keys generically; a new key needs no iOS release.
 - **Three scopes** (F4): **Project > Session/Home override > Global**, gated by
   registry grants. Home has no Project or separate chapter override. Private store
@@ -77,10 +77,7 @@ RPCs (shapes in the [Gateway README](../../README.md)): `settings.resolve`,
 Broadcasts: `settings.changed`, `trust.changed`, `mcp.changed`,
 `models.customChanged`. Agents reach the same path through the `settings` tool
 (a thin client of resolve, change, history, undo and inventory, each carrying the calling chat's actor; history and undo are
-scoped by that actor as the kernel contract defines). `inventory` is read-only: it projects the hook registrations (by
-extension and by event), configured packages, Tron modules and MCP server status for the chat's directory through
-`HookResources`, `PackageService`, `McpAdminService` and the module host, with URL userinfo and query masked. Home's tool may target a delegated
-worker by `taskId`.
+scoped by that actor as the kernel contract defines). `inventory` is read-only: it projects the hook registrations (by extension and by event), configured packages, Tron modules and configured MCP servers (`configured`, `disabled` or `unknown`; never probed) for the chat's directory. Hooks and packages come from `HookResources` and `PackageService`, which load extension definitions for a trusted project as the existing `hooks.list`/`packages.list` RPCs do (code loading, a residual risk; not a probe). MCP comes from `McpAdminService.configured`, which reads `mcp.json` and, for a trusted project, `.pi/mcp.json` directly. It never runs `pi mcp` (which connects servers and resolves `!command` credentials), so no MCP server is started and no credential is resolved. URLs are reduced to the transport kind, so no URL text reaches the result. Every string is sanitized through credential redaction. An undecided project fails with `trust_required`. Home's tool may target a delegated worker by `taskId`.
 
 Ports in: `gateway-main.ts` wires kernel `SettingsModel`/`SettingsChangePath`,
 admin `SettingsStoreAdapter`,
@@ -104,7 +101,8 @@ are installed; schema access never evaluates their late-bound service getter.
   atomically within one store and rolls back across stores; requests
   serialize per target.
 - The record is append-only and kept forever; credentials and redacted values
-  never appear in it. It is never read to compute a value.
+  never appear in it. It is never read to compute a value. Reads (RPC and agent tool) return
+  the kernel's public entries: values of a flagged, retired or unknown key are never returned.
 - An agent's history page and Undo reach only its own chat's changes; the scope
   filter runs inside the history owner's page, never after the page returns. Tron Home
   and the maintainer see and undo all changes, each Undo logged with before and after.

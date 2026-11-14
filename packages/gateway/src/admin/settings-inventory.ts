@@ -6,11 +6,18 @@ import { decodePackageInventory } from "../protocol/types.js";
 import { redactCredentials, redactCredentialUrls } from "../util/credential-redaction.js";
 import type { HookResources } from "./hook-resources.js";
 import type { PackageService } from "./package-service.js";
-import type { McpAdminService, McpListing } from "./mcp-admin-service.js";
+import type { McpAdminService } from "./mcp-admin-service.js";
 
 const LIMIT = 64;
+const TEXT_LIMIT = 2_048;
 
-const text = (value: string): string => redactCredentials(redactCredentialUrls(value));
+const text = (value: string): string => redactCredentials(redactCredentialUrls(value)).replace(/[\u0000-\u001f\u007f]/gu, " ").slice(0, TEXT_LIMIT);
+const sanitize = <T>(value: T): T => {
+  if (typeof value === "string") return text(value) as T;
+  if (Array.isArray(value)) return value.map(sanitize) as T;
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, sanitize(child)])) as T;
+  return value;
+};
 const bounded = <T>(items: readonly T[]): T[] => items.slice(0, LIMIT);
 
 export class SettingsInventoryReader implements SettingsInventorySource {
@@ -24,26 +31,25 @@ export class SettingsInventoryReader implements SettingsInventorySource {
 
   async read(cwd: string): Promise<SettingsInventory> {
     const resolved = await this.trust.requireResolved(cwd);
-    const [hookList, packageList, globalMcp, projectMcp] = await Promise.all([
+    const [hookList, packageList, mcp] = await Promise.all([
       this.hooks.list(cwd),
       this.packages.list(cwd),
-      this.mcp.list({ scope: "global" }),
-      resolved.trusted ? this.mcp.list({ scope: "project", cwd: resolved.projectDir, trusted: true }) : undefined,
+      this.mcp.configured(resolved.trusted ? { scope: "project", cwd: resolved.projectDir, trusted: true } : undefined),
     ]);
-    return {
+    return sanitize({
       hooks: this.hookInventory(hookList),
       packages: bounded(decodePackageInventory(packageList).packages).map(pkg => ({
-        source: text(pkg.source), scope: pkg.scope, filtered: pkg.filtered,
+        source: pkg.source, scope: pkg.scope, filtered: pkg.filtered,
         ...(pkg.provides ? { provides: {
           skills: bounded(pkg.provides.skills), prompts: bounded(pkg.provides.prompts), themes: bounded(pkg.provides.themes),
           subagents: bounded(pkg.provides.subagents), tools: bounded(pkg.provides.tools), commands: bounded(pkg.provides.commands),
         } } : {}),
-        ...(pkg.conflict ? { conflict: text(`${pkg.conflict.code}: ${pkg.conflict.message}`) } : {}),
+        ...(pkg.conflict ? { conflict: `${pkg.conflict.code}: ${pkg.conflict.message}` } : {}),
         ...(pkg.nodeRequirement ? { nodeRequirement: pkg.nodeRequirement.status } : {}),
       })),
       modules: bounded(tronModuleSummaries(this.modules)).map(module => ({ name: module.name, purpose: module.purpose, tools: module.tools, commands: module.commands })),
-      mcp: this.mcpStatus(projectMcp ? [globalMcp, projectMcp] : [globalMcp]),
-    };
+      mcp: { servers: bounded(mcp.servers), errors: mcp.errors },
+    });
   }
 
   private hookInventory(list: Awaited<ReturnType<HookResources["list"]>>): SettingsInventory["hooks"] {
@@ -57,23 +63,9 @@ export class SettingsInventoryReader implements SettingsInventorySource {
       }
     }
     return {
-      extensions: bounded(list.extensions).map(row => ({
-        name: text(row.name), scope: row.scope, source: text(row.source), handlers: bounded(row.handlers),
-      })),
-      events: bounded([...events]).map(([event, entry]) => ({ event: text(event), count: entry.count, extensions: bounded(entry.extensions).map(text) })),
+      extensions: bounded(list.extensions).map(row => ({ name: row.name, scope: row.scope, source: row.source, handlers: bounded(row.handlers) })),
+      events: bounded([...events]).map(([event, entry]) => ({ event, count: entry.count, extensions: bounded(entry.extensions) })),
       loadErrors: list.extensionLoadErrors.length,
-    };
-  }
-
-  private mcpStatus(listings: McpListing[]): SettingsInventory["mcp"] {
-    const servers = listings.flatMap(listing => listing.servers);
-    return {
-      servers: bounded(servers).map(server => ({
-        name: server.name, scope: server.scope, state: server.state, enabled: server.enabled, exposure: server.exposure,
-        transport: text(server.transport), tools: bounded(server.tools).map(text),
-        ...(server.error ? { error: text(server.error) } : {}),
-      })),
-      errors: listings.reduce((sum, listing) => sum + listing.errors, 0),
     };
   }
 }

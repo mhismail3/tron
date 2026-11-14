@@ -27,7 +27,6 @@ export interface KeyPresentation {
   range?: NonNullable<ValueType["range"]>;
   optionsSource?: { name: string; dependsOn: readonly string[] };
   confirm?: string;
-  redacted?: true;
   entry?: EntryGuidance;
   sessionOverridable: boolean;
   projectSettable: boolean;
@@ -56,7 +55,6 @@ function presentKey(key: KeyDeclaration, clientControls: readonly string[] | und
     ...(control && key.type.range ? { range: key.type.range } : {}),
     ...(control && key.optionsSource ? { optionsSource: key.optionsSource } : {}),
     ...(key.confirm ? { confirm: key.confirm } : {}),
-    ...(key.redacted ? { redacted: true as const } : {}),
     ...(key.entry ? { entry: key.entry } : {}),
   };
 }
@@ -120,15 +118,13 @@ export function presentHistoryEntry(schema: SettingsSchema, entry: ChangeEntry) 
   }
   const key = schema.KEYS.find(key => key.id === entry.key);
   const subject = key ? undefined : recordSubject(entry.key);
-  const redacted = entry.redacted || key?.redacted;
-  const { before, after, fixedAt: _fixedAt, ...redactedEntry } = entry;
   const format = (value: unknown): string => formatStoredSetting(key?.type, value);
   const name = subject ? entry.qualifiers?.[subject.qualifier] : undefined;
   const display = subject ? entry.op === "unset" ? { before: "Configured", after: "Removed" }
     : entry.added ? { before: "Not configured", after: "Added" } : { before: "Configured", after: "Changed" }
-    : redacted ? { before: "Hidden", after: "Changed" } : { before: format(before), after: format(after) };
+    : entry.redacted ? { before: "Hidden", after: "Changed" } : { before: format(entry.before), after: format(entry.after) };
   return {
-    ...(redacted ? { ...redactedEntry, changed: true as const, redacted: true as const } : entry),
+    ...entry,
     presentation: {
       label: key?.label ?? (subject ? `${subject.label}${name ? ` ${name}` : ""}` : entry.key),
       ...(key ? { section: key.group } : subject ? { section: subject.group } : {}),

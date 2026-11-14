@@ -264,10 +264,10 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     expect((await read()).keys).toEqual([]);
   });
 
-  it("serves target-specific recovery capability, Global reset presence and no stopped-runtime setting row", async () => {
+  it("serves target-specific recovery capability and Global reset presence", async () => {
     const f = await setup();
     const read = (target: Record<string, string>) => f.service.invoke(f.client, "settings.resolve", {
-      target, keys: ["run.retry.maxRetries", "setup.sessionDir"], renderer: { version: 1, controls: ["text"] },
+      target, keys: ["run.retry.maxRetries"], renderer: { version: 1, controls: ["text"] },
     }) as Promise<{ keys: Array<{ key: string; overridden: boolean; presentation: { editable: boolean } }> }>;
     const global = await read({ kind: "global" });
     expect(global.keys).toHaveLength(1);

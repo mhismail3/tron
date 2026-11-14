@@ -9,7 +9,7 @@ export function redactCredentials(value: string): string {
 
 export function redactCredentialUrls(value: string): string {
   return value
-    .replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/?#@]*@/giu, "$1[REDACTED]@")
+    .replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^\s@]*@/giu, "$1[REDACTED]@")
     .replace(/\b([a-z][a-z0-9+.-]*:\/\/[^\s?#]*)\?[^\s#]*/giu, "$1?[REDACTED]");
 }
 
