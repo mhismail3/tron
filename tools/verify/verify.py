@@ -1294,6 +1294,8 @@ def main(argv: list[str]) -> int:
     mode.add_argument("--all", action="store_true")
     mode.add_argument("--update-locks", metavar="ID")
     parser.add_argument("--base", default="origin/main")
+    parser.add_argument("--ios-host", choices=("local", "mini"), default="local",
+                        help="run a verification that selects iOS checks on this host or entirely under the mini lease")
     parser.add_argument("--ios-jobs", type=int, choices=(1, 2, 3), default=1,
                         help="maximum concurrent iOS shards and real-UI journey lanes (default: 1)")
     parser.add_argument("--skip", default="", help=f"comma-separated runner groups to skip explicitly: {', '.join(SKIPPABLE)}")
@@ -1303,6 +1305,9 @@ def main(argv: list[str]) -> int:
                              "else this Mac), this Mac, or the mini (tools/verify/mini.py); the Gateway node lane runs on this Mac "
                              "unless the mini is named")
     args = parser.parse_args(argv)
+    on_mini = args.ios_host == "mini" or os.environ.get("TRON_VERIFY_EXECUTION_HOST") == "mini"
+    if args.update_locks and on_mini:
+        parser.error("golden recording is local-only; --update-locks cannot run on the mini")
     gateway_host = "local" if args.update_locks else args.gateway_host
     gateway_reason = "--update-locks records goldens here" if args.update_locks else f"--gateway-host {gateway_host}"
     node_host = "mini" if gateway_host == "mini" else "local"
@@ -1350,6 +1355,24 @@ def main(argv: list[str]) -> int:
     skipped_group = lambda group: group.split("-")[0] in skip  # noqa: E731  (--skip ios covers ios-lanes)
     ios_lane = "ios" not in skip and ((name == "all" and any(key.startswith("ios-app/") for key in modules)) or "ios" in groups or any(group in owner_jobs for group in groups) or (
         name == "changed" and any(key.startswith("ios-app/") and key != "ios-app/e2e-tests" for key in selection["modules"])))
+    host_bound = sorted(group for group in ("python-here", "mac-terminal") if group in groups and not skipped_group(group))
+    if on_mini and host_bound:
+        parser.error(f"mini verification cannot run host-bound groups: {', '.join(host_bound)}; "
+                     "select a supported affected scope; these checks need their Mac owner")
+    if args.ios_host == "mini" and (ios_lane or any(group.startswith("ios") and not skipped_group(group) for group in groups)) and not args.plan:
+        forwarded = []
+        omit_value = False
+        for word in argv:
+            if omit_value:
+                omit_value = False
+            elif word in ("--ios-host", "--gateway-host", "--base"):
+                omit_value = True
+            elif not word.startswith(("--ios-host=", "--gateway-host=", "--base=")):
+                forwarded.append(word)
+        ancestor = git("merge-base", base, "HEAD").strip()
+        command = [sys.executable, str(ROOT / "tools/verify/mini.py"), "verify", *forwarded,
+                   "--base", ancestor, "--ios-host", "local", "--gateway-host", "local"]
+        os.execv(sys.executable, command)
     gateway_touched = (name == "all" and any(key.startswith("gateway/") for key in modules)) or any(key.startswith("gateway/") for key in selection["modules"]) \
         or any(path.startswith(f"{GATEWAY}/") for path in selection["tests"])
 
@@ -1445,6 +1468,7 @@ def main(argv: list[str]) -> int:
                           "gatewayHost": {"host": gateway_host, "reason": gateway_reason},
                           "deferredCommands": deferred_commands,
                           "iosJobs": args.ios_jobs,
+                          "iosHost": args.ios_host,
                           "iosLanes": [lane or "(this worktree's lane)" for lane in ios_phone_lanes()[:args.ios_jobs]] + [ios_pad_lane()] if "ios" in groups and "ios" not in skip else [],
                           "batchCommand": [tron, "verify", "--batch"] if selection["tier"] == "full" else None}, indent=2))
         return 0
