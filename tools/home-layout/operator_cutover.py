@@ -57,11 +57,7 @@ def ssh(root, hidden, log, hide=False):
         require(not target.is_symlink() and target.read_bytes() == terminal.plist(root), 'SSH plist is not exactly owned; stop for review')
         if not hide:
             command(['/bin/cp', '-p', target, hidden], log)
-    job = terminal.job(layout, root, target)
-    if job is not None:
-        result = terminal.command(layout, ['/bin/launchctl', 'bootout', f'gui/{os.getuid()}/{terminal.label(root)}'])
-        require(result.returncode == 0, 'owned SSH listener did not retire')
-        require(terminal.job(layout, root, target) is None, 'owned SSH job remains loaded')
+    terminal.retire_job(layout, root, target, lambda: None)
     if hide and target.exists():
         require(not hidden.exists(), 'held SSH intent already exists; inspect the receipt')
         target.rename(hidden)

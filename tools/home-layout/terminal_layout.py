@@ -41,9 +41,12 @@ def read(l, r, path):
     return r.read_record(l, path)[0]
 
 
-def command(l, arguments):
+RETIRE_DEADLINE = 30
+
+
+def command(l, arguments, timeout=3):
     try:
-        return subprocess.run(arguments, capture_output=True, text=True, timeout=3)
+        return subprocess.run(arguments, capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired):
         raise l.LayoutError("terminal_command_failed") from None
 
@@ -61,6 +64,19 @@ def job(l, root, path):
             or values != ["/usr/sbin/sshd", "-D", "-e", "-f", str(root / "sshd_config")]):
         raise l.LayoutError("terminal_job_not_owned")
     return {"running": bool(fields["state"] and fields["state"][1].strip() == "running" and fields["pid"])}
+
+
+def retire_job(l, root, path, fence):
+    if job(l, root, path) is None:
+        return
+    fence()
+    command(l, ["/bin/launchctl", "bootout", f"gui/{os.getuid()}/{label(root)}"], RETIRE_DEADLINE)
+    deadline = time.monotonic() + RETIRE_DEADLINE
+    while job(l, root, path) is not None:
+        if time.monotonic() >= deadline:
+            raise l.LayoutError("terminal_job_did_not_retire")
+        time.sleep(0.1)
+    fence()
 
 
 def configuration(l, root, data):
@@ -191,13 +207,7 @@ def retire(l, r, report, layout, journal, journal_path, reverse, fence):
     if reverse and saved["enabled"] and not any("state/mac-terminal/sshd_config" in layout[phase] for phase in ("inverse", "rewrites")):
         raise l.LayoutError("terminal_config_missing")
     if sys.platform == "darwin" and l.observed(str(source)) is not None:
-        active = job(l, source, before)
-        if active is not None:
-            fence()
-            result = command(l, ["/bin/launchctl", "bootout", f"gui/{os.getuid()}/{label(source)}"])
-            fence()
-            if result.returncode or job(l, source, before) is not None:
-                raise l.LayoutError("terminal_job_did_not_retire")
+        retire_job(l, source, before, fence)
     fence()
     if read(l, r, before) is not None:
         before.unlink()

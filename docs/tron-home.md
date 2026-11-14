@@ -235,14 +235,16 @@ an open output stream. The adapter flushes the append-mode stream before handing
 its path to every platform call, including stop and rollback launch. Append mode
 prevents later stream writes from overwriting output appended by the platform.
 The existing home-layout test suite drives both actions under a disposable HOME
-with an inert platform and the real command-log writer. It proves this wiring,
+with an inert platform, the real command-log writer and a launchd stand-in that keeps
+the SSH job visible after `bootout` returns. It proves this wiring,
 receipt completion and app-byte restoration, not live replacement approval.
 
 ### Private SSH
 
 The owned launch-agent plist is the sole enabled-intent authority. Migration backs up
-the old plist/config, proves the exact job/root/label/config, boots that job out, verifies
-absence, and removes its obsolete plist. Root lifecycle leases stay fenced by inode
+the old plist/config, proves the exact job/root/label/config, boots that job out, waits up
+to 30s for launchd to drop it (`bootout` can return while the job is still exiting), and
+removes its obsolete plist. The cutover packet retires the legacy job through the same owner. Root lifecycle leases stay fenced by inode
 through renames. Host and authorized keys move without regeneration; inodes survive.
 
 Enabled SSH receives a plist for the new root/label. Gateway startup restores it
