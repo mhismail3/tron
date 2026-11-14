@@ -34,6 +34,7 @@ import hashlib
 import json
 import os
 import random
+import select
 import shutil
 import signal
 import sqlite3
@@ -255,7 +256,7 @@ class ExternalVerificationTests(VerifyCase):
             else:
                 self.assertEqual(node_command[-1:], [files[3]], options)
                 self.assertNotIn("mini.py", " ".join(node_command), options)
-            local_python = "status=0; " + "; ".join(f"echo '### verify file: {path}'; python3 tools/verify/ledger.py python {path} || status=1"
+            local_python = "status=0; " + "; ".join(f"echo '### verify file: {path}'; python3 tools/verify/ledger.py python {path} || {{ code=$?; [ \"$status\" -ne 0 ] || status=$code; }}"
                                        for path in ("mods/alpha/test-alpha.py", "scripts/test-pooled.py")) + '; exit "$status"'
             python_command = next(c["command"] for c in plan["commands"] if c["name"] == "tests: python")
             self.assertEqual([python_command[0], Path(python_command[1]).name, *python_command[2:]] if runner == "mini.py"
@@ -616,6 +617,28 @@ class LedgerTests(VerifyCase):
         with sqlite3.connect(path) as connection:
             rows = connection.execute('SELECT test_id, outcome, seconds FROM results ORDER BY test_id').fetchall()
         self.assertEqual(rows, [('Target/Cases/testFail', 'failed', 2.5), ('Target/Cases/testPass', 'passed', 1.25), ('Target/Cases/testSkip', 'skipped', 0.0)])
+        command = [sys.executable, str(r.path / 'tools/verify/ledger.py'), 'exec', 'swift', sys.executable, '-c']
+        with self.subTest(contract='bytes and exit'):
+            output = subprocess.run([*command, "import sys;sys.stdout.buffer.write(b'one\\rtwo\\xff\\n');sys.stderr.buffer.write(b'error\\x80\\n');sys.exit(37)"],
+                                    cwd=r.path, env=r.env, capture_output=True)
+            self.assertEqual(output.returncode, 37)
+            self.assertEqual(output.stdout, b'one\rtwo\xff\n')
+            self.assertEqual(output.stderr, b'error\x80\n')
+        with self.subTest(contract='forwarded SIGTERM'):
+            process = subprocess.Popen([*command, "import signal;print('ready',flush=True);signal.pause()"],
+                                       cwd=r.path, env=r.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+            try:
+                self.assertTrue(select.select([process.stdout], [], [], 10)[0], 'recorder did not forward child readiness')
+                self.assertEqual(process.stdout.readline(), b'ready\n')
+                process.send_signal(signal.SIGTERM)
+                output, errors = process.communicate(timeout=10)
+                self.assertEqual(process.returncode, 143, output + errors)
+            finally:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.wait()
 
     def test_real_xctest_process_records_pass_fail_and_skip_without_a_simulator(self) -> None:
         r = self.repo
@@ -710,6 +733,22 @@ class LedgerTests(VerifyCase):
                                 ('mods/alpha/test-fixtures.py::setUpClass (Broken)', 'failed'),
                                 ('mods/alpha/test-fixtures.py::setUpClass (Skipped)', 'skipped'),
                                 ('mods/alpha/test-passed.py', 'passed')])
+        r.write('mods/alpha/test-000-status.py', 'import sys\nsys.exit(37)\n')
+        r.commit('first nonzero status with later files')
+        for entry in ('tooling', 'verify'):
+            with self.subTest(entry=entry):
+                if entry == 'tooling':
+                    result = subprocess.run([str(r.path / 'scripts/tron'), 'test', 'tooling',
+                                             'mods/alpha/test-000-status.py', 'mods/alpha/test-failed.py', 'mods/alpha/test-passed.py'],
+                                            cwd=r.path, env=r.env, capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 37, result.stdout + result.stderr)
+                    self.assertIn('file passed', result.stdout)
+                else:
+                    result = r.verify('--module', 'repo/alpha', '--gateway-host', 'local')
+                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                    step = next(step for step in r.report()['steps'] if step['name'] == 'tests: python')
+                    self.assertEqual(step['exit'], 37)
+                    self.assertIn('file passed', (r.path / step['log']).read_text())
 
     def test_public_tooling_run_appends_real_cases_and_flakes_means_same_tree_pass_and_fail(self) -> None:
         r = self.repo

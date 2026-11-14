@@ -183,7 +183,9 @@ cases; a file with no executed passes cannot hide beside a passing neighbour.
 The append-only per-test ledger is `~/.tron-maintenance/test-ledger/results.sqlite3`, outside
 all checkouts and outside Gateway state. `TRON_TEST_LEDGER` may select an external fixture
 or evidence file; a destination inside any repository or `~/.tron` is refused. SQLite transactions
-serialize concurrent appenders; reads never create a store. Recording is fail-closed: a capture or
+serialize concurrent appenders; reads never create a store. The first shipped schema has 14 columns;
+any later format change requires the dedicated backup-first migration policy, not a compatibility reader.
+Recording is fail-closed: a capture or
 storage error fails the recording command, even if its child passed. That infrastructure error
 creates no invented failed-test row. The ledger stores test identities and metrics, not test output,
 prompts or failure payloads; raw logs stay with their existing owners.
@@ -202,7 +204,9 @@ same-Mac batch overlap remains unannotated in the ledger. Raw runner verdicts ar
 
 Gateway Vitest, Python unittest, Node test and XCTest runners append one result per test identity,
 including failed and skipped cases. Vitest uses native result callbacks without replacing caller
-reporters or output paths; Node preserves TAP output; XCTest reads native result bundles; Python
+reporters or output paths; when none is supplied, Gateway reads the pinned Vitest default reporter list
+through Node before adding its recorder. A failed defaults probe is an infrastructure error, not a case.
+Node preserves TAP output; XCTest reads native result bundles; Python
 records unittest result callbacks, including subtest failures and unexpected successes. Class/module
 fixture errors and skips have their own fixture identity; a standalone Python script has one file
 identity. A zero-test unittest run invents no case. External Python files remain runnable, but their
@@ -219,8 +223,11 @@ A transport refusal retains any completed native cases without inventing a faile
 XCTest uses the result bundle's test tree, with completed XCTest console cases retained when a
 bundle is unavailable. Parameterized native tests use the identities supplied by their native report.
 
-Verify's Python/shell file groups collect all selected files' failures before returning; a failing
-file cannot hide the later cheap files. Direct `scripts/tron test tooling` uses the same Python
+Verify's Python/shell file groups run every selected file and preserve the first nonzero child status;
+a failing file cannot hide later files or collapse a native exit to 1. Recorder subprocesses forward
+SIGTERM/SIGINT and preserve stdout/stderr bytes, including CR and invalid UTF-8, without a TTY.
+Root Node and Gateway Node groups use `--gateway-host` alike; `mini` queues both under its lease,
+with a mini outage remaining no-result rather than local fallback. Direct `scripts/tron test tooling` uses the same Python
 recorder. The canonical iOS and real-Gateway journey runners and the Mac test owner record their
 native test results, so verify, batch and direct invocations share one ledger, not separate histories.
 

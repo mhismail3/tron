@@ -1175,7 +1175,7 @@ def ios_owner_count(output: str) -> int:
 
 def per_file(interpreter: str, files: list[str]) -> str:
     runner = 'python3 tools/verify/ledger.py ' + ('python' if interpreter == 'python3' else 'exec shell bash')
-    return "status=0; " + "; ".join(f"echo {shlex.quote(FILE_MARKER + path)}; {runner} {shlex.quote(path)} || status=1" for path in files) + '; exit "$status"'
+    return "status=0; " + "; ".join(f"echo {shlex.quote(FILE_MARKER + path)}; {runner} {shlex.quote(path)} || {{ code=$?; [ \"$status\" -ne 0 ] || status=$code; }}" for path in files) + '; exit "$status"'
 
 
 def test_step_names(group: str, shards: list[list[str]], skipped: bool) -> list[str]:
