@@ -403,6 +403,71 @@ describe("settings package update installs one exact version through the owner",
   });
 });
 
+describe("settings package update binds the effective installer of a trusted project", () => {
+  async function trustedProjectUpdate(name: string) {
+    const root = await mkdtemp(join(tmpdir(), "tron-package-update-project-"));
+    roots.push(root);
+    const agentDir = join(root, "agent"), cwd = join(root, "workspace"), tronHome = join(root, "tron");
+    await mkdir(agentDir, { recursive: true });
+    await mkdir(join(cwd, ".pi"), { recursive: true });
+    const registry = await publishedNpmRegistry(root, [{ name, versions: ["1.0.0", "1.2.0"], latest: "1.0.0" }]);
+    const saved = { registry: process.env.npm_config_registry, cache: process.env.npm_config_cache };
+    process.env.npm_config_registry = registry.base;
+    process.env.npm_config_cache = join(root, "npm-cache");
+    const source = `npm:${name}`;
+    const globalSettings = join(agentDir, "settings.json"), projectSettings = join(cwd, ".pi", "settings.json");
+    await writeFile(globalSettings, JSON.stringify({ packages: [source] }));
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const changes = new SettingsChangePath({} as never, new SettingsChangeRecord(tronHome), { setTrust: async () => undefined });
+    const packages = new PackageService(agentDir, trust, () => {});
+    packages.register(changes, () => {});
+    const requester = { kind: "home" as const, id: "home-session" };
+    await packages.mutate("update", source, cwd, false);
+    const installedPath = (await packages.list(cwd)).packages.find(row => row.source === source)?.installedPath as string;
+    const installedVersion = async () => JSON.parse(await readFile(join(installedPath, "package.json"), "utf8")).version as string;
+    expect(await installedVersion()).toBe("1.0.0");
+    return { root, cwd, source, projectSettings, changes, packages, requester, installedVersion, close: async () => {
+      await registry.close();
+      process.env.npm_config_registry = saved.registry;
+      process.env.npm_config_cache = saved.cache;
+    } };
+  }
+
+  it("shows a trusted project's npmCommand in the review before any command runs, without emitting its secret argument", async () => {
+    const fixture = await trustedProjectUpdate(`tron-update-project-review-${Date.now()}`);
+    try {
+      const marker = join(fixture.root, "project-installer-ran"), secret = "hunter2hunter2";
+      await writeFile(fixture.projectSettings, JSON.stringify({ npmCommand: ["sh", "-c", `touch '${marker}'; exit 1`, "--password", secret] }));
+      const review = await fixture.packages.updatePackage({ cwd: fixture.cwd, source: fixture.source, version: "1.2.0", reason: "Trusted installer" }, fixture.requester);
+      expect(review).toMatchObject({ status: "review", review: { items: [
+        expect.objectContaining({ label: expect.stringMatching(/^Package /), detail: expect.stringContaining("Installer: sh -c") }),
+        expect.objectContaining({ label: "Configured source" }),
+      ] } });
+      expect(JSON.stringify(review)).not.toContain(secret);
+      await expect(readFile(marker)).rejects.toThrow();
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("refuses an apply whose trusted-project installer changed after review, before any command runs or is recorded", async () => {
+    const fixture = await trustedProjectUpdate(`tron-update-project-stale-${Date.now()}`);
+    try {
+      const replacedMarker = join(fixture.root, "replaced-project-installer-ran");
+      await expect(fixture.packages.updatePackage({ cwd: fixture.cwd, source: fixture.source, version: "1.2.0", reason: "Changed after review" }, fixture.requester, async (_review, apply) => {
+        await writeFile(fixture.projectSettings, JSON.stringify({ npmCommand: ["sh", "-c", `touch '${replacedMarker}'; exit 1`] }));
+        return apply({ deviceId: "ios-device", commandId: "project-installer-changed" });
+      })).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("changed since review") });
+      await expect(readFile(replacedMarker)).rejects.toThrow();
+      expect(await fixture.installedVersion()).toBe("1.0.0");
+      expect((await fixture.changes.record.page({ filter: entry => entry.key === "package.update" })).entries).toEqual([]);
+    } finally {
+      await fixture.close();
+    }
+  });
+});
+
 async function gitHead(cwd: string): Promise<string> {
   return (await execFileAsync("git", ["-C", cwd, "rev-parse", "HEAD"])).stdout.trim();
 }
