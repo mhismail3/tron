@@ -321,13 +321,13 @@ describe("settings package update installs one exact version through the owner",
     try {
       await writeFile(join(agentDir, "settings.json"), JSON.stringify({ packages: [source] }));
       const first = await repo.commit("a\n", "a");
-      const second = await repo.commit("b\n", "b");
       const changes = new SettingsChangePath({} as never, new SettingsChangeRecord(tronHome), { setTrust: async () => undefined });
       const packages = new PackageService(agentDir, new TrustService(agentDir), () => {});
       packages.register(changes, () => {});
       await packages.mutate("update", source, cwd, false);
       const installedPath = (await packages.list(cwd)).packages.find(row => row.source === source)?.installedPath as string;
       expect(await gitHead(installedPath)).toBe(first);
+      const second = await repo.commit("b\n", "b");
 
       const fsmonitorMarker = join(root, "fsmonitor-ran"), filterMarker = join(root, "filter-ran");
       await execFileAsync("git", ["-C", installedPath, "config", "core.fsmonitor", `touch '${fsmonitorMarker}'`]);
