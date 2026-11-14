@@ -192,9 +192,41 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "sheet-\(name)-loading")
         let probe = CGRect(x: sheet.midX - 80, y: sheet.midY - 80, width: 160, height: 160)
         var drawn: (center: CGPoint, extent: CGFloat)?
+        var samples: [PulseCentroidSample] = []
         for _ in 0..<5 where drawn == nil {
-            drawn = accentCentroid(XCUIScreen.main.screenshot().image, in: probe, windowWidth: window.width)
+            let image = XCUIScreen.main.screenshot().image
+            var mask: [UInt8] = []
+            drawn = accentCentroid(image, in: probe, windowWidth: window.width, mask: &mask)
+            samples.append(PulseCentroidSample(image: image, mask: mask, measurement: drawn))
             if drawn == nil { Thread.sleep(forTimeInterval: 0.15) }
+        }
+        XCTContext.runActivity(named: "pulse-centroid-\(name)") { activity in
+            let bounds = XCTAttachment(string: "window=\(window)\nsheet=\(sheet)\nprobe=\(probe)\nmask coordinates: top row is height - 1 - CGContext buffer row; white pixels satisfy the original chroma predicate")
+            bounds.name = "centroid-\(name)-original-bounds"
+            bounds.lifetime = .keepAlways
+            activity.add(bounds)
+            for (index, sample) in samples.enumerated() {
+                let prefix = "centroid-\(name)-sample-\(index + 1)"
+                let input = XCTAttachment(data: sample.image.pngData()!, uniformTypeIdentifier: "public.png")
+                input.name = "\(prefix)-input.png"
+                input.lifetime = .keepAlways
+                activity.add(input)
+                let result = XCTAttachment(string: "measurement=\(String(describing: sample.measurement))\nqualifyingPixels=\(sample.mask.filter { $0 != 0 }.count)\nimageSize=\(sample.image.size)\nimageScale=\(sample.image.scale)")
+                result.name = "\(prefix)-measurement"
+                result.lifetime = .keepAlways
+                activity.add(result)
+                if !sample.mask.isEmpty {
+                    let provider = CGDataProvider(data: Data(sample.mask) as CFData)!
+                    let image = CGImage(width: Int(probe.width), height: Int(probe.height), bitsPerComponent: 8,
+                                        bitsPerPixel: 8, bytesPerRow: Int(probe.width), space: CGColorSpaceCreateDeviceGray(),
+                                        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue), provider: provider,
+                                        decode: nil, shouldInterpolate: false, intent: .defaultIntent)!
+                    let mask = XCTAttachment(data: UIImage(cgImage: image).pngData()!, uniformTypeIdentifier: "public.png")
+                    mask.name = "\(prefix)-mask.png"
+                    mask.lifetime = .keepAlways
+                    activity.add(mask)
+                }
+            }
         }
         guard let pulse = drawn else {
             XCTFail("No pulse drawn in the visible sheet (\(name))")
@@ -207,7 +239,13 @@ final class TronSmokeUITests: XCTestCase {
         return sheet.minY
     }
 
-    private func accentCentroid(_ image: UIImage, in area: CGRect, windowWidth: CGFloat) -> (center: CGPoint, extent: CGFloat)? {
+    private struct PulseCentroidSample {
+        let image: UIImage
+        let mask: [UInt8]
+        let measurement: (center: CGPoint, extent: CGFloat)?
+    }
+
+    private func accentCentroid(_ image: UIImage, in area: CGRect, windowWidth: CGFloat, mask: inout [UInt8]) -> (center: CGPoint, extent: CGFloat)? {
         guard let source = image.cgImage else { return nil }
         let scale = CGFloat(source.width) / windowWidth
         let width = Int(area.width), height = Int(area.height)
@@ -217,6 +255,7 @@ final class TronSmokeUITests: XCTestCase {
         guard let crop = source.cropping(to: CGRect(x: area.minX * scale, y: area.minY * scale,
                                                     width: area.width * scale, height: area.height * scale)) else { return nil }
         context.draw(crop, in: CGRect(x: 0, y: 0, width: width, height: height))
+        mask = [UInt8](repeating: 0, count: width * height)
         var sumX = 0.0, sumY = 0.0, count = 0.0, minX = Int.max, maxX = Int.min, minY = Int.max, maxY = Int.min
         for y in 0..<height {
             for x in 0..<width {
@@ -224,6 +263,7 @@ final class TronSmokeUITests: XCTestCase {
                 let r = Int(pixels[i]), g = Int(pixels[i + 1]), b = Int(pixels[i + 2])
                 guard max(r, g, b) - min(r, g, b) > 24 else { continue }
                 let row = height - 1 - y
+                mask[row * width + x] = 255
                 sumX += Double(x); sumY += Double(row); count += 1
                 minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, row); maxY = max(maxY, row)
             }
