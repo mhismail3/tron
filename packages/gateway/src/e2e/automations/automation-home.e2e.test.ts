@@ -481,8 +481,7 @@ it("real Gateway: paused crash claims and a partial canonical batch recover exac
     const partial = record.pendingHomeRuns[0];
     manager.appendCustomMessageEntry("tron.home-trigger.v1",
       `[from: automation; kind: trigger; authority: task]\nAutomation · ${partial.homeName}\n\n${partial.actionSnapshot.text}`, true,
-      { eventId: `automation:${partial.runId}`, fullTextReference: `schedule ${JSON.stringify({ action: "show", automationId: automation.id, runId: partial.runId, offset: 0, limit: 4096 })}`,
-        trigger: { kind: "automation", sourceId: automation.id, eventId: partial.runId, title: partial.homeName } });
+      { eventId: `automation:${partial.runId}`, trigger: { kind: "automation", sourceId: automation.id, eventId: partial.runId, title: partial.homeName } });
     const handle = await open(sessionFile, "r+"); try { await handle.sync(); } finally { await handle.close(); }
     gateway = live = await startLockGateway("automation-home-gates", { ...pushOptions, root }); owned.push(gateway);
     phone = await gateway.connect("push-restarted-phone");
