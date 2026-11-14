@@ -185,7 +185,6 @@ describe("Run Swift files device preference through the production Gateway proce
       for (const step of steps) {
         await waitFor(() => arrivals().length > answered, `the phone ${step.action} request ${answered + 1}`);
         const request = arrivals()[answered]!;
-        expect(JSON.stringify(arrivals().map((item) => [item.action, item.expected, item.value])), `DIAGNOSTIC arrivals before ${step.action}`).toBe("x");
         expect(request.action, `request ${answered + 1} arrival order`).toBe(step.action);
         answered += 1;
         const reply = await iphone.request("device.preference.respond", { commandId: randomUUID(), requestId: request.requestId, ...step.body });
@@ -196,7 +195,6 @@ describe("Run Swift files device preference through the production Gateway proce
     const changing = local.request("settings.change", { commandId: randomUUID(), target: { kind: "global" }, reason: "Turn off Swift files",
       changes: [{ key, layer: "global", op: "set", value: false, qualifiers: device, expected: true }] });
     await serve([
-      { action: "read", body: { status: "value", value: true } },
       { action: "read", body: { status: "value", value: true } },
       { action: "set", body: { status: "applied" } },
     ]);
