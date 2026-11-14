@@ -11,7 +11,7 @@ enum HostedManageSessionReview {
     }
 
     static func handles(_ method: String) -> Bool {
-        ["session.resources", "session.commandDetail", "session.subagentDetail", "session.workspace.inspect",
+        ["session.commandDetail", "session.subagentDetail", "session.workspace.inspect",
          "git.inspect", "trust.inspect"].contains(method)
     }
 
@@ -49,49 +49,8 @@ enum HostedManageSessionReview {
         case "trust.inspect":
             return .object(["requiresDecision": .bool(false), "effectiveDecision": .bool(true)])
         default:
-            return resources
+            return .null
         }
-    }
-
-    private static func row(_ name: String, _ description: String, path: String, scope: String, source: String,
-                            distribution: String) -> JSONValue {
-        .object(["name": .string(name), "description": .string(description), "path": .string(path), "scope": .string(scope),
-                 "source": .string(source), "distribution": .string(distribution)])
-    }
-
-    private static var resources: JSONValue {
-        .object([
-            "tools": .array(HostedSettingsReviewSchema.tools.map {
-                .object(["name": .string($0), "description": .string("Session tool details for \($0)."),
-                         "parameters": .object(["type": .string("object"), "properties": .object([:])])])
-            }),
-            "skills": .object(["skills": .array([
-                row("tron-ios", "Build, test and inspect iOS artifacts safely.", path: "/Users/fixture/.tron/agent/skills/tron-ios/SKILL.md",
-                    scope: "user", source: "auto", distribution: "local"),
-                row("repo-notes", "This repository's own conventions.", path: "/workspace/.agents/skills/repo-notes/SKILL.md",
-                    scope: "project", source: "auto", distribution: "local"),
-                row("pi-subagents", "Delegation guidance from the managed package.", path: "/Users/fixture/.tron/cache/pi-subagents/skills/pi-subagents/SKILL.md",
-                    scope: "user", source: "npm:pi-subagents", distribution: "external"),
-            ]), "diagnostics": .array([])]),
-            "prompts": .object(["prompts": .array([
-                row("land", "Fetch, rebase, test and push.", path: "/Users/fixture/.tron/agent/prompts/land.md",
-                    scope: "user", source: "auto", distribution: "local"),
-            ]), "diagnostics": .array([])]),
-            "commands": .array([
-                .object(["name": .string("review"), "description": .string("Review the working tree before landing"),
-                         "source": .string("extension"), "sourcePath": .string("/Users/fixture/.tron/agent/extensions/review.ts"),
-                         "resourceSource": .string("local"), "resourceScope": .string("user"), "resourceOrigin": .string("top-level"),
-                         "distribution": .string("local")]),
-            ]),
-            "subagents": .array([
-                .object(["name": .string("scout"), "description": .string("Fast codebase recon"), "source": .string("user"),
-                         "distribution": .string("local")]),
-                .object(["name": .string("repo-reviewer"), "description": .string("Reviews this repository's diffs"),
-                         "source": .string("project"), "distribution": .string("local")]),
-                .object(["name": .string("researcher"), "description": .string("Web research brief"), "source": .string("builtin"),
-                         "distribution": .string("external")]),
-            ]),
-        ])
     }
 }
 #endif

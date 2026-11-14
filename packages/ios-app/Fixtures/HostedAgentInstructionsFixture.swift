@@ -23,7 +23,7 @@ struct HostedAgentInstructionsFixtureView: View {
         .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-home-dark") ? .dark : .light)
         .task {
             model.installHostedSecondaryProjection(
-                context: .object(["instructions": Self.instructions]), tree: [], commands: [], resources: nil
+                context: .object(["instructions": Self.instructions]), tree: [], commands: []
             )
             presented = true
         }

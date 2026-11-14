@@ -282,23 +282,6 @@ final class TronSubagentParityUITests: XCTestCase {
     }
 
     @MainActor
-    func testSettingsResourcesAndDefinitionDiagnostic() throws {
-        continueAfterFailure = false
-        for scheme in ["light", "dark"] {
-            let app = launch(scheme: scheme, resources: true)
-            defer { app.terminate() }
-            XCTAssertTrue(app.staticTexts["Resources"].waitForExistence(timeout: 10), app.debugDescription)
-            XCTAssertTrue(app.staticTexts["Pi Subagents"].exists, app.debugDescription)
-            XCTAssertTrue(app.staticTexts["Council"].exists, app.debugDescription)
-            XCTAssertTrue(app.buttons["project-resource-subagents-0"].exists, app.debugDescription)
-            app.swipeUp()
-            XCTAssertTrue(app.staticTexts["Diagnostics"].waitForExistence(timeout: 5), app.debugDescription)
-            XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "fallbackModels")).firstMatch.exists, app.debugDescription)
-            try capture("settings-resources-\(scheme)")
-        }
-    }
-
-    @MainActor
     func testHistoricalSessionPills() throws {
         continueAfterFailure = false
         let app = launch(scheme: "dark", historical: true)
@@ -368,11 +351,10 @@ final class TronSubagentParityUITests: XCTestCase {
     }
 
     @MainActor
-    private func launch(scheme: String, historical: Bool = false, inputStage: String? = nil, queuedMaintainer: Bool = false, resources: Bool = false) -> XCUIApplication {
+    private func launch(scheme: String, historical: Bool = false, inputStage: String? = nil, queuedMaintainer: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-subagent-parity-fixture", "-\(scheme)"] + (historical ? ["-historical"] : [])
         if let inputStage { app.launchArguments.append("-\(inputStage)") }
-        if resources { app.launchArguments.append("-resources") }
         if queuedMaintainer { app.launchArguments.append("-queued-maintainer") }
         app.launch()
         return app

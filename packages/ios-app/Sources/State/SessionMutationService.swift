@@ -507,19 +507,6 @@ final class SessionMutationService {
         }
     }
 
-    func reloadResources(sessionID: String) async throws {
-        struct Params: Codable { let sessionId, commandId: String }
-        struct Response: Codable { let reloaded: Bool }
-        let commandID = uuidSource.next().uuidString
-        let params = Params(sessionId: sessionID, commandId: commandID)
-        let _: Response = try await executor.perform(
-            method: "session.reloadResources",
-            commandID: commandID
-        ) {
-            try await client.request("session.reloadResources", params, timeout: GatewayRequestTimeout.sessionReloadResources)
-        }
-    }
-
     func updateExtensionEditor(
         sessionID: String,
         hostEpoch: String,

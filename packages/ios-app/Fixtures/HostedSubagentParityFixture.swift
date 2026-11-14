@@ -241,7 +241,6 @@ struct HostedSubagentParityFixture: View {
                 if ProcessInfo.processInfo.arguments.contains("-history-grouping") {
                     Button("Subagent History") { showingHistory = true }
                 }
-                else if ProcessInfo.processInfo.arguments.contains("-resources") { ProjectResourcesView(sessionID: snapshot.sessionId) }
                 else { ChatView(sessionID: snapshot.sessionId, hostedProbe: probe) }
             }
             else if let error { Text(error) }
@@ -297,11 +296,7 @@ private actor HostedSubagentParitySocket: GatewaySocketConnection {
         guard let object = request.objectValue, let id = object["id"]?.stringValue,
               let method = object["method"]?.stringValue else { return }
         let result: JSONValue
-        if method == "session.resources" {
-            result = try JSONDecoder.gateway.decode(JSONValue.self, from: Data(#"""
-            {"skills":{"skills":[{"name":"pi-subagents","description":"Technical guidance for operator-requested delegation","path":"/provider/skills/pi-subagents/SKILL.md","scope":"user","source":"tron:pi-subagents@fixture#build","distribution":"external"}],"diagnostics":[]},"prompts":{"prompts":[{"name":"council","description":"Run a bounded supervisor-mediated council of advisors and write a decision memo","argumentHint":"<question>","path":"/provider/prompts/council.md","scope":"user","source":"tron:pi-subagents@fixture#build","distribution":"external"}],"diagnostics":[]},"subagents":[{"name":"parity-worker","description":"Read-only parity child","model":"parity-child/child","source":"project","distribution":"local"}],"subagentDiagnostics":"1 invalid subagent definition(s): Agent 'parity-invalid.md' uses removed frontmatter field 'fallbackModels'. Configure one model instead.","commands":[]}
-            """#.utf8))
-        } else if method == "session.processHistory.list" {
+        if method == "session.processHistory.list" {
             if ProcessInfo.processInfo.arguments.contains("-history-long") {
                 try await Task.sleep(for: .milliseconds(750))
             }

@@ -16,9 +16,10 @@ final class TronManageSessionReviewUITests: XCTestCase {
                        "Compact Now is centered on both lines")
         XCTAssertTrue(labels(app, containing: "Compact conversation").isEmpty, "no separate Compact row")
         XCTAssertTrue(app.buttons["manage-session-rename"].exists, "the edit pencil stays")
-        for title in ["Workspace", "Instructions", "Resources"] {
+        for title in ["Workspace", "Instructions"] {
             XCTAssertTrue(app.buttons[title].exists, "\(title) row\n\(app.debugDescription)")
         }
+        XCTAssertFalse(app.buttons["Resources"].exists, "the Resources row is gone")
         for gone in ["Current Branch", "Agent Instructions", "Project Resources"] {
             XCTAssertTrue(labels(app, containing: gone).isEmpty, "\(gone) is renamed")
         }
@@ -46,39 +47,6 @@ final class TronManageSessionReviewUITests: XCTestCase {
         XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "settings-ignored-defaultTools").count, 1)
     }
 
-    @MainActor func testResourceTagsAndBodies() {
-        for (kind, title, end) in [("commands", "Review", "END OF REVIEW COMMAND"), ("subagents", "Scout", "END OF SCOUT DEFINITION")] {
-            let app = launch(dark: false)
-            openResources(app)
-            XCTAssertTrue(app.staticTexts["Resources"].exists && !app.staticTexts["Project Resources"].exists)
-            if kind == "commands" {
-                XCTAssertEqual(tags(app, "skills-0"), ["Global"])
-                XCTAssertEqual(tags(app, "skills-1"), ["Project"])
-                XCTAssertEqual(tags(app, "skills-2"), ["External"])
-                XCTAssertEqual(tags(app, "subagents-0"), ["Global"])
-                XCTAssertEqual(tags(app, "subagents-1"), ["Project"])
-                XCTAssertEqual(tags(app, "prompts-0"), ["Global"], "a global prompt is not tagged Local")
-            }
-            let row = app.buttons["project-resource-\(kind)-0"]
-            for _ in 0..<8 where !row.isHittable { app.swipeUp() }
-            row.tap()
-            expandSheet(app, title: title)
-            let content = element(app, "project-resource-content")
-            XCTAssertTrue(content.waitForExistence(timeout: 10), app.debugDescription)
-            XCTAssertFalse(app.staticTexts["This resource does not expose body content."].exists)
-            XCTAssertFalse(app.staticTexts["Content truncated"].exists)
-            XCTAssertFalse(labels(content, containing: end).first?.exists ?? false, "the preview is an excerpt")
-            let viewAll = app.buttons["project-resource-view-all"]
-            XCTAssertTrue(viewAll.exists, app.debugDescription)
-            for _ in 0..<4 where !viewAll.isHittable { app.swipeUp() }
-            viewAll.tap()
-            let reading = element(app, "project-resource-reading")
-            XCTAssertTrue(reading.waitForExistence(timeout: 10), app.debugDescription)
-            XCTAssertFalse(labels(reading, containing: end).isEmpty, "View All shows the whole body\n\(reading.debugDescription)")
-            app.terminate()
-        }
-    }
-
     @MainActor private func launch(dark: Bool) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -90,22 +58,6 @@ final class TronManageSessionReviewUITests: XCTestCase {
         XCTAssertTrue(element(app, "session-usage-summary").waitForExistence(timeout: 10), app.debugDescription)
         expandSheet(app, title: "Manage Session")
         return app
-    }
-
-    @MainActor private func openResources(_ app: XCUIApplication) {
-        let row = app.buttons.matching(NSPredicate(format: "label IN {'Resources', 'Project Resources'}")).firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 8), app.debugDescription)
-        for _ in 0..<8 where !row.isHittable { app.swipeUp() }
-        row.tap()
-        XCTAssertTrue(app.buttons["project-resource-skills-0"].waitForExistence(timeout: 10), app.debugDescription)
-        expandSheet(app, title: row.label)
-    }
-
-    @MainActor private func tags(_ app: XCUIApplication, _ row: String) -> [String] {
-        let button = app.buttons["project-resource-\(row)"]
-        XCTAssertTrue(button.waitForExistence(timeout: 5), app.debugDescription)
-        let words: Set<String> = ["Global", "Project", "External", "Local", "Module", "User"]
-        return button.label.components(separatedBy: ", ").filter(words.contains)
     }
 
     @MainActor private func labels(_ root: XCUIElement, containing text: String) -> [XCUIElement] {

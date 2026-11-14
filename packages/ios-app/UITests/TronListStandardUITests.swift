@@ -57,21 +57,9 @@ final class TronListStandardUITests: XCTestCase {
         }
     }
 
-    @MainActor func testCaptureResourcesAndEmptySubagentHistory() {
+    @MainActor func testCaptureEmptySubagentHistory() {
         for mode in ["light", "dark"] {
             let app = XCUIApplication()
-            app.launchArguments = ["-tron-session-configuration-fixture", "-manage-session-review", "-fixture-appearance", mode]
-            app.launch()
-            XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
-            app.buttons["Stop session"].tap()
-            let resources = app.buttons.matching(NSPredicate(format: "label IN {'Resources', 'Project Resources'}")).firstMatch
-            reveal(resources, in: app, swipes: 8)
-            resources.tap()
-            XCTAssertTrue(app.buttons["project-resource-skills-0"].waitForExistence(timeout: 10), app.debugDescription)
-            expandSheet(app, title: "Resources")
-            Thread.sleep(forTimeInterval: 1)
-            shot("resources-\(mode)")
-            app.terminate()
             app.launchArguments = ["-tron-subagent-parity-fixture", "-history-grouping", "-history-empty", "-\(mode)"]
             app.launch()
             let open = app.buttons["Subagent History"]
@@ -204,16 +192,6 @@ final class TronListStandardUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 1)
         app.navigationBars.containing(.staticText, identifier: "Session History").buttons["Done"].firstMatch.tap()
         Thread.sleep(forTimeInterval: 1)
-        let resources = app.buttons.matching(NSPredicate(format: "label IN {'Resources', 'Project Resources'}")).firstMatch
-        reveal(resources, in: app, swipes: 8)
-        resources.tap()
-        XCTAssertTrue(app.buttons["project-resource-skills-0"].waitForExistence(timeout: 10), app.debugDescription)
-        expandSheet(app, title: "Resources")
-        Thread.sleep(forTimeInterval: 1)
-        shot("resources-\(mode)")
-        app.swipeUp()
-        Thread.sleep(forTimeInterval: 1)
-        shot("resources-bottom-\(mode)")
     }
 
     @MainActor func testFeedRowAnatomyAndActions() {
@@ -313,42 +291,6 @@ final class TronListStandardUITests: XCTestCase {
         assertSeparateSections(app, list: "home-profile-items", titles: ["Communication", "Machines, devices & services"],
                                row: "home-profile-item-6a26bfb7-f0d1-44ce-b0ae-9da01da3e55c")
         app.terminate()
-
-        app.launchArguments = ["-tron-session-configuration-fixture", "-manage-session-review", "-fixture-appearance", "light"]
-        app.launch()
-        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
-        app.buttons["Stop session"].tap()
-        let resources = app.buttons.matching(NSPredicate(format: "label IN {'Resources', 'Project Resources'}")).firstMatch
-        reveal(resources, in: app, swipes: 8)
-        resources.tap()
-        XCTAssertTrue(app.buttons["project-resource-skills-0"].waitForExistence(timeout: 10), app.debugDescription)
-        expandSheet(app, title: "Resources")
-        assertSeparateSections(app, list: "project-resource-groups", titles: ["Skills", "Subagents"], row: "project-resource-skills-0")
-    }
-
-    @MainActor func testResourceSectionsKeepDistinctKindTints() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-session-configuration-fixture", "-manage-session-review", "-fixture-appearance", "light"]
-        app.launch(); defer { app.terminate() }
-        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
-        app.buttons["Stop session"].tap()
-        let resources = app.buttons.matching(NSPredicate(format: "label IN {'Resources', 'Project Resources'}")).firstMatch
-        reveal(resources, in: app, swipes: 8)
-        resources.tap()
-        XCTAssertTrue(app.buttons["project-resource-skills-0"].waitForExistence(timeout: 10), app.debugDescription)
-        expandSheet(app, title: "Resources")
-        Thread.sleep(forTimeInterval: 0.6)
-        let headers = (0..<4).map { element(app, "project-resource-groups-header-\($0)") }
-        XCTAssertTrue(headers.allSatisfy { $0.exists && $0.isHittable }, "All four kind headers are on screen\n\(app.debugDescription)")
-        let screenshot = XCUIScreen.main.screenshot().image, window = app.windows.firstMatch.frame.width
-        let inks = headers.map { sheetInk(screenshot, $0.frame, window: window) }
-        for (index, ink) in inks.enumerated() { XCTAssertNotNil(ink, "\(headers[index].label) has an inked title") }
-        for i in inks.indices { for j in inks.indices where j > i {
-            guard let a = inks[i], let b = inks[j] else { continue }
-            let distance = zip(a, b).map { abs($0 - $1) }.max() ?? 0
-            XCTAssertGreaterThan(distance, 0.08, "\(headers[i].label) and \(headers[j].label) share one tint: \(a) vs \(b)")
-        } }
     }
 
     @MainActor func testEmptySubagentHistoryCentresItsPlaceholder() {

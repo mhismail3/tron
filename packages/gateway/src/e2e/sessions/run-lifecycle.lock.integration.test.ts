@@ -57,11 +57,9 @@ describe("gateway/run lifecycle RPC lock", () => {
     const sessionId = await createAndOpen(gateway, phone);
     expect((await command("session.prompt", { sessionId, text: "answer before the reload" })).ok).toBe(true);
     await gateway.settled(sessionId);
-    const reloadIdle = await command("session.reloadResources", { sessionId });
     const running = await command("session.prompt", { sessionId, text: "hold this run through the restart" });
     expect(running.ok, JSON.stringify(running)).toBe(true);
     await awaitsWithin(held.reached, "the held provider request");
-    const reloadRunning = await command("session.reloadResources", { sessionId });
 
     const restart = await command("gateway.restart");
     expect(restart.ok, JSON.stringify(restart)).toBe(true);
@@ -95,8 +93,6 @@ describe("gateway/run lifecycle RPC lock", () => {
     expect(malformedRestartNow.error).toEqual(refusal("invalid_request", "Gateway restart restartNow must be boolean"));
     expect(extraRestart.error).toEqual(refusal("invalid_request", "Gateway restart accepts only commandId and optional restartNow"));
     expect(extraStop.error).toEqual(refusal("invalid_request", "Gateway stop accepts only commandId"));
-    expect(reloadIdle.result).toEqual({ reloaded: true });
-    expect(reloadRunning.error).toEqual(refusal("busy", "Session must be idle for this operation"));
 
     const drainShape = { omittedCount: 0, suspectProjectionCount: 0, blockerCount: 1, blockerCounts: { "foreground-agent-operation": 1 } };
     expect(restart.result).toMatchObject({ restarting: false, scheduled: true, activeSessionIds: [sessionId], drainRevision: 4,
