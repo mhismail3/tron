@@ -247,7 +247,8 @@ native test results, so verify, batch and direct invocations share one ledger, n
    TypeScript/JavaScript (not JSX), Python, shell, Swift and CSS; Dafny (its `///` docs and `// @wire` feed `dafny2wire`), C/Objective-C and
    generated files are out of its scope
 6. When the selection touches the Gateway: `npm run check` (production and test
-   support typecheck), `npm run lint`, and `scripts/tron layers gateway`.
+   support typecheck), `npm run lint` (explicit agent-format file/line diagnostics, no success summary),
+   and `scripts/tron layers gateway`.
 7. Unlike the source-based static checks above, `scripts/tron layers ios` needs this
    commit's built Xcode index store (see the iOS lane below), so it runs at the build
    boundary after the cheap tier passes. A selection without the iOS lane runs it

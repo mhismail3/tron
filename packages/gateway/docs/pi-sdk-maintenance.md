@@ -90,6 +90,17 @@ requires its installed fetch to reject a loopback body that mismatches tab-prefi
 This is independent of the Gateway's external dependency override and the separately pinned
 managed-provider closure. The SDK cohort and conversation contracts remain unchanged.
 
+The local-file reader checks cancellation after `FileHandle.stat()` and immediately before
+`createReadStream`, with its existing handle-closing `finally` unchanged. Native stream cancellation
+and ordinary errors still propagate. The existing SDK integration test runs stat-boundary and
+mid-stream cancellation in isolated processes and joins handle closure. This one-line bridge
+is removed when the pinned Pi includes
+[upstream PR #12025](https://github.com/earendil-works/pi/pull/12025); upstream owns the
+alternative signal-free stream with reader-owned cancellation. The previous
+`pi-coding-agent-1.5.1-tron.1.tgz` is retained as the rollback artifact; its complete pin and
+patch inputs are available in the parent main tree. No installed runtime is changed by
+rebuilding or selecting `pi-coding-agent-1.5.1-tron.2.tgz` in a worktree.
+
 Pi activates newly registered declarable extension tools on a resumed branch, and the
 Gateway reapplies the transcript's explicit loadout over them. When that narrows the
 loadout, the patched `setActiveToolsByName` keeps the pending names the same call requested
