@@ -157,7 +157,9 @@ prompt-keyword handler is not part of that pin.
   That owner alone compares the canonical pin with the reviewed version and verifies
   installed-tool identity; the finite-task guard consumes its decision. A missing or
   unreviewed version is refused before launch. Validate actual Home-task launch/resume
-  and retained refusals, not only an ordinary session's child execution.
+  and retained refusals, not only an ordinary session's child execution. The pin module declares
+  `home-task-subagents-reports.e2e.test.ts` as a verification dependency, so a pin change exercises
+  verified controls, the missing-pin refusal and real child/report settlement.
 - **Advertisement lifetime:** global npm discovery runs through the provider's owned setup-command primitive. Reload cancels and joins superseded lookups; session shutdown cancels and joins the current lookup before returning. Unavailable global discovery still permits local agents. The real Gateway prompt/restart journey holds an npm lookup open and checks its PID is gone before the replacement process launches.
 - **Install and activation:** `npm run install:pi-subagents -- <gateway-home>` extracts the
   closure offline into `<gateway-home>/cache/pi-subagents/<version>` with a receipt and
