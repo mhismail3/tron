@@ -61,6 +61,7 @@ class GatewayRuns:
 
     def __init__(self, lock: Path):
         self.temporary = tempfile.TemporaryDirectory(prefix='tron-gateway-runs-')
+        self.ledger = tempfile.TemporaryDirectory(prefix='tron-gateway-ledger-')
         directory = Path(self.temporary.name)
         self.directory, self.order, self.runs = directory, directory / 'order', {}
         self.gateway = shipped_runner(directory, lock)
@@ -77,7 +78,8 @@ class GatewayRuns:
     def start(self, name):
         inherited = {key: value for key, value in os.environ.items() if key != 'TRON_FULL_GATEWAY_LOCK_HELD'}
         with (self.directory / f'{name}.err').open('w') as stderr:
-            self.runs[name] = subprocess.Popen(['python3', str(self.gateway), name], env=inherited,
+            self.runs[name] = subprocess.Popen(['python3', str(self.gateway), name],
+                                               env={**inherited, 'TRON_TEST_LEDGER': str(Path(self.ledger.name) / 'results.sqlite3')},
                                                stdout=subprocess.DEVNULL, stderr=stderr)
         return self.runs[name]
 
@@ -110,6 +112,7 @@ class GatewayRuns:
                 run.terminate()
                 run.wait(timeout=30)
         self.temporary.cleanup()
+        self.ledger.cleanup()
 
 
 class BatchTests(unittest.TestCase):
