@@ -832,4 +832,50 @@ describe("package update through the registered settings tool", () => {
       process.env.npm_config_cache = saved.cache;
     }
   });
+
+  it("refuses an approval made stale by an out-of-band change to the installed package and installs nothing", async () => {
+    const f = await fixture();
+    const name = `tron-update-stale-${Date.now()}`;
+    const registry = await publishedNpmRegistry(f.root, [{ name, versions: ["1.0.0", "1.2.0"], latest: "1.0.0" }]);
+    const saved = { registry: process.env.npm_config_registry, cache: process.env.npm_config_cache };
+    process.env.npm_config_registry = registry.base;
+    process.env.npm_config_cache = join(f.root, "npm-cache");
+    try {
+      const source = `npm:${name}`;
+      const settingsPath = join(f.agentDir, "settings.json");
+      const existing = JSON.parse(await readFile(settingsPath, "utf8").catch(() => "{}"));
+      await writeFile(settingsPath, JSON.stringify({ ...existing, packages: [source] }));
+      await f.packages.mutate("update", source, f.cwd, false);
+      await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
+
+      const home = await f.registry.acquire(f.home.sessionId);
+      f.faux.setResponses([
+        fauxAssistantMessage([fauxToolCall("settings", { action: "update", source, version: "1.2.0", reason: "Home requested the stale fixture update" }, { id: "package-update-stale" })], { stopReason: "toolUse" }),
+        fauxAssistantMessage("Refused"),
+      ]);
+      const prompting = home.prompt("Update the stale fixture package").then(() => waitFor(() => !home.isBusy, "stale package update settled"));
+      const interaction = await waitFor(() => home.snapshot().extensionPresentation.pendingInteractions[0], "stale package update card");
+      if (interaction.method !== "change") throw new Error("Expected the shared native install card");
+
+      const installedPath = (await f.packages.list(f.cwd)).packages.find(row => row.source === source)!.installedPath!;
+      const manifest = join(installedPath, "package.json");
+      await writeFile(manifest, JSON.stringify({ ...JSON.parse(await readFile(manifest, "utf8")), version: "0.9.9" }));
+
+      const service = settingsService(f);
+      await service.invoke(phone, "extension.respond", { commandId: "package-update-stale-response", sessionId: home.id,
+        interactionId: interaction.id, hostEpoch: interaction.hostEpoch, presentationRevision: interaction.presentationRevision,
+        value: { digest: interaction.review.digest, approved: true } }).catch(() => undefined);
+      await prompting;
+
+      expect(JSON.parse(await readFile(manifest, "utf8")).version).toBe("0.9.9");
+      expect(JSON.parse(await readFile(settingsPath, "utf8")).packages).toEqual([source]);
+      expect((await f.settings.settingsChanges.history({ key: "package.update" }, { kind: "ui", id: "maintainer" })).entries).toEqual([]);
+      expect(home.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === "package-update-stale"))
+        .toMatchObject({ type: "message", message: { role: "toolResult", isError: true } });
+    } finally {
+      await registry.close();
+      process.env.npm_config_registry = saved.registry;
+      process.env.npm_config_cache = saved.cache;
+    }
+  });
 });
