@@ -30,13 +30,21 @@ parsing only; selection does not build an app or use a simulator.
 **Packing.** Shards are consecutive runs of the selected methods, in selection order, whose
 estimates fit 570 s: twice that plus 60 s of process launch is the runner's unchanged 1200 s
 focused deadline, so a shard keeps it even if every method takes twice its estimate. A method's
-estimate is the longest time any runner log the runner retains on this Mac (`test.log` under
-`TRON_IOS_TEST_RESULTS_DIR`, default `~/Library/Developer/Tron/ios/test-runs`, every worktree and
-lane, failed cases included) records for it; a method with no record counts 190 s, so unmeasured
+estimate is the longest clean, uncontended passed or failed case duration in the D2 test ledger.
+The caller sends one immutable duration snapshot and selector multiset to the mini; the executor
+checks native, boundary, journey and selected-file equality before any build or test starts.
+The mini's nonce-local artifact directory is not a history source. Missing ledger history is an
+empty estimate set, never permission to omit a selector. A method with no record counts 190 s, so unmeasured
 methods run three to a process. A method estimated above 570 s runs alone; a class run whole counts
 the full 570 s. Estimates only pack processes: they never select, skip, order within a process or
 judge a test. `--plan` prints each shard's `estimatedSeconds`, its command as it runs alone, and the
 lanes shards may use beside each other (`iosLanes`), plus the concurrency limit (`iosJobs`).
+
+Each native run retains `stages.json` with epoch and monotonic observations for lease admission,
+provision/boot, build, test-process execution, extraction and shutdown. A started stage without a
+finish remains interrupted/unknown. Install is explicitly delegated to xcodebuild at test-process
+start: no separate install duration is inferred from that envelope. Build/test `process.json` also
+retains process start/end clocks. These receipts describe lifecycle costs, not another history store.
 
 **Lanes.** `--ios-jobs 1|2|3` limits concurrent native shards and real-UI journey lanes
 (default 1); phone and iPad shards run one at a time unless the caller explicitly widens it.

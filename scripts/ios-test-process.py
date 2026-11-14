@@ -402,12 +402,23 @@ def parse_args() -> argparse.Namespace:
     return arguments
 
 
+def stage(path: Path, name: str, event: str) -> None:
+    value = json.loads(path.read_text()) if path.exists() else {"schema": "tron.ios-stages.v1", "events": []}
+    value["events"].append({"stage": name, "event": event, "epochSeconds": time.time(),
+                            "monotonicSeconds": time.monotonic()})
+    atomic_json(path, value)
+
+
 def main() -> int:
+    if sys.argv[1:2] == ['stage']:
+        stage(Path(sys.argv[2]), sys.argv[3], sys.argv[4])
+        return 0
     arguments = parse_args()
     arguments.log.parent.mkdir(parents=True, exist_ok=True)
     arguments.evidence_dir.mkdir(parents=True, exist_ok=True)
     idle = XCTestIdleCapture(arguments.evidence_dir, arguments.idle_simulator)
     started = time.monotonic()
+    started_epoch = time.time()
     last_output = started
     interrupted_signal: int | None = None
     timed_out_reason: str | None = None
@@ -478,6 +489,8 @@ def main() -> int:
                     "schema": "tron.ios-process.v1",
                     "command": arguments.command,
                     "exit_code": process.returncode,
+                    "started_at_epoch_seconds": started_epoch,
+                    "ended_at_epoch_seconds": time.time(),
                     "elapsed_seconds": round(time.monotonic() - started, 3),
                     "timeout_reason": timed_out_reason,
                     "idle_simulator": arguments.idle_simulator,

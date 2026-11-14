@@ -1346,13 +1346,27 @@ class IosLaneTests(VerifyCase):
     def test_mini_ios_handoff_moves_the_whole_verification_without_nested_lease_or_local_build(self) -> None:
         r = self.repo
         calls = self.ios_fixture()
-        r.write("tools/verify/mini.py", "import json, sys\nif __name__ == '__main__':\n    print(json.dumps(sys.argv[1:]))\n    raise SystemExit(75)\n")
+        r.write("tools/verify/mini.py", "import json, os, sys\nif __name__ == '__main__':\n    print(json.dumps({'args': sys.argv[1:], 'plan': json.loads(os.environ['TRON_VERIFY_IOS_PLAN'])}))\n    raise SystemExit(75)\n")
         r.write("packages/ios-app/Sources/UI/Chat/ChatView.swift", "struct ChatView { let value = 1 }\n")
         r.commit("selected remote iOS work")
         result = r.verify("--changed", "--ios-host", "mini", "--gateway-host", "mini")
         self.assertEqual(result.returncode, 75, result.stdout + result.stderr)
-        self.assertEqual(json.loads(result.stdout), ["verify", "--changed", "--base", r.git("rev-parse", "base"),
-                                                    "--ios-host", "local", "--gateway-host", "local"])
+        handed = json.loads(result.stdout)
+        self.assertEqual(handed['args'], ["verify", "--changed", "--base", r.git("rev-parse", "base"),
+                                         "--ios-host", "local", "--gateway-host", "local"])
+        self.assertTrue(handed['plan']['manifest']['native'])
+        r.env['TRON_VERIFY_IOS_PLAN'] = json.dumps(handed['plan'])
+        accepted = r.verify('--changed', '--plan', '--gateway-host', 'local')
+        self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
+        handed['plan']['manifest']['native'].pop()
+        r.env['TRON_VERIFY_IOS_PLAN'] = json.dumps(handed['plan'])
+        refused = r.verify('--changed', '--gateway-host', 'local')
+        self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
+        self.assertIn('executor selector manifest differs', refused.stderr)
+        r.env['TRON_VERIFY_IOS_PLAN'] = '{}'
+        malformed = r.verify('--changed', '--gateway-host', 'local')
+        self.assertEqual(malformed.returncode, 2, malformed.stdout + malformed.stderr)
+        self.assertIn('invalid executor selector contract', malformed.stderr)
         self.assertFalse(calls.exists(), "no iOS build or test runs on the submitting host")
         self.assertFalse((r.path / "test-results/verify").exists(), "the mini owns the report, not an outer local verifier")
 
@@ -2115,7 +2129,7 @@ class IosLaneTests(VerifyCase):
 
     def test_a_class_larger_than_one_shard_runs_every_method_in_bounded_processes_on_concurrent_lanes(self) -> None:
         """#2173: a selected class runs as method shards, each its own runner process under the
-        unchanged deadline, packed by the longest time this Mac's runner logs record for each method
+        unchanged deadline, packed by the longest clean uncontended D2 ledger duration for each method
         (unmeasured methods three to a process). One lane is the default; explicit parallelism
         preserves selection and deadlines. A red shard does not stop the rest, an unexpected slot
         refusal fails, and SIGTERM stops every lane."""
@@ -2218,13 +2232,15 @@ class IosLaneTests(VerifyCase):
         self.assertEqual(locks, [f"run --lane {lane('iphone2')} --only-testing {lock}"])
         self.assertNotIn("requeued", refused.stdout)
 
-        results = Path(self.temp.name) / "ios-runs"
-        case = lambda name, outcome, seconds: f"Test Case '-[TronMobileUITests.FixtureJourneyUITests {name}]' {outcome} ({seconds} seconds).\n"  # noqa: E731
-        (results / "a-run.1").mkdir()
-        (results / "a-run.1/test.log").write_text(case(ordered[0], "passed", "0.5") + case(ordered[1], "passed", "0.5")
-                                                 + case(ordered[2], "passed", shipped.IOS_SHARD_SECONDS + 100))
-        (results / "b-run.2").mkdir()
-        (results / "b-run.2/test.log").write_text(case(ordered[1], "failed", shipped.IOS_SHARD_SECONDS) + case(ordered[3], "passed", "0.5"))
+        r.env['TRON_TEST_LEDGER'] = str(Path(self.temp.name) / 'packing.sqlite3')
+        seed = [f"{owner}/{ordered[index]}" for index in (0, 1, 2, 1, 3)]
+        seeded = subprocess.run([sys.executable, '-c',
+            "import sys; sys.path.insert(0, 'tools/verify'); import ledger; "
+            "c = ledger.Capture('ios'); ledger.append([c.record(test, outcome, seconds) for test, outcome, seconds in "
+            + repr(list(zip(seed, ['passed', 'passed', 'passed', 'failed', 'passed'],
+                            [0.5, 0.5, shipped.IOS_SHARD_SECONDS + 100, shipped.IOS_SHARD_SECONDS, 0.5]))) + "])"] ,
+            cwd=r.path, env=r.env, capture_output=True, text=True)
+        self.assertEqual(seeded.returncode, 0, seeded.stdout + seeded.stderr)
         self.assertEqual(planned_shards(), [f"{selectors(ordered[:1])}",
                                             f"{selectors(ordered[1:2])}",
                                             f"{selectors(ordered[2:3])}",
@@ -2238,8 +2254,7 @@ class IosLaneTests(VerifyCase):
         self.assertEqual({step["status"] for step in r.report()["steps"] if step["name"].startswith("tests: ios")}, {"failed"})
         self.assertEqual(len([step for step in r.report()["steps"] if step["name"].startswith("tests: ios")]), 5)
         r.env.pop("FIXTURE_IOS_BUSY"); r.env.pop("FIXTURE_IOS_BUSY_IN")
-        for item in results.iterdir():
-            shutil.rmtree(item)
+        Path(r.env.pop('TRON_TEST_LEDGER')).unlink()
 
         pids = Path(self.temp.name) / "pids.txt"
         calls.write_text("")

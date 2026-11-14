@@ -98,9 +98,10 @@ if table.exists():
 
 
 def copy_ledger(checkout: Path) -> None:
-    target = checkout / 'tools/verify/ledger.py'
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(ROOT / 'tools/verify/ledger.py', target)
+    for name in ('ledger.py', 'mini.py'):
+        target = checkout / 'tools/verify' / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / 'tools/verify' / name, target)
 
 
 def host_slot_count() -> int:
@@ -1151,7 +1152,7 @@ shutil.copytree(source, clone)
             environment.pop("TRON_IOS_TEST_RESULTS_DIR", None)
             environment["HOME"] = str(home)
         return subprocess.run(
-            [str((runner_root or self.checkout) / "scripts/tron"), "test", "ios", command, *(extra_args or [])],
+            [str((runner_root or self.checkout) / "scripts/tron"), "test", "ios", command, '--ios-host', 'local', *(extra_args or [])],
             env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
 
@@ -1506,6 +1507,17 @@ shutil.copytree(source, clone)
                 result = self.invoke(extra_args=owner, **options)
                 self.assertEqual(result.returncode, expected, result.stderr)
                 self.assertEqual(self.device_entry(self.owned_udid())["state"], "Shutdown")
+                directory = max((path for path in self.results.iterdir() if path.is_dir()), key=lambda path: path.stat().st_mtime_ns)
+                events = json.loads((directory / 'stages.json').read_text())['events']
+                observed = [(event['stage'], event['event']) for event in events]
+                self.assertEqual(observed, [('lease', 'acquired'), ('boot', 'started'), ('boot', 'finished'),
+                    ('install', 'delegated-to-xcodebuild'), ('test', 'started'), ('test', 'finished'),
+                    ('extraction', 'started'), ('extraction', 'finished'), ('shutdown', 'started'),
+                    ('shutdown', 'finished'), ('lease', 'released')])
+                clocks = [event['monotonicSeconds'] for event in events]
+                self.assertEqual(clocks, sorted(clocks))
+                process = json.loads((directory / 'test-evidence/process.json').read_text())
+                self.assertLessEqual(process['started_at_epoch_seconds'], process['ended_at_epoch_seconds'])
         self.assertEqual(len(self.simctl_calls("shutdown")), len(outcomes))
 
     def test_run_waits_for_a_host_slot_while_all_are_held(self) -> None:

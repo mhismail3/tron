@@ -33,6 +33,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shlex
 import shutil
 import signal
@@ -52,6 +53,106 @@ EXIT_NO_RESULT = 75
 NO_RESULT_LINE = 'mini: no result: '
 OUTPUT_OPTION = '--outputFile'
 ARTIFACT_LIMIT = 2 * 1024 ** 3
+RETAINED_LIMIT = 128 * 1024 ** 2
+RETAINED_JOBS = 8
+
+
+def retain_native(results: Path, retained: Path, receipt: dict) -> None:
+    retained.mkdir(parents=True, exist_ok=False)
+    entries, cases, total = [], [], 0
+    for source in sorted(results.rglob('*')):
+        if source.is_symlink() or not source.is_file() or source.suffix not in ('.json', '.log', '.txt'):
+            continue
+        relative = source.relative_to(results)
+        if any(part.endswith('.xcresult') for part in relative.parts):
+            continue
+        size = source.stat().st_size
+        allowance = min(4 * 1024 ** 2, RETAINED_LIMIT - total)
+        if allowance <= 0:
+            entries.append({'path': str(relative), 'bytes': size, 'retained': 0})
+            continue
+        target = retained / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with source.open('rb') as stream:
+            data = stream.read(allowance if size <= allowance else allowance // 2)
+            if size > allowance:
+                stream.seek(-allowance // 2, os.SEEK_END)
+                data += stream.read(allowance // 2)
+        target.write_bytes(data)
+        if source.name in ('test.log', 'first-failure.log') or relative.parts[0] == 'verify':
+            cases.extend({'log': str(relative), 'testId': f'{target_name}/{owner}/{method}',
+                          'outcome': outcome, 'seconds': float(seconds)}
+                         for target_name, owner, method, outcome, seconds in re.findall(
+                             r"Test Case '-\[(\w+)\.(\w+) (\w+)\]' (passed|failed|skipped) \(([\d.]+) seconds\)",
+                             data.decode(errors='replace')))
+        total += len(data)
+        entries.append({'path': str(relative), 'bytes': size, 'retained': len(data),
+                        'sha256': hashlib.sha256(data).hexdigest()})
+    partial = (json.dumps({'cases': cases[:4096], 'truncated': len(cases) > 4096,
+                           'completeShard': False}, indent=2) + '\n').encode()
+    (retained / 'partial-timings.json').write_bytes(partial)
+    entries.append({'path': 'partial-timings.json', 'bytes': len(partial), 'retained': len(partial),
+                    'sha256': hashlib.sha256(partial).hexdigest()})
+    (retained / 'retention.json').write_text(json.dumps({**receipt, 'files': entries, 'bytes': total,
+        'bundlesRetained': False, 'reason': 'interrupted or unconfirmed native transport'}, indent=2) + '\n')
+
+
+def retained_main(nonce: str, action: str = 'retrieve', digest: str | None = None) -> int:
+    if len(nonce) != 32 or any(character not in '0123456789abcdef' for character in nonce):
+        raise ValueError('invalid retained native nonce')
+    if action != 'retrieve':
+        retained = Path.home() / BASE / 'retained-native' / nonce
+        if retained.is_symlink() or not retained.is_dir():
+            raise ValueError('retained native evidence is unavailable')
+        if action == 'ack-retained':
+            if hashlib.sha256((retained / 'retention.json').read_bytes()).hexdigest() != digest:
+                raise ValueError('retained receipt changed; evidence was not removed')
+            shutil.rmtree(retained)
+            return 0
+        with tarfile.open(fileobj=sys.stdout.buffer, mode='w|gz') as bundle:
+            for path in sorted(retained.rglob('*')):
+                if path.is_symlink() or not (path.is_file() or path.is_dir()):
+                    raise ValueError('unsafe retained native evidence')
+                bundle.add(path, arcname=str(path.relative_to(retained)), recursive=False)
+        return 0
+    ssh = ssh_command()
+    source = Path(__file__).read_text()
+    target = ROOT / 'test-results/mini' / f'retained-{nonce}'
+    archive = target.with_suffix('.tar.gz')
+    if target.exists() or archive.exists():
+        raise ValueError('retained destination already exists; inspect it before another retrieval')
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    command = shlex.join(['/usr/bin/python3', '-c', source, 'remote-retained', nonce])
+    with subprocess.Popen([*ssh, command], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE) as child:
+        total = 0
+        with archive.open('xb') as output:
+            while chunk := child.stdout.read(64 * 1024):
+                total += len(chunk)
+                if total > ARTIFACT_LIMIT:
+                    child.terminate()
+                    raise ValueError('retained native archive exceeds transport bound')
+                output.write(chunk)
+        if child.wait():
+            raise ValueError('retained native transfer failed; remote evidence remains')
+    unpack_artifacts(archive, target)
+    receipt_path = target / 'retention.json'
+    receipt = json.loads(receipt_path.read_text())
+    if receipt['nonce'] != nonce:
+        raise ValueError('retained native receipt nonce mismatch')
+    for entry in receipt['files']:
+        file = target / entry['path']
+        if not file.resolve().is_relative_to(target.resolve()):
+            raise ValueError('unsafe retained receipt path')
+        if entry['retained'] and hashlib.sha256(file.read_bytes()).hexdigest() != entry['sha256']:
+            raise ValueError('retained native file digest mismatch')
+    digest = hashlib.sha256(receipt_path.read_bytes()).hexdigest()
+    confirmed = subprocess.run([*ssh, shlex.join(['/usr/bin/python3', '-c', source, 'ack-retained', nonce, digest])],
+                               stdin=subprocess.DEVNULL)
+    if confirmed.returncode:
+        raise ValueError(f'retained native cleanup unconfirmed; local evidence: {target}')
+    archive.unlink()
+    print(f'mini: retained native evidence: {target}')
+    return 0
 
 
 def unpack_artifacts(archive: Path, target: Path) -> None:
@@ -190,6 +291,8 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
         return no_result('TRON_UPDATE_LOCKS would rewrite goldens in the mini checkout, not here; record locks locally')
     if lane == 'verify' and any(word == '--batch' or word == '--update-locks' or word.startswith('--update-locks=') for word in args):
         return no_result('mini verification accepts synchronous checks, not batch dispatch or golden recording')
+    if lane == 'verify' and 'TRON_VERIFY_IOS_PLAN' not in os.environ:
+        return no_result('whole verification requires the caller selector contract; use scripts/tron verify --ios-host mini')
     if git('status', '--porcelain', '--untracked-files=normal'):
         return no_result('the worktree has uncommitted or untracked changes; the mini runs a commit, commit first')
     try:
@@ -220,11 +323,13 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
     wait = os.environ.get('TRON_MINI_JOB_WAIT_SECONDS')
     job = json.dumps({'sha': sha, 'main': main, 'lane': lane, 'args': mapped, 'outputs': len(paths), 'nonce': nonce, 'localRoot': str(ROOT),
                       'lockWaitSeconds': float(wait) if wait else None, 'contended': os.environ.get('TRON_TEST_CONTENDED', '0'),
+                      'iosPlan': json.loads(os.environ['TRON_VERIFY_IOS_PLAN']) if lane == 'verify' and 'TRON_VERIFY_IOS_PLAN' in os.environ else None,
                       'requester': {'host': platform.node(), 'worktree': str(ROOT), 'pid': os.getpid()}})
     source = Path(__file__).read_text()
     remote = shlex.join(['/usr/bin/python3', '-c', source, 'remote', job])
     marker, code, refused, received, stopped = frame(nonce), None, None, set(), []
-    with subprocess.Popen([*ssh, remote], stdin=subprocess.PIPE, stdout=subprocess.PIPE) as child:
+    environment = {key: value for key, value in os.environ.items() if key != 'TRON_VERIFY_IOS_PLAN'}
+    with subprocess.Popen([*ssh, remote], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=environment) as child:
         def stop(signum, _frame):
             stopped.append(signum)
             if child.stdin and not child.stdin.closed:
@@ -265,9 +370,12 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
                         raise ValueError('mini artifact archive digest mismatch')
                     unpack_artifacts(archive, artifacts)
                     receipt = json.loads((artifacts / 'receipt.json').read_text())
-                    if receipt['commit'] != sha or receipt['lane'] != lane:
+                    if receipt['commit'] != sha or receipt['lane'] != lane or receipt['nonce'] != nonce:
                         raise ValueError('mini artifact receipt does not match this submission')
                     artifacts_received = True
+                    if child.stdin and not child.stdin.closed:
+                        child.stdin.write(f'ack {value}\n'.encode())
+                        child.stdin.flush()
                     archive.unlink()
                 elif kind == 'refused':
                     refused = json.loads(value)
@@ -329,10 +437,16 @@ def remote_main(job: dict) -> int:
     out = sys.stdout.buffer
     cancelled = threading.Event()
     running: list[subprocess.Popen] = []
+    native_confirmed = False
+    preserve_results = False
+    acknowledged = threading.Event()
+    acknowledgement: list[str] = []
 
     def watch() -> None:
-        while os.read(sys.stdin.fileno(), 4096):
-            pass
+        for line in sys.stdin.buffer:
+            if line.startswith(b'ack '):
+                acknowledgement.append(line.decode().strip()[4:])
+                acknowledged.set()
         cancelled.set()
         for child in running:
             if child.poll() is None:
@@ -411,6 +525,9 @@ def remote_main(job: dict) -> int:
             lock.write(json.dumps({**job['requester'], 'sha': sha}))
             lock.flush()
 
+            retained_root = base / 'retained-native'
+            if job['lane'] in ('ios', 'verify') and retained_root.exists() and len(list(retained_root.iterdir())) >= RETAINED_JOBS:
+                return refuse('native evidence retention is full; retrieve pending evidence before another native job')
             prepared = time.time()
             if (checkout / '.git').exists():
                 steps = [('git', '-C', str(checkout), 'checkout', '--quiet', '--detach', '--force', sha),
@@ -485,6 +602,9 @@ def remote_main(job: dict) -> int:
                            'TRON_IOS_TEST_RESULTS_DIR': str(results / 'ios'),
                            'TRON_PROFILE_RESULTS_DIR': str(results / 'profiles'),
                            'TRON_IOS_E2E_STATE_DIR': str(checkout / '.scratch/mini-e2e')}
+                    if job.get('iosPlan') is not None:
+                        env['TRON_VERIFY_IOS_PLAN'] = json.dumps(job['iosPlan'])
+                        (results / 'execution-plan.json').write_text(env['TRON_VERIFY_IOS_PLAN'] + '\n')
                     code = stream(*command, cwd=checkout, env=env)
                     if job['lane'] == 'verify':
                         report = checkout / 'test-results/verify' / f'{sha}.json'
@@ -499,8 +619,10 @@ def remote_main(job: dict) -> int:
                             if source.is_dir():
                                 target = results / 'e2e' / source.relative_to(e2e)
                                 shutil.copytree(source, target, symlinks=True, ignore=shutil.ignore_patterns('latest', 'latest-ui'))
-                    (results / 'receipt.json').write_text(json.dumps({'commit': sha, 'lane': job['lane'], 'exit': code,
-                                                                     'host': platform.node(), 'args': job['args']}))
+                    receipt = {'commit': sha, 'nonce': nonce, 'lane': job['lane'], 'exit': code,
+                               'interrupted': cancelled.is_set() or code >= 128,
+                               'host': platform.node(), 'args': job['args'], 'completedAt': time.time()}
+                    (results / 'receipt.json').write_text(json.dumps(receipt))
                     total = 0
                     with tarfile.open(archive, 'w:gz', dereference=True) as bundle:
                         for path in sorted(results.rglob('*')):
@@ -519,10 +641,19 @@ def remote_main(job: dict) -> int:
                             out.write(b'\n' + frame(nonce) + b'artifact ' + base64.b64encode(chunk) + b'\n')
                     out.write(frame(nonce) + f'artifact-end {digest.hexdigest()}\n'.encode())
                     out.flush()
+                    if not cancelled.is_set():
+                        acknowledged.wait(10)
+                    native_confirmed = acknowledgement == [digest.hexdigest()] and not receipt['interrupted']
                     return finish(code)
                 except (OSError, ValueError, tarfile.TarError) as error:
                     return refuse(f'{job["lane"]} invocation/artifacts failed: {error}')
                 finally:
+                    if not native_confirmed and results.exists():
+                        preserve_results = True
+                        retain_native(results, base / 'retained-native' / nonce,
+                                      {'commit': sha, 'nonce': nonce, 'lane': job['lane'], 'host': platform.node(),
+                                       'interrupted': cancelled.is_set()})
+                        preserve_results = False
                     archive.unlink(missing_ok=True)
                     shutil.rmtree(results, ignore_errors=True)
             if job['lane'] == 'node':
@@ -557,11 +688,14 @@ def remote_main(job: dict) -> int:
             finally:
                 shutil.rmtree(results, ignore_errors=True)
     finally:
-        shutil.rmtree(results, ignore_errors=True)
+        if not preserve_results:
+            shutil.rmtree(results, ignore_errors=True)
         run('git', '-C', str(repository), 'update-ref', '-d', f'refs/tron-jobs/submissions/{nonce}', sha)
 
 
 if __name__ == '__main__':
+    if sys.argv[1:2] in (['retrieve'], ['remote-retained'], ['ack-retained']):
+        sys.exit(retained_main(sys.argv[2], sys.argv[1], sys.argv[3] if len(sys.argv) > 3 else None))
     if sys.argv[1:2] == ['remote']:
         sys.exit(remote_main(json.loads(sys.argv[2])))
     if sys.argv[1:2] == ['status']:

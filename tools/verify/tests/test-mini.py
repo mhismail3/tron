@@ -286,9 +286,75 @@ raise SystemExit(9 if 'fail' in sys.argv else 0)
         self.assertEqual(self.git('for-each-ref', '--format=%(refname)', 'refs/tron-jobs/submissions/', cwd=repository), '')
         self.assertEqual(list((self.mini / 'tron-ci/results').iterdir()), [])
 
+    def test_interrupted_native_evidence_survives_cleanup_and_is_retrieved_before_removal(self) -> None:
+        self.write('scripts/tron-ios-test', '''#!/usr/bin/env python3
+import json, os, signal, time
+from pathlib import Path
+if 'probe' in __import__('sys').argv:
+    raise SystemExit(0)
+root = Path(os.environ['TRON_IOS_TEST_RESULTS_DIR']) / 'partial-run'
+root.mkdir(parents=True)
+(root / 'large.log').write_bytes(b'first' + b'x' * (5 * 1024 ** 2) + b'last')
+(root / 'process.json').write_text(json.dumps({'started': time.time()}))
+(root / 'test.log').write_text("Test Case '-[TronMobileUITests.Probe testOne]' passed (0.25 seconds).\\n")
+def stop(*_):
+    (root / 'stages.json').write_text(json.dumps({'interrupted': True}))
+    raise SystemExit(130)
+signal.signal(signal.SIGTERM, stop)
+(Path.home() / 'native-started').touch()
+while True:
+    time.sleep(0.05)
+''')
+        (self.local / 'scripts/tron-ios-test').chmod(0o755)
+        sha = self.commit('interruptible native boundary fixture')
+        runner = self.lane('ios', 'run', background=True)
+        try:
+            deadline = time.monotonic() + 30
+            while not (self.mini / 'native-started').exists():
+                self.assertLess(time.monotonic(), deadline)
+                time.sleep(0.05)
+            runner.send_signal(signal.SIGTERM)
+            output, _ = runner.communicate(timeout=30)
+        finally:
+            if runner.poll() is None:
+                runner.kill()
+                runner.wait()
+        self.assertEqual(runner.returncode, 143, output)
+        retained = list((self.mini / 'tron-ci/retained-native').iterdir())
+        self.assertEqual(len(retained), 1, output)
+        receipt = json.loads((retained[0] / 'retention.json').read_text())
+        self.assertEqual(receipt['commit'], sha)
+        self.assertTrue(receipt['interrupted'])
+        self.assertIn('passed (0.25 seconds)', (retained[0] / 'ios/partial-run/test.log').read_text())
+        self.assertTrue((retained[0] / 'ios/partial-run/process.json').is_file())
+        self.assertTrue((retained[0] / 'ios/partial-run/stages.json').is_file())
+        large = next(entry for entry in receipt['files'] if entry['path'].endswith('large.log'))
+        self.assertEqual(large['retained'], 4 * 1024 ** 2)
+        self.assertGreater(large['bytes'], large['retained'])
+        self.assertTrue((retained[0] / large['path']).read_bytes().startswith(b'first'))
+        self.assertTrue((retained[0] / large['path']).read_bytes().endswith(b'last'))
+        partial = json.loads((retained[0] / 'partial-timings.json').read_text())
+        self.assertFalse(partial['completeShard'])
+        self.assertEqual(partial['cases'][0]['testId'], 'TronMobileUITests/Probe/testOne')
+        with open(self.mini / 'tron-ci/jobs/gateway.lock') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        retrieved = self.lane('retrieve', retained[0].name)
+        self.assertEqual(retrieved.returncode, 0, retrieved.stdout + retrieved.stderr)
+        self.assertFalse(retained[0].exists())
+        returned = self.local / 'test-results/mini' / f'retained-{receipt["nonce"]}'
+        self.assertEqual(json.loads((returned / 'receipt.json').read_text())['exit'], 130)
+        self.assertEqual(list((self.mini / 'tron-ci/results').iterdir()), [])
+        pending = self.mini / 'tron-ci/retained-native'
+        for index in range(8):
+            (pending / str(index)).mkdir()
+        full = self.lane('ios', 'probe')
+        self.assertEqual(full.returncode, NO_RESULT, full.stdout + full.stderr)
+        self.assertIn('evidence retention is full', full.stdout + full.stderr)
+        self.assertEqual(len(list(pending.iterdir())), 8)
+
     def test_whole_verifier_returns_its_report_logs_and_raw_75_without_another_lease(self) -> None:
         self.write('tools/probe.py', RECORDED)
-        self.write('tools/verify/verify.py', '''import json, subprocess, sys
+        self.write('tools/verify/verify.py', '''import json, os, subprocess, sys
 from pathlib import Path
 root = Path(__file__).resolve().parents[2]
 subprocess.run([sys.executable, str(root / 'tools/verify/ledger.py'), 'python', str(root / 'tools/probe.py')], check=True)
@@ -296,13 +362,22 @@ sha = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], tex
 logs = root / 'test-results/verify' / sha
 logs.mkdir(parents=True)
 (logs / 'first-failure.log').write_text('native boundary fixture')
+(logs / 'execution-plan.json').write_text(os.environ['TRON_VERIFY_IOS_PLAN'])
 main = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'origin/main'], text=True).strip()
 (logs.parent / (sha + '.json')).write_text(json.dumps({'commit': sha, 'main': main, 'args': sys.argv[1:]}))
 raise SystemExit(75 if '--incomplete' in sys.argv else 0)
 ''')
+        selectors = [f'TronMobileUITests/LongCanonicalFixtureProbeClass/testPreservesEverySelectedMethodAcrossRemotePacking{index}'
+                     for index in range(527)]
+        contract = json.dumps({'durations': {selector: 0.25 for selector in selectors},
+                               'manifest': {'native': selectors}})
         sha = self.commit('whole-verifier boundary fixture')
         main = self.git('rev-parse', 'HEAD^')
         self.git('update-ref', 'refs/remotes/origin/main', main)
+        missing = self.lane('verify', '--changed')
+        self.assertEqual(missing.returncode, NO_RESULT, missing.stdout + missing.stderr)
+        self.assertIn('requires the caller selector contract', missing.stderr)
+        self.env['TRON_VERIFY_IOS_PLAN'] = contract
         for args in (['--batch'], ['--update-locks', 'owner']):
             denied = self.lane('verify', *args)
             self.assertEqual(denied.returncode, NO_RESULT, denied.stdout + denied.stderr)
@@ -317,6 +392,8 @@ raise SystemExit(75 if '--incomplete' in sys.argv else 0)
                 artifacts = Path(line.removeprefix('mini: artifacts: '))
                 self.assertEqual(json.loads((artifacts / 'verify.json').read_text()), {'commit': sha, 'main': main, 'args': args})
                 self.assertEqual((artifacts / 'verify/first-failure.log').read_text(), 'native boundary fixture')
+                self.assertEqual(json.loads((artifacts / 'verify/execution-plan.json').read_text()),
+                                 json.loads(self.env['TRON_VERIFY_IOS_PLAN']))
                 self.assertFalse((artifacts / 'ledger.sqlite3').exists())
         self.assertTrue(Path(self.env['TRON_TEST_LEDGER']).is_file())
         with sqlite3.connect(self.env['TRON_TEST_LEDGER']) as connection:

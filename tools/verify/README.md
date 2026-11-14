@@ -151,6 +151,16 @@ more than 2 GiB of content; missing, corrupt or refused transport is no result, 
 A native red or exit 75 remains that lane's raw exit after artifacts return. Cancellation closes the
 session's input, signals and joins its owned process group, and releases the normal mini lease;
 the iOS helper owns its simulator release. No second scheduler, daemon or source checkout is created.
+The caller acknowledges verified native artifact receipt before successful transport cleanup. An
+interruption or unacknowledged transport retains a compact snapshot under the mini owner's
+`~/tron-ci/retained-native/<nonce>/`: process/stage JSON, log heads and tails, verify receipts,
+completed-case partial timings and a truncation manifest. Native bundles are not retained in that
+compact snapshot. Source files retain at most 4 MiB each and 128 MiB total, plus bounded derived
+metadata; eight pending snapshots stop native admission instead of silently evicting evidence.
+`python3 tools/verify/mini.py retrieve <nonce>` retrieves that snapshot into
+`test-results/mini/retained-<nonce>/`, verifies file hashes, then removes only the snapshot whose
+receipt was acknowledged. Interrupted outcomes remain interrupted, not completed shard passes.
+`execution-plan.json` in whole-verifier artifacts preserves the caller's duration/selector contract.
 
 ## Run output
 

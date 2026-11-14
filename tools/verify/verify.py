@@ -16,6 +16,7 @@ import signal
 import subprocess
 import sys
 import time
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -56,8 +57,6 @@ IOS_DEADLINE_SECONDS = 1200
 IOS_LAUNCH_SECONDS = 60
 IOS_SHARD_SECONDS = (IOS_DEADLINE_SECONDS - IOS_LAUNCH_SECONDS) / 2
 IOS_UNMEASURED_SECONDS = IOS_SHARD_SECONDS / 3
-IOS_RESULTS_ROOT = Path(os.environ.get("TRON_IOS_TEST_RESULTS_DIR") or Path.home() / "Library/Developer/Tron/ios/test-runs")
-IOS_CASE_LINE = re.compile(rb"^Test Case '-\[(\w+)\.(\w+) (\w+)\]' (?:passed|failed) \((\d+(?:\.\d+)?) seconds\)", re.M)
 IOS_PAD_GATE = re.compile(r"XCTSkipUnless\(\s*UIDevice\.current\.userInterfaceIdiom\s*==\s*\.pad\b")
 IOS_PAD_DEVICE_TYPE = "iPad Pro 13-inch (M5)"
 
@@ -520,23 +519,20 @@ class IosShard(list):
     seconds = 0.0
 
 
-def ios_method_seconds(results: Path = IOS_RESULTS_ROOT) -> dict[str, float]:
-    """`Target/Class/testMethod` to the longest it took in any runner log under `results`. An
-    estimate for packing only: it never selects, skips or judges a test."""
-    longest: dict[str, float] = {}
-    try:
-        entries = list(os.scandir(results))
-    except OSError:
-        return longest
-    for entry in entries:
-        try:
-            text = (Path(entry.path) / "test.log").read_bytes()
-        except OSError:
-            continue
-        for target, owner, method, seconds in IOS_CASE_LINE.findall(text):
-            key = f"{target.decode()}/{owner.decode()}/{method.decode()}"
-            longest[key] = max(longest.get(key, 0.0), float(seconds))
-    return longest
+def ios_method_seconds() -> dict[str, float]:
+    connection = ledger.database()
+    if connection is None:
+        return {}
+    with closing(connection):
+        return {row[0]: row[1] for row in connection.execute(
+            "SELECT test_id, MAX(seconds) FROM results WHERE dirty = 0 AND contended = 0 "
+            "AND outcome IN ('passed', 'failed') AND test_id LIKE '%/%/%' GROUP BY test_id")
+                if re.fullmatch(r'\w+/\w+/\w+', row[0])}
+
+
+def ios_execution_plan(selection: dict, shards: list[IosShard], boundaries: list[str], journeys: list[str]) -> dict:
+    return {"files": sorted(selection["tests"]), "native": sorted(method for shard in shards for method in shard),
+            "boundaries": sorted(boundaries), "journeys": sorted(journeys)}
 
 
 def ios_shards(selectors: list[str], seconds: dict[str, float]) -> list[IosShard]:
@@ -1352,12 +1348,22 @@ def main(argv: list[str]) -> int:
                     validate_profile_methods(files)
         boundaries = boundary_selectors(groups.get("ios-boundary", [])) if "ios" not in skip else []
         selectors = ios_selectors(groups.get("ios", [])) if "ios" not in skip else []
-        shards = ios_shards(selectors, ios_method_seconds() if selectors else {})
+        execution = json.loads(os.environ["TRON_VERIFY_IOS_PLAN"]) if "TRON_VERIFY_IOS_PLAN" in os.environ else None
+        if execution is not None and (not isinstance(execution, dict) or set(execution) != {'durations', 'manifest'}
+                                      or not isinstance(execution['durations'], dict) or not isinstance(execution['manifest'], dict)):
+            raise VerifyError("invalid executor selector contract")
+        durations = execution["durations"] if execution is not None else ios_method_seconds() if selectors else {}
+        if any(type(value) not in (int, float) or not 0 <= value < float('inf') for value in durations.values()):
+            raise VerifyError("invalid executor duration history")
+        shards = ios_shards(selectors, durations)
         journey_paths = groups.get("ios-journeys", [])
         journey_base = base if name == "changed" and all(
             is_doc(path) or path in journey_paths or path == JOURNEY_HARNESS for path in selection["paths"]) else None
         journeys = journey_selectors(journey_paths, journey_base, result["tracked"]) if "ios" not in skip else []
-    except VerifyError as error:
+        manifest = ios_execution_plan(selection, shards, boundaries, journeys)
+        if execution is not None and execution["manifest"] != manifest:
+            raise VerifyError("executor selector manifest differs from caller; no tests started")
+    except (VerifyError, ValueError, KeyError, TypeError, ledger.sqlite3.Error) as error:
         print(f"verify: {error}", file=sys.stderr)
         return 2
     skipped_group = lambda group: group.split("-")[0] in skip  # noqa: E731  (--skip ios covers ios-lanes)
@@ -1380,6 +1386,8 @@ def main(argv: list[str]) -> int:
         ancestor = git("merge-base", base, "HEAD").strip()
         command = [sys.executable, str(ROOT / "tools/verify/mini.py"), "verify", *forwarded,
                    "--base", ancestor, "--ios-host", "local", "--gateway-host", "local"]
+        os.environ["TRON_VERIFY_IOS_PLAN"] = json.dumps({"durations": {key: value for key, value in durations.items() if key in manifest['native']},
+                                                           "manifest": manifest})
         os.execv(sys.executable, command)
     gateway_touched = (name == "all" and any(key.startswith("gateway/") for key in modules)) or any(key.startswith("gateway/") for key in selection["modules"]) \
         or any(path.startswith(f"{GATEWAY}/") for path in selection["tests"])

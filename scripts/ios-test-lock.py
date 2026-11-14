@@ -378,6 +378,7 @@ def main() -> int:
     parser.add_argument("--rebuild-lock", type=Path, help="also exclude Mac replacement for a physical iOS install")
     parser.add_argument("--development-state", type=Path)
     parser.add_argument("--keep-booted", action="store_true")
+    parser.add_argument("--lifecycle-root", type=Path)
     parser.add_argument("--resource", default="iOS test simulator", help="what the lease protects, named when it is contended")
     parser.add_argument("--worktree", help="the worktree whose command holds the lease, named when it is contended")
     parser.add_argument("--host-slot", action="store_true",
@@ -427,6 +428,14 @@ def main() -> int:
         held = False
         slot: IO[str] | None = None
         rebuild_owner = None
+        lifecycle = None
+
+        def timing(name: str, event: str) -> None:
+            if lifecycle is not None:
+                recorded = subprocess.run([sys.executable, str(Path(__file__).with_name('ios-test-process.py')),
+                                           'stage', str(lifecycle / 'stages.json'), name, event])
+                if recorded.returncode:
+                    print(f'warning: lifecycle timestamp unavailable: {name}/{event}', file=sys.stderr)
 
         def forward(signum: int, _frame: object) -> None:
             nonlocal interrupted
@@ -498,6 +507,13 @@ def main() -> int:
                 return 128 + interrupted
 
             environment = os.environ.copy()
+            if arguments.lifecycle_root is not None:
+                import tempfile
+                arguments.lifecycle_root.mkdir(parents=True, exist_ok=True)
+                lifecycle = Path(tempfile.mkdtemp(prefix=time.strftime('%Y%m%dT%H%M%SZ-', time.gmtime()) + arguments.command[1] + '.',
+                                                  dir=arguments.lifecycle_root))
+                environment['TRON_IOS_TEST_RUN_DIRECTORY'] = str(lifecycle)
+                timing('lease', 'acquired')
             environment["TRON_IOS_TEST_LOCK_HELD"] = "1"
             environment["TRON_IOS_TEST_LEASE_FD"] = str(handle.fileno())
             environment["TRON_IOS_TEST_LEASE_LOCK"] = str(arguments.lock)
@@ -541,7 +557,10 @@ def main() -> int:
                 signal.signal(signum, handler)
             if held:
                 if process is not None and arguments.marker is not None and not arguments.keep_booted:
+                    timing('shutdown', 'started')
                     release_simulator(arguments.marker, arguments.development_state)
+                    timing('shutdown', 'finished')
+                timing('lease', 'released')
                 handle.seek(0)
                 handle.truncate()
                 if arguments.remove_empty_lane:
