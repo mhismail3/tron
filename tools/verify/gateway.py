@@ -3,6 +3,7 @@
 from __future__ import annotations
 from pathlib import Path
 import fcntl
+import json
 import os
 import platform
 import re
@@ -17,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from host_lock import HELD_BY_CALLER, wait_for_full_gateway_lock  # noqa: E402  (the one host lock owner)
 import vitest_configs  # noqa: E402  (the one reader of the listing Vitest configs)
+import ledger
 
 
 def hold_full_gateway_lock():
@@ -221,12 +223,20 @@ def main() -> int:
         path = [str(provision_browser_engine(copy)), *filter(None, os.environ.get('PATH', '').split(os.pathsep))]
         fork = {BROWSER_FORK_COPY: str(copy), 'PATH': os.pathsep.join(path)}
     lock = hold_full_gateway_lock()
+    capture = ledger.Capture('gateway-nested' if 'vitest.nested.config.ts' in arguments else 'gateway')
     signal.signal(signal.SIGTERM, lambda signum, _frame: sys.exit(128 + signum))
     with tempfile.TemporaryDirectory(prefix="tron-gateway-tests-", dir="/tmp") as temporary:
         root = Path(temporary)
         home, scratch = root / "home", root / "tmp"
         home.mkdir(); scratch.mkdir()
-        environment = {**os.environ, **fork, "HOME": str(home), "TMPDIR": str(scratch), "TRON_NODE_BIN": node}
+        report = root / 'cases.jsonl'
+        environment = {**os.environ, **fork, "HOME": str(home), "TMPDIR": str(scratch), "TRON_NODE_BIN": node,
+                       'TRON_TEST_LEDGER_CASES': str(report), 'TRON_TEST_LEDGER_CPU_IDLE': str(capture.context['cpuIdlePercent'])}
+        if not any(word.startswith('--reporter') for word in arguments):
+            defaults = subprocess.check_output([node, '-p', "JSON.stringify(require('vitest/config').configDefaults.reporters)"],
+                                               cwd=ROOT / 'packages/gateway', env=environment, text=True)
+            arguments.extend('--reporter=' + reporter for reporter in json.loads(defaults))
+        arguments.append('--reporter=' + str(ROOT / 'tools/verify/ledger-vitest.mjs'))
         with subprocess.Popen([str(ROOT / "scripts/tron-node"), "exec", str(vitest), "run", *arguments],
                               cwd=ROOT / "packages/gateway", env=environment) as child:
             def forward(signum, _frame):
@@ -238,8 +248,11 @@ def main() -> int:
             finally:
                 for sig, handler in previous.items():
                     signal.signal(sig, handler)
-                if lock:
-                    lock.close()
+                try:
+                    capture.events(report)
+                finally:
+                    if lock:
+                        lock.close()
 
 
 if __name__ == "__main__":

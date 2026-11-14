@@ -16,6 +16,18 @@ GATEWAY = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(GATEWAY)
 
 
+def fixture_node(node: Path) -> None:
+    defaults = node.with_name('fixture-node')
+    defaults.write_text('#!/bin/sh\nprintf \'["default"]\\n\'\n')
+    defaults.chmod(0o755)
+    node.write_text(f'#!/bin/bash\n[[ $# == 0 ]] && {{ echo {defaults}; exit 0; }}\nshift; exec "$@"\n')
+
+
+def commit_fixture(root: Path) -> None:
+    for arguments in (['init', '-q'], ['add', '-A'], ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture']):
+        subprocess.run(['git', '-C', str(root), *arguments], check=True, capture_output=True)
+
+
 class GatewayTestHomeIsolation(unittest.TestCase):
     def run_gateway(self, root: Path, arguments: list[str]) -> subprocess.CompletedProcess:
         caller_home = root / "caller-home"
@@ -24,6 +36,7 @@ class GatewayTestHomeIsolation(unittest.TestCase):
         scratch.mkdir(parents=True)
         node = subprocess.check_output([str(ROOT / "scripts/tron-node")], text=True).strip()
         env = {**os.environ, "HOME": str(caller_home), "TMPDIR": str(scratch),
+               'TRON_TEST_LEDGER': str(caller_home / '.tron-maintenance/test-ledger/results.sqlite3'),
                "TRON_NODE_BIN": node, "ISOLATION_CALLER_HOME": str(caller_home),
                "ISOLATION_CALLER_TMPDIR": str(scratch)}
         lock = GATEWAY.hold_full_gateway_lock()
@@ -79,20 +92,24 @@ class GatewayTestScratchCleanup(unittest.TestCase):
             base = Path(temporary).resolve()
             verify = base / "tools/verify"
             verify.mkdir(parents=True)
-            for name in ("gateway.py", "vitest_configs.py"):
+            for name in ("gateway.py", "vitest_configs.py", "ledger.py", "ledger-host.mjs", "ledger-vitest.mjs"):
                 (verify / name).write_text((ROOT / "tools/verify" / name).read_text())
             lock = (ROOT / "tools/verify/host_lock.py").read_text()
             self.assertIn("'/tmp/tron-full-gateway.lock'", lock)
             (verify / "host_lock.py").write_text(lock.replace("'/tmp/tron-full-gateway.lock'", repr(str(base / "full.lock"))))
             node = base / "scripts/tron-node"
             node.parent.mkdir()
-            node.write_text('#!/bin/bash\n[[ $# == 0 ]] && { echo /usr/bin/true; exit 0; }\nshift; exec "$@"\n')
+            fixture_node(node)
             vitest = base / "packages/gateway/node_modules/.bin/vitest"
             vitest.parent.mkdir(parents=True)
             vitest.write_text(f'#!/bin/bash\necho "$HOME" > {base}/home\nsleep 60 & wait\n')
             for script in (node, vitest):
                 script.chmod(0o755)
+            commit_fixture(base)
+            ledger = tempfile.TemporaryDirectory(prefix='tron-gateway-ledger-')
+            self.addCleanup(ledger.cleanup)
             env = {key: value for key, value in os.environ.items() if key != GATEWAY.HELD_BY_CALLER}
+            env['TRON_TEST_LEDGER'] = str(Path(ledger.name) / 'results.sqlite3')
             runner = subprocess.Popen([sys.executable, str(verify / "gateway.py"), "x.test.ts"], env=env,
                                       stderr=subprocess.DEVNULL, start_new_session=True)
             deadline = time.monotonic() + 30
@@ -111,8 +128,10 @@ class GatewayTestConfigRouting(unittest.TestCase):
 
     def run_files(self, base: Path, *words: str):
         (base / "argv").unlink(missing_ok=True)
+        ledger = tempfile.TemporaryDirectory(prefix='tron-gateway-ledger-')
+        self.addCleanup(ledger.cleanup)
         result = subprocess.run([sys.executable, str(base / "tools/verify/gateway.py"), *words], cwd=base / "packages/gateway",
-                                env={**os.environ, GATEWAY.HELD_BY_CALLER: "1"}, capture_output=True, text=True, timeout=60)
+                                env={**os.environ, GATEWAY.HELD_BY_CALLER: "1", "TRON_TEST_LEDGER": str(Path(ledger.name) / "results.sqlite3")}, capture_output=True, text=True, timeout=60)
         return result, (base / "argv").read_text() if (base / "argv").exists() else None
 
     def test_a_listed_file_runs_under_its_own_config_and_a_mixed_list_is_refused(self) -> None:
@@ -120,11 +139,11 @@ class GatewayTestConfigRouting(unittest.TestCase):
             base = Path(temporary).resolve()
             verify = base / "tools/verify"
             verify.mkdir(parents=True)
-            for source in (ROOT / "tools/verify").glob("*.py"):
+            for source in [*(ROOT / 'tools/verify').glob('*.py'), *(ROOT / 'tools/verify').glob('ledger-*.mjs')]:
                 (verify / source.name).write_text(source.read_text())
             node = base / "scripts/tron-node"
             node.parent.mkdir()
-            node.write_text('#!/bin/bash\n[[ $# == 0 ]] && { echo /usr/bin/true; exit 0; }\nshift; exec "$@"\n')
+            fixture_node(node)
             gateway = base / "packages/gateway"
             vitest = gateway / "node_modules/.bin/vitest"
             vitest.parent.mkdir(parents=True)
@@ -136,6 +155,7 @@ class GatewayTestConfigRouting(unittest.TestCase):
             for path in ("src/a/nested.e2e.test.ts", "src/a/plain.test.ts", "src/b/terminal.e2e.test.ts"):
                 (gateway / path).parent.mkdir(parents=True, exist_ok=True)
                 (gateway / path).write_text("")
+            commit_fixture(base)
             nested, terminal = ["--config", "vitest.nested.config.ts"], ["--config", "vitest.mac-terminal.config.ts"]
             for words, config in ((["src/a/nested.e2e.test.ts"], nested),
                                   (["packages/gateway/src/b/terminal.e2e.test.ts", "-t", "x"], terminal),
@@ -145,7 +165,8 @@ class GatewayTestConfigRouting(unittest.TestCase):
                 with self.subTest(words=words):
                     result, argv = self.run_files(base, *words)
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                    self.assertEqual(argv, " ".join(["run", *config, *words]) + "\n")
+                    actual = argv.strip().split()
+                    self.assertEqual(actual, ['run', *config, *words, '--reporter=default', '--reporter=' + str(base / 'tools/verify/ledger-vitest.mjs')])
             for words in (["src/a/nested.e2e.test.ts", "src/a/plain.test.ts"], ["src/a/"], ["SRC/A/"]):
                 with self.subTest(words=words):
                     result, argv = self.run_files(base, *words, "-t", "x")
