@@ -811,7 +811,7 @@ describe("package update through the registered settings tool", () => {
       expect(JSON.parse(await readFile(settingsPath, "utf8")).packages).toEqual([`npm:${name}@1.2.0`]);
       await respond("package-update-response-2").catch(() => undefined);
       expect(await installedVersion(`npm:${name}@1.2.0`)).toBe("1.2.0");
-      const audited = (await f.settings.settingsChanges.history({ key: "package.update" })).entries;
+      const audited = (await f.settings.settingsChanges.history({ key: "package.update" }, { kind: "ui", id: "maintainer" })).entries;
       expect(audited.map(entry => entry.status).sort()).toEqual(["applied", "started"]);
       expect(audited.find(entry => entry.status === "applied")).toMatchObject({ action: true, reason: "Home requested the exact fixture update" });
 
