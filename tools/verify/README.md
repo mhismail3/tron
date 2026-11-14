@@ -237,8 +237,9 @@ native test results, so verify, batch and direct invocations share one ledger, n
 `scripts/tron verify --hunt --rounds 20 --hours 8` repeats all registered default Gateway,
 nested Gateway, portable Python, root Node and Gateway Node suites, serially on the mini.
 It never selects Apple-hosted, relay or shell groups or falls back to this Mac. `--plan`
-previews the selected files without running them. Execution requires a clean checkout whose
-HEAD equals live `origin/main`; that fence is checked before every lane and after the last.
+previews the selected files without running them. Preflight refusals, including an unavailable
+origin read, exit 2 before any lane starts; plan mode also needs the origin read. Execution requires
+a clean checkout whose HEAD equals live `origin/main`; that fence is checked before every lane and after the last.
 Run from a checkout containing the hunt tooling at that main commit, not a feature branch.
 The normal mini lease has zero wait, so a busy lease or other no-result stops the hunt without
 queuing or retrying. Honor Home's resource order before invoking it.
@@ -251,8 +252,8 @@ The plan exposes explicit contention marking. Each invocation retains unique log
 raw step exits, the first red's log and the ledger's same-tree flake ranking. A later pass never
 erases an earlier red: completed hunts exit 1 if any lane failed, otherwise 0. Budget expiry,
 source drift, no-result or an undriven lane exits 75 with partial evidence, or 1 if a prior lane
-already failed; interruption stays 130/143. Remote-read errors are no-result, not evidence that
-source changed. Cleanup/ranking errors are retained and make an otherwise successful hunt exit 1,
+already failed; interruption stays 130/143. After admission, remote-read errors are no-result,
+not evidence that source changed. Cleanup/ranking errors are retained and make an otherwise successful hunt exit 1,
 without replacing earlier nonzero verdicts. These repetitions measure variability, not retry-to-green verification. Zero ranked
 flakes is not proof of absence, especially for partial hunts or always-failing cases.
 
