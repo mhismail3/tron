@@ -75,7 +75,6 @@ enum MacAppStartupMaintenance {
         truncateGatewayStderr(at: setup.tronHome)
         let currentVersion = setup.currentAppVersion()
         let startupMode = setup.resolvedStartupMode(
-            command: .normal,
             underTests: false,
             onboardedOverride: context == .wizardCompletion ? false : nil
         )
@@ -189,11 +188,6 @@ enum MacAppStartupMaintenance {
         if !canManageLaunchAgent { return .unmanagedWrapper }
         if recordedVersion == currentVersion { return .versionAlreadyRecorded }
         return nil
-    }
-
-    @discardableResult
-    static func recordCurrentVersion(setup: EnvironmentSetup) -> Bool {
-        recordCurrentVersion(setup.currentAppVersion(), setup: setup)
     }
 
     @discardableResult

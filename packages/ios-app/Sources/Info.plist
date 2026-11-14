@@ -42,8 +42,6 @@
 	<string>$(TRON_APP_ATTEST_ENVIRONMENT)</string>
 	<key>TRONPrivateBlurEnabled</key>
 	<string>$(TRON_PRIVATE_BLUR_ENABLED)</string>
-	<key>TRONMacDownloadURL</key>
-	<string>$(TRON_MAC_DOWNLOAD_URL)</string>
 	<key>TRONPushServiceOrigin</key>
 	<string>$(TRON_PUSH_SERVICE_ORIGIN)</string>
 	<key>LSRequiresIPhoneOS</key>
