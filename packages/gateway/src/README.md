@@ -88,7 +88,7 @@ Also the rows of `src/` modules that have no README yet: process lifecycle
 
 | Signal | Level | Meaning |
 |---|---|---|
-| `background.slice` | debug; warning on failure | One background slice ran: `step` (the job), `outcome`, `durationMs`, `counts.waitedMs` past its due time, `error`; a failure is retried only by the next slice |
+| `background.slice` | no record on success; warning on failure | One background slice ran: `step` (the job), `outcome`, `durationMs`, `counts.waitedMs` past its due time, `error`; a failure is retried only by the next slice |
 | `background.backlog` | warning | A job starved past `BACKGROUND_BACKLOG_WARNING_MS` (5 min) while the scheduler was paused: `step`, `reason` (`requests-in-flight`, `event-loop-p99`), `counts`; once per spell |
 | `gateway.fatal-startup` | error | Loading the module graph or startup threw before the logger existed (`index.ts`): `error`, `runtimeEpoch`, `payloadVersion` |
 | `mac-terminal.startup-failed` | warning | Restoring an enabled private SSH service failed: `error`; its owned plist retains enabled intent, host keys never rotate automatically, and Gateway startup continues |

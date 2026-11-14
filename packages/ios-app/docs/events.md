@@ -202,10 +202,11 @@ background and every 60 s; it never persists a cursor, and the Gateway's cursor 
 Every uploaded line is at most 16 KiB encoded. A larger record is replaced at the same position by a bounded
 `log.record-truncated` line (its free fields capped), and if even that is over the bound, by a minimal fixed
 record, so one record cannot stall the upload. Free text is redacted on admission (`IOSClientDiagnosticBuffer.redactedMessage`):
-`token`, `authorization`, `password`, `secret`, `api_key` and compound keys ending in them (`access_token`,
-`refresh_token`, `client_secret`) lose their value in JSON-quoted, escaped (`\"v\"`) or bare form; the key and
-neighbouring keys are kept, keys such as `tokenCount` are not matched, and single-quoted keys (`'token':'v'`)
-are matched. Not covered: secret words that are not the end of a key (`secretValue`). Native proof is pending.
+Credential fields such as `token`, `authorization`, `password`, `secret`, `api_key`, `private_key`,
+`aws_secret_access_key` and separator-delimited suffixes such as `client_secret_id` lose their value in
+JSON-quoted, escaped (`\"v\"`), single-quoted or bare form. A quoted value cut by the admission byte bound
+is redacted through the end of that bounded input. Keys and neighbouring fields remain; `tokenCount` is
+not a credential-key match. Free-text redaction is defensive: callers must not record credential values.
 
 ## Covered presentation surfaces
 

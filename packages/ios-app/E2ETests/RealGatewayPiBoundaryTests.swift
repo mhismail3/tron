@@ -1547,9 +1547,16 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         let refreshSecret = "synthetic-refresh-\(UUID().uuidString.prefix(8))"
         let clientSecret = "synthetic-client-\(UUID().uuidString.prefix(8))"
         let escapedSecret = "synthetic-escaped-\(UUID().uuidString.prefix(8))"
+        let privateSecret = "synthetic-private-\(UUID().uuidString.prefix(8))"
+        let awsSecret = "synthetic-aws-\(UUID().uuidString.prefix(8))"
+        let credentialID = "synthetic-credential-id-\(UUID().uuidString.prefix(8))"
+        let truncatedTail = "synthetic-truncated-tail-\(UUID().uuidString.prefix(8))"
+        let truncatedSecret = "head \(truncatedTail) " + String(repeating: "x", count: 5_000)
         let control = String(repeating: "\u{1}", count: 512)
         await AppLog.shared.recordCausal(name: "e2e.log-redaction", outcome: "success",
-                                         details: #"{"token":"\#(secret)","access_token":"\#(accessSecret)","refresh_token":"\#(refreshSecret)","client_secret":"\#(clientSecret)","label":"\#(neighbor)","tokenCount":5} \"api_key\":\"\#(escapedSecret)\""#)
+                                         details: #"{"token":"\#(secret)","access_token":"\#(accessSecret)","refresh_token":"\#(refreshSecret)","client_secret":"\#(clientSecret)","private_key":"\#(privateSecret)","aws_secret_access_key":"\#(awsSecret)","client_secret_id":"\#(credentialID)","label":"\#(neighbor)","tokenCount":5} \"api_key\":\"\#(escapedSecret)\""#)
+        await AppLog.shared.recordCausal(name: "e2e.log-redaction-truncated", outcome: "success",
+                                         details: #"{"token":"\#(truncatedSecret)"}"#)
         await AppLog.shared.recordRPC(event: control, method: control, requestID: control, outcome: control, code: control,
                                       durationMilliseconds: 1, profileID: control, connectionID: nil)
         await AppLog.shared.recordCausal(name: "e2e.log-marker", outcome: "success", details: marker)
@@ -1573,7 +1580,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         XCTAssertTrue(found, "the phone log marker must reach the Gateway device file in one upload pass")
         let text = try devices.contentsOfDirectoryText()
         XCTAssertTrue(text.contains(neighbor), "non-secret neighbouring text must survive redaction")
-        for value in [secret, accessSecret, refreshSecret, clientSecret, escapedSecret] {
+        for value in [secret, accessSecret, refreshSecret, clientSecret, escapedSecret, privateSecret, awsSecret, credentialID, truncatedTail] {
             XCTAssertFalse(text.contains(value), "a secret value must never reach the Gateway device file")
         }
         XCTAssertTrue(text.contains("tokenCount"), "a non-secret key that merely contains a secret word must survive redaction")
