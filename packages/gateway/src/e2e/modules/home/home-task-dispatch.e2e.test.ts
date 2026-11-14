@@ -46,6 +46,12 @@ afterAll(async () => {
   if (process.env.HOME_TASK_REPORT) await writeFile(process.env.HOME_TASK_REPORT, JSON.stringify({ suite: "home-task-dispatch", evidence }, null, 2));
 });
 
+async function evictWorker(f: Awaited<ReturnType<typeof fixture>>, sessionId: string): Promise<void> {
+  const registry = f.registry as any;
+  registry.options.idleRuntimeMs = 0;
+  await waitFor(async () => { await registry.evictIdle(); return !registry.slots.has(sessionId); }, "the ownerless worker's runtime is evicted");
+}
+
 async function taskFile(f: Awaited<ReturnType<typeof fixture>>, id: string): Promise<string> {
   const directory = join(f.tronHome, "state/home/tasks");
   return join(directory, (await readdir(directory)).find(name => name.endsWith(`-${id}.json`))!);
@@ -1320,11 +1326,6 @@ describe("Home task production dispatch", () => {
   });
 
   const USAGE_LIMIT = "The ChatGPT user has reached their Subscription Sharing usage limit. Ask the user to try again after their usage limit resets.";
-  async function evictWorker(f: Awaited<ReturnType<typeof fixture>>, sessionId: string): Promise<void> {
-    const registry = f.registry as any;
-    registry.options.idleRuntimeMs = 0;
-    await waitFor(async () => { await registry.evictIdle(); return !registry.slots.has(sessionId); }, "the ownerless worker's runtime is evicted");
-  }
   async function resumeInPlace(f: Awaited<ReturnType<typeof fixture>>, taskId: string, sessionId: string): Promise<void> {
     f.faux.setResponses([fauxAssistantMessage([reportCall("resumed", "Resumed after the limit")], { stopReason: "toolUse" })]);
     const resumed = await homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "resume", taskId }) as { taskId: string; sessionId: string };
