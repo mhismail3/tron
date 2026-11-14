@@ -3,10 +3,13 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { NotificationGrantStore, notificationHash, type NotificationInboxEntry } from "./grant-store.js";
-import { NotificationService, type NotificationInboxChanged, type NotificationInboxItem } from "./notification-service.js";
+import { NotificationService, resolveNotificationPolicy, type NotificationInboxChanged, type NotificationInboxItem } from "./notification-service.js";
 import { PushRelayClient } from "./relay-client.js";
 import { GatewayService, type ClientContext } from "../transport/gateway-service.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { createGatewaySettingsSchema } from "../main/settings-schema.js";
+import { resolveSettings } from "../kernel/settings/settings-resolver.js";
+import type { SettingsStores } from "../kernel/settings/settings-types.js";
 
 const REPORT_PATH = join(process.cwd(), "test-results", "notification-inbox.integration.json");
 const report: {
@@ -187,17 +190,39 @@ describe("push alert policy is read from the Global keys", () => {
     await store.initialize();
     const policy = { inputNeeded: false, finished: true, waiting: true };
     const notifications = new NotificationService(store, relay, async () => ({ ...policy }));
-    await notifications.initialize();
-    await notifications.upsertGrant({
-      deviceId: "device_abcdefgh", installationId: "install_abcdefgh", grantId: "grant_abcdefgh",
-      secret: Buffer.alloc(32, 7).toString("base64url"), previewsEnabled: false, relayOrigin,
-    });
-    expect(await notifications.enqueue({ sessionId: "session-policy", sourceId: "ask-off", kind: "ask", message: "Input needed" })).toBe("suppressed");
-    expect(envelopes).toHaveLength(0);
-    policy.inputNeeded = true;
-    expect(await notifications.enqueue({ sessionId: "session-policy", sourceId: "ask-on", kind: "ask", message: "Input needed" })).toBe("queued");
-    await waitFor(() => envelopes.length === 1, "the push for the kind whose key is on");
-    expect(envelopes).toHaveLength(1);
+    try {
+      await notifications.initialize();
+      await notifications.upsertGrant({
+        deviceId: "device_abcdefgh", installationId: "install_abcdefgh", grantId: "grant_abcdefgh",
+        secret: Buffer.alloc(32, 7).toString("base64url"), previewsEnabled: false, relayOrigin,
+      });
+      expect(await notifications.enqueue({ sessionId: "session-policy", sourceId: "ask-off", kind: "ask", message: "Input needed" })).toBe("suppressed");
+      expect(envelopes).toHaveLength(0);
+      policy.inputNeeded = true;
+      expect(await notifications.enqueue({ sessionId: "session-policy", sourceId: "ask-on", kind: "ask", message: "Input needed" })).toBe("queued");
+      await waitFor(async () => {
+        const document = await store.snapshot();
+        return document.pending.length === 0 && document.receipts.some(receipt => receipt.result === "accepted_by_apns");
+      }, "the push for the kind whose key is on to settle");
+      expect(envelopes).toHaveLength(1);
+    } finally {
+      notifications.dispose();
+    }
     record("push policy keys gate admission", { suppressedWhileOff: true, pushedWhileOn: envelopes.length });
+  });
+});
+
+describe("push alert policy resolves through the real Global schema", () => {
+  it("defaults all three keys on and reads a stored value from the Gateway settings file", async () => {
+    const schema = createGatewaySettingsSchema();
+    const resolveWith = (gateway: Record<string, unknown>) => (keys: readonly string[]) => {
+      const stores: SettingsStores = { layers: ["global", "default"], global: {}, gateway, trust: {}, macTerminal: {} };
+      return Promise.resolve(resolveSettings(schema, { kind: "global" }, stores, {
+        format: { modelName: () => undefined }, options: { clamp: (_source, _dependency, value) => value }, keys,
+      }).keys);
+    };
+    expect(await resolveNotificationPolicy(resolveWith({}))).toEqual({ inputNeeded: true, finished: true, waiting: true });
+    expect(await resolveNotificationPolicy(resolveWith({ notifications: { push: { inputNeeded: false, finished: true, waiting: false } } })))
+      .toEqual({ inputNeeded: false, finished: true, waiting: false });
   });
 });
