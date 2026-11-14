@@ -2126,7 +2126,7 @@ export class GatewayService {
       }
     }
     for (const change of changes) {
-      const key = this.dependencies.settingsModel.schema.KEYS.find(candidate => candidate.id === change.key);
+      const key = this.dependencies.settingsModel.schema.recordKey(change.key) ?? this.dependencies.settingsModel.schema.KEYS.find(candidate => candidate.id === change.key);
       if (!key) continue;
       if (key.effect === "reload") {
         this.dependencies.sessions.freshness.stale(change.key === "permissions.projectTrust" ? {}
