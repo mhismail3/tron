@@ -125,7 +125,7 @@ function planChanges(documentBefore: Buffer, settingsBefore: Buffer | null): Cha
 async function publish(path: string, bytes: Buffer, expected: Buffer | null): Promise<void> {
   if (digest(await readBounded(path)) !== digest(expected)) throw conflict(`${path} changed during the push policy migration`);
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  const temporary = `${path}.migration-${process.pid}.tmp`;
+  const temporary = `${path}.migration-${randomBytes(8).toString("hex")}.tmp`;
   try {
     await writeDurable(temporary, bytes);
     await rename(temporary, path);
@@ -148,7 +148,7 @@ async function writeBackup(tronHome: string, changes: Change[]): Promise<void> {
     version: 1,
     files: changes.map(change => ({ path: change.path, before: digest(change.before), after: hash(change.after) })),
   };
-  const temporary = join(directory, `${MANIFEST}.tmp-${process.pid}`);
+  const temporary = join(directory, `${MANIFEST}.tmp-${randomBytes(8).toString("hex")}`);
   try {
     await writeDurable(temporary, Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`, "utf8"));
     await rename(temporary, join(directory, MANIFEST));
@@ -193,17 +193,18 @@ export async function migratePushPolicy(tronHome: string): Promise<boolean> {
     if (receipt && await backupIntact(directory, receipt)) {
       const originals = await backupOriginals(directory, receipt);
       const changes = planChanges(originals.get(FILES[1].path)!, originals.get(FILES[0].path) ?? null);
-      if (sameTargets(changes, receipt)) {
-        const pending: Change[] = [];
-        for (const [index, change] of changes.entries()) {
-          const current = digest(await readBounded(join(tronHome, change.path)));
-          const entry = receipt.files[index]!;
-          if (current === entry.before) pending.push(change);
-          else if (current !== entry.after) throw conflict(`${change.path} changed after its push policy backup; restore it by hand from ${directory}`);
-        }
-        for (const change of pending) await publish(join(tronHome, change.path), change.after, change.before);
-        return true;
+      if (!sameTargets(changes, receipt)) {
+        throw conflict(`The push policy backup receipt in ${directory} does not match this build's migration plan; nothing was changed. Restore it with scripts/tron migrate push-policy --restore, or move that directory aside by hand.`);
       }
+      const pending: Change[] = [];
+      for (const [index, change] of changes.entries()) {
+        const current = digest(await readBounded(join(tronHome, change.path)));
+        const entry = receipt.files[index]!;
+        if (current === entry.before) pending.push(change);
+        else if (current !== entry.after) throw conflict(`${change.path} changed after its push policy backup; restore it by hand from ${directory}`);
+      }
+      for (const change of pending) await publish(join(tronHome, change.path), change.after, change.before);
+      return true;
     } else if (receipt) {
       const current = await Promise.all(receipt.files.map(entry => readBounded(join(tronHome, entry.path))));
       if (current.some((bytes, index) => digest(bytes) !== null && digest(bytes) === receipt.files[index]!.after)) {
