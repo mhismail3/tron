@@ -117,7 +117,7 @@ def retain_native(results: Path, retained: Path, receipt: dict) -> None:
             size = source.stat().st_size
             allowance = min(4 * 1024 ** 2, RETAINED_LIMIT - total)
             entry = {'path': str(relative), 'bytes': size, 'retained': min(size, allowance), 'sha256': '0' * 64}
-            entry_size = len(json.dumps(entry).encode()) + 1
+            entry_size = len(json.dumps(entry).encode()) + 2
             if manifest_bytes + entry_size > RETAINED_MANIFEST_BYTES - 8192:
                 limits['manifest'] = True
                 break
@@ -140,7 +140,7 @@ def retain_native(results: Path, retained: Path, receipt: dict) -> None:
                     target_name, owner, method, outcome, seconds = match.groups()
                     case = {'log': str(relative), 'testId': f'{target_name}/{owner}/{method}',
                             'outcome': outcome, 'seconds': float(seconds)}
-                    encoded = len(json.dumps(case).encode()) + 1
+                    encoded = len(json.dumps(case).encode()) + 2
                     if case_bytes + encoded > RETAINED_CASE_BYTES - 256:
                         limits['caseBytes'] = True
                         break

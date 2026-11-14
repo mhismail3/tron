@@ -481,8 +481,8 @@ print('PEAK', tracemalloc.get_traced_memory()[1])
                     for item in range(8300):
                         (originals / str(item)).mkdir()
                 elif scenario == 'caseBytes':
-                    line = "Test Case '-[T.C test" + 'x' * 2000 + "]' passed (0.25 seconds).\\n"
-                    (originals / 'test.log').write_text(line * 1500)
+                    line = "Test Case '-[T.C test" + 'x' * 500 + "]' passed (0.25 seconds).\\n"
+                    (originals / 'test.log').write_text(line * 6000)
                 else:
                     (originals / 'receipt.json').write_text(json.dumps({'nonce': nonce, 'host': 'x' * 5000}))
                     refused = self.lane('recover', nonce)
