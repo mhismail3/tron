@@ -335,7 +335,10 @@ describe("settings package update installs one exact version through the owner",
       await writeFile(join(installedPath, ".git", "info", "attributes"), "index.txt filter=marker\n");
 
       const review = await packages.updatePackage({ cwd, source, version: second, reason: "Plan only" }, { kind: "home", id: "home-session" });
-      expect(review).toMatchObject({ status: "review", review: { items: [expect.objectContaining({ before: first, after: second })] } });
+      expect(review).toMatchObject({ status: "review", review: { items: [
+        expect.objectContaining({ before: first, after: second }),
+        expect.objectContaining({ label: "Configured source", before: source, after: `${source}@${second}` }),
+      ] } });
       await expect(readFile(fsmonitorMarker)).rejects.toThrow();
       await expect(readFile(filterMarker)).rejects.toThrow();
       expect(await gitHead(installedPath)).toBe(first);
