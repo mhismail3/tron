@@ -53,7 +53,6 @@ export interface KeyDeclaration {
   tap?: "trust" | "privacy" | "spend" | "install" | "irreversible";
   direction?: (before: unknown, after: unknown) => Direction;
   writers: readonly Writer[];
-  redacted?: boolean;
   label: string;
   help: string;
   order: number;
@@ -424,11 +423,6 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       label: "WebSocket connect timeout", help: "How long a WebSocket connection may take to open.", order: 110, importance: "advanced",
     },
     {
-      id: "run.httpProxy", sessionOverridable: false, projectSettable: false, group: "run", subgroup: "Connection", type: types.text(4_096), redacted: true,
-      layers: { global: pi("httpProxy") }, timing: "live", effect: "restart", writers: ["ui"],
-      label: "HTTP proxy", help: "Proxy for model requests. Applies after a restart.", order: 120, importance: "advanced", control: "secret",
-    },
-    {
       tap: "spend", id: "run.cacheWarming", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "run", subgroup: "Connection",
       type: types.choice([
         { value: "off", label: "Off", detail: "Prompt caches are never kept warm" },
@@ -473,12 +467,6 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       tap: "privacy", id: "notifications.push.waiting", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "notifications", type: types.boolean(),
       layers: { global: { store: "gateway", path: ["notifications", "push", "waiting"] } }, defaultValue: true, timing: "live", effect: "next-request", direction: grants,
       writers: ANY_ACTOR, label: "Waiting", help: "Send a push when work is waiting on background tasks.", order: 30, importance: "essential",
-    },
-    {
-      id: "setup.sessionDir", sessionOverridable: false, projectSettable: false, group: "setup", type: types.text(4_096), layers: { global: pi("sessionDir") }, timing: "live", effect: "restart",
-      writers: [], label: "Session folder", help: "Where chats are stored. Applies after a restart.",
-      order: 10, importance: "advanced", control: "text",
-      entry: { hint: "A folder path on the Mac. Start with ~ or /.", example: "~/Documents/Tron Sessions" },
     },
     {
       tap: "irreversible", id: "setup.installTelemetry", sessionOverridable: false, projectSettable: false, group: "setup", type: types.boolean(), layers: { global: pi("enableInstallTelemetry") }, defaultValue: true,

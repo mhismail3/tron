@@ -234,7 +234,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     private var invalidValue = ""
     private var blockImages = false
     private var focusMode = "calm"
-    private var hasSecret = false
     private var paths = ["alpha", "beta"]
     private var applied = 0
     private var thinkingOptions = -1
@@ -402,9 +401,10 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 "changeId": .string("fixture-change"), "at": .string("2026-10-11T12:00:00.000Z"),
                 "actor": .object(["kind": .string("agent"), "sessionId": .string("fixture-chat")]),
                 "target": .object(["kind": .string("global")]), "layer": .string("global"),
-                "key": .string("run.retry.maxRetries"), "op": .string("set"), "changed": .bool(true), "redacted": .bool(true),
+                "key": .string("tools.mcp.server"), "qualifiers": .object(["server": .string("fixture-server")]),
+                "op": .string("set"), "changed": .bool(true), "redacted": .bool(true),
                 "tier": .string("quiet"), "status": .string("applied"),
-                "presentation": .object(["label": .string("Agent retry count"), "section": .string("run"),
+                "presentation": .object(["label": .string("MCP server"), "section": .string("tools"),
                     "actor": .string("Agent"), "layer": .string("Global"),
                     "display": .object(["before": .string("Hidden"), "after": .string("Changed")])]),
             ])
@@ -435,8 +435,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                         return key != "model.thinking[role=chat]" && !key.hasPrefix("context.")
                     }
                 + (ProcessInfo.processInfo.arguments.contains("-settings-sheet-theme-review") ? HostedSettingsReviewSchema.sheetThemeKeys : [])
-                + [HostedSettingsReviewSchema.key("setup.sessionDir", "setup", "Session folder", .string("/workspace/sessions"), "/workspace/sessions", "readOnly", help: "Where chats are stored. Applies after a restart."),
-                   HostedSettingsReviewSchema.key("setup.installTelemetry", "setup", "Install telemetry", .bool(false), "Off", "toggle", order: 20)]
+                + [HostedSettingsReviewSchema.key("setup.installTelemetry", "setup", "Install telemetry", .bool(false), "Off", "toggle", order: 20)]
             if ProcessInfo.processInfo.arguments.contains("-six-ui-surface") {
                 return .object(["keys": .array(rows), "sections": .array(HostedSettingsReviewSchema.sections)])
             }
@@ -509,12 +508,9 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                         "options": .array([.object(["value": .string("red"), "label": .string("Red weight")]),
                                            .object(["value": .string("blue"), "label": .string("Blue weight")])]),
                         "range": .object(["min": .number(0), "max": .number(100), "step": .number(1)])])),
-            key("lab.password", group: "lab", value: nil, display: hasSecret ? "Set" : "Not set",
-                presentation: presentation("Password", "Write-only replacement.", 26, "advanced", "secret",
-                    extra: ["redacted": .bool(true)])),
             key("lab.secretToken", group: "lab", value: nil, display: "Set",
                 presentation: presentation("Token", "A secret this app cannot edit yet.", 30, "advanced", "readOnly",
-                    extra: ["note": .string("Update Tron to edit"), "redacted": .bool(true)])),
+                    extra: ["note": .string("Update Tron to edit")])),
         ]
         let sections: [JSONValue] = [
             section("model", "Model", 10, "Models, thinking, and context window"),
@@ -591,7 +587,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             case "sources.extensions": extensions = value?.arrayValue?.compactMap(\.stringValue) ?? []
             case "lab.focusMode": focusMode = value?.stringValue ?? focusMode
             case "lab.paths": paths = value?.arrayValue?.compactMap(\.stringValue) ?? []
-            case "lab.password": hasSecret = value?.stringValue?.isEmpty == false
             default: break
             }
             applied += 1

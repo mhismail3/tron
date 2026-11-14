@@ -180,8 +180,7 @@ function resolveInstance(
   options: ResolveOptions,
   dependencyValue: (id: string) => unknown,
 ): ResolvedKey {
-  const format = (value: unknown) => key.redacted ? (value === undefined || value === "" ? "Not set" : "Set")
-    : value === undefined ? "Not set" : key.type.format(value, options.format);
+  const format = (value: unknown) => value === undefined ? "Not set" : key.type.format(value, options.format);
   const layerValues: LayerValue[] = [];
   const facts = precedenceFacts(stores, key, qualifiers);
   const resolution = precedence.Resolve(facts.key, facts.layers);
@@ -224,7 +223,6 @@ function resolveInstance(
       }
     }
   }
-  if (key.redacted) badges.push({ kind: "state", label: "Not undoable" });
   const candidate = stores.session?.fixed?.[key.id] ?? stores.session?.requestPins?.[key.id];
   const fixedAt = layer === "session" && candidate && JSON.stringify(candidate.value) === JSON.stringify(value)
     && (!candidate.qualifiers?.model || candidate.qualifiers.model === qualifiers.model) ? candidate : undefined;
@@ -250,7 +248,7 @@ function resolveInstance(
     ...(Object.keys(qualifiers).length ? { qualifiers } : {}),
     group: key.group,
     ...(key.subgroup ? { subgroup: key.subgroup } : {}),
-    value: key.redacted ? undefined : value,
+    value,
     display: value !== undefined && key.type.summary ? key.type.summary(value) : format(value),
     layer: scopeForStore(layer),
     applied: !notApplied,
@@ -259,7 +257,7 @@ function resolveInstance(
     ...(fixedAt ? { fixedAt } : {}),
     overridden: localValue !== undefined,
     ...(projectValue && projectPath && stores.project ? { projectSetting: { file: join(stores.project.root, ".pi", "settings.json"), path: projectPath } } : {}),
-    layers: key.redacted ? layerValues.map(({ value: _value, ...rest }) => rest) : layerValues,
+    layers: layerValues,
   };
 }
 

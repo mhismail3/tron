@@ -195,7 +195,6 @@ final class AppModel {
     let settingsTrust: SettingsTrustCoordinator
     private let providerAuth: ProviderAuthCoordinator
     private let packageConfiguration: PackageConfigurationCoordinator
-    let configurationAutosave = ConfigurationAutosaveCoordinator()
     let composerDrafts: ComposerDraftCoordinator
     let extensionInteractionDrafts: ExtensionInteractionDraftStore
     let gatewayDiagnostics: GatewayDiagnosticsService
@@ -680,9 +679,6 @@ final class AppModel {
         providerAuth.delegate = self
         packageConfiguration.delegate = self
         installedApps.onFailure = { [weak self] error in self?.surface(error) }
-        configurationAutosave.didFail = { [weak self] error in
-            self?.presentConfigurationActionError(error)
-        }
         let events = client.events
         eventTask = Task { [weak self, events] in
             for await delivery in events {
@@ -1330,11 +1326,6 @@ extension AppModel {
         }
     }
 
-    func presentConfigurationActionError(_ error: Error) {
-        guard !(error is CancellationError) else { return }
-        surface(error)
-    }
-
     func start(scenePhase: AppScenePhase = .active) async {
         seedLaunchScenePhase(scenePhase)
         await client.installAppLog(appLog)
@@ -1507,7 +1498,6 @@ extension AppModel {
         providerAuth.clearProfile()
         settingsTrust.clearProfile()
         packageConfiguration.clearProfile()
-        configurationAutosave.clearProfile()
         cancelAllExtensionEditorSynchronization()
         composerDrafts.retireProfilePresentation()
         noticeCenter.dismissAll()

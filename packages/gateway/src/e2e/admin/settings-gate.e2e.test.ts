@@ -67,14 +67,13 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
   roots.push(root);
   const tronHome = join(root, "tron");
   const agentDir = join(root, "agent");
-  const sessionDir = join(root, "sessions");
   const project = join(root, "project");
   const other = join(root, "other");
-  await Promise.all([mkdir(join(agentDir, "extensions"), { recursive: true }), mkdir(sessionDir, { recursive: true }), mkdir(project), mkdir(other)]);
+  await Promise.all([mkdir(join(agentDir, "extensions"), { recursive: true }), mkdir(project), mkdir(other)]);
   vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
   vi.stubEnv("PI_OFFLINE", "1");
   await writeFile(join(agentDir, "extensions", "third-party.ts"), THIRD_PARTY_EXTENSION);
-  await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, retry: { maxRetries: 3 }, defaultProvider: MODEL.provider, defaultModel: MODEL.id }));
+  await writeFile(join(agentDir, "settings.json"), JSON.stringify({ retry: { maxRetries: 3 }, defaultProvider: MODEL.provider, defaultModel: MODEL.id }));
   const faux = fauxProvider({ provider: PROVIDER, models: [{ id: MODEL.id, reasoning: options.reasoning ?? false }, { id: MEMORY_MODEL.id, reasoning: false }], tokensPerSecond: 1_000_000 });
   const modelRuntimeFactory = async () => {
     const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
@@ -829,7 +828,7 @@ describe("typed settings at real runtime boundaries", () => {
     await delegateOnce("clean-worker", 4, null as unknown as number, false);
     await delegateOnce("marked-worker", 5, 4, true);
     expect(fetched.get("marked-worker")).toContain("Ignore previous instructions");
-    const entries = (await settingsChanges.history({ key: "run.retry.maxRetries" })).entries.reverse();
+    const entries = (await settingsChanges.history({ key: "run.retry.maxRetries" }, { kind: "ui", id: "maintainer" })).entries.reverse();
     expect(entries.map(entry => [entry.actor.kind, entry.status, entry.after])).toEqual([
       ["worker", "applied", 4], ["worker", "applied", 5],
     ]);
@@ -959,7 +958,7 @@ describe("typed settings at real runtime boundaries", () => {
     expect(forbidden).toMatchObject({ isError: true });
     expect(forbidden.text).toMatch(/available only in Tron Home/);
 
-    const entries = (await settingsChanges.history({ actor: "home" })).entries.reverse()
+    const entries = (await settingsChanges.history({ actor: "home" }, { kind: "ui", id: "maintainer" })).entries.reverse()
       .filter(entry => entry.key === "model.ref[role=chat]" || entry.key === "model.thinking[role=chat]");
     expect(entries.map(entry => [entry.key, entry.status, entry.after, entry.actor.taskId, entry.target])).toEqual([
       ["model.ref[role=chat]", "applied", REASONING, "live-worker", { kind: "session", sessionId: workerSessionId }],

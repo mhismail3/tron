@@ -109,7 +109,7 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     await expect(f.service.invoke(f.client, "settings.undo", { ...undo, commandId: randomUUID() })).rejects.toMatchObject({ code: "conflict" });
     const redone = await f.service.invoke(f.client, "settings.undo", { ...undo, commandId: randomUUID(), changeId: reverted.changes[0]!.changeId }) as unknown as ChangeResult;
     expect(retryValue(await f.resolve(slot, ["run.retry.maxRetries"]))).toBe(3);
-    const entries = (await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" })).entries;
+    const entries = (await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" }, { kind: "ui", id: "maintainer" })).entries;
     expect(entries.find(entry => entry.changeId === reverted.changes[0]!.changeId)?.undoOf).toBe(original);
     expect(entries.find(entry => entry.changeId === redone.changes[0]!.changeId)?.undoOf).toBe(reverted.changes[0]!.changeId);
     expect(entries.filter(entry => entry.changeId === reverted.changes[0]!.changeId)).toHaveLength(1);
@@ -144,7 +144,7 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
       changes: [{ key: "run.retry.maxRetries", layer: "session", op: "set", value: 4, expected: null }],
     })).rejects.toMatchObject({ code: "conflict" });
     expect(retryValue(await f.resolve(slot, ["run.retry.maxRetries"]))).toBe(winner.changes[0]!.after);
-    expect((await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" })).entries.filter(entry => entry.status === "applied")).toHaveLength(1);
+    expect((await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" }, { kind: "ui", id: "maintainer" })).entries.filter(entry => entry.status === "applied")).toHaveLength(1);
     evidence.push({ case: "expected-session-winner", winner });
   });
   it("refuses a stale expected value for a Session-owned field without changing its effective value", async () => {
@@ -267,10 +267,10 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     expect((await read()).keys).toEqual([]);
   });
 
-  it("serves target-specific recovery capability, Global reset presence and no stopped-runtime setting row", async () => {
+  it("serves target-specific recovery capability and Global reset presence", async () => {
     const f = await setup();
     const read = (target: Record<string, string>) => f.service.invoke(f.client, "settings.resolve", {
-      target, keys: ["run.retry.maxRetries", "setup.sessionDir"], renderer: { version: 1, controls: ["text"] },
+      target, keys: ["run.retry.maxRetries"], renderer: { version: 1, controls: ["text"] },
     }) as Promise<{ keys: Array<{ key: string; overridden: boolean; presentation: { editable: boolean } }> }>;
     const global = await read({ kind: "global" });
     expect(global.keys).toHaveLength(1);

@@ -80,7 +80,7 @@ describe("settings worker changes and Session fences", () => {
     expect(home.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
     const worker = await f.registry.acquire(workerSessionId);
     expect(worker.snapshot()).toMatchObject({ model: REASONING, thinkingLevel: "low" });
-    expect((await f.settingsChanges.history({ key: "model.thinking[role=chat]" })).entries.map(entry => entry.status)).not.toContain("failed");
+    expect((await f.settingsChanges.history({ key: "model.thinking[role=chat]" }, { kind: "ui", id: "maintainer" })).entries.map(entry => entry.status)).not.toContain("failed");
     transcript.push({ case: "routine worker change without a client fence", steps: [{ applied: applied.details }] });
   }, 90_000);
 
@@ -96,7 +96,7 @@ describe("settings worker changes and Session fences", () => {
       await expect(refused).rejects.toMatchObject({ code: "invalid_request", message: expect.stringMatching(/fence/) });
       refusals.push(String((await refused.catch((error: Error) => error)).message));
     }
-    expect((await f.settingsChanges.history({ key: "run.retry.maxRetries" })).entries).toEqual([]);
+    expect((await f.settingsChanges.history({ key: "run.retry.maxRetries" }, { kind: "ui", id: "maintainer" })).entries).toEqual([]);
     const snapshot = slot.snapshot();
     const fence = { runtimeGeneration: snapshot.runtimeGeneration, model: snapshot.model, revision: snapshot.revision };
     const contextWindow = [{ key: "model.contextWindow", layer: "session", op: "set", value: 100_000, qualifiers: { model: `${f.model.provider}/${f.model.id}` } }];
