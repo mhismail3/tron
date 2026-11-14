@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { DatabaseSync } from "node:sqlite";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +15,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { waitFor } from "../../../test-support/wait-for.js";
+import { DEFAULT_MAX_UPLOAD_BYTES } from "../../config.js";
 import { TrustService } from "../../kernel/resources/trust-service.js";
 import type { HomeRequestRecord } from "../../modules/home/home-request-policy.js";
 import type { HomeResearchToolDetails } from "../../modules/home/home-research-tools.js";
@@ -868,7 +869,9 @@ describe("Tron Home research tools", () => {
     const { sessionId } = JSON.parse(imported!.text) as { sessionId: string };
     expect(sessionId).not.toBe("external-source");
     expect(JSON.stringify(imported!.details)).not.toContain(marker);
-    expect(JSON.stringify((await f.registry.acquire(sessionId)).canonicalSessionEntries())).toContain(marker);
+    const importedSlot = await f.registry.acquire(sessionId);
+    expect(JSON.stringify(importedSlot.canonicalSessionEntries())).toContain(marker);
+    expect(importedSlot.canonicalSessionEntries().filter(entry => entry.type === "message" && entry.message.role === "assistant")).toEqual([]);
     expect(relative!.isError).toBe(true);
     expect(relative!.text).toContain("absolute .jsonl file");
     expect(unscoped!.isError).toBe(true);
@@ -908,6 +911,29 @@ describe("Tron Home research tools", () => {
     expect(imported.isError).toBe(false);
     const { sessionId } = JSON.parse(imported.content.map(part => part.type === "text" ? part.text : "").join("")) as { sessionId: string };
     expect(JSON.stringify((await f.registry.acquire(sessionId)).canonicalSessionEntries())).toContain(marker);
+  }, 60_000);
+
+  it("refuses oversized, missing and non-session import files without echoing their content", async () => {
+    const f = await fixture("session-import-refusals");
+    const secret = "IMPORT-SECRET-CONTENT-5b2e";
+    const oversized = join(f.root, "oversized.jsonl");
+    await writeFile(oversized, "");
+    await truncate(oversized, DEFAULT_MAX_UPLOAD_BYTES + 1);
+    const garbage = join(f.root, "garbage.jsonl");
+    await writeFile(garbage, `not a session ${secret}\n`);
+    const answers = await toolAnswers(f, "import the refused files", [
+      { name: "session_import", args: { path: oversized, cwd: f.project } },
+      { name: "session_import", args: { path: join(f.root, "missing.jsonl"), cwd: f.project } },
+      { name: "session_import", args: { path: garbage, cwd: f.project } },
+    ]);
+    expect(answers[0]!.isError).toBe(true);
+    expect(answers[0]!.text).toContain(`regular file of 1 byte through ${DEFAULT_MAX_UPLOAD_BYTES} bytes`);
+    expect(answers[1]!.isError).toBe(true);
+    expect(answers[2]!.isError).toBe(true);
+    for (const answer of answers) expect(answer.text).not.toContain(secret);
+    const sessions = await f.registry.catalog("all");
+    expect(JSON.stringify(sessions)).not.toContain(secret);
+    recordCase("session-import-refusals", { refused: answers.map(answer => answer.isError) });
   }, 60_000);
 
   it("refuses cataloged children and malformed roots while reading an ordinary parent", async () => {
