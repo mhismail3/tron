@@ -1160,12 +1160,13 @@
             "additionalProperties": false,
             "properties": {
               "action": {
-                "description": "resolve: read current values and scopes. history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card.",
+                "description": "resolve: read current values and scopes. inventory: read-only hooks by event and extension, packages, Tron modules and MCP server status for this chat's directory (credentials masked). history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card.",
                 "enum": [
                   "resolve",
                   "change",
                   "history",
-                  "undo"
+                  "undo",
+                  "inventory"
                 ],
                 "type": "string"
               },
@@ -1893,12 +1894,13 @@
             "additionalProperties": false,
             "properties": {
               "action": {
-                "description": "resolve: read current values and scopes. history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card.",
+                "description": "resolve: read current values and scopes. inventory: read-only hooks by event and extension, packages, Tron modules and MCP server status for this chat's directory (credentials masked). history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card.",
                 "enum": [
                   "resolve",
                   "change",
                   "history",
-                  "undo"
+                  "undo",
+                  "inventory"
                 ],
                 "type": "string"
               },

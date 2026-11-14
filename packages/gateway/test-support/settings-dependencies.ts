@@ -13,6 +13,17 @@ import type { RuntimeRegistry } from "../src/kernel/session/runtime-registry.js"
 import { HomeProfileItems } from "../src/modules/home/home-profile.js";
 import type { ProfileStore } from "../src/modules/home/profile-store.js";
 import { homeOwnerOf, projectsOwnerOf } from "./gateway-registry.js";
+import { HookResources } from "../src/admin/hook-resources.js";
+import { PackageService } from "../src/admin/package-service.js";
+import { McpAdminService } from "../src/admin/mcp-admin-service.js";
+import { SettingsInventoryReader } from "../src/admin/settings-inventory.js";
+import type { SettingsInventorySource } from "../src/kernel/settings/tool-contract.js";
+import type { ModuleHost } from "../src/kernel/host/module-host.js";
+import { piCliBundle } from "../src/kernel/pi/packages.js";
+
+export function settingsInventorySource(input: { agentDir: string; trust: TrustService; modules: ModuleHost; mcp: McpAdminService }): SettingsInventorySource {
+  return new SettingsInventoryReader(new HookResources(input.agentDir, input.trust), new PackageService(input.agentDir, input.trust, () => {}), input.mcp, input.trust, input.modules);
+}
 
 export function settingsDependencies(input: {
   agentDir: string;
@@ -22,7 +33,7 @@ export function settingsDependencies(input: {
   sessions?: { reloadProject(cwd: string, trusted: boolean, force: boolean): Promise<unknown>; commitProjectReload(cwd: string): Promise<unknown> | unknown; abortProjectReload(cwd: string): Promise<unknown> | unknown };
   home?: () => HomeOwner | undefined;
   knowledge?: () => ProfileStore | undefined;
-  registry?: { setSettings(model: SettingsModel, changes: SettingsChangePath): void };
+  registry?: { setSettings(model: SettingsModel, changes: SettingsChangePath, inventory: SettingsInventorySource): void; moduleHost: ModuleHost };
   now?: () => Date;
   toolCatalog?: ConstructorParameters<typeof SettingsStoreAdapter>[0]["toolCatalog"];
 }): { settingsModel: SettingsModel<SettingsStoreAdapter>; settingsChanges: SettingsChangePath } {
@@ -39,8 +50,10 @@ export function settingsDependencies(input: {
     },
     ...(input.knowledge ? { undoSubject: (entry, context) => new HomeProfileItems(() => input.knowledge?.()).undo(settingsChanges, entry, context) } : {}),
   }, input.now);
-  input.registry?.setSettings(settingsModel, settingsChanges);
-  if (input.registry) projectsOwnerOf(input.registry)?.register(settingsChanges);
+  if (input.registry) {
+    input.registry.setSettings(settingsModel, settingsChanges, settingsInventorySource({ agentDir: input.agentDir, trust: input.trust, modules: input.registry.moduleHost, mcp: new McpAdminService(input.agentDir, piCliBundle()) }));
+    projectsOwnerOf(input.registry)?.register(settingsChanges);
+  }
   return { settingsModel, settingsChanges };
 }
 

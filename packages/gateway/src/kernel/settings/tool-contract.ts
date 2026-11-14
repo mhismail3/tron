@@ -149,7 +149,23 @@ export interface SettingsHistoryQuery {
   limit?: number;
 }
 
+export interface SettingsInventory {
+  hooks: {
+    extensions: Array<{ name: string; scope: string; source: string; handlers: Array<{ event: string; count: number }> }>;
+    events: Array<{ event: string; count: number; extensions: string[] }>;
+    loadErrors: number;
+  };
+  packages: Array<{ source: string; scope: string; filtered: boolean; provides?: Record<string, string[]>; conflict?: string; nodeRequirement?: string }>;
+  modules: Array<{ name: string; purpose: string; tools: string[]; commands: string[] }>;
+  mcp: { servers: Array<{ name: string; scope: string; state: string; enabled: boolean; exposure: string; transport: string; tools: string[]; error?: string }>; errors: number };
+}
+
+export interface SettingsInventorySource {
+  read(cwd: string): Promise<SettingsInventory>;
+}
+
 export interface SettingsToolAccess {
+  inventory(): Promise<SettingsInventory>;
   history(input: SettingsHistoryQuery, toolCallId: string): Promise<{ entries: unknown[]; nextCursor?: string }>;
   undo(changeId: string, input: { reason: string; toolCallId: string; confirm?: ConfirmChange }): Promise<ChangeResult>;
   resolve(keys?: string[], taskId?: string): Promise<Resolution & { worker?: TaskWorkerSettingsView }>;

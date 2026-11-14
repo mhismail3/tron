@@ -1,8 +1,10 @@
+import { piCliBundle } from "../src/kernel/pi/packages.js";
+import { McpAdminService } from "../src/admin/mcp-admin-service.js";
 import { workspaceModule } from "../src/workspace/workspace-module.js";
 import { TEST_SETTINGS_SCHEMA } from "./settings-schema.js";
 import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "./gateway-registry.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { setHomeMemoryModels } from "./settings-dependencies.js";
+import { setHomeMemoryModels, settingsInventorySource } from "./settings-dependencies.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -191,7 +193,7 @@ export async function fixture(label: string): Promise<Fixture> {
     undoSubject: (entry, context) => new HomeProfileItems(() => knowledge).undo(settingsChanges, entry, context),
   });
   settings = { model: settingsModel, changes: settingsChanges };
-  registry.setSettings(settingsModel, settingsChanges);
+  registry.setSettings(settingsModel, settingsChanges, settingsInventorySource({ agentDir, trust, modules: registry.moduleHost, mcp: new McpAdminService(agentDir, piCliBundle()) }));
   const broadcasts: Array<{ topic: string; payload: unknown }> = [];
   const pushes: Array<{ title: string; message: string }> = [];
   const service = new GatewayService({ display: displayOwnerOf(registry),

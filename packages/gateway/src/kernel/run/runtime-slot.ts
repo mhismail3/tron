@@ -59,7 +59,7 @@ import { ORDINARY_SESSION_PROFILE, type SessionProfile } from "../host/session-p
 import { historyVisible, type ChangeContext, type SessionAppliers, type SettingsChangePath, type SettingsNotice } from "../settings/settings-change.js";
 import { setPath, type SessionSettingsSource, type SettingsModel } from "../settings/settings-model.js";
 import { SETTINGS_OUTCOME_MESSAGE, CONTEXT_DELIVERY_RECEIPT_TYPE } from "../receipts/delivery-tags.js";
-import { type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting, type LayerId } from "../settings/tool-contract.js";
+import { type SettingsSignal, type SettingsInventorySource, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting, type LayerId } from "../settings/tool-contract.js";
 import type { Actor } from "../settings/settings-record.js";
 import { piBuiltinExtensions } from "../host/pi-builtins.js";
 import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../host/extension-adapters.js";
@@ -225,7 +225,7 @@ export interface RuntimeSlotDependencies {
   exports: BlobStore;
   modules: ModuleHost;
   readonly settingsSchema: SettingsSchema;
-  settings: () => { model: SettingsModel; changes: SettingsChangePath } | undefined;
+  settings: () => { model: SettingsModel; changes: SettingsChangePath; inventory: SettingsInventorySource } | undefined;
   workspace: ResourceRoot;
   markers: RunMarkerStore;
   extensionActivityRecency: ExtensionActivityRecency;
@@ -672,6 +672,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       return { task, slot, target: { kind: "session" as const, sessionId: task.sessionId } };
     };
     return {
+      inventory: () => owners.inventory.read(this.cwd),
       history: (input, toolCallId) => owners.changes.history(input, actor(toolCallId)),
       undo: async (changeId, input) => {
         const toolActor = actor(input.toolCallId);

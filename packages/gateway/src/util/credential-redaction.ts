@@ -7,6 +7,12 @@ export function redactCredentials(value: string): string {
     .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/giu, "$1[REDACTED]");
 }
 
+export function redactCredentialUrls(value: string): string {
+  return value
+    .replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/?#@]*@/giu, "$1[REDACTED]@")
+    .replace(/\b([a-z][a-z0-9+.-]*:\/\/[^\s?#]*)\?[^\s#]*/giu, "$1?[REDACTED]");
+}
+
 export function redactCredentialField(key: string, value: unknown): unknown {
   const normalized = key.replace(/([a-z0-9])([A-Z])/gu, "$1_$2");
   if (/(?:^|[-_])(?:key|api[-_]?key|authorization|password|secret|credential|token|cookie|set[-_]cookie)$/iu.test(normalized)) return "[REDACTED]";
