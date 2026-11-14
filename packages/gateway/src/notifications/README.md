@@ -15,9 +15,7 @@ The push policy move runs at Gateway start, under the agent-runtime lock, before
 document and `state/settings/gateway.json` (mode 0600, fsynced) into `state/migrations/push-policy-v3`, commits
 a manifest last (temporary file, fsync, rename), then publishes settings before the document. A truncated,
 absent or invalid manifest is never trusted: its directory is kept as `push-policy-v3.incomplete-<stamp>` and the
-backup is taken again. Restore (`scripts/tron migrate push-policy --restore --tron-home <dir>`) takes the same
-agent-runtime lock as Gateway, refuses while it is held, validates the manifest against the two store paths and
-sha256 digests, and writes nothing unless every target matches its recorded before or after bytes. Store: `state/notifications.json`, one exact 1 MiB
+backup is taken again. Restore (`scripts/tron migrate push-policy --restore --tron-home <dir>`) is a rollback to a pre-v3 build: it takes the same agent-runtime lock as Gateway, refuses while it is held, validates the manifest against the two store paths and sha256 digests, and writes nothing unless every target matches its recorded before or after bytes. Starting this Gateway on a v2 store migrates it again, so restore only before running this build. An intact receipt whose recorded plan differs from this build's plan is a conflict: nothing is quarantined or re-backed-up, and the backup is left for the operator. Store: `state/notifications.json`, one exact 1 MiB
 owner-only document holding grants (at most 64 active devices), 256 pending intents,
 512 receipts, 192 revocation tombstones and the 512-row inbox. It never stores raw
 APNs tokens; secrets and message content stay out of RPC projections, logs and JSONL. The

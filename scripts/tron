@@ -43,9 +43,10 @@ Commands:
                                     operations, receipts and Raindrop collection mappings;
                                     dry run unless --apply; never at startup
   migrate push-policy --restore --tron-home <dir>
-                                    Operator restore of the push policy move (the Gateway runs
-                                    the move at its first start on a v2 store). Refuses while a
-                                    Gateway owns the agent directory; backup state/migrations/push-policy-v3
+                                    Rollback to a pre-v3 build: restores the two stores from
+                                    state/migrations/push-policy-v3. Refuses while a Gateway owns
+                                    the agent directory. Starting this Gateway on a v2 store
+                                    migrates it again, so restore only before running this build.
   diagnose [--since <1..9999><s|m|h|d>] [--out <path>]
                                     Write one read-only redacted diagnostic bundle
                                     to <path>, or to a new file in the system temp
