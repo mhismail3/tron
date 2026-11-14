@@ -22,6 +22,17 @@ scripts/tron verify ... --skip ios,mac,relay    # accept, explicitly, selections
 scripts/tron verify ... --gateway-host local    # override the test-host pool: run the Gateway Vitest lanes here
 ```
 
+## System-section consumers
+
+The workspace, resources, run and Pi SDK owners explicitly declare the nested delegation
+lock as verification. That lock observes both the runtime system-section preview and the
+persisted child replay: workspace core instructions, resource instruction assembly, runtime
+projection and the pinned SDK artifact can each change it without changing the lock file.
+These declarations keep that consumer in affected checks with its nested runner rather than
+deferring it to the full batch. Other unchanged serial tests remain batch-selected. The
+selection regression calls the shipped planner against the actual ownership graph and each
+producer path; it does not mirror the dependency list in a fixture graph.
+
 ## Worktree dependencies
 
 Worktree creation does not install dependencies. Before running any test step or a
