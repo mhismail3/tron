@@ -10,9 +10,14 @@ tool and explicit lifecycle result notifications.
 ## Owns
 
 `notification-service.ts` (`NotificationService`), `grant-store.ts`, `relay-client.ts`,
-`notify-module.ts` (optional-owner descriptor), `tron-notify-extension.ts` and `push-policy-migration.ts`
-(the start-time, backed-up move of the retired document policy into the Global keys; its backup and manifest are
-`state/migrations/push-policy-v3`). Store: `state/notifications.json`, one exact 1 MiB
+`notify-module.ts` (optional-owner descriptor), `tron-notify-extension.ts` and `push-policy-migration.ts`.
+The push policy move runs at Gateway start, under the agent-runtime lock, before the store opens: it copies the
+document and `state/settings/gateway.json` (mode 0600, fsynced) into `state/migrations/push-policy-v3`, commits
+a manifest last (temporary file, fsync, rename), then publishes settings before the document. A truncated,
+absent or invalid manifest is never trusted: its directory is kept as `push-policy-v3.incomplete-<stamp>` and the
+backup is taken again. Restore (`scripts/tron migrate push-policy --restore --tron-home <dir>`) takes the same
+agent-runtime lock as Gateway, refuses while it is held, validates the manifest against the two store paths and
+sha256 digests, and writes nothing unless every target matches its recorded before or after bytes. Store: `state/notifications.json`, one exact 1 MiB
 owner-only document holding grants (at most 64 active devices), 256 pending intents,
 512 receipts, 192 revocation tombstones and the 512-row inbox. It never stores raw
 APNs tokens; secrets and message content stay out of RPC projections, logs and JSONL. The
