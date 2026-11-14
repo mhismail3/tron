@@ -236,6 +236,9 @@ raise SystemExit(9 if 'fail' in sys.argv else 0)
         (self.local / 'scripts/tron-ios-test').chmod(0o755)
         shutil.copy2(ROOT / 'scripts/tron', self.local / 'scripts/tron')
         sha = self.commit('native result fixture')
+        repository = self.mini / 'tron-ci/tron.git'
+        foreign = self.git('rev-parse', 'HEAD^')
+        self.git('push', '--quiet', str(repository), f'{foreign}:refs/tron-jobs/incoming')
         for flag, expected in (('pass', 0), ('fail', 9), ('unsafe', NO_RESULT)):
             with self.subTest(outcome=flag):
                 result = subprocess.run([str(self.local / 'scripts/tron'), 'test', 'ios', 'run', flag, '--ios-host', 'mini'],
@@ -260,6 +263,8 @@ raise SystemExit(9 if 'fail' in sys.argv else 0)
                     self.assertIn('deliberate red', (artifacts / 'ios/test.log').read_text())
         with open(self.mini / 'tron-ci/jobs/gateway.lock') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        self.assertEqual(self.git('rev-parse', 'refs/tron-jobs/incoming', cwd=repository), foreign)
+        self.assertEqual(self.git('for-each-ref', '--format=%(refname)', 'refs/tron-jobs/submissions/', cwd=repository), '')
         self.assertEqual(list((self.mini / 'tron-ci/results').iterdir()), [])
 
     def test_whole_verifier_returns_its_report_logs_and_raw_75_without_another_lease(self) -> None:

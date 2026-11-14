@@ -197,7 +197,7 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
         return no_result(f'HEAD is {sha[:12]}, not the commit under verification {expected[:12]}')
     mapped, paths = outputs(args) if lane == 'gateway' else (args, [])
     nonce = uuid.uuid4().hex
-    incoming = f'refs/tron-jobs/incoming/{nonce}'
+    incoming = f'refs/tron-jobs/submissions/{nonce}'
     artifacts = ROOT / 'test-results/mini' / f'{sha[:12]}-{nonce}'
     archive = artifacts.with_suffix('.tar.gz')
     artifact_bytes, artifacts_received = 0, False
@@ -524,7 +524,7 @@ def remote_main(job: dict) -> int:
             finally:
                 shutil.rmtree(results, ignore_errors=True)
     finally:
-        run('git', '-C', str(repository), 'update-ref', '-d', f'refs/tron-jobs/incoming/{nonce}', sha)
+        run('git', '-C', str(repository), 'update-ref', '-d', f'refs/tron-jobs/submissions/{nonce}', sha)
 
 
 if __name__ == '__main__':
