@@ -159,7 +159,7 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   Server** first). Rebuild is user-initiated only: agents never press it or submit its RPC. Status
   polling is command-bound and stops at terminal state, reconnect or disappearance. Maintenance
   action containers inherit the sheet theme; Forget Server keeps semantic red. The selected
-  server shows its Gateway-declared Mac Terminal key using the standard renderer;
+  server's Mac Terminal service and key rows are not repeated here (the Mac Terminal sheet owns them);
   other servers require Use This Server before exposing this control-plane setting.
 - **Logs.** Gateway records are fetched only while Logs is presented, merged with the iOS client
   ring, refreshed every 15 s while visible, and exported through Export Diagnostics.

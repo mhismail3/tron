@@ -593,7 +593,8 @@ struct GatewayConnectionDetailView: View {
 
                 if currentProfile.id == model.profiles.selected?.id {
                     SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global",
-                        presentation: .section("connections"), embedded: true)
+                        presentation: .section("connections"), embedded: true,
+                        selection: .allExcept(["permissions.macTerminalServer", "permissions.macTerminalKey"]))
                 }
                 GatewayMaintenanceActions(
                     lifecycle: lifecycleActions,

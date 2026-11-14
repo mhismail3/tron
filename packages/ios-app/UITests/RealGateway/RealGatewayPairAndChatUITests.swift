@@ -1051,11 +1051,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                 XCTAssertTrue(server.waitForExistence(timeout: 30), app.debugDescription)
                 server.tap()
                 let service = app.descendants(matching: .any)[settingRowToken("permissions.macTerminalServer")]
-                revealBelowNavigationBar(app, service)
-                XCTAssertTrue(service.waitForExistence(timeout: 30), "This Mac's page must show the SSH service row: \(app.debugDescription)")
-                XCTAssertTrue(service.staticTexts["Private Mac SSH service"].exists, app.debugDescription)
-                XCTAssertEqual(service.switches.firstMatch.value as? String, "0", "The fixture's private SSH service starts stopped")
-                keepScreenshot(app, name: "2208-mac-terminal-service-row")
+                XCTAssertFalse(service.waitForExistence(timeout: 3), "The Mac Terminal service belongs to the Mac Terminal sheet, not this page: \(app.debugDescription)")
                 dismissTopSheet(app)
             }
             keepScreenshot(app, name: "939-\(name)")
@@ -1415,7 +1411,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         for key in schema.keys where !groups.contains(key.group) { groups.append(key.group) }
         let customOwners = name == "settings" ? ["permissions.defaultProjectTrust": "Trusted Projects (#1517)",
             "sources.packages": "Extensions' Installed list (#1482)", "sources.npmCommand": "Extensions' npm command card (#1482)",
-            "permissions.macTerminalServer": "this Mac's Connections page (testSettingsSourcesTextDoneAndRoutes)"] : [:]
+            "permissions.macTerminalServer": "Mac Terminal sheet (TronMacTerminalUITests)",
+            "permissions.macTerminalKey": "Mac Terminal sheet (TronMacTerminalUITests)"] : [:]
         for group in groups {
             let rendered = schema.keys.filter { $0.group == group && !$0.layers.isDisjoint(with: layers) && customOwners[$0.id] == nil }
             let detail = openSettingsSectionIfServed(app, group, linkLabel: sectionDestinations[group],
