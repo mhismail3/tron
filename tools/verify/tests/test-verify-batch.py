@@ -23,6 +23,9 @@ def shipped_runner(root, lock):
     defaults = root / 'fixture-node'
     defaults.write_text('#!/bin/sh\nprintf \'["default"]\\n\'\n')
     defaults.chmod(0o755)
+    vitest = root / 'packages/gateway/node_modules/vitest'
+    vitest.parent.mkdir(parents=True)
+    vitest.symlink_to(ROOT / 'packages/gateway/node_modules/vitest', target_is_directory=True)
     for name in ('gateway.py', 'vitest_configs.py', 'ledger.py', 'ledger-host.mjs', 'ledger-vitest.mjs'):
         (root / 'tools/verify' / name).write_text((ROOT / 'tools/verify' / name).read_text())
     source = (ROOT / 'tools/verify/host_lock.py').read_text()
