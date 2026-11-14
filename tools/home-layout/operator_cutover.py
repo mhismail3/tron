@@ -14,6 +14,9 @@ REVISION = ""
 REVIEWED_TREE = ""
 
 
+RUNNING_APP_BLOCKERS = {'gateway_running', 'terminal_runtime_lock_present', 'mac_wrapper_running', 'home_process_present'}
+
+
 def require(value, message):
     if not value:
         raise RuntimeError(message)
@@ -72,6 +75,44 @@ def migrate(build, action, operation, log, home):
     return json.loads(output.read_text())
 
 
+def processes():
+    rows = []
+    for line in subprocess.run(['/bin/ps', '-axo', 'pid=,ppid=,command='], capture_output=True, text=True, check=True, timeout=15).stdout.splitlines():
+        pid, parent, *text = line.split(None, 2)
+        rows.append((int(pid), int(parent), text[0] if text else ''))
+    return rows
+
+
+def preflight(platform):
+    main_sha = subprocess.check_output(['git', '-C', str(SOURCE), 'ls-remote', 'origin', 'refs/heads/main'], text=True).split()[0]
+    require(main_sha == REVISION, 'main advanced; this exact reviewed cutover needs revalidation')
+    require(not platform.build_root(REVISION).exists(), 'build worktree already exists; inspect rather than reuse unknown work')
+    require(not (platform.maintenance / 'active.json').exists(), 'another reinstall owns maintenance')
+    require(not (platform.store / 'active.json').exists(), 'another replacement owns maintenance')
+    offline = reinstall.MacPlatform(platform.home)
+    offline.isolated()
+    owners = stopped.process_owners(str(platform.tron_home))
+    found = {pid for pid, _ in offline.writers()}
+    rows = processes()
+    children = {}
+    for pid, parent, _ in rows:
+        children.setdefault(parent, []).append(pid)
+    app = platform.app_identity()
+    cohort = [pid for pid in (app and app['pid'], platform.gateway_pid(), platform.launchd_pid(platform.helper_label)) if pid]
+    for pid in cohort:
+        cohort.extend(children.get(pid, []))
+    root = platform.tron_home / 'mac-terminal'
+    listener = terminal.job(layout, root, Path.home() / 'Library/LaunchAgents' / (terminal.label(root) + '.plist'))
+    retiring = set(cohort) | {os.getpid()} | ({listener['pid']} if listener and listener['pid'] else set())
+    writers = [f'{pid} {text[:160]}' for pid, _, text in rows if pid in found and pid not in retiring]
+    require(not writers, 'settle these writers through their owners before cutover: ' + '; '.join(writers))
+    holders = [f'{pid} {text[:160]}' for pid, _, text in rows if pid in owners and pid not in retiring]
+    require(not holders, f'settle these {platform.tron_home} holders through their owners before cutover: ' + '; '.join(holders))
+    _, status = layout.migrate(str(platform.tron_home), True)
+    require(status['state'] == 'not_started' and not status['errors'] and set(status['blockers']) <= RUNNING_APP_BLOCKERS,
+            'migration status refuses: ' + json.dumps({key: status[key] for key in ('state', 'errors', 'blockers')}))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['apply', 'rollback'])
@@ -81,10 +122,12 @@ def main():
     tree = subprocess.check_output(['git', '-C', str(SOURCE), 'rev-parse', REVISION + '^{tree}'], text=True).strip()
     dirty = subprocess.check_output(['git', '-C', str(SOURCE), 'status', '--porcelain', '--untracked-files=no'], text=True)
     require(head == REVISION and tree == REVIEWED_TREE and not dirty, 'landed main checkout is not the exact clean reviewed tree')
-    global layout, terminal
+    global layout, terminal, stopped, reinstall
     sys.path[:0] = [str(SOURCE / 'scripts'), str(SOURCE / 'tools/home-layout')]
     import home_layout as layout
+    import stopped_home as stopped
     import terminal_layout as terminal
+    import tron_mac_reinstall as reinstall
     from tron_mac_reinstall import exclusive, private_dir, read_json
     from tron_mac_replace_platform import MacPlatform
     platform = MacPlatform()
@@ -96,6 +139,7 @@ def main():
     receipt_path = operation / 'receipt.json'
     if args.action == 'apply':
         require(shutil.disk_usage(platform.home).free >= 450_000_000_000, 'less than the conservative450GB free-space budget')
+        preflight(platform)
         operation.mkdir(mode=0o700)
         receipt = {'revision': REVISION, 'phase': 'building', 'started': time.time()}
         save(receipt_path, receipt)
@@ -107,9 +151,6 @@ def main():
     log_path.touch(mode=0o600, exist_ok=False)
     with log_path.open('a') as log:
         if args.action == 'apply':
-            main_sha = subprocess.check_output(['git', '-C', str(SOURCE), 'ls-remote', 'origin', 'refs/heads/main'], text=True).split()[0]
-            require(main_sha == REVISION, 'main advanced; this exact reviewed cutover needs revalidation')
-            require(not platform.build_root(REVISION).exists(), 'build worktree already exists; inspect rather than reuse unknown work')
             candidate = platform.build(SOURCE, REVISION, platform_log(log))
             platform.verify_artifact(candidate, REVISION, platform_log(log))
             build = platform.build_root(REVISION)
