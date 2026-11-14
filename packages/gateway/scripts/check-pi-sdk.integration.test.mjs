@@ -9,6 +9,70 @@ import { WAIT_HANG_BOUND_MS } from "../test-support/wait-for.ts";
 import { PATCH_PIN_FILE } from "./check-pi-sdk.mjs";
 import { runUpdate } from "./update-pi-sdk.mjs";
 
+test("local read cancellation propagates and closes the handle before and during streaming", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tron-pi-read-abort-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const path = join(root, "read.txt");
+  writeFileSync(path, "line\n".repeat(200_000));
+  const readTool = new URL("../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/read.js", import.meta.url).href;
+  const probe = join(root, "read-abort.mjs");
+  writeFileSync(probe, `import assert from "node:assert/strict";
+import { open } from "node:fs/promises";
+import { TextDecoder } from "node:util";
+import { setImmediate } from "node:timers/promises";
+import { createReadToolDefinition } from ${JSON.stringify(readTool)};
+const [path, phase] = process.argv.slice(2);
+const controller = new AbortController();
+const sample = await open(path, "r");
+const prototype = Object.getPrototypeOf(sample);
+await sample.close();
+const stat = prototype.stat;
+const close = prototype.close;
+const createReadStream = prototype.createReadStream;
+const decode = TextDecoder.prototype.decode;
+let handle;
+let streams = 0;
+let chunks = 0;
+let closed;
+const cleanup = new Promise(resolve => { closed = resolve; });
+prototype.stat = async function(...args) {
+  const result = await stat.apply(this, args);
+  handle = this;
+  if (phase === "stat") controller.abort();
+  return result;
+};
+prototype.close = async function(...args) {
+  const result = await close.apply(this, args);
+  if (this === handle) closed();
+  return result;
+};
+prototype.createReadStream = function(...args) {
+  streams++;
+  return createReadStream.apply(this, args);
+};
+TextDecoder.prototype.decode = function(...args) {
+  const result = decode.apply(this, args);
+  if (phase === "stream" && ++chunks === 1) controller.abort();
+  return result;
+};
+await assert.rejects(createReadToolDefinition(process.cwd()).execute("read", { path }, controller.signal), /Operation aborted/);
+await cleanup;
+await setImmediate();
+assert.equal(handle.fd, -1);
+assert.equal(streams, phase === "stat" ? 0 : 1);
+assert.equal(chunks, phase === "stat" ? 0 : 1);
+console.log("READ_ABORT_PROBE " + JSON.stringify({ phase, fd: handle.fd, streams, chunks }));
+`);
+  for (const phase of ["stat", "stream"]) {
+    const child = spawnSync(process.execPath, [probe, path, phase], {
+      encoding: "utf8", timeout: WAIT_HANG_BOUND_MS, cwd: root,
+      env: { PATH: process.env.PATH, HOME: root, TMPDIR: root, PI_CODING_AGENT_DIR: join(root, "agent") },
+    });
+    assert.equal(child.status, 0, `${phase}: ${child.error ?? ""}\n${child.stdout}${child.stderr}`);
+    assert.match(child.stdout, new RegExp(`READ_ABORT_PROBE \\{"phase":"${phase}","fd":-1,"streams":${phase === "stat" ? 0 : 1},"chunks":${phase === "stat" ? 0 : 1}\\}`, "u"));
+  }
+});
+
 const gatewayDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const checker = join(gatewayDir, "scripts", "check-pi-sdk.mjs");
 
