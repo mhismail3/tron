@@ -211,9 +211,11 @@ changes keep its store, cursors and spend.
 
 ### Tools and profile
 
-- **Research tools** (read-only): the shared `web_search` search/read/content contract
+- **Research tools** (read-only, except `session_import` below): the shared `web_search` search/read/content contract
   (`workspace/web-research-module.ts`), `session_search`,
   `session_read` (never Home chapters) and bounded explicit `profile` reads.
+  `session_import` is the one write: it creates one new session from a named `.jsonl` file
+  through the registry's import owner, in the explicit `cwd` Home must pass.
   Web schema, backend and quota owner are identical to ordinary workers and native
   research children. Results are capped untrusted data; delegation is not gated on them.
 - **Shared tools:** Pi owns `read`, `write`, `edit`, `bash`, `grep`, `find` and `ls`,

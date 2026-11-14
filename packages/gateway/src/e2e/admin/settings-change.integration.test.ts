@@ -464,10 +464,14 @@ describe("settings.change", () => {
   caseIt("refuses unauthorized bundles before review and discloses no credentials in a native preview", async owner => {
     const f = await fixture(owner);
     const actor = { actor: { kind: "home" as const, id: "home-fixture" }, reason: "Change the declared setting" };
+    const agentCwd = join(f.root, "bundle-chat");
+    await mkdir(agentCwd);
+    const agentChat = await f.registry.create(agentCwd);
     await expect(f.settingsChanges.change({ kind: "global" }, [
       { key: "run.retry.maxRetries", layer: "global", op: "set", value: 8 },
       { key: "permissions.defaultProjectTrust", layer: "global", op: "set", value: "always" },
-    ], actor)).rejects.toMatchObject({ code: "invalid_request", message: "Default trust policy cannot be changed by home" });
+    ], { actor: { kind: "agent", id: agentChat.id, sessionId: agentChat.id }, reason: "Ordinary chat bundles trust with a retry" }))
+      .rejects.toMatchObject({ code: "invalid_request", message: "Default trust policy cannot be changed by agent" });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
     expect(await f.history()).toEqual([]);
     const preview = await f.settingsChanges.change({ kind: "global" }, [
@@ -506,6 +510,22 @@ describe("settings.change", () => {
     expect(inventory.packages).toContainEqual(expect.objectContaining({ source: pkg, scope: "user" }));
     expect(inventory.mcp.servers.map(server => server.name)).toContain("inventory-http");
     expect(JSON.stringify(inventory)).not.toMatch(/inventory-secret|inventory-query-secret/);
+    const projectCwd = join(f.root, "inventory-project");
+    await mkdir(join(projectCwd, ".pi", "extensions"), { recursive: true });
+    await writeFile(join(projectCwd, ".pi", "extensions", "project-gate.ts"), "export default function (pi) { pi.on(\"tool_call\", () => {}); }\n");
+    await expect(f.registry.create(projectCwd)).rejects.toMatchObject({ code: "trust_required" });
+    await f.trust.set(projectCwd, true);
+    const projectChat = await f.registry.create(projectCwd);
+    await projectChat.setModel(model.provider, model.id);
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("settings", { action: "inventory" }, { id: "inventory-trusted-project" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage("Done"),
+    ]);
+    await projectChat.prompt("Read the settings inventory");
+    await waitFor(() => !projectChat.isBusy && !projectChat.hasActiveAgentRun || undefined, "project inventory turn settled");
+    const projectResult = projectChat.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === "inventory-trusted-project");
+    if (projectResult?.type !== "message" || projectResult.message.role !== "toolResult") throw new Error("No canonical settings tool result");
+    expect((projectResult.message.details as SettingsInventory).hooks.extensions.map(extension => extension.name)).toContain("project-gate.ts");
   });
 
   caseIt("an agent pages only its own settings history, never another chat's or the maintainer's rows", async owner => {

@@ -1,0 +1,11 @@
+{
+  "layer": "L3",
+  "owns": [
+    "**"
+  ],
+  "dependsOn": [
+    "gateway/host",
+    "gateway/pi",
+    "gateway/run"
+  ]
+}

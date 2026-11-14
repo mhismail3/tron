@@ -67,7 +67,6 @@
     "state/uploads": {"owner": "gateway/machine", "subtree": true, "prune": {"maxEntries": 16384}},
     "state/upload-objects": {"owner": "gateway/machine", "subtree": true, "prune": {"when": "unreferenced objects are collected"}},
     "state/upload-bodies": {"owner": "gateway/machine", "class": "scratch", "subtree": true, "prune": {"when": "cleared on Gateway start"}},
-    "state/upload-imports": {"owner": "gateway/machine", "class": "scratch", "subtree": true, "prune": {"when": "temporary files removed"}},
     "state/display-artifacts": {"owner": "gateway/display", "subtree": true, "prune": {"when": "removed per artifact; orphan objects are collected"}},
     "state/web-research-children": {"owner": "gateway/workspace", "class": "scratch", "subtree": true, "prune": {"maxEntries": 4096, "when": "retired with their scope"}},
     "state/workspace-state": {"owner": "gateway/workspace", "subtree": true},

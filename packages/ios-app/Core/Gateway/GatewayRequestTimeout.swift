@@ -2,7 +2,6 @@ import Foundation
 
 package enum GatewayRequestTimeout {
     package static let sessionExport: Duration = .seconds(1_800)
-    package static let sessionImport: Duration = .seconds(120)
     package static let sessionContext: Duration = .seconds(60)
     package static let sessionResources: Duration = .seconds(60)
     package static let sessionCreate: Duration = .seconds(60)
