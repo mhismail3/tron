@@ -774,10 +774,12 @@ describe("outside changes", () => {
   caseIt("an observed state persisted before a key was retired records no outside entry or mark for it", async owner => {
     const f = await fixture(owner);
     const retired = (key: string) => instanceId(key, {});
+    const baseline = (await f.macDocument()).retry as { maxRetries: number };
     await mkdir(dirname(f.outside.path), { recursive: true });
     await writeFile(f.outside.path, JSON.stringify({ version: 1, stores: { global: {
       digest: "stale",
       values: {
+        [instanceId("run.retry.maxRetries", {})]: { key: "run.retry.maxRetries", value: baseline.maxRetries },
         [retired("run.httpProxy")]: { key: "run.httpProxy", hash: "a".repeat(64) },
         [retired("setup.sessionDir")]: { key: "setup.sessionDir", value: "/elsewhere" },
       },
