@@ -314,7 +314,7 @@ describe("device log append RPC boundary", () => {
     expect(files.every((file) => Buffer.byteLength(file.text) <= 5 * 1024 * 1024)).toBe(true);
     const newest = files.flatMap((file) => sequencesOf(file.text)).reduce((max, value) => Math.max(max, value), 0);
     expect(newest).toBe(next - 1);
-  }, 60_000);
+  });
 
   it("refuses a local wrapper and keeps each paired device in its own file", async () => {
     const fixtureValue = await fixture();
