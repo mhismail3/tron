@@ -464,7 +464,7 @@ export class SettingsChangePath {
     if (failure) {
       const unrestored = new Map<string, string>();
       for (const done of [...applied].reverse()) {
-        await this.model.owner.applyStore(target, stores, done.plan, done.plan.before, context, this.writers, done.plan.after).catch((error: unknown) => {
+        await this.model.owner.applyStore(target, stores, done.plan, done.plan.before, context, this.writers, done.plan.before).catch((error: unknown) => {
           unrestored.set(done.plan.changeId, `Not rolled back: the ${done.plan.binding.store} store refused its compensating write (${error instanceof Error ? error.message : String(error)}); it may still hold the new value`);
         });
       }
