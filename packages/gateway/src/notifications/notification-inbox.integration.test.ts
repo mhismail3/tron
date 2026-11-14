@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { NotificationGrantStore, notificationHash, type NotificationInboxEntry } from "./grant-store.js";
 import { NotificationService, type NotificationInboxChanged, type NotificationInboxItem } from "./notification-service.js";
-import type { PushRelayClient } from "./relay-client.js";
+import { PushRelayClient } from "./relay-client.js";
 import { GatewayService, type ClientContext } from "../transport/gateway-service.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
@@ -70,6 +70,7 @@ async function fixture() {
   const notifications = new NotificationService(
     store,
     { available: false, relayOrigin: "https://push.example.test" } as PushRelayClient,
+    async () => ({ inputNeeded: true, finished: true, waiting: true }),
     Date.now,
     (payload) => broadcasts.push(payload),
   );
@@ -169,5 +170,34 @@ describe("notification inbox RPCs over a real credential document", () => {
       bytes: bytes.byteLength,
       rows: INBOX_ROWS,
     });
+  });
+});
+
+describe("push alert policy is read from the Global keys", () => {
+  it("sends no push for a kind whose key is off and one push for a kind whose key is on", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-notification-policy-"));
+    roots.push(root);
+    const relayOrigin = "https://relay.policy.invalid";
+    const envelopes: Array<Record<string, unknown>> = [];
+    const relay = new PushRelayClient(relayOrigin, async (_url, init) => {
+      envelopes.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      return new Response(JSON.stringify({ status: "accepted_by_apns" }), { status: 200 }) as never;
+    });
+    const store = new NotificationGrantStore(root);
+    await store.initialize();
+    const policy = { inputNeeded: false, finished: true, waiting: true };
+    const notifications = new NotificationService(store, relay, async () => ({ ...policy }));
+    await notifications.initialize();
+    await notifications.upsertGrant({
+      deviceId: "device_abcdefgh", installationId: "install_abcdefgh", grantId: "grant_abcdefgh",
+      secret: Buffer.alloc(32, 7).toString("base64url"), previewsEnabled: false, relayOrigin,
+    });
+    expect(await notifications.enqueue({ sessionId: "session-policy", sourceId: "ask-off", kind: "ask", message: "Input needed" })).toBe("suppressed");
+    expect(envelopes).toHaveLength(0);
+    policy.inputNeeded = true;
+    expect(await notifications.enqueue({ sessionId: "session-policy", sourceId: "ask-on", kind: "ask", message: "Input needed" })).toBe("queued");
+    await waitFor(() => envelopes.length === 1, "the push for the kind whose key is on");
+    expect(envelopes).toHaveLength(1);
+    record("push policy keys gate admission", { suppressedWhileOff: true, pushedWhileOn: envelopes.length });
   });
 });

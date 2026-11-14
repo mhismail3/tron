@@ -24,8 +24,8 @@ APNs tokens; secrets and message content stay out of RPC projections, logs and J
   `queued`, `suppressed`, `rate_limited` or `unavailable`; APNs acceptance is never
   called delivery. Capacity refusals create no intent or inbox row. Failure is
   diagnostic only and never fails canonical settlement.
-- **Automatic kinds** (all on by default, per-kind policy round-trips through
-  registration): `ask` (Time Sensitive, input needed), `agent_finished` (a neutral
+- **Automatic kinds** (per-kind switches are the Global keys `notifications.push.inputNeeded`,
+  `.finished` and `.waiting`, default on, read live through `resolveNotificationPolicy`): `ask` (Time Sensitive, input needed), `agent_finished` (a neutral
   terminal category, sent only when no session-owned subagent or workflow is still
   live) and `waiting` (once per unchanged set of live background identities).
 - **Terminal alerts** fire only at Pi's final `agent_settled` at idle, never for
@@ -41,7 +41,7 @@ APNs tokens; secrets and message content stay out of RPC projections, logs and J
 - **Input required.** Every admitted semantic interaction (`select`, `confirm`, `input`,
   `editor`, form, including the `pi-ask-user` adapter's) emits one alert from
   `SemanticUIBroker` while pending, keyed by the interaction ID; it never delays the
-  interaction. `notifyWhenAskPresented` keeps its wire name but governs all of them.
+  interaction. `notifications.push.inputNeeded` governs all of them.
 - **Presence.** A mobile subscription or local connection may publish
   `session.presentation.set` after sync: token-bound, revisioned, one per connection,
   visible leases expiring after 45 s. Visible at observation (latched before receipt
@@ -66,7 +66,7 @@ APNs tokens; secrets and message content stay out of RPC projections, logs and J
   the existing service for these two kernel calls; it adds no persistence or retry owner.
 - **Registration.** `push.registration.upsert|remove`. Upsert derives `deviceId`
   from the connection and takes an installation ID, endpoint-scoped grant ID/secret,
-  the issuing relay origin and preview/policy booleans (preview defaults off); an
+  the issuing relay origin and the preview boolean (preview defaults off); an
   identical registration writes nothing. `hello`/`system.info` carry
   `pushRegistrationRevision` so a phone re-registers after rotation. A grant from
   another origin or rejected by the relay is rotated by iOS through App Attest, never

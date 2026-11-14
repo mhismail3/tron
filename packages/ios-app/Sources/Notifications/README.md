@@ -32,9 +32,9 @@ notification inbox.
 - **Alerts.** No badge, background fetch or notification approval actions. Exact changes
   are reviewed in the shared in-chat native card. The bundled `tron-notification.caf` sound; ask pushes are Time
   Sensitive (entitlement in every build configuration). A foreground synchronized chat's
-  presentation lease suppresses its own agent-terminal alert at the Gateway. Push Notifications
-  settings toggle Input needed, Finished and Waiting through `push.registration.upsert`, rolling
-  back on failure.
+  presentation lease suppresses its own agent-terminal alert at the Gateway. Which alert kinds
+  send is the Global settings `notifications.push.inputNeeded|finished|waiting`; registration
+  carries no policy, and the iPhone shows no toggles.
 - **Icon.** iOS owns the small app icon in system notifications; there is no per-notification
   theme color or icon override in Tron's payload. Theme selection uses bundled alternate app
   icons through UIKit, not a notification extension or communication-avatar workaround. Apple

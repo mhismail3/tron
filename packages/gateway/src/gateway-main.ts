@@ -51,7 +51,7 @@ import { createProviderModelRuntime } from "./providers/provider-runtime.js";
 import { OpenAIModelEligibility } from "./providers/openai-model-eligibility.js";
 import { NotificationGrantStore } from "./notifications/grant-store.js";
 import { PushRelayClient } from "./notifications/relay-client.js";
-import { NotificationService } from "./notifications/notification-service.js";
+import { NotificationService, resolveNotificationPolicy } from "./notifications/notification-service.js";
 import { handledSignalExitCode, SUPERVISOR_RELAUNCH_EXIT_CODE } from "./lifecycle/supervisor-exit-policy.js";
 import { shutdownStep } from "./lifecycle/shutdown-step.js";
 import { exitAfterShutdown } from "./lifecycle/exit-after-shutdown.js";
@@ -140,6 +140,7 @@ startupCheckpoint("devices");
 const notifications: NotificationService = new NotificationService(
   new NotificationGrantStore(config.tronHome),
   new PushRelayClient(config.pushServiceOrigin),
+  () => resolveNotificationPolicy(keys => settingsModel.resolve({ kind: "global" }, undefined, keys).then(resolution => resolution.keys)),
   Date.now,
   (payload) => transport?.broadcast("notification.inbox.changed", payload),
   () => logger.log("warning", "Session notification read state could not be persisted; unread state is retained.", {

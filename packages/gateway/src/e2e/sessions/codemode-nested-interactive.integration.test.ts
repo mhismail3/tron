@@ -60,9 +60,9 @@ describe("codemode nested interactive tools", () => {
       },
       async revoke() { return "revoked" as const; },
     } as unknown as PushRelayClient;
-    const notificationService = new NotificationService(notificationStore, relay);
+    const notificationService = new NotificationService(notificationStore, relay, async () => ({ inputNeeded: false, finished: false, waiting: false }));
     await notificationService.upsertGrant({
-      ...grant, notifyWhenAskPresented: false, notifyWhenFinished: false, notifyWhenWaiting: false,
+      ...grant,
     });
     const notificationAdmissions: Array<{ kind: string; status: string; sessionId: string }> = [];
     const enqueue = notificationService.enqueue.bind(notificationService);

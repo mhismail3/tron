@@ -5,20 +5,6 @@ struct PushNotificationsSettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(PushNotificationCoordinator.self) private var pushNotifications
 
-    private func notificationPolicyBinding(_ keyPath: WritableKeyPath<PushNotificationPolicy, Bool>) -> Binding<Bool> {
-        Binding(
-            get: { pushNotifications.notificationPolicy[keyPath: keyPath] },
-            set: { value in
-                var next = pushNotifications.notificationPolicy
-                next[keyPath: keyPath] = value
-                Task { @MainActor in
-                    do { try await pushNotifications.updateNotificationPolicy(next) }
-                    catch { model.presentError(error) }
-                }
-            }
-        )
-    }
-
     private var pushStatus: (icon: String, title: String, detail: String) {
         switch model.pushNotificationReadiness {
         case .ready:
@@ -37,8 +23,6 @@ struct PushNotificationsSettingsView: View {
     }
 
     var body: some View {
-        let policyEditable = model.connectionState == .connected && pushNotifications.readiness == .ready
-            && !pushNotifications.isUpdatingNotificationPolicy
         ScrollView(.vertical, showsIndicators: true) {
             TronSettingsSections(alignment: .leading, spacing: 18, hidesLoneHeading: true) {
                 TronSettingsGroup("Push Notifications", detail: "Private agent alerts for this iPhone.") {
@@ -61,25 +45,6 @@ struct PushNotificationsSettingsView: View {
                 }
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("push-registration-summary")
-
-                TronGlassCard {
-                    VStack(spacing: 0) {
-                        TronToggleRow(icon: "questionmark.bubble.fill", title: "Input needed",
-                                      detail: "Time Sensitive alerts when Tron needs a response",
-                                      isEnabled: policyEditable, isOn: notificationPolicyBinding(\.inputNeeded))
-                        TronSettingsDivider()
-                        TronToggleRow(icon: "stop.circle.fill", title: "Finished",
-                                      detail: "Alert when the session has no pending background work",
-                                      isEnabled: policyEditable, isOn: notificationPolicyBinding(\.finished))
-                        TronSettingsDivider()
-                        TronToggleRow(icon: "hourglass", title: "Waiting on background work",
-                                      detail: "Alert once while delegated work is still running",
-                                      isEnabled: policyEditable, isOn: notificationPolicyBinding(\.waiting))
-
-                    }
-                }
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("push-alert-policy")
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 18)

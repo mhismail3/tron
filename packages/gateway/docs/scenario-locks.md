@@ -193,7 +193,7 @@ Knowledge lock.
 | `state/command-receipts/` | `CommandReceiptStore` | `gateway/transport` store-command-receipts |
 | `state/session-archive.json`, `state/session-attention.json` | archive and attention stores | `gateway/session-catalog` |
 | `state/runtime-markers/` | `RunMarkerStore` | `gateway/run` store-run-markers |
-| `state/notifications.json` (grants, inbox, policy) | `NotificationGrantStore` | `gateway/notifications` |
+| `state/notifications.json` (grants, inbox) | `NotificationGrantStore` | `gateway/notifications` |
 | `state/model-recents.json` | `RecentModelStore` | `gateway/providers` |
 | `state/automations/` | `AutomationStore` | `gateway/automations` |
 | `state/uploads/`, `state/upload-objects/`, `state/upload-bodies/` | `UploadStore` | `gateway/machine` (live) |

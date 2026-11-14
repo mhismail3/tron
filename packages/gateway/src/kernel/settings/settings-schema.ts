@@ -460,6 +460,21 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       entry: { hint: "One word per value: the program first (npm, pnpm or bun), then any arguments.", example: "pnpm" },
     },
     {
+      tap: "privacy", id: "notifications.push.inputNeeded", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "notifications", type: types.boolean(),
+      layers: { global: { store: "gateway", path: ["notifications", "push", "inputNeeded"] } }, defaultValue: true, timing: "live", effect: "next-request", direction: grants,
+      writers: ANY_ACTOR, label: "Input needed", help: "Send a push when Tron needs an answer or approval.", order: 10, importance: "essential",
+    },
+    {
+      tap: "privacy", id: "notifications.push.finished", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "notifications", type: types.boolean(),
+      layers: { global: { store: "gateway", path: ["notifications", "push", "finished"] } }, defaultValue: true, timing: "live", effect: "next-request", direction: grants,
+      writers: ANY_ACTOR, label: "Finished", help: "Send a push when a chat finishes its work.", order: 20, importance: "essential",
+    },
+    {
+      tap: "privacy", id: "notifications.push.waiting", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "notifications", type: types.boolean(),
+      layers: { global: { store: "gateway", path: ["notifications", "push", "waiting"] } }, defaultValue: true, timing: "live", effect: "next-request", direction: grants,
+      writers: ANY_ACTOR, label: "Waiting", help: "Send a push when work is waiting on background tasks.", order: 30, importance: "essential",
+    },
+    {
       id: "setup.sessionDir", sessionOverridable: false, projectSettable: false, group: "setup", type: types.text(4_096), layers: { global: pi("sessionDir") }, timing: "live", effect: "restart",
       writers: [], label: "Session folder", help: "Where chats are stored. Applies after a restart.",
       order: 10, importance: "advanced", control: "text",

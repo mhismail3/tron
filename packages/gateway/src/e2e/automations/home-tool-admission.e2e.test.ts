@@ -31,7 +31,7 @@ const options = { automations: true, home: { memorySummarizer: () => async () =>
   notifications: async (root: string) => {
     const owner = new NotificationService(new NotificationGrantStore(root), new PushRelayClient("https://relay.lock.invalid", async () => {
       throw new Error("Tool admission must not send a push");
-    }), Date.now, () => {}, () => {}, () => {});
+    }), async () => ({ inputNeeded: true, finished: true, waiting: true }), Date.now, () => {}, () => {}, () => {});
     notifications.push(owner);
     await owner.initialize();
     return owner;

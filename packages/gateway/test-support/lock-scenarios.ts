@@ -362,7 +362,7 @@ export async function notificationsPushScenario(own: (release: () => Promise<voi
         });
         return new Response(JSON.stringify({ status: "accepted_by_apns" }), { status: 200 }) as never;
       });
-      notifications = new NotificationService(new NotificationGrantStore(tronHome), relay, Date.now, () => {}, () => {}, () => {},
+      notifications = new NotificationService(new NotificationGrantStore(tronHome), relay, async () => ({ inputNeeded: true, finished: true, waiting: true }), Date.now, () => {}, () => {}, () => {},
         (sessionId) => (gateway ? homeOwnerOf(gateway.registry) : undefined)?.chapterStateFor(sessionId).homeId !== undefined);
       await notifications.initialize();
       return notifications;
@@ -380,8 +380,7 @@ export async function notificationsPushScenario(own: (release: () => Promise<voi
   const responses: Record<string, { ok: boolean; result?: unknown; error?: unknown }> = {};
   const registered = await phone.request("push.registration.upsert", {
     commandId: gateway.commandId(), installationId: "lock-installation", grantId: "lock-grant-0001",
-    secret: Buffer.alloc(32, 7).toString("base64url"), previewsEnabled: false, relayOrigin: PUSH_RELAY_ORIGIN,
-    notifyWhenAskPresented: true, notifyWhenFinished: true, notifyWhenWaiting: true,
+    secret: Buffer.alloc(32, 7).toString("base64url"), previewsEnabled: false, relayOrigin: PUSH_RELAY_ORIGIN
   });
   responses.registered = registered;
 

@@ -114,7 +114,7 @@ describe("gateway/home scenario lock", () => {
           relayRequests.push({ method: String(init.method), path: new URL(url).pathname, envelope: init.body ? JSON.parse(String(init.body)) : null });
           return new Response(JSON.stringify({ status: "accepted_by_apns" }), { status: 200 }) as never;
         });
-        notifications = new NotificationService(new NotificationGrantStore(tronHome), relay, Date.now, () => {}, () => {}, () => {},
+        notifications = new NotificationService(new NotificationGrantStore(tronHome), relay, async () => ({ inputNeeded: true, finished: true, waiting: true }), Date.now, () => {}, () => {}, () => {},
           (sessionId) => (gateway ? homeOwnerOf(gateway.registry) : undefined)?.chapterStateFor(sessionId).homeId !== undefined);
         await notifications.initialize();
         return notifications;
@@ -159,8 +159,7 @@ describe("gateway/home scenario lock", () => {
     const phone = await gateway.connect("phone", { clientRole: "mobile" });
     const registered = await phone.request("push.registration.upsert", {
       commandId: gateway.commandId(), installationId: "lock-installation", grantId: "lock-grant-0001",
-      secret: Buffer.alloc(32, 7).toString("base64url"), previewsEnabled: false, relayOrigin: RELAY_ORIGIN,
-      notifyWhenAskPresented: true, notifyWhenFinished: true, notifyWhenWaiting: true,
+      secret: Buffer.alloc(32, 7).toString("base64url"), previewsEnabled: false, relayOrigin: RELAY_ORIGIN
     });
     expect(registered.ok, JSON.stringify(registered)).toBe(true);
     const undesignated = await phone.request("home.status", {});
@@ -215,8 +214,7 @@ describe("gateway/home scenario lock", () => {
     const MODEL = `${LOCK_PROVIDER}/faux-1`;
     const HOST = { eventLoopUtilization: "<host>", level: "<host>", load1PerCpu: "<host>", sampledAt: "<host>" };
     expect(answers[0], "the push registration").toEqual({ error: null, ok: true, result: {
-      available: true, deviceRegistered: true, enabledDeviceCount: 1, notifyWhenAskPresented: true, notifyWhenFinished: true, notifyWhenWaiting: true,
-      pendingCount: 0, registered: true, relayOrigin: RELAY_ORIGIN, requiresGrantRotation: false } });
+      available: true, deviceRegistered: true, enabledDeviceCount: 1, pendingCount: 0, registered: true, relayOrigin: RELAY_ORIGIN, requiresGrantRotation: false } });
     expect(answers[1], "status before designation: no Home, designate is the recovery").toEqual({ error: null, ok: true, result: {
       activation: { available: false }, available: true, enabled: false, hostPressure: HOST, live: false,
       memory: { configured: false, open: false, paused: false }, phase: "undesignated", readiness: { gaps: ["not-designated"], ready: false },

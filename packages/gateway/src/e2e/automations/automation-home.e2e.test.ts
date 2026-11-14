@@ -445,7 +445,7 @@ it("real Gateway: paused crash claims and a partial canonical batch recover exac
       relayRequests.push({ path: new URL(url).pathname, requestId: (init.headers as Record<string, string>)["x-tron-request-id"], envelope: JSON.parse(String(init.body)) });
       return new Response(JSON.stringify({ status: "accepted_by_apns" }), { status: 200 }) as never;
     });
-    const owner = new NotificationService(new NotificationGrantStore(root), relay, Date.now, () => {}, () => {}, () => {},
+    const owner = new NotificationService(new NotificationGrantStore(root), relay, async () => ({ inputNeeded: true, finished: true, waiting: true }), Date.now, () => {}, () => {}, () => {},
       id => (live ? homeOwnerOf(live.registry).chapterStateFor(id).homeId : undefined) !== undefined);
     notifications.push(owner);
     await owner.initialize();
@@ -460,8 +460,7 @@ it("real Gateway: paused crash claims and a partial canonical batch recover exac
     expect((await phone.request("home.prompt", { commandId: gateway.commandId(), text: "Initialize push-crash Home." })).ok).toBe(true);
     await gateway.settled(sessionId);
     expect((await phone.request("push.registration.upsert", { commandId: gateway.commandId(), installationId: "automation-crash-installation", grantId: "automation-crash-grant",
-      secret: Buffer.alloc(32, 7).toString("base64url"), previewsEnabled: false, relayOrigin: "https://relay.lock.invalid",
-      notifyWhenAskPresented: true, notifyWhenFinished: true, notifyWhenWaiting: true })).ok).toBe(true);
+      secret: Buffer.alloc(32, 7).toString("base64url"), previewsEnabled: false, relayOrigin: "https://relay.lock.invalid" })).ok).toBe(true);
     expect((await phone.request("home.pauseMemory", { commandId: gateway.commandId() })).ok).toBe(true);
     const automation = await setup.create("Crash-proof batch");
     const originalIds = [await setup.fire(automation), await setup.fire(automation), await setup.fire(automation)];
@@ -529,7 +528,7 @@ it("real Gateway: a singleton partial input resumes with one model turn and push
     const owner = new NotificationService(new NotificationGrantStore(root), new PushRelayClient("https://relay.lock.invalid", async (_url, init) => {
       pushes.push(JSON.parse(String(init.body)));
       return new Response(JSON.stringify({ status: "accepted_by_apns" }), { status: 200 }) as never;
-    }), Date.now, () => {}, () => {}, () => {}, id => (live ? homeOwnerOf(live.registry).chapterStateFor(id).homeId : undefined) !== undefined);
+    }), async () => ({ inputNeeded: true, finished: true, waiting: true }), Date.now, () => {}, () => {}, () => {}, id => (live ? homeOwnerOf(live.registry).chapterStateFor(id).homeId : undefined) !== undefined);
     owners.push(owner); await owner.initialize(); return owner;
   } };
   try {
@@ -541,8 +540,7 @@ it("real Gateway: a singleton partial input resumes with one model turn and push
     expect((await phone.request("home.prompt", { commandId: gateway.commandId(), text: "Initialize singleton fixture." })).ok).toBe(true);
     await gateway.settled(sessionId);
     expect((await phone.request("push.registration.upsert", { commandId: gateway.commandId(), installationId: "singleton-installation", grantId: "singleton-grant",
-      secret: Buffer.alloc(32, 9).toString("base64url"), previewsEnabled: false, relayOrigin: "https://relay.lock.invalid",
-      notifyWhenAskPresented: true, notifyWhenFinished: true, notifyWhenWaiting: true })).ok).toBe(true);
+      secret: Buffer.alloc(32, 9).toString("base64url"), previewsEnabled: false, relayOrigin: "https://relay.lock.invalid" })).ok).toBe(true);
     expect((await phone.request("home.pauseMemory", { commandId: gateway.commandId() })).ok).toBe(true);
     const automation = await setup.create("Singleton recovery");
     const runId = await setup.fire(automation);

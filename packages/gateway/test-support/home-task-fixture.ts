@@ -132,7 +132,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   const queueDiagnostics: ModelQueueRecord[] = [];
   const pushStore = new NotificationGrantStore(join(root, "notifications"));
   await pushStore.initialize();
-  const pushAdmission = new NotificationService(pushStore, { available: false, relayOrigin: "https://push.invalid" } as unknown as PushRelayClient);
+  const pushAdmission = new NotificationService(pushStore, { available: false, relayOrigin: "https://push.invalid" } as unknown as PushRelayClient, async () => ({ inputNeeded: true, finished: true, waiting: true }));
   let settings: ReturnType<typeof settingsDependencies> | undefined;
   const createRegistry = async () => await createTestRegistry({ projectOptions: options.projectOptions, knowledge, agentDir, tronHome, trust, machineId: "machine-task-test",
     settings: () => settings ? { model: settings.settingsModel, changes: settings.settingsChanges } : undefined,
