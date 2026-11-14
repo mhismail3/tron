@@ -349,6 +349,53 @@ describe("settings package update installs one exact version through the owner",
       await repo.close();
     }
   });
+
+  it("plans a npm update without running a configured npmCommand for an unrelated source with no managed install, and refuses an apply whose installer changed after review", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-package-update-npm-plan-"));
+    roots.push(root);
+    const agentDir = join(root, "agent"), cwd = join(root, "workspace"), tronHome = join(root, "tron");
+    await mkdir(agentDir, { recursive: true });
+    await mkdir(cwd, { recursive: true });
+    const name = `tron-update-plan-${Date.now()}`;
+    const unrelated = "npm:tron-plan-unrelated-missing";
+    const registry = await publishedNpmRegistry(root, [{ name, versions: ["1.0.0", "1.2.0"], latest: "1.0.0" }]);
+    const saved = { registry: process.env.npm_config_registry, cache: process.env.npm_config_cache };
+    process.env.npm_config_registry = registry.base;
+    process.env.npm_config_cache = join(root, "npm-cache");
+    try {
+      const source = `npm:${name}`;
+      const settingsPath = join(agentDir, "settings.json");
+      await writeFile(settingsPath, JSON.stringify({ packages: [source] }));
+      const changes = new SettingsChangePath({} as never, new SettingsChangeRecord(tronHome), { setTrust: async () => undefined });
+      const packages = new PackageService(agentDir, new TrustService(agentDir), () => {});
+      packages.register(changes, () => {});
+      const requester = { kind: "home" as const, id: "home-session" };
+      await packages.mutate("update", source, cwd, false);
+      const installedPath = (await packages.list(cwd)).packages.find(row => row.source === source)?.installedPath as string;
+      const installedVersion = async () => JSON.parse(await readFile(join(installedPath, "package.json"), "utf8")).version as string;
+      expect(await installedVersion()).toBe("1.0.0");
+
+      const marker = join(root, "npm-command-ran"), replacedMarker = join(root, "replaced-npm-command-ran");
+      await writeFile(settingsPath, JSON.stringify({ packages: [source, unrelated], npmCommand: ["sh", "-c", `touch '${marker}'; exit 1`] }));
+      const review = await packages.updatePackage({ cwd, source, version: "1.2.0", reason: "Plan only" }, requester);
+      expect(review).toMatchObject({ status: "review", review: { title: `Update ${name} to exactly 1.2.0`, items: [
+        expect.objectContaining({ label: `Package ${name}`, before: "1.0.0", after: "1.2.0" }),
+        expect.objectContaining({ label: "Configured source", before: source, after: `npm:${name}@1.2.0` }),
+      ] } });
+      await expect(readFile(marker)).rejects.toThrow();
+      expect(await installedVersion()).toBe("1.0.0");
+
+      await writeFile(settingsPath, JSON.stringify({ packages: [source, unrelated], npmCommand: ["sh", "-c", `touch '${replacedMarker}'; exit 1`] }));
+      await expect(packages.updatePackage({ cwd, source, version: "1.2.0", reason: "Installer changed" }, requester, async (_review, apply) => apply({ deviceId: "ios-device", commandId: "npm-installer-changed" })))
+        .rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("changed since review") });
+      expect(await installedVersion()).toBe("1.0.0");
+      expect((await changes.record.page({ filter: entry => entry.key === "package.update" })).entries).toEqual([]);
+    } finally {
+      await registry.close();
+      process.env.npm_config_registry = saved.registry;
+      process.env.npm_config_cache = saved.cache;
+    }
+  });
 });
 
 async function gitHead(cwd: string): Promise<string> {
