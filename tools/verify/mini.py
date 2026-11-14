@@ -58,7 +58,13 @@ RETAINED_JOBS = 8
 
 
 def retain_native(results: Path, retained: Path, receipt: dict) -> None:
-    retained.mkdir(parents=True, exist_ok=False)
+    published = retained
+    retained = published.with_name(f'.{published.name}.building')
+    if published.exists() or results.is_symlink() or not results.is_dir() or retained.is_symlink():
+        raise ValueError('native snapshot source or construction destination is unsafe')
+    if retained.exists():
+        shutil.rmtree(retained)
+    retained.mkdir(parents=True)
     entries, cases, total = [], [], 0
     for source in sorted(results.rglob('*')):
         if source.is_symlink() or not source.is_file() or source.suffix not in ('.json', '.log', '.txt'):
@@ -95,20 +101,65 @@ def retain_native(results: Path, retained: Path, receipt: dict) -> None:
                     'sha256': hashlib.sha256(partial).hexdigest()})
     (retained / 'retention.json').write_text(json.dumps({**receipt, 'files': entries, 'bytes': total,
         'bundlesRetained': False, 'reason': 'interrupted or unconfirmed native transport'}, indent=2) + '\n')
+    retained.rename(published)
+
+
+def verify_retained(evidence: Path, nonce: str) -> str:
+    receipt_path = evidence / 'retention.json'
+    receipt = json.loads(receipt_path.read_text())
+    if receipt['nonce'] != nonce:
+        raise ValueError('retained native receipt nonce mismatch')
+    for entry in receipt['files']:
+        file = evidence / entry['path']
+        if not file.resolve().is_relative_to(evidence.resolve()) or file.is_symlink():
+            raise ValueError('unsafe retained receipt path')
+        if entry['retained'] and hashlib.sha256(file.read_bytes()).hexdigest() != entry['sha256']:
+            raise ValueError('retained native file digest mismatch')
+    return hashlib.sha256(receipt_path.read_bytes()).hexdigest()
 
 
 def retained_main(nonce: str, action: str = 'retrieve', digest: str | None = None) -> int:
     if len(nonce) != 32 or any(character not in '0123456789abcdef' for character in nonce):
         raise ValueError('invalid retained native nonce')
-    if action != 'retrieve':
+    if action not in ('retrieve', 'recover'):
         retained = Path.home() / BASE / 'retained-native' / nonce
-        if retained.is_symlink() or not retained.is_dir():
-            raise ValueError('retained native evidence is unavailable')
-        if action == 'ack-retained':
-            if hashlib.sha256((retained / 'retention.json').read_bytes()).hexdigest() != digest:
-                raise ValueError('retained receipt changed; evidence was not removed')
-            shutil.rmtree(retained)
+        originals = Path.home() / BASE / 'results' / f'gateway-{nonce}'
+        building = retained.with_name(f'.{nonce}.building')
+        if action == 'recover-retained':
+            if not retained.exists():
+                receipt_path = originals / 'receipt.json'
+                receipt = json.loads(receipt_path.read_text()) if receipt_path.is_file() else {'nonce': nonce}
+                if receipt.get('nonce') != nonce:
+                    raise ValueError('native recovery receipt nonce mismatch')
+                retain_native(originals, retained, receipt)
+            verify_retained(retained, nonce)
+            if originals.is_symlink():
+                raise ValueError('unsafe original native evidence')
+            if originals.exists():
+                shutil.rmtree(originals)
+            originals.with_suffix('.tar.gz').unlink(missing_ok=True)
+            print(f'mini: native snapshot ready: {nonce}')
             return 0
+        if action == 'ack-retained':
+            if digest is None or len(digest) != 64 or any(character not in '0123456789abcdef' for character in digest):
+                raise ValueError('invalid retained acknowledgement digest')
+            acknowledged = retained.with_name(f'.{nonce}.ack-{digest}')
+            if retained.exists():
+                if retained.is_symlink() or hashlib.sha256((retained / 'retention.json').read_bytes()).hexdigest() != digest:
+                    raise ValueError('retained receipt changed; evidence was not removed')
+                try:
+                    retained.rename(acknowledged)
+                except FileNotFoundError:
+                    pass
+            if acknowledged.is_symlink():
+                raise ValueError('unsafe acknowledged snapshot')
+            if acknowledged.exists():
+                shutil.rmtree(acknowledged, ignore_errors=False)
+            elif building.exists() or originals.exists():
+                raise ValueError('native construction is incomplete; recover it before acknowledgement')
+            return 0
+        if retained.is_symlink() or not retained.is_dir():
+            raise ValueError('retained native evidence is unavailable; use recover for incomplete construction')
         with tarfile.open(fileobj=sys.stdout.buffer, mode='w|gz') as bundle:
             for path in sorted(retained.rglob('*')):
                 if path.is_symlink() or not (path.is_file() or path.is_dir()):
@@ -117,40 +168,40 @@ def retained_main(nonce: str, action: str = 'retrieve', digest: str | None = Non
         return 0
     ssh = ssh_command()
     source = Path(__file__).read_text()
+    if action == 'recover':
+        return subprocess.run([*ssh, shlex.join(['/usr/bin/python3', '-c', source, 'recover-retained', nonce])],
+                              stdin=subprocess.DEVNULL).returncode
     target = ROOT / 'test-results/mini' / f'retained-{nonce}'
+    staging = target.with_name(f'.{target.name}.partial')
     archive = target.with_suffix('.tar.gz')
-    if target.exists() or archive.exists():
-        raise ValueError('retained destination already exists; inspect it before another retrieval')
-    archive.parent.mkdir(parents=True, exist_ok=True)
-    command = shlex.join(['/usr/bin/python3', '-c', source, 'remote-retained', nonce])
-    with subprocess.Popen([*ssh, command], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE) as child:
-        total = 0
-        with archive.open('xb') as output:
-            while chunk := child.stdout.read(64 * 1024):
-                total += len(chunk)
-                if total > ARTIFACT_LIMIT:
-                    child.terminate()
-                    raise ValueError('retained native archive exceeds transport bound')
-                output.write(chunk)
-        if child.wait():
-            raise ValueError('retained native transfer failed; remote evidence remains')
-    unpack_artifacts(archive, target)
-    receipt_path = target / 'retention.json'
-    receipt = json.loads(receipt_path.read_text())
-    if receipt['nonce'] != nonce:
-        raise ValueError('retained native receipt nonce mismatch')
-    for entry in receipt['files']:
-        file = target / entry['path']
-        if not file.resolve().is_relative_to(target.resolve()):
-            raise ValueError('unsafe retained receipt path')
-        if entry['retained'] and hashlib.sha256(file.read_bytes()).hexdigest() != entry['sha256']:
-            raise ValueError('retained native file digest mismatch')
-    digest = hashlib.sha256(receipt_path.read_bytes()).hexdigest()
+    if any(path.is_symlink() for path in (target, staging, archive)):
+        raise ValueError('unsafe local retained destination')
+    if not target.exists():
+        if staging.exists():
+            shutil.rmtree(staging)
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        command = shlex.join(['/usr/bin/python3', '-c', source, 'remote-retained', nonce])
+        with subprocess.Popen([*ssh, command], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE) as child:
+            total = 0
+            with archive.open('wb') as output:
+                while chunk := child.stdout.read(64 * 1024):
+                    total += len(chunk)
+                    if total > ARTIFACT_LIMIT:
+                        child.terminate()
+                        raise ValueError('retained native archive exceeds transport bound')
+                    output.write(chunk)
+            if child.wait():
+                raise ValueError('retained native transfer failed; remote evidence remains')
+        unpack_artifacts(archive, staging)
+    evidence = target if target.exists() else staging
+    digest = verify_retained(evidence, nonce)
+    if evidence == staging:
+        staging.rename(target)
     confirmed = subprocess.run([*ssh, shlex.join(['/usr/bin/python3', '-c', source, 'ack-retained', nonce, digest])],
                                stdin=subprocess.DEVNULL)
     if confirmed.returncode:
         raise ValueError(f'retained native cleanup unconfirmed; local evidence: {target}')
-    archive.unlink()
+    archive.unlink(missing_ok=True)
     print(f'mini: retained native evidence: {target}')
     return 0
 
@@ -694,7 +745,7 @@ def remote_main(job: dict) -> int:
 
 
 if __name__ == '__main__':
-    if sys.argv[1:2] in (['retrieve'], ['remote-retained'], ['ack-retained']):
+    if sys.argv[1:2] in (['retrieve'], ['recover'], ['recover-retained'], ['remote-retained'], ['ack-retained']):
         sys.exit(retained_main(sys.argv[2], sys.argv[1], sys.argv[3] if len(sys.argv) > 3 else None))
     if sys.argv[1:2] == ['remote']:
         sys.exit(remote_main(json.loads(sys.argv[2])))

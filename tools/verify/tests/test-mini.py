@@ -17,6 +17,7 @@ the checkout and a probe with no or malformed status); a stopped local pool lane
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import importlib.util
 import json
 import os
@@ -45,6 +46,19 @@ destination="$1"; shift
 [[ "$destination" != silent* ]] || exit 0
 [[ "$destination" != garbled* ]] || { echo 'mini status: not json'; exit 0; }
 [[ "$destination" != nojob* || "$*" != *" remote "* ]] || { echo "ssh: connection to $destination closed" >&2; exit 255; }
+if [[ -n "${MINI_RETAINED_FAULT:-}" && ! -e "$MINI_HOME/$MINI_RETAINED_FAULT.once" ]]; then
+  if [[ "$MINI_RETAINED_FAULT" == transfer && "$*" == *" remote-retained "* ]]; then
+    touch "$MINI_HOME/$MINI_RETAINED_FAULT.once"
+    (cd "$MINI_HOME" && HOME="$MINI_HOME" /bin/sh -c "$*") > "$MINI_HOME/retained-transfer.tar.gz"
+    head -c 64 "$MINI_HOME/retained-transfer.tar.gz"
+    exit 255
+  fi
+  if [[ "$MINI_RETAINED_FAULT" == ack-* && "$*" == *" ack-retained "* ]]; then
+    touch "$MINI_HOME/$MINI_RETAINED_FAULT.once"
+    [[ "$MINI_RETAINED_FAULT" != ack-after ]] || (cd "$MINI_HOME" && HOME="$MINI_HOME" /bin/sh -c "$*")
+    exit 255
+  fi
+fi
 # sshd runs the command in its own session: killing this client's process group leaves it running, with its
 # input closed once no client holds the pipe.
 cd "$MINI_HOME" && HOME="$MINI_HOME" exec /usr/bin/python3 -c 'import os, sys; os.setsid(); os.execv("/bin/sh", ["sh", "-c", sys.argv[1]])' "$*"
@@ -351,6 +365,82 @@ while True:
         self.assertEqual(full.returncode, NO_RESULT, full.stdout + full.stderr)
         self.assertIn('evidence retention is full', full.stdout + full.stderr)
         self.assertEqual(len(list(pending.iterdir())), 8)
+
+    def test_native_recovery_retries_construction_transfer_verification_and_acknowledgement(self) -> None:
+        nonce = 'a' * 32
+        originals = self.mini / 'tron-ci/results' / f'gateway-{nonce}'
+        originals.mkdir(parents=True)
+        content = b'first native evidence\n' + b'x' * 16384
+        (originals / 'test.log').write_bytes(content)
+        receipt = {'nonce': nonce, 'commit': self.git('rev-parse', 'HEAD'), 'interrupted': True}
+        (originals / 'receipt.json').write_text(json.dumps(receipt))
+        retained = self.mini / 'tron-ci/retained-native' / nonce
+        constructor = '''import importlib.util, resource, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location('mini', sys.argv[1])
+module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+resource.setrlimit(resource.RLIMIT_FSIZE, (2048, 2048))
+module.retain_native(Path(sys.argv[2]), Path(sys.argv[3]), {'nonce': sys.argv[4]})
+'''
+        failed = subprocess.run(['python3', '-c', constructor, str(self.local / 'tools/verify/mini.py'),
+                                 str(originals), str(retained), nonce], env={**self.env, 'PYTHONDONTWRITEBYTECODE': '1'},
+                                capture_output=True, text=True)
+        self.assertNotEqual(failed.returncode, 0, failed.stdout + failed.stderr)
+        self.assertEqual((originals / 'test.log').read_bytes(), content)
+        self.assertFalse(retained.exists(), 'incomplete construction must not publish a pending snapshot')
+        self.assertTrue(retained.with_name(f'.{nonce}.building').is_dir())
+        recovered = self.lane('recover', nonce)
+        self.assertEqual(recovered.returncode, 0, recovered.stdout + recovered.stderr)
+        self.assertFalse(originals.exists())
+        self.assertEqual((retained / 'test.log').read_bytes(), content)
+        self.assertFalse(retained.with_name(f'.{nonce}.building').exists())
+        self.env['MINI_RETAINED_FAULT'] = 'transfer'
+        interrupted = self.lane('retrieve', nonce)
+        self.assertNotEqual(interrupted.returncode, 0)
+        target = self.local / 'test-results/mini' / f'retained-{nonce}'
+        self.assertFalse(target.exists())
+        self.assertTrue(retained.exists())
+        self.env.pop('MINI_RETAINED_FAULT')
+        (retained / 'test.log').write_bytes(b'corrupted in transfer fixture')
+        corrupt = self.lane('retrieve', nonce)
+        self.assertNotEqual(corrupt.returncode, 0)
+        self.assertIn('digest mismatch', corrupt.stdout + corrupt.stderr)
+        self.assertFalse(target.exists(), 'unverified files must not occupy the published destination')
+        (retained / 'test.log').write_bytes(content)
+        for fault in ('ack-before', 'ack-after'):
+            self.env['MINI_RETAINED_FAULT'] = fault
+            unconfirmed = self.lane('retrieve', nonce)
+            self.assertNotEqual(unconfirmed.returncode, 0)
+            self.assertTrue(target.is_dir(), unconfirmed.stdout + unconfirmed.stderr)
+            self.assertEqual((target / 'test.log').read_bytes(), content)
+            self.assertEqual(retained.exists(), fault == 'ack-before')
+        self.env.pop('MINI_RETAINED_FAULT')
+        retried = self.lane('retrieve', nonce)
+        self.assertEqual(retried.returncode, 0, retried.stdout + retried.stderr)
+        self.assertFalse(retained.exists())
+        self.assertFalse(target.with_suffix('.tar.gz').exists())
+        self.assertFalse(target.with_name(f'.{target.name}.partial').exists())
+        nonce = 'b' * 32
+        originals = self.mini / 'tron-ci/results' / f'gateway-{nonce}'
+        (originals / 'locked').mkdir(parents=True)
+        (originals / 'locked/test.log').write_bytes(content)
+        recovered = self.lane('recover', nonce)
+        self.assertEqual(recovered.returncode, 0, recovered.stdout + recovered.stderr)
+        retained = self.mini / 'tron-ci/retained-native' / nonce
+        (retained / 'locked').chmod(0o500)
+        try:
+            failed_cleanup = self.lane('retrieve', nonce)
+            self.assertNotEqual(failed_cleanup.returncode, 0)
+            target = self.local / 'test-results/mini' / f'retained-{nonce}'
+            digest = hashlib.sha256((target / 'retention.json').read_bytes()).hexdigest()
+            acknowledged = retained.with_name(f'.{nonce}.ack-{digest}')
+            self.assertTrue(acknowledged.is_dir())
+        finally:
+            for directory in retained.parent.glob(f'.{nonce}.ack-*/locked'):
+                directory.chmod(0o700)
+        cleanup = self.lane('retrieve', nonce)
+        self.assertEqual(cleanup.returncode, 0, cleanup.stdout + cleanup.stderr)
+        self.assertFalse(acknowledged.exists())
 
     def test_whole_verifier_returns_its_report_logs_and_raw_75_without_another_lease(self) -> None:
         self.write('tools/probe.py', RECORDED)

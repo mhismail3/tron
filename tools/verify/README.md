@@ -157,9 +157,19 @@ interruption or unacknowledged transport retains a compact snapshot under the mi
 completed-case partial timings and a truncation manifest. Native bundles are not retained in that
 compact snapshot. Source files retain at most 4 MiB each and 128 MiB total, plus bounded derived
 metadata; eight pending snapshots stop native admission instead of silently evicting evidence.
-`python3 tools/verify/mini.py retrieve <nonce>` retrieves that snapshot into
-`test-results/mini/retained-<nonce>/`, verifies file hashes, then removes only the snapshot whose
-receipt was acknowledged. Interrupted outcomes remain interrupted, not completed shard passes.
+Snapshot construction uses `.<nonce>.building` and atomically publishes `<nonce>` only after its
+manifest is complete. A construction failure preserves the originals in `results/gateway-<nonce>`.
+`python3 tools/verify/mini.py recover <nonce>` rebuilds that exact incomplete staging copy from the
+preserved originals; only a verified published snapshot allows original cleanup. Recovery does not
+require the incomplete copy to have a manifest. Staging still occupies admission capacity until recovered.
+`python3 tools/verify/mini.py retrieve <nonce>` retrieves into a local `.partial` directory, verifies
+file hashes, and atomically publishes `test-results/mini/retained-<nonce>/` before acknowledging.
+Retry the same command after transfer/verification failure: it replaces only the unfinished local
+copy while remote evidence remains. After an acknowledgement failure it reuses the verified local
+copy and retries the exact receipt acknowledgement, including when the remote deletion succeeded
+but its reply was lost. Remote acknowledgement renames the snapshot to a digest-bound `.ack-`
+directory before deleting it; retry also finishes interrupted deletion there. No evidence is evicted
+to make room. Interrupted outcomes remain interrupted, not completed shard passes.
 `execution-plan.json` in whole-verifier artifacts preserves the caller's duration/selector contract.
 
 ## Run output
