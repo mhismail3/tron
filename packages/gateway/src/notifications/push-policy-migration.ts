@@ -124,6 +124,7 @@ function planChanges(documentBefore: Buffer, settingsBefore: Buffer | null): Cha
 
 async function publish(path: string, bytes: Buffer, expected: Buffer | null): Promise<void> {
   if (digest(await readBounded(path)) !== digest(expected)) throw conflict(`${path} changed during the push policy migration`);
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.migration-${process.pid}.tmp`;
   try {
     await writeDurable(temporary, bytes);
