@@ -9,7 +9,7 @@ export interface UpstreamErrorInfo {
   httpStatus?: number;
 }
 
-export const UPSTREAM_USAGE_LIMIT = /GoUsageLimitError|FreeUsageLimitError|usage.?limit|insufficient_quota|quota exceeded|out of budget|subscription_sharing_usage_limit_exceeded|available balance|\b429\b|rate.?limit|too many requests/iu;
+export const UPSTREAM_USAGE_LIMIT = /GoUsageLimitError|FreeUsageLimitError|usage.?limit|insufficient_quota|quota exceeded|out of budget|out of extra usage|subscription_sharing_usage_limit_exceeded|available balance|\b429\b|rate.?limit|too many requests/iu;
 
 function object(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -62,7 +62,7 @@ export function upstreamErrorInfo(raw: string, provider: string): UpstreamErrorI
   else if (/timeout|timed?\s*out|ETIMEDOUT/iu.test(text)) { category = "timeout"; friendly = `The connection to ${name} timed out`; }
   else if (/ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|fetch failed|network|connection (?:reset|closed|failed)|socket hang up/iu.test(text)) { category = "network"; friendly = `Could not connect to ${name}`; }
   else if (UPSTREAM_USAGE_LIMIT.test(text) || httpStatus === 429) {
-    category = /usage.?limit|insufficient_quota|quota|out of budget|available balance|subscription_sharing/iu.test(text) ? "usage-limit" : "rate-limit";
+    category = /usage.?limit|insufficient_quota|quota|out of budget|out of extra usage|available balance|subscription_sharing/iu.test(text) ? "usage-limit" : "rate-limit";
     friendly = category === "usage-limit" ? `Usage limit reached for ${name}` : `Rate limited by ${name}`;
   }
   else if (httpStatus && httpStatus >= 500) { category = "unavailable"; friendly = `${name} is temporarily unavailable`; }

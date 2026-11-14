@@ -206,6 +206,25 @@ status/result `structuredOutput` values remain opaque. Parallel-group counters h
 no path fields. Symlinked homes and ancestors refuse before cwd encoding or SSH
 label selection; the admitted home address must be physical.
 
+A session-header rewrite refuses with `home_memory_cursor_requires_relocation` if
+an episodic cursor has already admitted that session. Relocating files does not
+permit invalidating sealed Home evidence: the cursor must move in the same
+backed-up operation, or the migration must refuse before any effects.
+
+For an already completed header-only layout relocation, `scripts/tron home-layout
+repair-memory --home <physical-home> --journal <layout-journal> --dry-run` proves
+each ingested body against the previous cursor using the receipted original
+header. The complete old prefix, leaf ID and leaf digest must match; only `cwd`
+may differ in the header. It then proves the new source through Home's reader.
+`--apply --backup <new-directory>` requires the existing offline runtime/wrapper
+leases and an unowned workspace, backs up the memory state and Home ledger,
+rebinds offsets/digests and sealed sizes, and clears only the matching source
+block. Summary nodes, catalog entries, source bodies and model configuration are
+unchanged; no model calls are made. Repeating after partial publication proves
+already-rebound cursors without applying the offset twice. The operator must
+stop/start Tron; the repair never controls its lifecycle. Retire this repair
+entrypoint after the approved live repair is verified.
+
 Inverse carries current files and appended bodies back. Before/after provenance avoids
 restoring old whole files or blindly reversing every new-prefix string. Values already
 using the new prefix stay unchanged. Forward/inverse snapshots remain intact. Partial

@@ -1432,6 +1432,35 @@ class RuntimeMigrationTests(unittest.TestCase):
             self.assertIn("stopped_proof_unavailable", json.loads(result.stdout)["blockers"])
             self.assertEqual(snapshot(home, contents_first=False), before)
 
+    def test_session_header_move_refuses_before_invalidating_admitted_home_memory(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="home-layout-memory-") as temporary:
+            fixture = Fixture(Path(temporary).resolve())
+            fixture.write(REGISTRY, (ROOT / REGISTRY).read_text())
+            home = Path(temporary).resolve() / "user/.tron"
+            session = home / "agent/sessions/chapter.jsonl"
+            session.parent.mkdir(parents=True)
+            session.write_text(json.dumps({"type": "session", "version": 3, "id": "sealed", "cwd": str(home / "gateway/home/workspace")}) + "\n")
+            memory = home / "workspace/state/episodic/home/state.json"
+            memory.parent.mkdir(parents=True)
+            memory.write_text(json.dumps({"cursor": {"home": {"chapters": [{"sessionId": "sealed"}]}}}))
+            before = snapshot(home.parent)
+            for mode in ("--dry-run", "--apply"):
+                result = fixture.run("migrate", "--home", str(home), mode, env={"HOME": str(home.parent)})
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertEqual(json.loads(result.stdout)["errors"][0]["reason"], "home_memory_cursor_requires_relocation")
+                self.assertEqual(snapshot(home.parent, contents_first=False), before)
+            memory.unlink()
+            applied = fixture.run("migrate", "--home", str(home), "--apply", env={"HOME": str(home.parent)})
+            self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+            memory.write_text(json.dumps({"cursor": {"home": {"chapters": [{"sessionId": "sealed"}]}}}))
+            migrated = snapshot(home.parent)
+            inverse = fixture.run("migrate", "--home", str(home), "--rollback", env={"HOME": str(home.parent)})
+            self.assertEqual(inverse.returncode, 1, inverse.stdout + inverse.stderr)
+            self.assertEqual(json.loads(inverse.stdout)["errors"][0]["reason"], "home_memory_cursor_requires_relocation", inverse.stdout + inverse.stderr)
+            after_inverse = snapshot(home.parent, contents_first=False)
+            regulars = lambda values: {path: value[:6] + value[7:] for path, value in values.items() if value[-1] is not None}
+            self.assertEqual(regulars(after_inverse), regulars(migrated))
+
     def test_non_object_settings_refuse_without_mutation(self) -> None:
         with tempfile.TemporaryDirectory(prefix="home-layout-settings-") as temporary:
             fixture = Fixture(Path(temporary).resolve())

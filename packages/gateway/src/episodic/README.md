@@ -46,6 +46,10 @@ workspace record `state/workspace-state/episodic-initialized.json`.
   refuses a sealed one; navigation and context edits re-read the chapter. A parse failure on a changing file
   leaves the cursor for retry; a stable malformed file blocks `source-unavailable`.
   Partial lines wait for their newline. The Home cursor is strict version 2.
+  Offline header relocations must rebind the admitted cursor, not loosen these
+  source proofs. The receipted one-time [layout repair](../../../../docs/tron-home.md#offline-migration)
+  proves the old prefix with the backed-up header and the unchanged body before
+  publishing the new cursor through `EpisodicStore`. It never re-summarizes history.
 - **Reads.** `whenReady(cut)` resolves when every view part before `cut` is built
   (cut 0 at once; beyond the count refused; blocked or aborted rejects).
   `renderView(cut)` is `id+n|text` oldest first. `zoomLines(id, n)` opens line `id+n`
@@ -159,6 +163,12 @@ workspace record `state/workspace-state/episodic-initialized.json`.
 - Ingestion, invalidation, `resumeIngested()` and `dispose()` share one mutex; the
   pump runs outside it, and a result whose generation, children or message changed
   is discarded, never appended.
+
+## Signals
+
+| Event | Level | Diagnosis |
+| --- | --- | --- |
+| `episodic.node-blocked` (`reason: source-unavailable`) | warning | Inspect `workspace/state/episodic/<homeId>/state.json` → `blocked.detail`; `Sealed Home source changed since ingestion` after a layout relocation means the session bytes and admitted cursor disagree. Prove the receipted header/body before rebinding; never reset memory or weaken the sealed-source guard. |
 
 ## Entry points
 

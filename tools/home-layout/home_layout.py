@@ -906,7 +906,42 @@ def main(argv: list[str]) -> int:
     mode.add_argument("--apply", action="store_true", help="journal and rename offline; never start a Gateway")
     mode.add_argument("--rollback", action="store_true", help="invert journaled renames; carry newer data back")
     migrate_parser.add_argument("--json", action="store_true", help="JSON is always emitted")
+    repair_parser = commands.add_parser("repair-memory", help="rebind Home memory after a receipted header-only relocation; never starts or stops Tron")
+    repair_parser.add_argument("--home", required=True)
+    repair_parser.add_argument("--journal", required=True)
+    repair_mode = repair_parser.add_mutually_exclusive_group(required=True)
+    repair_mode.add_argument("--dry-run", action="store_true")
+    repair_mode.add_argument("--apply", action="store_true")
+    repair_parser.add_argument("--backup")
     args = parser.parse_args(argv)
+    if args.command == "repair-memory":
+        module = ROOT / "packages/gateway/dist/episodic/home-source-relocation-migration.js"
+        repair_home = os.path.abspath(args.home)
+        journal = json.loads(runtime_layout.read_record(sys.modules[__name__], Path(args.journal))[0])
+        layout = journal["layouts"][repair_home]
+        receipt_root = runtime_layout.backup_root({"home": repair_home, "user_home": os.path.expanduser("~")}, layout)
+        command = [str(ROOT / "scripts/tron-node"), "exec", "node", str(module), "--home", repair_home, "--journal", os.path.abspath(args.journal), "--receipt-root", str(receipt_root)]
+        if not module.is_file():
+            parser.error("Build the Gateway CLI before repairing memory")
+        if args.apply and not args.backup:
+            parser.error("--apply requires a new --backup directory")
+        try:
+            with contextlib.ExitStack() as locks:
+                if args.apply:
+                    owned = set()
+                    locks.enter_context(maintenance_lock(Path(args.journal).resolve().parent))
+                    guard = locks.enter_context(runtime_lock(Path(args.home).resolve() / RUNTIME_LOCK, owned=owned))
+                    owned.update(locks.enter_context(stopped_home.claim(sys.modules[__name__], os.path.abspath(args.home))))
+                    refusal = stopped_home.probe(sys.modules[__name__], os.path.abspath(args.home), owned)
+                    if refusal:
+                        raise LayoutError(refusal["reason"])
+                    guard()
+                    script = "const m=await import(process.argv[1]); await m.applyHomeSourceRelocation(await m.planHomeSourceRelocation(process.argv[2],process.argv[3],process.argv[4]),process.argv[5]); console.log(JSON.stringify({applied:true}));"
+                    command = [str(ROOT / "scripts/tron-node"), "exec", "node", "--input-type=module", "-e", script, module.as_uri(), repair_home, os.path.abspath(args.journal), str(receipt_root), os.path.abspath(args.backup)]
+                return subprocess.run(command, check=False).returncode
+        except (OSError, LayoutError) as error:
+            print(f"home-layout repair-memory: {error}", file=sys.stderr)
+            return 1
     if args.command == "audit":
         code, report = audit(args.home, args.max_entries, maintenance=args.maintenance)
         print(json.dumps(report, indent=2))

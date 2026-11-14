@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { appendFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import fs from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
@@ -12,6 +13,8 @@ import { resolveLimits, type EpisodicLimits, type EpisodicDiagnostic, type Episo
 import { EpisodicStore } from "./episodic-store.js";
 import { readCanonicalHomeDeltas, readCanonicalHomeIndex } from "./home-source.js";
 import type { EpisodicSourceDelta } from "./episodic-projection.js";
+import { relocateHomeSourceCursor } from "./home-source-relocation.js";
+import { applyHomeSourceRelocation, planHomeSourceRelocation } from "./home-source-relocation-migration.js";
 
 const roots: string[] = [];
 const memories: EpisodicMemory[] = [];
@@ -34,7 +37,7 @@ const assistantEntry = (id: string, parentId: string | null, text: string) => JS
 }) + "\n";
 
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "tron-home-source-")); roots.push(root);
+  const root = await fs.realpath(await mkdtemp(join(tmpdir(), "tron-home-source-"))); roots.push(root);
   const workspace = new TronWorkspace(join(root, "home")); workspaces.push(workspace);
   const chapters = ["one", "two"].map(sessionId => ({ sessionId, path: join(root, sessionId + ".jsonl"), sealed: sessionId === "one" }));
   for (const chapter of chapters) await writeFile(chapter.path, JSON.stringify({ type: "session", version: 3, id: chapter.sessionId, cwd: root, timestamp: "2026-01-01T00:00:00.000Z" }) + "\n");
@@ -82,6 +85,81 @@ it("continues two chapters across replay/restart and freezes exact message and n
   const report = { chapters: 2, messages: restarted.status().messages, frozenCut: 3, replay: "idempotent", provenance: ["one", "two"] };
   await mkdir("test-results/home-memory", { recursive: true });
   await writeFile("test-results/home-memory/continuity.json", JSON.stringify(report, null, 2) + "\n");
+});
+
+it("repairs only a proven header relocation, preserves summaries across reopen and ingests the active tail", async () => {
+  const fx = await fixture();
+  const summarize = vi.fn(async () => fauxAssistantMessage("summary"));
+  const firstPath = fx.chapters[0]!.path;
+  await writeFile(firstPath, (await readFile(firstPath, "utf8")).replace("first chapter violet fact", `first chapter violet fact ${"detail ".repeat(300)}`));
+  const memory = await fx.open(fx.source, summarize);
+  await memory.entriesCommitted("home");
+  await memory.whenReady(2);
+  const originalCalls = summarize.mock.calls.length;
+  expect(originalCalls).toBeGreaterThan(0);
+  const store = new EpisodicStore(fx.workspace, "home", 1024 * 1024);
+  const original = await store.read();
+  const headers = new Map<string, Buffer>();
+  const home = join(fx.root, "home");
+  const layoutId = "a".repeat(32);
+  const hash = (bytes: Buffer | string) => createHash("sha256").update(bytes).digest("hex");
+  const backupRoot = join(fx.root, ".tron-maintenance/backups", "2026-11-12-2500-layout-v2-" + hash(home).slice(0, 16), layoutId, "forward");
+  const rewrites: Record<string, object> = {};
+  for (const chapter of fx.chapters) {
+    const bytes = await readFile(chapter.path);
+    const split = bytes.indexOf(10) + 1;
+    headers.set(chapter.sessionId, bytes.subarray(0, split));
+    const header = JSON.parse(bytes.subarray(0, split).toString("utf8"));
+    const relative = `agent/sessions/moved/test_${chapter.sessionId}.jsonl`;
+    const originalPath = join(backupRoot, relative);
+    await mkdir(join(backupRoot, "agent/sessions/moved"), { recursive: true });
+    await writeFile(originalPath, bytes);
+    chapter.path = join(home, relative);
+    await mkdir(join(home, "agent/sessions/moved"), { recursive: true });
+    const nextHeader = Buffer.from(JSON.stringify({ ...header, cwd: fx.root + "/moved" }) + "\n");
+    await writeFile(chapter.path, Buffer.concat([nextHeader, bytes.subarray(split)]));
+    rewrites[relative] = { kind: "session", before: hash(bytes.subarray(0, split)), after: hash(nextHeader), source_sha256: hash(bytes) };
+  }
+  await mkdir(join(home, "state/home"), { recursive: true });
+  await writeFile(join(home, "state/home/home.json"), JSON.stringify({ homeId: "home", chapters: original.state!.cursor!.home.chapters.map(cursor => ({ sessionId: cursor.sessionId, state: cursor.sealed ? "sealed" : "active", ...(cursor.sealed ? { sizeAtSeal: cursor.size } : {}) })) }));
+  const journal = join(fx.root, "journal.json");
+  await writeFile(journal, JSON.stringify({ layouts: { [home]: { id: layoutId, direction: "applied", rewrites } } }));
+  await appendFile(fx.chapters[1]!.path, entry("e", "d", "new active tail"));
+  await memory.entriesCommitted("home");
+  expect(memory.status().blocked?.reason).toBe("source-unavailable");
+  await memory.dispose(); memories.splice(memories.indexOf(memory), 1);
+  const state = (await store.readState())!;
+  const plan = await planHomeSourceRelocation(home, journal, backupRoot);
+  expect(plan.changes).toHaveLength(2);
+  const savedBytes = await readFile(plan.statePath);
+  expect(savedBytes).toEqual(plan.stateBytes);
+  await expect(applyHomeSourceRelocation(plan, join(fx.root, "refused-backup"))).rejects.toThrow("still owned by the Gateway");
+  await fx.workspace.dispose();
+  await applyHomeSourceRelocation(plan, join(fx.root, "repair-backup"));
+  expect(await readFile(join(fx.root, "repair-backup/workspace/state/episodic/home/state.json"))).toEqual(savedBytes);
+  await expect(applyHomeSourceRelocation(plan, join(fx.root, "stale-backup"))).rejects.toThrow("Memory changed during relocation proof");
+  await writeFile(plan.ledgerPath, plan.ledgerBytes);
+  const repeat = await planHomeSourceRelocation(home, journal, backupRoot);
+  expect(repeat.changes).toEqual([]);
+  expect(repeat.state.blocked).toBeNull();
+  expect(repeat.ledger.chapters[0]!.sizeAtSeal).toBe(repeat.state.cursor!.home.chapters[0]!.size);
+  await applyHomeSourceRelocation(repeat, join(fx.root, "partial-repair-backup"));
+  const workspace = new TronWorkspace(home); workspaces.push(workspace);
+  const reopened = await EpisodicMemory.open({ workspace, sessionId: "home", sessionSource: fx.source, summarizer: summarize, limits: { viewBytes: 4096, jobs: 2, retryMs: 0 } }); memories.push(reopened);
+  await reopened.entriesCommitted("home");
+  expect(reopened.status().blocked).toBeNull();
+  expect(reopened.status().messages).toBe(3);
+  expect(await reopened.cutAtEntry("e")).toBe(3);
+  const repaired = await new EpisodicStore(workspace, "home", 1024 * 1024).read();
+  expect([...repaired.nodes.values()].slice(0, original.nodes.size)).toEqual([...original.nodes.values()]);
+  expect([...repaired.messages.values()].slice(0, original.messages.size)).toEqual([...original.messages.values()]);
+  expect(summarize).toHaveBeenCalledTimes(originalCalls);
+  const source = fx.chapters[0]!;
+  const valid = await readFile(source.path, "utf8");
+  await writeFile(source.path, valid.replace("violet", "silver"));
+  await expect(relocateHomeSourceCursor(source.path, headers.get(source.sessionId)!, state.cursor!.home.chapters[0]!)).rejects.toThrow("exact ingested session body");
+  await writeFile(source.path, valid.replace('"version":3', '"version":4'));
+  await expect(relocateHomeSourceCursor(source.path, headers.get(source.sessionId)!, state.cursor!.home.chapters[0]!)).rejects.toThrow("more than the session cwd");
 });
 
 it("labels an assistant summary from the canonical Home item kind", async () => {

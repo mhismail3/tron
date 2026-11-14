@@ -115,6 +115,7 @@ Commands:
                                     Read-only boundary metadata; exits 0 clean, 1 findings,
                                     2 incomplete/error (docs/tron-home.md)
   home-layout migrate --home PATH (--dry-run|--status|--apply|--rollback) [--json]
+  home-layout repair-memory --home PATH --journal PATH (--dry-run|--apply --backup NEW_DIR)
                                     JSON plan/status or offline journaled renames/inverse;
                                     exits 0 clear, 1 refusal, pending or conflict, 2 error
   context audit [--report-only]      Render context layers and diagnose duplicates,
