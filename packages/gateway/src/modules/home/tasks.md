@@ -65,8 +65,8 @@ rechecks the Home route binding and never acquires a runtime. The shared episodi
 projection excludes thinking, redacts credential-shaped secrets and respects context edits.
 Worker content is untrusted data, never authorization. The paged text lists owned subagent
 session IDs; `subagentSessionId` selects one of those sessions, including nested descendants.
-Ownership requires both the canonical parent relationship and the delegated session directory
-layout. Root chats, unrelated children and ambiguous IDs are refused. Reads never revive children.
+Ownership follows the delegated session directory layout; a canonical parent header, when
+present, must agree with that layout. Root chats, unrelated children and ambiguous IDs are refused. Reads never revive children.
 
 ## Worker progress check-ins
 

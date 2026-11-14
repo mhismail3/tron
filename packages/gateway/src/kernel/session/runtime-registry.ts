@@ -317,6 +317,7 @@ interface CatalogAcquisitionEntry {
   canonicalCwd: string;
   fileIdentity?: string;
   structuralSubagent: boolean;
+  parentSessionPath?: string;
   parentSessionId?: string;
 }
 
@@ -1901,6 +1902,7 @@ export class RuntimeRegistry implements SessionOperations {
         canonicalCwd: resolve(session.cwd || process.cwd()),
         ...(session.fileIdentity ? { fileIdentity: session.fileIdentity } : {}),
         structuralSubagent: session.delegated,
+        ...(session.parentSessionPath ? { parentSessionPath: session.parentSessionPath } : {}),
         ...(parentSessionId ? { parentSessionId } : {}),
       };
       retainedBytes += Buffer.byteLength(JSON.stringify(entry));
@@ -3374,14 +3376,16 @@ export class RuntimeRegistry implements SessionOperations {
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
     const root = acquisition.entriesByID.get(sessionId);
     if (!root) throw new GatewayError("not_found", "Task worker session is unavailable");
+    const byPath = new Map([...acquisition.entriesByID.values()].map(entry => [entry.path, entry]));
     const owned = new Set([sessionId]);
     let changed = true;
     while (changed) {
       changed = false;
       for (const entry of acquisition.entriesByID.values()) {
-        if (owned.has(entry.id) || !entry.structuralSubagent || !entry.parentSessionId || !owned.has(entry.parentSessionId)) continue;
-        const parent = acquisition.entriesByID.get(entry.parentSessionId)!;
-        if (delegatedSessionParentPath(entry.path, this.catalogDirectory()) !== parent.path) continue;
+        if (owned.has(entry.id) || !entry.structuralSubagent) continue;
+        const parentPath = delegatedSessionParentPath(entry.path, this.catalogDirectory());
+        const parent = parentPath ? byPath.get(parentPath) : undefined;
+        if (!parent || !owned.has(parent.id) || entry.parentSessionPath && resolve(entry.parentSessionPath) !== parent.path) continue;
         owned.add(entry.id);
         changed = true;
       }
