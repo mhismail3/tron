@@ -102,7 +102,8 @@ are installed; schema access never evaluates their late-bound service getter.
   atomically within one store and rolls back across stores; requests
   serialize per target.
 - The record is append-only and kept forever; credentials and redacted values
-  never appear in it. It is never read to compute a value.
+  never appear in it. It is never read to compute a value. Reads (RPC and agent tool) return
+  the kernel's public entries: values of a flagged, retired or unknown key are never returned.
 - An agent's history page and Undo reach only its own chat's changes; the scope
   filter runs inside the history owner's page, never after the page returns. Tron Home
   and the maintainer see and undo all changes, each Undo logged with before and after.

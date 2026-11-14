@@ -6,7 +6,7 @@ import { RequestSpanLane } from "../../util/request-span.js";
 import { type ConfirmChange, type ChangeRequest, type SettingsSignal, type ChangeOutcome, type ChangeResult, type ChangeStatus, type GitResult, type FixedSetting, type SettingsTarget, type Direction, type LayerId, type Qualifiers } from "./tool-contract.js";
 import type { Actor, ActorKind, ChangeEntry, SettingsChangeRecord } from "./settings-record.js";
 import { composedBelow, readBinding, resolveSettings } from "./settings-resolver.js";
-import { HOME_PROFILE_SUBJECT, keyDefault, hasSessionSettingsApplier, keyForHome, type Binding, type KeyDeclaration } from "./settings-schema.js";
+import { HOME_PROFILE_SUBJECT, keyDefault, hasSessionSettingsApplier, keyForHome, type Binding, type KeyDeclaration, type SettingsSchema } from "./settings-schema.js";
 import { changeReview, formatStoredSetting, LAYER_LABELS, type ModelRefValue, type SettingsStores, type PlannedWrite } from "./settings-types.js";
 import { canonicalSettingsTarget, scopeAdmitted, storeForScope } from "./scope-resolution.js";
 import { SettingsModel, declaredKey, deepEqual, setPath, unsetPath, qualifiedWrite, type SessionSettingsSource, type SettingsReadOwner } from "./settings-model.js";
@@ -101,6 +101,13 @@ export function historyVisible(viewer: Actor, entry: ChangeEntry): boolean {
   if (viewer.kind === "home" || viewer.kind === "ui") return true;
   return entry.target.kind === "session" && entry.target.sessionId === viewer.sessionId
     || viewer.sessionId !== undefined && entry.actor.sessionId === viewer.sessionId;
+}
+
+export function publicHistoryEntry(schema: SettingsSchema, entry: ChangeEntry): ChangeEntry {
+  if (entry.action || entry.key === HOME_PROFILE_SUBJECT.id) return entry;
+  if (!entry.redacted && schema.auditSubject(entry.key) !== undefined) return entry;
+  const { before: _before, after: _after, fixedAt: _fixedAt, ...hidden } = entry;
+  return { ...hidden, changed: true, redacted: true };
 }
 
 export class SettingsChangePath {
@@ -357,14 +364,15 @@ export class SettingsChangePath {
     }], { ...context, applyAgainOf: changeId, ...(session ? { session } : {}) });
   }
 
-  history(input: { cursor?: string; limit?: number; key?: string; status?: string; actor?: ActorKind | "agents"; layer?: LayerId; section?: string }, viewer: Actor) {
-    return this.record.page({
+  async history(input: { cursor?: string; limit?: number; key?: string; status?: string; actor?: ActorKind | "agents"; layer?: LayerId; section?: string }, viewer: Actor) {
+    const page = await this.record.page({
       ...(input.cursor ? { cursor: input.cursor } : {}), ...(input.limit ? { limit: input.limit } : {}),
       filter: entry => historyVisible(viewer, entry) && (!input.key || entry.key === input.key) && (!input.status || entry.status === input.status)
         && (!input.actor || (input.actor === "agents" ? entry.actor.kind !== "ui" : entry.actor.kind === input.actor))
         && (!input.layer || entry.layer === input.layer)
         && (!input.section || this.model.schema.auditSubject(entry.key)?.group === input.section),
     });
+    return { ...page, entries: page.entries.map(entry => publicHistoryEntry(this.model.schema, entry)) };
   }
 
   private async announce(changes: readonly ChangeOutcome[], context: ChangeContext): Promise<SettingsSignal | undefined> {

@@ -151,7 +151,7 @@ changes only while idle; `setup.sessionDir` has no writer; Home Chat compaction 
 refused. **Record:** `<tronHome>/state/settings/changes/`, append-only 500-entry segments
 listed in `index.json`, kept forever, paged by `settings.history` (the maintainer's full view) or the tool's `history`
 action (optional key filter, cursor and limit 1–200; a page may be empty with a
-`nextCursor`); entries hold actor, target, key, `before`/`after` (never credentials), reason,
+`nextCursor`); entries hold actor, target, key, `before`/`after` (never credentials; reads return values only for a declared key or record subject not flagged redacted, so a retired or unknown key's values never leave the Gateway), reason,
 status, git result and `undoOf`/`applyAgainOf`. Scope: an agent's history and Undo cover only its own
 chat's changes, meaning those targeting its session and those its session initiated (including its Global
 changes); foreign rows are absent from its pages and its Undo of them is refused. Tron Home sees and undoes every
