@@ -77,7 +77,10 @@ actual K3 host; native frames do not select product modules or keep another list
   and `setsid` children stay owned after re-parenting to launchd; the reap freezes, re-reads
   and kills them, then removes the scope and the commands' short `TMPDIR`,
   `$TMPDIR/tron-tc/<10-hex session digest>` (fixtures nest under it and embed it in
-  byte-bounded data, #2260). Interactive sessions have no scope.
+  byte-bounded data, #2260). Before removing that temporary tree, the reaper restores
+  owner write/search permission on its directories, skips symlinks and leaves their
+  targets untouched. Permission or removal failures keep the existing `remove-failed`
+  refusal. Interactive sessions have no scope.
 
 - `context-delivery.ts`: canonical inbox delivery; Run owns terminal decisions and writes.
   Pure parsing/folding and encoded bounds live in [Receipts](../receipts/README.md); persisted bytes remain stable.
