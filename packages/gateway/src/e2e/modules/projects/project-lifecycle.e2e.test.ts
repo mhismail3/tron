@@ -160,7 +160,7 @@ exec ${JSON.stringify(realGit)} "$@"
   it("Home creates an untrusted main repository, approval grants trust and the real delegate owner immediately admits work", async () => {
     const f = await fixture();
     await f.decide(await f.create("slim-key"));
-    await f.decide((await f.request({ action: "untrust", name: "slim-key" })).details);
+    expect((await f.request({ action: "untrust", name: "slim-key" })).details).toMatchObject({ status: "applied", changes: [{ key: "permissions.projectTrust", status: "applied" }] });
     expect(await f.git("slim-key", ["symbolic-ref", "--short", "HEAD"])).toBe("main");
     expect((await f.trust.inspect(f.path("slim-key"))).effectiveDecision).toBe(false);
     await expect(homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "untrusted-task", target: f.path("slim-key"), intent: "Report a finite result" }).then(handle => handle.completion)).rejects.toThrow(/trust/i);
