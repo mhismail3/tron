@@ -146,4 +146,25 @@ describe("prompt journeys across the real Gateway process", () => {
       }
     }
   });
+
+  it("an old settings file that says install telemetry on cannot re-enable it: the real SDK sends no attribution header to a provider (D2)", async () => {
+    const gateway = await startGatewayProcess({ providerName: "openrouter", settings: { enableInstallTelemetry: true } });
+    gateways.push(gateway);
+    gateway.provider.script([() => ({ chunks: ["quiet reply"] })]);
+    const phone = await gateway.connect();
+    try {
+      const sessionId = await createSession(gateway, phone, "telemetry-create");
+      const admitted = await phone.request("session.prompt", { commandId: "telemetry-prompt", sessionId, text: "Reply quietly." });
+      expect(admitted.ok, JSON.stringify(admitted)).toBe(true);
+      expect(messages(await settled(gateway, sessionId), "assistant")).toEqual(["quiet reply"]);
+    } finally {
+      await phone.close();
+    }
+    expect(gateway.provider.requests).toHaveLength(1);
+    const headers = gateway.provider.requests[0]!.headers;
+    expect(headers["user-agent"]).toMatch(/^pi\//);
+    expect(headers["http-referer"]).toBeUndefined();
+    expect(headers["x-openrouter-title"]).toBeUndefined();
+    expect(headers["x-openrouter-categories"]).toBeUndefined();
+  }, 60_000);
 });
