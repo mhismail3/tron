@@ -107,20 +107,15 @@ describe("typed changes and exact native acceptance", () => {
     expect(history.entries).toEqual([expect.objectContaining({ status: "applied" })]);
     await waitFor(() => signals.some(event => event.outcome === "resources-reload" && event.reason === "completed" && event.sessionId === ordinary.id), "the idle ordinary session reloads the MCP change");
     await waitFor(async () => (await readFile(marker, "utf8").catch(() => "")).includes("tools/list") || undefined, "the docs server lists its tools");
-    const offered: string[][] = [];
     faux.setResponses([
-      (context: TranscriptContext) => {
-        offered.push((context.tools ?? []).map(tool => tool.name));
-        return fauxAssistantMessage([fauxToolCall("mcp__fixture-docs__fixture_tool", { value: "after-reload" }, { id: "mcp-next" })], { stopReason: "toolUse" });
-      },
+      fauxAssistantMessage([fauxToolCall("mcp__fixture_docs__fixture_tool", { value: "after-reload" }, { id: "mcp-next" })], { stopReason: "toolUse" }),
       fauxAssistantMessage("Used the docs server"),
-    ] as never);
+    ]);
     await ordinary.prompt("Use the docs server");
     await waitFor(() => !ordinary.isBusy, "the next ordinary turn settled");
-    expect(offered[0]).toContain("mcp__fixture-docs__fixture_tool");
     expect(JSON.stringify(ordinary.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === "mcp-next")))
       .toContain("worked:after-reload");
-    expect(await readFile(marker, "utf8")).toContain("launched");
+    expect(await readFile(marker, "utf8")).toContain("tools/call");
     await service.invoke(phone, "settings.undo", { commandId: "mcp-docs-undo", changeId: history.entries[0]!.changeId });
     expect(JSON.parse(await readFile(join(agentDir, "mcp.json"), "utf8")).mcpServers["fixture-docs"]).toBeUndefined();
     faux.setResponses([

@@ -63,7 +63,7 @@ Record writes (`tools.mcp.server`) are Global-only and take one qualifier, `serv
 `ui` and `home`, as for the Home keys; agents, workers and Project layers are refused. Adding or
 enabling a server, changing its command, args or URL, or raising its visibility requires the
 native tap. Disabling, removing, or lowering exposure applies as routine. Undo uses the same path and records
-its own entry.
+its own entry. The typed value carries no inline credentials: env, headers, OAuth and secret-named tokens are refused. Tron-made change entries retain the typed command, args or URL for Undo; outside-edit entries retain only a digest.
 
 `SettingsToolAccess` resolves and changes the current session or Home's delegated
 worker. Routine reversible changes, tool selection included, apply, log and can be undone.
