@@ -492,6 +492,18 @@ describe("settings.change", () => {
     await writeFile(join(pkg, "package.json"), JSON.stringify({ name: "inventory-package", version: "1.0.0" }));
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), packages: [pkg] }));
     await f.service.invoke(client(), "mcp.add", { commandId: commandId(), scope: "global", server: "inventory-http", transport: "http", url: "http://user:inventory-secret@127.0.0.1:1/mcp?token=inventory-query-secret" });
+    const markers = join(f.root, "inventory-markers");
+    await mkdir(markers);
+    const launched = join(markers, "stdio-launched");
+    const disabledLaunched = join(markers, "disabled-launched");
+    const resolved = join(markers, "credential-resolved");
+    const mcpPath = join(f.agentDir, "mcp.json");
+    const mcpDocument = JSON.parse(await readFile(mcpPath, "utf8")) as { mcpServers: Record<string, unknown> };
+    mcpDocument.mcpServers["inventory-stdio"] = { command: "/bin/sh", args: ["-c", `touch ${launched}`] };
+    mcpDocument.mcpServers["inventory-disabled"] = { command: "/bin/sh", args: ["-c", `touch ${disabledLaunched}`], enabled: false };
+    mcpDocument.mcpServers["inventory-credential"] = { url: "http://127.0.0.1:1/credential", headers: { Authorization: `!touch ${resolved}; printf secret` } };
+    mcpDocument.mcpServers["inventory-slash-userinfo"] = { url: "https://user:pa/ss@127.0.0.1:1/mcp" };
+    await writeFile(mcpPath, JSON.stringify(mcpDocument, null, 2));
     f.faux.setResponses([
       fauxAssistantMessage([fauxToolCall("settings", { action: "inventory" }, { id: "inventory-tool" })], { stopReason: "toolUse" }),
       fauxAssistantMessage("Done"),
@@ -504,8 +516,17 @@ describe("settings.change", () => {
     const inventory = result.message.details as SettingsInventory;
     expect(inventory.hooks.extensions.find(extension => extension.name === "builtin:mcp")?.handlers).toContainEqual({ event: "session_start", count: 1 });
     expect(inventory.packages).toContainEqual(expect.objectContaining({ source: pkg, scope: "user" }));
-    expect(inventory.mcp.servers.map(server => server.name)).toContain("inventory-http");
-    expect(JSON.stringify(inventory)).not.toMatch(/inventory-secret|inventory-query-secret/);
+    expect(existsSync(launched)).toBe(false);
+    expect(existsSync(disabledLaunched)).toBe(false);
+    expect(existsSync(resolved)).toBe(false);
+    expect(inventory.mcp.servers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "inventory-http", scope: "global", state: "configured", transport: "http" }),
+      expect.objectContaining({ name: "inventory-stdio", scope: "global", state: "configured", transport: "stdio" }),
+      expect.objectContaining({ name: "inventory-disabled", scope: "global", state: "disabled", enabled: false }),
+      expect.objectContaining({ name: "inventory-credential", state: "configured", transport: "http" }),
+      expect.objectContaining({ name: "inventory-slash-userinfo", state: "configured", transport: "http" }),
+    ]));
+    expect(JSON.stringify(inventory)).not.toMatch(/inventory-secret|inventory-query-secret|pa\/ss|user:|127\.0\.0\.1|secret/);
   });
 
   caseIt("an agent pages only its own settings history, never another chat's or the maintainer's rows", async owner => {
