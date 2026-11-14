@@ -10,7 +10,7 @@ const gatewayRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const oxlint = join(gatewayRoot, "node_modules", ".bin", "oxlint");
 const config = join(gatewayRoot, ".oxlintrc.json");
 
-const flags = ["-c", config, "--format", "unix", "--deny-warnings", "--report-unused-disable-directives"];
+const flags = ["-c", config, "--format", "agent", "--deny-warnings", "--report-unused-disable-directives"];
 
 async function lintFixture(files) {
   const root = await mkdtemp(join(tmpdir(), "tron-oxlint-rules-"));
