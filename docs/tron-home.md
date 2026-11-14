@@ -217,6 +217,27 @@ receive exact refusal markers. Startup checks again under its runtime lease befo
 persisting configuration; legacy/partial layouts refuse with the migration command.
 The entrypoint may append a fatal-startup diagnostic, but initializes no second tree.
 
+### Maintainer cutover packet
+
+`tools/home-layout/operator_cutover.py` is the inert source template for the
+maintainer-only #2500 cutover packet, not a Gateway command or automated deployment.
+Its empty `REVISION` and `REVIEWED_TREE` refuse execution. After source verification
+and non-author review, land the source with a plain no-ff merge. Copy the template
+to that merge's clean checkout at `test-results/2500-resume4/operator-cutover.py`,
+and bind only those two literals to the exact merge SHA and its Git tree. Review
+that exact bound packet before handing its `apply` command to the maintainer.
+The checkout and remote main must still equal the bound revision at invocation.
+Keep packet instructions beside it in `OPERATOR-CUTOVER.md`; never reuse an older
+failed operation or build directory. A new merge gets new maintenance paths.
+
+Platform command logs are paths, whereas the packet's commands and migration use
+an open output stream. The adapter flushes the append-mode stream before handing
+its path to every platform call, including stop and rollback launch. Append mode
+prevents later stream writes from overwriting output appended by the platform.
+The existing home-layout test suite drives both actions under a disposable HOME
+with an inert platform and the real command-log writer. It proves this wiring,
+receipt completion and app-byte restoration, not live replacement approval.
+
 ### Private SSH
 
 The owned launch-agent plist is the sole enabled-intent authority. Migration backs up

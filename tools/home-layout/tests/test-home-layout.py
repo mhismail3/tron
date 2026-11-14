@@ -13,14 +13,17 @@ disposable homes.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -85,6 +88,122 @@ def snapshot(root: Path, contents_first: bool = True) -> dict:
             bodies.get(path) if contents_first else path.read_bytes() if stat.S_ISREG(info.st_mode) else None,
         )
     return result
+
+
+class OperatorCutoverTests(unittest.TestCase):
+    def test_apply_and_rollback_pass_paths_to_every_platform_log_boundary(self):
+        with tempfile.TemporaryDirectory(prefix="cutover-home-") as temporary:
+            user = Path(temporary)
+            spec = importlib.util.spec_from_file_location("operator_cutover", ROOT / "tools/home-layout/operator_cutover.py")
+            operator = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(operator)
+            sys_path = list(sys.path)
+            self.addCleanup(setattr, sys, "path", sys_path)
+            sys.path.insert(0, str(ROOT / "scripts"))
+            import tron_mac_replace_platform as boundary
+            calls = []
+            pending = []
+            revision = "a" * 40
+            tree = "b" * 40
+            candidate = user / "candidate.app"
+            candidate.mkdir()
+            (candidate / "identity").write_text("new")
+            installed = user / "Tron.app"
+            installed.mkdir()
+            (installed / "identity").write_text("old")
+
+            class Platform(boundary.MacPlatform):
+                def __init__(self):
+                    super().__init__(user)
+                    self.installed = installed
+
+                def admit(self):
+                    if Path.home() != user:
+                        raise AssertionError("not a sandbox HOME")
+
+                def __getattribute__(self, name):
+                    if name in {"build", "verify_artifact", "quit_app", "replace_app_bytes", "launch_app", "refresh_guard", "verify_installed"}:
+                        def call(*args):
+                            log = args[-1]
+                            boundary.run(["/bin/echo", name], log)
+                            content = Path(log).read_text()
+                            if any(marker not in content for marker in pending):
+                                raise AssertionError("buffered operator output was not flushed before platform call")
+                            pending.clear()
+                            calls.append(name)
+                            if name == "build":
+                                self.build_root(revision).mkdir(parents=True)
+                                return candidate
+                            if name == "replace_app_bytes":
+                                shutil.copytree(args[0], args[1])
+                        return call
+                    return super().__getattribute__(name)
+
+                def quit_progress(self):
+                    return None
+
+                def offline_blocker(self):
+                    return None
+
+                def clear_quit_request(self):
+                    return None
+
+                def gateway_pid(self):
+                    return 123
+
+                def port_listening(self):
+                    return True
+
+                def system_info(self):
+                    return {"sourceRevision": revision}
+
+            platform = Platform()
+
+            def command(args, log, cwd=None):
+                marker = "operator-command-" + str(len(pending))
+                log.write(marker + "\n")
+                pending.append(marker)
+                active = platform.maintenance / "active.json"
+                if "--app" in args:
+                    operator.save(active, {"id": "backup"})
+                if "--abandon" in args:
+                    active.unlink()
+
+            def migrate(build, action, operation, log, home):
+                self.assertEqual(home, user / ".tron")
+                marker = "migration-" + action
+                log.write(marker + "\n")
+                pending.append(marker)
+                return {"state": "rolled_back" if action == "--rollback" else "applied", "errors": [], "blockers": []}
+
+            def git(args, **kwargs):
+                if "--porcelain" in args:
+                    return ""
+                return tree if revision + "^{tree}" in args else revision
+
+            env = {**os.environ, "HOME": str(user)}
+            env.pop("PI_SESSION_ID", None)
+            with patch.dict(os.environ, env, clear=True), \
+                    patch.object(operator, "REVISION", revision), patch.object(operator, "REVIEWED_TREE", tree), \
+                    patch.object(operator.subprocess, "check_output", side_effect=git), \
+                    patch.object(operator.shutil, "disk_usage", return_value=shutil._ntuple_diskusage(10**12, 0, 10**12)), \
+                    patch.object(boundary, "MacPlatform", Platform), \
+                    patch.object(operator, "command", side_effect=command), patch.object(operator, "migrate", side_effect=migrate), \
+                    patch.object(operator, "ssh", return_value=str(user / "legacy.plist")):
+                with patch("sys.argv", ["operator-cutover.py", "apply"]):
+                    operator.main()
+                receipt = platform.maintenance / ("cutover-2500-" + revision[:12]) / "receipt.json"
+                self.assertEqual(json.loads(receipt.read_text())["phase"], "verified")
+                self.assertEqual((installed / "identity").read_text(), "new")
+                with patch("sys.argv", ["operator-cutover.py", "rollback"]):
+                    operator.main()
+                self.assertEqual(json.loads(receipt.read_text())["phase"], "rolled-back")
+                self.assertEqual((installed / "identity").read_text(), "old")
+            self.assertEqual(calls, ["build", "verify_artifact", "quit_app", "replace_app_bytes", "verify_artifact", "launch_app", "refresh_guard", "verify_installed", "quit_app", "launch_app"])
+            for action, expected in (("apply", calls[:8]), ("rollback", calls[8:])):
+                log = receipt.parent / (action + ".log")
+                self.assertEqual(stat.S_IMODE(log.stat().st_mode), 0o600)
+                self.assertEqual([line for line in log.read_text().splitlines() if line in calls], expected)
 
 
 class HomeLayoutTests(unittest.TestCase):
