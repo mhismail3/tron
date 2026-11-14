@@ -15,6 +15,7 @@ import { readCanonicalHomeDeltas, readCanonicalHomeIndex } from "./home-source.j
 import type { EpisodicSourceDelta } from "./episodic-projection.js";
 import { relocateHomeSourceCursor } from "./home-source-relocation.js";
 import { applyHomeSourceRelocation, planHomeSourceRelocation } from "./home-source-relocation-migration.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const roots: string[] = [];
 const memories: EpisodicMemory[] = [];
@@ -133,17 +134,22 @@ it("repairs only a proven header relocation, preserves summaries across reopen a
   expect(plan.changes).toHaveLength(2);
   const savedBytes = await readFile(plan.statePath);
   expect(savedBytes).toEqual(plan.stateBytes);
-  await expect(applyHomeSourceRelocation(plan, join(fx.root, "refused-backup"))).rejects.toThrow("still owned by the Gateway");
+  const orphanProgram = `const m=await import(${JSON.stringify(new URL("./home-source-relocation-migration.ts", import.meta.url).href)}); await new Promise(r=>setTimeout(r,100)); try { await m.applyHomeSourceRelocation(await m.planHomeSourceRelocation(${JSON.stringify(home)},${JSON.stringify(journal)},${JSON.stringify(backupRoot)}),${JSON.stringify(join(fx.root, "orphan-backup"))},Number(process.argv[1])); process.stdout.write("unexpected publication"); } catch(error) { await (await import("node:fs/promises")).writeFile(${JSON.stringify(join(fx.root, "orphan-result"))},error.message); }`;
+  const launcher = `require("node:child_process").spawn(process.execPath,["--experimental-transform-types","--import",${JSON.stringify(new URL("../../test-support/source-ts-resolver-preload.mjs", import.meta.url).href)},"--input-type=module","-e",${JSON.stringify(orphanProgram)},String(process.pid)],{stdio:["ignore","inherit","inherit"]}).unref();`;
+  execFileSync(process.execPath, ["-e", launcher], { encoding: "utf8", timeout: 20_000 });
+  await waitFor(async () => await readFile(join(fx.root, "orphan-result"), "utf8").catch(() => "") === "Offline repair lease owner was lost", "orphaned repair refuses publication");
+  expect(await readFile(plan.statePath)).toEqual(savedBytes);
+  await expect(applyHomeSourceRelocation(plan, join(fx.root, "refused-backup"), process.ppid)).rejects.toThrow("still owned by the Gateway");
   await fx.workspace.dispose();
-  await applyHomeSourceRelocation(plan, join(fx.root, "repair-backup"));
+  await applyHomeSourceRelocation(plan, join(fx.root, "repair-backup"), process.ppid);
   expect(await readFile(join(fx.root, "repair-backup/workspace/state/episodic/home/state.json"))).toEqual(savedBytes);
-  await expect(applyHomeSourceRelocation(plan, join(fx.root, "stale-backup"))).rejects.toThrow("Memory changed during relocation proof");
+  await expect(applyHomeSourceRelocation(plan, join(fx.root, "stale-backup"), process.ppid)).rejects.toThrow("Memory changed during relocation proof");
   await writeFile(plan.ledgerPath, plan.ledgerBytes);
   const repeat = await planHomeSourceRelocation(home, journal, backupRoot);
   expect(repeat.changes).toEqual([]);
   expect(repeat.state.blocked).toBeNull();
   expect(repeat.ledger.chapters[0]!.sizeAtSeal).toBe(repeat.state.cursor!.home.chapters[0]!.size);
-  await applyHomeSourceRelocation(repeat, join(fx.root, "partial-repair-backup"));
+  await applyHomeSourceRelocation(repeat, join(fx.root, "partial-repair-backup"), process.ppid);
   const workspace = new TronWorkspace(home); workspaces.push(workspace);
   const reopened = await EpisodicMemory.open({ workspace, sessionId: "home", sessionSource: fx.source, summarizer: summarize, limits: { viewBytes: 4096, jobs: 2, retryMs: 0 } }); memories.push(reopened);
   await reopened.entriesCommitted("home");

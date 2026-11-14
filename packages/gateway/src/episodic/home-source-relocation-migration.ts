@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { copyFile, lstat, mkdir, open, readFile, realpath, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { durableAtomicWriteJson, syncDurably } from "../foundation/durable-json.js";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
@@ -90,16 +90,23 @@ export async function planHomeSourceRelocation(home: string, journalPath: string
   return { home, journalPath: resolve(journalPath), ledgerPath, statePath, ledgerBytes, stateBytes, ledger, state: nextState, changes, proofs };
 }
 
-export async function applyHomeSourceRelocation(plan: Awaited<ReturnType<typeof planHomeSourceRelocation>>, backup: string): Promise<void> {
+export async function applyHomeSourceRelocation(plan: Awaited<ReturnType<typeof planHomeSourceRelocation>>, backup: string, leaseOwnerPid: number): Promise<void> {
+  const assertLeaseOwner = () => {
+    if (!Number.isSafeInteger(leaseOwnerPid) || leaseOwnerPid <= 1 || process.ppid !== leaseOwnerPid) throw new Error("Offline repair lease owner was lost");
+  };
+  assertLeaseOwner();
+  const fileSystem = { mkdir, open, rm, lstat, readdir, writeFile, syncDurably,
+    rename: (async (from, to) => { assertLeaseOwner(); await rename(from, to); }) as typeof rename };
   backup = resolve(backup);
   const workspace = new TronWorkspace(plan.home);
   await workspace.initialize();
   try {
     if (!(await workspace.describe()).available) throw new Error("Workspace is unavailable or still owned by the Gateway; stop Tron before applying");
-    const store = new EpisodicStore(workspace, plan.ledger.homeId, EPISODIC_DEFAULTS.maxStoreLineBytes);
+    const store = new EpisodicStore(workspace, plan.ledger.homeId, EPISODIC_DEFAULTS.maxStoreLineBytes, fileSystem);
     const current = await store.readState();
     if (JSON.stringify(current) !== JSON.stringify(JSON.parse(plan.stateBytes.toString("utf8")))) throw new Error("Memory changed during relocation proof");
     if (!(await bounded(plan.ledgerPath, 2_097_152)).equals(plan.ledgerBytes)) throw new Error("Home ledger changed during relocation proof");
+    assertLeaseOwner();
     await mkdir(backup, { mode: 0o700 });
     for (const [path, bytes] of [[plan.statePath, plan.stateBytes], [plan.ledgerPath, plan.ledgerBytes]] as const) {
       const destination = join(backup, relative(plan.home, path));
@@ -127,7 +134,7 @@ export async function applyHomeSourceRelocation(plan: Awaited<ReturnType<typeof 
       if (JSON.stringify(identity) !== JSON.stringify(proof.identity)) throw new Error("Source changed since relocation proof");
     }
     await store.saveState(plan.state);
-    await durableAtomicWriteJson(plan.ledgerPath, plan.ledger, 0o600);
+    await durableAtomicWriteJson(plan.ledgerPath, plan.ledger, 0o600, fileSystem);
   } finally { await workspace.dispose(); }
 }
 

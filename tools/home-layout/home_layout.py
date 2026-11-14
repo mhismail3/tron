@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import signal
 import stat
 import subprocess
 import sys
@@ -936,9 +937,27 @@ def main(argv: list[str]) -> int:
                     if refusal:
                         raise LayoutError(refusal["reason"])
                     guard()
-                    script = "const m=await import(process.argv[1]); await m.applyHomeSourceRelocation(await m.planHomeSourceRelocation(process.argv[2],process.argv[3],process.argv[4]),process.argv[5]); console.log(JSON.stringify({applied:true}));"
-                    command = [str(ROOT / "scripts/tron-node"), "exec", "node", "--input-type=module", "-e", script, module.as_uri(), repair_home, os.path.abspath(args.journal), str(receipt_root), os.path.abspath(args.backup)]
-                return subprocess.run(command, check=False).returncode
+                    script = "const m=await import(process.argv[1]); await m.applyHomeSourceRelocation(await m.planHomeSourceRelocation(process.argv[2],process.argv[3],process.argv[4]),process.argv[5],Number(process.argv[6])); console.log(JSON.stringify({applied:true}));"
+                    command = [str(ROOT / "scripts/tron-node"), "exec", "node", "--input-type=module", "-e", script, module.as_uri(), repair_home, os.path.abspath(args.journal), str(receipt_root), os.path.abspath(args.backup), str(os.getpid())]
+                previous_signal = signal.getsignal(signal.SIGTERM)
+                def interrupted(_number, _frame):
+                    raise KeyboardInterrupt()
+                signal.signal(signal.SIGTERM, interrupted)
+                child = None
+                try:
+                    child = subprocess.Popen(command)
+                    return child.wait()
+                finally:
+                    if child is not None and child.poll() is None:
+                        child.terminate()
+                        try:
+                            child.wait(timeout=10)
+                        except subprocess.TimeoutExpired:
+                            child.kill()
+                            child.wait()
+                    signal.signal(signal.SIGTERM, previous_signal)
+        except KeyboardInterrupt:
+            return 130
         except (OSError, LayoutError) as error:
             print(f"home-layout repair-memory: {error}", file=sys.stderr)
             return 1
