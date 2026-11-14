@@ -99,8 +99,27 @@ class OperatorCutoverTests(unittest.TestCase):
             spec.loader.exec_module(operator)
             sys_path = list(sys.path)
             self.addCleanup(setattr, sys, "path", sys_path)
-            sys.path.insert(0, str(ROOT / "scripts"))
+            sys.path[:0] = [str(ROOT / "scripts"), str(ROOT / "tools/home-layout")]
             import tron_mac_replace_platform as boundary
+            import terminal_layout as terminal
+            legacy = user / ".tron/mac-terminal"
+            launch_agent = user / "Library/LaunchAgents" / (terminal.label(legacy) + ".plist")
+            launch_agent.parent.mkdir(parents=True)
+            launch_agent.write_bytes(terminal.plist(legacy))
+            launchd = {"prints": None}
+
+            def launchctl(l, arguments, timeout=3):
+                if arguments[1] == "bootout":
+                    launchd["prints"] = 2
+                    return subprocess.CompletedProcess(arguments, 0, "", "")
+                if arguments[-1].endswith("/" + terminal.label(legacy)) and launchd["prints"] != 0:
+                    if launchd["prints"]:
+                        launchd["prints"] -= 1
+                    listing = (f"\tpath = {launch_agent}\n\tprogram = /usr/sbin/sshd\n\targuments = {{\n\t\t/usr/sbin/sshd\n\t\t-D\n\t\t-e\n"
+                               f"\t\t-f\n\t\t{legacy}/sshd_config\n\t}}\n\tstate = exiting\n")
+                    return subprocess.CompletedProcess(arguments, 0, listing, "")
+                return subprocess.CompletedProcess(arguments, 113, "", "Could not find service")
+
             calls = []
             pending = []
             revision = "a" * 40
@@ -163,6 +182,8 @@ class OperatorCutoverTests(unittest.TestCase):
                 marker = "operator-command-" + str(len(pending))
                 log.write(marker + "\n")
                 pending.append(marker)
+                if args[0] == "/bin/cp":
+                    shutil.copy2(args[2], args[3])
                 active = platform.maintenance / "active.json"
                 if "--app" in args:
                     operator.save(active, {"id": "backup"})
@@ -174,6 +195,8 @@ class OperatorCutoverTests(unittest.TestCase):
                 marker = "migration-" + action
                 log.write(marker + "\n")
                 pending.append(marker)
+                if action == "--apply":
+                    launch_agent.unlink()
                 return {"state": "rolled_back" if action == "--rollback" else "applied", "errors": [], "blockers": []}
 
             def git(args, **kwargs):
@@ -189,16 +212,18 @@ class OperatorCutoverTests(unittest.TestCase):
                     patch.object(operator.shutil, "disk_usage", return_value=shutil._ntuple_diskusage(10**12, 0, 10**12)), \
                     patch.object(boundary, "MacPlatform", Platform), \
                     patch.object(operator, "command", side_effect=command), patch.object(operator, "migrate", side_effect=migrate), \
-                    patch.object(operator, "ssh", return_value=str(user / "legacy.plist")):
+                    patch.object(terminal, "command", side_effect=launchctl):
                 with patch("sys.argv", ["operator-cutover.py", "apply"]):
                     operator.main()
                 receipt = platform.maintenance / ("cutover-2500-" + revision[:12]) / "receipt.json"
                 self.assertEqual(json.loads(receipt.read_text())["phase"], "verified")
+                self.assertEqual(launchd["prints"], 0)
                 self.assertEqual((installed / "identity").read_text(), "new")
                 with patch("sys.argv", ["operator-cutover.py", "rollback"]):
                     operator.main()
                 self.assertEqual(json.loads(receipt.read_text())["phase"], "rolled-back")
                 self.assertEqual((installed / "identity").read_text(), "old")
+                self.assertEqual(launch_agent.read_bytes(), terminal.plist(legacy))
             self.assertEqual(calls, ["build", "verify_artifact", "quit_app", "replace_app_bytes", "verify_artifact", "launch_app", "refresh_guard", "verify_installed", "quit_app", "launch_app"])
             for action, expected in (("apply", calls[:8]), ("rollback", calls[8:])):
                 log = receipt.parent / (action + ".log")
