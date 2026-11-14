@@ -266,6 +266,24 @@ describe("Run Swift files device preference over the real socket (Gateway servic
     successor.close();
   });
 
+  it("does not publish a read a predecessor answers after a newer capable connection is selected, with both sockets open", async () => {
+    const f = await fixture();
+    const older = await f.connect(f.phone.token);
+    const resolving = f.resolveKey();
+    await older.waitFor("read", 1);
+    const newer = await f.connect(f.phone.token);
+    expect(await older.answer(older.requests("read")[0]!, { status: "value", value: true }))
+      .toMatchObject({ ok: false, error: { code: "conflict" } });
+    expect(await resolving).toMatchObject({ value: null });
+    expect(newer.requests("read")).toHaveLength(0);
+    const fresh = f.resolveKey();
+    await newer.waitFor("read", 1);
+    expect(older.requests("read")).toHaveLength(1);
+    await newer.answer(newer.requests("read")[0]!, { status: "value", value: false });
+    expect(await fresh).toMatchObject({ value: false });
+    older.close(); newer.close();
+  });
+
   it("fences an in-flight read: a successor connection cannot answer the superseded request, which settles unavailable", async () => {
     const f = await fixture();
     const older = await f.connect(f.phone.token);
@@ -291,7 +309,7 @@ describe("Run Swift files device preference over the real socket (Gateway servic
     legacy.close();
   });
 
-  it("refuses an ordinary agent before any phone request", async () => {
+  it("refuses an ordinary agent's write with no phone set (planning reads are allowed)", async () => {
     const f = await fixture();
     const iphone = await f.connect(f.phone.token);
     const refused = f.settingsChanges.change(HOME, [{ key: KEY, layer: "global", op: "set", value: false, qualifiers: f.device, expected: true }] as never,
