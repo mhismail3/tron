@@ -191,7 +191,6 @@ final class AppModel {
     private let exportArtifacts: SessionExportArtifactStore
     private let mutationExecutor: ConfirmedMutationExecutor
     private let sessionMutations: SessionMutationService
-    private let sessionImports: SessionImportCoordinator
     let settingsTrust: SettingsTrustCoordinator
     private let providerAuth: ProviderAuthCoordinator
     private let packageConfiguration: PackageConfigurationCoordinator
@@ -422,8 +421,6 @@ final class AppModel {
         pairingCommit: PairingCommit? = nil,
         profileTokenLookup: ProfileTokenLookup? = nil,
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared,
-        sessionImportFileAccess: SessionImportFileAccess = .live,
-        sessionImportUpload: SessionImportUpload? = nil,
         composerUpload: ComposerUploadOperation? = nil,
         composerFileUpload: ComposerFileUploadOperation? = nil,
         composerSend: ComposerSendOperation? = nil,
@@ -601,14 +598,6 @@ final class AppModel {
             }
         )
         let chatMediaMemoryPressureObserver = ChatMediaMemoryPressureObserver(loader: chatMedia)
-        let resolvedSessionImportUpload = sessionImportUpload ?? { name, mimeType, fileURL, byteCount in
-            try await client.upload(
-                name: name,
-                mimeType: mimeType,
-                fileURL: fileURL,
-                byteCount: byteCount
-            )
-        }
         self.lifecycle = lifecycle
         self.noticeCenter = noticeCenter
         self.dashboardConnections = dashboardConnections
@@ -616,12 +605,6 @@ final class AppModel {
         self.homeMutations = homeMutations
         self.mutationExecutor = mutationExecutor
         self.sessionMutations = sessionMutations
-        self.sessionImports = SessionImportCoordinator(
-            lifecycle: lifecycle,
-            mutations: sessionMutations,
-            fileAccess: sessionImportFileAccess,
-            upload: resolvedSessionImportUpload
-        )
         self.settingsTrust = settingsTrust
         self.providerAuth = providerAuth
         self.packageConfiguration = packageConfiguration
@@ -2550,18 +2533,6 @@ extension AppModel {
                 setupComplete = false
             }
         }
-    }
-
-    func importSession(from url: URL, cwd: String) async throws -> SessionNavigationRoute {
-        let imported = try await sessionImports.importSession(from: url, cwd: cwd)
-        await refreshSessions()
-        try sessionImports.requireCurrent(imported)
-        return SessionNavigationRoute(
-            sessionID: imported.sessionID,
-            editorText: nil,
-            gatewayProfileID: imported.profileID,
-            gatewayLifecycleGeneration: imported.lifecycleGeneration
-        )
     }
 
     func ownsNavigationRoute(_ route: SessionNavigationRoute) -> Bool {
