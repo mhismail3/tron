@@ -404,7 +404,7 @@ describe("settings package update installs one exact version through the owner",
 });
 
 describe("settings package update binds the effective installer of a trusted project", () => {
-  async function trustedProjectUpdate(name: string) {
+  async function trustedProjectUpdate(name: string, recordFor: (tronHome: string) => SettingsChangeRecord = tronHome => new SettingsChangeRecord(tronHome)) {
     const root = await mkdtemp(join(tmpdir(), "tron-package-update-project-"));
     roots.push(root);
     const agentDir = join(root, "agent"), cwd = join(root, "workspace"), tronHome = join(root, "tron");
@@ -419,7 +419,7 @@ describe("settings package update binds the effective installer of a trusted pro
     await writeFile(globalSettings, JSON.stringify({ packages: [source] }));
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
-    const changes = new SettingsChangePath({} as never, new SettingsChangeRecord(tronHome), { setTrust: async () => undefined });
+    const changes = new SettingsChangePath({} as never, recordFor(tronHome), { setTrust: async () => undefined });
     const packages = new PackageService(agentDir, trust, () => {});
     packages.register(changes, () => {});
     const requester = { kind: "home" as const, id: "home-session" };
@@ -462,6 +462,35 @@ describe("settings package update binds the effective installer of a trusted pro
       await expect(readFile(replacedMarker)).rejects.toThrow();
       expect(await fixture.installedVersion()).toBe("1.0.0");
       expect((await fixture.changes.record.page({ filter: entry => entry.key === "package.update" })).entries).toEqual([]);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("installs the reviewed installer when the trusted project's settings change after the started record", async () => {
+    const hook: { run?: () => Promise<void> } = {};
+    const fixture = await trustedProjectUpdate(`tron-update-project-gap-${Date.now()}`, tronHome => new class extends SettingsChangeRecord {
+      override async append(entries: Parameters<SettingsChangeRecord["append"]>[0]): Promise<void> {
+        await super.append(entries);
+        if (hook.run && entries.some(entry => entry.status === "started")) {
+          const run = hook.run;
+          hook.run = undefined;
+          await run();
+        }
+      }
+    }(tronHome));
+    try {
+      const installer = (marker: string) => ({ npmCommand: ["sh", "-c", `touch '${marker}'; exec npm "$@"`, "tron-npm"] });
+      const reviewed = join(fixture.root, "reviewed-installer-ran"), replaced = join(fixture.root, "replaced-installer-ran");
+      await writeFile(fixture.projectSettings, JSON.stringify(installer(reviewed)));
+      hook.run = () => writeFile(fixture.projectSettings, JSON.stringify(installer(replaced)));
+      await expect(fixture.packages.updatePackage({ cwd: fixture.cwd, source: fixture.source, version: "1.2.0", reason: "Installer changes in the gap" }, fixture.requester, async (_review, apply) => apply({ deviceId: "ios-device", commandId: "effective-gap" })))
+        .resolves.toMatchObject({ status: "applied" });
+      expect(hook.run).toBeUndefined();
+      await readFile(reviewed);
+      await expect(readFile(replaced)).rejects.toThrow();
+      expect(await fixture.installedVersion()).toBe("1.2.0");
+      expect((await fixture.changes.record.page({ filter: entry => entry.key === "package.update" })).entries.map(entry => entry.status).sort()).toEqual(["applied", "started"]);
     } finally {
       await fixture.close();
     }
