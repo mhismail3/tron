@@ -50,7 +50,7 @@ destination="$1"; shift
 cd "$MINI_HOME" && HOME="$MINI_HOME" exec /usr/bin/python3 -c 'import os, sys; os.setsid(); os.execv("/bin/sh", ["sh", "-c", sys.argv[1]])' "$*"
 '''
 LANE = r'''#!/usr/bin/env python3
-import json, os, signal, sys, time
+import json, os, signal, subprocess, sys, time
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 args = sys.argv[1:]
@@ -62,7 +62,8 @@ if 'hang' in args:
     time.sleep(120)
 output = next(word.split('=', 1)[1] for word in args if word.startswith('--outputFile.json='))
 Path(output).write_text(json.dumps({'testResults': [{'name': str(ROOT / 'packages/gateway/src/a.test.ts')}], 'args': args,
-                                    'path': os.environ['PATH'], 'cwd': str(Path.cwd().relative_to(Path(os.environ['HOME']).resolve()))}))
+                                    'path': os.environ['PATH'], 'cwd': str(Path.cwd().relative_to(Path(os.environ['HOME']).resolve())),
+                                    'sha': subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip()}))
 sys.exit(3 if 'fail' in args else 0)
 '''
 
@@ -179,6 +180,124 @@ class MiniGatewayLane(unittest.TestCase):
         self.assertIn('uncommitted', dirty.stderr)
         self.assertNotIn('pushing', dirty.stdout)
         self.assertFalse(report.exists())
+
+    def test_concurrent_transfers_run_each_exact_commit_without_shared_ref_races(self) -> None:
+        repository = self.mini / 'tron-ci/tron.git'
+        hook = repository / 'hooks/pre-receive'
+        hook.write_text('''#!/usr/bin/python3
+import os, time
+from pathlib import Path
+barrier = Path(os.environ['MINI_HOME']) / 'transfers'
+barrier.mkdir(exist_ok=True)
+(barrier / str(os.getpid())).touch()
+deadline = time.monotonic() + 20
+while len(list(barrier.iterdir())) < 2:
+    if time.monotonic() >= deadline:
+        raise SystemExit('the second transfer never reached receive-pack')
+    time.sleep(0.02)
+''')
+        hook.chmod(0o755)
+        other = self.temporary / 'other'
+        self.git('clone', '--quiet', str(self.local), str(other))
+        self.git('config', 'tron.verify.mini', 'mini.test', cwd=other)
+        (other / 'README').write_text('distinct source\n')
+        self.git('add', 'README', cwd=other)
+        self.git('commit', '-qm', 'distinct source', cwd=other)
+        processes = []
+        for checkout in (self.local, other):
+            command = ['python3', str(checkout / 'tools/verify/mini.py'), '--reporter=json',
+                       '--outputFile.json=' + str(checkout / 'test-results/concurrent.json'), 'src/a.test.ts']
+            process = subprocess.Popen(command, cwd=checkout, env=self.env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            self.addCleanup(lambda process=process: process.poll() is None and process.kill())
+            processes.append((checkout, process))
+        results = [(checkout, process, process.communicate(timeout=90)[0]) for checkout, process in processes]
+        for checkout, process, output in results:
+            with self.subTest(checkout=checkout.name):
+                self.assertEqual(process.returncode, 0, output)
+                data = json.loads((checkout / 'test-results/concurrent.json').read_text())
+                self.assertEqual(data['sha'], self.git('rev-parse', 'HEAD', cwd=checkout))
+        refs = self.git('for-each-ref', '--format=%(refname)', cwd=repository).splitlines()
+        self.assertEqual(refs, ['refs/tron-jobs/gateway'])
+
+    def test_ios_lane_returns_native_artifacts_and_failure_through_the_normal_lease(self) -> None:
+        self.write('scripts/tron-ios-test', '''#!/usr/bin/python3
+import json, os, subprocess, sys
+from pathlib import Path
+root = Path(__file__).resolve().parents[1]
+results = Path(os.environ['TRON_IOS_TEST_RESULTS_DIR'])
+results.mkdir(parents=True)
+(results / 'TestResults.xcresult').mkdir()
+(results / 'TestResults.xcresult/Info.plist').write_text('native result fixture')
+if 'unsafe' in sys.argv:
+    (results / 'outside').symlink_to(root / 'README')
+(results / 'test.log').write_text('failure: fixture/native: deliberate red' if 'fail' in sys.argv else 'Executed 1 test, with 0 failures')
+(results / 'source.json').write_text(json.dumps({'sha': subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip(), 'args': sys.argv[1:], 'home': os.environ['HOME']}))
+print('Executed 1 test, with ' + ('1 failure' if 'fail' in sys.argv else '0 failures'), flush=True)
+raise SystemExit(9 if 'fail' in sys.argv else 0)
+''')
+        (self.local / 'scripts/tron-ios-test').chmod(0o755)
+        shutil.copy2(ROOT / 'scripts/tron', self.local / 'scripts/tron')
+        sha = self.commit('native result fixture')
+        repository = self.mini / 'tron-ci/tron.git'
+        foreign = self.git('rev-parse', 'HEAD^')
+        self.git('push', '--quiet', str(repository), f'{foreign}:refs/tron-jobs/incoming')
+        for flag, expected in (('pass', 0), ('fail', 9), ('unsafe', NO_RESULT)):
+            with self.subTest(outcome=flag):
+                result = subprocess.run([str(self.local / 'scripts/tron'), 'test', 'ios', 'run', flag, '--ios-host', 'mini'],
+                                        cwd=self.local, env=self.env, text=True, capture_output=True)
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                paths = [line.removeprefix('mini: artifacts: ') for line in result.stdout.splitlines() if line.startswith('mini: artifacts: ')]
+                if flag == 'unsafe':
+                    self.assertEqual(paths, [])
+                    self.assertIsNotNone(self.reader().no_result_reason(result.returncode, result.stdout + result.stderr))
+                    self.assertIn('unsafe mini artifact source', result.stdout + result.stderr)
+                    self.assertNotIn('cleanup unresolved', result.stderr)
+                    continue
+                self.assertEqual(len(paths), 1, result.stdout + result.stderr)
+                artifacts = Path(paths[0])
+                source = json.loads((artifacts / 'ios/source.json').read_text())
+                self.assertEqual(source['sha'], sha)
+                self.assertEqual(source['args'], ['run', flag])
+                self.assertEqual(Path(source['home']).resolve(), self.mini.resolve())
+                self.assertEqual((artifacts / 'ios/TestResults.xcresult/Info.plist').read_text(), 'native result fixture')
+                self.assertEqual(json.loads((artifacts / 'receipt.json').read_text())['exit'], expected)
+                if expected:
+                    self.assertIn('deliberate red', (artifacts / 'ios/test.log').read_text())
+        with open(self.mini / 'tron-ci/jobs/gateway.lock') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        self.assertEqual(self.git('rev-parse', 'refs/tron-jobs/incoming', cwd=repository), foreign)
+        self.assertEqual(self.git('for-each-ref', '--format=%(refname)', 'refs/tron-jobs/submissions/', cwd=repository), '')
+        self.assertEqual(list((self.mini / 'tron-ci/results').iterdir()), [])
+
+    def test_whole_verifier_returns_its_report_logs_and_raw_75_without_another_lease(self) -> None:
+        self.write('tools/verify/verify.py', '''import json, subprocess, sys
+from pathlib import Path
+root = Path(__file__).resolve().parents[2]
+sha = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+logs = root / 'test-results/verify' / sha
+logs.mkdir(parents=True)
+(logs / 'first-failure.log').write_text('native boundary fixture')
+main = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'origin/main'], text=True).strip()
+(logs.parent / (sha + '.json')).write_text(json.dumps({'commit': sha, 'main': main, 'args': sys.argv[1:]}))
+raise SystemExit(75 if '--incomplete' in sys.argv else 0)
+''')
+        sha = self.commit('whole-verifier boundary fixture')
+        main = self.git('rev-parse', 'HEAD^')
+        self.git('update-ref', 'refs/remotes/origin/main', main)
+        for args in (['--batch'], ['--update-locks', 'owner']):
+            denied = self.lane('verify', *args)
+            self.assertEqual(denied.returncode, NO_RESULT, denied.stdout + denied.stderr)
+            self.assertIn('synchronous checks', denied.stderr)
+            self.assertNotIn('pushing', denied.stdout)
+        for args, expected in ((['--changed'], 0), (['--incomplete'], 75)):
+            with self.subTest(exit=expected):
+                result = self.lane('verify', *args)
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                self.assertIsNone(self.reader().no_result_reason(result.returncode, result.stdout + result.stderr))
+                line = next(line for line in result.stdout.splitlines() if line.startswith('mini: artifacts: '))
+                artifacts = Path(line.removeprefix('mini: artifacts: '))
+                self.assertEqual(json.loads((artifacts / 'verify.json').read_text()), {'commit': sha, 'main': main, 'args': args})
+                self.assertEqual((artifacts / 'verify/first-failure.log').read_text(), 'native boundary fixture')
 
     def test_a_python_lane_runs_its_command_at_the_exact_commit_with_one_ordered_output(self) -> None:
         self.write('tools/probe.py', PROBE)
@@ -381,7 +500,7 @@ class MiniGatewayLane(unittest.TestCase):
         self.assertTrue(report.is_file(), 'the lane ran and returned its report')
         self.assertIsNone(self.reader().no_result_reason(exited.returncode, exited.stdout + exited.stderr))
 
-    def test_a_push_whose_job_never_started_leaves_no_ref_after_the_next_job(self) -> None:
+    def test_a_push_whose_job_never_started_leaves_no_submission_ref(self) -> None:
         report, args = self.report_args()
         repository = self.mini / 'tron-ci/tron.git'
         self.git('config', 'tron.verify.mini', 'nojob.test')
@@ -389,6 +508,7 @@ class MiniGatewayLane(unittest.TestCase):
         self.assertEqual(abandoned.returncode, NO_RESULT, abandoned.stdout + abandoned.stderr)
         self.assertIn('pushed', abandoned.stdout)
         self.assertIn('without a result', abandoned.stderr)
+        self.assertEqual(self.git('for-each-ref', '--format=%(refname)', cwd=repository), '')
         self.git('config', 'tron.verify.mini', 'mini.test')
         self.write('README', 'next commit\n')
         sha = self.commit('next')
@@ -435,10 +555,20 @@ class MiniGatewayLane(unittest.TestCase):
         self.wait_for_lane(runner)
         self.write('README', 'later push\n')
         later = self.commit('later')
-        self.git('push', '-q', '--force', str(self.mini / 'tron-ci/tron.git'), f'{later}:refs/tron-jobs/incoming')
+        pending = self.lane(*args, background=True)
+        self.addCleanup(lambda: pending.poll() is None and pending.kill())
+        seen = ''
+        deadline = time.monotonic() + 30
+        while 'waiting for the mini job lock' not in seen:
+            self.assertLess(time.monotonic(), deadline, seen)
+            self.assertIsNone(pending.poll(), seen)
+            seen += pending.stdout.readline()
         runner.send_signal(signal.SIGTERM)
         output, _ = runner.communicate(timeout=60)
-        self.assertEqual(self.git('rev-parse', 'refs/tron-jobs/incoming', cwd=self.mini / 'tron-ci/tron.git'), later, output)
+        resumed, _ = pending.communicate(timeout=60)
+        self.assertEqual(pending.returncode, 0, seen + resumed)
+        self.assertEqual(self.git('for-each-ref', '--format=%(refname) %(objectname)', cwd=self.mini / 'tron-ci/tron.git'),
+                         f'refs/tron-jobs/gateway {later}', output + resumed)
         self.assertEqual((self.mini / 'lane-terminated').read_text(), 'SIGTERM', output)
         self.assertEqual(runner.returncode, 143, output)
         self.assert_mini_job_ended()

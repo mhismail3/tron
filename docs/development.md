@@ -267,7 +267,9 @@ its manifest updated in the same change. [Ownership rules](../tools/ownership/RE
 `scripts/tron layers [gateway|ios]` checks a package's dependency graph against
 manifest layers and `dependsOn`. The Gateway graph comes from the pinned TypeScript
 compiler; the iOS graph comes from the Xcode index store of a fresh
-`scripts/tron-ios-test build` of the current commit (stale evidence is refused).
+`scripts/tron test ios build` of the current commit (stale evidence is refused). With
+`verify --ios-host mini`, both the build and index validation run on the mini; returning test artifacts
+does not copy the build's DerivedData or make its index local.
 Existing upward and two-way pairs live in the shrink-only
 `packages/<pkg>/layer-baseline.json`; a new one or a new unindexed file fails
 (file-edge counts are only reported), and a fixed one must be removed with
@@ -282,10 +284,17 @@ owns selection and `test-results/verify/<sha>.json`; the [oracle policy](../tool
 owns fail-before/pass-after in the owning test, consolidation, and test changes with independent ACCEPT. Reds need
 root fixes or causal reverts, not exemptions; no maintainer test-text approval or retry-to-green.
 
-Home plans heavy work across workers (`packages/gateway/docs/host-load.md`). Host slots
-are the ceiling: at most 3 simulator jobs run at once on this Mac, across all worktrees and workers. The
-iOS test runner (`scripts/tron-ios-test` build/run, so `verify` too), the profiler, the Gateway E2E
-harness and `scripts/tron-ios-simulator install` each take one of three host-wide slots through
-`scripts/ios-test-lock.py --host-slot`, waiting (and naming the holders) when all are held; a killed
-holder frees its slot. `scripts/tron test ios slots` shows them. `verify` runs one simulator lane unless
-its caller passes `--ios-jobs 2|3`. [iOS parallel workers](../packages/ios-app/docs/development.md#parallel-worker-resource-ownership).
+Tron heavy tests, including simulator tests, run serially on the Mac mini through the normal lease.
+Use `scripts/tron verify ... --gateway-host mini --ios-host mini` or `scripts/tron test ios ...`
+(mini by default), from a clean committed tree. A verification selecting iOS work runs entirely on the
+mini, keeping cheap checks, build identity and index validation with the tests. Output and native
+artifacts return to a unique `test-results/mini/<sha-prefix>-<nonce>/`; a busy mini queues and an
+unreachable or incomplete mini never falls back here. [Mini execution](../tools/verify/README.md#ios-checks-on-the-mini)
+owns setup, result layout and cancellation.
+
+Home plans the queue (`packages/gateway/docs/host-load.md`). The host-local iOS runner, profiler,
+Gateway E2E harness and Development simulator helper still take their native simulator lease and one
+of three host slots through `scripts/ios-test-lock.py --host-slot`; that ceiling is not a target.
+`scripts/tron test ios slots` reads the mini's slots; `scripts/tron-ios-test slots` reads this host's.
+`verify` uses one simulator lane unless its brief permits `--ios-jobs 2|3`.
+[iOS parallel workers](../packages/ios-app/docs/development.md#parallel-worker-resource-ownership).

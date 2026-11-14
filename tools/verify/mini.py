@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Run one Gateway Vitest lane (tools/verify/gateway.py) or verify's Python group on the Mac mini test host and return
-its result as this run's.
+"""Run Gateway, Python, Node, iOS or whole-verifier jobs under the Mac mini lease and return their native results.
 
 The test-host pool is {the mini, this Mac}: `choose_host` picks the mini when it is configured, reachable and idle,
 and otherwise this Mac, always with its reason; `mini.py pool [vitest args]` runs one lane on the chosen host.
 `mini.py python <command>` runs verify's per-file Python command in the mini checkout, its stderr merged into
 stdout in order, since verify counts each file's unittest summary after that file's marker. `mini.py node <file>...`
 runs the Gateway's `node --test` files on the mini's pinned Node, its TAP output streamed back for verify to count.
+`mini.py ios` invokes the native iOS owner; `mini.py verify` invokes verification inside the lease. Both return
+bounded digest-checked native artifact archives with commit, execution-host and raw-exit receipts.
 
 Local side: refuse a dirty tree, push the exact HEAD commit to the mini's bare repository, run this same file there
 (sent as source, so both halves are one version), stream its output live, and write the Vitest output files it
@@ -24,6 +25,7 @@ destination) and `tron.verify.miniIdentity` (an optional key file). Runs on the 
 """
 from __future__ import annotations
 
+import argparse
 import base64
 import fcntl
 import hashlib
@@ -36,6 +38,7 @@ import signal
 import sqlite3
 import subprocess
 import sys
+import tarfile
 import threading
 import time
 import uuid
@@ -47,7 +50,26 @@ BASE = 'tron-ci'
 EXIT_NO_RESULT = 75
 NO_RESULT_LINE = 'mini: no result: '
 OUTPUT_OPTION = '--outputFile'
-INCOMING = 'refs/tron-jobs/incoming'
+ARTIFACT_LIMIT = 2 * 1024 ** 3
+
+
+def unpack_artifacts(archive: Path, target: Path) -> None:
+    total = 0
+    with tarfile.open(archive, 'r|gz') as bundle:
+        for member in bundle:
+            name = Path(member.name)
+            if name.is_absolute() or '..' in name.parts or not (member.isfile() or member.isdir()):
+                raise ValueError('unsafe mini artifact member')
+            total += member.size
+            if total > ARTIFACT_LIMIT:
+                raise ValueError('mini artifacts exceed the 2 GiB transport limit')
+            destination = target / name
+            if member.isdir():
+                destination.mkdir(parents=True, exist_ok=True)
+            else:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                with bundle.extractfile(member) as source, destination.open('wb') as output:
+                    shutil.copyfileobj(source, output)
 
 
 def no_result(reason: str) -> int:
@@ -149,9 +171,24 @@ def outputs(args: list[str]) -> tuple[list[str], list[str]]:
     return mapped, [str(ROOT / 'packages/gateway' / path) for path in paths]
 
 
+def release_submission(ssh: list[str], reference: str, sha: str) -> None:
+    code = f'''import subprocess, sys
+command = ['git', '--git-dir={BASE}/tron.git']
+status = subprocess.run([*command, 'for-each-ref', '--format=%(objectname)', sys.argv[1]], capture_output=True, text=True, check=True)
+if status.stdout.strip():
+    subprocess.run([*command, 'update-ref', '-d', sys.argv[1], sys.argv[2]], check=True)
+'''
+    result = subprocess.run([*ssh, shlex.join(['/usr/bin/python3', '-c', code, reference, sha])],
+                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    if result.returncode:
+        print(f'mini: submission ref cleanup unresolved: {reference}: {result.stdout.strip()}', file=sys.stderr)
+
+
 def local_main(args: list[str], lane: str = 'gateway') -> int:
     if os.environ.get('TRON_UPDATE_LOCKS'):
         return no_result('TRON_UPDATE_LOCKS would rewrite goldens in the mini checkout, not here; record locks locally')
+    if lane == 'verify' and any(word == '--batch' or word == '--update-locks' or word.startswith('--update-locks=') for word in args):
+        return no_result('mini verification accepts synchronous checks, not batch dispatch or golden recording')
     if git('status', '--porcelain', '--untracked-files=normal'):
         return no_result('the worktree has uncommitted or untracked changes; the mini runs a commit, commit first')
     try:
@@ -162,19 +199,25 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
     expected = os.environ.get('TRON_VERIFY_COMMIT')
     if expected and expected != sha:
         return no_result(f'HEAD is {sha[:12]}, not the commit under verification {expected[:12]}')
+    main = git('merge-base', 'origin/main', 'HEAD') if lane == 'verify' else None
     mapped, paths = outputs(args) if lane == 'gateway' else (args, [])
+    nonce = uuid.uuid4().hex
+    incoming = f'refs/tron-jobs/submissions/{nonce}'
+    artifacts = ROOT / 'test-results/mini' / f'{sha[:12]}-{nonce}'
+    archive = artifacts.with_suffix('.tar.gz')
+    artifact_bytes, artifacts_received = 0, False
     started = time.time()
     print(f'mini: {lane} lane for {sha[:12]} on {destination}; pushing the commit', flush=True)
     push = subprocess.run(['git', '-C', str(ROOT), 'push', '--no-verify', '--quiet', f'{destination}:{BASE}/tron.git',
-                           f'+{sha}:{INCOMING}'], env={**os.environ, 'GIT_SSH_COMMAND': shlex.join(ssh[:-1])},
+                           f'{sha}:{incoming}'], env={**os.environ, 'GIT_SSH_COMMAND': shlex.join(ssh[:-1])},
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     if push.returncode:
+        release_submission(ssh, incoming, sha)
         return no_result(f'could not push {sha[:12]} to {destination}:{BASE}/tron.git; the mini is unreachable or not set up '
                          f'(pass --gateway-host local to run here): {push.stdout.strip()}')
     print(f'mini: pushed in {time.time() - started:.1f}s', flush=True)
-    nonce = uuid.uuid4().hex
     wait = os.environ.get('TRON_MINI_JOB_WAIT_SECONDS')
-    job = json.dumps({'sha': sha, 'lane': lane, 'args': mapped, 'outputs': len(paths), 'nonce': nonce, 'localRoot': str(ROOT),
+    job = json.dumps({'sha': sha, 'main': main, 'lane': lane, 'args': mapped, 'outputs': len(paths), 'nonce': nonce, 'localRoot': str(ROOT),
                       'lockWaitSeconds': float(wait) if wait else None, 'contended': os.environ.get('TRON_TEST_CONTENDED', '0'),
                       'requester': {'host': platform.node(), 'worktree': str(ROOT), 'pid': os.getpid()}})
     source = Path(__file__).read_text()
@@ -204,6 +247,27 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
                 elif kind == 'ledger':
                     import ledger
                     ledger.append_rows(json.loads(base64.b64decode(value)))
+                elif kind == 'artifact':
+                    payload = base64.b64decode(value, validate=True)
+                    artifact_bytes += len(payload)
+                    if artifact_bytes > ARTIFACT_LIMIT:
+                        raise ValueError('mini artifact archive exceeds the 2 GiB transport limit')
+                    archive.parent.mkdir(parents=True, exist_ok=True)
+                    with archive.open('ab') as stream:
+                        stream.write(payload)
+                elif kind == 'artifact-end':
+                    digest = hashlib.sha256()
+                    with archive.open('rb') as stream:
+                        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                            digest.update(chunk)
+                    if digest.hexdigest() != value:
+                        raise ValueError('mini artifact archive digest mismatch')
+                    unpack_artifacts(archive, artifacts)
+                    receipt = json.loads((artifacts / 'receipt.json').read_text())
+                    if receipt['commit'] != sha or receipt['lane'] != lane:
+                        raise ValueError('mini artifact receipt does not match this submission')
+                    artifacts_received = True
+                    archive.unlink()
                 elif kind == 'refused':
                     refused = json.loads(value)
                 elif kind == 'exit':
@@ -212,6 +276,8 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
         finally:
             for sig, handler in previous.items():
                 signal.signal(sig, handler)
+            if code is None:
+                release_submission(ssh, incoming, sha)
     if stopped:
         print(f'mini: stopped; the mini job was ended (lane exit {code}); not a test result', file=sys.stderr)
         return 128 + stopped[0]
@@ -219,6 +285,10 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
         return no_result(f'the session with {destination} ended (ssh exit {child.returncode}) without a result')
     if refused is not None:
         return no_result(refused)
+    if lane in ('ios', 'verify'):
+        if not artifacts_received:
+            return no_result('the mini returned a lane exit without its artifact receipt')
+        print(f'mini: artifacts: {artifacts}', flush=True)
     missing = [paths[index] for index in range(len(paths)) if index not in received]
     print(f'mini: lane exit {code} after {time.time() - started:.1f}s' + (f'; it wrote no {", ".join(missing)}' if missing else ''), flush=True)
     return code
@@ -330,6 +400,8 @@ def remote_main(job: dict) -> int:
                         say(f'waiting for the mini job lock, held by {holder}')
                         announced = time.time()
                     time.sleep(min(2, cap) if cap else 2)
+            if cancelled.is_set():
+                return refuse('stopped before preparing the mini checkout')
             lock.seek(0)
             lock.truncate()
             lock.write(json.dumps({**job['requester'], 'sha': sha}))
@@ -338,7 +410,8 @@ def remote_main(job: dict) -> int:
             prepared = time.time()
             if (checkout / '.git').exists():
                 steps = [('git', '-C', str(checkout), 'checkout', '--quiet', '--detach', '--force', sha),
-                         ('git', '-C', str(checkout), 'clean', '-ffdxq', '-e', '/packages/gateway/node_modules')]
+                         ('git', '-C', str(checkout), 'clean', '-ffdxq', '-e', '/packages/gateway/node_modules',
+                          '-e', '/packages/ios-app/TronMobile.xcodeproj')]
             else:
                 steps = [('git', '-C', str(repository), 'worktree', 'prune'),
                          ('git', '-C', str(repository), 'worktree', 'add', '--quiet', '--detach', str(checkout), sha)]
@@ -352,6 +425,10 @@ def remote_main(job: dict) -> int:
             if head != sha or dirty:
                 return refuse(f'the mini checkout is not exactly {sha} (HEAD {head or "unknown"}; changes: {dirty or "none"})')
             run('git', '-C', str(repository), 'update-ref', 'refs/tron-jobs/gateway', sha)
+            if job['lane'] == 'verify':
+                bound = run('git', '-C', str(repository), 'update-ref', 'refs/remotes/origin/main', job['main'])
+                if bound.returncode:
+                    return refuse(f'cannot bind the caller main baseline: {bound.stderr.strip()}')
 
             pins = dict(line.split('=', 1) for line in (checkout / 'config/ci-toolchain.env').read_text().splitlines()
                         if '=' in line and not line.lstrip().startswith('#'))
@@ -392,6 +469,58 @@ def remote_main(job: dict) -> int:
             results.mkdir(parents=True, exist_ok=True)
             clean['TRON_TEST_LEDGER'] = str(results / 'ledger.sqlite3')
             clean['TRON_TEST_CONTENDED'] = job.get('contended', '0')
+            if job['lane'] in ('ios', 'verify'):
+                results.mkdir(parents=True, exist_ok=True)
+                archive = results.with_suffix('.tar.gz')
+                try:
+                    command = ([str(checkout / 'scripts/tron-ios-test'), *job['args']] if job['lane'] == 'ios'
+                               else ['/usr/bin/python3', str(checkout / 'tools/verify/verify.py'), *job['args']])
+                    env = {**clean, 'PATH': f'{node.parent}:{clean["PATH"]}',
+                           'TRON_VERIFY_EXECUTION_HOST': 'mini',
+                           'TRON_CI_TOOLS_DIR': str(base / '.ci-tools'),
+                           'TRON_IOS_TEST_RESULTS_DIR': str(results / 'ios'),
+                           'TRON_PROFILE_RESULTS_DIR': str(results / 'profiles'),
+                           'TRON_IOS_E2E_STATE_DIR': str(checkout / '.scratch/mini-e2e')}
+                    code = stream(*command, cwd=checkout, env=env)
+                    if job['lane'] == 'verify':
+                        report = checkout / 'test-results/verify' / f'{sha}.json'
+                        if report.is_file():
+                            shutil.copy2(report, results / 'verify.json', follow_symlinks=False)
+                        logs = checkout / 'test-results/verify' / sha
+                        if logs.is_dir():
+                            shutil.copytree(logs, results / 'verify', symlinks=True)
+                    e2e = checkout / '.scratch/mini-e2e'
+                    if e2e.is_dir():
+                        for source in [e2e / 'results', e2e / 'attempts', *sorted(e2e.glob('lane*/results'))]:
+                            if source.is_dir():
+                                target = results / 'e2e' / source.relative_to(e2e)
+                                shutil.copytree(source, target, symlinks=True, ignore=shutil.ignore_patterns('latest', 'latest-ui'))
+                    (results / 'receipt.json').write_text(json.dumps({'commit': sha, 'lane': job['lane'], 'exit': code,
+                                                                     'host': platform.node(), 'args': job['args']}))
+                    total = 0
+                    with tarfile.open(archive, 'w:gz', dereference=True) as bundle:
+                        for path in sorted(results.rglob('*')):
+                            if path.parent == results and path.name in ('ledger.sqlite3', 'ledger.sqlite3-wal', 'ledger.sqlite3-shm'):
+                                continue
+                            if path.is_symlink() or not (path.is_file() or path.is_dir()):
+                                raise ValueError('unsafe mini artifact source')
+                            total += path.stat().st_size if path.is_file() else 0
+                            if total > ARTIFACT_LIMIT:
+                                raise ValueError('mini artifacts exceed the 2 GiB transport limit')
+                            bundle.add(path, arcname=str(path.relative_to(results)), recursive=False)
+                    digest = hashlib.sha256()
+                    with archive.open('rb') as payload_stream:
+                        for chunk in iter(lambda: payload_stream.read(64 * 1024), b''):
+                            digest.update(chunk)
+                            out.write(b'\n' + frame(nonce) + b'artifact ' + base64.b64encode(chunk) + b'\n')
+                    out.write(frame(nonce) + f'artifact-end {digest.hexdigest()}\n'.encode())
+                    out.flush()
+                    return finish(code)
+                except (OSError, ValueError, tarfile.TarError) as error:
+                    return refuse(f'{job["lane"]} invocation/artifacts failed: {error}')
+                finally:
+                    archive.unlink(missing_ok=True)
+                    shutil.rmtree(results, ignore_errors=True)
             if job['lane'] == 'node':
                 root_node = job['args'][:1] == ['--root']
                 arguments = job['args'][1:] if root_node else job['args']
@@ -425,7 +554,7 @@ def remote_main(job: dict) -> int:
                 shutil.rmtree(results, ignore_errors=True)
     finally:
         shutil.rmtree(results, ignore_errors=True)
-        run('git', '-C', str(repository), 'update-ref', '-d', INCOMING, sha)
+        run('git', '-C', str(repository), 'update-ref', '-d', f'refs/tron-jobs/submissions/{nonce}', sha)
 
 
 if __name__ == '__main__':
@@ -438,7 +567,15 @@ if __name__ == '__main__':
             sys.exit('usage: mini.py python <command>')
         if sys.argv[1:2] == ['pool']:
             sys.exit(pool_main(sys.argv[2:]))
-        sys.exit(local_main(sys.argv[2:], sys.argv[1]) if sys.argv[1:2] in (['python'], ['node']) else local_main(sys.argv[1:]))
+        if sys.argv[1:2] == ['ios']:
+            parser = argparse.ArgumentParser(add_help=False)
+            parser.add_argument('--ios-host', choices=('mini', 'local'), default='mini')
+            option, args = parser.parse_known_args(sys.argv[2:])
+            if option.ios_host == 'local':
+                script = str(ROOT / 'scripts/tron-ios-test')
+                os.execv(script, [script, *args])
+            sys.exit(local_main(args, 'ios'))
+        sys.exit(local_main(sys.argv[2:], sys.argv[1]) if sys.argv[1:2] in (['python'], ['node'], ['verify']) else local_main(sys.argv[1:]))
     except KeyboardInterrupt:
         sys.exit(130)
     except (OSError, ValueError, subprocess.SubprocessError) as error:

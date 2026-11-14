@@ -25,8 +25,9 @@ Commands:
   test gateway [--mini|--local] [vitest args...]
                                     Run Gateway tests with pinned Node on the test-host pool: the Mac
                                     mini when reachable and idle, else here (tools/verify/README.md)
-  test ios [runner args...]         Run the owned iOS test runner directly (3 host-wide simulator
-                                    slots; a 4th job waits; `test ios slots` shows holders)
+  test ios [--ios-host mini|local] [runner args...]
+                                    Run the owned iOS runner under the mini lease by default;
+                                    return logs and native result bundles; local is host-local.
   test mac [test classes...]        Build and run the Mac integration tests under a temporary HOME
   test tooling [test files...]      Run Python script integration suites with per-test evidence
   flakes [--tree HASH] [--json]     Read same-tree pass/fail history from the external test ledger
@@ -65,7 +66,7 @@ Commands:
                                     objects to test-results/metrics/<sha>.json;
                                     --compare prints the delta table; never a gate
   verify [--changed] [--base <ref>] | --module <id> | --all | --update-locks <id> [--skip ios,mac,relay] [--plan]
-         [--gateway-host pool|local|mini]
+         [--gateway-host pool|local|mini] [--ios-host local|mini]
                                     Mechanical none/partial/full tier; affected checks
                                     now, full coverage in the async main batch.
                                     --plan includes dirty paths and exact commands.
@@ -201,7 +202,7 @@ case "$cmd" in
           *) exec python3 "$ROOT/tools/verify/mini.py" pool "$@" ;;
         esac
         ;;
-      ios) exec "$ROOT/scripts/tron-ios-test" "$@" ;;
+      ios) exec python3 "$ROOT/tools/verify/mini.py" ios "$@" ;;
       mac) exec python3 "$ROOT/tools/verify/mac.py" "$@" ;;
       tooling)
         if (($# == 0)); then set -- "$ROOT"/tools/work/tests/test-*.py; fi
