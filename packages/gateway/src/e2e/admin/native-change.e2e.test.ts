@@ -84,6 +84,52 @@ async function saveCase(name: string, evidence: unknown) {
 }
 
 describe("typed changes and exact native acceptance", () => {
+  it("adds an MCP server from Home through the shared card: the exact command shows before any launch, one approval writes mcp.json and launches it, the idle ordinary session reloads and its next turn calls the server, and undo removes it", async () => {
+    const script = fileURLToPath(new URL("../../../test-fixtures/mcp-stdio-fixture.mjs", import.meta.url));
+    let marker = "";
+    const native = await nativeChange(async f => {
+      vi.stubEnv("PI_CODING_AGENT_DIR", f.agentDir);
+      marker = join(f.root, "mcp-launch.log");
+      return [{ key: "tools.mcp.server", qualifiers: { server: "fixture-docs" }, layer: "global", op: "set",
+        value: { command: process.execPath, args: [script, marker], exposure: "direct" } }];
+    }, true, "Add the docs server");
+    const { home, prompting, interaction, answer, service, signals, faux, agentDir, registry, cwd } = native;
+    if (interaction.method !== "change") throw new Error("Expected the shared change card");
+    expect(interaction.review).toMatchObject({ requiresTap: true, items: [{ label: "MCP server", after: `${process.execPath} ${script} ${marker}, exposure direct` }] });
+    const ordinary = await registry.create(cwd);
+    expect(await readFile(marker, "utf8").catch(() => "")).toBe("");
+    expect(await readFile(join(agentDir, "mcp.json"), "utf8").catch(() => "")).not.toContain("fixture-docs");
+    await answer(true);
+    await prompting;
+    expect(JSON.parse(await readFile(join(agentDir, "mcp.json"), "utf8")).mcpServers["fixture-docs"])
+      .toEqual({ command: process.execPath, args: [script, marker], exposure: "direct" });
+    const history = await service.invoke(phone, "settings.history", { key: "tools.mcp.server" }) as { entries: Array<{ changeId: string; status: string }> };
+    expect(history.entries).toEqual([expect.objectContaining({ status: "applied" })]);
+    await waitFor(() => signals.some(event => event.outcome === "resources-reload" && event.reason === "completed" && event.sessionId === ordinary.id), "the idle ordinary session reloads the MCP change");
+    await waitFor(async () => (await readFile(marker, "utf8").catch(() => "")).includes("tools/list") || undefined, "the docs server lists its tools");
+    faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("mcp__fixture_docs__fixture_tool", { value: "after-reload" }, { id: "mcp-next" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage("Used the docs server"),
+    ]);
+    await ordinary.prompt("Use the docs server");
+    await waitFor(() => !ordinary.isBusy, "the next ordinary turn settled");
+    expect(JSON.stringify(ordinary.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === "mcp-next")))
+      .toContain("worked:after-reload");
+    expect(await readFile(marker, "utf8")).toContain("tools/call");
+    await service.invoke(phone, "settings.undo", { commandId: "mcp-docs-undo", changeId: history.entries[0]!.changeId });
+    expect(JSON.parse(await readFile(join(agentDir, "mcp.json"), "utf8")).mcpServers["fixture-docs"]).toBeUndefined();
+    faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("settings", { action: "change", reason: "Add with a token", changes: [{ key: "tools.mcp.server", qualifiers: { server: "leaky" }, layer: "global", op: "set", value: { command: process.execPath, args: ["--token=secret-value"] } }], taskId: "diff-worker" }, { id: "mcp-secret" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage("Refused"),
+    ]);
+    await home.prompt("Add a server with a token");
+    await waitFor(() => !home.isBusy, "the secret-bearing server refused");
+    expect(home.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === "mcp-secret"))
+      .toMatchObject({ type: "message", message: { role: "toolResult", isError: true } });
+    expect(home.snapshot().extensionPresentation.pendingInteractions).toHaveLength(0);
+    expect(JSON.stringify(await service.invoke(phone, "settings.history", { key: "tools.mcp.server" }))).not.toContain("secret-value");
+  });
+
   it("configures numeric maps through the agent and keeps a task-budget raise behind the shared card", async () => {
     const f = await fixture();
     await setHomeMemoryModels(f.registry, [f.model]);
