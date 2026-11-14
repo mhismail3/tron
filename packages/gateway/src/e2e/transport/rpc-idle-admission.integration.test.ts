@@ -1,5 +1,5 @@
 import { displayOwnerOf, createTestRegistry } from "../../../test-support/gateway-registry.js";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
@@ -54,7 +54,9 @@ interface Fixture {
   faux: ReturnType<typeof fauxProvider>;
   port: number;
   logRecords: Array<{ level: string; message: string; metadata: Record<string, unknown> }>;
-  connect(): Promise<Client>;
+  connect(token?: string): Promise<Client>;
+  pairDevice(name: string): Promise<string>;
+  localToken(): string;
   coldSession(label: string): Promise<{ id: string; file: string; entryId: string }>;
   snapshot(client: Client, sessionId: string): Promise<any>;
   openSession(client: Client, sessionId: string): Promise<any>;
@@ -176,8 +178,8 @@ async function fixture(options: {
     await rm(root, { recursive: true, force: true });
   });
 
-  const connect = async (): Promise<Client> => {
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${paired.token}` } });
+  const connect = async (token = paired.token): Promise<Client> => {
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
     sockets.push(socket);
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
@@ -220,7 +222,13 @@ async function fixture(options: {
     expect(synced.ok, JSON.stringify(synced)).toBe(true);
     return opened.result.session;
   };
-  return { root, registry, faux, uploads, port, logRecords, connect, coldSession, snapshot, openSession,
+  const pairDevice = async (name: string): Promise<string> => {
+    const invitation = await devices.ensureEnrollment();
+    const device = await devices.pair(invitation.code, name);
+    await devices.ensureEnrollment();
+    return device.token;
+  };
+  return { root, registry, faux, uploads, port, logRecords, connect, pairDevice, localToken: () => (devices as unknown as { localToken: string }).localToken, coldSession, snapshot, openSession,
     retirementState: () => retirement };
 }
 
@@ -247,6 +255,86 @@ describe("diagnostic export RPC boundary", () => {
     expect(records.some(({ metadata }) => metadata.event === "rpc.completed" && metadata.requestID === requestID && metadata.outcome === "success")).toBe(true);
     expect(JSON.stringify(records)).not.toContain(privateContent);
     expect(JSON.stringify(ingressRecords)).not.toContain("synthetic-command-identifier");
+  });
+});
+
+describe("device log append RPC boundary", () => {
+  const line = (sequence: number, padding = 0) => JSON.stringify({ timestamp: "2026-11-14T00:00:00.000Z", level: "info", message: `synthetic-${sequence}`, padding: "x".repeat(padding) });
+  const batch = (first: number, count: number, padding = 0) => Array.from({ length: count }, (_, index) => line(first + index, padding));
+  const deviceFiles = async (root: string) => {
+    const directory = join(root, "logs", "devices");
+    const names = await readdir(directory).catch(() => [] as string[]);
+    return Promise.all(names.map(async (name) => ({ name, text: await readFile(join(directory, name), "utf8") })));
+  };
+  const sequencesOf = (text: string) => text.split("\n").filter(Boolean).map((entry) => (JSON.parse(entry) as { sequence: number }).sequence);
+
+  it("holds each device sequence once, reports the cursor, and refuses gaps", async () => {
+    const fixtureValue = await fixture();
+    const client = await fixtureValue.connect();
+    const bootId = "boot-logs-0001";
+    const initial = await client.request("cursor-initial", "client.logs.cursor", {});
+    expect(initial.ok, JSON.stringify(initial)).toBe(true);
+    expect(initial.result).toEqual({ bootId: null, sequence: 0 });
+    const first = await client.request("append-first", "client.logs.append", { commandId: "append-first-0001", bootId, firstSequence: 1, lines: batch(1, 3) });
+    expect(first.result).toEqual({ bootId, sequence: 3 });
+    const retried = await client.request("append-retry", "client.logs.append", { commandId: "append-first-0001", bootId, firstSequence: 1, lines: batch(1, 3) });
+    expect(retried.ok, JSON.stringify(retried)).toBe(true);
+    expect(retried.result).toEqual({ bootId, sequence: 3 });
+    const overlap = await client.request("append-overlap", "client.logs.append", { commandId: "append-overlap-0002", bootId, firstSequence: 2, lines: batch(2, 3) });
+    expect(overlap.result).toEqual({ bootId, sequence: 4 });
+    const gap = await client.request("append-gap", "client.logs.append", { commandId: "append-gap-0003", bootId, firstSequence: 9, lines: batch(9, 1) });
+    expect(gap.ok).toBe(false);
+    const files = await deviceFiles(fixtureValue.root);
+    expect(files).toHaveLength(1);
+    expect(sequencesOf(files[0].text)).toEqual([1, 2, 3, 4]);
+    const cursor = await client.request("cursor-after", "client.logs.cursor", {});
+    expect(cursor.result).toEqual({ bootId, sequence: 4 });
+    const unknown = await client.request("append-path", "client.logs.append", { commandId: "append-path-0004", bootId, firstSequence: 5, lines: batch(5, 1), path: "../escape.jsonl" });
+    expect(unknown.ok).toBe(false);
+  });
+
+  it("bounds the batch and keeps four 5 MiB segments per device", async () => {
+    const fixtureValue = await fixture();
+    const client = await fixtureValue.connect();
+    const bootId = "boot-logs-rotate";
+    const oversized = await client.request("append-oversized", "client.logs.append", { commandId: "append-oversized-01", bootId, firstSequence: 1, lines: batch(1, 17, 16_000) });
+    expect(oversized.ok).toBe(false);
+    const tooLong = await client.request("append-long-line", "client.logs.append", { commandId: "append-long-line-01", bootId, firstSequence: 1, lines: [line(1, 17_000)] });
+    expect(tooLong.ok).toBe(false);
+    const batchBytes = 16 * 1024;
+    let next = 1;
+    for (let round = 0; round < 110; round += 1) {
+      const lines = batch(next, 16, batchBytes - 200);
+      const response = await client.request(`append-round-${round}`, "client.logs.append", { commandId: `append-round-${round}-0001`, bootId, firstSequence: next, lines });
+      expect(response.ok, JSON.stringify(response)).toBe(true);
+      next += 16;
+    }
+    const files = await deviceFiles(fixtureValue.root);
+    expect(files.length).toBeLessThanOrEqual(4);
+    expect(files.every((file) => Buffer.byteLength(file.text) <= 5 * 1024 * 1024)).toBe(true);
+    const newest = files.flatMap((file) => sequencesOf(file.text)).reduce((max, value) => Math.max(max, value), 0);
+    expect(newest).toBe(next - 1);
+  }, 60_000);
+
+  it("refuses a local wrapper and keeps each paired device in its own file", async () => {
+    const fixtureValue = await fixture();
+    const local = await fixtureValue.connect(fixtureValue.localToken());
+    const localAppend = await local.request("local-append", "client.logs.append", { commandId: "local-append-0001", bootId: "boot-local-01", firstSequence: 1, lines: batch(1, 1) });
+    expect(localAppend.ok).toBe(false);
+    expect(localAppend.error?.code).toBe("unauthenticated");
+    const localCursor = await local.request("local-cursor", "client.logs.cursor", {});
+    expect(localCursor.ok).toBe(false);
+    const phone = await fixtureValue.connect();
+    const secondToken = await fixtureValue.pairDevice("Second phone");
+    const second = await fixtureValue.connect(secondToken);
+    await phone.request("phone-append", "client.logs.append", { commandId: "phone-append-0001", bootId: "boot-phone-01", firstSequence: 1, lines: batch(1, 2) });
+    const other = await second.request("second-cursor", "client.logs.cursor", {});
+    expect(other.result).toEqual({ bootId: null, sequence: 0 });
+    await second.request("second-append", "client.logs.append", { commandId: "second-append-0001", bootId: "boot-second-01", firstSequence: 1, lines: batch(1, 1) });
+    const files = await deviceFiles(fixtureValue.root);
+    expect(files).toHaveLength(2);
+    expect(files.map((file) => file.name).every((name) => /^[a-f0-9]{32}\.jsonl$/.test(name))).toBe(true);
+    expect(files.map((file) => sequencesOf(file.text).length).sort()).toEqual([1, 2]);
   });
 });
 
