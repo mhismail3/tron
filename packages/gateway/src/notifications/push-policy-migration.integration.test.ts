@@ -107,6 +107,35 @@ describe("push policy migration at Gateway start", () => {
     expect(await incompleteDirectories(home)).toEqual([]);
   });
 
+  it("an intact receipt whose stored after digest differs from this build's plan is a conflict: nothing is quarantined or re-backed-up", async () => {
+    const home = await seed();
+    const originalDocument = await readFile(documentPath(home));
+    expect(await migratePushPolicy(home)).toBe(true);
+    const migratedSettings = await readFile(settingsPath(home));
+    await writeFile(documentPath(home), originalDocument);
+    const manifest = join(backupPath(home), "manifest.json");
+    const receipt = JSON.parse(await readFile(manifest, "utf8"));
+    receipt.files[0].after = "f".repeat(64);
+    await writeFile(manifest, JSON.stringify(receipt, null, 2));
+    const tampered = await readFile(manifest);
+    await expect(migratePushPolicy(home)).rejects.toThrow("does not match");
+    expect(await readFile(manifest)).toEqual(tampered);
+    expect(await readFile(settingsPath(home))).toEqual(migratedSettings);
+    expect(await readFile(documentPath(home))).toEqual(originalDocument);
+    expect(await readFile(join(backupPath(home), "notifications.json"))).toEqual(originalDocument);
+    await expect(stat(join(backupPath(home), "gateway.json"))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await incompleteDirectories(home)).toEqual([]);
+  });
+
+  it("a stale temporary file left under a process-id name cannot fail a start", async () => {
+    const home = await seed();
+    await mkdir(dirname(settingsPath(home)), { recursive: true });
+    await writeFile(`${settingsPath(home)}.migration-${process.pid}.tmp`, "stale");
+    await writeFile(`${documentPath(home)}.migration-${process.pid}.tmp`, "stale");
+    expect(await migratePushPolicy(home)).toBe(true);
+    expect(JSON.parse(await readFile(documentPath(home), "utf8"))).toEqual(V3);
+  });
+
   it("does nothing to a store already at version 3", async () => {
     const home = await seed();
     await writeFile(documentPath(home), `${JSON.stringify(V3, null, 2)}\n`);
