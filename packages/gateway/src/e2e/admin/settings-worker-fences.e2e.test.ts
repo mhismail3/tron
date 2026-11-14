@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fauxAssistantMessage, getSystemMessageText, fauxToolCall, type AssistantMessage, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
@@ -42,32 +42,37 @@ async function gateway() {
   return { ...f, service, settingsChanges };
 }
 
+async function homeScript(f: Awaited<ReturnType<typeof gateway>>) {
+  const isWorker = (context: TranscriptContext) => context.messages.some(message => message.role === "system" && getSystemMessageText(message).includes("This is a finite Home task"));
+  let homeCall: { prompt: string; name: string; args: Record<string, unknown> } | undefined;
+  const homeResults = new Map<string, { isError: boolean; text: string; details: unknown }>();
+  const respond = async (context: TranscriptContext): Promise<AssistantMessage> => {
+    if (isWorker(context)) return fauxAssistantMessage([reportCall("settled-worker")], { stopReason: "toolUse" });
+    const users = context.messages.filter(message => message.role === "user").map(textOf);
+    const last = context.messages.at(-1)!;
+    if (last.role === "toolResult") {
+      if (homeCall && last.toolName === homeCall.name) homeResults.set(homeCall.prompt, { isError: last.isError === true, text: textOf(last), details: last.details });
+      return fauxAssistantMessage("Done.");
+    }
+    if (homeCall && users.at(-1) === homeCall.prompt) return fauxAssistantMessage([fauxToolCall(homeCall.name, homeCall.args)], { stopReason: "toolUse" });
+    return fauxAssistantMessage("Noted.");
+  };
+  f.faux.setResponses(Array.from({ length: 20 }, () => respond as never));
+  const home = await f.registry.acquire(f.home.sessionId);
+  const homeSays = async (prompt: string, name: string, args: Record<string, unknown>) => {
+    homeCall = { prompt, name, args };
+    await home.prompt(prompt);
+    const result = await waitFor(() => homeResults.get(prompt), `Home result: ${prompt}`);
+    await waitFor(() => home.snapshot().configurationBlocker === null || undefined, `Home settled: ${prompt}`);
+    return result;
+  };
+  return { home, homeSays };
+}
+
 describe("settings worker changes and Session fences", () => {
   it("Home applies routine model/thinking changes to a settled worker without a client opening that worker", async () => {
     const f = await gateway();
-    const isWorker = (context: TranscriptContext) => context.messages.some(message => message.role === "system" && getSystemMessageText(message).includes("This is a finite Home task"));
-    let homeCall: { prompt: string; name: string; args: Record<string, unknown> } | undefined;
-    const homeResults = new Map<string, { isError: boolean; text: string; details: unknown }>();
-    const respond = async (context: TranscriptContext): Promise<AssistantMessage> => {
-      if (isWorker(context)) return fauxAssistantMessage([reportCall("settled-worker")], { stopReason: "toolUse" });
-      const users = context.messages.filter(message => message.role === "user").map(textOf);
-      const last = context.messages.at(-1)!;
-      if (last.role === "toolResult") {
-        if (homeCall && last.toolName === homeCall.name) homeResults.set(homeCall.prompt, { isError: last.isError === true, text: textOf(last), details: last.details });
-        return fauxAssistantMessage("Done.");
-      }
-      if (homeCall && users.at(-1) === homeCall.prompt) return fauxAssistantMessage([fauxToolCall(homeCall.name, homeCall.args)], { stopReason: "toolUse" });
-      return fauxAssistantMessage("Noted.");
-    };
-    f.faux.setResponses(Array.from({ length: 20 }, () => respond as never));
-    const home = await f.registry.acquire(f.home.sessionId);
-    const homeSays = async (prompt: string, name: string, args: Record<string, unknown>) => {
-      homeCall = { prompt, name, args };
-      await home.prompt(prompt);
-      const result = await waitFor(() => homeResults.get(prompt), `Home result: ${prompt}`);
-      await waitFor(() => home.snapshot().configurationBlocker === null || undefined, `Home settled: ${prompt}`);
-      return result;
-    };
+    const { home, homeSays } = await homeScript(f);
     await homeSays("Delegate settled-worker", "delegate", { taskId: "settled-worker", title: "Settled worker", intent: "Report at once", target: f.cwd });
     await waitFor(async () => (await homeOwnerOf(f.registry).taskResult("settled-worker").catch(() => undefined) as { wake?: { state?: string } } | undefined)?.wake?.state === "acknowledged" || undefined, "result wake acknowledged");
     await waitFor(() => home.snapshot().configurationBlocker === null || undefined, "Home settled after the result");
@@ -82,6 +87,24 @@ describe("settings worker changes and Session fences", () => {
     expect(worker.snapshot()).toMatchObject({ model: REASONING, thinkingLevel: "low" });
     expect((await f.settingsChanges.history({ key: "model.thinking[role=chat]" })).entries.map(entry => entry.status)).not.toContain("failed");
     transcript.push({ case: "routine worker change without a client fence", steps: [{ applied: applied.details }] });
+  }, 90_000);
+
+  it("Home's default trust change needs the native card; an ordinary chat is refused", async () => {
+    const f = await gateway();
+    const { homeSays } = await homeScript(f);
+    const readDefaultTrust = async () => (JSON.parse(await readFile(join(f.agentDir, "settings.json"), "utf8")) as Record<string, unknown>).defaultProjectTrust;
+    const changes = [{ key: "permissions.defaultProjectTrust", layer: "global", op: "set", value: "always" }];
+    const requested = await homeSays("Trust new projects by default", "settings", { action: "change", reason: "Maintainer asked to trust new projects", changes });
+    expect(requested.details).toMatchObject({ status: "review", review: { requiresTap: true } });
+    expect(await readDefaultTrust()).not.toBe("always");
+    const digest = (requested.details as { review: { digest: string } }).review.digest;
+    await expect(f.settingsChanges.change({ kind: "global" }, changes, { actor: { kind: "ui", id: "device:phone" },
+      reason: "Maintainer approved", confirmationDigest: digest })).resolves.toMatchObject({ status: "applied" });
+    expect(await readDefaultTrust()).toBe("always");
+    const chat = await f.registry.create(f.cwd);
+    await expect(f.settingsChanges.change({ kind: "global" }, changes, { actor: { kind: "agent", id: chat.id, sessionId: chat.id },
+      reason: "Ordinary chat tries" })).rejects.toMatchObject({ code: "invalid_request", message: "Default trust policy cannot be changed by agent" });
+    transcript.push({ case: "Home default trust change needs the native card", steps: [{ requested: requested.details }] });
   }, 90_000);
 
   it("a Session-scope change without the fence it read is refused at submission, dry run included", async () => {
