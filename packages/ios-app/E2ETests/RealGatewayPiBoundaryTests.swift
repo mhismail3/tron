@@ -1543,9 +1543,13 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         let marker = "e2e-log-marker-\(UUID().uuidString)"
         let neighbor = "e2e-neighbor-\(UUID().uuidString)"
         let secret = "synthetic-e2e-secret-\(UUID().uuidString.prefix(8))"
+        let accessSecret = "synthetic-access-\(UUID().uuidString.prefix(8))"
+        let refreshSecret = "synthetic-refresh-\(UUID().uuidString.prefix(8))"
+        let clientSecret = "synthetic-client-\(UUID().uuidString.prefix(8))"
+        let escapedSecret = "synthetic-escaped-\(UUID().uuidString.prefix(8))"
         let control = String(repeating: "\u{1}", count: 512)
         await AppLog.shared.recordCausal(name: "e2e.log-redaction", outcome: "success",
-                                         details: #"{"token":"\#(secret)","label":"\#(neighbor)"}"#)
+                                         details: #"{"token":"\#(secret)","access_token":"\#(accessSecret)","refresh_token":"\#(refreshSecret)","client_secret":"\#(clientSecret)","label":"\#(neighbor)","tokenCount":5} \"api_key\":\"\#(escapedSecret)\""#)
         await AppLog.shared.recordRPC(event: control, method: control, requestID: control, outcome: control, code: control,
                                       durationMilliseconds: 1, profileID: control, connectionID: nil)
         await AppLog.shared.recordCausal(name: "e2e.log-marker", outcome: "success", details: marker)
@@ -1569,7 +1573,10 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         XCTAssertTrue(found, "the phone log marker must reach the Gateway device file in one upload pass")
         let text = try devices.contentsOfDirectoryText()
         XCTAssertTrue(text.contains(neighbor), "non-secret neighbouring text must survive redaction")
-        XCTAssertFalse(text.contains(secret), "a JSON-quoted token value must never reach the Gateway device file")
+        for value in [secret, accessSecret, refreshSecret, clientSecret, escapedSecret] {
+            XCTAssertFalse(text.contains(value), "a secret value must never reach the Gateway device file")
+        }
+        XCTAssertTrue(text.contains("tokenCount"), "a non-secret key that merely contains a secret word must survive redaction")
         XCTAssertTrue(text.contains("log.record-truncated"), "an oversize record must be replaced by a bounded line, not stall the upload")
     }
 

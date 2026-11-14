@@ -199,18 +199,27 @@ package actor AppLog {
 
     private func uploadLine(_ record: AppLogRecord) -> String? {
         let value = admitted(record)
-        guard let encoded = try? JSONEncoder().encode(value) else { return nil }
-        if encoded.count <= AppLogUploadPlanner.maximumLineBytes { return String(decoding: encoded, as: UTF8.self) }
+        if let encoded = encodedLine(value) { return encoded }
         let truncated = AppLogRecord(
-            timestamp: value.timestamp, level: value.level,
-            event: "log.record-truncated", source: value.source,
+            timestamp: String(value.timestamp.prefix(64)), level: value.level,
+            event: "log.record-truncated", source: String(value.source.prefix(64)),
             message: String(value.message.prefix(128)), process: "ios",
             requestID: value.requestID.map { String($0.prefix(64)) }, durationMs: value.durationMs,
             outcome: value.outcome.map { String($0.prefix(64)) }, code: value.code.map { String($0.prefix(64)) },
             profileID: value.profileID.map { String($0.prefix(64)) },
             connectionID: value.connectionID, lifecycleGeneration: value.lifecycleGeneration
         )
-        guard let data = try? JSONEncoder().encode(truncated) else { return nil }
+        if let encoded = encodedLine(truncated) { return encoded }
+        return encodedLine(AppLogRecord(
+            timestamp: String(value.timestamp.prefix(64)), level: value.level,
+            event: "log.record-truncated", source: "", message: "", process: "ios",
+            requestID: nil, durationMs: nil, outcome: nil, code: nil, profileID: nil,
+            connectionID: nil, lifecycleGeneration: nil
+        ))
+    }
+
+    private func encodedLine(_ record: AppLogRecord) -> String? {
+        guard let data = try? JSONEncoder().encode(record), data.count <= AppLogUploadPlanner.maximumLineBytes else { return nil }
         return String(decoding: data, as: UTF8.self)
     }
 

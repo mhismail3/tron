@@ -199,9 +199,13 @@ coarse path changes are bounded lifecycle incidents with loop IDs. A LAN/Tailsca
 `AppDiagnostics` owns the client incidents and Copy Logs (offline, no Gateway request). `AppLogUploader`
 owns the app-log upload to the Gateway device file (`client.logs.append`), one task on connect, on
 background and every 60 s; it never persists a cursor, and the Gateway's cursor is authoritative.
-Every uploaded line is at most 16 KiB encoded; a larger record is replaced at the same position by a bounded
-`log.record-truncated` line, so one record cannot stall the upload. Free text is redacted on admission,
-including JSON-quoted secret values; the redacted value is replaced and its neighbouring keys are kept.
+Every uploaded line is at most 16 KiB encoded. A larger record is replaced at the same position by a bounded
+`log.record-truncated` line (its free fields capped), and if even that is over the bound, by a minimal fixed
+record, so one record cannot stall the upload. Free text is redacted on admission (`IOSClientDiagnosticBuffer.redactedMessage`):
+`token`, `authorization`, `password`, `secret`, `api_key` and compound keys ending in them (`access_token`,
+`refresh_token`, `client_secret`) lose their value in JSON-quoted, escaped (`\"v\"`) or bare form; the key and
+neighbouring keys are kept, keys such as `tokenCount` are not matched, and single-quoted keys (`'token':'v'`)
+are matched. Not covered: secret words that are not the end of a key (`secretValue`). Native proof is pending.
 
 ## Covered presentation surfaces
 
