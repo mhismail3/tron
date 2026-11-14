@@ -175,6 +175,13 @@ are credential-free. Reconnect converges through an authoritative snapshot.
 owner lease after a catalog build, so a concurrent listing never returns an already
 expired cursor ([catalog](../sessions/catalog.md#catalog-pagination),
 [model catalog](../admin/runtime-configuration.md#model-catalog)).
+`client.logs.cursor` returns the device's held `{bootId, sequence}`. `client.logs.append`
+(receipt-backed, device connections only; a local wrapper is refused) takes `bootId`,
+`firstSequence` and `lines` (1 to 256 one-line JSON objects, each at most 16 KiB, batch at
+most 256 KiB), writes each record once to `~/.tron/logs/devices/<device-hash>.jsonl` as
+`{bootId, sequence, record}` and replies with the held cursor. A batch that starts past
+the held sequence plus one is refused as a gap; a replayed range writes nothing. The
+device is derived from the authenticated peer. Four 5 MiB segments are kept per device.
 `system.logs.export` accepts only a bounded redacted client snapshot and command ID,
 appends the newest debug records (≤ 1 MB) and writes
 `~/.tron/logs/device-exports/<device-hash>-<timestamp>.jsonl` (0600 in 0700, newest

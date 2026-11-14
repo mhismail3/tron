@@ -34,7 +34,8 @@ candidate, so it goes through the manual local Mac Release reinstall (Mac first,
 the iPhone app). Never widen the advertised minimum or allow a mixed pair to bypass
 that handoff. Same-major updates use the owned Gateway update flow.
 
-**Logging.** `GatewayLogger` is the one writer. `system.logs` serves the newest 1,000
+**Logging.** `GatewayLogger` is the one writer. The phone's own records reach the Mac
+through `client.logs.append` into `device-logs.ts`, the one owner of the per-device files. `system.logs` serves the newest 1,000
 persisted records (info and above); debug lives only in a bounded memory buffer that
 `system.logs.export` appends. Records carry `timestamp`, `level`, `event`, `source`, a
 redacted `message` and the writer-stamped `process`, `runtimeEpoch`, `payloadVersion`;

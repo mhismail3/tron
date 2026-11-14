@@ -11,8 +11,14 @@ export class RotatingJsonl {
 
   append(record: unknown): void {
     try {
+      this.appendChecked(record);
+    } catch { }
+  }
+
+  appendChecked(record: unknown, leadingNewline = false): void {
+    try {
       mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
-      const line = `${JSON.stringify(record)}\n`;
+      const line = `${leadingNewline ? "\n" : ""}${JSON.stringify(record)}\n`;
       const lineBytes = Buffer.byteLength(line);
       if (this.activeBytes === undefined) {
         this.activeBytes = existsSync(this.path) ? statSync(this.path).size : 0;
@@ -20,8 +26,9 @@ export class RotatingJsonl {
       if (this.activeBytes > 0 && this.activeBytes + lineBytes > this.segmentBytes) this.rotate();
       appendFileSync(this.path, line, { mode: 0o600 });
       this.activeBytes += lineBytes;
-    } catch {
+    } catch (error) {
       this.activeBytes = undefined;
+      throw error;
     }
   }
 
