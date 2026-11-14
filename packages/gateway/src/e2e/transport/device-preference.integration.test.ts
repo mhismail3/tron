@@ -295,10 +295,10 @@ describe("Run Swift files device preference over the real socket (Gateway servic
     const f = await fixture();
     const iphone = await f.connect(f.phone.token);
     const refused = f.settingsChanges.change(HOME, [{ key: KEY, layer: "global", op: "set", value: false, qualifiers: f.device, expected: true }] as never,
-      { actor: { kind: "agent", id: "chat" }, reason: "Turn off Swift files" });
+      { actor: { kind: "agent", id: "chat" }, reason: "Turn off Swift files" }).then(() => undefined, (error: Error) => error);
     await iphone.waitFor("read", 1);
     await iphone.answer(iphone.requests("read")[0]!, { status: "value", value: true });
-    await expect(refused).rejects.toThrow("cannot be changed by agent");
+    expect((await refused)?.message).toContain("cannot be changed by agent");
     expect(iphone.requests("set")).toHaveLength(0);
     expect(await f.history(KEY)).toEqual([]);
     iphone.close();
