@@ -94,7 +94,7 @@ The local-file reader checks cancellation after `FileHandle.stat()` and immediat
 `createReadStream`, with its existing handle-closing `finally` unchanged. Native stream cancellation
 and ordinary errors still propagate. The existing SDK integration test runs stat-boundary and
 mid-stream cancellation in isolated processes and joins handle closure. This one-line bridge
-is removed when a release contains the fix in
+is removed when the pinned Pi includes
 [upstream PR #12025](https://github.com/earendil-works/pi/pull/12025); upstream owns the
 alternative signal-free stream with reader-owned cancellation. The previous
 `pi-coding-agent-1.5.1-tron.1.tgz` is retained as the rollback artifact; its complete pin and
