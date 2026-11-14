@@ -226,6 +226,8 @@ results = Path(os.environ['TRON_IOS_TEST_RESULTS_DIR'])
 results.mkdir(parents=True)
 (results / 'TestResults.xcresult').mkdir()
 (results / 'TestResults.xcresult/Info.plist').write_text('native result fixture')
+if 'unsafe' in sys.argv:
+    (results / 'outside').symlink_to(root / 'README')
 (results / 'test.log').write_text('failure: fixture/native: deliberate red' if 'fail' in sys.argv else 'Executed 1 test, with 0 failures')
 (results / 'source.json').write_text(json.dumps({'sha': subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip(), 'args': sys.argv[1:], 'home': os.environ['HOME']}))
 print('Executed 1 test, with ' + ('1 failure' if 'fail' in sys.argv else '0 failures'), flush=True)
@@ -234,12 +236,18 @@ raise SystemExit(9 if 'fail' in sys.argv else 0)
         (self.local / 'scripts/tron-ios-test').chmod(0o755)
         shutil.copy2(ROOT / 'scripts/tron', self.local / 'scripts/tron')
         sha = self.commit('native result fixture')
-        for flag, expected in (('pass', 0), ('fail', 9)):
+        for flag, expected in (('pass', 0), ('fail', 9), ('unsafe', NO_RESULT)):
             with self.subTest(outcome=flag):
                 result = subprocess.run([str(self.local / 'scripts/tron'), 'test', 'ios', 'run', flag, '--ios-host', 'mini'],
                                         cwd=self.local, env=self.env, text=True, capture_output=True)
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
                 paths = [line.removeprefix('mini: artifacts: ') for line in result.stdout.splitlines() if line.startswith('mini: artifacts: ')]
+                if flag == 'unsafe':
+                    self.assertEqual(paths, [])
+                    self.assertIsNotNone(self.reader().no_result_reason(result.returncode, result.stdout + result.stderr))
+                    self.assertIn('unsafe mini artifact source', result.stdout + result.stderr)
+                    self.assertNotIn('cleanup unresolved', result.stderr)
+                    continue
                 self.assertEqual(len(paths), 1, result.stdout + result.stderr)
                 artifacts = Path(paths[0])
                 source = json.loads((artifacts / 'ios/source.json').read_text())

@@ -40,34 +40,36 @@ before `devicectl` when their signed protocol metadata differs.
 
 ## Commands
 
-Choose relevant tests and run them directly. One simulator job per worktree
-at a time (including profiling and Gateway E2E). Host-wide, host slots allow at most 3 simulator jobs at once: each of these commands takes one of 3 slots
-and waits, printing the holders, when all are taken. That is a ceiling; Home plans how many actually run
-(`packages/gateway/docs/host-load.md`). There is no other queue or admission.
+Tron simulator tests run serially on the Mac mini, not this Mac. Commit the source first, then use
+`scripts/tron test ios` (mini by default), or `scripts/tron verify ... --gateway-host mini --ios-host mini`.
+The latter moves the whole verification under one mini lease when iOS work is selected, so its build,
+index validation and test artifacts stay together without nested acquisition. Home plans the mini queue.
+A busy mini waits; unreachable or incomplete execution never falls back here. Native helpers below
+remain host-local execution owners for in-lease work. Their 3 host slots are a ceiling, not a target.
 
 ```bash
 scripts/tron-ios-simulator install
 scripts/tron-ios-simulator start
 scripts/tron-ios-simulator status
 scripts/tron-ios-simulator stop
-scripts/tron-ios-test build
-scripts/tron-ios-test run --only-testing TronMobileUITests/<Class>/<method>
-scripts/tron-ios-test run --lane ipad --device-type "iPad Pro 13-inch (M5)" --only-testing TronMobileUITests/TronPadSheetPresentationUITests
-scripts/tron-ios-test run                 # the smoke set
-scripts/tron-ios-test checkpoint         # build, then the smoke set
-scripts/tron-ios-test status --all
-scripts/tron-ios-test lanes
-scripts/tron-ios-test lane-remove <name>
-scripts/tron-ios-test reap
-scripts/tron-ios-test prune
-scripts/tron-ios-test clean
+scripts/tron test ios build
+scripts/tron test ios run --only-testing TronMobileUITests/<Class>/<method>
+scripts/tron test ios checkpoint --lane ipad --device-type "iPad Pro 13-inch (M5)" --only-testing TronMobileUITests/TronPadSheetPresentationUITests
+scripts/tron test ios run                 # the smoke set, with current built products
+scripts/tron test ios checkpoint         # build, then the smoke set
+scripts/tron test ios status --all
+scripts/tron test ios lanes
 ```
 
 A failed `build` prints `error: path:line: message` for each build error and a
 failed `run` prints `failure: test: message` for each test failure (first 20),
 read from the run's result bundle (`Build.xcresult`, `TestResults.xcresult`) by
-`scripts/xcresult-failures.py`. Read that block first; the raw `build.log` and
-`test.log` in the printed run directory stay the evidence.
+`scripts/xcresult-failures.py`. Read that block first. The mini returns those bundles and raw logs under
+`test-results/mini/<sha-prefix>-<nonce>/ios/` with an exact-SHA/host/exit receipt; the console prints the
+artifact directory. Native reports retain mini paths. A fresh source needs `checkpoint` or `build`
+before `run`; missing or stale products are still refused. See [mini execution](../../../tools/verify/README.md#ios-checks-on-the-mini).
+Native `lane-remove`, `reap`, `prune` and `clean` remain owning maintenance commands, not routine
+remote test steps; remove only resources you own and have authorization to delete.
 
 For a physical development device targeting Stable, first complete the Mac
 Release reinstall runbook and `scripts/tron mac verify`, then use the device

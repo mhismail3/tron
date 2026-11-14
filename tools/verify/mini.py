@@ -169,6 +169,19 @@ def outputs(args: list[str]) -> tuple[list[str], list[str]]:
     return mapped, [str(ROOT / 'packages/gateway' / path) for path in paths]
 
 
+def release_submission(ssh: list[str], reference: str, sha: str) -> None:
+    code = f'''import subprocess, sys
+command = ['git', '--git-dir={BASE}/tron.git']
+status = subprocess.run([*command, 'for-each-ref', '--format=%(objectname)', sys.argv[1]], capture_output=True, text=True, check=True)
+if status.stdout.strip():
+    subprocess.run([*command, 'update-ref', '-d', sys.argv[1], sys.argv[2]], check=True)
+'''
+    result = subprocess.run([*ssh, shlex.join(['/usr/bin/python3', '-c', code, reference, sha])],
+                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    if result.returncode:
+        print(f'mini: submission ref cleanup unresolved: {reference}: {result.stdout.strip()}', file=sys.stderr)
+
+
 def local_main(args: list[str], lane: str = 'gateway') -> int:
     if os.environ.get('TRON_UPDATE_LOCKS'):
         return no_result('TRON_UPDATE_LOCKS would rewrite goldens in the mini checkout, not here; record locks locally')
@@ -194,6 +207,7 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
                            f'{sha}:{incoming}'], env={**os.environ, 'GIT_SSH_COMMAND': shlex.join(ssh[:-1])},
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     if push.returncode:
+        release_submission(ssh, incoming, sha)
         return no_result(f'could not push {sha[:12]} to {destination}:{BASE}/tron.git; the mini is unreachable or not set up '
                          f'(pass --gateway-host local to run here): {push.stdout.strip()}')
     print(f'mini: pushed in {time.time() - started:.1f}s', flush=True)
@@ -255,10 +269,7 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
             for sig, handler in previous.items():
                 signal.signal(sig, handler)
             if code is None:
-                cleanup = subprocess.run([*ssh, shlex.join(['git', f'--git-dir={BASE}/tron.git', 'update-ref', '-d', incoming, sha])],
-                                         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-                if cleanup.returncode:
-                    print(f'mini: submission ref cleanup unresolved: {incoming}: {cleanup.stdout.strip()}', file=sys.stderr)
+                release_submission(ssh, incoming, sha)
     if stopped:
         print(f'mini: stopped; the mini job was ended (lane exit {code}); not a test result', file=sys.stderr)
         return 128 + stopped[0]
