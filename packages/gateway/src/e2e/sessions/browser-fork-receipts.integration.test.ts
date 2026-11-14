@@ -2,7 +2,11 @@ import { createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
+import { promisify } from "node:util";
+import { once } from "node:events";
+import { createServer } from "node:http";
+import { WebSocket, WebSocketServer } from "ws";
 import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
@@ -45,6 +49,121 @@ function toolResult(slot: Awaited<ReturnType<RuntimeRegistry["create"]>>, toolCa
 }
 
 describe("installed agent-browser fork receipts", () => {
+  it.skipIf(!installedFork)("attaches the pinned tool to Chrome's fixed consent endpoint, reuses it for DOM work, and seals a restart-fenced live view", async () => {
+    if (!installedFork) throw new Error("The pinned browser fork fixture is required");
+    const root = await mkdtemp(join(tmpdir(), "chrome-"));
+    roots.push(root);
+    const socketDir = join(root, "sockets");
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const cache = join(agentDir, "git/github.com/fitchmultz/pi-agent-browser-native");
+    await Promise.all([mkdir(socketDir), mkdir(cwd), mkdir(dirname(cache), { recursive: true })]);
+    await symlink(installedFork, cache, "dir");
+    const executable = execFileSync("/usr/bin/which", ["agent-browser"], { encoding: "utf8" }).trim();
+    const cli = async (...args: string[]) => {
+      const result = await promisify(execFile)(executable, ["--json", "--session", "o", ...args], {
+        encoding: "utf8", env: { ...process.env, AGENT_BROWSER_SOCKET_DIR: socketDir }, timeout: 15_000,
+      });
+      const envelope = JSON.parse(result.stdout);
+      expect(envelope.success).toBe(true);
+      return envelope.data;
+    };
+    browserCleanups.push(() => execFileSync(executable, ["--session", "o", "close"], {
+      env: { ...process.env, AGENT_BROWSER_SOCKET_DIR: socketDir }, timeout: 15_000, stdio: "pipe",
+    }));
+    const site = createServer((_request, response) => response.end("<!doctype html><title>Consented attach fixture</title><button>Local fixture only</button>"));
+    site.listen(0, "127.0.0.1");
+    await once(site, "listening");
+    const siteAddress = site.address();
+    if (!siteAddress || typeof siteAddress === "string") throw new Error("No fixture site address");
+    const url = `http://127.0.0.1:${siteAddress.port}/`;
+    const proxy = new WebSocketServer({ host: "127.0.0.1", port: 0, path: "/devtools/browser" });
+    await once(proxy, "listening");
+    const proxyAddress = proxy.address();
+    if (typeof proxyAddress === "string" || !proxyAddress) throw new Error("No fixture proxy address");
+    const endpoint = `ws://127.0.0.1:${proxyAddress.port}/devtools/browser`;
+    const upstreams = new Set<WebSocket>();
+    const views = new BrowserLiveViewRegistry();
+    let registry: RuntimeRegistry | undefined;
+    try {
+      await cli("open", url);
+      const upstreamEndpoint = (await cli("get", "cdp-url")).cdpUrl;
+      expect(upstreamEndpoint).toMatch(/^ws:\/\/127\.0\.0\.1:/);
+      proxy.on("connection", downstream => {
+        const upstream = new WebSocket(upstreamEndpoint);
+        upstreams.add(upstream);
+        const pending: Array<{ data: Buffer; binary: boolean }> = [];
+        downstream.on("message", (data, binary) => {
+          if (upstream.readyState === WebSocket.OPEN) upstream.send(data, { binary });
+          else pending.push({ data: Buffer.from(data as Buffer), binary });
+        });
+        upstream.on("open", () => { for (const { data, binary } of pending) upstream.send(data, { binary }); pending.length = 0; });
+        upstream.on("message", (data, binary) => { if (downstream.readyState === WebSocket.OPEN) downstream.send(data, { binary }); });
+        downstream.on("close", () => upstream.terminate());
+        upstream.on("close", () => { upstreams.delete(upstream); downstream.terminate(); });
+        upstream.on("error", () => downstream.terminate());
+        downstream.on("error", () => upstream.terminate());
+      });
+      await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir: join(root, "sessions"), packages: [installedForkSource], defaultTools: ["+agent_browser"] }));
+      const faux = fauxProvider({ provider: "tron-chrome-attach", tokensPerSecond: 10_000 });
+      faux.setResponses([
+        fauxAssistantMessage([fauxToolCall("agent_browser", { args: ["connect", endpoint], sessionMode: "fresh" }, { id: "attach" })], { stopReason: "toolUse" }),
+        fauxAssistantMessage([fauxToolCall("agent_browser", { args: ["tab", "new", url] }, { id: "fixture-open" })], { stopReason: "toolUse" }),
+        fauxAssistantMessage([fauxToolCall("agent_browser", { args: ["get", "title"] }, { id: "fixture-title" })], { stopReason: "toolUse" }),
+        fauxAssistantMessage([fauxToolCall("agent_browser", { args: ["get", "cdp-url"] }, { id: "fixture-view" })], { stopReason: "toolUse" }),
+        fauxAssistantMessage([fauxToolCall("agent_browser", { args: ["tab", "close"] }, { id: "fixture-close" })], { stopReason: "toolUse" }),
+        fauxAssistantMessage("complete"),
+      ]);
+      const trust = new TrustService(agentDir);
+      await trust.set(cwd, true);
+      registry = await createTestRegistry({ agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
+        modelRuntimeFactory: async () => {
+          const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+          runtime.registerNativeProvider(faux.provider);
+          return runtime;
+        }, browserLiveViews: views, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+      });
+      registries.push(registry);
+      await registry.initialize();
+      await registry.initializeBlobStorage();
+      const slot = await registry.create(cwd);
+      const model = faux.getModel();
+      await slot.setModel(model.provider, model.id);
+      await slot.prompt("Attach to the isolated local Chrome fixture, open and read only the fixture tab, then close it");
+      await waitFor(() => !slot.isBusy && toolResult(slot, "fixture-close") !== undefined, "real attached browser task completion");
+      for (const id of ["attach", "fixture-open", "fixture-title", "fixture-view", "fixture-close"]) {
+        expect(toolResult(slot, id), id).toMatchObject({ isError: false });
+      }
+      expect(JSON.stringify(toolResult(slot, "fixture-title"))).toContain("Consented attach fixture");
+      const observed = toolResult(slot, "fixture-view");
+      const reference = admitBrowserToolReference("agent_browser", "fixture-view", observed.details, slot.id);
+      expect(reference).toBeDefined();
+      const descriptor = reference!.descriptor;
+      expect(views.describe(slot.id, descriptor.viewId, descriptor.generation)).toEqual(descriptor);
+      const viewer = views.open(slot.id, descriptor.viewId, descriptor.generation, "attached-viewer");
+      try {
+        const frame = await waitFor(() => {
+          const delivery = views.acquireFrame(slot.id, descriptor.viewId, descriptor.generation, viewer.leaseId, "attached-viewer", () => {});
+          delivery.release();
+          return "sequence" in delivery.frame ? delivery.frame : undefined;
+        }, "a real frame from the identity-pinned Chrome endpoint");
+        expect(frame.data.length).toBeGreaterThan(0);
+      } finally { views.close(viewer.leaseId); }
+      await cli("close");
+      await waitFor(() => {
+        try { views.describe(slot.id, descriptor.viewId, descriptor.generation); return false; } catch { return true; }
+      }, "Chrome exit retires its exact live view");
+      expect(() => views.open(slot.id, descriptor.viewId, descriptor.generation, "late-viewer")).toThrow();
+    } finally {
+      if (registry) { await registry.dispose(); registries.splice(registries.indexOf(registry), 1); }
+      views.dispose();
+      for (const socket of proxy.clients) socket.terminate();
+      for (const socket of upstreams) socket.terminate();
+      await new Promise<void>(resolve => proxy.close(() => resolve()));
+      site.closeAllConnections();
+      await new Promise<void>(resolve => site.close(() => resolve()));
+    }
+  });
   it.skipIf(!installedFork).each(["envelope", "native"] as const)("registers direct and parent-sealed nested live views, reloads the parent receipt, and clears aborted stash (%s CLI)", async mode => {
     if (!installedFork) throw new Error("TRON_P99_17_BROWSER_FORK_COPY must point at the read-only installed fork copy");
     const forkStat = await readFile(join(installedFork, "package.json"), "utf8");

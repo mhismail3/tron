@@ -54,11 +54,63 @@ function admitBrowserJPEG(data: Buffer): CapturedBrowserFrame | undefined {
   }
 }
 
+export interface PinnedBrowserCDP {
+  readonly targetId: string;
+  readonly active: boolean;
+  close(): void;
+}
+
+export function pinBrowserCDP(input: {
+  endpoint: string;
+  connect: (endpoint: string, maximumPayload: number) => WebSocket;
+  signal: AbortSignal;
+  onEnd: () => void;
+}): Promise<PinnedBrowserCDP> {
+  input.signal.throwIfAborted();
+  const socket = input.connect(input.endpoint, 65_536);
+  return new Promise((resolve, reject) => {
+    let finished = false;
+    let pinned = false;
+    const end = (): void => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      input.signal.removeEventListener("abort", end);
+      socket.terminate();
+      if (pinned) input.onEnd();
+      else reject(new Error("browser_consent_required: Chrome did not admit a browser identity connection"));
+    };
+    const timer = setTimeout(end, 1_000);
+    timer.unref();
+    input.signal.addEventListener("abort", end, { once: true });
+    socket.once("close", end);
+    socket.once("error", end);
+    socket.once("open", () => {
+      if (finished) return;
+      socket.send(JSON.stringify({ id: 1, method: "Target.getTargetInfo" }), error => { if (error) end(); });
+    });
+    socket.on("message", (raw: Buffer) => {
+      if (finished || pinned) return;
+      try {
+        const message = record(JSON.parse(raw.toString("utf8")));
+        if (message?.id !== 1) return;
+        const target = record(record(message.result)?.targetInfo);
+        if (target?.type !== "browser" || !identifier(target.targetId)) { end(); return; }
+        clearTimeout(timer);
+        pinned = true;
+        resolve({ targetId: target.targetId,
+          get active() { return !finished && socket.readyState === WebSocket.OPEN; }, close: end });
+      } catch { end(); }
+    });
+  });
+}
+
 export function observeBrowserCDP(input: {
   endpoint: string;
   connect: (endpoint: string, maximumPayload: number) => WebSocket;
   onFrame: (frame: CapturedBrowserFrame) => void;
   onReset: () => void;
+  browserTargetId?: string;
 }): { stop: () => void; done: Promise<void> } {
   const socket = input.connect(input.endpoint, MAXIMUM_PAYLOAD);
   const controller = new AbortController();
@@ -249,6 +301,10 @@ export function observeBrowserCDP(input: {
 
   void (async () => {
     await ready;
+    if (input.browserTargetId) {
+      const target = record((await request("Target.getTargetInfo", { targetId: input.browserTargetId })).targetInfo);
+      if (target?.type !== "browser" || target.targetId !== input.browserTargetId) throw new Error("The attached browser identity has ended");
+    }
     let lastVisibleAt = performance.now();
     while (!stopped) {
       if (firstFrameDeadline !== undefined && performance.now() >= firstFrameDeadline) {

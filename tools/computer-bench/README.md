@@ -28,8 +28,10 @@ is reported as `absent`, never skipped.
 
 ## Tasks
 
-Everything is local and deterministic. Nothing signs in anywhere, touches the maintainer's
-browser profile, changes Chrome settings or system permissions, or spends money.
+Everything uses local fixtures. Nothing signs in anywhere, changes Chrome settings or
+system permissions, or spends money. Ordinary runs never attach to the maintainer's
+profile; only an explicitly supplied, separately consented `--chrome-cdp` endpoint
+admits the signed-in Chrome task.
 
 - **Fixture site** (`fixtures/site.mjs`, `127.0.0.1:<random>`): form fields, a prefilled field,
   a counter button, select and checkbox, file input, download link, `target=_blank` link,
@@ -46,8 +48,27 @@ value over CDP, the scratch window's state file, a PNG header, a file on disk). 
 own claim (`confirmed`, `unverifiable`) is recorded but is not the result. Tasks run
 serially; each rep starts from a fresh page or window.
 
-`signed-in-chrome` only checks whether the maintainer's Chrome exposes a CDP endpoint
-(`DevToolsActivePort`); it never attaches. `background-delivery` fails when any background
+For `agent-browser`, `signed-in-chrome` requires an explicit `--chrome-cdp` loopback
+browser WebSocket endpoint. Without one it reports `consent_required` and never probes
+or attaches. With one it connects in a separate tool session, verifies the exact
+endpoint, opens the local Bench Form in a new tab, reads its title, closes only that
+issued tab ID and detaches without closing Chrome. Every repetition starts detached;
+raw JSON records `attachMs` separately from total task wall time. Attach has a two-second
+bound; absent consent, wrong title, changed endpoint or failed cleanup is failure.
+Use `COMPUTER_BENCH_AGENT_BROWSER` to select the qualified engine under test rather
+than assume the installed engine matches the repository pin. For example, after Chrome
+has been released by its current owner and the per-instance setting consented:
+
+```bash
+scripts/tron computer-bench --tools agent-browser --only signed-in-chrome --reps 3 \
+  --chrome-cdp ws://127.0.0.1:9222/devtools/browser --json test-results/chrome-attach.json
+```
+
+The adapter does not enable or revoke Chrome's setting. The operator owns that exact
+consent window and verifies revocation through Chrome's UI when finished. An isolated
+profile run is fixture evidence, not proof of signed-in acceptance. The `browser-use`
+adapter still reports only its endpoint-existence probe and is not an attach oracle.
+`background-delivery` fails when any background
 Cua action changed the frontmost app. `foreground-delivery` runs only with `--foreground`
 and after 120 s without user input, so it never takes the shared Mac from a user;
 otherwise it reports `idle`. `permission-prompt` and `locked-refusal` are listed as not

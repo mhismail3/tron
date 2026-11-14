@@ -46,6 +46,7 @@ const USAGE = `Usage: scripts/tron computer-bench [--tools agent-browser,cua,bro
   --reps        repetitions per task (default 3)
   --only        run only these task ids
   --foreground  also run foreground-delivery cases (moves focus briefly; idle Mac only)
+  --chrome-cdp  explicitly consented loopback browser WebSocket endpoint for signed-in-chrome
   --json        write raw results
   --markdown    write the scorecard markdown (default: stdout)`;
 
@@ -70,7 +71,7 @@ async function runTool(name, options, ctx) {
         try { outcome = await adapter.tasks[id](ctx); } catch (error) { outcome = { ok: false, detail: String(error.message ?? error).slice(0, 400) }; }
         const ms = Math.round(performance.now() - started);
         const status = outcome.status ?? (outcome.ok ? "pass" : "fail");
-        (tool.tasks[id] ??= []).push({ status, ms, detail: outcome.detail?.replace(/\s+/gu, " ").trim(), stoleFocus: outcome.stoleFocus ?? false });
+        (tool.tasks[id] ??= []).push({ status, ms, ...(Number.isFinite(outcome.attachMs) ? { attachMs: outcome.attachMs } : {}), detail: outcome.detail?.replace(/\s+/gu, " ").trim(), stoleFocus: outcome.stoleFocus ?? false });
         process.stderr.write(`${name} ${id} #${rep + 1}: ${status} ${ms}ms ${outcome.detail ?? ""}\n`);
       }
     }
@@ -129,12 +130,12 @@ export function scorecard(results) {
 }
 
 async function main() {
-  const { values } = parseArgs({ options: { tools: { type: "string" }, reps: { type: "string", default: "3" }, only: { type: "string" }, foreground: { type: "boolean", default: false },
+  const { values } = parseArgs({ options: { tools: { type: "string" }, reps: { type: "string", default: "3" }, only: { type: "string" }, foreground: { type: "boolean", default: false }, "chrome-cdp": { type: "string" },
     json: { type: "string" }, markdown: { type: "string" }, help: { type: "boolean", default: false } } });
   if (values.help) { console.log(USAGE); return; }
   const names = (values.tools ?? Object.keys(ADAPTERS).join(",")).split(",");
   for (const name of names) if (!ADAPTERS[name]) throw new Error(`unknown tool ${name}\n${USAGE}`);
-  const options = { reps: Number(values.reps), only: values.only?.split(","), foreground: values.foreground };
+  const options = { reps: Number(values.reps), only: values.only?.split(","), foreground: values.foreground, chromeCdp: values["chrome-cdp"] };
   const workdir = mkdtempSync("/tmp/cbench-");
   const site = await startSite();
   const uploadFile = join(workdir, "bench-upload.txt");
