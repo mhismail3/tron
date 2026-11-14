@@ -1119,6 +1119,19 @@ class IosLaneTests(VerifyCase):
         r.git("branch", "-f", "base")
         return calls
 
+    def test_mini_ios_handoff_moves_the_whole_verification_without_nested_lease_or_local_build(self) -> None:
+        r = self.repo
+        calls = self.ios_fixture()
+        r.write("tools/verify/mini.py", "import json, sys\nif __name__ == '__main__':\n    print(json.dumps(sys.argv[1:]))\n    raise SystemExit(75)\n")
+        r.write("packages/ios-app/Sources/UI/Chat/ChatView.swift", "struct ChatView { let value = 1 }\n")
+        r.commit("selected remote iOS work")
+        result = r.verify("--changed", "--ios-host", "mini", "--gateway-host", "mini")
+        self.assertEqual(result.returncode, 75, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout), ["verify", "--changed", "--base", r.git("rev-parse", "base"),
+                                                    "--ios-host", "local", "--gateway-host", "local"])
+        self.assertFalse(calls.exists(), "no iOS build or test runs on the submitting host")
+        self.assertFalse((r.path / "test-results/verify").exists(), "the mini owns the report, not an outer local verifier")
+
     def test_real_gateway_boundary_tests_execute_through_their_owning_harness(self) -> None:
         r = self.repo
         ios_calls = self.ios_fixture()

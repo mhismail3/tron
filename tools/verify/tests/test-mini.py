@@ -232,10 +232,12 @@ print('Executed 1 test, with ' + ('1 failure' if 'fail' in sys.argv else '0 fail
 raise SystemExit(9 if 'fail' in sys.argv else 0)
 ''')
         (self.local / 'scripts/tron-ios-test').chmod(0o755)
+        shutil.copy2(ROOT / 'scripts/tron', self.local / 'scripts/tron')
         sha = self.commit('native result fixture')
         for flag, expected in (('pass', 0), ('fail', 9)):
             with self.subTest(outcome=flag):
-                result = self.lane('ios', 'run', flag)
+                result = subprocess.run([str(self.local / 'scripts/tron'), 'test', 'ios', 'run', flag, '--ios-host', 'mini'],
+                                        cwd=self.local, env=self.env, text=True, capture_output=True)
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
                 paths = [line.removeprefix('mini: artifacts: ') for line in result.stdout.splitlines() if line.startswith('mini: artifacts: ')]
                 self.assertEqual(len(paths), 1, result.stdout + result.stderr)
@@ -251,6 +253,28 @@ raise SystemExit(9 if 'fail' in sys.argv else 0)
         with open(self.mini / 'tron-ci/jobs/gateway.lock') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         self.assertEqual(list((self.mini / 'tron-ci/results').iterdir()), [])
+
+    def test_whole_verifier_returns_its_report_logs_and_raw_75_without_another_lease(self) -> None:
+        self.write('tools/verify/verify.py', '''import json, subprocess, sys
+from pathlib import Path
+root = Path(__file__).resolve().parents[2]
+sha = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+logs = root / 'test-results/verify' / sha
+logs.mkdir(parents=True)
+(logs / 'first-failure.log').write_text('native boundary fixture')
+(logs.parent / (sha + '.json')).write_text(json.dumps({'commit': sha, 'args': sys.argv[1:]}))
+raise SystemExit(75 if '--incomplete' in sys.argv else 0)
+''')
+        sha = self.commit('whole-verifier boundary fixture')
+        for args, expected in ((['--changed'], 0), (['--incomplete'], 75)):
+            with self.subTest(exit=expected):
+                result = self.lane('verify', *args)
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                self.assertIsNone(self.reader().no_result_reason(result.returncode, result.stdout + result.stderr))
+                line = next(line for line in result.stdout.splitlines() if line.startswith('mini: artifacts: '))
+                artifacts = Path(line.removeprefix('mini: artifacts: '))
+                self.assertEqual(json.loads((artifacts / 'verify.json').read_text()), {'commit': sha, 'args': args})
+                self.assertEqual((artifacts / 'verify/first-failure.log').read_text(), 'native boundary fixture')
 
     def test_a_python_lane_runs_its_command_at_the_exact_commit_with_one_ordered_output(self) -> None:
         self.write('tools/probe.py', PROBE)
@@ -436,7 +460,7 @@ raise SystemExit(9 if 'fail' in sys.argv else 0)
         self.assertTrue(report.is_file(), 'the lane ran and returned its report')
         self.assertIsNone(self.reader().no_result_reason(exited.returncode, exited.stdout + exited.stderr))
 
-    def test_a_push_whose_job_never_started_leaves_no_ref_after_the_next_job(self) -> None:
+    def test_a_push_whose_job_never_started_leaves_no_submission_ref(self) -> None:
         report, args = self.report_args()
         repository = self.mini / 'tron-ci/tron.git'
         self.git('config', 'tron.verify.mini', 'nojob.test')
@@ -444,6 +468,7 @@ raise SystemExit(9 if 'fail' in sys.argv else 0)
         self.assertEqual(abandoned.returncode, NO_RESULT, abandoned.stdout + abandoned.stderr)
         self.assertIn('pushed', abandoned.stdout)
         self.assertIn('without a result', abandoned.stderr)
+        self.assertEqual(self.git('for-each-ref', '--format=%(refname)', cwd=repository), '')
         self.git('config', 'tron.verify.mini', 'mini.test')
         self.write('README', 'next commit\n')
         sha = self.commit('next')
@@ -490,10 +515,20 @@ raise SystemExit(9 if 'fail' in sys.argv else 0)
         self.wait_for_lane(runner)
         self.write('README', 'later push\n')
         later = self.commit('later')
-        self.git('push', '-q', '--force', str(self.mini / 'tron-ci/tron.git'), f'{later}:refs/tron-jobs/incoming')
+        pending = self.lane(*args, background=True)
+        self.addCleanup(lambda: pending.poll() is None and pending.kill())
+        seen = ''
+        deadline = time.monotonic() + 30
+        while 'waiting for the mini job lock' not in seen:
+            self.assertLess(time.monotonic(), deadline, seen)
+            self.assertIsNone(pending.poll(), seen)
+            seen += pending.stdout.readline()
         runner.send_signal(signal.SIGTERM)
         output, _ = runner.communicate(timeout=60)
-        self.assertEqual(self.git('rev-parse', 'refs/tron-jobs/incoming', cwd=self.mini / 'tron-ci/tron.git'), later, output)
+        resumed, _ = pending.communicate(timeout=60)
+        self.assertEqual(pending.returncode, 0, seen + resumed)
+        self.assertEqual(self.git('for-each-ref', '--format=%(refname) %(objectname)', cwd=self.mini / 'tron-ci/tron.git'),
+                         f'refs/tron-jobs/gateway {later}', output + resumed)
         self.assertEqual((self.mini / 'lane-terminated').read_text(), 'SIGTERM', output)
         self.assertEqual(runner.returncode, 143, output)
         self.assert_mini_job_ended()

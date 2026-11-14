@@ -200,7 +200,7 @@ case "$cmd" in
           *) exec python3 "$ROOT/tools/verify/mini.py" pool "$@" ;;
         esac
         ;;
-      ios) exec "$ROOT/scripts/tron-ios-test" "$@" ;;
+      ios) exec python3 "$ROOT/tools/verify/mini.py" ios "$@" ;;
       mac) exec python3 "$ROOT/tools/verify/mac.py" "$@" ;;
       tooling)
         if (($# == 0)); then set -- "$ROOT"/tools/work/tests/test-*.py; fi
