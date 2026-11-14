@@ -733,7 +733,7 @@ export class GatewayService {
         return safeJson(await this.deviceLogStore().cursor(client.identity));
       case "client.logs.append":
         return this.mutation(client, method, params, async () => {
-          rejectUnknownFields(params, ["commandId", "bootId", "firstSequence", "lines"], method);
+          rejectUnknownFields(params, ["commandId", "bootId", "firstSequence", "lines", "gapFrom", "reason"], method);
           requireDeviceLogClient(client);
           return safeJson(await this.deviceLogStore().append(client.identity, client.admission, params));
         });
