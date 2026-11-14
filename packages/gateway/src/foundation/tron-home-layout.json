@@ -115,7 +115,6 @@
     "logs/ios-builds.log": {"owner": "repo/ios"},
     "logs/mac.jsonl*": {"owner": "mac-app/support", "prune": {"keepNewest": 4, "maxBytes": 4194304}},
     "logs/deploy.jsonl*": {"owner": "repo/dev", "prune": {"keepNewest": 2, "maxBytes": 2097152}},
-    "logs/device-exports": {"owner": "gateway/transport", "subtree": true, "prune": {"keepNewest": 10}},
     "logs/devices": {"owner": "gateway/transport", "subtree": true, "prune": {"when": "rotated per paired device at 5 MiB, four segments kept"}},
 
     "workspace/builds/ios-ota": {"owner": "repo/ios", "class": "rebuild", "container": true},

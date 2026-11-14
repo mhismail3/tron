@@ -178,14 +178,16 @@ expired cursor ([catalog](../sessions/catalog.md#catalog-pagination),
 `client.logs.cursor` returns the device's held `{bootId, sequence}`. `client.logs.append`
 (receipt-backed, device connections only; a local wrapper is refused) takes `bootId`,
 `firstSequence` and `lines` (1 to 256 one-line JSON objects, each at most 16 KiB, batch at
-most 256 KiB), writes each record once to `~/.tron/logs/devices/<device-hash>.jsonl` as
-`{bootId, sequence, record}` and replies with the held cursor. A batch that starts past
-the held sequence plus one is refused as a gap; a replayed range writes nothing. The
-device is derived from the authenticated peer. Four 5 MiB segments are kept per device.
-`system.logs.export` accepts only a bounded redacted client snapshot and command ID,
-appends the newest debug records (≤ 1 MB) and writes
-`~/.tron/logs/device-exports/<device-hash>-<timestamp>.jsonl` (0600 in 0700, newest
-ten kept); it never takes a client path or reads session content. RPC records keep
+most 256 KiB) and writes each record once to `~/.tron/logs/devices/<device-hash>.jsonl` as
+`{bootId, sequence, record}`; it replies with the held cursor. On an unchanged `bootId` a
+batch must start at most one past the held sequence, and a replayed range writes nothing.
+A new `bootId` is a new epoch: it must start at 1 and may carry `gapFrom` (exactly the held
+sequence) with `reason` `local-rotation` when a different epoch was held. The gap is written
+into that first envelope as `gap`; a mismatched gap is refused as `conflict` and writes
+nothing. A write from an older connection admission is refused and leaves the cursor
+unchanged. The device is derived from the authenticated peer. Four 5 MiB segments are kept
+per device.
+RPC records keep
 `method`, `requestID`, `outcome`, `code`, `durationMs`; catalog stages add a
 process-local `workID`; reasons are fixed codes, never exception text or parameters.
 

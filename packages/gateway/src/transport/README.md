@@ -13,7 +13,7 @@ and diagnostic exports.
 `command-receipts.ts`, `session-sync.ts`, `ordered-outbound-queue.ts`,
 `connection-policy.ts`, `lan-endpoint.ts`, `tailscale-peer.ts`, `upload-http.ts`,
 `stall-diagnostics.ts`, `logger.ts` (`GatewayLogger`) and
-`diagnostic-export.ts`.
+`device-logs.ts`.
 
 ## Contract
 
@@ -35,9 +35,7 @@ the iPhone app). Never widen the advertised minimum or allow a mixed pair to byp
 that handoff. Same-major updates use the owned Gateway update flow.
 
 **Logging.** `GatewayLogger` is the one writer. The phone's own records reach the Mac
-through `client.logs.append` into `device-logs.ts`, the one owner of the per-device files. `system.logs` serves the newest 1,000
-persisted records (info and above); debug lives only in a bounded memory buffer that
-`system.logs.export` appends. Records carry `timestamp`, `level`, `event`, `source`, a
+through `client.logs.append` into `device-logs.ts`, the one owner of the per-device files. Persisted records are the file stream; debug lives only in a bounded memory buffer. Records carry `timestamp`, `level`, `event`, `source`, a
 redacted `message` and the writer-stamped `process`, `runtimeEpoch`, `payloadVersion`;
 call sites add correlation as fields (`sessionId`, `connectionId`, `commandId`,
 `requestID`, `method`, `outcome`, `code`, `reason`, `durationMs`, `step`) and pass a
@@ -126,7 +124,6 @@ heartbeat-refreshed memory reading with its age.
 | `http.upload-cleanup` | warning | Discarding an abandoned upload failed other than by conflict or not-found; owned bytes remain |
 | `http.error` | error | An unexpected HTTP handler fault before headers were sent: public `code` and the original bounded/redacted `error`/`cause`; client fault text is fixed-safe. Inspect this record for the local cause, not the client message |
 | `rpc.error` | warning for a cause-free `GatewayError` other than `internal`; error, with `error`, for an unexpected/caused fault or `internal` | An RPC handler threw: `method`, `requestID`, `connectionId`, `sessionId`, `commandId`, `code`, `outcome`, `reason`, `operationId`, `ageMs` |
-| `rpc.received` | info | An admitted `system.logs.export` reached its handler (`outcome=admitted`); joins the phone's `logs.export.requested` to `rpc.completed` |
 | `rpc.completed` | debug for a success under `SLOW_RPC_WARNING_MS` (1,000 ms), or `SLOW_PROMPT_WARNING_MS` (250 ms) for a prompt; warning at or above it, on failure or on `connectionClosed` | Every RPC end: correlation, `outcome`, `durationMs`, `stages` (`util/request-span.ts`, most expensive first, ≤ 1,024 bytes) and `unaccountedMs`. Prompt spans name lane waits, inventory admission, receipt persistence and response write; `settings.resolve` names its store awaits as finite `settings.*` stages |
 | `receipt.completed-persist-failed` | warning | The detached completed-receipt write after an accepted `session.prompt` response failed (`gateway-service.ts`); the pending receipt stays the replay fence |
 | `rpc.cancelled` | debug under `SLOW_RPC_WARNING_MS`; warning at or above it | A `{type:"cancel",id}` frame named a disposable read this connection owns, or a shared `session.open` lost its last waiter: `stage` (innermost open), `durationMs`, `stages`; replaces `rpc.completed`. Mutations and prompts are never cancelled |
