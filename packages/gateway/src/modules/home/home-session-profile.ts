@@ -6,7 +6,7 @@ import { isVirtualModel } from "../../providers/virtual-model.js";
 
 export const HOME_SESSION_PROFILE_NAME = "home";
 const HOME_MODULE_NAMES: readonly string[] = [
-  "tron-context-window", "tron-compaction-policy", "tron-settings", "tron-projects", "tron-ask-user", "tron-display", "tron-notify", "tron-schedule", "tron-computer",
+  "tron-context-window", "tron-compaction-policy", "tron-settings", "tron-session-import", "tron-projects", "tron-ask-user", "tron-display", "tron-notify", "tron-schedule", "tron-computer",
 ];
 export interface HomeSessionProfileServices {
   globalRulesPath: string;
