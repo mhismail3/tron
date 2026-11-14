@@ -84,6 +84,7 @@ import { runtimeIdentity } from "./transport/runtime-identity.js";
 import { assertHomeLayout, tronHomePath } from "./foundation/tron-home-layout.js";
 
 const moduleGraphLoadedAt = performance.now();
+process.env.PI_TELEMETRY = "0";
 const tronHome = resolveTronHome();
 const agentDir = resolveAgentDir(tronHome);
 await assertHomeLayout(tronHome);

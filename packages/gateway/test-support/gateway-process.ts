@@ -189,7 +189,7 @@ async function launchGatewayProcess(
     models: [model(SCRIPTED_MODEL), model("scripted-alternate"), model(BACKGROUND_MODEL)] } } }, null, 2));
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({
     defaultProvider: SCRIPTED_PROVIDER, defaultModel: SCRIPTED_MODEL, defaultProjectTrust: "never",
-    enableAnalytics: false, enableInstallTelemetry: false, ...options.settings,
+    enableAnalytics: false, ...options.settings,
   }, null, 2));
   const port = await freePort();
   const environment = {

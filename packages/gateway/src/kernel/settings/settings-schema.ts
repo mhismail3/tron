@@ -453,11 +453,6 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       writers: ["ui", "home"], label: "npm command", help: "The command used to install packages.", order: 60, importance: "advanced", control: "list",
       entry: { hint: "One word per value: the program first (npm, pnpm or bun), then any arguments.", example: "pnpm" },
     },
-    {
-      tap: "irreversible", id: "setup.installTelemetry", sessionOverridable: false, projectSettable: false, group: "setup", type: types.boolean(), layers: { global: pi("enableInstallTelemetry") }, defaultValue: true,
-      timing: "live", effect: "next-request", writers: ["ui"], label: "Install telemetry",
-      help: "Send pi's anonymous install attribution header.", order: 20, importance: "advanced", control: "toggle",
-    },
   ] satisfies readonly KeyDeclaration[]);
 
   const byId = new Map(KEYS.map(key => [key.id, key]));
