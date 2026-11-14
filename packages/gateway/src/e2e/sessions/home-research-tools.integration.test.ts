@@ -864,7 +864,7 @@ describe("Tron Home research tools", () => {
       { name: "session_import", args: { path: "to-import.jsonl", cwd: f.project } },
       { name: "session_import", args: { path: source } },
     ]);
-    expect(imported!.isError).toBe(false);
+    if (imported!.isError) throw new Error(`session_import refused: ${imported!.text}`);
     const { sessionId } = JSON.parse(imported!.text) as { sessionId: string };
     expect(sessionId).not.toBe("external-source");
     expect(JSON.stringify(imported!.details)).not.toContain(marker);
