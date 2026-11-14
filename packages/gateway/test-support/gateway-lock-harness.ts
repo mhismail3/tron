@@ -152,7 +152,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
     for (const extension of options.extensions) await writeFile(join(agentDir, "extensions", extension.name), extension.source);
   }
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({
-    sessionDir: join(root, "sessions"), defaultProvider: model.provider, defaultModel: model.id,
+    defaultProvider: model.provider, defaultModel: model.id,
     compaction: { enabled: false, reserveTokens: 2_048, keepRecentTokens: 120 },
     ...options.settings,
   }));

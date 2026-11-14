@@ -60,7 +60,7 @@ defines scoped permissions and runtime admission.
 In short:
 
 - **One key, declared once on the Gateway** (F1). The schema holds type,
-  group, allowed layers, timing, effect point, native-tap classification, writers, redaction and
+  group, allowed layers, timing, effect point, native-tap classification, writers and
   display. iOS renders keys generically; a new key needs no iOS release.
 - **Three scopes** (F4): **Project > Session/Home override > Global**, gated by
   registry grants. Home has no Project or separate chapter override. Private store
@@ -104,7 +104,8 @@ are installed; schema access never evaluates their late-bound service getter.
   atomically within one store and rolls back across stores; requests
   serialize per target.
 - The record is append-only and kept forever; credentials and redacted values
-  never appear in it. It is never read to compute a value.
+  never appear in it. It is never read to compute a value. Reads (RPC and agent tool) return
+  the kernel's public entries: values of a flagged, retired or unknown key are never returned.
 - An agent's history page and Undo reach only its own chat's changes; the scope
   filter runs inside the history owner's page, never after the page returns. Tron Home
   and the maintainer see and undo all changes, each Undo logged with before and after.

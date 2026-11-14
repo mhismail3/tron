@@ -139,11 +139,9 @@ describe("native-tool settlement qualification with the pinned runtime", { concu
       try {
         const agentDir = join(root, "agent");
         const cwd = join(root, "workspace");
-        const sessionDir = join(root, "sessions");
         const extensionDir = join(cwd, ".pi", "extensions");
-        await Promise.all([mkdir(agentDir), mkdir(sessionDir), mkdir(extensionDir, { recursive: true })]);
+        await Promise.all([mkdir(agentDir), mkdir(extensionDir, { recursive: true })]);
         process.env.PI_CODING_AGENT_DIR = agentDir;
-        await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir }));
         await writeFile(join(extensionDir, "native-fixture.ts"), extensionSource(peer.port, waiterOnly));
         const trust = new TrustService(agentDir);
         await trust.set(cwd, true);

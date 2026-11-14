@@ -50,7 +50,7 @@ No Profile DTO or domain inverse is invented by the settings kernel.
 `SettingsToolAccess` resolves and changes the current session or Home's delegated
 worker. Its `history` action pages the durable audit (50 records by default, at most 200),
 optionally filtered by key, using the returned cursor. The caller's actor is threaded into
-`SettingsChangePath.history` and `undo`, where `historyVisible` decides scope: an agent sees and
+`SettingsChangePath.history` and `undo`, where `historyVisible` decides scope; `history` returns public entries (`publicHistoryEntry`: before/after only for a declared key or record subject, never for a flagged, retired or unknown key), so the RPC and the tool share one redaction: an agent sees and
 undoes only changes whose target is its session or that its session initiated (its Global changes
 included); Tron Home and the maintainer see and undo every change. `undo` takes a change id and
 reason; the target session's own store is acquired through its owner, never Home's snapshot.
@@ -106,7 +106,9 @@ proofs live in `settings-three-layer.e2e.test.ts`.
 Expected-before checks, including Session-owned fields, run inside the target stripe.
 Undo checks both the original entry's history-derived consumption and its expected
 current-after value under that same stripe. Undo of Undo names the new fact, not the
-original operation. Redacted/action facts are not generically undoable.
+original operation. Redacted/action facts are not generically undoable. Key declarations
+contain no credentials or redaction mode; credential-bearing record subjects retain their
+digest-only outside audit and redaction-aware history and Undo guards.
 
 Segment replacement precedes index publication. Recovery adopts only complete,
 unambiguous bounded published bytes and never replays effects. Corrupt history
