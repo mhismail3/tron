@@ -282,6 +282,11 @@ raise SystemExit(75 if '--incomplete' in sys.argv else 0)
         sha = self.commit('whole-verifier boundary fixture')
         main = self.git('rev-parse', 'HEAD^')
         self.git('update-ref', 'refs/remotes/origin/main', main)
+        for args in (['--batch'], ['--update-locks', 'owner']):
+            denied = self.lane('verify', *args)
+            self.assertEqual(denied.returncode, NO_RESULT, denied.stdout + denied.stderr)
+            self.assertIn('synchronous checks', denied.stderr)
+            self.assertNotIn('pushing', denied.stdout)
         for args, expected in ((['--changed'], 0), (['--incomplete'], 75)):
             with self.subTest(exit=expected):
                 result = self.lane('verify', *args)

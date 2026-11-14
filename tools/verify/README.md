@@ -108,7 +108,14 @@ checks still precede the build on that host. The base is resolved to a committed
 transfer; the leased checkout also binds `origin/main` to the caller's committed main merge-base so
 native ownership ratchets see the same Git baseline. The remote invocation names local execution hosts
 so its own groups never reacquire the mini lease. `--plan` remains a submitting-host preview and records `iosHost`; it launches nothing. Without
-iOS work, the existing group routing remains in effect.
+iOS work, the existing group routing remains in effect. A mini invocation refuses selections with
+`python-here` or `mac-terminal` before starting runners: those checks belong to their Mac's stores/SSH
+service. This includes `--all`; select a supported affected scope instead, never fall back to a local
+simulator run. Golden recording is local-only and cannot be combined with remote verification.
+
+The existing batch Apple path is not migrated by this flag. Its serial mini routing, explicit host-bound
+split and SHA-addressed asynchronous result retrieval are tracked in #2530. Do not launch that still-local
+Apple path as agent heavy-test evidence on this Mac.
 
 `scripts/tron test ios [--ios-host mini|local] <runner arguments>` defaults to the mini and invokes
 that commit's `scripts/tron-ios-test` there. A fresh source needs `checkpoint` (build and selected tests)

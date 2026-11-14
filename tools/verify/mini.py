@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Run one Gateway Vitest lane (tools/verify/gateway.py) or verify's Python group on the Mac mini test host and return
-its result as this run's.
+"""Run Gateway, Python, Node, iOS or whole-verifier jobs under the Mac mini lease and return their native results.
 
 The test-host pool is {the mini, this Mac}: `choose_host` picks the mini when it is configured, reachable and idle,
 and otherwise this Mac, always with its reason; `mini.py pool [vitest args]` runs one lane on the chosen host.
 `mini.py python <command>` runs verify's per-file Python command in the mini checkout, its stderr merged into
 stdout in order, since verify counts each file's unittest summary after that file's marker. `mini.py node <file>...`
 runs the Gateway's `node --test` files on the mini's pinned Node, its TAP output streamed back for verify to count.
+`mini.py ios` invokes the native iOS owner; `mini.py verify` invokes verification inside the lease. Both return
+bounded digest-checked native artifact archives with commit, execution-host and raw-exit receipts.
 
 Local side: refuse a dirty tree, push the exact HEAD commit to the mini's bare repository, run this same file there
 (sent as source, so both halves are one version), stream its output live, and write the Vitest output files it
@@ -185,6 +186,8 @@ if status.stdout.strip():
 def local_main(args: list[str], lane: str = 'gateway') -> int:
     if os.environ.get('TRON_UPDATE_LOCKS'):
         return no_result('TRON_UPDATE_LOCKS would rewrite goldens in the mini checkout, not here; record locks locally')
+    if lane == 'verify' and any(word == '--batch' or word == '--update-locks' or word.startswith('--update-locks=') for word in args):
+        return no_result('mini verification accepts synchronous checks, not batch dispatch or golden recording')
     if git('status', '--porcelain', '--untracked-files=normal'):
         return no_result('the worktree has uncommitted or untracked changes; the mini runs a commit, commit first')
     try:
@@ -461,6 +464,7 @@ def remote_main(job: dict) -> int:
                     command = ([str(checkout / 'scripts/tron-ios-test'), *job['args']] if job['lane'] == 'ios'
                                else ['/usr/bin/python3', str(checkout / 'tools/verify/verify.py'), *job['args']])
                     env = {**clean, 'PATH': f'{node.parent}:{clean["PATH"]}',
+                           'TRON_VERIFY_EXECUTION_HOST': 'mini',
                            'TRON_CI_TOOLS_DIR': str(base / '.ci-tools'),
                            'TRON_IOS_TEST_RESULTS_DIR': str(results / 'ios'),
                            'TRON_PROFILE_RESULTS_DIR': str(results / 'profiles'),
@@ -469,16 +473,16 @@ def remote_main(job: dict) -> int:
                     if job['lane'] == 'verify':
                         report = checkout / 'test-results/verify' / f'{sha}.json'
                         if report.is_file():
-                            shutil.copy2(report, results / 'verify.json')
+                            shutil.copy2(report, results / 'verify.json', follow_symlinks=False)
                         logs = checkout / 'test-results/verify' / sha
                         if logs.is_dir():
-                            shutil.copytree(logs, results / 'verify')
+                            shutil.copytree(logs, results / 'verify', symlinks=True)
                     e2e = checkout / '.scratch/mini-e2e'
                     if e2e.is_dir():
                         for source in [e2e / 'results', e2e / 'attempts', *sorted(e2e.glob('lane*/results'))]:
                             if source.is_dir():
                                 target = results / 'e2e' / source.relative_to(e2e)
-                                shutil.copytree(source, target, ignore=shutil.ignore_patterns('latest', 'latest-ui'))
+                                shutil.copytree(source, target, symlinks=True, ignore=shutil.ignore_patterns('latest', 'latest-ui'))
                     (results / 'receipt.json').write_text(json.dumps({'commit': sha, 'lane': job['lane'], 'exit': code,
                                                                      'host': platform.node(), 'args': job['args']}))
                     total = 0
@@ -498,6 +502,8 @@ def remote_main(job: dict) -> int:
                     out.write(frame(nonce) + f'artifact-end {digest.hexdigest()}\n'.encode())
                     out.flush()
                     return finish(code)
+                except (OSError, ValueError, tarfile.TarError) as error:
+                    return refuse(f'{job["lane"]} invocation/artifacts failed: {error}')
                 finally:
                     archive.unlink(missing_ok=True)
                     shutil.rmtree(results, ignore_errors=True)
