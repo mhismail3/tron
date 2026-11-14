@@ -124,7 +124,7 @@ export interface GatewayProcess {
   readonly cwd: string;
   readonly provider: ScriptedProvider;
   pid(): number;
-  connect(options?: { token?: string }): Promise<ProcessClient>;
+  connect(options?: { token?: string; capabilities?: string[] }): Promise<ProcessClient>;
   pair(deviceName: string): Promise<{ deviceId: string; token: string }>;
   log(): Promise<Array<Record<string, any>>>;
   restart(options?: { environment?: Record<string, string>; whileStopped?: () => Promise<void> }): Promise<void>;
@@ -264,7 +264,7 @@ async function launchGatewayProcess(
         else if (frame.type === "event") events.push({ topic: frame.topic, sessionId: frame.sessionId, payload: frame.payload });
       });
       await once(socket, "open");
-      socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
+      socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION, ...(connectOptions.capabilities ? { capabilities: connectOptions.capabilities } : {}) }));
       await awaitsWithin(helloed, "the Gateway hello");
       return {
         events,

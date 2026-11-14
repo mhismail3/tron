@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
@@ -166,5 +167,47 @@ describe("prompt journeys across the real Gateway process", () => {
     expect(headers["http-referer"]).toBeUndefined();
     expect(headers["x-openrouter-title"]).toBeUndefined();
     expect(headers["x-openrouter-categories"]).toBeUndefined();
+  }, 60_000);
+});
+
+describe("Run Swift files device preference through the production Gateway process composition", () => {
+  it("a Home settings change reaches the explicit paired iPhone over its authenticated socket, is audited, and undoes through a fresh read", async () => {
+    const gateway = await startGatewayProcess();
+    gateways.push(gateway);
+    const phone = await gateway.pair("Process fixture iPhone");
+    const iphone = await gateway.connect({ token: phone.token, capabilities: ["device-preference"] });
+    const local = await gateway.connect();
+    const key = "experimental.swiftApps";
+    const device = { device: phone.deviceId };
+    const requests = (action: string) => iphone.events.filter((event) => event.topic === "device.preference.request" && event.payload.action === action).map((event) => event.payload as Record<string, any>);
+    const answer = async (action: string, index: number, body: Record<string, unknown>) => {
+      await waitFor(() => requests(action).length > index, `the phone ${action} request ${index + 1}`);
+      const reply = await iphone.request("device.preference.respond", { commandId: randomUUID(), requestId: requests(action)[index]!.requestId, ...body });
+      expect(reply.ok, JSON.stringify(reply)).toBe(true);
+    };
+
+    const changing = local.request("settings.change", { commandId: randomUUID(), target: { kind: "home" }, reason: "Turn off Swift files",
+      changes: [{ key, layer: "global", op: "set", value: false, qualifiers: device, expected: true }] });
+    await answer("read", 0, { status: "value", value: true });
+    await answer("read", 1, { status: "value", value: true });
+    await answer("set", 0, { status: "applied" });
+    const applied = await changing;
+    expect(applied.ok, JSON.stringify(applied)).toBe(true);
+    expect(applied.result).toMatchObject({ status: "applied" });
+    const changeId = applied.result.changes[0].changeId as string;
+
+    const history = await local.request("settings.history", { key, limit: 10 });
+    expect(history.ok, JSON.stringify(history)).toBe(true);
+    expect(history.result.entries).toHaveLength(1);
+    expect(history.result.entries[0]).toMatchObject({ changeId, status: "applied", actor: { kind: "ui" }, layer: "global", before: true, after: false, qualifiers: device });
+
+    const undoing = local.request("settings.undo", { commandId: randomUUID(), changeId, reason: "Undo Swift files" });
+    await answer("read", 2, { status: "value", value: false });
+    await answer("set", 1, { status: "applied" });
+    const undone = await undoing;
+    expect(undone.ok, JSON.stringify(undone)).toBe(true);
+    expect(undone.result).toMatchObject({ status: "applied" });
+    expect(requests("set").map((request) => [request.expected, request.value])).toEqual([[true, false], [false, true]]);
+    await local.close(); await iphone.close();
   }, 60_000);
 });
