@@ -1,8 +1,8 @@
 import { stat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
-import { Type } from "../kernel/pi/ai.js";
-import type { ModuleDescriptor } from "../kernel/host/module-host.js";
-import type { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
+import { Type } from "../../kernel/pi/ai.js";
+import type { ModuleDescriptor } from "../../kernel/host/module-host.js";
+import type { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 
 const PARAMETERS = Type.Object({
   path: Type.String({ minLength: 1, maxLength: 4_096, description: "Absolute path to a Tron session .jsonl file on this Mac." }),
