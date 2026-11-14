@@ -433,7 +433,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                         return key != "model.thinking[role=chat]" && !key.hasPrefix("context.")
                     }
                 + (HostedLaunch.arguments.contains("-settings-sheet-theme-review") ? HostedSettingsReviewSchema.sheetThemeKeys : [])
-                + [HostedSettingsReviewSchema.key("setup.installTelemetry", "setup", "Install telemetry", .bool(false), "Off", "toggle", order: 20)]
             if HostedLaunch.arguments.contains("-six-ui-surface") {
                 return .object(["keys": .array(rows), "sections": .array(HostedSettingsReviewSchema.sections)])
             }

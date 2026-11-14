@@ -133,7 +133,6 @@ function piEffective(manager: SettingsManager, model: { provider: string; id: st
     "context.images.autoResize": manager.getImageAutoResize(),
     "context.images.block": manager.getBlockImages(),
     "permissions.defaultProjectTrust": manager.getDefaultProjectTrust(),
-    "setup.installTelemetry": manager.getEnableInstallTelemetry(),
   };
 }
 
