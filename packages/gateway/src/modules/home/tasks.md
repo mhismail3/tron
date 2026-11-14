@@ -60,6 +60,9 @@ Home's `task transcript {taskId, subagentSessionId?, offset?, limit?}` reads can
 including tool calls/results and operations resumed in the same session, while running or
 settled. It is available on wakes and maintainer turns. Pages use UTF-8 byte offsets and
 at most 4096 bytes, like `task report`; `nextOffset` continues a growing transcript.
+Cold source files over 64 MiB refuse with `busy` rather than reading an unbounded source.
+Offsets refer to the current projection; restart at zero after context edits or newly
+discovered children change earlier text.
 The task record, not a caller-supplied session/path, establishes Home ownership. A read
 rechecks the Home route binding and never acquires a runtime. The shared episodic
 projection excludes thinking, redacts credential-shaped secrets and respects context edits.

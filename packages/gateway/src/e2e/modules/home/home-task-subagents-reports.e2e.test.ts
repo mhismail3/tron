@@ -198,7 +198,7 @@ describe("Home task subagents: refusals, restarts and reports", () => {
           const page = await owner.taskTool(f.home.sessionId, { action: "transcript", taskId: run.taskId }) as { text: string };
           seen.childSessionId = /subagentSessionId=([^\s]+)/u.exec(page.text)?.[1];
           return seen.childSessionId !== undefined;
-        }, "owned child is discoverable in the worker transcript", bound).catch(async error => { console.error(JSON.stringify({ catalog: await f.registry.catalog("all"), error: String(error) })); throw error; });
+        }, "owned child is discoverable in the worker transcript", bound);
         const transcript = await owner.taskTool(f.home.sessionId, { action: "transcript", taskId: run.taskId, subagentSessionId: seen.childSessionId }) as { text: string };
         expect(transcript.text).toContain("HOLD-CHILD background search");
         await expect(owner.taskTool(f.home.sessionId, { action: "transcript", taskId: run.taskId, subagentSessionId: f.home.sessionId })).rejects.toThrow(/does not belong/);
