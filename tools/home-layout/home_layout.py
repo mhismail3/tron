@@ -7,6 +7,7 @@ import argparse
 import contextlib
 import ctypes
 import fnmatch
+import fcntl
 import hashlib
 import json
 import os
@@ -20,6 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import runtime_layout  # noqa: E402
+import stopped_home  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 REGISTRY = "packages/gateway/src/foundation/tron-home-layout.json"
@@ -38,7 +40,9 @@ JOURNAL_MAX_BYTES = 16 * 1024 * 1024
 
 
 class LayoutError(Exception):
-    pass
+    def __init__(self, reason, path=None):
+        super().__init__(reason)
+        self.path = path
 
 
 def load(root: Path = ROOT) -> dict:
@@ -336,7 +340,7 @@ def source_identity(registry: dict, root: Path) -> dict:
     return {"revision": revision.stdout.strip() if revision.returncode == 0 else None,
             "manifest": REGISTRY, "manifest_version": registry["version"],
             "manifest_sha256": hashlib.sha256((root / REGISTRY).read_bytes()).hexdigest(),
-            "tool_sha256": hashlib.sha256(b"".join((root / "tools/home-layout" / name).read_bytes() for name in ("home_layout.py", "runtime_layout.py", "runtime_rewrites.py", "terminal_layout.py"))).hexdigest()}
+            "tool_sha256": hashlib.sha256(b"".join((root / "tools/home-layout" / name).read_bytes() for name in ("home_layout.py", "runtime_layout.py", "runtime_rewrites.py", "terminal_layout.py", "stopped_home.py"))).hexdigest()}
 
 
 def audit(home: str, max_entries: int, root: Path = ROOT, maintenance: str | None = None) -> tuple[int, dict]:
@@ -513,7 +517,7 @@ def nearest_parent(path: str) -> os.stat_result:
         parent = os.path.dirname(parent)
 
 
-def migration(home: str, root: Path = ROOT) -> dict:
+def migration(home: str, root: Path = ROOT, owned=None) -> dict:
     report = {"home": os.path.abspath(home), "user_home": os.path.abspath(os.path.expanduser("~")), "source": {},
               "state": None, "moves": [], "blockers": [], "errors": []}
     try:
@@ -523,11 +527,13 @@ def migration(home: str, root: Path = ROOT) -> dict:
         report["source"] = source_identity(registry, root)
         os.close(open_home(report["home"]))
         lock = observed(os.path.join(report["home"], RUNTIME_LOCK))
-        if lock is not None and time.time() - lock.st_mtime < RUNTIME_LOCK_STALE_SECONDS:
+        if lock is not None and time.time() - lock.st_mtime < RUNTIME_LOCK_STALE_SECONDS and (owned is None or (lock.st_dev, lock.st_ino) not in owned):
             report["blockers"].append("gateway_running")
-        debug_lock = observed(os.path.join(report["user_home"], ".tron-dev", RUNTIME_LOCK))
-        if debug_lock is not None and time.time() - debug_lock.st_mtime < RUNTIME_LOCK_STALE_SECONDS and report["home"] != os.path.join(report["user_home"], ".tron-dev"):
-            report["blockers"].append("debug_gateway_running")
+        refusal = stopped_home.probe(sys.modules[__name__], report["home"], owned) if not report["blockers"] else None
+        if refusal:
+            report["blockers"].append(refusal["reason"])
+        report["stopped_proof"] = {"state": "refused" if report["blockers"] else "stopped", "refusal": refusal,
+                                   "owners": ["gateway-runtime-lease", "mac-wrapper-fcntl", "kernel-argv-environment-open-files"]}
         for move in [*registry.get("retired", []), *runtime_layout.extra_moves(report, registry)]:
             source, destination = (os.path.join(report["user_home"], value[2:]) if value.startswith("~/") else os.path.join(report["home"], value)
                                    for value in (move["from"], move["to"]))
@@ -554,9 +560,9 @@ def migration(home: str, root: Path = ROOT) -> dict:
         report["state"] = ("nothing_declared" if not report["moves"] else "conflict" if "conflict" in states
                            else "partly_applied" if {"pending", "done"} <= states else "not_started" if "pending" in states
                            else "applied" if "done" in states else "nothing_to_move")
-        runtime_layout.plan(sys.modules[__name__], report, registry)
+        runtime_layout.plan(sys.modules[__name__], report, registry, owned)
     except LayoutError as failure:
-        report["errors"].append({"path": REGISTRY, "reason": str(failure), "errno": None})
+        report["errors"].append({"path": failure.path or REGISTRY, "reason": str(failure), "errno": None})
     except OSError as failure:
         report["errors"].append({"path": ".", "reason": "home_unavailable", "errno": failure.errno})
     except ValueError:
@@ -639,11 +645,42 @@ def rename_exclusive(source: str, destination: str) -> None:
 
 
 @contextlib.contextmanager
-def runtime_lock(path: Path, locate=None, interval=10):
+def maintenance_lock(path: Path):
+    private_directory(path)
+    fd = open_home(str(path))
+    identity = os.fstat(fd)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise LayoutError("maintenance_running") from None
+        def check():
+            current = observed(str(path))
+            if current is None or (current.st_dev, current.st_ino) != (identity.st_dev, identity.st_ino):
+                raise LayoutError("maintenance_lock_lost")
+        yield check
+    finally:
+        os.close(fd)
+
+
+@contextlib.contextmanager
+def runtime_lock(path: Path, locate=None, interval=10, owned=None):
     private_directory(path.parent)
+    previous = observed(str(path))
+    if previous is not None:
+        if (not stat.S_ISDIR(previous.st_mode) or previous.st_uid != os.geteuid()
+                or time.time() - previous.st_mtime < RUNTIME_LOCK_STALE_SECONDS):
+            raise LayoutError("runtime_lock_present")
+        current = observed(str(path))
+        if current is None or (current.st_dev, current.st_ino, current.st_mtime_ns) != (previous.st_dev, previous.st_ino, previous.st_mtime_ns):
+            raise LayoutError("runtime_lock_changed")
+        path.rmdir()
     path.mkdir(mode=0o700)
     fd = open_home(str(path))
     identity = os.fstat(fd)
+    token = (identity.st_dev, identity.st_ino)
+    if owned is not None:
+        owned.add(token)
     stop = threading.Event()
     errors = []
 
@@ -668,6 +705,8 @@ def runtime_lock(path: Path, locate=None, interval=10):
         stop.set()
         heartbeat.join()
         os.close(fd)
+        if owned is not None:
+            owned.discard(token)
         current_path = locate() if locate else path
         current = observed(str(current_path))
         if current is not None and (current.st_dev, current.st_ino) == (identity.st_dev, identity.st_ino):
@@ -682,7 +721,7 @@ def move_position(row: dict) -> str:
     if (before is not None and after is not None or current is None
             or (current.st_dev, current.st_ino) != (row["identity"]["device"], row["identity"]["inode"])
             or linked_component(row["source"], "/") or linked_component(row["destination"], "/")):
-        raise LayoutError("move_identity_changed")
+        raise LayoutError("move_identity_changed", row["source"])
     return "pending" if before is not None else "done"
 
 
@@ -758,21 +797,18 @@ def execute_migration(home: str, rollback: bool, root: Path = ROOT) -> tuple[int
     report["journal"] = str(journal_path)
     with contextlib.ExitStack() as locks:
         try:
-            lock_paths = sorted({Path(report["home"]) / RUNTIME_LOCK,
-                                 Path(report["user_home"]) / ".tron-dev" / RUNTIME_LOCK})
-            for lock in lock_paths:
-                if observed(str(lock)) is not None:
-                    report["blockers"].append("runtime_lock_present")
-                    return 1, report
+            lock_paths = [Path(report["home"]) / RUNTIME_LOCK]
             if rollback and journal is None:
                 report["blockers"].append("no_journal")
                 return 1, report
             if rollback and not any(row["home"] == report["home"] for row in journal["moves"]) and report["home"] not in journal["layouts"]:
                 report["state"] = "nothing_to_rollback"
                 return 0, report
-            guards = [locks.enter_context(runtime_lock(lock)) for lock in lock_paths]
-            current = migration(home, root)
-            if current["errors"] or any(row["refusals"] for row in current["moves"]):
+            owned = set()
+            guards = [locks.enter_context(maintenance_lock(journal_path.parent)),
+                      *(locks.enter_context(runtime_lock(lock, owned=owned)) for lock in lock_paths)]
+            current = migration(home, root, owned)
+            if current["errors"] or current["blockers"] or any(row["refusals"] for row in current["moves"]):
                 report["blockers"].append("plan_changed")
                 return 1, report
             if rollback and read_journal(journal_path, current) is None:
@@ -787,6 +823,8 @@ def execute_migration(home: str, rollback: bool, root: Path = ROOT) -> tuple[int
             if journal is None:
                 journal = {"registry": report["source"]["manifest_sha256"], "moves": [], "layouts": {}}
             registry = load(root)
+            if runtime_layout.enabled(registry):
+                owned.update(locks.enter_context(stopped_home.claim(sys.modules[__name__], report["home"])))
             runtime_layout.adopt_current(sys.modules[__name__], journal, report)
             if not rollback:
                 claims = {row["destination"] for row in journal["moves"]}
@@ -795,7 +833,7 @@ def execute_migration(home: str, rollback: bool, root: Path = ROOT) -> tuple[int
                         journal["moves"].append({**row, "home": report["home"]})
                         claims.add(row["destination"])
             private_directory(journal_path.parent)
-            runtime_layout.prepare(sys.modules[__name__], current, registry, journal, journal_path, rollback, locks, guards)
+            runtime_layout.prepare(sys.modules[__name__], current, registry, journal, journal_path, rollback, locks, guards, owned)
             moves = [row for row in journal["moves"] if row["home"] == report["home"]]
             if rollback:
                 moves.reverse()
@@ -825,17 +863,21 @@ def execute_migration(home: str, rollback: bool, root: Path = ROOT) -> tuple[int
                     write_journal(journal_path, journal)
             for guard in guards:
                 guard()
+            refusal = stopped_home.probe(sys.modules[__name__], report["home"], owned)
+            if refusal:
+                report["stopped_proof"] = {**report["stopped_proof"], "state": "refused", "refusal": refusal}
+                raise LayoutError(refusal["reason"])
             runtime_layout.finish(sys.modules[__name__], report, registry, journal, journal_path, rollback)
-            completed = migration(home, root)
-            if completed["errors"] or any(row["refusals"] for row in completed["moves"]):
-                report["completion"] = {"errors": completed["errors"], "refusals": [{"from": row["from"], "reasons": row["refusals"]} for row in completed["moves"] if row["refusals"]]}
+            completed = migration(home, root, owned)
+            if completed["errors"] or completed["blockers"] or any(row["refusals"] for row in completed["moves"]):
+                report["completion"] = {"errors": completed["errors"], "blockers": completed["blockers"], "stopped_proof": completed["stopped_proof"], "refusals": [{"from": row["from"], "reasons": row["refusals"]} for row in completed["moves"] if row["refusals"]]}
                 raise LayoutError("plan_changed")
             if not rollback and any(row["state"] == "pending" for row in completed["moves"]):
                 raise LayoutError("plan_changed")
             report["state"] = "rolled_back" if rollback else "applied"
             return 0, report
         except (OSError, ValueError, KeyError, TypeError, LayoutError) as failure:
-            report["errors"].append({"path": str(journal_path), "reason": str(failure) if isinstance(failure, LayoutError) else type(failure).__name__,
+            report["errors"].append({"path": (failure.path or str(journal_path)) if isinstance(failure, LayoutError) else str(journal_path), "reason": str(failure) if isinstance(failure, LayoutError) else type(failure).__name__,
                                      "errno": failure.errno if isinstance(failure, OSError) else None})
             return 1, report
 

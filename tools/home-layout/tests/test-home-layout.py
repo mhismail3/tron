@@ -51,7 +51,7 @@ class Fixture:
         self.repo = base / "repo"
         (self.repo / "tools/home-layout").mkdir(parents=True)
         shutil.copy2(ROOT / TOOL, self.repo / TOOL)
-        for module in ("runtime_layout.py", "runtime_rewrites.py", "terminal_layout.py"):
+        for module in ("runtime_layout.py", "runtime_rewrites.py", "terminal_layout.py", "stopped_home.py"):
             shutil.copy2(ROOT / "tools/home-layout" / module, self.repo / "tools/home-layout" / module)
         shutil.copytree(ROOT / "tools/ownership", self.repo / "tools/ownership", ignore=shutil.ignore_patterns("tests", "__pycache__"))
         self.write("fixture.module.json", json.dumps({"layer": "L5", "owns": ["**"]}))
@@ -674,7 +674,7 @@ class MigrateTests(unittest.TestCase):
             f"layout.main(['migrate', '--home', {str(self.home)!r}, '--apply'])\n")
         result = subprocess.run(["python3", "-B", str(runner)], env={**os.environ, "HOME": str(self.user)}, capture_output=True)
         self.assertEqual(result.returncode, 86, result.stderr)
-        for lock in (self.home / "agent/.tron-gateway-runtime.lock.lock", debug / "agent/.tron-gateway-runtime.lock.lock"):
+        for lock in (self.home / "agent/.tron-gateway-runtime.lock.lock",):
             lock.rmdir()
         for mode in ("--dry-run", "--apply"):
             before = snapshot(self.user)
@@ -699,8 +699,8 @@ class MigrateTests(unittest.TestCase):
             f"spec = importlib.util.spec_from_file_location('layout', {str(self.fixture.repo / TOOL)!r})\n"
             "layout = importlib.util.module_from_spec(spec)\nimport sys\nsys.modules[spec.name] = layout\nspec.loader.exec_module(layout)\n"
             "original = layout.runtime_lock\n"
-            "@contextlib.contextmanager\ndef acquire(path):\n"
-            "    with original(path) as guard:\n"
+            "@contextlib.contextmanager\ndef acquire(path, locate=None, interval=10, owned=None):\n"
+            "    with original(path, locate=locate, interval=interval, owned=owned) as guard:\n"
             f"        for journal in Path({str(self.user / '.tron-maintenance/layout-v2')!r}).glob('*.json'): journal.unlink()\n"
             "        yield guard\n"
             "layout.runtime_lock = acquire\n"
@@ -764,8 +764,8 @@ class MigrateTests(unittest.TestCase):
             f"spec = importlib.util.spec_from_file_location('layout', {str(self.fixture.repo / TOOL)!r})\n"
             "layout = importlib.util.module_from_spec(spec)\nimport sys\nsys.modules[spec.name] = layout\nspec.loader.exec_module(layout)\n"
             "original = layout.runtime_lock\n"
-            "@contextlib.contextmanager\ndef acquire(path):\n"
-            "    with original(path) as guard:\n"
+            "@contextlib.contextmanager\ndef acquire(path, locate=None, interval=10, owned=None):\n"
+            "    with original(path, locate=locate, interval=interval, owned=owned) as guard:\n"
             f"        os.chmod({str(source)!r}, 0o700)\n"
             "        yield guard\n"
             "layout.runtime_lock = acquire\n"
@@ -820,7 +820,7 @@ class MigrateTests(unittest.TestCase):
                 identities = {name: (home / name).stat().st_ino for name in ("backup-a", "backup-b")}
                 result = subprocess.run(["python3", "-B", str(runner)], env={**os.environ, "HOME": str(self.user)}, capture_output=True)
                 self.assertEqual(result.returncode, 86, result.stderr)
-                for lock in (home / "agent/.tron-gateway-runtime.lock.lock", self.user / ".tron-dev/agent/.tron-gateway-runtime.lock.lock"):
+                for lock in (home / "agent/.tron-gateway-runtime.lock.lock",):
                     self.assertTrue(lock.is_dir())
                     lock.rmdir()
                 code, report = self.migrate("--apply", home=home)
@@ -898,17 +898,22 @@ class MigrateTests(unittest.TestCase):
             self.assertIn("unowned_destination", json.dumps(report))
             self.assertEqual(snapshot(self.user, contents_first=False), before)
 
-    def test_stale_selected_home_lock_refuses_without_mutation(self) -> None:
+    def test_stopped_copy_reclaims_a_stale_runtime_lease_and_restores_bodies(self) -> None:
         lock = self.home / "agent/.tron-gateway-runtime.lock.lock"
         lock.mkdir(parents=True)
         stale = time.time() - 600
         os.utime(lock, (stale, stale))
-        before = snapshot(self.user)
+        before = (self.home / "gateway/devices.json").read_bytes()
+        code, report = self.migrate("--dry-run")
+        self.assertEqual(code, 0, report)
+        self.assertEqual(report["stopped_proof"]["state"], "stopped")
+        self.assertTrue(lock.is_dir())
         for mode in ("--apply", "--rollback"):
             code, report = self.migrate(mode)
-            self.assertEqual(code, 1, report)
-            self.assertIn("runtime_lock_present", report["blockers"])
-            self.assertEqual(snapshot(self.user, contents_first=False), before)
+            self.assertEqual(code, 0, report)
+            self.assertFalse(lock.exists())
+            path = self.home / ("state/devices.json" if mode == "--apply" else "gateway/devices.json")
+            self.assertEqual(path.read_bytes(), before)
 
     def test_a_source_removed_during_the_rename_cannot_be_reported_applied(self) -> None:
         self.fixture.write(REGISTRY, registry(PATHS, [self.RETIRED[1]]))
@@ -925,15 +930,32 @@ class MigrateTests(unittest.TestCase):
         self.assertNotEqual(json.loads(result.stdout)["state"], "applied")
         self.assertIn("move_identity_changed", result.stdout)
 
-    def test_debug_runtime_lock_refuses_all_modes_without_mutations(self) -> None:
-        lock = self.user / ".tron-dev/agent/.tron-gateway-runtime.lock.lock"
+    def test_a_sibling_debug_home_is_not_claimed_or_mutated(self) -> None:
+        debug = self.user / ".tron-dev"
+        lock = debug / "agent/.tron-gateway-runtime.lock.lock"
         lock.mkdir(parents=True)
-        before = snapshot(self.user)
+        before = snapshot(debug)
+        code, report = self.migrate("--dry-run", home=debug)
+        self.assertEqual(code, 1, report)
+        self.assertIn("gateway_running", report["blockers"])
         for mode in ("--dry-run", "--apply", "--rollback"):
             code, report = self.migrate(mode)
-            self.assertEqual(code, 1, report)
-            self.assertIn("debug_gateway_running", report["blockers"])
-            self.assertEqual(snapshot(self.user, contents_first=False), before)
+            self.assertEqual(code, 0, report)
+            self.assertEqual(snapshot(debug, contents_first=False), before)
+        journal_directory = self.user / ".tron-maintenance/layout-v2"
+        program = "import fcntl,os,sys; fd=os.open(sys.argv[1],os.O_RDONLY); fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB); print('owned',flush=True); sys.stdin.read()"
+        with subprocess.Popen(["python3", "-B", "-c", program, str(journal_directory)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True) as owner:
+            try:
+                self.assertEqual(owner.stdout.readline().strip(), "owned")
+                stopped = snapshot(self.home)
+                code, report = self.migrate("--apply")
+                self.assertEqual(code, 1, report)
+                self.assertIn("maintenance_running", [error["reason"] for error in report["errors"]])
+                self.assertEqual(snapshot(self.home, contents_first=False), stopped)
+                self.assertEqual(snapshot(debug, contents_first=False), before)
+            finally:
+                owner.communicate("release", timeout=15)
+                self.assertEqual(owner.returncode, 0)
 
     def test_the_shipped_registry_declares_slice_b_moves(self) -> None:
         result = subprocess.run(["python3", str(ROOT / TOOL), "migrate", "--home", str(self.home), "--status"],
@@ -986,7 +1008,7 @@ class RuntimeMigrationTests(unittest.TestCase):
             self.sdk("create", base, home)
             core = fixture.repo / TOOL
             source = core.read_text()
-            anchor = "            completed = migration(home, root)"
+            anchor = "            completed = migration(home, root, owned)"
             self.assertEqual(source.count(anchor), 1)
             core.write_text(source.replace(anchor, '            print("held", flush=True)\n            os.read(0, 1)\n' + anchor))
             fixture.git("add", "-A")
@@ -1001,7 +1023,9 @@ class RuntimeMigrationTests(unittest.TestCase):
                 diagnostics = after.pop("logs/gateway.jsonl")
                 records = [json.loads(line) for line in diagnostics.splitlines()]
                 self.assertEqual([row["event"] for row in records], ["gateway.fatal-startup"])
-                (ROOT / "test-results/home-layout-runtime-process.json").write_text(json.dumps({"heldLease": refused, "diagnostics": records}, indent=2))
+                evidence = ROOT / "test-results/home-layout-runtime-process.json"
+                evidence.parent.mkdir(parents=True, exist_ok=True)
+                evidence.write_text(json.dumps({"heldLease": refused, "diagnostics": records}, indent=2))
                 self.assertEqual(after, before)
             finally:
                 output, error = holder.communicate("release", timeout=30)
@@ -1025,28 +1049,25 @@ class RuntimeMigrationTests(unittest.TestCase):
             try:
                 ready = json.loads(racing.stdout.readline())
                 self.assertTrue(ready.get("ready"), ready)
-                rolled_back = fixture.run("migrate", "--home", str(home), "--rollback", env={"HOME": str(home.parent)})
-                self.assertEqual(rolled_back.returncode, 0, rolled_back.stdout + rolled_back.stderr)
                 before_release = {str(path.relative_to(home)): path.read_bytes() for path in home.rglob("*") if path.is_file()}
+                rolled_back = fixture.run("migrate", "--home", str(home), "--rollback", env={"HOME": str(home.parent)})
+                self.assertEqual(rolled_back.returncode, 1, rolled_back.stdout + rolled_back.stderr)
+                self.assertIn("home_process_present", json.loads(rolled_back.stdout)["blockers"])
+                self.assertEqual({str(path.relative_to(home)): path.read_bytes() for path in home.rglob("*") if path.is_file()}, before_release)
             finally:
                 output, error = racing.communicate("release", timeout=30)
                 self.assertEqual(racing.returncode, 0, output + error)
-            refused = json.loads(output)
-            self.assertEqual(refused["code"], 1, refused["output"])
-            self.assertIn("home-layout migrate", refused["output"])
-            after_release = {str(path.relative_to(home)): path.read_bytes() for path in home.rglob("*") if path.is_file()}
-            previous_log = before_release.pop("logs/gateway.jsonl")
-            current_log = after_release.pop("logs/gateway.jsonl")
-            self.assertTrue(current_log.startswith(previous_log))
-            self.assertEqual([json.loads(line)["event"] for line in current_log[len(previous_log):].splitlines()], ["gateway.fatal-startup"])
-            (ROOT / "test-results/home-layout-runtime-process.json").write_text(json.dumps({"heldLease": "refused", "startupRace": refused}, indent=2))
-            self.assertEqual(after_release, before_release)
+            started = json.loads(output)
+            self.assertEqual(started["code"], 0, started["output"])
+            events = [json.loads(line)["event"] for line in (home / "logs/gateway.jsonl").read_text().splitlines()]
+            self.assertIn("gateway.startup-budget", events)
+            (ROOT / "test-results/home-layout-runtime-process.json").write_text(json.dumps({"heldLease": "refused", "startingOwner": json.loads(rolled_back.stdout), "startupAfterRefusal": started}, indent=2))
 
     def release_dead_fixture_locks(self, fixture: Fixture, home: Path) -> None:
         blocked = fixture.run("migrate", "--home", str(home), "--apply", env={"HOME": str(home.parent)})
         self.assertEqual(blocked.returncode, 1, blocked.stdout + blocked.stderr)
         self.assertIn("gateway_running", json.loads(blocked.stdout)["blockers"])
-        for lock in (home / "agent/.tron-gateway-runtime.lock.lock", home.parent / ".tron-dev/agent/.tron-gateway-runtime.lock.lock"):
+        for lock in (home / "agent/.tron-gateway-runtime.lock.lock",):
             lock.rmdir()
 
     def test_crashes_resume_forward_and_inverse_without_restoring_runtime_bodies(self) -> None:
@@ -1090,7 +1111,7 @@ class RuntimeMigrationTests(unittest.TestCase):
                     self.sdk("old", base, home)
                     self.assertEqual((home / sdk["session"]).read_bytes().split(b"\n", 1)[1], content)
 
-    def test_observed_process_close_is_required_before_a_run_can_move(self) -> None:
+    def test_live_owner_refuses_but_stopped_handoff_history_is_not_a_liveness_gate(self) -> None:
         with tempfile.TemporaryDirectory(prefix="home-layout-live-sdk-") as temporary:
             base = Path(temporary).resolve()
             fixture = Fixture(base)
@@ -1105,10 +1126,13 @@ class RuntimeMigrationTests(unittest.TestCase):
                 self.assertTrue(ready, process.stderr.read() if not ready else "")
                 manifest = json.loads(ready)
                 self.assertIn("runId", manifest)
+                lease = home / "agent/.tron-gateway-runtime.lock.lock"
+                lease.mkdir(parents=True)
+                os.utime(lease, (time.time() - 600, time.time() - 600))
                 before = snapshot(home)
                 result = fixture.run("migrate", "--home", str(home), "--dry-run", env={"HOME": str(home.parent)})
-                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-                self.assertEqual(json.loads(result.stdout)["errors"][0]["reason"], "subagent_process_unsettled")
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("home_process_present", json.loads(result.stdout)["blockers"])
                 self.assertEqual(snapshot(home, contents_first=False), before)
             finally:
                 if process.poll() is None:
@@ -1116,17 +1140,105 @@ class RuntimeMigrationTests(unittest.TestCase):
                     self.assertEqual(process.returncode, 0, output + error)
             handoff = home / manifest["asyncDir"] / "handoff.json"
             self.sdk("handoff-pending", base, home)
-            before = snapshot(home)
-            result = fixture.run("migrate", "--home", str(home), "--dry-run", env={"HOME": str(home.parent)})
-            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-            self.assertEqual(json.loads(result.stdout)["errors"][0]["reason"], "subagent_handoff_unsettled")
-            self.assertEqual(snapshot(home, contents_first=False), before)
-            self.sdk("handoff-complete", base, home)
-            completed = handoff.read_text()
+            pending = handoff.read_bytes()
             result = fixture.run("migrate", "--home", str(home), "--apply", env={"HOME": str(home.parent)})
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.sdk("open", base, home)
-            self.assertEqual((home / manifest["asyncDir"].replace("internal/subagents/", "state/subagents/") / "handoff.json").read_text(), completed)
+            self.assertEqual((home / manifest["asyncDir"].replace("internal/subagents/", "state/subagents/") / "handoff.json").read_bytes(), pending)
+
+    def test_mac_wrapper_lock_refuses_planning_and_apply(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="home-layout-wrapper-") as temporary:
+            base = Path(temporary).resolve()
+            fixture = Fixture(base)
+            fixture.write(REGISTRY, (ROOT / REGISTRY).read_text())
+            home = base / "user/.tron"
+            (home / "gateway/home/workspace").mkdir(parents=True)
+            lock = home / "internal/mac/.mac-wrapper.com.tron.mac.lock"
+            lock.parent.mkdir(parents=True)
+            lock.write_text("stale owner text is not authority\n")
+            lock.chmod(0o600)
+            program = "import fcntl,sys; f=open(sys.argv[1],'r+'); fcntl.lockf(f,fcntl.LOCK_EX|fcntl.LOCK_NB); print('owned',flush=True); sys.stdin.read()"
+            with subprocess.Popen(["python3", "-B", "-c", program, str(lock)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True) as owner:
+                try:
+                    self.assertEqual(owner.stdout.readline().strip(), "owned")
+                    for mode in ("--dry-run", "--apply"):
+                        result = fixture.run("migrate", "--home", str(home), mode, env={"HOME": str(home.parent)})
+                        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                        self.assertIn("mac_wrapper_running", json.loads(result.stdout)["blockers"])
+                        self.assertFalse((home / "state").exists())
+                finally:
+                    owner.communicate("release", timeout=15)
+                    self.assertEqual(owner.returncode, 0)
+            result = fixture.run("migrate", "--home", str(home), "--dry-run", env={"HOME": str(home.parent)})
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            identity = lock.stat().st_ino
+            for mode in ("--apply", "--rollback"):
+                result = fixture.run("migrate", "--home", str(home), mode, env={"HOME": str(home.parent)})
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                current = home / "state/mac" / lock.name if mode == "--apply" else lock
+                self.assertEqual(current.stat().st_ino, identity)
+                self.assertEqual(current.read_text(), "stale owner text is not authority\n")
+
+    def test_stopped_home_carries_interrupted_malformed_and_opaque_statuses_both_ways(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="home-layout-interrupted-") as temporary:
+            base = Path(temporary).resolve()
+            fixture = Fixture(base)
+            fixture.write(REGISTRY, (ROOT / REGISTRY).read_text())
+            home = base / "user/.tron"
+            (home / "gateway").mkdir(parents=True)
+            bodies = {}
+            records = {}
+            for index, state in enumerate(("pending", "running", "paused")):
+                relative = f"async-subagent-runs/run-{index}/status.json"
+                bodies[relative] = json.dumps({"state": state, "cwd": str(home / "gateway/home/workspace"), "steps": [{"status": state}]}, indent=3).encode() + b"\n"
+                records[relative] = "interrupted-at-migration"
+            relative = "nested-subagent-runs/parent/child/status.json"
+            bodies[relative] = b'{"state":"failed","steps":[{"status":"running","children":[{"state":"paused"}]}]}\n'
+            records[relative] = "interrupted-at-migration"
+            for index, data in enumerate((b'{"state": \xff', b'not json\n')):
+                relative = f"async-subagent-runs/broken-{index}/status.json"
+                bodies[relative] = data
+                records[relative] = "malformed-status"
+            directories = [f"async-subagent-runs/opaque-{index}/status.json" for index in range(2)]
+            for relative in directories:
+                path = home / "internal/subagents" / relative
+                path.mkdir(parents=True)
+                bodies[relative + "/artifact.bin"] = b"\x00opaque\xff\n"
+                records[relative] = "opaque-status-directory"
+            for relative, data in bodies.items():
+                path = home / "internal/subagents" / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+            for mode in ("--dry-run", "--apply", "--rollback"):
+                result = fixture.run("migrate", "--home", str(home), mode, env={"HOME": str(home.parent)})
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                report = json.loads(result.stdout)
+                self.assertEqual({row["path"].removeprefix("state/subagents/"): row["reason"] for row in report["carried_lifecycle_records"]}, records)
+                folder = home / ("state/subagents" if mode == "--apply" else "internal/subagents")
+                self.assertEqual({relative: (folder / relative).read_bytes() for relative in bodies}, bodies)
+                for row in report["carried_lifecycle_records"]:
+                    relative = row["path"].removeprefix("state/subagents/")
+                    if relative in bodies:
+                        self.assertEqual(row["sha256"], hashlib.sha256(bodies[relative]).hexdigest())
+                if mode == "--apply":
+                    journal = json.loads(Path(report["journal"]).read_text())
+                    self.assertEqual(journal["layouts"][str(home)]["carried_lifecycle_records"], report["carried_lifecycle_records"])
+
+    def test_unreadable_kernel_ownership_refuses_without_mutation(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="home-layout-unreadable-owner-") as temporary:
+            base = Path(temporary).resolve()
+            fixture = Fixture(base)
+            fixture.write(REGISTRY, (ROOT / REGISTRY).read_text())
+            home = base / "user/.tron"
+            (home / "gateway").mkdir(parents=True)
+            fixture.git("add", "-A")
+            before = snapshot(home)
+            result = subprocess.run(["/usr/bin/sandbox-exec", "-p", "(version 1) (allow default) (deny sysctl-read)",
+                                     "python3", "-B", str(fixture.repo / TOOL), "migrate", "--home", str(home), "--apply", "--json"],
+                                    capture_output=True, text=True, env={**os.environ, "HOME": str(home.parent)})
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn("stopped_proof_unavailable", json.loads(result.stdout)["blockers"])
+            self.assertEqual(snapshot(home, contents_first=False), before)
 
     def test_non_object_settings_refuse_without_mutation(self) -> None:
         with tempfile.TemporaryDirectory(prefix="home-layout-settings-") as temporary:
@@ -1141,6 +1253,78 @@ class RuntimeMigrationTests(unittest.TestCase):
             self.assertEqual(json.loads(result.stdout)["errors"][0]["reason"], "invalid_settings_document")
             self.assertEqual(snapshot(home.parent, contents_first=False), before)
 
+    def test_metadata_walk_ignores_large_artifact_trees_but_refuses_over_budget_metadata(self) -> None:
+        for kind in ("artifacts", "metadata", "unmatched"):
+            artifacts = kind == "artifacts"
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory(prefix="home-layout-metadata-") as temporary:
+                base = Path(temporary).resolve()
+                fixture = Fixture(base)
+                fixture.write(REGISTRY, (ROOT / REGISTRY).read_text())
+                user = base / "user"
+                home = user / ".tron"
+                (home / "gateway").mkdir(parents=True)
+                folder = home / ("internal/subagents/async-subagent-runs/run/artifacts" if artifacts else "gateway/home/tasks")
+                folder.mkdir(parents=True)
+                suffix = ".txt" if kind == "unmatched" else ".json"
+                for index in range(100001):
+                    (folder / f"{index}{suffix}").touch()
+                if artifacts:
+                    for relative in ("agent/sessions/cwd/artifacts/status.json", "gateway/uploads/upload/artifacts/metadata.json",
+                                     "gateway/home/tasks/artifacts/status.json", "agent/missions/artifacts/status.json"):
+                        path = home / relative
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_text("opaque artifact, not JSON")
+                    metadata = home / "internal/subagents/async-cfg-fixture.json"
+                    empty_artifact = metadata.parent / "async-cfg-empty-directory.json"
+                    empty_artifact.mkdir()
+                    file_artifact = metadata.parent / "nested-subagent-runs"
+                    file_artifact.write_text("opaque artifact, not a directory")
+                    opaque_metadata = ("gateway/home/tasks/status.json", "agent/missions/status.json", "gateway/uploads/upload/metadata.json")
+                    for relative in opaque_metadata:
+                        directory = home / relative
+                        directory.mkdir(parents=True)
+                        (directory / "artifact.bin").write_bytes(b"opaque status-named artifact\n")
+                    old = str(home / "gateway/home/workspace")
+                    metadata.write_text(json.dumps({"cwd": old}))
+                    inode = (folder / "0.json").stat().st_ino
+                result = fixture.run("migrate", "--home", str(home), "--dry-run", env={"HOME": str(user)})
+                report = json.loads(result.stdout)
+                self.assertEqual(result.returncode, 0 if artifacts else 2, report)
+                if not artifacts:
+                    self.assertEqual([error["reason"] for error in report["errors"]], ["rewrite_file_budget_exceeded"])
+                    self.assertFalse((home / "state").exists())
+                    continue
+                self.assertEqual(report["errors"], [])
+                self.assertEqual([record["kind"] for record in report["rewrites"]], ["subagent_config"])
+                for mode in ("--apply", "--rollback"):
+                    result = fixture.run("migrate", "--home", str(home), mode, env={"HOME": str(user)})
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    root = home / ("state/subagents" if mode == "--apply" else "internal/subagents")
+                    expected = str(home / ("state/home/workspace" if mode == "--apply" else "gateway/home/workspace"))
+                    self.assertEqual(json.loads((root / "async-cfg-fixture.json").read_text())["cwd"], expected)
+                    self.assertEqual((root / "async-subagent-runs/run/artifacts/0.json").stat().st_ino, inode)
+                    self.assertTrue((root / empty_artifact.name).is_dir())
+                    self.assertEqual(list((root / empty_artifact.name).iterdir()), [])
+                    self.assertEqual((root / file_artifact.name).read_text(), "opaque artifact, not a directory")
+                    for relative in opaque_metadata:
+                        current = relative.replace("gateway/", "state/", 1) if mode == "--apply" else relative
+                        self.assertEqual((home / current / "artifact.bin").read_bytes(), b"opaque status-named artifact\n")
+                metadata.unlink()
+                outside = user / "external.json"
+                outside.write_text("{}")
+                for unsafe in ("symlink", "fifo"):
+                    path = metadata
+                    if unsafe == "symlink":
+                        path.symlink_to(outside)
+                    else:
+                        os.mkfifo(path)
+                    result = fixture.run("migrate", "--home", str(home), "--dry-run", env={"HOME": str(user)})
+                    self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                    self.assertEqual([error["reason"] for error in json.loads(result.stdout)["errors"]],
+                                     ["rewrite_symlink" if unsafe == "symlink" else "rewrite_unsafe_type"])
+                    self.assertEqual(outside.read_text(), "{}")
+                    path.unlink()
+
     def test_offline_runtime_move_rewrites_only_owned_fields_and_carries_new_data_back(self) -> None:
         with tempfile.TemporaryDirectory(prefix="home-layout-runtime-") as temporary:
             base = Path(temporary).resolve()
@@ -1154,7 +1338,7 @@ class RuntimeMigrationTests(unittest.TestCase):
                 "state/home": entry(container=True), "state/home/workspace": entry(subtree=True),
                 "state/home/tasks": entry(subtree=True), "state/uploads": entry(subtree=True),
                 "state/settings": entry(container=True), "state/settings/observed.json": entry(),
-                "state/subagents": entry(subtree=True), "state/mac-terminal": entry(subtree=True),
+                "state/subagents": entry(subtree=True), "state/mac": entry(subtree=True), "state/mac-terminal": entry(subtree=True),
                 "state/mac-terminal.lock": entry(**{"class": "scratch"}, container=True),
                 "mac-terminal.lock": entry(**{"class": "scratch"}, container=True),
                 "cache": entry(**{"class": "rebuild"}, container=True), "cache/network.json": entry(),
@@ -1174,14 +1358,31 @@ class RuntimeMigrationTests(unittest.TestCase):
             sdk = self.sdk("create", base, home)
             old_session = home / sdk["session"]
             _, body = old_session.read_bytes().split(b"\n", 1)
+            nested_run = home / "internal/subagents/nested-subagent-runs/parent" / sdk["runId"]
+            shutil.copytree(home / sdk["asyncDir"], nested_run)
+            results = home / "internal/subagents/async-subagent-results"
+            result_files = list(results.rglob("*.json"))
+            for path in result_files:
+                destination = results / "nested/parent" / path.relative_to(results)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(path, destination)
+            pending = results / "nested/parent/result-pending" / sdk["sessionId"] / (sdk["runId"] + ".json")
+            pending.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(results / (sdk["runId"] + ".json"), pending)
             records = {
                 "gateway/network.json": {"host": "fixture"},
                 "gateway/settings/observed.json": {"version": 1, "stores": {"trust": {"digest": hashlib.sha256(json.dumps({old_cwd: True}).encode()).hexdigest(), "values": {"permissions.projectTrust\u0000" + json.dumps({"project": old_cwd}, separators=(",", ":")): {"key": "permissions.projectTrust", "qualifiers": {"project": old_cwd}, "value": True}}, "tron": {}, "outside": {}}}},
                 "gateway/uploads/one/metadata.json": {"path": str(home / "gateway/uploads/one/file")},
                 "gateway/uploads/two/metadata.json": {"path": new_cwd + "/preexisting-new-prefix"},
-                "gateway/home/tasks/one.json": {"target": {"cwd": old_cwd}, "brief": "history quotes " + old_cwd},
+                "gateway/home/tasks/one.json": {"target": old_cwd, "brief": "history quotes " + old_cwd},
                 "agent/trust.json": {old_cwd: True},
                 "agent/missions/one.json": {"runs": [{"asyncDir": str(home / sdk["asyncDir"])}], "notes": old_cwd},
+                "agent/missions/projects/project/mission.json": {"runs": [{"asyncDir": str(home / sdk["asyncDir"])}]},
+                "agent/missions/index/mission.json": {"artifacts": [{"path": old_cwd}]},
+                "agent/missions/projects/project/mission/state.json": {"artifacts": [{"path": old_cwd}]},
+                "agent/missions/index/mission/state.json": {"artifacts": [{"path": old_cwd}]},
+                "agent/missions/events.jsonl": {"artifacts": [{"path": old_cwd}]},
+                "agent/sessions/direct.jsonl": {"type": "session", "cwd": old_cwd},
             }
             for relative, value in records.items():
                 path = home / relative
@@ -1206,6 +1407,16 @@ class RuntimeMigrationTests(unittest.TestCase):
             plan = migrate("--dry-run")
             self.assertEqual(snapshot(home.parent, contents_first=False), before)
             self.assertGreaterEqual(len(plan["rewrites"]), 8)
+            selected = {str(Path(record["file"]).relative_to(home)): record["kind"] for record in plan["rewrites"]}
+            self.assertEqual(set(selected.values()), {"session", "trust", "observed", "upload", "target", "mission", "subagent", "subagent_config", "terminal", "budget", "candidate"})
+            expected_paths = set(records) - {"gateway/network.json", "gateway/uploads/two/metadata.json"}
+            expected_paths.update(str(path.relative_to(home)) for path in (old_session, pending, home / sdk["config"]))
+            expected_paths.add("mac-terminal/sshd_config")
+            for root in (home / sdk["asyncDir"], nested_run):
+                expected_paths.update(str((root / name).relative_to(home)) for name in ("status.json", "recovery-descriptor.json", "run-fanout-budget.json", "process-terminal-candidate.json"))
+            expected_paths.update(str(path.relative_to(home)) for path in result_files)
+            expected_paths.update(str((results / "nested/parent" / path.relative_to(results)).relative_to(home)) for path in result_files)
+            self.assertEqual(set(selected), expected_paths)
             applied = migrate("--apply")
             journal = json.loads(Path(applied["journal"]).read_text())
             self.assertTrue(any(row["kind"] == "session" for row in journal["layouts"][str(home)]["rewrites"].values()))
@@ -1234,6 +1445,18 @@ class RuntimeMigrationTests(unittest.TestCase):
             self.assertEqual(mission["runs"][0]["asyncDir"], str(home / sdk["asyncDir"].replace("internal/subagents/", "state/subagents/")))
             self.assertEqual(mission["notes"], old_cwd)
             self.assertEqual(json.loads((home / "agent/trust.json").read_text()), {new_cwd: True})
+            hidden = session.parent / "artifacts" / session.name
+            hidden.parent.mkdir()
+            session.rename(hidden)
+            before_refusal = snapshot(home)
+            journal_bytes = Path(applied["journal"]).read_bytes()
+            refused = fixture.run("migrate", "--home", str(home), "--rollback", env={"HOME": str(home.parent)})
+            self.assertEqual(refused.returncode, 1, refused.stdout + refused.stderr)
+            self.assertEqual(json.loads(refused.stdout)["errors"][0]["reason"], "rewrite_selection_changed")
+            self.assertEqual(normalize_lease_parent(snapshot(home, contents_first=False)), normalize_lease_parent(before_refusal))
+            self.assertEqual(Path(applied["journal"]).read_bytes(), journal_bytes)
+            hidden.rename(session)
+            hidden.parent.rmdir()
             self.sdk("append", base, home)
             appended = session.read_bytes().split(b"\n", 1)[1][len(body):]
             (home / "state/home/workspace/new-only-copy").write_text("new workspace data")

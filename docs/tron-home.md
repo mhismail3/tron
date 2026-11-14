@@ -134,25 +134,59 @@ scripts/tron home-layout migrate --home /absolute/installation --status
 These modes observe only the explicit home and `$HOME`, printed as `user_home`. They
 list retired moves, device/inode/mode, pending/done/conflict/absent state, refusals,
 owned runtime-address changes and private SSH intent. Planning reads bounded metadata
-and private journals, not transcript bodies. It never creates/clears locks, writes
-configuration or actuates launchd. Dry-run exit **0** is clear, **1** refused/blocked,
+and private journals, not transcript bodies. Each rewrite-selection walk keeps its 100,000-examined-entry
+cap and selects owned directory/name shapes before descending: session JSONL headers,
+upload metadata, flat Home tasks, mission records/state, and pinned subagent run,
+configuration and result-index records. Session, upload, task, mission and subagent
+artifact trees are not traversed; their directory entries still count in the admitted
+parent. File patterns select regular files, and directory patterns descend only into
+directories. Other regular-file/directory artifacts remain opaque, including empty
+config-named directories; matching symlinks and special files still refuse.
+Rollback refuses without changing home contents or journal bytes
+when a journaled record is missing from the current selection, including a record moved
+into an artifact tree; the runtime lock is taken and released first. Keep rollback and
+old data until the live migration is verified; only then may retention or deletion run.
+Deleted journaled records refuse rather than implicitly restoring or skipping them.
+Planning never creates/clears locks, writes configuration or actuates launchd. Dry-run exit **0** is clear, **1** refused/blocked,
 **2** unreadable/unsupported. Status exit **0** means no pending move, **1** pending or
 conflicting; blockers are printed without changing that status exit rule.
 
-Unsafe files, symlinked components, occupied targets, cross-volume moves, unregistered
-relocated entries and live runtime/lifecycle locks refuse. A provider result marked
-complete is insufficient: authoritative process-terminal evidence must record actual
-close and acknowledged writers. Unresolved worktree handoffs refuse; completed handoff
-contents remain historical bytes.
+Stop Gateway and Mac app → migrate → start. Unsafe files, symlinked components,
+occupied targets, cross-volume moves and unregistered relocated entries refuse.
+Admission requires a stopped home: the Gateway runtime lease is absent or stale,
+the Mac wrapper's whole-file kernel locks are released, and same-user kernel process
+arguments, environment and open-file owners do not bind any process to the target.
+Unreadable ownership refuses as `stopped_proof_unavailable`; a live owner refuses as
+`gateway_running`, `mac_wrapper_running` or `home_process_present`. These probes are
+target-scoped, not a production-global process-name grep: a private copy may be
+rehearsed while another home is running. Apply reclaims only stale runtime leases
+after the stopped proof, holds Gateway leases and existing Mac wrapper kernel locks
+through the operation, and checks ownership again before publishing ready. Wrapper
+locks follow the declared `internal/mac` → `state/mac` move; admission never creates
+wrapper data. Held lifecycle directory leases are recognized by their device/inode,
+not by ignoring all blockers. A kernel lock on the private
+journal directory serializes maintenance across homes without claiming a sibling
+Gateway lease. A new standalone writer must
+not be launched during the offline window.
+
+Historical lifecycle projections are not liveness. Nonterminal status records are
+carried byte-for-byte and listed as `interrupted-at-migration` in
+`carried_lifecycle_records` in the report and per-home journal receipt. Malformed
+status JSON, oversized status files and opaque status-named directories are also
+carried unchanged and listed with their reason; file receipts include SHA-256.
+Opaque directory contents are not traversed or repaired. No status is marked terminal,
+no process-terminal or handoff projection grants/refuses migration, and no cleanup
+runs. Terminal status records still receive only owned address rewrites. Normal
+Gateway/SDK startup owns lifecycle reconciliation; migration neither resumes work
+nor introduces an alternative reconciliation reader.
 
 `--apply` and `--rollback` are prepared capabilities, not permission to migrate a live
-installation. Keep both Gateways offline through the maintainer-approved operation and
-recovery. Use the same source and registry for both homes. Review dry-run and maintenance
+installation. Keep the target Gateway, Mac wrapper and workers stopped through the
+maintainer-approved operation and recovery. Use the same source and registry for both homes. Review dry-run and maintenance
 index first; migration does not edit the index. Copies and snapshots are retained.
 
 One private journal at `$HOME/.tron-maintenance/layout-v2/<registry-sha256>.json` owns
-moves across homes. Claims bind home, logical endpoints and device/inode. The shared
-Debug lease serializes writes. A claim reserved by another home refuses even after a
+moves across homes. Claims bind home, logical endpoints and device/inode. The private journal directory's whole-operation kernel lock serializes writes. A claim reserved by another home refuses even after a
 crash. Inverse releases each claim durably after its rename; another home can then
 acquire the restored source. Unknown/replaced destinations and changed digests refuse.
 A completed rename is inferred only from its inode, never replayed speculatively.
@@ -205,11 +239,14 @@ launch agents and ports, never production labels.
 ### Interrupted operations
 
 Agent leases refresh while held. SSH leases use the proper-lockfile directory protocol
-and follow their parent by proved inode. Every existing lease, even stale, refuses apply;
-migration never steals it. A crash can leave leases behind. Keep both Gateways stopped,
-preserve journal/snapshots and obtain exact owner-reviewed recovery, rather than editing
-claims or substituting copies. Consumers have their own stale reclaim rules; these do
-not make a partly migrated home safe to start. Completion failures retain the specific
+and follow their parent by proved inode. Fresh leases refuse admission. After the target
+passes stopped ownership proof, apply reclaims stale agent and SSH leases under their
+existing directory protocol; its own leases are removed on exit, including a later
+refusal. The old stale directory is not restored: it is not historical run data or proof
+of a live owner. Initial live/unknown-owner refusal leaves it untouched. A crash can
+leave leases behind. Keep the target Gateway, Mac wrapper and workers stopped, preserve
+journal/snapshots and obtain exact owner-reviewed recovery rather than editing claims or
+substituting copies. Stale reclaim does not make a partly migrated home safe to start. Completion failures retain the specific
 metadata errors/refusals in the JSON `completion` field.
 
 ## Rules

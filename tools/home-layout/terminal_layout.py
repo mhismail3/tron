@@ -7,6 +7,7 @@ import re
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -101,25 +102,26 @@ def inspect(l, r, report, root):
     return payload is not None, running
 
 
-def plan(l, r, report, root):
+def plan(l, r, report, root, owned=None):
     home = Path(report["home"])
     for path in (home / "mac-terminal.lock", r.physical(l, home, "gateway", "state") / "mac-terminal.lock"):
-        if l.observed(str(path)) is not None:
+        info = l.observed(str(path))
+        if info is not None and time.time() - info.st_mtime < l.RUNTIME_LOCK_STALE_SECONDS and (owned is None or (info.st_dev, info.st_ino) not in owned):
             report["blockers"].append("terminal_runtime_lock_present")
     enabled, running = inspect(l, r, report, root)
     report["terminal"] = {"enabled": enabled, "job_loaded": running is not None, "label": label(root)}
 
 
-def lock(l, r, report, locks, guards):
+def lock(l, r, report, locks, guards, owned):
     home = Path(report["home"])
     old = home / "mac-terminal"
     new = home / "state/mac-terminal"
     if not any(l.observed(str(path)) is not None for path in (old, new, coordinates(report, False)[2], coordinates(report, False)[3])):
         return
-    guards.append(locks.enter_context(l.runtime_lock(home / "mac-terminal.lock", interval=1)))
+    guards.append(locks.enter_context(l.runtime_lock(home / "mac-terminal.lock", interval=1, owned=owned)))
     def location():
         return r.physical(l, home, "gateway", "state") / "mac-terminal.lock"
-    guards.append(locks.enter_context(l.runtime_lock(location(), locate=location, interval=1)))
+    guards.append(locks.enter_context(l.runtime_lock(location(), locate=location, interval=1, owned=owned)))
 
 
 def validate(l, records):
