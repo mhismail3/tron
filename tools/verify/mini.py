@@ -195,6 +195,7 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
     expected = os.environ.get('TRON_VERIFY_COMMIT')
     if expected and expected != sha:
         return no_result(f'HEAD is {sha[:12]}, not the commit under verification {expected[:12]}')
+    main = git('merge-base', 'origin/main', 'HEAD') if lane == 'verify' else None
     mapped, paths = outputs(args) if lane == 'gateway' else (args, [])
     nonce = uuid.uuid4().hex
     incoming = f'refs/tron-jobs/submissions/{nonce}'
@@ -212,7 +213,7 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
                          f'(pass --gateway-host local to run here): {push.stdout.strip()}')
     print(f'mini: pushed in {time.time() - started:.1f}s', flush=True)
     wait = os.environ.get('TRON_MINI_JOB_WAIT_SECONDS')
-    job = json.dumps({'sha': sha, 'lane': lane, 'args': mapped, 'outputs': len(paths), 'nonce': nonce, 'localRoot': str(ROOT),
+    job = json.dumps({'sha': sha, 'main': main, 'lane': lane, 'args': mapped, 'outputs': len(paths), 'nonce': nonce, 'localRoot': str(ROOT),
                       'lockWaitSeconds': float(wait) if wait else None,
                       'requester': {'host': platform.node(), 'worktree': str(ROOT), 'pid': os.getpid()}})
     source = Path(__file__).read_text()
@@ -412,6 +413,10 @@ def remote_main(job: dict) -> int:
             if head != sha or dirty:
                 return refuse(f'the mini checkout is not exactly {sha} (HEAD {head or "unknown"}; changes: {dirty or "none"})')
             run('git', '-C', str(repository), 'update-ref', 'refs/tron-jobs/gateway', sha)
+            if job['lane'] == 'verify':
+                bound = run('git', '-C', str(repository), 'update-ref', 'refs/remotes/origin/main', job['main'])
+                if bound.returncode:
+                    return refuse(f'cannot bind the caller main baseline: {bound.stderr.strip()}')
 
             pins = dict(line.split('=', 1) for line in (checkout / 'config/ci-toolchain.env').read_text().splitlines()
                         if '=' in line and not line.lstrip().startswith('#'))

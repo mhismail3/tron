@@ -275,10 +275,13 @@ sha = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], tex
 logs = root / 'test-results/verify' / sha
 logs.mkdir(parents=True)
 (logs / 'first-failure.log').write_text('native boundary fixture')
-(logs.parent / (sha + '.json')).write_text(json.dumps({'commit': sha, 'args': sys.argv[1:]}))
+main = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'origin/main'], text=True).strip()
+(logs.parent / (sha + '.json')).write_text(json.dumps({'commit': sha, 'main': main, 'args': sys.argv[1:]}))
 raise SystemExit(75 if '--incomplete' in sys.argv else 0)
 ''')
         sha = self.commit('whole-verifier boundary fixture')
+        main = self.git('rev-parse', 'HEAD^')
+        self.git('update-ref', 'refs/remotes/origin/main', main)
         for args, expected in ((['--changed'], 0), (['--incomplete'], 75)):
             with self.subTest(exit=expected):
                 result = self.lane('verify', *args)
@@ -286,7 +289,7 @@ raise SystemExit(75 if '--incomplete' in sys.argv else 0)
                 self.assertIsNone(self.reader().no_result_reason(result.returncode, result.stdout + result.stderr))
                 line = next(line for line in result.stdout.splitlines() if line.startswith('mini: artifacts: '))
                 artifacts = Path(line.removeprefix('mini: artifacts: '))
-                self.assertEqual(json.loads((artifacts / 'verify.json').read_text()), {'commit': sha, 'args': args})
+                self.assertEqual(json.loads((artifacts / 'verify.json').read_text()), {'commit': sha, 'main': main, 'args': args})
                 self.assertEqual((artifacts / 'verify/first-failure.log').read_text(), 'native boundary fixture')
 
     def test_a_python_lane_runs_its_command_at_the_exact_commit_with_one_ordered_output(self) -> None:

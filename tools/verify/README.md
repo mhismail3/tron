@@ -105,8 +105,9 @@ Tron heavy tests, including simulator tests, run on the mini serially. Use
 `verify ... --gateway-host mini --ios-host mini`; `--ios-jobs 1` is the default. When the selection
 includes iOS work, `--ios-host mini` hands the entire verification to one normal mini lease. Cheap
 checks still precede the build on that host. The base is resolved to a committed source ancestor before
-transfer; the remote invocation names local execution hosts so its own groups never reacquire the mini
-lease. `--plan` remains a submitting-host preview and records `iosHost`; it launches nothing. Without
+transfer; the leased checkout also binds `origin/main` to the caller's committed main merge-base so
+native ownership ratchets see the same Git baseline. The remote invocation names local execution hosts
+so its own groups never reacquire the mini lease. `--plan` remains a submitting-host preview and records `iosHost`; it launches nothing. Without
 iOS work, the existing group routing remains in effect.
 
 `scripts/tron test ios [--ios-host mini|local] <runner arguments>` defaults to the mini and invokes
