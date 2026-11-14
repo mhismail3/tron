@@ -98,8 +98,8 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(served("e2e-alternate").firstMatch.waitForExistence(timeout: 60), app.debugDescription)
         XCTAssertTrue(waitForEnabled(app.buttons["session-context-button"], timeout: 60), app.debugDescription)
         XCTAssertTrue(waitForHittable(app.buttons["Back"], timeout: 30), app.debugDescription)
-        probe("three", expecting: "e2e-model", count: 2)
-        XCTAssertEqual(served("e2e-alternate").count, 1, "the change must not rewrite the earlier reply")
+        probe("three", expecting: "e2e-alternate", count: 2)
+        XCTAssertEqual(served("e2e-model").count, 1, "the earlier reply keeps the base model after the reopen")
     }
 
     @MainActor

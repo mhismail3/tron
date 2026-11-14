@@ -10,8 +10,9 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
 - Shell: `SettingsView` (`SettingsGroupKind` groups, `SettingsGroupCard`).
 - Renderer: `SettingsRendererView`, `SettingsRendererRow`, `SettingsValueEditors`,
   `SettingsChoiceSlider`.
-- Audit: exact reviews use the shared `ChangeReviewSheet`; the Changes history is read from
-  the Gateway's audit store and the agent's `settings` tool, not an app sheet.
+- Audit: the app has no history reader and no Changes screen. The immutable record is the Gateway's
+  settings change store, read by the agent's `settings` history tool and the `settings.history` RPC; exact
+  reviews use the shared `ChangeReviewSheet`.
 - Agent configuration: `ConfigurationSlider(Surface)`,
   `DefaultToolsSettingsSection`.
 - Accounts: `ProviderSettingsView`, `ProviderUsageReadController`, `IntegrationsSettingsView`
@@ -115,8 +116,7 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   layer already stores sends nothing, while picking an inherited or default value pins it there. A row whose dry run requires a
   tap (trust, privacy or spend widening, installs, irreversible effects) opens the shared
   `ChangeReviewSheet`; Approve commits once bound to the shown digest, Cancel sends nothing.
-  The shared card, its actions and native review title use `tronPrimary`, including read-only
-  history. Generic questions retain their own accent; theme never changes approval authority.
+  The shared card, its actions and native review title use `tronPrimary`. Generic questions retain their own accent; theme never changes approval authority.
 - **Providers.** Configured above Available. Connect/Configure opens one sheet showing every
   advertised method; the visible sheet owns the operation's prompts, and an answered choice
   restarts with `replaceOperationId` (`ProviderAuthSelectionTrail`). Usage rows reserve a skeleton
@@ -181,7 +181,6 @@ scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronMCPServerSheetsUITests \
   --only-testing TronMobileUITests/TronProjectTrustUITests \
   --only-testing TronMobileUITests/TronDiagnosticsExportUITests \
-  --only-testing TronMobileUITests/TronSmokeUITests/testSettingsRowInspectionAndActionsStayIndependent \
   --only-testing TronMobileUITests/TronSmokeUITests/testIphoneDashboardPreferencesPersistAcrossRoutesAndRelaunch
 scripts/ios-gateway-e2e-test run-ui \
   --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testRoutineEditorsDisappearAndExplicitGlobalValueResets \
@@ -193,18 +192,18 @@ scripts/ios-gateway-e2e-test run-ui \
 `TronSettingsScopeRowsUITests` checks read-only queue values, independent Revert and Project
 inspection. `TronSmokeUITests` keeps direct model/thinking and shared string-list editing,
 read-only numeric-map/no-write inspection and approvals.
-`TronAgentBehaviorRegressionUITests` checks numeric-map values without native editor/reset routes in
-light/dark and XXXL; Gateway `native-change.e2e.test.ts` owns actual agent numeric-map changes,
-next-Pi-session admission, spend-card acceptance and Undo. Its painted-geometry journey measures the primitive and generic
-schema controls at both text sizes and appearances; background sampling stays outside the whole
-action cluster so a left-hand reset cannot sample its neighboring value pill.
+`TronAgentBehaviorRegressionUITests` checks numeric-map rows without native editor or reset routes, retired
+compaction rows absent, Global and Session value-pill reset and revert, and the Agent Behavior review in
+light/dark and XXXL. Gateway `native-change.e2e.test.ts` owns agent numeric-map changes through the shared card,
+spend-card acceptance, stale refusal and Undo. Pill sampling stays outside the action cluster, so a reset
+cannot sample its neighboring value pill.
 The surviving memory/provider/queued-editor journeys in
 `TronForegroundCaptureUITests` own native-stack refresh, draft/focus preservation and invalid-child
 retirement; retired Worker thinking and Transport editor cases do not define that lifecycle.
 
-`TronAgentBehaviorRegressionUITests` exercises the production Global sheet, medium-first
-project list, error/Retry and missing-response recovery over the hosted socket; it also checks
-Global/Session value/reset order and captures both appearances. Hosted values are scripted,
+`TronAgentBehaviorRegressionUITests` exercises the production Global sheet's numeric-map and value/reset
+order over the hosted socket and captures both appearances. The project list and its Retry journey were
+retired with the Trusted Projects sheet (5.8); the Project Settings trust row is proven by `RealGatewayProjectTrustUITests.testProjectSettingsTrustRowTrustsABlockedProject`; a Home-requested trust card has no UI journey yet. Hosted values are scripted,
 not persistence evidence. Real-UI journeys read their key inventory
 from the fixture Gateway's built schema. Before device sign-off, change values rapidly, dismiss while saving
 and switch profile: no untouched inherited setting may become an override.

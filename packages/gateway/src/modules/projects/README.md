@@ -63,6 +63,21 @@ path; a settled native interaction cannot apply again.
 Capability `projects.lifecycle.v1` is advertised in `system.info`. Module-host
 routing uses the same owner as the agent tool, not a tool invocation from the UI.
 
+Retained after the app's removal (5.8). No first-party client calls these RPCs, so
+this is an open bridge, not a completed retirement:
+
+- The agent `projects` tool only creates. Trust and untrust exist solely as
+  `projects.change` actions.
+- `ProjectLifecycle.inspect` alone refuses linked worktrees and busy occupancy and
+  binds a state digest. The settings `permissions.projectTrust` write goes through
+  `TrustService.setAndApply` with runtime retirement and has none of those refusals.
+- Removing `projects.change` would drop those refusals from every path. Decision
+  needed: move them into the settings trust write (a behavior change for Home
+  trust during busy work), or keep this RPC as the lifecycle trust authority.
+- `projects.list` and `projects.inspect` are read-only eligibility views with no
+  surviving owner. Removing them needs the e2e oracle in
+  `src/e2e/modules/projects/project-lifecycle.e2e.test.ts` (27 RPC calls) ported first.
+
 - `projects.list({limit?, after?})` returns `{workspace, projects, nextCursor}`.
   Limit is 1–50 (default 25); cursor is the last returned name. It sorts visible
   direct Workspace folders/symlinks; directories over 1,000 entries refuse. Hidden
