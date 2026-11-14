@@ -188,11 +188,6 @@ describe("Run Swift files device preference through the production Gateway proce
 
     const changing = local.request("settings.change", { commandId: randomUUID(), target: { kind: "global" }, reason: "Turn off Swift files",
       changes: [{ key, layer: "global", op: "set", value: false, qualifiers: device, expected: true }] });
-    await new Promise((resolve) => setTimeout(resolve, 8_000));
-    const settled = await Promise.race([changing.then((value) => ({ value }), (error: unknown) => ({ error: String(error) })), new Promise((resolve) => setTimeout(() => resolve({ pending: true }), 1_000))]);
-    const probe = iphone.request("device.preference.respond", { commandId: randomUUID(), requestId: requests("read")[0]!.requestId, status: "value", value: true });
-    const reply = await Promise.race([probe.then((value) => ({ value }), (error: unknown) => ({ error: String(error) })), new Promise((resolve) => setTimeout(() => resolve({ pending: true }), 3_000))]);
-    expect(JSON.stringify({ topics: iphone.events.map((event) => event.topic), settled, reply }), "DIAGNOSTIC").toBe("never");
     await answer("read", 0, { status: "value", value: true });
     await answer("read", 1, { status: "value", value: true });
     await answer("set", 0, { status: "applied" });
