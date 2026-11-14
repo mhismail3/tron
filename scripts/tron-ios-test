@@ -3,6 +3,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ -z "${TRON_TEST_LEDGER_WRAPPED:-}" ]]; then
+  case "${1:-}" in
+    run|checkpoint|prepare|diagnose) exec python3 "$ROOT/tools/verify/ledger.py" exec swift "$ROOT/scripts/tron-ios-test" "$@" ;;
+  esac
+fi
 IOS="$ROOT/packages/ios-app"
 # shellcheck disable=SC1091
 source "$ROOT/config/ci-toolchain.env"

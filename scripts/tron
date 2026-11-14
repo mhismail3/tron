@@ -29,7 +29,8 @@ Commands:
                                     Run the owned iOS runner under the mini lease by default;
                                     return logs and native result bundles; local is host-local.
   test mac [test classes...]        Build and run the Mac integration tests under a temporary HOME
-  test tooling [test files...]      Run Python script integration suites directly
+  test tooling [test files...]      Run Python script integration suites with per-test evidence
+  flakes [--tree HASH] [--json]     Read same-tree pass/fail history from the external test ledger
   provider-smoke [--probe-only] [--live --agent-dir <dir>] [--require-fable-5-2] [--json]
                                     Claude subscription smoke of the pinned Pi: Fable 5.2,
                                     the Claude Code version it sends, Tron's wiring tests
@@ -205,7 +206,9 @@ case "$cmd" in
       mac) exec python3 "$ROOT/tools/verify/mac.py" "$@" ;;
       tooling)
         if (($# == 0)); then set -- "$ROOT"/tools/work/tests/test-*.py; fi
-        for suite in "$@"; do python3 "$suite"; done
+        status=0
+        for suite in "$@"; do python3 "$ROOT/tools/verify/ledger.py" python "$suite" || { code=$?; [[ "$status" -ne 0 ]] || status=$code; }; done
+        exit "$status"
         ;;
       *) usage >&2; exit 64 ;;
     esac
@@ -297,6 +300,9 @@ case "$cmd" in
       facade) shift; use_pinned_node; exec node "$ROOT/tools/proof/dafny2wire/facade.mjs" "$@" ;;
       *) usage >&2; exit 64 ;;
     esac
+    ;;
+  flakes)
+    exec python3 "$ROOT/tools/verify/ledger.py" "$@"
     ;;
   verify)
     exec python3 "$ROOT/tools/verify/verify.py" "$@"

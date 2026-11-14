@@ -7,6 +7,7 @@ from pathlib import Path
 import platform
 import shutil
 import signal
+import sqlite3
 import subprocess
 import tempfile
 import time
@@ -19,11 +20,20 @@ ARTIFACTS = ROOT / 'test-results/verify-batch'
 def shipped_runner(root, lock):
     """The shipped Gateway runner, its config reader and its host lock under `root`, pointed at this test's lock path, not the host's."""
     (root / 'tools/verify').mkdir(parents=True, exist_ok=True)
-    for name in ('gateway.py', 'vitest_configs.py'):
+    defaults = root / 'fixture-node'
+    defaults.write_text('#!/bin/sh\nprintf \'["default"]\\n\'\n')
+    defaults.chmod(0o755)
+    vitest = root / 'packages/gateway/node_modules/vitest'
+    vitest.parent.mkdir(parents=True)
+    vitest.symlink_to(ROOT / 'packages/gateway/node_modules/vitest', target_is_directory=True)
+    for name in ('gateway.py', 'vitest_configs.py', 'ledger.py', 'ledger-host.mjs', 'ledger-vitest.mjs'):
         (root / 'tools/verify' / name).write_text((ROOT / 'tools/verify' / name).read_text())
     source = (ROOT / 'tools/verify/host_lock.py').read_text()
     assert "'/tmp/tron-full-gateway.lock'" in source, 'the host lock path moved; point this fixture at its new spelling'
     (root / 'tools/verify/host_lock.py').write_text(source.replace("'/tmp/tron-full-gateway.lock'", repr(str(lock))))
+    subprocess.run(['git', 'init', '-q', str(root)], check=True)
+    subprocess.run(['git', '-C', str(root), '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                    'commit', '-q', '--allow-empty', '-m', 'runner fixture'], check=True)
     return root / 'tools/verify/gateway.py'
 
 
@@ -51,12 +61,13 @@ class GatewayRuns:
 
     def __init__(self, lock: Path):
         self.temporary = tempfile.TemporaryDirectory(prefix='tron-gateway-runs-')
+        self.ledger = tempfile.TemporaryDirectory(prefix='tron-gateway-ledger-')
         directory = Path(self.temporary.name)
         self.directory, self.order, self.runs = directory, directory / 'order', {}
         self.gateway = shipped_runner(directory, lock)
         node = directory / 'scripts/tron-node'
         node.parent.mkdir()
-        node.write_text('#!/bin/bash\n[[ $# == 0 ]] && { echo /usr/bin/true; exit 0; }\nshift; exec "$@"\n')
+        node.write_text(f'#!/bin/bash\n[[ $# == 0 ]] && {{ echo {directory / "fixture-node"}; exit 0; }}\nshift; exec "$@"\n')
         vitest = directory / 'packages/gateway/node_modules/.bin/vitest'
         vitest.parent.mkdir(parents=True)
         vitest.write_text(f'#!/bin/bash\necho "$2" >> {self.order}\n'
@@ -67,7 +78,8 @@ class GatewayRuns:
     def start(self, name):
         inherited = {key: value for key, value in os.environ.items() if key != 'TRON_FULL_GATEWAY_LOCK_HELD'}
         with (self.directory / f'{name}.err').open('w') as stderr:
-            self.runs[name] = subprocess.Popen(['python3', str(self.gateway), name], env=inherited,
+            self.runs[name] = subprocess.Popen(['python3', str(self.gateway), name],
+                                               env={**inherited, 'TRON_TEST_LEDGER': str(Path(self.ledger.name) / 'results.sqlite3')},
                                                stdout=subprocess.DEVNULL, stderr=stderr)
         return self.runs[name]
 
@@ -100,6 +112,7 @@ class GatewayRuns:
                 run.terminate()
                 run.wait(timeout=30)
         self.temporary.cleanup()
+        self.ledger.cleanup()
 
 
 class BatchTests(unittest.TestCase):
@@ -108,6 +121,7 @@ class BatchTests(unittest.TestCase):
         self.root = Path(self.temporary.name) / 'repo'
         self.root.mkdir()
         self.env = {**os.environ, 'HOME': self.temporary.name, 'TMPDIR': self.temporary.name,
+                    'TRON_TEST_LEDGER': str(Path(self.temporary.name) / 'test-ledger/results.sqlite3'),
                     'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1',
                     'GIT_AUTHOR_NAME': 'Fixture', 'GIT_AUTHOR_EMAIL': 'fixture@example.invalid',
                     'GIT_COMMITTER_NAME': 'Fixture', 'GIT_COMMITTER_EMAIL': 'fixture@example.invalid'}
@@ -358,6 +372,9 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertEqual(json.loads((self.common / 'verify/green.json').read_text())['commit'], self.git('rev-parse', 'HEAD'))
         self.assertIn('no uncovered commits', self.run_batch().stdout)
         self.assertEqual(len(self.reports()), 1)
+        with sqlite3.connect(self.env['TRON_TEST_LEDGER']) as connection:
+            self.assertEqual(connection.execute('SELECT test_id, outcome FROM results').fetchall(),
+                             [('packages/push-relay/tests/worker.test.ts::relay case', 'passed')])
 
     def test_an_inherited_held_lock_marker_reaches_no_lane(self):
         self.land('good', 'yes')
@@ -1526,7 +1543,7 @@ class BrowserForkProvisionTests(unittest.TestCase):
         self.adapter.parent.mkdir(parents=True)
         self.adapter.write_text(f'const sources = [\n  "git:github.com/fitchmultz/pi-agent-browser-native",\n  "git:github.com/fitchmultz/pi-agent-browser-native@{self.PIN}",\n];\n')
         (root / 'scripts').mkdir()
-        (root / 'scripts/tron-node').write_text('#!/bin/bash\n[[ $# == 0 ]] && { echo /usr/bin/true; exit 0; }\nshift; exec "$@"\n')
+        (root / 'scripts/tron-node').write_text(f'#!/bin/bash\n[[ $# == 0 ]] && {{ echo {root / "fixture-node"}; exit 0; }}\nshift; exec "$@"\n')
         vitest = root / 'packages/gateway/node_modules/.bin/vitest'
         vitest.parent.mkdir(parents=True)
         vitest.write_text(f'#!/bin/bash\necho "${{TRON_P99_17_BROWSER_FORK_COPY:-unset}}" >> {self.seen}\n')
@@ -1557,8 +1574,10 @@ class BrowserForkProvisionTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def run_gateway(self, *args, env=None):
+        ledger = tempfile.TemporaryDirectory(prefix='tron-gateway-ledger-')
+        self.addCleanup(ledger.cleanup)
         inherited = {key: value for key, value in os.environ.items() if key not in ('TRON_P99_17_BROWSER_FORK_COPY', 'TRON_FULL_GATEWAY_LOCK_HELD')}
-        return subprocess.run(['python3', str(self.root / 'tools/verify/gateway.py'), *args], env={**inherited, **(env or {})},
+        return subprocess.run(['python3', str(self.root / 'tools/verify/gateway.py'), *args], env={**inherited, **(env or {}), 'TRON_TEST_LEDGER': str(Path(ledger.name) / 'results.sqlite3')},
                               capture_output=True, text=True, timeout=60)
 
     def test_a_full_default_run_receives_the_provisioned_pinned_fork(self):
@@ -1753,7 +1772,7 @@ class FullGatewayLockTests(unittest.TestCase):
         self.ran = root / 'ran'
         shipped_runner(root, self.lock)
         (root / 'scripts').mkdir()
-        (root / 'scripts/tron-node').write_text('#!/bin/bash\n[[ $# == 0 ]] && { echo /usr/bin/true; exit 0; }\nshift; exec "$@"\n')
+        (root / 'scripts/tron-node').write_text(f'#!/bin/bash\n[[ $# == 0 ]] && {{ echo {root / "fixture-node"}; exit 0; }}\nshift; exec "$@"\n')
         vitest = root / 'packages/gateway/node_modules/.bin/vitest'
         vitest.parent.mkdir(parents=True)
         vitest.write_text(f'#!/bin/bash\necho "$@" >> {self.ran}\n')
@@ -1765,8 +1784,10 @@ class FullGatewayLockTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def start(self, env=None, stderr=subprocess.PIPE):
+        ledger = tempfile.TemporaryDirectory(prefix='tron-gateway-ledger-')
+        self.addCleanup(ledger.cleanup)
         inherited = {key: value for key, value in os.environ.items() if key != 'TRON_FULL_GATEWAY_LOCK_HELD'}
-        return subprocess.Popen(['python3', str(self.gateway), 'some.test.ts'], env={**inherited, **(env or {})},
+        return subprocess.Popen(['python3', str(self.gateway), 'some.test.ts'], env={**inherited, **(env or {}), 'TRON_TEST_LEDGER': str(Path(ledger.name) / 'results.sqlite3')},
                                 stdout=subprocess.PIPE, stderr=stderr, text=True)
 
     def test_a_run_waits_for_the_held_lock_then_records_itself(self):
@@ -1786,7 +1807,8 @@ class FullGatewayLockTests(unittest.TestCase):
         err = errors.read_text()
         self.assertEqual(run.returncode, 0, out + err)
         self.assertIn('waiting for ' + str(self.lock), err)
-        self.assertEqual(self.ran.read_text().split(), ['run', 'some.test.ts'])
+        self.assertEqual(self.ran.read_text().split(), ['run', 'some.test.ts', '--reporter=default',
+                         '--reporter=' + str(self.gateway.with_name('ledger-vitest.mjs').resolve())])
         self.assertIn('"purpose": "gateway vitest some.test.ts"', self.lock.read_text())
 
     def test_a_batch_lane_that_holds_the_lock_runs_without_waiting(self):

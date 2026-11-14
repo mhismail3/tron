@@ -92,9 +92,16 @@ Gateway refusing a mismatched client.
 ## P6 Tests are deterministic and own their resources
 
 **Rule.** A test owns its HOME, TMPDIR, ports and children, and uses events or injected clocks
-instead of sleeps. A flake is its module's bug: it gets one timeboxed root-cause attempt, then
-logging that catches the next occurrence, and the case is deleted. It never blocks another
-module.
+instead of sleeps. Each test run records its identity, commit/tree, outcome, duration and execution-host
+CPU idle/free-memory reading in the external [test ledger](../tools/verify/README.md#test-ledger).
+A test is flaky only when it both passes and fails on the same committed tree; an always-failing
+test is broken. Mark known contention with `TRON_TEST_CONTENDED=1`: flake ranking excludes those
+records, while verify and batch retain raw verdicts. Host readings inform that annotation;
+concurrency or a load threshold does not classify it automatically. Use `scripts/tron flakes` to
+triage same-tree evidence, preserve first failures and measure repeat counts before and after a fix.
+A flake is its module's bug: it gets one timeboxed root-cause attempt, then shipped logging
+that catches the next occurrence and a maintainer decision on deleting the case. Never delete it
+without that approval. It never blocks another module.
 **Evidence.** 21 flake issues were open at the baseline, mostly timeouts under host load. Test stop
 paths that sent SIGKILL leaked `/tmp/tron-gateway-tests-*` roots; they now send SIGTERM first.
 **Enforced by** the Gateway test isolation preflight (`tron-home-environment` guard), simulator

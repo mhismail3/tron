@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+from contextlib import closing
 import fcntl
 import hashlib
 import json
@@ -35,6 +36,7 @@ import platform
 import shlex
 import shutil
 import signal
+import sqlite3
 import subprocess
 import sys
 import tarfile
@@ -217,7 +219,7 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
     print(f'mini: pushed in {time.time() - started:.1f}s', flush=True)
     wait = os.environ.get('TRON_MINI_JOB_WAIT_SECONDS')
     job = json.dumps({'sha': sha, 'main': main, 'lane': lane, 'args': mapped, 'outputs': len(paths), 'nonce': nonce, 'localRoot': str(ROOT),
-                      'lockWaitSeconds': float(wait) if wait else None,
+                      'lockWaitSeconds': float(wait) if wait else None, 'contended': os.environ.get('TRON_TEST_CONTENDED', '0'),
                       'requester': {'host': platform.node(), 'worktree': str(ROOT), 'pid': os.getpid()}})
     source = Path(__file__).read_text()
     remote = shlex.join(['/usr/bin/python3', '-c', source, 'remote', job])
@@ -243,6 +245,9 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
                     temporary.write_bytes(base64.b64decode(payload))
                     os.replace(temporary, target)
                     received.add(int(index))
+                elif kind == 'ledger':
+                    import ledger
+                    ledger.append_rows(json.loads(base64.b64decode(value)))
                 elif kind == 'artifact':
                     payload = base64.b64decode(value, validate=True)
                     artifact_bytes += len(payload)
@@ -335,6 +340,14 @@ def remote_main(job: dict) -> int:
     threading.Thread(target=watch, daemon=True).start()
 
     def finish(code: int) -> int:
+        ledger_path = results / 'ledger.sqlite3'
+        if any((results / name).is_symlink() for name in ('ledger.sqlite3', 'ledger.sqlite3-wal', 'ledger.sqlite3-shm')):
+            out.write(b'\n' + frame(nonce) + b'refused "unsafe mini ledger spool"\n')
+            code = EXIT_NO_RESULT
+        elif ledger_path.is_file():
+            with closing(sqlite3.connect(ledger_path.as_uri() + '?mode=ro', uri=True)) as connection:
+                rows = [list(row) for row in connection.execute('SELECT * FROM results')]
+            out.write(b'\n' + frame(nonce) + b'ledger ' + base64.b64encode(json.dumps(rows).encode()) + b'\n')
         out.write(b'\n' + frame(nonce) + f'exit {code}\n'.encode())
         out.flush()
         return code
@@ -457,6 +470,9 @@ def remote_main(job: dict) -> int:
             if cancelled.is_set():
                 return refuse('stopped before the lane started')
 
+            results.mkdir(parents=True, exist_ok=True)
+            clean['TRON_TEST_LEDGER'] = str(results / 'ledger.sqlite3')
+            clean['TRON_TEST_CONTENDED'] = job.get('contended', '0')
             if job['lane'] in ('ios', 'verify'):
                 results.mkdir(parents=True, exist_ok=True)
                 archive = results.with_suffix('.tar.gz')
@@ -490,6 +506,8 @@ def remote_main(job: dict) -> int:
                         for path in sorted(results.rglob('*')):
                             if path.is_symlink() or not (path.is_file() or path.is_dir()):
                                 raise ValueError('unsafe mini artifact source')
+                            if path.parent == results and path.name in ('ledger.sqlite3', 'ledger.sqlite3-wal', 'ledger.sqlite3-shm'):
+                                continue
                             total += path.stat().st_size if path.is_file() else 0
                             if total > ARTIFACT_LIMIT:
                                 raise ValueError('mini artifacts exceed the 2 GiB transport limit')
@@ -508,8 +526,12 @@ def remote_main(job: dict) -> int:
                     archive.unlink(missing_ok=True)
                     shutil.rmtree(results, ignore_errors=True)
             if job['lane'] == 'node':
-                return finish(stream(str(checkout / 'scripts/tron-node'), 'exec', 'node', '--test', '--test-concurrency=1', *job['args'],
-                                     cwd=checkout / 'packages/gateway'))
+                root_node = job['args'][:1] == ['--root']
+                arguments = job['args'][1:] if root_node else job['args']
+                return finish(stream('/usr/bin/python3', str(checkout / 'tools/verify/ledger.py'), 'exec', 'node',
+                                     str(checkout / 'scripts/tron-node'), 'exec', 'node', '--test', '--test-concurrency=1',
+                                     '--test-reporter=' + str(checkout / 'tools/verify/ledger-node.mjs'), *arguments,
+                                     cwd=checkout if root_node else checkout / 'packages/gateway'))
             if job['lane'] == 'python':
                 doctor = (run('/bin/bash', str(checkout / 'tools/proof/bootstrap.sh'), 'doctor', cwd=checkout)
                           if (checkout / 'tools/proof/dafny.pin').is_file() else None)
@@ -535,6 +557,7 @@ def remote_main(job: dict) -> int:
             finally:
                 shutil.rmtree(results, ignore_errors=True)
     finally:
+        shutil.rmtree(results, ignore_errors=True)
         run('git', '-C', str(repository), 'update-ref', '-d', f'refs/tron-jobs/submissions/{nonce}', sha)
 
 

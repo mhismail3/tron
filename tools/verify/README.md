@@ -178,6 +178,60 @@ the build that stamped it). The iOS shards count as one entry there (their statu
 failed and deferred tests), because packing and lanes vary between runs. Python unittest counts exclude skipped and expected-failure
 cases; a file with no executed passes cannot hide beside a passing neighbour.
 
+## Test ledger
+
+The append-only per-test ledger is `~/.tron-maintenance/test-ledger/results.sqlite3`, outside
+all checkouts and outside Gateway state. `TRON_TEST_LEDGER` may select an external fixture
+or evidence file; a destination inside any repository or `~/.tron` is refused. SQLite transactions
+serialize concurrent appenders; reads never create a store. The first shipped schema has 14 columns;
+any later format change requires the dedicated backup-first migration policy, not a compatibility reader.
+Recording is fail-closed: a capture or
+storage error fails the recording command, even if its child passed. That infrastructure error
+creates no invented failed-test row. The ledger stores test identities and metrics, not test output,
+prompts or failure payloads; raw logs stay with their existing owners.
+
+`scripts/tron flakes [--tree HASH] [--json]` ranks tests that both passed and failed on the same
+tree, with pass/fail counts, failure rate, lanes, hosts and last seen. Always-failing tests are broken,
+not flaky, and are not listed by this query.
+Different trees are never pooled. Dirty-tree runs retain their HEAD tree and an explicit dirty
+marker, but are excluded from flake classification because that hash cannot prove their source.
+Set `TRON_TEST_CONTENDED=1` for a known contended run: its raw outcomes and host readings remain
+recorded, but it counts as neither red nor green in flake ranking. This is evidence annotation,
+not a retry, timeout change or load-admission mechanism. The caller annotates known contention from
+host evidence; neither concurrency nor a numeric host threshold automatically changes that flag.
+Verify and batch do not annotate their own overlapping lanes: without a caller-set flag, even
+same-Mac batch overlap remains unannotated in the ledger. Raw runner verdicts are unchanged.
+
+Gateway Vitest, Python unittest, Node test and XCTest runners append one result per test identity,
+including failed and skipped cases. Vitest uses native result callbacks without replacing caller
+reporters or output paths; when none is supplied, Gateway reads the pinned Vitest default reporter list
+through Node before adding its recorder. A failed defaults probe is an infrastructure error, not a case.
+Node preserves TAP output; XCTest reads native result bundles; Python
+records unittest result callbacks, including subtest failures and unexpected successes. Class/module
+fixture errors and skips have their own fixture identity; a standalone Python script has one file
+identity. A zero-test unittest run invents no case. External Python files remain runnable, but their
+records are marked dirty because the checkout's HEAD does not identify their source. Each record
+contains the commit SHA, HEAD tree hash, duration, lane, actual host, CPU idle percentage and memory-free
+percentage (not load average), the host measurement time and completion time. Vitest and Node sample
+host metrics on native case completion; other runners retain the lane-start host sample. Free memory
+is raw OS free pages divided by physical memory (Node's `os.freemem()` definition on macOS), not the
+available-memory percentage reported by `memory_pressure`. The mini
+spools records outside its checkout and returns them through its existing nonce-bound transport
+to the invoking Mac's ledger, preserving the mini's readings. iOS and whole-verifier jobs use that
+same spool and frame once; their native artifact archives exclude the temporary SQLite files.
+An artifact transport refusal retains completed native cases only when the spool remains intact;
+a symlinked DB/WAL/SHM is refused without reading its target or importing any rows, never inventing a failed-test row.
+XCTest uses the result bundle's test tree, with completed XCTest console cases retained when a
+bundle is unavailable. Parameterized native tests use the identities supplied by their native report.
+
+Verify's Python/shell file groups run every selected file and preserve the first nonzero child status;
+a failing file cannot hide later files or collapse a native exit to 1. Recorder subprocesses forward
+SIGTERM/SIGINT and preserve stdout/stderr bytes, including CR and invalid UTF-8, without a TTY.
+Root Node and Gateway Node groups use `--gateway-host` alike; `mini` queues both under its lease,
+with a mini outage remaining no-result rather than local fallback. Direct `scripts/tron test tooling` uses the same Python
+recorder. The canonical iOS and real-Gateway journey runners and the Mac test owner record their
+native test results, so verify, batch and direct invocations share one ledger, not separate histories.
+
 ## Static checks (existing tools only)
 1. `scripts/tron ownership`, including the repository layout
 2. `scripts/tron tidy --here --landing`: no untracked file or ignored path without a named writer

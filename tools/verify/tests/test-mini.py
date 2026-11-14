@@ -22,6 +22,7 @@ import json
 import os
 import shutil
 import signal
+import sqlite3
 import subprocess
 import tempfile
 import time
@@ -75,12 +76,20 @@ sys.exit(int(sys.argv[1]) if sys.argv[1:] else 0)
 '''
 
 
+RECORDED = '''import sys, unittest
+class Probe(unittest.TestCase):
+    def test_case(self):
+        self.assertNotIn('fail', sys.argv[1:])
+unittest.main(argv=[sys.argv[0]])
+'''
+
+
 class MiniGatewayLane(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = Path(tempfile.mkdtemp(prefix='tron-mini-test-'))
         self.addCleanup(shutil.rmtree, self.temporary, True)
         self.local, self.mini = self.temporary / 'local', self.temporary / 'mini-home'
-        for path in ('tools/verify/mini.py', 'scripts/tron-node', '.node-version', 'config/ci-toolchain.env'):
+        for path in ('tools/verify/mini.py', 'tools/verify/ledger.py', 'tools/verify/ledger-node.mjs', 'tools/verify/ledger-host.mjs', 'scripts/tron-node', '.node-version', 'config/ci-toolchain.env'):
             (self.local / path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / path, self.local / path)
         self.write('tools/verify/gateway.py', LANE)
@@ -103,7 +112,8 @@ class MiniGatewayLane(unittest.TestCase):
         version = (ROOT / '.node-version').read_text().strip()
         (self.mini / '.nvm/versions/node').mkdir(parents=True)
         (self.mini / f'.nvm/versions/node/v{version}').symlink_to(node.parent.parent)
-        self.env = {**os.environ, 'PATH': f'{bin_dir}:{os.environ["PATH"]}', 'MINI_HOME': str(self.mini)}
+        self.env = {**os.environ, 'PATH': f'{bin_dir}:{os.environ["PATH"]}', 'MINI_HOME': str(self.mini),
+                    'TRON_TEST_LEDGER': str(self.temporary / 'local-ledger.sqlite3')}
         self.env.pop('TRON_UPDATE_LOCKS', None)
 
     def write(self, path: str, text: str) -> None:
@@ -218,16 +228,26 @@ while len(list(barrier.iterdir())) < 2:
         self.assertEqual(refs, ['refs/tron-jobs/gateway'])
 
     def test_ios_lane_returns_native_artifacts_and_failure_through_the_normal_lease(self) -> None:
+        self.write('tools/probe.py', RECORDED)
         self.write('scripts/tron-ios-test', '''#!/usr/bin/python3
-import json, os, subprocess, sys
+import json, os, sqlite3, subprocess, sys
 from pathlib import Path
 root = Path(__file__).resolve().parents[1]
+subprocess.run([sys.executable, str(root / 'tools/verify/ledger.py'), 'python', str(root / 'tools/probe.py'), *sys.argv[1:]])
 results = Path(os.environ['TRON_IOS_TEST_RESULTS_DIR'])
 results.mkdir(parents=True)
 (results / 'TestResults.xcresult').mkdir()
 (results / 'TestResults.xcresult/Info.plist').write_text('native result fixture')
 if 'unsafe' in sys.argv:
     (results / 'outside').symlink_to(root / 'README')
+if 'unsafe-ledger' in sys.argv:
+    spool = Path(os.environ['TRON_TEST_LEDGER'])
+    outside = root / 'test-results/private-ledger.sqlite3'
+    outside.parent.mkdir(parents=True, exist_ok=True)
+    spool.replace(outside)
+    with sqlite3.connect(outside) as connection:
+        connection.execute("UPDATE results SET test_id = 'private outside sentinel'")
+    spool.symlink_to(outside)
 (results / 'test.log').write_text('failure: fixture/native: deliberate red' if 'fail' in sys.argv else 'Executed 1 test, with 0 failures')
 (results / 'source.json').write_text(json.dumps({'sha': subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip(), 'args': sys.argv[1:], 'home': os.environ['HOME']}))
 print('Executed 1 test, with ' + ('1 failure' if 'fail' in sys.argv else '0 failures'), flush=True)
@@ -239,20 +259,21 @@ raise SystemExit(9 if 'fail' in sys.argv else 0)
         repository = self.mini / 'tron-ci/tron.git'
         foreign = self.git('rev-parse', 'HEAD^')
         self.git('push', '--quiet', str(repository), f'{foreign}:refs/tron-jobs/incoming')
-        for flag, expected in (('pass', 0), ('fail', 9), ('unsafe', NO_RESULT)):
+        for flag, expected in (('pass', 0), ('fail', 9), ('unsafe', NO_RESULT), ('unsafe-ledger', NO_RESULT)):
             with self.subTest(outcome=flag):
                 result = subprocess.run([str(self.local / 'scripts/tron'), 'test', 'ios', 'run', flag, '--ios-host', 'mini'],
                                         cwd=self.local, env=self.env, text=True, capture_output=True)
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
                 paths = [line.removeprefix('mini: artifacts: ') for line in result.stdout.splitlines() if line.startswith('mini: artifacts: ')]
-                if flag == 'unsafe':
+                if flag in ('unsafe', 'unsafe-ledger'):
                     self.assertEqual(paths, [])
                     self.assertIsNotNone(self.reader().no_result_reason(result.returncode, result.stdout + result.stderr))
-                    self.assertIn('unsafe mini artifact source', result.stdout + result.stderr)
+                    self.assertIn('unsafe mini artifact source' if flag == 'unsafe' else 'unsafe mini', result.stdout + result.stderr)
                     self.assertNotIn('cleanup unresolved', result.stderr)
                     continue
                 self.assertEqual(len(paths), 1, result.stdout + result.stderr)
                 artifacts = Path(paths[0])
+                self.assertFalse((artifacts / 'ledger.sqlite3').exists())
                 source = json.loads((artifacts / 'ios/source.json').read_text())
                 self.assertEqual(source['sha'], sha)
                 self.assertEqual(source['args'], ['run', flag])
@@ -261,6 +282,12 @@ raise SystemExit(9 if 'fail' in sys.argv else 0)
                 self.assertEqual(json.loads((artifacts / 'receipt.json').read_text())['exit'], expected)
                 if expected:
                     self.assertIn('deliberate red', (artifacts / 'ios/test.log').read_text())
+        self.assertTrue(Path(self.env['TRON_TEST_LEDGER']).is_file(), 'native records return to the caller, not a second mini ledger')
+        with sqlite3.connect(self.env['TRON_TEST_LEDGER']) as connection:
+            rows = connection.execute('SELECT test_id, commit_sha, outcome, host, contended FROM results').fetchall()
+        self.assertEqual(len(rows), 3, 'one record per intact probe spool; artifact refusal retains cases but an untrusted ledger imports no rows')
+        self.assertEqual([row[2] for row in rows], ['passed', 'failed', 'passed'])
+        self.assertTrue(all(row[0] == 'tools/probe.py::Probe.test_case' and row[1] == sha and row[3] and row[4] == 0 for row in rows))
         with open(self.mini / 'tron-ci/jobs/gateway.lock') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         self.assertEqual(self.git('rev-parse', 'refs/tron-jobs/incoming', cwd=repository), foreign)
@@ -268,9 +295,11 @@ raise SystemExit(9 if 'fail' in sys.argv else 0)
         self.assertEqual(list((self.mini / 'tron-ci/results').iterdir()), [])
 
     def test_whole_verifier_returns_its_report_logs_and_raw_75_without_another_lease(self) -> None:
+        self.write('tools/probe.py', RECORDED)
         self.write('tools/verify/verify.py', '''import json, subprocess, sys
 from pathlib import Path
 root = Path(__file__).resolve().parents[2]
+subprocess.run([sys.executable, str(root / 'tools/verify/ledger.py'), 'python', str(root / 'tools/probe.py')], check=True)
 sha = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
 logs = root / 'test-results/verify' / sha
 logs.mkdir(parents=True)
@@ -296,6 +325,12 @@ raise SystemExit(75 if '--incomplete' in sys.argv else 0)
                 artifacts = Path(line.removeprefix('mini: artifacts: '))
                 self.assertEqual(json.loads((artifacts / 'verify.json').read_text()), {'commit': sha, 'main': main, 'args': args})
                 self.assertEqual((artifacts / 'verify/first-failure.log').read_text(), 'native boundary fixture')
+                self.assertFalse((artifacts / 'ledger.sqlite3').exists())
+        self.assertTrue(Path(self.env['TRON_TEST_LEDGER']).is_file())
+        with sqlite3.connect(self.env['TRON_TEST_LEDGER']) as connection:
+            rows = connection.execute('SELECT test_id, commit_sha, outcome FROM results').fetchall()
+        self.assertEqual(rows, [('tools/probe.py::Probe.test_case', sha, 'passed')] * 2)
+        self.assertEqual(list((self.mini / 'tron-ci/results').iterdir()), [])
 
     def test_a_python_lane_runs_its_command_at_the_exact_commit_with_one_ordered_output(self) -> None:
         self.write('tools/probe.py', PROBE)
@@ -353,6 +388,23 @@ raise SystemExit(75 if '--incomplete' in sys.argv else 0)
         failed = self.lane('node', 'scripts/fail.test.mjs')
         self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
         self.assertRegex(failed.stdout, r'(?m)^[#ℹ] fail 1$')
+        with sqlite3.connect(self.env['TRON_TEST_LEDGER']) as connection:
+            rows = connection.execute('SELECT test_id, commit_sha, tree_hash, outcome, lane, host, cpu_idle_percent, memory_free_percent FROM results').fetchall()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual({row[3] for row in rows}, {'passed', 'failed'})
+        self.assertEqual({row[1] for row in rows}, {sha})
+        self.assertEqual({row[2] for row in rows}, {self.git('rev-parse', 'HEAD^{tree}')})
+        self.assertTrue(all(row[0].startswith('packages/gateway/scripts/') and row[4] == 'node' and row[5] for row in rows))
+        self.assertTrue(all(0 <= row[6] <= 100 and 0 <= row[7] <= 100 for row in rows))
+        self.assertEqual(list((self.mini / 'tron-ci/results').iterdir()), [])
+        self.write('scripts/root.test.mjs', "import test from 'node:test';\nimport { strict as assert } from 'node:assert';\ntest('root cwd', () => assert.ok(!process.cwd().endsWith('/packages/gateway')));\n")
+        root_sha = self.commit('root Node case')
+        root_run = self.lane('node', '--root', 'scripts/root.test.mjs')
+        self.assertEqual(root_run.returncode, 0, root_run.stdout + root_run.stderr)
+        with sqlite3.connect(self.env['TRON_TEST_LEDGER']) as connection:
+            root_rows = connection.execute("SELECT test_id, commit_sha, outcome FROM results WHERE test_id LIKE 'scripts/root.test.mjs::%'").fetchall()
+        self.assertEqual(len(root_rows), 1)
+        self.assertEqual(root_rows[0][1:], (root_sha, 'passed'))
 
     def pool(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(['python3', str(self.local / 'tools/verify/mini.py'), 'pool', *args], cwd=self.local / 'packages/gateway',
