@@ -163,47 +163,6 @@ final class SettingsTrustCoordinator {
         settingsInvalidationGeneration &+= 1
     }
 
-    func settingsHistory(cursor: String?, actor: String?, layer: String?, section: String?, key: String?, status: String?) async throws -> SettingsChangeHistoryPage {
-        let admittedProfileGeneration = profileGeneration
-        var params: [String: JSONValue] = ["limit": .number(100)]
-        if let cursor { params["cursor"] = .string(cursor) }
-        if let actor { params["actor"] = .string(actor) }
-        if let layer { params["layer"] = .string(layer) }
-        if let section { params["section"] = .string(section) }
-        if let key { params["key"] = .string(key) }
-        if let status { params["status"] = .string(status) }
-        let value = try await client.requestValue("settings.history", JSONValue.object(params))
-        try requireProfile(admittedProfileGeneration)
-        return try value.decode(SettingsChangeHistoryPage.self)
-    }
-
-    func applySettingsChangeAgain(_ changeID: String) async throws {
-        let admittedProfileGeneration = profileGeneration
-        let commandID = uuidSource.next().uuidString
-        let params = JSONValue.object(["commandId": .string(commandID), "changeId": .string(changeID)])
-        let value = try await mutationExecutor.performValue(method: "settings.applyAgain", commandID: commandID) {
-            try await client.requestValue("settings.applyAgain", params)
-        }
-        try requireProfile(admittedProfileGeneration)
-        try value.decode(SettingsChangeResult.self).throwIfRefused()
-        noteSettingsChanged()
-    }
-
-    func undoSettingsChange(_ changeID: String, fence: JSONValue?, admitSend: (() -> Bool)? = nil) async throws {
-        let admittedProfileGeneration = profileGeneration
-        let commandID = uuidSource.next().uuidString
-        var fields: [String: JSONValue] = ["commandId": .string(commandID), "changeId": .string(changeID)]
-        if let fence { fields["fence"] = fence }
-        let params = JSONValue.object(fields)
-        let value = try await mutationExecutor.performValue(method: "settings.undo", commandID: commandID) {
-            if let admitSend, !admitSend() { throw CancellationError() }
-            return try await client.requestValue("settings.undo", params)
-        }
-        try requireProfile(admittedProfileGeneration)
-        try value.decode(SettingsChangeResult.self).throwIfRefused()
-        noteSettingsChanged()
-    }
-
     func refreshSnapshot(target: JSONValue, freshness: SettingsFreshness) async throws {
         if snapshots[target]?.freshness == freshness { return }
         if let running = refreshes[target], running.freshness == freshness { return try await running.task.value }

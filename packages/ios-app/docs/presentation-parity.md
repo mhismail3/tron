@@ -197,8 +197,8 @@ card; `ChangeReviewSheet` presents it. An agent, Home or worker change arrives a
 and project lifecycle actions (`projects.change`) present the same sheet. Approve retires the
 sheet at the tap and answers the typed owner once with the review's digest through the receipt executor; Cancel and native
 dismissal send nothing. Generic forms never authorize effects. The card shows Gateway text
-only and keeps exact values behind its disclosure. Global Changes remains the audit/Undo
-surface; owner actions have no generic Undo. The card surface, Approve/Cancel/Undo actions and
+only and keeps exact values behind its disclosure. The app has no Changes screen: the audit is the Gateway's settings record and Undo is the
+native card; owner actions have no generic Undo. The card surface, Approve/Cancel/Undo actions and
 native change title use `tronPrimary`, not the generic question's amber accent. Agent & Tools
 and its inherited admin-sheet chrome follow the selected primary theme; semantic statuses keep their colors.
 

@@ -94,7 +94,7 @@ Dropped (design rationale); see #758.
 ### 5.2 The request and the record
 → [Change path](settings-contract.md#change-path)
 
-### 5.3 Undo and Apply again
+### 5.3 Undo
 → [Change path](settings-contract.md#change-path)
 
 ### 5.3a Implemented: the change path

@@ -949,15 +949,7 @@ describe("outside changes", () => {
     expect(edited.value).toBe(9);
     const changed = label(edited, "Changed outside Tron")!;
     expect(changed.detail).toBe("Global: 6 retries → 9 retries");
-    expect(changed.action).toMatchObject({ kind: "applyAgain", changeId: first.find(entry => entry.key === "run.retry.maxRetries")!.changeId });
-    expect(label(await row(f, { kind: "global" }, "run.transport"), "Changed outside Tron")!.action).toBeUndefined();
-
-    const again = await f.service.invoke(client(), "settings.applyAgain", { commandId: commandId(), changeId: changed.action!.changeId }) as unknown as { status: string; changes: Array<{ changeId: string }> };
-    expect(again.status).toBe("applied");
-    expect((await f.macDocument()).retry).toEqual({ maxRetries: 6 });
-    expect((await f.history())[0]).toMatchObject({ applyAgainOf: changed.action!.changeId, after: 6, actor: { kind: "ui" } });
-    expect(label(await row(f, { kind: "global" }, "run.retry.maxRetries"), "Changed outside Tron")).toBeUndefined();
-    await expect(f.service.invoke(client(), "settings.applyAgain", { commandId: commandId(), changeId: changed.action!.changeId })).rejects.toMatchObject({ code: "conflict" });
+    expect(label(await row(f, { kind: "global" }, "run.transport"), "Changed outside Tron")).toBeDefined();
 
     const temporary = join(f.agentDir, "settings.json.swp");
     await writeFile(temporary, JSON.stringify({ ...(await f.macDocument()), retry: { maxRetries: 2 } }));
@@ -1146,8 +1138,6 @@ describe("outside changes to MCP servers and custom models", () => {
     expect(JSON.stringify(await f.history())).not.toContain("outside-secret");
     await expect(f.service.invoke(client(), "settings.undo", { commandId: commandId(), changeId: added.changeId }))
       .rejects.toMatchObject({ code: "conflict", message: "This change is not undoable; inspect it with its owner" });
-    await expect(f.service.invoke(client(), "settings.applyAgain", { commandId: commandId(), changeId: added.changeId }))
-      .rejects.toMatchObject({ code: "conflict", message: "A hidden value cannot be applied again: it was never recorded" });
     expect(await readFile(f.outside.path, "utf8")).not.toContain("outside-secret");
     expect(await servers(f, { scope: "global" })).toEqual(["global:hand-added", "global:tron-added"]);
     const afterAdd = JSON.parse(await readFile(globalMcp, "utf8")) as { mcpServers: Record<string, unknown> };

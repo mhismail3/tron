@@ -704,19 +704,10 @@ private actor HostedHomeShellGateway {
         case "model.recent": return (.object(["models": .array([])]), nil)
         case "settings.history":
             seedHomeProfileEntry()
-            let entries: [JSONValue] = ProcessInfo.processInfo.arguments.contains("-home-settings-history") ? [
-                .object(["changeId": .string("worker-setting"), "at": .string("2026-10-11T12:00:00Z"),
-                    "actor": .object(["kind": .string("worker"), "sessionId": .string("worker-session"), "taskId": .string("active")]),
-                    "target": .object(["kind": .string("home")]), "layer": .string("session"), "key": .string("model.thinking[role=worker]"),
-                    "op": .string("set"), "before": .string("off"), "after": .string("high"), "tier": .string("notify"),
-                    "status": .string("applied"), "presentation": .object(["label": .string("Worker thinking"),
-                        "actor": .string("Worker"), "layer": .string("Session"), "section": .string("model"),
-                        "display": .object(["before": .string("Off"), "after": .string("High")])])])
-            ] : []
             let profile = profileEntries.reversed().filter { entry in
                 params["actor"]?.stringValue != "agents" || entry.objectValue?["actor"]?.objectValue?["kind"]?.stringValue != "ui"
             }
-            return (.object(["entries": .array(profile + entries)]), nil)
+            return (.object(["entries": .array(profile)]), nil)
         case "home.profileChange":
             seedHomeProfileEntry()
             return profileChange(params)

@@ -17,7 +17,6 @@ struct SettingsRendererRow: View {
     let options: SettingsOptionsResponse?
     let error: String?
     let onChange: (JSONValue?) -> Void
-    var onApplyAgain: ((String) -> Void)? = nil
 
     @Environment(AppModel.self) private var model
     @Environment(\.tronSettingsVisualTheme) private var theme
@@ -294,16 +293,6 @@ struct SettingsRendererRow: View {
 
     @ViewBuilder
     private var details: some View {
-        let actions = setting.badges.compactMap(\.action)
-        let applyAgain = onApplyAgain == nil ? [] : actions.filter { $0.kind == "applyAgain" && $0.changeId != nil }
-        ForEach(Array(applyAgain.enumerated()), id: \.offset) { _, action in
-            TronSettingsDivider()
-            Button { if let id = action.changeId { onApplyAgain?(id) } } label: {
-                TronSettingsRow(icon: "arrow.clockwise", title: action.label)
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("\(settingsRowIdentifier(setting))-applyAgain")
-        }
         if let error {
             Label(error, systemImage: "exclamationmark.triangle")
                 .font(TronTypography.secondaryDescription)

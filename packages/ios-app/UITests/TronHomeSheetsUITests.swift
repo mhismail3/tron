@@ -1042,20 +1042,6 @@ final class TronHomeSheetsUITests: XCTestCase {
         app.buttons["home-sheet-done-profile"].tap()
 
         app.buttons["home-sheet-done-manage"].tap()
-        let gear = app.navigationBars.buttons["Settings"]
-        XCTAssertTrue(gear.waitForExistence(timeout: 8), app.debugDescription)
-        gear.tap()
-        let changes = app.buttons["Changes"].firstMatch
-        XCTAssertTrue(changes.waitForExistence(timeout: 8))
-        changes.tap()
-        let entries = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'settings-change-' AND label CONTAINS 'Profile item'"))
-        XCTAssertTrue(entries.firstMatch.waitForExistence(timeout: 8) && entries.firstMatch.label.contains("Changed by You"), app.debugDescription)
-        let entry = entries.matching(NSPredicate(format: "label CONTAINS 'Changed by Home'")).firstMatch
-        for _ in 0..<8 where !entry.isHittable { app.swipeUp() }; XCTAssertTrue(entry.label.contains("Inferred preference"), entry.label)
-        keep("profile-edit-08-changes")
-        entry.tap()
-        XCTAssertTrue(app.buttons["Undo"].firstMatch.waitForExistence(timeout: 5))
-        keep("profile-edit-09-change-detail")
     }
 
     @MainActor private func toolSheet(_ app: XCUIApplication, _ name: String, chip label: String, index: Int, outcome: String,

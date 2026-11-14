@@ -1255,21 +1255,11 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         openSettingsSection(app, "setup", linkLabel: "Setup", loneRow: settingRowToken("setup.installTelemetry"))
         let outsideRow = topSwitchRow(app, key: "setup.installTelemetry")
         XCTAssertEqual(switchValue(outsideRow), globalEdit.before, "the live value must follow the edited store")
-        let applyAgain = hittableElement(app, identifier: settingRowToken("setup.installTelemetry") + "-applyAgain", timeout: 120)
-        XCTAssertNotNil(applyAgain, "the outside change of Tron's value must offer Apply again: \(app.debugDescription)")
-        keepScreenshot(app, name: "settings-surface-outside-change-apply-again")
-        applyAgain?.tap()
-        XCTAssertTrue(waitUntil(timeout: 60) {
-            self.switchValue(outsideRow) == globalEdit.after
-        }, "Apply again must restore Tron's accepted value")
-        XCTAssertTrue(waitForNonExistence(app.buttons[settingRowToken("setup.installTelemetry") + "-applyAgain"], timeout: 30),
-                      "Apply again must clear the canonical outside-change evidence")
-
         for _ in 0..<3 {
             if app.buttons["settings-done"].isHittable { break }
             dismissTopSheet(app)
         }
-        XCTAssertTrue(app.buttons["settings-done"].isHittable, "Apply again must return to Settings")
+        XCTAssertTrue(app.buttons["settings-done"].isHittable, "the outside-change check must return to Settings")
         let extensionsLink = app.buttons["settings-link-Extensions"]
         for _ in 0..<40 where !extensionsLink.isHittable { app.swipeDown() }
         extensionsLink.tap()
@@ -1301,12 +1291,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         keepScreenshot(app, name: "settings-mcp-outside-addition")
         dismissTopSheet(app)
         XCTAssertTrue(waitUntil(timeout: 15) { !outsideServer.exists && mcpLink.exists }, "dismissing MCP Servers must return to Settings")
-        for _ in 0..<40 where !app.buttons["Changes"].isHittable { app.swipeDown() }
-        app.buttons["Changes"].tap()
-        let outsideEntry = app.staticTexts["MCP server outside-mcp"]
-        XCTAssertTrue(outsideEntry.waitForExistence(timeout: 60), "Changes must list the outside MCP addition by name: \(app.debugDescription)")
-        keepScreenshot(app, name: "settings-changes-outside-mcp")
-        for _ in 0..<3 where app.navigationBars.staticTexts["Global Settings"].exists || outsideEntry.exists { dismissTopSheet(app); Thread.sleep(forTimeInterval: 1) }
+        for _ in 0..<3 where app.navigationBars.staticTexts["Global Settings"].exists { dismissTopSheet(app); Thread.sleep(forTimeInterval: 1) }
         XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
 
     }
@@ -1451,7 +1436,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                 let rows = keyElements.filter {
                     $0.elementType == .other && ($0.identifier == token || $0.identifier.hasPrefix(token + "_"))
                         && !$0.identifier.hasSuffix("-project") && !$0.identifier.hasSuffix("-reset")
-                        && !$0.identifier.hasSuffix("-applyAgain") && !$0.identifier.hasSuffix("-error")
+                        && !$0.identifier.hasSuffix("-error")
                 }
                 let globalInstancesOnly = key.qualifier == "key" || key.qualifier == "device"
                 let served = !key.layers.isDisjoint(with: layers) && (!globalInstancesOnly || isGlobalTarget)
@@ -1956,7 +1941,7 @@ struct RealGatewayUIFixture {
     }
 }
 
-private let provenanceWords: Set<String> = ["Overridden", "Revert", "Reset", "Set by Project settings", "Apply again"]
+private let provenanceWords: Set<String> = ["Overridden", "Revert", "Reset", "Set by Project settings"]
 
 private struct SettingsSchemaInventory {
     struct Key {

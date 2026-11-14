@@ -464,7 +464,7 @@ final class TronSmokeUITests: XCTestCase {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {
             let dark = appearance == "dark"
-            for surface in ["prompt", "changes", "home", "session", "global", "photo"] {
+            for surface in ["prompt", "home", "session", "global", "photo"] {
                 let app = XCUIApplication()
                 switch surface {
                 case "prompt":
@@ -478,7 +478,6 @@ final class TronSmokeUITests: XCTestCase {
                     app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", appearance]
                 default:
                     app.launchArguments = ["-tron-settings-renderer-fixture"]
-                    if surface == "changes" { app.launchArguments += ["-settings-changes", "-settings-changes-scope"] }
                     if dark { app.launchArguments.append("-settings-renderer-dark") }
                 }
                 app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
@@ -504,11 +503,6 @@ final class TronSmokeUITests: XCTestCase {
                     app.buttons["Stop session"].tap()
                     app.buttons["Release terminal settlement"].tap()
                     expandSettingsSheet(app, title: "Manage Session")
-                case "changes":
-                    XCTAssertTrue(app.buttons["settings-change-ui-change"].waitForExistence(timeout: 10))
-                    chooseChangesFilter(app, row: "settings-changes-layer", option: "Project")
-                    XCTAssertTrue(app.buttons["settings-change-project-change"].waitForExistence(timeout: 5))
-                    chooseChangesFilter(app, row: "settings-changes-layer", option: "All scopes")
                 default:
                     let behavior = app.buttons["settings-link-Agent Behavior"]
                     XCTAssertTrue(behavior.waitForExistence(timeout: 10))
@@ -910,7 +904,7 @@ final class TronSmokeUITests: XCTestCase {
     func testSettingsScopeVisualReviewInLightAndDark() {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {
-            for scope in ["global", "changes", "home", "session", "project"] {
+            for scope in ["global", "home", "session", "project"] {
                 let app = XCUIApplication()
                 if scope == "home" {
                     app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
@@ -921,7 +915,6 @@ final class TronSmokeUITests: XCTestCase {
                     app.launchArguments = ["-tron-new-session-fixture", "-new-session-scenario", "project-settings", "-fixture-appearance", appearance]
                 } else {
                     app.launchArguments = ["-tron-settings-renderer-fixture"]
-                    if scope == "changes" { app.launchArguments += ["-settings-changes", "-settings-changes-scope"] }
                     if appearance == "dark" { app.launchArguments.append("-settings-renderer-dark") }
                 }
                 app.launch()
@@ -952,28 +945,6 @@ final class TronSmokeUITests: XCTestCase {
                     expandSettingsSheet(app, title: "Project Settings")
                     keepScreenshot(named: "1325-project-\(appearance)")
                     captureSettingsTools(app, scope: scope, appearance: appearance)
-                } else if scope == "changes" {
-                    XCTAssertTrue(app.buttons["settings-changes-filters"].waitForExistence(timeout: 10))
-                    XCTAssertFalse(app.buttons["This session"].exists)
-                    XCTAssertTrue(app.buttons["settings-change-ui-change"].waitForExistence(timeout: 5))
-                    keepScreenshot(named: "1305-changes-\(appearance)")
-                    chooseChangesFilter(app, row: "settings-changes-layer", option: "Session")
-                    XCTAssertTrue(app.buttons["settings-change-ui-change"].waitForExistence(timeout: 5))
-                    chooseChangesFilter(app, row: "settings-changes-layer", option: "Global")
-                    XCTAssertTrue(app.buttons["settings-change-fixture-change"].waitForExistence(timeout: 5))
-                    chooseChangesFilter(app, row: "settings-changes-layer", option: "Project")
-                    XCTAssertTrue(app.buttons["settings-change-project-change"].waitForExistence(timeout: 5))
-                    chooseChangesFilter(app, row: "settings-changes-layer", option: "All scopes")
-                    let project = app.buttons["settings-change-project-change"]
-                    XCTAssertTrue(project.waitForExistence(timeout: 5))
-                    keepScreenshot(named: "1305-changes-\(appearance)-all-scopes")
-                    project.tap()
-                    let readOnly = app.staticTexts["Repository configuration is read-only"]
-                    reveal(readOnly, in: app)
-                    XCTAssertTrue(readOnly.isHittable, app.debugDescription)
-                    XCTAssertFalse(app.buttons["Undo"].exists)
-                    XCTAssertFalse(app.buttons["Apply again"].exists)
-                    keepScreenshot(named: "1305-changes-\(appearance)-repository-detail")
                 } else {
                     XCTAssertTrue(app.buttons["settings-link-Agent Behavior"].waitForExistence(timeout: 10))
                     keepScreenshot(named: "1305-global-\(appearance)")
@@ -2288,178 +2259,6 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    func testSettingsChangesOpensRequestingChatOnItsOwningMac() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes"]
-        app.launch(); defer { app.terminate() }
-        let row = app.buttons["settings-change-fixture-change"]
-        XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertFalse(app.buttons["settings-changes-load-more"].exists, "The feed's end needs no Load more")
-        keepScreenshot(named: "925-changes-first-page")
-        row.tap()
-        XCTAssertTrue(app.staticTexts["Key history"].waitForExistence(timeout: 5), app.debugDescription)
-        let iso = NSPredicate(format: "label MATCHES %@", ".*[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:.*")
-        XCTAssertEqual(app.descendants(matching: .any).matching(iso).count, 0, "Change detail shows readable dates, never raw ISO timestamps")
-        keepScreenshot(named: "925-change-detail")
-        tapScrolling(app.buttons["Open requesting chat"], in: app)
-        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-changes-route"],
-                                  containing: "owned:true:fixture-chat", timeout: 5))
-    }
-
-    @MainActor
-    func testSettingsChangesOpensOwningHomeTask() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-settings-history"]
-        app.launch(); defer { app.terminate() }
-        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
-        app.buttons["home-pinned-row"].tap()
-        app.navigationBars.buttons["Settings"].firstMatch.tap()
-        tapScrolling(app.buttons["Changes"].firstMatch, in: app)
-        let row = app.buttons["settings-change-worker-setting"]
-        XCTAssertTrue(row.waitForExistence(timeout: 5))
-        row.tap()
-        tapScrolling(app.buttons["Open task"], in: app)
-        XCTAssertTrue(app.buttons["home-sheet-done-task"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Settings model: continue epic #758"].waitForExistence(timeout: 5),
-                      "Open the audit actor's exact canonical task, not the task list")
-    }
-
-    @MainActor
-    func testSettingsChangesScopeFilters() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes", "-settings-changes-scope"]
-        app.launch(); defer { app.terminate() }
-        XCTAssertTrue(app.navigationBars.staticTexts["Changes"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["This session"].exists)
-        drainChanges(app)
-        XCTAssertTrue(app.buttons["settings-change-project-change"].exists)
-        XCTAssertTrue(app.buttons["settings-change-foreign-change"].exists, "All scopes includes other sessions")
-        chooseChangesFilter(app, row: "settings-changes-layer", option: "Global")
-        drainChanges(app)
-        XCTAssertTrue(app.buttons["settings-change-fixture-change"].exists)
-        XCTAssertTrue(app.buttons["settings-change-foreign-change"].exists)
-        XCTAssertFalse(app.buttons["settings-change-ui-change"].exists)
-        XCTAssertFalse(app.buttons["settings-change-project-change"].exists)
-        chooseChangesFilter(app, row: "settings-changes-layer", option: "Project")
-        drainChanges(app)
-        XCTAssertTrue(app.buttons["settings-change-project-change"].exists)
-        XCTAssertFalse(app.buttons["settings-change-ui-change"].exists)
-        XCTAssertFalse(app.buttons["settings-change-fixture-change"].exists)
-        chooseChangesFilter(app, row: "settings-changes-layer", option: "Session")
-        drainChanges(app)
-        XCTAssertTrue(app.buttons["settings-change-ui-change"].exists)
-        XCTAssertFalse(app.buttons["settings-change-foreign-change"].exists)
-        XCTAssertFalse(app.buttons["settings-change-project-change"].exists, "Repository history is not a Session value")
-        chooseChangesFilter(app, row: "settings-changes-actor", option: "Agents and outside")
-        drainChanges(app)
-        XCTAssertFalse(app.buttons["settings-change-ui-change"].exists)
-        chooseChangesFilter(app, row: "settings-changes-actor", option: "Everyone")
-        chooseChangesFilter(app, row: "settings-changes-status", option: "Failed")
-        drainChanges(app)
-        XCTAssertTrue(app.buttons["settings-change-ui-change"].exists)
-        XCTAssertFalse(app.buttons["settings-change-fixture-change"].exists)
-        XCTAssertFalse(app.buttons["settings-change-project-change"].exists)
-        keepScreenshot(named: "758-changes-scoped-filter-intersection")
-    }
-
-    @MainActor
-    private func drainChanges(_ app: XCUIApplication) {
-        let more = app.buttons["settings-changes-load-more"]
-        for _ in 0..<6 where more.waitForExistence(timeout: 2) { tapScrolling(more, in: app) }
-    }
-
-    @MainActor
-    private func chooseChangesFilter(_ app: XCUIApplication, row: String, option: String) {
-        let filters = app.buttons["settings-changes-filters"]
-        XCTAssertTrue(filters.waitForExistence(timeout: 5), app.debugDescription)
-        filters.tap()
-        let control = app.descendants(matching: .any)[row].buttons.firstMatch
-        XCTAssertTrue(control.waitForExistence(timeout: 5), app.debugDescription)
-        control.tap()
-        let choice = app.buttons["settings-option-\(option)"]
-        XCTAssertTrue(choice.waitForExistence(timeout: 5), app.debugDescription)
-        choice.tap()
-        XCTAssertTrue(choice.waitForNonExistence(timeout: 5), app.debugDescription)
-        closeTopSheet(app)
-    }
-
-    @MainActor
-    func testSettingsChangesLastLookUsesPreviousVisit() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes"]
-        app.launch(); defer { app.terminate() }
-        XCTAssertTrue(app.buttons["settings-change-fixture-change"].waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(app.staticTexts["Since you last looked"].exists)
-        keepScreenshot(named: "758-changes-since-last-visit")
-    }
-
-    @MainActor
-    func testSettingsChangesUndoRefusalRetainsCurrentDiff() {
-        continueAfterFailure = false
-        for outcomeFailure in [false, true] {
-            let app = XCUIApplication()
-            app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes", "-settings-undo-refused"]
-            if outcomeFailure { app.launchArguments.append("-settings-undo-outcome-refused") }
-            app.launch(); defer { app.terminate() }
-            let entry = app.buttons["settings-change-fixture-change"]
-            XCTAssertTrue(entry.waitForExistence(timeout: 10), app.debugDescription)
-            tapScrolling(entry, in: app)
-            tapScrolling(app.buttons["Undo"], in: app)
-            app.buttons["Undo change"].tap()
-            XCTAssertTrue(app.staticTexts["Current value"].waitForExistence(timeout: 5), app.debugDescription)
-            XCTAssertTrue(app.staticTexts["8 retries"].exists)
-            XCTAssertTrue(app.staticTexts["Value when applied"].exists)
-            XCTAssertTrue(app.staticTexts["6 retries"].exists)
-            XCTAssertEqual(app.staticTexts["fixture.settings-changes-undos"].label, "undos:1")
-            keepScreenshot(named: "758-changes-undo-current-diff-\(outcomeFailure ? "outcome" : "rpc")")
-        }
-    }
-
-    @MainActor
-    func testSettingsChangesRedactedEntryIsNotUndoable() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes", "-settings-changes-redacted"]
-        app.launch()
-        defer { app.terminate() }
-        let entry = app.buttons["settings-change-fixture-change"]
-        XCTAssertTrue(entry.waitForExistence(timeout: 10), app.debugDescription)
-        tapScrolling(entry, in: app)
-        XCTAssertTrue(app.staticTexts["Not undoable"].waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(showsText("Hidden", in: app))
-        XCTAssertFalse(app.buttons["Undo"].exists, "A redacted change must not offer Undo")
-        XCTAssertEqual(app.staticTexts["fixture.settings-changes-undos"].label, "undos:0")
-        keepScreenshot(named: "769-changes-redacted-not-undoable")
-    }
-
-    @MainActor
-    func testSettingsChangesFeedOpensKeyHistoryAndUndoesThroughGatewayReceipt() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes"]
-        app.launch()
-        defer { app.terminate() }
-
-        let row = app.buttons["settings-change-fixture-change"]
-        XCTAssertTrue(row.waitForExistence(timeout: 10), "An empty history page with a cursor is not EOF: \(app.debugDescription)")
-        XCTAssertTrue(showsText("6 retries", in: app))
-        row.tap()
-        XCTAssertTrue(showsText("Key history", in: app))
-        let undo = app.buttons["Undo"]
-        XCTAssertTrue(undo.waitForExistence(timeout: 5), app.debugDescription)
-        undo.tap()
-        XCTAssertEqual(app.alerts.count, 0)
-        app.buttons["Undo change"].tap()
-        XCTAssertTrue(app.staticTexts["Key history"].waitForNonExistence(timeout: 5), "A confirmed receipt dismisses the covered detail")
-        XCTAssertTrue(app.staticTexts["fixture.settings-changes-undos"].waitForExistence(timeout: 5))
-        XCTAssertTrue(showsText("undos:1", in: app), "Undo was issued exactly once through settings.undo")
-    }
-
-    @MainActor
     func testSettingsRendererRetiresCoveredPreviewWithoutWritingOrLockingRows() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -2647,36 +2446,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertEqual(applied.label, "applied:0", "Toggling edits the draft; nothing applies before Save")
         app.buttons["tron-sheet-save"].tap()
         XCTAssertTrue(waitForLabel(applied, containing: "applied:1", timeout: 5))
-    }
-
-    @MainActor
-    func testSheetIntroTextMatchesRowSubtitleSize() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture",
-                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]
-        app.launch()
-        defer { app.terminate() }
-        let subtitle = app.staticTexts["Provider accounts and sign-in"]
-        XCTAssertTrue(subtitle.waitForExistence(timeout: 10), app.debugDescription)
-        let line = subtitle.frame.height
-        XCTAssertGreaterThan(line, 8)
-        tapScrolling(app.buttons["Changes"].firstMatch, in: app)
-        let intro = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "One audit history · All scopes.")).firstMatch
-        XCTAssertTrue(intro.waitForExistence(timeout: 5), app.debugDescription)
-        app.staticTexts["Changes"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
-        var frame = intro.frame
-        for _ in 0..<10 {
-            _ = XCTWaiter.wait(for: [XCTestExpectation(description: "settle")], timeout: 0.3)
-            if intro.frame == frame { break }
-            frame = intro.frame
-        }
-        keepScreenshot(named: "900-changes-intro")
-        let lines = (frame.height / line).rounded()
-        XCTAssertGreaterThanOrEqual(lines, 1)
-        XCTAssertEqual(frame.height, lines * line, accuracy: 0.5,
-                       "The intro uses the row subtitle's size: \(frame.height) is not \(lines) lines of \(line)")
     }
 
     @MainActor

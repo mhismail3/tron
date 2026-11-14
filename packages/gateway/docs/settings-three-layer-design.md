@@ -179,7 +179,7 @@ status. Each entry snapshots scope title/group/key at write so renames/deletion 
 show redacted old→new and Undo or its precise refusal. Preserve pending approvals and receipt fencing.
 Project repo edits do not create new Tron settings entries; diagnostics/trust state have their own
 owners. Non-repo outside edits to Global remain observed changes. Historical Project entries stay
-readable in Global Changes; no request, Undo or Apply again writes Project settings.
+readable in Global Changes; no request or Undo writes Project settings.
 
 ## One migration, backup and verification
 

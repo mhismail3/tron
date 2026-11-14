@@ -291,8 +291,7 @@ function storeStateBadges(key: KeyDeclaration, qualifiers: Qualifiers, stores: S
     const marks = stores.outside?.[layer];
     const mark = marks?.[instanceId(key.id, qualifiers)] ?? marks?.[instanceId(key.id, key.fixed ?? {})];
     if (!mark) continue;
-    badges.push({ kind: "state", label: "Changed outside Tron", detail: `${LAYER_LABELS[scopeForStore(layer)]}: ${mark.before} → ${mark.after}`,
-      ...(mark.applyAgain ? { action: { kind: "applyAgain", label: "Apply again", changeId: mark.changeId } } : {}) });
+    badges.push({ kind: "state", label: "Changed outside Tron", detail: `${LAYER_LABELS[scopeForStore(layer)]}: ${mark.before} → ${mark.after}` });
   }
   return badges;
 }

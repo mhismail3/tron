@@ -39,7 +39,7 @@ extension RealGatewayPairAndChatUITests {
     }
 
     @MainActor
-    func testSessionModelChangeReachesNextPromptAndUndoRestoresIt() throws {
+    func testSessionModelChangeReachesNextPrompt() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
         let app = launchApp()
@@ -97,35 +97,9 @@ extension RealGatewayPairAndChatUITests {
         changedChat.tap()
         XCTAssertTrue(served("e2e-alternate").firstMatch.waitForExistence(timeout: 60), app.debugDescription)
         XCTAssertTrue(waitForEnabled(app.buttons["session-context-button"], timeout: 60), app.debugDescription)
-        let gear = app.navigationBars.buttons["Settings"]
-        XCTAssertTrue(gear.waitForExistence(timeout: 30), app.debugDescription)
-        gear.tap()
-        let changes = app.buttons["Changes"]
-        XCTAssertTrue(changes.waitForExistence(timeout: 30), app.debugDescription)
-        changes.tap()
-        let entry = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'settings-change-' AND label BEGINSWITH 'Model,'")).firstMatch
-        XCTAssertTrue(entry.waitForExistence(timeout: 30), app.debugDescription)
-        entry.tap()
-        XCTAssertTrue(app.staticTexts["Before"].waitForExistence(timeout: 15), app.debugDescription)
-        let undo = app.buttons["Undo"]
-        revealBelowNavigationBar(app, undo)
-        XCTAssertTrue(undo.waitForExistence(timeout: 15), app.debugDescription)
-        undo.tap()
-        let confirm = app.buttons["Undo change"]
-        XCTAssertTrue(confirm.waitForExistence(timeout: 15), app.debugDescription)
-        confirm.tap()
-        XCTAssertTrue(waitUntil(timeout: 60) { !app.staticTexts["Before"].exists }, "Undo did not complete: \(app.debugDescription)")
-        keepScreenshot(app, name: "2233-session-model-undone")
-        let tronHome = fixture.tronHome
-        let sessionChanges = settingsHistory(tronHome, key: "model.ref[role=chat]").filter { ($0["target"] as? [String: Any])?["kind"] as? String == "session" }
-        XCTAssertEqual(sessionChanges.count, 2, "one Session change and its one Undo: \(sessionChanges)")
-        XCTAssertEqual(sessionChanges.last?["undoOf"] as? String, sessionChanges.first?["changeId"] as? String)
-        XCTAssertEqual(sessionChanges.last?["status"] as? String, "applied")
-        dismissTopSheet(app)
-        dismissTopSheet(app)
         XCTAssertTrue(waitForHittable(app.buttons["Back"], timeout: 30), app.debugDescription)
         probe("three", expecting: "e2e-model", count: 2)
-        XCTAssertEqual(served("e2e-alternate").count, 1, "Undo must not rewrite the earlier reply")
+        XCTAssertEqual(served("e2e-alternate").count, 1, "the change must not rewrite the earlier reply")
     }
 
     @MainActor

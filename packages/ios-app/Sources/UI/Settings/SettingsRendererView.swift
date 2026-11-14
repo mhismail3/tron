@@ -261,8 +261,7 @@ struct SettingsRendererView: View {
             onChange: { value in
                 guard !resetDisabled else { return }
                 change(setting, value: value)
-            },
-            onApplyAgain: writableLayer(for: setting) == nil ? nil : { changeID in applyAgain(changeID, rowID: setting.id) }
+            }
         )
         .disabled((changingID != nil && !(modelConfiguration && setting.key == "model.ref[role=chat]")) || previewingID != nil)
     }
@@ -342,30 +341,6 @@ struct SettingsRendererView: View {
             } else {
                 previewingID = nil
                 commit(change, rowID: setting.id)
-            }
-        }
-    }
-
-    private func applyAgain(_ changeID: String, rowID: String) {
-        guard changingID == nil, previewingID == nil, presentationActivity.allowsDataPublication else { return }
-        changingID = rowID
-        let identity = model.knowledgePresentationIdentity
-        let requestTarget = target
-        let admittedSurface = surfaceToken
-        Task { @MainActor in
-            defer { changingID = nil }
-            do {
-                try await model.applySettingsChangeAgain(changeID)
-                guard identity == model.knowledgePresentationIdentity, requestTarget == target,
-                      admittedSurface == surfaceToken, presentationActivity.allowsDataPublication else { return }
-                rowErrors[rowID] = nil
-                model.noteSettingsChanged()
-            } catch is CancellationError {
-                return
-            } catch {
-                guard identity == model.knowledgePresentationIdentity, requestTarget == target,
-                      admittedSurface == surfaceToken, presentationActivity.allowsDataPublication else { return }
-                rowErrors[rowID] = error.localizedDescription
             }
         }
     }

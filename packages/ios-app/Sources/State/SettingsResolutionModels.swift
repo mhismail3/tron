@@ -2,19 +2,9 @@ import Foundation
 import TronMobileCore
 
 struct SettingsBadge: Decodable, Hashable, Sendable {
-    struct Action: Decodable, Hashable, Sendable {
-        let kind: String
-        let label: String
-        var changeId: String? = nil
-    }
     let kind: String
     let label: String
     let detail: String?
-    let action: Action?
-
-    init(kind: String, label: String, detail: String?, action: Action? = nil) {
-        self.kind = kind; self.label = label; self.detail = detail; self.action = action
-    }
 }
 
 struct ResolvedSetting: Decodable, Equatable, Sendable, Identifiable {

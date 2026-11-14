@@ -10,8 +10,8 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
 - Shell: `SettingsView` (`SettingsGroupKind` groups, `SettingsGroupCard`).
 - Renderer: `SettingsRendererView`, `SettingsRendererRow`, `SettingsValueEditors`,
   `SettingsChoiceSlider`.
-- Audit: `SettingsChangesView`, `SettingsChangeRow`; exact reviews use the shared
-  `ChangeReviewSheet`.
+- Audit: exact reviews use the shared `ChangeReviewSheet`; the Changes history is read from
+  the Gateway's audit store and the agent's `settings` tool, not an app sheet.
 - Agent configuration: `ConfigurationSlider(Surface)`,
   `DefaultToolsSettingsSection`.
 - Accounts: `ProviderSettingsView`, `ProviderUsageReadController`, `IntegrationsSettingsView`
@@ -50,7 +50,7 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   retained values; Global embeds those groups directly. There is no Advanced section.
   Trusted Projects and the server's Mac Terminal section consume their declared groups
   without duplicating them in More Settings.
-  Notifications and Changes sit in the toolbar; no Value & Source sheet. Dashboard Settings
+  Notifications sit in the toolbar; no Changes or Value & Source sheet. Dashboard Settings
   exposes only Global: editable keys plus explicit read-only values with Reset and Project inspection.
   Trusted Projects owns the default trust policy and per-project trust; Add Project records the
   chosen folder as Not trusted through `settings.change`, a folder inside a listed project too
@@ -91,9 +91,8 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   receipt and the session owner's admission state with `ModelSelectionAvailability`: model browsing
   stays available while choices, Revert and picker reset are disabled. Their existing change gate
   still serializes writes; no presentation value grants mutation authority. Outside-change recovery
-  remains an explicit inline Apply again action beneath the same value control, not a row-opening
-  detail link. The real-Gateway outside-change journey verifies the live value, receipt-backed restore
-  and marker removal on that row. The Gateway supplies override presence and permissions;
+  shows an outside-change badge on the row; restoring is by the agent or a native change card, not an
+  app action. The Gateway supplies override presence and permissions;
   rows never infer ownership from value equality.
 - **Chat and Home settings.** Manage Session and Manage Home open `SessionSettingsView` (scopes:
   Project, Session, Global); Home writes its saved settings, a chat its own Session scope.
@@ -114,10 +113,6 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   repository-field notices (no Workspace row in Session Settings). Summaries omit unset values. Trust still uses `TrustSettingsView`; another Mac requires **Use This Server**.
   Until the user scrolls, `SessionSettingsView` keeps its content at its top edge as the presented
   sheet's top inset settles, so an upward drag at medium expands the sheet rather than scrolling it.
-- **Changes.** Only Global has a Changes entry. `SettingsChangesView` pages `settings.history` by
-  Project/Session/Global and keeps last-look per Mac. Undo and
-  Apply again are receipt-backed through `SettingsTrustCoordinator`; outside MCP and custom-model
-  entries never show their definition.
 - **Exact reviews.** The maintainer's own edits apply directly; picking the value the edited
   layer already stores sends nothing, while picking an inherited or default value pins it there. A row whose dry run requires a
   tap (trust, privacy or spend widening, installs, irreversible effects) opens the shared
@@ -176,7 +171,7 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
 
 ## Entry points
 
-`SettingsView.swift`, `SettingsRendererView.swift`, `SettingsChangesView.swift`,
+`SettingsView.swift`, `SettingsRendererView.swift`,
 `ProviderSettingsView.swift`, `MCPServersSettingsView.swift`, `ConnectionSettingsView.swift`.
 
 ## Verify
@@ -187,7 +182,6 @@ scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronIntegrationSheetsUITests \
   --only-testing TronMobileUITests/TronMCPServerSheetsUITests \
   --only-testing TronMobileUITests/TronProjectTrustUITests \
-  --only-testing TronMobileUITests/TronSettingsChangesReviewUITests \
   --only-testing TronMobileUITests/TronDiagnosticsExportUITests \
   --only-testing TronMobileUITests/TronSmokeUITests/testSettingsRowInspectionAndActionsStayIndependent \
   --only-testing TronMobileUITests/TronSmokeUITests/testIphoneDashboardPreferencesPersistAcrossRoutesAndRelaunch
@@ -200,7 +194,7 @@ scripts/ios-gateway-e2e-test run-ui \
 
 `TronSettingsScopeRowsUITests` checks read-only queue values, independent Revert and Project
 inspection. `TronSmokeUITests` keeps direct model/thinking and shared string-list editing,
-read-only numeric-map/no-write inspection, approvals and Changes coverage.
+read-only numeric-map/no-write inspection and approvals.
 `TronAgentBehaviorRegressionUITests` checks numeric-map values without native editor/reset routes in
 light/dark and XXXL; Gateway `native-change.e2e.test.ts` owns actual agent numeric-map changes,
 next-Pi-session admission, spend-card acceptance and Undo. Its painted-geometry journey measures the primitive and generic

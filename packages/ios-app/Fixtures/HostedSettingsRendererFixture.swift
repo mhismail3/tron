@@ -14,18 +14,12 @@ struct HostedSettingsRendererFixture: View {
     @State private var error: String?
     @State private var applied = 0
     @State private var thinkingOptions = -1
-    @State private var undos = 0
-    @State private var decisions = "decisions:0"
     @State private var toolWrite = "none"
     @State private var providerOperations = ""
-    @State private var openedRoute: AppModel.SessionNavigationRoute?
     private let socket = HostedSettingsRendererSocket()
     private let profile: GatewayProfile
 
     init() {
-        if let lastLook = HostedSettingsChangesReview.lastLook ?? (ProcessInfo.processInfo.arguments.contains("-settings-changes") ? "2026-10-10T00:00:00Z" : nil) {
-            UserDefaults.standard.set(lastLook, forKey: "settings.changes.lastLookedAt.settings-renderer-fixture.all")
-        }
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
         profile = GatewayProfile(id: "settings-renderer-fixture", label: "Fixture", host: "gateway.test", port: 9847,
@@ -135,10 +129,6 @@ struct HostedSettingsRendererFixture: View {
                         providerReview
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-ui-push") {
                         PushNotificationsSettingsView()
-                    } else if ProcessInfo.processInfo.arguments.contains("-settings-changes") {
-                        SettingsChangesView(scope: ProcessInfo.processInfo.arguments.contains("-settings-changes-session")
-                            ? .session("fixture-chat", projectCWD: "/fixture/project") : .all,
-                            onOpenSession: { openedRoute = $0 })
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-renderer-held-preview") || ProcessInfo.processInfo.arguments.contains("-settings-renderer-confirm") || ProcessInfo.processInfo.arguments.contains("-settings-renderer-haptics") {
                         SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global", presentation: .section("context"))
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-nested") {
@@ -161,17 +151,11 @@ struct HostedSettingsRendererFixture: View {
                         if ProcessInfo.processInfo.arguments.contains("-settings-renderer-held-preview") { Button("Cover renderer") { covering = true } }
                         Text("haptics:\(TronHapticsProbe.shared.summary)").accessibilityIdentifier("fixture.haptics")
                         Text("thinking-options:\(thinkingOptions)").accessibilityIdentifier("fixture.settings-renderer-thinking-options")
-                        Text("undos:\(undos)").accessibilityIdentifier("fixture.settings-changes-undos")
-                        Text(decisions).accessibilityIdentifier("fixture.settings-changes-decisions")
                         if ProcessInfo.processInfo.arguments.contains("-settings-ui-tools-write") {
                             Text(toolWrite).accessibilityIdentifier("fixture.tools-write")
                         }
                         if ProcessInfo.processInfo.arguments.contains("-settings-provider-actions") {
                             Text(providerOperations).accessibilityIdentifier("fixture.provider-operations")
-                        }
-                        if let openedRoute {
-                            Text("owned:\(model.ownsNavigationRoute(openedRoute)):\(openedRoute.sessionID)")
-                                .accessibilityIdentifier("fixture.settings-changes-route")
                         }
                     }
                     .font(.caption2).opacity(0.6)
@@ -195,14 +179,13 @@ struct HostedSettingsRendererFixture: View {
                 try await model.connectHostedGateway(profile: profile, token: "fixture-token")
                 model.pushNotificationReadiness = .ready
                 model.pushRegistrationDiagnostic = .complete
-                await HostedSettingsChangesReview.prepare(model); ready = true
+                ready = true
             } catch { self.error = String(describing: error) }
         }
         .task {
             while !Task.isCancelled {
-                (applied, thinkingOptions, undos) = await socket.counters()
+                (applied, thinkingOptions) = await socket.counters()
                 heldPreviews = await socket.previewCount()
-                decisions = await socket.decisionSummary()
                 toolWrite = await socket.lastToolWrite()
                 providerOperations = await socket.providerOperationSummary()
                 try? await Task.sleep(for: .milliseconds(250))
@@ -239,8 +222,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     private var paths = ["alpha", "beta"]
     private var applied = 0
     private var thinkingOptions = -1
-    private var undos = 0
-    private var decided: [String: Bool] = [:]
     private var catalogRefreshes = 0
     private var customReads = 0
     private var customWrites = 0
@@ -248,9 +229,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     func providerOperationSummary() -> String {
         "refresh:\(catalogRefreshes) custom-read:\(customReads) custom-write:\(customWrites) credentials:\(credentialWrites)"
     }
-    func decisionSummary() -> String { "decisions:\(decided.count) approved:\(decided.values.filter { $0 }.count)" }
-
-    func counters() -> (Int, Int, Int) { (applied, thinkingOptions, undos) }
+    func counters() -> (Int, Int) { (applied, thinkingOptions) }
     func resume() async { }
     func ping() async throws { }
 
@@ -332,99 +311,14 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 await withCheckedContinuation { heldPreview = $0 }
             }
             result = try change(params)
-        case "settings.history": result = HostedSettingsChangesReview.page(params) ?? historyPage(params)
-        case "settings.undo":
-            undos += 1
-            if ProcessInfo.processInfo.arguments.contains("-settings-undo-refused") {
-                let failure: JSONValue = .object(["code": .string("conflict"),
-                    "message": .string("The setting changed since; undo would overwrite a newer value"),
-                    "retryable": .bool(false), "details": .object([
-                        "current": .number(8), "after": .number(6),
-                        "display": .object(["current": .string("8 retries"), "after": .string("6 retries")])
-                    ])])
-                if ProcessInfo.processInfo.arguments.contains("-settings-undo-outcome-refused") {
-                    result = .object(["status": .string("applied"), "changes": .array([
-                        .object(["key": .string("run.transport"), "status": .string("applied")]), .object([
-                        "key": .string("run.retry.maxRetries"), "status": .string("failed"), "error": failure
-                    ])])])
-                } else {
-                    try enqueue(.object(["type": .string("response"), "id": .string(id), "ok": .bool(false), "error": failure]))
-                    return
-                }
-            } else {
-                result = .object(["status": .string("applied"), "changes": .array([])])
-            }
-        default: result = HostedExtensionsReview.response(method) ?? HostedSettingsChangesReview.response(method) ?? .object([:])
+        default: result = HostedExtensionsReview.response(method) ?? .object([:])
         }
         try enqueue(.object(["type": .string("response"), "id": .string(id), "ok": .bool(true), "result": result]))
     }
 
     private var modelName: String { model == "pro" ? "Fixture Pro" : "Fixture Lite" }
 
-    private func historyPage(_ params: [String: JSONValue]) -> JSONValue {
-        guard params["key"] != nil || params["cursor"]?.stringValue == "fixture-next" else {
-            return .object(["entries": .array([]), "nextCursor": .string("fixture-next")])
-        }
-        var entries = [historyEntry()]
-        if ProcessInfo.processInfo.arguments.contains("-settings-changes-scope") {
-            let base = historyEntry().objectValue!
-            entries += [
-                .object(base.merging(["changeId": .string("project-change"), "layer": .string("project"),
-                    "actor": .object(["kind": .string("outside")]),
-                    "target": .object(["kind": .string("project"), "cwd": .string("/fixture/project")]),
-                    "status": .string("outside")]) { $1 }),
-                .object(base.merging(["changeId": .string("foreign-change"),
-                    "actor": .object(["kind": .string("agent"), "sessionId": .string("foreign-chat")]),
-                    "target": .object(["kind": .string("session"), "sessionId": .string("foreign-chat")])]) { $1 }),
-                .object(base.merging(["changeId": .string("ui-change"), "actor": .object(["kind": .string("ui")]),
-                    "layer": .string("session"),
-                    "target": .object(["kind": .string("session"), "sessionId": .string("fixture-chat")]),
-                    "status": .string("failed")]) { $1 })
-            ]
-        }
-        entries = entries.filter { entry in
-            let value = entry.objectValue!
-            let actor = value["actor"]?.objectValue?["kind"]?.stringValue
-            let requestedActor = params["actor"]?.stringValue
-            return (requestedActor == nil || (requestedActor == "agents" ? actor != "ui" : actor == requestedActor))
-                && (params["layer"] == nil || params["layer"] == value["layer"])
-                && (params["key"] == nil || params["key"] == value["key"])
-                && (params["section"] == nil || params["section"] == value["presentation"]?.objectValue?["section"])
-                && (params["status"] == nil || params["status"] == value["status"])
-        }
-        return .object(["entries": .array(entries)])
-    }
-
     private let weights: [String: JSONValue] = ["red": .number(2)]
-
-    private func historyEntry() -> JSONValue {
-        if ProcessInfo.processInfo.arguments.contains("-settings-changes-redacted") {
-            return .object([
-                "changeId": .string("fixture-change"), "at": .string("2026-10-11T12:00:00.000Z"),
-                "actor": .object(["kind": .string("agent"), "sessionId": .string("fixture-chat")]),
-                "target": .object(["kind": .string("global")]), "layer": .string("global"),
-                "key": .string("tools.mcp.server"), "qualifiers": .object(["server": .string("fixture-server")]),
-                "op": .string("set"), "changed": .bool(true), "redacted": .bool(true),
-                "tier": .string("quiet"), "status": .string("applied"),
-                "presentation": .object(["label": .string("MCP server"), "section": .string("tools"),
-                    "actor": .string("Agent"), "layer": .string("Global"),
-                    "display": .object(["before": .string("Hidden"), "after": .string("Changed")])]),
-            ])
-        }
-        return .object([
-            "changeId": .string("fixture-change"), "at": .string("2026-10-11T12:00:00.000Z"),
-            "actor": .object(["kind": .string("agent"), "sessionId": .string("fixture-chat")]),
-            "target": .object(["kind": .string("global")]), "layer": .string("global"),
-            "key": .string("run.retry.maxRetries"), "op": .string("set"),
-            "before": .number(4), "after": .number(6), "tier": .string("quiet"), "status": .string("applied"),
-            "tierBasis": .object(["direction": .string("widen"), "floor": .string("quiet"), "floorSource": .string("code"),
-                "web": .bool(false), "risk": .string("quiet"),
-                "riskEvaluation": .object(["status": .string("assessed"), "rationale": .string("The deterministic floor is sufficient.")])]),
-            "presentation": .object(["label": .string("Agent retry count"), "section": .string("run"),
-                "actor": .string("Agent"), "layer": .string("Global"),
-                "display": .object(["before": .string("4 retries"), "after": .string("6 retries")])]),
-        ])
-    }
 
     private func resolution() -> JSONValue {
         if ProcessInfo.processInfo.arguments.contains("-settings-expanded-review") {

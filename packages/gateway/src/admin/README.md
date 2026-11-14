@@ -73,7 +73,7 @@ In short:
 
 RPCs (shapes in the [Gateway README](../../README.md)): `settings.resolve`,
 `settings.options`, `settings.change` (with `dryRun`), `settings.undo`,
-`settings.applyAgain`, `settings.history` (the maintainer's full view), plus `home.profileChange` for learned-profile notes.
+`settings.history` (the maintainer's full view), plus `home.profileChange` for learned-profile notes.
 Broadcasts: `settings.changed`, `trust.changed`, `mcp.changed`,
 `models.customChanged`. Agents reach the same path through the `settings` tool
 (a thin client of resolve, change, history, undo and inventory, each carrying the calling chat's actor; history and undo are
@@ -140,7 +140,7 @@ are installed; schema access never evaluates their late-bound service getter.
 - Add or change a key: [kernel schema](../kernel/settings/settings-schema.ts) `KEYS`, then
   `scripts/tron docs update` refreshes the key table in the contract doc.
 - Resolve a target: `SettingsModel.resolve` / `options`.
-- Change/Undo: kernel `SettingsChangePath.change`, `undo`, `applyAgain`.
+- Change/Undo: kernel `SettingsChangePath.change`, `undo`.
 - Learned profile: Home `HomeProfileItems.change` / `undo` under `SettingsChangePath.auditSubject`.
 - Outside detection: `OutsideChanges` (`reconcile`, `adopt`, `dispose`).
 - Agent tool and web mark: `tron-settings-extension.ts`.

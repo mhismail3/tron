@@ -177,23 +177,6 @@ extension RealGatewayPairAndChatUITests {
             for _ in 0..<5 { app.swipeUp() }
             keepScreenshot(app, name: "2010-agent-settings-more-\(appearance)")
             dismissAgentSheet(app, title: "Agent Behavior")
-            let changes = app.buttons["Changes"]
-            XCTAssertTrue(changes.waitForExistence(timeout: 15), app.debugDescription)
-            changes.tap()
-            let entry = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'settings-change-' AND label BEGINSWITH 'Background models,'")).firstMatch
-            XCTAssertTrue(entry.waitForExistence(timeout: 30), app.debugDescription)
-            entry.tap()
-            XCTAssertTrue(app.staticTexts["Before"].waitForExistence(timeout: 15), app.debugDescription)
-            XCTAssertTrue(app.staticTexts["After"].exists, app.debugDescription)
-            let undo = app.buttons["Undo"]
-            revealBelowNavigationBar(app, undo)
-            XCTAssertTrue(undo.waitForExistence(timeout: 15), app.debugDescription)
-            undo.tap()
-            let confirm = app.buttons["Undo change"]
-            XCTAssertTrue(confirm.waitForExistence(timeout: 15), app.debugDescription)
-            confirm.tap()
-            XCTAssertTrue(waitUntil(timeout: 15) { saved("background") == [] }, "Changes Undo restores the explicit empty queue through the receipt owner")
-            keepScreenshot(app, name: "2010-agent-behavior-changes-\(appearance)")
             app.terminate()
         }
     }

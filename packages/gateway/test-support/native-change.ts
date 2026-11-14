@@ -2,7 +2,7 @@ import type { GatewayService, ClientContext } from "../src/transport/gateway-ser
 import type { ChangeResult } from "../src/kernel/settings/tool-contract.js";
 
 export async function maintainerChange(service: GatewayService, client: ClientContext,
-  method: "settings.change" | "settings.undo" | "settings.applyAgain", params: Record<string, unknown>): Promise<ChangeResult> {
+  method: "settings.change" | "settings.undo", params: Record<string, unknown>): Promise<ChangeResult> {
   return await service.invoke(client, method, params) as unknown as ChangeResult;
 }
 

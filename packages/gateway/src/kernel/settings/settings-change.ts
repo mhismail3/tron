@@ -40,7 +40,6 @@ export interface ChangeContext {
     mutate<T>(operation: (admission: { appliers: SessionAppliers } | { error: GatewayError }) => Promise<T>): Promise<T>;
   };
   undoOf?: string;
-  applyAgainOf?: string;
 }
 
 function outcomeValues(before: unknown, after: unknown): Pick<ChangeOutcome, "before" | "after"> {
@@ -176,7 +175,7 @@ export class SettingsChangePath {
       }
     }
     const requiresTap = planned.some(plan => plan.key.tap && (plan.key.tap === "install" || plan.key.tap === "irreversible" || plan.direction === "widen"));
-    const review = changeReview({ target, undoOf: context.undoOf, applyAgainOf: context.applyAgainOf, planned: planned.map(plan => ({
+    const review = changeReview({ target, undoOf: context.undoOf, planned: planned.map(plan => ({
       key: plan.key.id, layer: plan.request.layer, qualifiers: plan.qualifiers, op: plan.request.op, before: plan.before ?? null, after: plan.after ?? null })) },
       { title: planned.map(plan => plan.key.label).join(", "), requiresTap, ...(context.reason ? { reason: context.reason } : {}),
         items: planned.map(plan => ({ label: plan.key.label, before: formatStoredSetting(plan.key.type, plan.before),
@@ -348,20 +347,6 @@ export class SettingsChangePath {
           expected: entry.after ?? null,
         }], currentContext);
       }));
-  }
-
-  async applyAgain(changeId: string, context: Omit<ChangeContext, "applyAgainOf" | "undoOf">, session?: ChangeContext["session"]) {
-    const entry = await this.record.find(changeId);
-    if (!entry || entry.status !== "outside") throw new GatewayError("not_found", "No such outside change");
-    if (entry.redacted) throw new GatewayError("conflict", "A hidden value cannot be applied again: it was never recorded");
-    const replaced = entry.refersTo ? await this.record.entry(entry.refersTo) : undefined;
-    if (!replaced || replaced.entry.redacted) throw new GatewayError("conflict", "This outside change did not replace a value Tron wrote");
-    const value = replaced.entry.after;
-    return this.change(entry.target, [{
-      key: entry.key, ...(entry.qualifiers ? { qualifiers: entry.qualifiers } : {}), layer: entry.layer,
-      op: value === undefined ? "unset" : "set", ...(value === undefined ? {} : { value }),
-      expected: entry.after === undefined ? null : entry.after,
-    }], { ...context, applyAgainOf: changeId, ...(session ? { session } : {}) });
   }
 
   async history(input: { cursor?: string; limit?: number; key?: string; status?: string; actor?: ActorKind | "agents"; layer?: LayerId; section?: string }, viewer: Actor) {
@@ -600,7 +585,7 @@ export class SettingsChangePath {
       ...(plan.before === undefined ? {} : { before: plan.before }), ...(plan.after === undefined ? {} : { after: plan.after }),
       ...(context.reason ? { reason: context.reason } : {}), status,
       ...(failure ? { failure } : {}), ...(git ? { git } : {}),
-      ...(context.undoOf ? { undoOf: context.undoOf } : {}), ...(context.applyAgainOf ? { applyAgainOf: context.applyAgainOf } : {}) };
+      ...(context.undoOf ? { undoOf: context.undoOf } : {}) };
   }
 }
 

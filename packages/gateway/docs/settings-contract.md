@@ -13,7 +13,7 @@ consume it. Edge cases follow from a [foundation](#foundations), never a new rul
   store bindings describe owned persistence. iOS renders the served metadata generically.
 - **F2 Truth.** Each layer's store is the truth; the change record is audit and undo, never
   consulted for a value. A store that differs from the last observed value is an
-  [outside change](#outside-changes), offered **Apply again**; Tron never re-applies on its own.
+  [outside change](#outside-changes), shown as such; Tron never re-applies on its own.
 - **F3 Policy.** Routine reversible writes apply and log. Widening trust/executable
   authority, privacy or spend, and any install or irreversible effect, require an exact paired-native
   tap through the dedicated [native review](#native-review), never a generic form.
@@ -150,7 +150,7 @@ refused. **Record:** `<tronHome>/state/settings/changes/`, append-only 500-entry
 listed in `index.json`, kept forever, paged by `settings.history` (the maintainer's full view) or the tool's `history`
 action (optional key filter, cursor and limit 1–200; a page may be empty with a
 `nextCursor`); entries hold actor, target, key, `before`/`after` (never credentials; reads return values only for a declared key or record subject not flagged redacted, so a retired or unknown key's values never leave the Gateway), reason,
-status, git result and `undoOf`/`applyAgainOf`. Scope: an agent's history and Undo cover only its own
+status, git result and `undoOf`. Scope: an agent's history and Undo cover only its own
 chat's changes, meaning those targeting its session and those its session initiated (including its Global
 changes); foreign rows are absent from its pages and its Undo of them is refused. Tron Home sees and undoes every
 change, applied to the target session's own store. Existing persisted facts remain readable;
@@ -158,11 +158,11 @@ there is no pending-request folding or tier basis in new facts. **Undo** (`setti
 `before` back, refused with `conflict` when the store moved; redacted entries are **Not
 undoable**. Consumption is derived from permanent history, checked with the current-after
 value under the same stripe. Grouped Undo requires every unique member with a consistent
-size; corrupt indexed segments refuse rather than restoring a partial group. **Apply again** (`settings.applyAgain`) restores Tron's value over an outside one.
+size; corrupt indexed segments refuse rather than restoring a partial group.
 
 ## Native review
 
-A review binds target, operation identity (including Undo/Apply again), reason and
+A review binds target, operation identity (including Undo), reason and
 every displayed item, alongside exact typed values. Controls, bidi and invisible
 format characters are disclosed; credential-bearing values remain redacted.
 A review is disposable presentation, not authority or a durable pending store.
@@ -183,7 +183,7 @@ canonical `extension.respond` mutation receipt. Before acceptance, Stop/cancella
 means no effects. After acceptance, retirement cannot falsely decline accepted work
 or cause replay. An uncertain receipt requires inspection.
 
-The maintainer's own `settings.change`, `settings.undo` and `settings.applyAgain`
+The maintainer's own `settings.change` and `settings.undo`
 apply directly: his tap is the authority. A renderer that shows a key's review card
 may bind that tap to it with `confirmationDigest`; a changed store refuses it as stale.
 Project lifecycle uses `projects.change`, binding its exact typed intent and review;
@@ -269,4 +269,4 @@ options endpoint. Its canonical type, validation and runtime clamping still appl
 not a pending-request inbox. Global writes Global, Session the Session scope, Home its saved settings;
 Project is inspection only. Session/Home reuse Global's renderer and editors; Project-owned rows
 have a read-only value and separate Project info pill, explicit overrides have Overridden/Revert,
-and Global alone has a Changes entry. Hand-built screens remain only for guided flows and viewers.
+and no app screen lists changes. Hand-built screens remain only for guided flows and viewers.

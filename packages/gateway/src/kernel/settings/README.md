@@ -76,7 +76,7 @@ Its canonical `extension.respond` receipt owns effects through settlement. Stop 
 host retirement can cancel only before acceptance; afterwards they cannot falsely
 turn accepted work into a decline or replay it. The callback reacquires the actual
 target stripe and recomputes the reviewed diff before effects. Local generic RPC
-cannot confirm a native review. The maintainer's own (`ui`) change/Undo/Apply again
+cannot confirm a native review. The maintainer's own (`ui`) change/Undo
 apply directly, optionally bound to a shown review's digest; only other actors get
 the review. Project lifecycle binds its typed intent to the card and revalidates
 canonical filesystem, Git, trust and occupancy state.
