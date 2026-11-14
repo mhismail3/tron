@@ -1151,7 +1151,7 @@ shutil.copytree(source, clone)
             environment.pop("TRON_IOS_TEST_RESULTS_DIR", None)
             environment["HOME"] = str(home)
         return subprocess.run(
-            [str((runner_root or self.checkout) / "scripts/tron"), "test", "ios", command, *(extra_args or [])],
+            [str((runner_root or self.checkout) / "scripts/tron-ios-test"), command, *(extra_args or [])],
             env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
 
