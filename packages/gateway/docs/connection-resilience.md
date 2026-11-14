@@ -25,7 +25,7 @@ reconnect never replays a prompt blindly. Wire bounds, receipts and the outbound
   after a ping answers it, and the Gateway writes pongs ahead of its queued frames
   (`server-pong-backlog.integration.test.ts`). A probe retires the epoch (`pong_timeout`) only
   when nothing arrived within its 8 s deadline, so a dead link is detected within 18 s. Excused
-  probes leave a debug `liveness outcome=excused` record.
+  probes are a debug-level phone diagnostic (`GatewayClientDiagnostics`, outcome `excused`); the Gateway writes no record for them.
 - **Projection:** 1 MiB frames and 32,768 JSON nodes; overflow is a correlated
   `response_too_large` or a resync notice. A rejected mutation projection stays an unknown
   outcome, never a failure.

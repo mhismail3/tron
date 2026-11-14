@@ -32,7 +32,8 @@ The level answers "who needs to look, and when". Debug is not retained on any st
   transient state (warming up, busy) is info or warning, never error.
 - Debug is never written on any Tron-owned stream; `GatewayLogger.log` drops it.
 - Consequence: a fast success's stage breakdown is not kept anywhere. It was reachable only through the
-  removed `system.logs.export` debug section. Slow or failed completions keep their stages on disk.
+  removed `system.logs.export` debug section (PLAN3.2). A slow or non-success completion keeps every stage it
+  entered, including stages that round to 0 ms; `util/request-span.ts` `breakdown(durationMs, failed)` is the owner.
 
 ## Streams
 
