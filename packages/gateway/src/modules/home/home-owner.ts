@@ -323,11 +323,11 @@ export class HomeOwner {
     if (action === "transcript") {
       if (!named.sessionId) throw new GatewayError("not_found", "Task has no worker session");
       const binding = this.routeBinding();
-      const entries = await this.options.runtimes.readTaskWorkerTranscript(named.sessionId);
+      const source = await this.options.runtimes.readTaskWorkerTranscript(named.sessionId, request.subagentSessionId);
       this.assertRouteBinding(binding);
-      const messages = projectBranch(entries.map(entry => parseEntry(JSON.stringify(entry))), EPISODIC_DEFAULTS, named.sessionId);
-      const text = messages.map(message => `entry=${message.entryId} kind=${message.kind}\n${message.text}`).join("\n\n");
-      return { taskId: named.taskId, sessionId: named.sessionId, untrusted: true, thinking: "excluded", ...utf8Page(text, "task transcript", request.offset, request.limit) };
+      const messages = projectBranch(source.entries.map(entry => parseEntry(JSON.stringify(entry))), EPISODIC_DEFAULTS, source.sessionId);
+      const text = [...source.subagents.map(id => `subagentSessionId=${id}`), ...messages.map(message => `entry=${message.entryId} kind=${message.kind}\n${message.text}`)].join("\n\n");
+      return { taskId: named.taskId, sessionId: source.sessionId, untrusted: true, thinking: "excluded", ...utf8Page(text, "task transcript", request.offset, request.limit) };
     }
     if (action === "report") {
       if (named.lifecycle !== "terminal") throw new GatewayError("conflict", `task report: "${taskId}" is ${named.lifecycle === "active" ? "still running" : "not started yet"}; it has no report until it settles`);

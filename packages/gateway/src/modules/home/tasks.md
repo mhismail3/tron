@@ -56,15 +56,17 @@ list and revoke.
 
 ## Read-only worker history
 
-Home's `task transcript {taskId, offset?, limit?}` reads canonical worker messages,
+Home's `task transcript {taskId, subagentSessionId?, offset?, limit?}` reads canonical worker messages,
 including tool calls/results and operations resumed in the same session, while running or
 settled. It is available on wakes and maintainer turns. Pages use UTF-8 byte offsets and
 at most 4096 bytes, like `task report`; `nextOffset` continues a growing transcript.
 The task record, not a caller-supplied session/path, establishes Home ownership. A read
 rechecks the Home route binding and never acquires a runtime. The shared episodic
 projection excludes thinking, redacts credential-shaped secrets and respects context edits.
-Worker content is untrusted data, never authorization. Subagent calls/results in the worker
-session are included; separate subagent sessions are not exposed by this action.
+Worker content is untrusted data, never authorization. The paged text lists owned subagent
+session IDs; `subagentSessionId` selects one of those sessions, including nested descendants.
+Ownership requires both the canonical parent relationship and the delegated session directory
+layout. Root chats, unrelated children and ambiguous IDs are refused. Reads never revive children.
 
 ## Worker progress check-ins
 

@@ -384,7 +384,7 @@ export interface SessionOperations extends LineageRuntimePort<RuntimeSlot>, Owne
   readTaskEvidence(sessionId: string, options?: { appendStable?: boolean }): Promise<FileEntry[]>;
   readLiveTaskEvidence(sessionId: string, operationId: string): Promise<LiveTaskEvidence>;
   readTaskWorkerEntries(sessionId: string): Promise<FileEntry[]>;
-  readTaskWorkerTranscript(sessionId: string): Promise<SessionEntry[]>;
+  readTaskWorkerTranscript(sessionId: string, subagentSessionId?: string): Promise<{ sessionId: string; subagents: string[]; entries: SessionEntry[] }>;
   recordTaskWorkers(workers: Iterable<readonly [sessionId: string, taskId: string]>): void;
   taskWorkerSettled(sessionId: string, taskId: string): Promise<void>;
   taskWorkerModel(sessionId: string): Promise<{ provider: string; id: string } | undefined>;
@@ -3368,17 +3368,41 @@ export class RuntimeRegistry implements SessionOperations {
     return path ? this.sessionCatalog.row(path)?.name : undefined;
   }
 
-  async readTaskWorkerTranscript(sessionId: string): Promise<SessionEntry[]> {
-    const live = this.slots.get(sessionId);
+  async readTaskWorkerTranscript(sessionId: string, subagentSessionId?: string): Promise<{ sessionId: string; subagents: string[]; entries: SessionEntry[] }> {
+    await this.sessionCatalog.whenReconciled();
+    const acquisition = await this.catalogAcquisition();
+    this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
+    const root = acquisition.entriesByID.get(sessionId);
+    if (!root) throw new GatewayError("not_found", "Task worker session is unavailable");
+    const owned = new Set([sessionId]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const entry of acquisition.entriesByID.values()) {
+        if (owned.has(entry.id) || !entry.structuralSubagent || !entry.parentSessionId || !owned.has(entry.parentSessionId)) continue;
+        const parent = acquisition.entriesByID.get(entry.parentSessionId)!;
+        if (delegatedSessionParentPath(entry.path, this.catalogDirectory()) !== parent.path) continue;
+        owned.add(entry.id);
+        changed = true;
+      }
+    }
+    const selected = subagentSessionId ?? sessionId;
+    this.requireUnambiguousSessionId(selected, acquisition.ambiguousIDs);
+    if (!owned.has(selected)) throw new GatewayError("not_found", "Subagent session does not belong to this task worker");
+    const subagents = [...owned].filter(id => id !== sessionId).sort();
+    const live = this.slots.get(selected);
     if (live) {
       const branch = validateSearchBranch(live.canonicalSessionEntries());
-      if (branch.header.id !== sessionId) throw new GatewayError("conflict", "Task worker session identity changed");
-      return branch.entries;
+      if (branch.header.id !== selected) throw new GatewayError("conflict", "Task worker session identity changed");
+      return { sessionId: selected, subagents, entries: branch.entries };
     }
-    const path = await this.sessionFile(sessionId);
-    if (!path) throw new GatewayError("not_found", "Task worker session is unavailable");
-    const source = await readCanonicalSession({ path, sessionId });
-    return source.branch.map(entry => entry.raw as unknown as SessionEntry);
+    const entry = acquisition.entriesByID.get(selected)!;
+    const metadata = await lstat(entry.path);
+    if (!metadata.isFile() || metadata.isSymbolicLink() || await realpath(entry.path) !== entry.path) throw new GatewayError("conflict", "Task transcript path is unsafe");
+    const source = await readCanonicalSession({ path: entry.path, sessionId: selected });
+    const after = await lstat(entry.path);
+    if (after.dev !== metadata.dev || after.ino !== metadata.ino) throw new GatewayError("conflict", "Task transcript file was replaced");
+    return { sessionId: selected, subagents, entries: source.branch.map(item => item.raw as unknown as SessionEntry) };
   }
 
   async readTaskWorkerEntries(sessionId: string): Promise<FileEntry[]> {
