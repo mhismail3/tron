@@ -1,5 +1,5 @@
 import { displayOwnerOf, createTestRegistry } from "../../../test-support/gateway-registry.js";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
@@ -55,6 +55,7 @@ interface Fixture {
   port: number;
   logRecords: Array<{ level: string; message: string; metadata: Record<string, unknown> }>;
   connect(token?: string): Promise<Client>;
+  restart(): Promise<void>;
   pairDevice(name: string): Promise<string>;
   localToken(): string;
   coldSession(label: string): Promise<{ id: string; file: string; entryId: string }>;
@@ -131,41 +132,49 @@ async function fixture(options: {
   ) : undefined;
   let retirement = "running";
   let retirementTask: Promise<void> | undefined;
-  const service = new GatewayService({
-    display: displayOwnerOf(registry),
-    config: { tronHome: root },
-    devices,
-    sessions: registry,
-    ...settingsDependencies({ agentDir, tronHome: root, trust, modelRuntime: await runtimeFactory(), sessions: registry }),
-    broadcast: (topic: string, payload: unknown) => server?.broadcast(topic, payload as never),
-    receipts: new CommandReceiptStore(root),
-    uploads,
-    logger: diagnosticLogger,
-    ...(options.authRuntime ? { modelRuntime: options.authRuntime } : {}),
-    ...(auth ? { auth } : {}),
-    workRegistry: registry.administrativeWorkRegistry,
-    requestStop: () => {
-      retirement = "draining";
-      retirementTask = Promise.resolve().then(() => options.onStopRequested?.(registry)).then(
-        () => { retirement = "drained"; },
-        () => { retirement = "failed"; },
-      );
-    },
-  } as never);
-  server = new GatewayServer({ display: displayOwnerOf(registry),
-    host: "127.0.0.1",
-    port: 0,
-    maxFrameBytes: 1_048_576,
-    devices,
-    sessions: registry,
-    service,
-    uploads: uploads as never,
-    auth: { cancelOwner: () => {}, detachClient: () => {} } as never,
-    logger: diagnosticLogger as never,
-  });
-  await server.listen();
-  const port = (server as unknown as { server: { address(): { port: number } } }).server.address().port;
+  const start = async (): Promise<number> => {
+    const service = new GatewayService({
+      display: displayOwnerOf(registry),
+      config: { tronHome: root },
+      devices,
+      sessions: registry,
+      ...settingsDependencies({ agentDir, tronHome: root, trust, modelRuntime: await runtimeFactory(), sessions: registry }),
+      broadcast: (topic: string, payload: unknown) => server?.broadcast(topic, payload as never),
+      receipts: new CommandReceiptStore(root),
+      uploads,
+      logger: diagnosticLogger,
+      ...(options.authRuntime ? { modelRuntime: options.authRuntime } : {}),
+      ...(auth ? { auth } : {}),
+      workRegistry: registry.administrativeWorkRegistry,
+      requestStop: () => {
+        retirement = "draining";
+        retirementTask = Promise.resolve().then(() => options.onStopRequested?.(registry)).then(
+          () => { retirement = "drained"; },
+          () => { retirement = "failed"; },
+        );
+      },
+    } as never);
+    server = new GatewayServer({ display: displayOwnerOf(registry),
+      host: "127.0.0.1",
+      port: 0,
+      maxFrameBytes: 1_048_576,
+      devices,
+      sessions: registry,
+      service,
+      uploads: uploads as never,
+      auth: { cancelOwner: () => {}, detachClient: () => {} } as never,
+      logger: diagnosticLogger as never,
+    });
+    await server.listen();
+    return (server as unknown as { server: { address(): { port: number } } }).server.address().port;
+  };
+  let port = await start();
   report.ports.push(port);
+  const restart = async (): Promise<void> => {
+    sockets.forEach((socket) => socket.terminate());
+    await server?.close();
+    port = await start();
+  };
 
   cleanup.push(async () => {
     sockets.forEach((socket) => socket.terminate());
@@ -228,7 +237,7 @@ async function fixture(options: {
     await devices.ensureEnrollment();
     return device.token;
   };
-  return { root, registry, faux, uploads, port, logRecords, connect, pairDevice, localToken: () => (devices as unknown as { localToken: string }).localToken, coldSession, snapshot, openSession,
+  return { root, registry, faux, uploads, port, logRecords, connect, restart, pairDevice, localToken: () => (devices as unknown as { localToken: string }).localToken, coldSession, snapshot, openSession,
     retirementState: () => retirement };
 }
 
@@ -266,7 +275,8 @@ describe("device log append RPC boundary", () => {
     const names = await readdir(directory).catch(() => [] as string[]);
     return Promise.all(names.map(async (name) => ({ name, text: await readFile(join(directory, name), "utf8") })));
   };
-  const sequencesOf = (text: string) => text.split("\n").filter(Boolean).map((entry) => (JSON.parse(entry) as { sequence: number }).sequence);
+  const envelopesOf = (text: string) => text.split("\n").filter(Boolean).map((entry) => JSON.parse(entry) as { bootId: string; sequence: number });
+  const sequencesOf = (text: string) => envelopesOf(text).map((envelope) => envelope.sequence);
 
   it("holds each device sequence once, reports the cursor, and refuses gaps", async () => {
     const fixtureValue = await fixture();
@@ -291,6 +301,47 @@ describe("device log append RPC boundary", () => {
     expect(cursor.result).toEqual({ bootId, sequence: 4 });
     const unknown = await client.request("append-path", "client.logs.append", { commandId: "append-path-0004", bootId, firstSequence: 5, lines: batch(5, 1), path: "../escape.jsonl" });
     expect(unknown.ok).toBe(false);
+  });
+
+  it("refuses an older connection's boot after a newer connection starts one", async () => {
+    const fixtureValue = await fixture();
+    const older = await fixtureValue.connect();
+    const newer = await fixtureValue.connect();
+    const started = await newer.request("boot-b-start", "client.logs.append", { commandId: "boot-b-start-0001", bootId: "boot-logs-b", firstSequence: 1, lines: batch(1, 2) });
+    expect(started.result).toEqual({ bootId: "boot-logs-b", sequence: 2 });
+    const stale = await older.request("boot-a-stale", "client.logs.append", { commandId: "boot-a-stale-0001", bootId: "boot-logs-a", firstSequence: 1, lines: batch(1, 3) });
+    expect(stale.ok).toBe(false);
+    expect(stale.error?.code).toBe("conflict");
+    const skipped = await newer.request("boot-c-skip", "client.logs.append", { commandId: "boot-c-skip-0001", bootId: "boot-logs-c", firstSequence: 3, lines: batch(3, 1) });
+    expect(skipped.ok).toBe(false);
+    expect(skipped.error?.code).toBe("invalid_request");
+    const cursor = await newer.request("boot-b-cursor", "client.logs.cursor", {});
+    expect(cursor.result).toEqual({ bootId: "boot-logs-b", sequence: 2 });
+    const files = await deviceFiles(fixtureValue.root);
+    expect(files).toHaveLength(1);
+    expect(envelopesOf(files[0].text).map((envelope) => envelope.bootId)).toEqual(["boot-logs-b", "boot-logs-b"]);
+  });
+
+  it("recovers the cursor after a restart and a torn tail, then continues on a fresh line", async () => {
+    const fixtureValue = await fixture();
+    const bootId = "boot-logs-restart";
+    const first = await fixtureValue.connect();
+    await first.request("restart-first", "client.logs.append", { commandId: "restart-first-0001", bootId, firstSequence: 1, lines: batch(1, 3) });
+    await fixtureValue.restart();
+    const recovered = await fixtureValue.connect();
+    expect((await recovered.request("restart-cursor", "client.logs.cursor", {})).result).toEqual({ bootId, sequence: 3 });
+    const [file] = await deviceFiles(fixtureValue.root);
+    await appendFile(join(fixtureValue.root, "logs", "devices", file.name), '{"bootId":"boot-logs-restart","sequence":4,"record":{"mess');
+    await fixtureValue.restart();
+    const afterTear = await fixtureValue.connect();
+    expect((await afterTear.request("tear-cursor", "client.logs.cursor", {})).result).toEqual({ bootId, sequence: 3 });
+    const next = await afterTear.request("tear-next", "client.logs.append", { commandId: "tear-next-0001", bootId, firstSequence: 4, lines: batch(4, 1) });
+    expect(next.result).toEqual({ bootId, sequence: 4 });
+    const [after] = await deviceFiles(fixtureValue.root);
+    const lines = after.text.split("\n").filter(Boolean);
+    const torn = lines.filter((entry) => { try { JSON.parse(entry); return false; } catch { return true; } });
+    expect(torn).toHaveLength(1);
+    expect(sequencesOf(lines.filter((entry) => !torn.includes(entry)).join("\n"))).toEqual([1, 2, 3, 4]);
   });
 
   it("bounds the batch and keeps four 5 MiB segments per device", async () => {
