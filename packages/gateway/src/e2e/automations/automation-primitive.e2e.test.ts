@@ -69,6 +69,14 @@ it("real Home uses the standard schedule lifecycle without confirmation and reta
   const resumed = await call({ action: "enable", automationId: automation.id, expectedRevision: updated.details.revision });
   expect(resumed.isError).not.toBe(true);
   expect((await call({ action: "delete", automationId: automation.id, expectedRevision: resumed.details.revision })).isError).not.toBe(true);
+  const lapsed = await call({ ...create, name: "Lapsed work", expiresAt: new Date(Date.now() - 1_000).toISOString() });
+  expect(lapsed.isError, JSON.stringify(lapsed)).not.toBe(true);
+  const lapsedUpdate = await call({ action: "update", automationId: lapsed.details.id, expectedRevision: lapsed.details.revision, name: "Lapsed renamed", at: "2099-03-01T00:00:00.000Z", prompt: "Still lapsed." });
+  expect(lapsedUpdate.isError, JSON.stringify(lapsedUpdate)).not.toBe(true);
+  expect(lapsedUpdate.details).toMatchObject({ name: "Lapsed renamed", activation: "expired", provenance: { expiresAt: lapsed.details.provenance.expiresAt } });
+  expect(lapsedUpdate.details.nextOccurrenceAt).toBeUndefined();
+  expect((await call({ action: "enable", automationId: lapsed.details.id, expectedRevision: lapsedUpdate.details.revision })).isError).toBe(true);
+  expect((await call({ action: "delete", automationId: lapsed.details.id, expectedRevision: lapsedUpdate.details.revision })).isError).not.toBe(true);
   expect((await phone.request("automation.list", {})).result.items).toHaveLength(0);
 });
 it("real Home automation-triggered turns cannot mutate automations", async () => {
