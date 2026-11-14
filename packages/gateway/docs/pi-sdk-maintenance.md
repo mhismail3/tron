@@ -176,7 +176,15 @@ prompt-keyword handler is not part of that pin.
   `managedProviderSettingsView`, which also refuses package writes; `extensionsOverride` is too
   late to exclude); `packages.list` shows a typed `conflict` (`managed-provider`), Settings says
   "Remove it with `pi remove npm:pi-subagents`"; one `pi-subagents.user-package-ignored` per load.
-- **Proof:** `managed-subagents.install.integration.test.ts`,
+- **Status coverage:** status and fleet discovery keep readable runs visible and report unreadable
+  indexed records as incomplete coverage, without rewriting those records or their active markers.
+  Missing process-terminal evidence remains unknown, including historical terminal records; it is
+  not repaired from result files or step counts. Control and admission readers remain strict.
+  Fork test entrypoints allocate a fresh root rather than inheriting the runtime's
+  `PI_SUBAGENTS_TEMP_ROOT`; only nested test processes reuse their loader-owned root.
+- **Proof:** `delegation.lock.integration.test.ts` (native skill paths and serialized managed-provider
+  identity; pin changes re-record only their intended identity hunks through the scenario-lock owner),
+  `managed-subagents.install.integration.test.ts`,
   `managed-subagents-warm-process.e2e.test.ts` (fresh home, real Gateway process),
   `managed-subagents.transform.integration.test.ts` (fresh build, no Gateway-thread transform),
   `managed-subagents.integration.test.ts` (npm offline, TCP denied, a real child),

@@ -3,6 +3,9 @@
   "owns": [
     "**"
   ],
+  "verify": [
+    "scripts/tron test gateway src/e2e/kernel/delegation/delegation.lock.integration.test.ts"
+  ],
   "dependsOn": [
     "gateway/integrations-contract",
     "gateway/host",
