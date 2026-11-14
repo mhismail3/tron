@@ -31,6 +31,7 @@ from contextlib import closing
 import fcntl
 import hashlib
 import json
+from itertools import islice
 import os
 import platform
 import re
@@ -45,7 +46,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Sequence
+from typing import Iterator, Sequence
 
 ROOT = Path(__file__).resolve().parents[2] if '__file__' in globals() else None
 BASE = 'tron-ci'
@@ -55,9 +56,44 @@ OUTPUT_OPTION = '--outputFile'
 ARTIFACT_LIMIT = 2 * 1024 ** 3
 RETAINED_LIMIT = 128 * 1024 ** 2
 RETAINED_JOBS = 8
+RETAINED_ENTRIES = 1024
+RETAINED_MANIFEST_BYTES = 1024 ** 2
+RETAINED_CASES = 4096
+RETAINED_CASE_BYTES = 1024 ** 2
+RETAINED_WALK_ENTRIES = 8192
+
+
+def retained_sources(root: Path, state: dict) -> Iterator[Path]:
+    pending = [(root, 0)]
+    while pending:
+        directory, depth = pending.pop()
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                if state['visitedEntries'] == RETAINED_WALK_ENTRIES:
+                    state['limitsReached']['walk'] = True
+                    return
+                state['visitedEntries'] += 1
+                path = Path(entry.path)
+                if entry.is_symlink():
+                    state['limitsReached']['links'] = True
+                    continue
+                if len(str(path.relative_to(root)).encode()) > 1015:
+                    state['limitsReached']['paths'] = True
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    if path.name.endswith('.xcresult'):
+                        continue
+                    if depth == 32:
+                        state['limitsReached']['depth'] = True
+                    else:
+                        pending.append((path, depth + 1))
+                elif entry.is_file(follow_symlinks=False) and path.suffix in ('.json', '.log', '.txt'):
+                    yield path
 
 
 def retain_native(results: Path, retained: Path, receipt: dict) -> None:
+    if len(json.dumps(receipt).encode()) > 4096:
+        raise ValueError('native retention receipt exceeds 4096 bytes; originals preserved')
     published = retained
     retained = published.with_name(f'.{published.name}.building')
     if published.exists() or results.is_symlink() or not results.is_dir() or retained.is_symlink():
@@ -65,57 +101,96 @@ def retain_native(results: Path, retained: Path, receipt: dict) -> None:
     if retained.exists():
         shutil.rmtree(retained)
     retained.mkdir(parents=True)
-    entries, cases, total = [], [], 0
-    for source in sorted(results.rglob('*')):
-        if source.is_symlink() or not source.is_file() or source.suffix not in ('.json', '.log', '.txt'):
-            continue
-        relative = source.relative_to(results)
-        if any(part.endswith('.xcresult') for part in relative.parts):
-            continue
-        size = source.stat().st_size
-        allowance = min(4 * 1024 ** 2, RETAINED_LIMIT - total)
-        if allowance <= 0:
-            entries.append({'path': str(relative), 'bytes': size, 'retained': 0})
-            continue
-        target = retained / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with source.open('rb') as stream:
-            data = stream.read(allowance if size <= allowance else allowance // 2)
-            if size > allowance:
-                stream.seek(-allowance // 2, os.SEEK_END)
-                data += stream.read(allowance // 2)
-        target.write_bytes(data)
-        if source.name in ('test.log', 'first-failure.log') or relative.parts[0] == 'verify':
-            cases.extend({'log': str(relative), 'testId': f'{target_name}/{owner}/{method}',
-                          'outcome': outcome, 'seconds': float(seconds)}
-                         for target_name, owner, method, outcome, seconds in re.findall(
-                             r"Test Case '-\[(\w+)\.(\w+) (\w+)\]' (passed|failed|skipped) \(([\d.]+) seconds\)",
-                             data.decode(errors='replace')))
-        total += len(data)
-        entries.append({'path': str(relative), 'bytes': size, 'retained': len(data),
-                        'sha256': hashlib.sha256(data).hexdigest()})
-    partial = (json.dumps({'cases': cases[:4096], 'truncated': len(cases) > 4096,
-                           'completeShard': False}, indent=2) + '\n').encode()
+    entries, cases, total, manifest_bytes, case_bytes = [], [], 0, 0, 0
+    state = {'visitedEntries': 0, 'limitsReached': dict.fromkeys(
+        ('walk', 'depth', 'paths', 'links', 'entries', 'manifest', 'data', 'cases', 'caseBytes'), False)}
+    limits = state['limitsReached']
+    with closing(retained_sources(results, state)) as sources:
+        for source in sources:
+            if len(entries) == RETAINED_ENTRIES - 1:
+                limits['entries'] = True
+                break
+            if total == RETAINED_LIMIT:
+                limits['data'] = True
+                break
+            relative = Path('evidence') / source.relative_to(results)
+            size = source.stat().st_size
+            allowance = min(4 * 1024 ** 2, RETAINED_LIMIT - total)
+            entry = {'path': str(relative), 'bytes': size, 'retained': min(size, allowance), 'sha256': '0' * 64}
+            entry_size = len(json.dumps(entry).encode()) + 1
+            if manifest_bytes + entry_size > RETAINED_MANIFEST_BYTES - 8192:
+                limits['manifest'] = True
+                break
+            target = retained / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with source.open('rb') as stream:
+                data = stream.read(allowance if size <= allowance else allowance // 2)
+                if size > allowance:
+                    stream.seek(-allowance // 2, os.SEEK_END)
+                    data += stream.read(allowance // 2)
+                    limits['data'] = True
+            target.write_bytes(data)
+            if not limits['cases'] and not limits['caseBytes'] and (source.name in ('test.log', 'first-failure.log')
+                                                                  or relative.parts[1] == 'verify'):
+                for match in re.finditer(r"Test Case '-\[(\w+)\.(\w+) (\w+)\]' (passed|failed|skipped) \(([\d.]+) seconds\)",
+                                         data.decode(errors='replace')):
+                    if len(cases) == RETAINED_CASES:
+                        limits['cases'] = True
+                        break
+                    target_name, owner, method, outcome, seconds = match.groups()
+                    case = {'log': str(relative), 'testId': f'{target_name}/{owner}/{method}',
+                            'outcome': outcome, 'seconds': float(seconds)}
+                    encoded = len(json.dumps(case).encode()) + 1
+                    if case_bytes + encoded > RETAINED_CASE_BYTES - 256:
+                        limits['caseBytes'] = True
+                        break
+                    cases.append(case)
+                    case_bytes += encoded
+            total += len(data)
+            entry.update(retained=len(data), sha256=hashlib.sha256(data).hexdigest())
+            entries.append(entry)
+            manifest_bytes += entry_size
+    partial = (json.dumps({'cases': cases, 'truncated': any(limits.values()),
+                           'completeShard': False}) + '\n').encode()
+    if len(partial) > RETAINED_CASE_BYTES:
+        raise ValueError('partial timings exceeded retention bound; originals preserved')
     (retained / 'partial-timings.json').write_bytes(partial)
     entries.append({'path': 'partial-timings.json', 'bytes': len(partial), 'retained': len(partial),
                     'sha256': hashlib.sha256(partial).hexdigest()})
-    (retained / 'retention.json').write_text(json.dumps({**receipt, 'files': entries, 'bytes': total,
-        'bundlesRetained': False, 'reason': 'interrupted or unconfirmed native transport'}, indent=2) + '\n')
+    manifest = (json.dumps({**receipt, **state, 'files': entries, 'bytes': total,
+        'truncated': any(limits.values()), 'bundlesRetained': False,
+        'reason': 'interrupted or unconfirmed native transport'}) + '\n').encode()
+    if len(manifest) > RETAINED_MANIFEST_BYTES:
+        raise ValueError('native manifest exceeded retention bound; originals preserved')
+    (retained / 'retention.json').write_bytes(manifest)
     retained.rename(published)
 
 
+def retained_json(path: Path, limit: int) -> tuple[dict, bytes]:
+    with path.open('rb') as source:
+        content = source.read(limit + 1)
+    if len(content) > limit:
+        raise ValueError('retained metadata exceeds its byte bound')
+    return json.loads(content), content
+
+
 def verify_retained(evidence: Path, nonce: str) -> str:
-    receipt_path = evidence / 'retention.json'
-    receipt = json.loads(receipt_path.read_text())
+    if evidence.is_symlink() or (evidence / 'retention.json').is_symlink():
+        raise ValueError('unsafe retained manifest')
+    receipt, content = retained_json(evidence / 'retention.json', RETAINED_MANIFEST_BYTES)
+    if len(receipt['files']) > RETAINED_ENTRIES:
+        raise ValueError('retained manifest exceeds its entry bound')
     if receipt['nonce'] != nonce:
         raise ValueError('retained native receipt nonce mismatch')
     for entry in receipt['files']:
         file = evidence / entry['path']
         if not file.resolve().is_relative_to(evidence.resolve()) or file.is_symlink():
             raise ValueError('unsafe retained receipt path')
-        if entry['retained'] and hashlib.sha256(file.read_bytes()).hexdigest() != entry['sha256']:
+        if not 0 <= entry['retained'] <= 4 * 1024 ** 2 or file.stat().st_size != entry['retained']:
+            raise ValueError('retained file exceeds its byte bound')
+        if hashlib.sha256(file.read_bytes()).hexdigest() != entry['sha256']:
             raise ValueError('retained native file digest mismatch')
-    return hashlib.sha256(receipt_path.read_bytes()).hexdigest()
+    return hashlib.sha256(content).hexdigest()
 
 
 def retained_main(nonce: str, action: str = 'retrieve', digest: str | None = None) -> int:
@@ -125,16 +200,22 @@ def retained_main(nonce: str, action: str = 'retrieve', digest: str | None = Non
         retained = Path.home() / BASE / 'retained-native' / nonce
         originals = Path.home() / BASE / 'results' / f'gateway-{nonce}'
         building = retained.with_name(f'.{nonce}.building')
+        if any(path.is_symlink() for path in (retained, originals, building)):
+            raise ValueError('unsafe native recovery path')
         if action == 'recover-retained':
             if not retained.exists():
                 receipt_path = originals / 'receipt.json'
-                receipt = json.loads(receipt_path.read_text()) if receipt_path.is_file() else {'nonce': nonce}
+                if receipt_path.is_symlink():
+                    raise ValueError('unsafe original native receipt')
+                source_receipt = retained_json(receipt_path, RETAINED_MANIFEST_BYTES)[0] if receipt_path.is_file() else {'nonce': nonce}
+                receipt = {key: source_receipt[key] for key in ('nonce', 'commit', 'lane', 'host', 'exit', 'interrupted')
+                           if key in source_receipt}
                 if receipt.get('nonce') != nonce:
                     raise ValueError('native recovery receipt nonce mismatch')
                 retain_native(originals, retained, receipt)
             verify_retained(retained, nonce)
-            if originals.is_symlink():
-                raise ValueError('unsafe original native evidence')
+            if building.exists():
+                shutil.rmtree(building)
             if originals.exists():
                 shutil.rmtree(originals)
             originals.with_suffix('.tar.gz').unlink(missing_ok=True)
@@ -144,8 +225,11 @@ def retained_main(nonce: str, action: str = 'retrieve', digest: str | None = Non
             if digest is None or len(digest) != 64 or any(character not in '0123456789abcdef' for character in digest):
                 raise ValueError('invalid retained acknowledgement digest')
             acknowledged = retained.with_name(f'.{nonce}.ack-{digest}')
+            if originals.exists() or building.exists():
+                raise ValueError('native recovery cleanup is incomplete; finish recover before acknowledgement')
             if retained.exists():
-                if retained.is_symlink() or hashlib.sha256((retained / 'retention.json').read_bytes()).hexdigest() != digest:
+                _, manifest = retained_json(retained / 'retention.json', RETAINED_MANIFEST_BYTES)
+                if hashlib.sha256(manifest).hexdigest() != digest:
                     raise ValueError('retained receipt changed; evidence was not removed')
                 try:
                     retained.rename(acknowledged)
@@ -577,8 +661,10 @@ def remote_main(job: dict) -> int:
             lock.flush()
 
             retained_root = base / 'retained-native'
-            if job['lane'] in ('ios', 'verify') and retained_root.exists() and len(list(retained_root.iterdir())) >= RETAINED_JOBS:
-                return refuse('native evidence retention is full; retrieve pending evidence before another native job')
+            if job['lane'] in ('ios', 'verify') and retained_root.exists():
+                with os.scandir(retained_root) as pending:
+                    if sum(1 for _ in islice(pending, RETAINED_JOBS)) == RETAINED_JOBS:
+                        return refuse('native evidence retention is full; recover/retrieve pending evidence before another native job')
             prepared = time.time()
             if (checkout / '.git').exists():
                 steps = [('git', '-C', str(checkout), 'checkout', '--quiet', '--detach', '--force', sha),

@@ -154,14 +154,23 @@ the iOS helper owns its simulator release. No second scheduler, daemon or source
 The caller acknowledges verified native artifact receipt before successful transport cleanup. An
 interruption or unacknowledged transport retains a compact snapshot under the mini owner's
 `~/tron-ci/retained-native/<nonce>/`: process/stage JSON, log heads and tails, verify receipts,
-completed-case partial timings and a truncation manifest. Native bundles are not retained in that
-compact snapshot. Source files retain at most 4 MiB each and 128 MiB total, plus bounded derived
-metadata; eight pending snapshots stop native admission instead of silently evicting evidence.
+completed-case partial timings and a truncation manifest. Copied source files are under `evidence/`;
+native bundles are excluded. Source data retains at most 4 MiB per file and 128 MiB total. The
+manifest has at most 1,024 entries (including partial timings) and 1 MiB encoded bytes. Partial
+timings stop parsing at 4,096 cases or a 1 MiB encoded budget, whichever comes first. The source
+walk streams at most 8,192 filesystem entries, descends at most 32 directory levels, and excludes
+links and encoded evidence paths over 1,024 bytes. Limit/truncation flags record early stops; they
+never claim an exact count for unvisited files or unparsed cases. Receipt context is capped at
+4 KiB. All derived metadata fits the two 1 MiB files, not an unbounded manifest alongside the data
+budget. Eight outstanding published/staging/ack entries stop native admission instead of eviction.
 Snapshot construction uses `.<nonce>.building` and atomically publishes `<nonce>` only after its
 manifest is complete. A construction failure preserves the originals in `results/gateway-<nonce>`.
 `python3 tools/verify/mini.py recover <nonce>` rebuilds that exact incomplete staging copy from the
 preserved originals; only a verified published snapshot allows original cleanup. Recovery does not
-require the incomplete copy to have a manifest. Staging still occupies admission capacity until recovered.
+require the incomplete copy to have a manifest. A copy, metadata-size, disk or publication failure
+leaves the original evidence intact; fix the resource/input error and retry recovery. Staging still
+occupies admission capacity until recovered. Recovery also finishes cleanup after publication if
+that cleanup was interrupted; acknowledgement refuses while original/staging cleanup is pending.
 `python3 tools/verify/mini.py retrieve <nonce>` retrieves into a local `.partial` directory, verifies
 file hashes, and atomically publishes `test-results/mini/retained-<nonce>/` before acknowledging.
 Retry the same command after transfer/verification failure: it replaces only the unfinished local

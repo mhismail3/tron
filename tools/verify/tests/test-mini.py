@@ -339,9 +339,9 @@ while True:
         receipt = json.loads((retained[0] / 'retention.json').read_text())
         self.assertEqual(receipt['commit'], sha)
         self.assertTrue(receipt['interrupted'])
-        self.assertIn('passed (0.25 seconds)', (retained[0] / 'ios/partial-run/test.log').read_text())
-        self.assertTrue((retained[0] / 'ios/partial-run/process.json').is_file())
-        self.assertTrue((retained[0] / 'ios/partial-run/stages.json').is_file())
+        self.assertIn('passed (0.25 seconds)', (retained[0] / 'evidence/ios/partial-run/test.log').read_text())
+        self.assertTrue((retained[0] / 'evidence/ios/partial-run/process.json').is_file())
+        self.assertTrue((retained[0] / 'evidence/ios/partial-run/stages.json').is_file())
         large = next(entry for entry in receipt['files'] if entry['path'].endswith('large.log'))
         self.assertEqual(large['retained'], 4 * 1024 ** 2)
         self.assertGreater(large['bytes'], large['retained'])
@@ -356,7 +356,7 @@ while True:
         self.assertEqual(retrieved.returncode, 0, retrieved.stdout + retrieved.stderr)
         self.assertFalse(retained[0].exists())
         returned = self.local / 'test-results/mini' / f'retained-{receipt["nonce"]}'
-        self.assertEqual(json.loads((returned / 'receipt.json').read_text())['exit'], 130)
+        self.assertEqual(json.loads((returned / 'evidence/receipt.json').read_text())['exit'], 130)
         self.assertEqual(list((self.mini / 'tron-ci/results').iterdir()), [])
         pending = self.mini / 'tron-ci/retained-native'
         for index in range(8):
@@ -392,7 +392,7 @@ module.retain_native(Path(sys.argv[2]), Path(sys.argv[3]), {'nonce': sys.argv[4]
         recovered = self.lane('recover', nonce)
         self.assertEqual(recovered.returncode, 0, recovered.stdout + recovered.stderr)
         self.assertFalse(originals.exists())
-        self.assertEqual((retained / 'test.log').read_bytes(), content)
+        self.assertEqual((retained / 'evidence/test.log').read_bytes(), content)
         self.assertFalse(retained.with_name(f'.{nonce}.building').exists())
         self.env['MINI_RETAINED_FAULT'] = 'transfer'
         interrupted = self.lane('retrieve', nonce)
@@ -401,18 +401,23 @@ module.retain_native(Path(sys.argv[2]), Path(sys.argv[3]), {'nonce': sys.argv[4]
         self.assertFalse(target.exists())
         self.assertTrue(retained.exists())
         self.env.pop('MINI_RETAINED_FAULT')
-        (retained / 'test.log').write_bytes(b'corrupted in transfer fixture')
+        (retained / 'evidence/test.log').write_bytes(content[:-1])
+        wrong_size = self.lane('retrieve', nonce)
+        self.assertNotEqual(wrong_size.returncode, 0)
+        self.assertIn('byte bound', wrong_size.stdout + wrong_size.stderr)
+        self.assertFalse(target.exists())
+        (retained / 'evidence/test.log').write_bytes(content[:-1] + b'z')
         corrupt = self.lane('retrieve', nonce)
         self.assertNotEqual(corrupt.returncode, 0)
         self.assertIn('digest mismatch', corrupt.stdout + corrupt.stderr)
         self.assertFalse(target.exists(), 'unverified files must not occupy the published destination')
-        (retained / 'test.log').write_bytes(content)
+        (retained / 'evidence/test.log').write_bytes(content)
         for fault in ('ack-before', 'ack-after'):
             self.env['MINI_RETAINED_FAULT'] = fault
             unconfirmed = self.lane('retrieve', nonce)
             self.assertNotEqual(unconfirmed.returncode, 0)
             self.assertTrue(target.is_dir(), unconfirmed.stdout + unconfirmed.stderr)
-            self.assertEqual((target / 'test.log').read_bytes(), content)
+            self.assertEqual((target / 'evidence/test.log').read_bytes(), content)
             self.assertEqual(retained.exists(), fault == 'ack-before')
         self.env.pop('MINI_RETAINED_FAULT')
         retried = self.lane('retrieve', nonce)
@@ -427,7 +432,7 @@ module.retain_native(Path(sys.argv[2]), Path(sys.argv[3]), {'nonce': sys.argv[4]
         recovered = self.lane('recover', nonce)
         self.assertEqual(recovered.returncode, 0, recovered.stdout + recovered.stderr)
         retained = self.mini / 'tron-ci/retained-native' / nonce
-        (retained / 'locked').chmod(0o500)
+        (retained / 'evidence/locked').chmod(0o500)
         try:
             failed_cleanup = self.lane('retrieve', nonce)
             self.assertNotEqual(failed_cleanup.returncode, 0)
@@ -436,11 +441,86 @@ module.retain_native(Path(sys.argv[2]), Path(sys.argv[3]), {'nonce': sys.argv[4]
             acknowledged = retained.with_name(f'.{nonce}.ack-{digest}')
             self.assertTrue(acknowledged.is_dir())
         finally:
-            for directory in retained.parent.glob(f'.{nonce}.ack-*/locked'):
+            for directory in retained.parent.glob(f'.{nonce}.ack-*/evidence/locked'):
                 directory.chmod(0o700)
         cleanup = self.lane('retrieve', nonce)
         self.assertEqual(cleanup.returncode, 0, cleanup.stdout + cleanup.stderr)
         self.assertFalse(acknowledged.exists())
+
+    def test_native_retention_bounds_traversal_entries_bytes_and_case_collection(self) -> None:
+        capture = '''import importlib.util, sys, tracemalloc
+spec = importlib.util.spec_from_file_location('mini', sys.argv[1])
+module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+tracemalloc.start()
+module.retained_main(sys.argv[2], 'recover-retained')
+print('PEAK', tracemalloc.get_traced_memory()[1])
+'''
+        for index, scenario in enumerate(('cases', 'entries', 'manifest', 'data', 'walk', 'caseBytes', 'receipt'), 1):
+            with self.subTest(bound=scenario):
+                nonce = f'{index:032x}'
+                originals = self.mini / 'tron-ci/results' / f'gateway-{nonce}'
+                originals.mkdir(parents=True)
+                if scenario == 'cases':
+                    line = "Test Case '-[T.C testOne]' passed (0.25 seconds).\\n"
+                    (originals / 'test.log').write_text(line * 80000)
+                elif scenario == 'entries':
+                    for item in range(2048):
+                        (originals / f'{item}.log').touch()
+                elif scenario == 'manifest':
+                    directory = originals
+                    for _ in range(3):
+                        directory = directory / ('界' * 70)
+                    directory.mkdir(parents=True)
+                    for item in range(1000):
+                        (directory / (str(item) + '界' * 64 + '.log')).touch()
+                elif scenario == 'data':
+                    for item in range(34):
+                        with (originals / f'{item}.log').open('wb') as stream:
+                            stream.truncate(8 * 1024 ** 2)
+                elif scenario == 'walk':
+                    for item in range(8300):
+                        (originals / str(item)).mkdir()
+                elif scenario == 'caseBytes':
+                    line = "Test Case '-[T.C test" + 'x' * 2000 + "]' passed (0.25 seconds).\\n"
+                    (originals / 'test.log').write_text(line * 1500)
+                else:
+                    (originals / 'receipt.json').write_text(json.dumps({'nonce': nonce, 'host': 'x' * 5000}))
+                    refused = self.lane('recover', nonce)
+                    self.assertNotEqual(refused.returncode, 0, refused.stdout + refused.stderr)
+                    self.assertIn('receipt exceeds 4096 bytes', refused.stdout + refused.stderr)
+                    self.assertTrue((originals / 'receipt.json').is_file())
+                    self.assertFalse((self.mini / 'tron-ci/retained-native' / nonce).exists())
+                    (originals / 'receipt.json').write_text(json.dumps({'nonce': nonce, 'host': 'fixture'}))
+                result = subprocess.run(['python3', '-c', capture, str(self.local / 'tools/verify/mini.py'), nonce],
+                                        env={**self.env, 'HOME': str(self.mini), 'PYTHONDONTWRITEBYTECODE': '1'},
+                                        capture_output=True, text=True, timeout=60)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                peak = int(next(line.split()[1] for line in result.stdout.splitlines() if line.startswith('PEAK ')))
+                if scenario == 'cases':
+                    self.assertLess(peak, 28 * 1024 ** 2, 'case parsing must stop before collecting the whole log')
+                retained = self.mini / 'tron-ci/retained-native' / nonce
+                manifest_path = retained / 'retention.json'
+                partial_path = retained / 'partial-timings.json'
+                manifest = json.loads(manifest_path.read_text())
+                partial = json.loads(partial_path.read_text())
+                self.assertLessEqual(len(manifest['files']), 1024)
+                self.assertLessEqual(manifest_path.stat().st_size, 1024 ** 2)
+                self.assertLessEqual(manifest['bytes'], 128 * 1024 ** 2)
+                self.assertLessEqual(len(partial['cases']), 4096)
+                self.assertLessEqual(partial_path.stat().st_size, 1024 ** 2)
+                self.assertLessEqual(manifest['visitedEntries'], 8192)
+                print(f"retention {scenario}: peak={peak} entries={len(manifest['files'])} "
+                      f"manifest={manifest_path.stat().st_size} cases={len(partial['cases'])} "
+                      f"caseBytes={partial_path.stat().st_size} data={manifest['bytes']} "
+                      f"visited={manifest['visitedEntries']}", flush=True)
+                if scenario != 'receipt':
+                    self.assertTrue(manifest['limitsReached'][scenario], manifest)
+                    self.assertTrue(manifest['truncated'])
+                    self.assertTrue(partial['truncated'])
+                self.assertFalse(originals.exists())
+                retrieved = self.lane('retrieve', nonce)
+                self.assertEqual(retrieved.returncode, 0, retrieved.stdout + retrieved.stderr)
+                self.assertFalse(retained.exists())
 
     def test_whole_verifier_returns_its_report_logs_and_raw_75_without_another_lease(self) -> None:
         self.write('tools/probe.py', RECORDED)
