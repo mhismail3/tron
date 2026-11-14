@@ -11,6 +11,9 @@ import { ProviderUsageOwner } from "../../providers/provider-usage.js";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../../kernel/resources/trust-service.js";
+import { McpAdminService } from "../../admin/mcp-admin-service.js";
+import { piCliBundle } from "../../kernel/pi/packages.js";
+import { settingsInventorySource } from "../../../test-support/settings-dependencies.js";
 import { createSettingsManager } from "../../kernel/settings/settings-sdk-manager.js";
 import { SettingsStoreAdapter } from "../../admin/settings-model.js";
 import { SettingsChangePath } from "../../kernel/settings/settings-change.js";
@@ -298,7 +301,7 @@ describe("settings renderer contract", () => {
       target: { kind: "global" }, key: "model.ref[role=chat]", query: "tron", limit: 200,
     }) as unknown as { options: Array<{ value: { provider: string; id: string } }> };
     expect(chatModels.options.some(option => option.value.provider === "tron" && option.value.id === "subagent")).toBe(true);
-    f.registry.setSettings(f.settingsModel, f.settingsChanges);
+    f.registry.setSettings(f.settingsModel, f.settingsChanges, settingsInventorySource({ agentDir: f.agentDir, trust: f.trust, modules: f.registry.moduleHost, mcp: new McpAdminService(f.agentDir, piCliBundle()) }));
     const queue = new ModelQueueOwner({ tronHome: f.tronHome, runtime: f.modelRuntime, usage: new ProviderUsageOwner(),
       queue: role => f.registry.modelQueueOf(role, "home") });
     f.faux.setResponses(Array.from({ length: 3 }, () => async (_context, _options, _state, model) =>

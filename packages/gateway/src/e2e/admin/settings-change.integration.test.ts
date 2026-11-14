@@ -21,10 +21,11 @@ import { SettingsChangeRecord, type ChangeEntry } from "../../kernel/settings/se
 import { maintainerChange } from "../../../test-support/native-change.js";
 import { OutsideChanges } from "../../admin/settings-outside.js";
 import { McpAdminService } from "../../admin/mcp-admin-service.js";
+import { settingsInventorySource } from "../../../test-support/settings-dependencies.js";
 import { ModelConfigService } from "../../admin/model-config-service.js";
 import { type SettingsStores } from "../../kernel/settings/settings-types.js";
 import { composedBelow, readBinding } from "../../kernel/settings/settings-resolver.js";
-import { type Resolution } from "../../kernel/settings/tool-contract.js";
+import { type Resolution, type SettingsInventory } from "../../kernel/settings/tool-contract.js";
 import { type KeyDeclaration } from "../../kernel/settings/settings-schema.js";
 const { KEYS } = TEST_SETTINGS_SCHEMA;
 import type { PresentedResolution } from "../../admin/settings-presentation.js";
@@ -387,7 +388,8 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
         async inspection => { await registry.abortProjectReload(inspection.projectDir); });
     },
   });
-  registry.setSettings(settingsModel, settingsChanges);
+  const mcpAdmin = new McpAdminService(agentDir, join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js"));
+  registry.setSettings(settingsModel, settingsChanges, settingsInventorySource({ agentDir, trust, modules: registry.moduleHost, mcp: mcpAdmin }));
   const broadcasts: Array<{ topic: string; payload: unknown }> = [];
   const pushes: Array<{ sourceId: string; title: string; message: string }> = [];
   const notifications = { enqueue: async (push: { sourceId: string; title: string; message: string }) => { pushes.push(push); } };
@@ -396,7 +398,7 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
     modelRuntime, trust, settingsModel, settingsChanges, sessions: registry, receipts: new CommandReceiptStore(tronHome), notifications,
     broadcast: (topic: string, payload: unknown) => broadcasts.push({ topic, payload }),
     globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
-    mcpAdmin: new McpAdminService(agentDir, join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js")),
+    mcpAdmin,
     modelConfig: new ModelConfigService(agentDir),
   } as unknown as GatewayServiceDependencies);
   const change = (target: Record<string, unknown>, changes: unknown[], extra: Record<string, unknown> = {}, c = client()) =>
@@ -476,6 +478,31 @@ describe("settings.change", () => {
     expect(JSON.stringify(preview)).not.toContain("fixture-secret-token");
     expect(await f.history()).toEqual([]);
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
+  });
+
+  caseIt("an agent reads its chat's inventory of hooks, packages and MCP status with credentials masked", async owner => {
+    const f = await fixture(owner);
+    const cwd = join(f.root, "inventory-chat");
+    await mkdir(cwd);
+    const slot = await f.registry.create(cwd);
+    const model = f.faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), packages: ["npm:inventory-package"] }));
+    await f.service.invoke(client(), "mcp.add", { commandId: commandId(), scope: "global", server: "inventory-http", transport: "http", url: "http://user:inventory-secret@127.0.0.1:1/mcp?token=inventory-query-secret" });
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("settings", { action: "inventory" }, { id: "inventory-tool" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage("Done"),
+    ]);
+    await slot.prompt("Read the settings inventory");
+    await waitFor(() => !slot.isBusy && !slot.hasActiveAgentRun || undefined, "settings inventory tool turn settled");
+    const result = slot.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === "inventory-tool");
+    if (result?.type !== "message" || result.message.role !== "toolResult") throw new Error("No canonical settings tool result");
+    expect(result.message.isError).not.toBe(true);
+    const inventory = result.message.details as SettingsInventory;
+    expect(inventory.hooks.extensions.find(extension => extension.name === "builtin:mcp")?.handlers).toContainEqual({ event: "session_start", count: 1 });
+    expect(inventory.packages).toContainEqual(expect.objectContaining({ source: "npm:inventory-package", scope: "user" }));
+    expect(inventory.mcp.servers.map(server => server.name)).toContain("inventory-http");
+    expect(JSON.stringify(inventory)).not.toMatch(/inventory-secret|inventory-query-secret/);
   });
 
   caseIt("an agent pages only its own settings history, never another chat's or the maintainer's rows", async owner => {

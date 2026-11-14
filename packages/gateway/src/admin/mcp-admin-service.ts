@@ -12,6 +12,8 @@ const CLI_TIMEOUT_MS = 30_000;
 const EXPOSURES = ["codemode", "codemode-deferred", "deferred", "direct", "hidden"] as const;
 export type McpExposure = typeof EXPOSURES[number];
 export type McpScope = { scope: "global" } | { scope: "project"; cwd: string; trusted: true };
+export interface McpServerStatus { name: string; state: string; scope: "global" | "project"; enabled: boolean; exposure: string; transport: string; tools: string[]; error?: string }
+export interface McpListing { servers: McpServerStatus[]; errors: number }
 
 export interface McpCredentialOwner {
   store(scope: McpScope, server: string, token: string): Promise<string>;
@@ -146,7 +148,7 @@ export class McpAdminService {
   private cliEnvironment(): NodeJS.ProcessEnv {
     return { ...process.env, PI_CODING_AGENT_DIR: this.agentDir };
   }
-  async list(scope: McpScope): Promise<unknown> {
+  async list(scope: McpScope): Promise<McpListing> {
     const result = await runProcess(process.execPath, this.cliArgs(scope, ["list", "--json"]), { cwd: scope.scope === "project" ? scope.cwd : this.agentDir, timeoutMs: this.cliTimeoutMs, env: this.cliEnvironment() });
     if (result.code !== 0 && result.code !== 1) {
       this.log("warning", "Bundled MCP status listing failed", "mcp.startup.problem", { reason: "cli-failure", scope: scope.scope });
@@ -167,7 +169,7 @@ export class McpAdminService {
     }
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new GatewayError("conflict", "Bundled MCP CLI returned invalid JSON");
     const raw = parsed as { servers?: unknown; errors?: unknown };
-    const servers = Array.isArray(raw.servers) ? raw.servers.slice(0, 128).flatMap((item) => {
+    const servers = Array.isArray(raw.servers) ? raw.servers.slice(0, 128).flatMap((item): McpServerStatus[] => {
       if (!item || typeof item !== "object" || Array.isArray(item)) return [];
       const row = item as Record<string, unknown>;
       if (typeof row.name !== "string" || !/^[A-Za-z0-9._-]{1,128}$/.test(row.name)) return [];

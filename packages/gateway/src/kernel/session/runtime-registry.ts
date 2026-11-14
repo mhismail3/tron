@@ -433,7 +433,7 @@ export class RuntimeRegistry implements SessionOperations {
   private readonly blobs: BlobStore;
   private readonly exports: BlobStore;
   private readonly workspace: ResourceRoot;
-  private settingsOwners: Readonly<{ model: import("../settings/settings-model.js").SettingsModel; changes: import("../settings/settings-change.js").SettingsChangePath }> | undefined;
+  private settingsOwners: Readonly<{ model: import("../settings/settings-model.js").SettingsModel; changes: import("../settings/settings-change.js").SettingsChangePath; inventory: import("../settings/tool-contract.js").SettingsInventorySource }> | undefined;
   private readonly homeMaterializations = new Map<string, Promise<RuntimeSlot>>();
   private searchInvalidator: ((sessionID: string, nextSessionID?: string) => void) | undefined;
   private readonly markers: RunMarkerStore;
@@ -597,9 +597,9 @@ export class RuntimeRegistry implements SessionOperations {
     this.searchInvalidator = invalidator;
   }
 
-  setSettings(model: import("../settings/settings-model.js").SettingsModel, changes: import("../settings/settings-change.js").SettingsChangePath): void {
+  setSettings(model: import("../settings/settings-model.js").SettingsModel, changes: import("../settings/settings-change.js").SettingsChangePath, inventory: import("../settings/tool-contract.js").SettingsInventorySource): void {
     if (this.settingsOwners && this.settingsOwners.changes !== changes) throw new Error("Settings are already installed");
-    this.settingsOwners = { model, changes };
+    this.settingsOwners = { model, changes, inventory };
   }
 
   get administrativeWorkRegistry(): GatewayWorkRegistry { return this.workRegistry; }

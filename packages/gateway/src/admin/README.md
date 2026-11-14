@@ -76,8 +76,10 @@ RPCs (shapes in the [Gateway README](../../README.md)): `settings.resolve`,
 `settings.applyAgain`, `settings.history` (the maintainer's full view), plus `home.profileChange` for learned-profile notes.
 Broadcasts: `settings.changed`, `trust.changed`, `mcp.changed`,
 `models.customChanged`. Agents reach the same path through the `settings` tool
-(a thin client of resolve, change, history and undo, each carrying the calling chat's actor; history and undo are
-scoped by that actor as the kernel contract defines). Home's tool may target a delegated
+(a thin client of resolve, change, history, undo and inventory, each carrying the calling chat's actor; history and undo are
+scoped by that actor as the kernel contract defines). `inventory` is read-only: it projects the hook registrations (by
+extension and by event), configured packages, Tron modules and MCP server status for the chat's directory through
+`HookResources`, `PackageService`, `McpAdminService` and the module host, with URL userinfo and query masked. Home's tool may target a delegated
 worker by `taskId`.
 
 Ports in: `gateway-main.ts` wires kernel `SettingsModel`/`SettingsChangePath`,

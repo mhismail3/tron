@@ -13,7 +13,7 @@ const CHANGE = Type.Object({
 }, { additionalProperties: false });
 
 const PARAMETERS = Type.Object({
-  action: StringEnum(["resolve", "change", "history", "undo"] as const, { description: "resolve: read current values and scopes. history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card." }),
+  action: StringEnum(["resolve", "change", "history", "undo", "inventory"] as const, { description: "resolve: read current values and scopes. inventory: read-only hooks by event and extension, packages, Tron modules and MCP server status for this chat's directory (credentials masked). history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card." }),
   keys: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 200 }), { maxItems: 200, description: "resolve: the key ids to read; omit for every key." })),
   taskId: Type.Optional(Type.String({ minLength: 1, maxLength: 160,
     description: "Tron Home only: the delegated task (from task list) whose worker session to read or change instead of this chat." })),
@@ -29,17 +29,19 @@ const PARAMETERS = Type.Object({
 type SettingsCall =
   | { action: "resolve"; keys?: string[]; taskId?: string }
   | { action: "history"; key?: string; cursor?: string; limit?: number }
+  | { action: "inventory" }
   | { action: "undo"; changeId: string; reason: string }
   | { action: "change"; changes: ChangeRequest[]; reason: string; dryRun?: boolean; taskId?: string };
 
-function admitSettingsCall(input: { action: "resolve" | "change" | "history" | "undo"; keys?: string[]; taskId?: string; changes?: unknown[]; reason?: string; dryRun?: boolean; key?: string; cursor?: string; limit?: number; changeId?: string }): SettingsCall {
+function admitSettingsCall(input: { action: "resolve" | "change" | "history" | "undo" | "inventory"; keys?: string[]; taskId?: string; changes?: unknown[]; reason?: string; dryRun?: boolean; key?: string; cursor?: string; limit?: number; changeId?: string }): SettingsCall {
   const fields = {
     resolve: ["keys", "taskId"], change: ["changes", "reason", "dryRun", "taskId"],
-    history: ["key", "cursor", "limit"], undo: ["changeId", "reason"],
+    history: ["key", "cursor", "limit"], undo: ["changeId", "reason"], inventory: [] as string[],
   }[input.action];
   for (const [field, value] of Object.entries(input)) {
     if (field !== "action" && value !== undefined && !fields.includes(field)) throw new Error(`settings ${input.action}: "${field}" is not used by this action`);
   }
+  if (input.action === "inventory") return { action: "inventory" };
   if (input.action === "history") return { action: "history", ...(input.key ? { key: input.key } : {}), ...(input.cursor ? { cursor: input.cursor } : {}), ...(input.limit !== undefined ? { limit: input.limit } : {}) };
   if (input.action === "undo") {
     if (!input.changeId?.trim()) throw new Error("settings undo: changeId is required");
@@ -85,6 +87,10 @@ export function createTronSettingsExtension(access: () => SettingsToolAccess | u
             ...(key.applied ? {} : { applied: false, reason: key.reason }),
           }));
           return { content: [{ type: "text", text: JSON.stringify({ ...(resolution.worker ? { worker: resolution.worker } : {}), layers: resolution.layers, keys: summary }) }], details: resolution };
+        }
+        if (input.action === "inventory") {
+          const inventory = await owner.inventory();
+          return { content: [{ type: "text" as const, text: JSON.stringify(inventory) }], details: inventory };
         }
         if (input.action === "history") {
           const { action: _action, ...query } = input;
