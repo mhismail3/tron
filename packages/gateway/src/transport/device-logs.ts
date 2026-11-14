@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmodSync, closeSync, lstatSync, mkdirSync, openSync, readSync, statSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
@@ -84,7 +84,7 @@ function parseGap(gapFrom: unknown, reason: unknown): DeviceLogGap {
   return { fromSequence: gapFrom as number, reason: DEVICE_LOG_GAP_REASON };
 }
 
-function envelopeCursor(text: string): DeviceLogCursor | undefined {
+function parseEnvelope(text: string): Envelope | undefined {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -94,7 +94,17 @@ function envelopeCursor(text: string): DeviceLogCursor | undefined {
   if (parsed === null || typeof parsed !== "object") return undefined;
   const envelope = parsed as Partial<Envelope>;
   if (typeof envelope.bootId !== "string" || !Number.isSafeInteger(envelope.sequence)) return undefined;
-  return { bootId: envelope.bootId, sequence: envelope.sequence as number };
+  return envelope as Envelope;
+}
+
+function sameGap(left: DeviceLogGap | undefined, right: DeviceLogGap | undefined): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  return left.fromSequence === right.fromSequence && left.reason === right.reason;
+}
+
+function envelopeCursor(text: string): DeviceLogCursor | undefined {
+  const envelope = parseEnvelope(text);
+  return envelope === undefined ? undefined : { bootId: envelope.bootId, sequence: envelope.sequence };
 }
 
 function assertPrivateFile(path: string): void {
@@ -133,9 +143,18 @@ export class DeviceLogStore {
     if (!sameBoot && held.bootId !== null && admission < owner) {
       throw new GatewayError("conflict", "Device log batch came from an older connection; the cursor is unchanged", false, held);
     }
+    if (sameBoot && append.firstSequence === 1) {
+      const first = firstEnvelopeOf(stream.log, append.bootId);
+      if (first === undefined) {
+        throw new GatewayError("conflict", "Device log gap metadata for this epoch is no longer retained; the batch is refused", false, held);
+      }
+      if (!sameGap(first.gap, append.gap)) {
+        throw new GatewayError("conflict", "Device log replay does not match the durable gap of its epoch", false, held);
+      }
+    }
     if (append.gap) {
       if (sameBoot) {
-        if (append.firstSequence !== 1 || held.sequence < 1) throw invalid("A gap belongs to the first batch of a new epoch");
+        if (append.firstSequence !== 1) throw invalid("A gap belongs to the first batch of a new epoch");
       } else if (held.bootId === null || append.gap.fromSequence !== held.sequence) {
         throw new GatewayError("conflict", "Device log gap does not match the held cursor", false, held);
       }
@@ -206,6 +225,22 @@ export class DeviceLogStore {
     }
     return { cursor: { bootId: null, sequence: 0 }, torn };
   }
+}
+
+function firstEnvelopeOf(log: RotatingJsonl, bootId: string): { gap?: DeviceLogGap } | undefined {
+  for (let index = 0; index < SEGMENT_COUNT; index += 1) {
+    const path = log.segmentPath(index);
+    if (!existsSync(path)) continue;
+    assertPrivateFile(path);
+    const lines = readFileSync(path, "utf8").split("\n");
+    for (const entry of lines.reverse()) {
+      const envelope = parseEnvelope(entry);
+      if (envelope === undefined) continue;
+      if (envelope.bootId !== bootId) return undefined;
+      if (envelope.sequence === 1) return envelope.gap === undefined ? {} : { gap: envelope.gap };
+    }
+  }
+  return undefined;
 }
 
 function readTailText(path: string, size: number): string {
