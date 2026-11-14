@@ -383,6 +383,51 @@ describe("Home task bounded backlogs", () => {
     evidence.push({ case: "bounded-backlog", batches });
   }, 30_000);
 
+  it("reads bounded worker transcripts while running and after a cold settled resume without opening a runtime", async () => {
+    const f = await fixture();
+    const owner = homeOwnerOf(f.registry);
+    let entered = false;
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("bash", { command: "printf worker-transcript-proof" })], { stopReason: "toolUse" }),
+      async () => { entered = true; await held; return fauxAssistantMessage([reportCall("transcript-first", "First transcript report 🦊")], { stopReason: "toolUse" }); },
+    ]);
+    const run = await dispatch(f, "transcript-worker");
+    const read = async (taskId: string) => {
+      let text = "";
+      let offset = 0;
+      for (let count = 0; count < 1000; count++) {
+        const page = await owner.taskTool(f.home.sessionId, { action: "transcript", taskId, offset, limit: 1024 }) as { text: string; nextOffset: number | null; sessionId: string };
+        expect(page.sessionId).toBe(run.sessionId);
+        expect(Buffer.byteLength(page.text)).toBeLessThanOrEqual(1024);
+        text += page.text;
+        if (page.nextOffset === null) return text;
+        expect(page.nextOffset).toBeGreaterThan(offset);
+        offset = page.nextOffset;
+      }
+      throw new Error("Transcript did not finish within its page bound");
+    };
+    try {
+      await waitFor(() => entered, "worker waits after its real bash result");
+      const text = await read(run.taskId);
+      expect(text).toContain("[call bash");
+      expect(text).toContain("tool bash: worker-transcript-proof");
+      await expect(owner.taskTool(run.sessionId, { action: "transcript", taskId: run.taskId })).rejects.toThrow(/unavailable/);
+      await expect(owner.taskTool(f.home.sessionId, { action: "transcript", taskId: run.taskId, limit: 1_000_000 })).rejects.toThrow(/page/);
+    } finally { release(); await run.completion; }
+    f.faux.setResponses([fauxAssistantMessage([reportCall("transcript-resumed", "Resumed transcript report")], { stopReason: "toolUse" })]);
+    const resumed = await owner.taskTool(f.home.sessionId, { action: "resume", taskId: run.taskId }) as { taskId: string };
+    await waitFor(async () => (await owner.taskResult(resumed.taskId)).lifecycle === "terminal", "transcript resume settles");
+    await evictWorker(f, run.sessionId);
+    const acquire = vi.spyOn(f.registry, "acquire");
+    const text = await read(run.taskId);
+    expect(text).toContain("First transcript report 🦊");
+    expect(text).toContain("Resumed transcript report");
+    expect(text).toContain("tool bash: worker-transcript-proof");
+    expect(acquire).not.toHaveBeenCalled();
+  });
+
   it("delivers a never-fit report by reference before its successor and reads immutable bounded pages", async () => {
     const f = await fixture(undefined, false, 18_000); const model = f.faux.getModel();
     const owner = homeOwnerOf(f.registry);
