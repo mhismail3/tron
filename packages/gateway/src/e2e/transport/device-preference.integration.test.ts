@@ -83,14 +83,14 @@ async function fixture() {
   });
   const trust = new TrustService(agentDir);
   const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome: root, trust,
-    modelRuntime: await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }), devicePreferences: bridge }));
+    modelRuntime: await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }) }));
   const settingsChanges = new SettingsChangePath(settingsModel, new SettingsChangeRecord(root), {
     setTrust: async () => { throw new Error("trust is not exercised here"); },
   });
   const service = new GatewayService({ display: displayOwnerOf(registry),
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: root, agentDir },
     devices, sessions: registry, receipts: new CommandReceiptStore(root), uploads: {} as never, trust,
-    settingsModel, settingsChanges, devicePreferences: bridge, modelRuntime: settingsModel.owner.modelRuntime,
+    settingsModel, settingsChanges, modelRuntime: settingsModel.owner.modelRuntime,
     broadcast: () => {}, globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
   } as never);
   server = new GatewayServer({ display: displayOwnerOf(registry), host: "127.0.0.1", port: 0, maxFrameBytes: 1_048_576,
