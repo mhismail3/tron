@@ -89,8 +89,8 @@ On the mini, `mini.py` refuses a dirty tree, or a HEAD other than the commit ver
 The remote removes only its own ref, with its expected SHA. A session that returns no exit also attempts
 that cleanup from the caller; an unreachable cleanup is reported as unresolved, not silently successful. One job at a time
 (`~/tron-ci/jobs/gateway.lock`) checks out exactly that commit in `~/tron-ci/jobs/gateway`, cleaned except for the
-Gateway `node_modules`, pinned `.ci-tools` and generated iOS project (the native toolchain and build-identity
-owners validate these before reuse), refuses a Node binary or npm off the commit's `config/ci-toolchain.env`, reruns `npm ci`
+Gateway `node_modules` and generated iOS project (the native build-identity owner validates products
+before reuse), refuses a Node binary or npm off the commit's `config/ci-toolchain.env`, reruns `npm ci`
 only when `package.json`, `package-lock.json`, `third_party/` or the Node binary changed, and runs that commit's
 `gateway.py`, the Gateway's `node --test` files on the pinned Node (`mini.py node`), or the Python group's per-file command (stderr merged, the pinned Node first on PATH), each in its own process group killed before the lock is released, with a minimal PATH and only the mini user's HOME, USER, LOGNAME, SHELL and LANG. Output streams
 live; the Vitest output files come back with paths rewritten to this checkout, and the lane's exit code is the step's. With `--mini`, an unconfigured or
@@ -113,8 +113,14 @@ iOS work, the existing group routing remains in effect.
 that commit's `scripts/tron-ios-test` there. A fresh source needs `checkpoint` (build and selected tests)
 or `build` before `run`; `run` still refuses missing or stale products. The underlying iOS helpers and
 explicit `--ios-host local` are host-local execution routes, not a fallback for a busy or unreachable mini.
-Prepare pinned XcodeGen on the mini with the owning `scripts/install-ci-tools.sh xcodegen` helper;
-no live Gateway or app install is part of test setup.
+iOS and whole-verifier jobs use the existing `~/tron-ci/.ci-tools` dependency cache, outside the cleaned
+checkout. Prepare pinned XcodeGen there through the normal lease with its owning helper:
+
+```bash
+python3 tools/verify/mini.py python 'TRON_CI_TOOLS_DIR="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.ci-tools" scripts/install-ci-tools.sh xcodegen'
+```
+
+This is a pinned project test-tool dependency, not a live Gateway or app install.
 
 Output streams live. Each iOS/whole-verifier invocation returns a SHA-256-checked archive into a unique
 `test-results/mini/<sha-prefix>-<nonce>/`, prints `mini: artifacts: <directory>`, and keeps native logs,

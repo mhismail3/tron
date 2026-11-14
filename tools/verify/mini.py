@@ -398,7 +398,7 @@ def remote_main(job: dict) -> int:
             if (checkout / '.git').exists():
                 steps = [('git', '-C', str(checkout), 'checkout', '--quiet', '--detach', '--force', sha),
                          ('git', '-C', str(checkout), 'clean', '-ffdxq', '-e', '/packages/gateway/node_modules',
-                          '-e', '/packages/ios-app/TronMobile.xcodeproj', '-e', '/.ci-tools')]
+                          '-e', '/packages/ios-app/TronMobile.xcodeproj')]
             else:
                 steps = [('git', '-C', str(repository), 'worktree', 'prune'),
                          ('git', '-C', str(repository), 'worktree', 'add', '--quiet', '--detach', str(checkout), sha)]
@@ -456,6 +456,7 @@ def remote_main(job: dict) -> int:
                     command = ([str(checkout / 'scripts/tron-ios-test'), *job['args']] if job['lane'] == 'ios'
                                else ['/usr/bin/python3', str(checkout / 'tools/verify/verify.py'), *job['args']])
                     env = {**clean, 'PATH': f'{node.parent}:{clean["PATH"]}',
+                           'TRON_CI_TOOLS_DIR': str(base / '.ci-tools'),
                            'TRON_IOS_TEST_RESULTS_DIR': str(results / 'ios'),
                            'TRON_PROFILE_RESULTS_DIR': str(results / 'profiles'),
                            'TRON_IOS_E2E_STATE_DIR': str(checkout / '.scratch/mini-e2e')}
