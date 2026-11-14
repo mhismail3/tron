@@ -1123,14 +1123,23 @@ class IosLaneTests(VerifyCase):
         r = self.repo
         calls = self.ios_fixture()
         r.write("tools/proof/tests/test-core.py", PASSING)
+        manifest = json.loads((r.path / "tooling.module.json").read_text())
+        manifest["verify"] = ["scripts/tron test tooling tools/proof/tests/test-core.py"]
+        r.write("tooling.module.json", json.dumps(manifest))
         r.write("tools/verify/mini.py", "from pathlib import Path\nif __name__ == '__main__':\n    Path('test-results').mkdir(exist_ok=True)\n    Path('test-results/remote-called').touch()\n")
         r.commit("host-bound and recording handoff boundaries")
+        preview = r.verify("--all", "--plan", "--ios-host", "local")
+        self.assertEqual(preview.returncode, 0, preview.stdout + preview.stderr)
+        plan = json.loads(preview.stdout[preview.stdout.index("{"):])
+        self.assertEqual(plan["groups"]["python-here"], ["tools/proof/tests/test-core.py"])
         for host in ("mini", "local"):
             if host == "local":
                 r.env["TRON_VERIFY_EXECUTION_HOST"] = "mini"
             for args, message in ((("--all",), "host-bound"),
                                   (("--update-locks", "ios-app/ui-tests"), "golden recording")):
                 with self.subTest(host=host, mode=args):
+                    calls.unlink(missing_ok=True)
+                    (r.path / "test-results/remote-called").unlink(missing_ok=True)
                     result = r.verify(*args, "--ios-host", host, "--gateway-host", "mini")
                     self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                     self.assertIn(message, result.stderr)
