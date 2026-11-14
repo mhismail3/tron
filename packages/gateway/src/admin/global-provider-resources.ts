@@ -1,6 +1,8 @@
 import { homedir } from "node:os";
 import { DefaultPackageManager, DefaultResourceLoader, SettingsManager, type ModelRuntime } from "../kernel/pi/coding-agent.js";
 import { AsyncMutex } from "../util/async-mutex.js";
+import { GatewayError } from "../errors.js";
+import { modelsErrorSummary } from "./model-config-service.js";
 import type { GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
 import type { AuthBroker } from "./auth-broker.js";
 
@@ -70,6 +72,8 @@ export class GlobalProviderResources {
       try {
         const result = await this.modelRuntime.refresh({ allowNetwork: false });
         for (const [providerId, error] of result.errors) this.log("warning", `Global provider ${providerId} refresh failed: ${error.message}`);
+        const invalid = this.invalidModels();
+        if (invalid) throw new GatewayError("conflict", invalid);
       } finally {
         this.broadcast();
       }
@@ -170,9 +174,16 @@ export class GlobalProviderResources {
       for (const failure of failures) this.log("error", failure);
       for (const diagnostic of loaded.errors) this.log("error", `Global extension ${diagnostic.path} failed to load: ${diagnostic.error}`);
       for (const [providerId, error] of result.errors) this.log("warning", `Global provider ${providerId} refresh failed: ${error.message}`);
+      const invalid = this.invalidModels();
+      if (invalid) this.log("error", invalid);
     } finally {
       this.broadcast();
     }
+  }
+
+  private invalidModels(): string | undefined {
+    const error = this.modelRuntime.getError();
+    return error === undefined ? undefined : `Custom model configuration is invalid: ${modelsErrorSummary(error)}`;
   }
 
   private replayContributions(

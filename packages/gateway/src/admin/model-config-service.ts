@@ -1,7 +1,11 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GatewayError } from "../errors.js";
 import { readJson, updateJsonLocked } from "../foundation/json.js";
 import { modelProviderOnDisk, type ModelProviderValue } from "../kernel/settings/model-provider-value.js";
+import { ModelRuntime } from "../kernel/pi/coding-agent.js";
+import { redactCredentials } from "../util/credential-redaction.js";
 
 const MODEL_CONFIG_MAX_BYTES = 768 * 1_024;
 const MODEL_CONFIG_MAX_DEPTH = 64;
@@ -60,12 +64,36 @@ function redact(value: unknown, key = ""): unknown {
   return value;
 }
 
+export function modelsErrorSummary(error: string): string {
+  const bare = error.split("\n\nFile:")[0]!;
+  if (bare.startsWith("Failed to parse")) return "models.json is not valid JSON; its text is not echoed";
+  if (bare.startsWith("Failed to load")) return "models.json could not be read";
+  return redactCredentials(bare);
+}
+
 function providersOf(document: Record<string, unknown>): Record<string, unknown> {
   const providers = document.providers ?? {};
   if (typeof providers !== "object" || providers === null || Array.isArray(providers)) {
     throw new GatewayError("conflict", "Custom model configuration has no valid providers object");
   }
   return providers as Record<string, unknown>;
+}
+
+function withProvider(current: Record<string, unknown>, id: string, value: ModelProviderValue | undefined): Record<string, unknown> {
+  assertBoundedDocument(current, "conflict");
+  const providers = { ...providersOf(current) };
+  const existing = providers[id];
+  if (existing !== undefined) modelProviderOnDisk(id, existing);
+  if (value === undefined) {
+    if (existing === undefined) return current;
+    delete providers[id];
+  } else {
+    if (existing === undefined && Object.keys(providers).length >= MODEL_CONFIG_MAX_PROVIDERS) {
+      throw new GatewayError("invalid_request", `At most ${MODEL_CONFIG_MAX_PROVIDERS} custom providers are allowed`);
+    }
+    providers[id] = value;
+  }
+  return { ...current, providers };
 }
 
 export class ModelConfigService {
@@ -87,27 +115,34 @@ export class ModelConfigService {
   }
 
   async setProvider(id: string, value: ModelProviderValue | undefined): Promise<void> {
+    const current = await this.read();
+    const next = withProvider(current, id, value);
+    await this.validateDocument(next);
+    const checked = JSON.stringify(current);
     try {
-      await updateJsonLocked<Record<string, unknown>>(this.path, { providers: {} }, (current) => {
-        assertBoundedDocument(current, "conflict");
-        const providers = { ...providersOf(current) };
-        const existing = providers[id];
-        if (existing !== undefined) modelProviderOnDisk(id, existing);
-        if (value === undefined) {
-          if (existing === undefined) return current;
-          delete providers[id];
-        } else {
-          if (existing === undefined && Object.keys(providers).length >= MODEL_CONFIG_MAX_PROVIDERS) {
-            throw new GatewayError("invalid_request", `At most ${MODEL_CONFIG_MAX_PROVIDERS} custom providers are allowed`);
-          }
-          providers[id] = value;
+      await updateJsonLocked<Record<string, unknown>>(this.path, { providers: {} }, (latest) => {
+        assertBoundedDocument(latest, "conflict");
+        if (JSON.stringify(latest) !== checked) {
+          throw new GatewayError("conflict", "Custom model configuration changed while it was checked; refresh and try again");
         }
-        const next = { ...current, providers };
         assertBoundedDocument(next, "conflict", true);
         return next;
       }, MODEL_CONFIG_MAX_BYTES);
     } catch (error) {
       boundedReadFailure(error);
+    }
+  }
+
+  private async validateDocument(document: Record<string, unknown>): Promise<void> {
+    const root = await mkdtemp(join(tmpdir(), "tron-model-validation-"));
+    try {
+      const modelsPath = join(root, "models.json");
+      await writeFile(modelsPath, canonicalDocument(document, "invalid_request"), { mode: 0o600 });
+      const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath, refreshOnCreate: false });
+      const error = runtime.getError();
+      if (error) throw new GatewayError("invalid_request", `Custom model configuration is invalid: ${modelsErrorSummary(error)}`);
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   }
 

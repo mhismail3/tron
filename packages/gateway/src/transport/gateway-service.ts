@@ -6,7 +6,7 @@ import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
 import { contextWindowLimits } from "../providers/context-window-policy.js";
 import { ModelReleaseDateCatalog } from "../providers/model-release-date-catalog.js";
 import type { GatewayConfig } from "../config.js";
-import { GatewayError, isUncertainOutcome } from "../errors.js";
+import { asUncertainOutcome, GatewayError, isUncertainOutcome } from "../errors.js";
 import { runtimeIdentity } from "./runtime-identity.js";
 import { HOME_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY, HOME_MEMORY_VIEW_CAPABILITY, HOME_PROFILE_LIST_CAPABILITY, HOME_PROFILE_EDIT_CAPABILITY } from "../protocol/capabilities.js";
 import type { CommandDetail, GatewayRestartResponse, HomeTaskStatusResult, JsonValue, ModelPage, ModelRef, SessionCommands, SessionListPage, TronModuleList } from "../protocol/types.js";
@@ -2132,7 +2132,9 @@ export class GatewayService {
       }
     }
     if (changes.some(change => change.key === "accounts.models.provider")) {
-      await this.dependencies.globalProviderResources.refreshModels();
+      await this.dependencies.globalProviderResources.refreshModels().catch(error => {
+        throw asUncertainOutcome(error, "Settings applied but the custom model catalog did not refresh");
+      });
     }
     this.dependencies.broadcast("settings.changed", safeJson({
       changeIds: changes.map(change => change.changeId), keys: [...new Set(changes.map(change => change.key))],
