@@ -189,6 +189,11 @@ unchanged. The device is derived from the authenticated peer. Four 5 MiB segment
 per device. The phone's `bootId` is an opaque epoch: the SHA-256 of its oldest retained
 app-log line. Rotation that drops that line starts a new epoch and the phone declares the
 gap; the cursor is the only progress state, and the phone keeps none. Protocol not yet deployed.
+A replay of an epoch's first batch (same `bootId`, `firstSequence` 1) must carry exactly the gap
+stored on that epoch's first envelope, or none; any difference is refused as `conflict` and writes
+nothing. The stored gap is read back from the newest retained segments (bounded by the four
+5 MiB segments). If the epoch's first envelope has rotated out, the replay is refused as
+`conflict`: the gap cannot be verified, so nothing is guessed.
 RPC records keep
 `method`, `requestID`, `outcome`, `code`, `durationMs`; catalog stages add a
 process-local `workID`; reasons are fixed codes, never exception text or parameters.
