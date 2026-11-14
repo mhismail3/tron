@@ -520,10 +520,8 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         guard !closed else { throw CancellationError() }
         if hello {
             hello = false
-            let capabilities = ProcessInfo.processInfo.arguments.contains("-agent-behavior-regression")
-                ? #"["sessions.v1","projects.lifecycle.v1"]"#
-                : ProcessInfo.processInfo.arguments.contains("-settings-sheet-theme-review")
-                    ? #"["sessions.v1","gateway-update.v1","restart-supervised.v1","projects.lifecycle.v1"]"# : #"["sessions.v1"]"#
+            let capabilities = ProcessInfo.processInfo.arguments.contains("-settings-sheet-theme-review")
+                ? #"["sessions.v1","gateway-update.v1","restart-supervised.v1"]"# : #"["sessions.v1"]"#
             return Data("""
                 {"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":8,"minProtocolVersion":8,"machineId":"fixture-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":\(capabilities)}
                 """.utf8)

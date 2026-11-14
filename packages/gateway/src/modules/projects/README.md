@@ -58,48 +58,26 @@ path; a settled native interaction cannot apply again.
   The `projects` tool waits in the asking chat for that card's decision; there is
   no `wait` option or separate pending-request API.
 
-## Native RPC
+## Surface
 
-Capability `projects.lifecycle.v1` is advertised in `system.info`. Module-host
-routing uses the same owner as the agent tool, not a tool invocation from the UI.
+The module exposes one agent tool and no RPC; the `projects.lifecycle.v1` capability and
+its `projects.list`, `projects.inspect` and `projects.change` adapters were removed (5.8).
+The app has no project screen.
 
-Retained after the app's removal (5.8). No first-party client calls these RPCs, so
-this is an open bridge, not a completed retirement:
-
-- The agent `projects` tool only creates. Trust and untrust exist solely as
-  `projects.change` actions.
-- `ProjectLifecycle.inspect` alone refuses linked worktrees and busy occupancy and
-  binds a state digest. The settings `permissions.projectTrust` write goes through
-  `TrustService.setAndApply` with runtime retirement and has none of those refusals.
-- Removing `projects.change` would drop those refusals from every path. Decision
-  needed: move them into the settings trust write (a behavior change for Home
-  trust during busy work), or keep this RPC as the lifecycle trust authority.
-- `projects.list` and `projects.inspect` are read-only eligibility views with no
-  surviving owner. Removing them needs the e2e oracle in
-  `src/e2e/modules/projects/project-lifecycle.e2e.test.ts` (27 RPC calls) ported first.
-
-- `projects.list({limit?, after?})` returns `{workspace, projects, nextCursor}`.
-  Limit is 1–50 (default 25); cursor is the last returned name. It sorts visible
-  direct Workspace folders/symlinks; directories over 1,000 entries refuse. Hidden
-  folders are not listed. Folder paths/names and cursors retain exact whitespace;
-  unsupported names are never trimmed into another project. Reads never adopt
-  folders or grant trust.
-- `projects.inspect({cwd})` reads one absolute folder path, including saved folders
-  outside Workspace. Each row is `{name, path, trust, eligibility}`; trust is the
-  existing TrustInspection or null for unsafe/uninspectable paths. Eligibility has
-  `trust/untrust`, each `{allowed:true}` or `{allowed:false, code, reason}`.
-  Unsupported layouts/names/outside folders are read-only. These are disposable
-  snapshots; submission and decision always revalidate.
-- `projects.change({commandId, action, name, reason, confirmation?})` without
-  `confirmation` plans the action and returns `{status:"review", review, intent}`
-  with no effects. Actions are create/trust/untrust; field bounds match the tool,
-  with commandId 8–160 characters. Native UI identity is transport-derived, never
-  caller-supplied; local clients cannot confirm. The shared card's Approve resends
-  the request with `confirmation: {digest, intent}` under a new command ID; the owner
-  reconstructs the validated typed intent independently of JSON object-key order,
-  then revalidates canonical filesystem, Git, occupancy and trust state against the
-  digest before effects. Create applies only after that tap and creates a trusted repository.
-  The agent tool reaches the same review through the native `change` interaction.
+- `projects({name, reason})` creates a direct Workspace child: an untrusted folder with a
+  Git repository on `main`, trusted after the exact native card is approved. The target
+  must be absent; traversal, existing paths and symlinks refuse. Creation reviews are
+  bound to the Workspace identity and digest; approval revalidates the digest (`Project
+  changed since review`) before any effect.
+- Creation's private trust step (`inspect` then `setTrust`) refuses linked worktrees and
+  busy occupancy and binds a state digest for the new project.
+- Existing-project trust and untrust are not lifecycle actions. Home changes
+  `permissions.projectTrust` with a `project` qualifier through the `settings` tool, which
+  writes through `TrustService.setAndApply` with runtime reload and abort. That path has
+  no linked-worktree or busy-occupancy refusal. This is the current behavior, not a
+  new policy.
+- Native confirmation for every change is the shared `change` interaction answered by
+  `extension.respond`. Local clients cannot confirm.
 
 Canonical receipts bind caller + commandId + method: retries return the original
 result even if their payload differs. A new intent requires a new ID; different
@@ -124,7 +102,7 @@ state before retry.
 
 | Signal | One-step diagnosis / boundary |
 | --- | --- |
-| `projects.change` conflict, “Project changed since review” | Compare the reviewed typed intent and current filesystem/Git/trust state before requesting a new review. JSON object-key order alone is not an intent change; the create/untrust reordered-confirmation journey protects that distinction and still refuses a wrong digest. |
+| Project changed since review | Compare the reviewed create intent (name, Workspace identity) and the current filesystem before requesting a new review. A wrong digest or changed identity refuses before any effect. Existing-project trust cards use the settings owner's digest, not this one. |
 
 ## Verify
 
@@ -134,14 +112,15 @@ scripts/tron test gateway src/e2e/modules/projects/project-lifecycle.e2e.test.ts
 
 The real Gateway/Registry/Pi/faux-model journey retains a regenerable transcript in
 `packages/gateway/test-results/project-lifecycle/report.json`. All projects are temporary.
-The list scale journey publishes one real task, derives 299 persisted input records
-from those canonical bytes/name, then validates all 300 through the real Home reader.
-It measures list reads, not sequential task admission and durability; the calibrated
-bound and protection against per-folder/per-page history rescans remain unchanged.
-Native cases invoke the real Gateway module route, receipts and exact native decisions:
-create → untrust → trust, unconfirmed reviews, busy-work refusal, unsupported folders,
-authenticated actor provenance and disconnect ownership. Runtime reload and
-compensation failure use the real trust owner's `setAndApply`.
+Creation cases use the real Home `projects` tool, the native `change` card and
+`extension.respond`: create → approval → trust → delegate admission; decline and Stop leave
+no effect; traversal, existing-path, trailing-space and symlink names refuse; uncertain
+audit fences keep their receipt; nested exact roots pin under default-always trust.
+Home untrust and trust of an existing project use the `settings` tool's
+`permissions.projectTrust` card; that journey proves the exact path, approval and delegate
+admission. Runtime reload and compensation failure use the real trust owner's `setAndApply`.
+Linked-worktree and busy-work refusals are proven only for creation's trust step; the
+existing-project trust path has no such refusal (see Surface).
 
 ## Not here
 

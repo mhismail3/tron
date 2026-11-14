@@ -185,8 +185,9 @@ or cause replay. An uncertain receipt requires inspection.
 The maintainer's own `settings.change` and `settings.undo`
 apply directly: his tap is the authority. A renderer that shows a key's review card
 may bind that tap to it with `confirmationDigest`; a changed store refuses it as stale.
-Project lifecycle uses `projects.change` (a retained RPC, see the projects README), binding its exact typed intent and review;
-its owner revalidates filesystem, Git, occupancy and trust before effects.
+Project creation uses the `projects` tool with its own exact native review, revalidating the
+Workspace identity before effects. Existing-project trust is `permissions.projectTrust`, bound
+to its exact review digest like any tap-required change. No project RPC exists.
 Project action facts do not invent generic inverses. Local RPC cannot confirm reviews. An agent's or Home's Undo that restores a tap-required value shows the same native card as a change.
 
 A refused bundle retains all per-change errors and before/after facts, but never
