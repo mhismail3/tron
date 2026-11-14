@@ -104,7 +104,7 @@ and [observability](docs/observability.md); startup and shutdown records: [found
 ### Diagnostic bundle
 
 `scripts/tron diagnose [--since <count><s|m|h|d>] [--out <path>]` writes one read-only
-bundle: the `~/.tron/logs` streams in the window (default 2h), device exports, payload
+bundle: the `~/.tron/logs` streams in the window (default 2h), payload
 selection documents, launchd `com.tron.server` records, `/health`, Tron processes,
 `scripts/tron mac verify` and Tailscale paths. Commands are time-bounded; text is
 redacted with the logger's rules; output is one new `0600` file. It needs a Gateway

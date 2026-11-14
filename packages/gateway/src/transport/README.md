@@ -5,7 +5,7 @@
 The Gateway's network face: enrollment-authenticated HTTP and WebSocket serving,
 request dispatch (`GatewayService`), command receipts, per-connection ordered writes,
 session subscription and synchronization, uploads/blobs, live-view routes, logging
-and diagnostic exports.
+and the device log store.
 
 ## Owns
 
