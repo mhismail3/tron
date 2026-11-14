@@ -41,7 +41,25 @@ type ConfiguredPackages = Parameters<SettingsManager["setPackages"]>[0];
 
 interface PackageUpdatePlan {
   kind: UpdateKind; source: string; target: string; name: string; from: string; version: string; reason: string;
-  installedPath: string | undefined; packages: ConfiguredPackages; review: ChangeReview;
+  installer: readonly string[] | null; installedPath: string | undefined; packages: ConfiguredPackages; review: ChangeReview;
+}
+
+function configuredEntries(settings: SettingsManager): Array<{ source: string; scope: "user" | "project" }> {
+  const sourceOf = (pkg: ConfiguredPackages[number]) => typeof pkg === "string" ? pkg : pkg.source;
+  return [
+    ...(settings.getGlobalSettings().packages ?? []).map(pkg => ({ source: sourceOf(pkg), scope: "user" as const })),
+    ...(settings.getProjectSettings().packages ?? []).map(pkg => ({ source: sourceOf(pkg), scope: "project" as const })),
+  ];
+}
+
+function hostNpmPlanningView(settings: SettingsManager): SettingsManager {
+  return new Proxy(settings, {
+    get(target, key) {
+      if (key === "getNpmCommand") return () => undefined;
+      const value = Reflect.get(target, key, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
 }
 
 function sourceKind(source: string): UpdateKind | "local" {
@@ -251,15 +269,17 @@ export class PackageService {
     if (/^[a-z][a-z0-9+.-]*:\/\/[^/@]*@/i.test(request.source)) {
       throw new GatewayError("invalid_request", "Package sources with credentials in their URL are refused; keep credentials in their owned store");
     }
-    const { manager, settings } = await this.manager(request.cwd, false);
-    const configured = manager.listConfiguredPackages();
+    const { settings, project } = await this.manager(request.cwd, false);
+    const configured = configuredEntries(settings);
     if (!configured.some(entry => entry.scope === "user" && entry.source === request.source)) {
       if (configured.some(entry => entry.source === request.source)) {
         throw new GatewayError("invalid_request", "Repository packages are read-only in the app; edit the repository configuration");
       }
       throw new GatewayError("not_found", "The requested package is not configured in that scope");
     }
-    const installedPath = manager.getInstalledPath(request.source, "user");
+    const installedPath = new DefaultPackageManager({ cwd: project.cwd, projectDir: project.projectDir, agentDir: this.agentDir, settingsManager: hostNpmPlanningView(settings) })
+      .getInstalledPath(request.source, "user");
+    const installer = settings.getGlobalSettings().npmCommand ?? null;
     const packagesAfter = (target: string): ConfiguredPackages => (settings.getGlobalSettings().packages ?? []).map(entry => {
       if (typeof entry === "string") return entry === request.source ? target : entry;
       return entry.source === request.source ? { ...entry, source: target } : entry;
@@ -278,7 +298,7 @@ export class PackageService {
       if (!from) throw new GatewayError("conflict", "The package is not installed; install it before updating");
       if (from === request.version) throw new GatewayError("conflict", `${name} is already at ${from}; nothing to update`);
       const target = `npm:${name}@${request.version}`;
-      return this.planned({ kind, source: request.source, target, name, from, version: request.version, reason: request.reason, installedPath, packages: packagesAfter(target) });
+      return this.planned({ kind, source: request.source, target, name, from, version: request.version, reason: request.reason, installer, installedPath, packages: packagesAfter(target) });
     }
     if (!/^[0-9a-f]{40}$/.test(request.version)) {
       throw new GatewayError("invalid_request", "A git package update requires a full 40-character commit SHA");
@@ -294,11 +314,11 @@ export class PackageService {
     const from = await gitRead(installedPath, ["rev-parse", "HEAD"]);
     if (from === request.version) throw new GatewayError("conflict", `${repo} is already at ${from}; nothing to update`);
     const target = `${repo}@${request.version}`;
-    return this.planned({ kind, source: request.source, target, name: repo, from, version: request.version, reason: request.reason, installedPath, packages: packagesAfter(target) });
+    return this.planned({ kind, source: request.source, target, name: repo, from, version: request.version, reason: request.reason, installer, installedPath, packages: packagesAfter(target) });
   }
 
   private planned(input: Omit<PackageUpdatePlan, "review">): PackageUpdatePlan {
-    const identity = { operation: PACKAGE_UPDATE_ACTION, kind: input.kind, source: input.source, target: input.target, name: input.name, from: input.from, version: input.version };
+    const identity = { operation: PACKAGE_UPDATE_ACTION, kind: input.kind, source: input.source, target: input.target, name: input.name, from: input.from, version: input.version, installer: input.installer };
     const items = [{ label: `Package ${input.name}`, before: input.from, after: input.version, detail: `${input.source}\nUser package (global)`, exact: JSON.stringify(identity) }];
     if (input.target !== input.source) {
       items.push({ label: "Configured source", before: input.source, after: input.target, detail: "sources.packages (global) pin", exact: JSON.stringify({ source: input.source, target: input.target }) });
