@@ -48,15 +48,15 @@
     "@types/semver": "7.8.0",
     "proper-lockfile": "4.1.2",
     "semver": "7.8.6",
-    "typebox": "1.4.4",
-    "ws": "8.22.1"
+    "typebox": "1.4.6",
+    "ws": "8.22.2"
   },
   "devDependencies": {
     "@types/node": "24.19.2",
     "@types/proper-lockfile": "4.1.4",
     "@types/ws": "8.18.2",
     "fast-check": "4.10.2",
-    "oxlint": "1.91.0",
+    "oxlint": "1.93.0",
     "typescript": "7.0.2",
     "vitest": "5.1.0"
   },
