@@ -18,6 +18,22 @@ struct MenuBarLogReaderTests {
         #expect(result == .success("[t] INFO TRON: first\n[t] INFO TRON: three"))
     }
 
+    @Test("reads a bounded tail of a segment far larger than the window, newest last")
+    func boundedTailOfLargeSegment() async throws {
+        let home = try makeHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let logs = home.appendingPathComponent("logs", isDirectory: true)
+        try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        var text = ""
+        for index in 0..<8_000 { text += line("filler-\(index)") }
+        text += line("newest-a") + line("newest-b")
+        try text.write(to: logs.appendingPathComponent("gateway.jsonl"), atomically: true, encoding: .utf8)
+
+        let result = await MenuBarLogReader.fetchRecentLogs(tronHome: home, limit: 2)
+
+        #expect(result == .success("[t] INFO TRON: newest-a\n[t] INFO TRON: newest-b"))
+    }
+
     @Test("a fresh home with no Gateway log yet reads as empty, not a failure")
     func missingLogIsEmpty() async throws {
         let home = try makeHome()
