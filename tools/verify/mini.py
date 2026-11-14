@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+from contextlib import closing
 import fcntl
 import hashlib
 import json
@@ -341,7 +342,7 @@ def remote_main(job: dict) -> int:
     def finish(code: int) -> int:
         ledger_path = results / 'ledger.sqlite3'
         if ledger_path.is_file():
-            with sqlite3.connect(ledger_path.as_uri() + '?mode=ro', uri=True) as connection:
+            with closing(sqlite3.connect(ledger_path.as_uri() + '?mode=ro', uri=True)) as connection:
                 rows = [list(row) for row in connection.execute('SELECT * FROM results')]
             out.write(b'\n' + frame(nonce) + b'ledger ' + base64.b64encode(json.dumps(rows).encode()) + b'\n')
         out.write(b'\n' + frame(nonce) + f'exit {code}\n'.encode())
