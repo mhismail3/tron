@@ -1568,8 +1568,10 @@ class BrowserForkProvisionTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def run_gateway(self, *args, env=None):
+        ledger = tempfile.TemporaryDirectory(prefix='tron-gateway-ledger-')
+        self.addCleanup(ledger.cleanup)
         inherited = {key: value for key, value in os.environ.items() if key not in ('TRON_P99_17_BROWSER_FORK_COPY', 'TRON_FULL_GATEWAY_LOCK_HELD')}
-        return subprocess.run(['python3', str(self.root / 'tools/verify/gateway.py'), *args], env={**inherited, **(env or {})},
+        return subprocess.run(['python3', str(self.root / 'tools/verify/gateway.py'), *args], env={**inherited, **(env or {}), 'TRON_TEST_LEDGER': str(Path(ledger.name) / 'results.sqlite3')},
                               capture_output=True, text=True, timeout=60)
 
     def test_a_full_default_run_receives_the_provisioned_pinned_fork(self):
@@ -1776,8 +1778,10 @@ class FullGatewayLockTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def start(self, env=None, stderr=subprocess.PIPE):
+        ledger = tempfile.TemporaryDirectory(prefix='tron-gateway-ledger-')
+        self.addCleanup(ledger.cleanup)
         inherited = {key: value for key, value in os.environ.items() if key != 'TRON_FULL_GATEWAY_LOCK_HELD'}
-        return subprocess.Popen(['python3', str(self.gateway), 'some.test.ts'], env={**inherited, **(env or {})},
+        return subprocess.Popen(['python3', str(self.gateway), 'some.test.ts'], env={**inherited, **(env or {}), 'TRON_TEST_LEDGER': str(Path(ledger.name) / 'results.sqlite3')},
                                 stdout=subprocess.PIPE, stderr=stderr, text=True)
 
     def test_a_run_waits_for_the_held_lock_then_records_itself(self):
