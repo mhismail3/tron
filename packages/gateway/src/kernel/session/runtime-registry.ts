@@ -3376,6 +3376,7 @@ export class RuntimeRegistry implements SessionOperations {
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
     const root = acquisition.entriesByID.get(sessionId);
     if (!root) throw new GatewayError("not_found", "Task worker session is unavailable");
+    const catalogRoot = await realpath(this.catalogDirectory());
     const byPath = new Map([...acquisition.entriesByID.values()].map(entry => [entry.path, entry]));
     const owned = new Set([sessionId]);
     let changed = true;
@@ -3383,7 +3384,7 @@ export class RuntimeRegistry implements SessionOperations {
       changed = false;
       for (const entry of acquisition.entriesByID.values()) {
         if (owned.has(entry.id) || !entry.structuralSubagent) continue;
-        const parentPath = delegatedSessionParentPath(entry.path, this.catalogDirectory());
+        const parentPath = delegatedSessionParentPath(entry.path, catalogRoot);
         const parent = parentPath ? byPath.get(parentPath) : undefined;
         if (!parent || !owned.has(parent.id) || entry.parentSessionPath && resolve(entry.parentSessionPath) !== parent.path) continue;
         owned.add(entry.id);
