@@ -31,7 +31,6 @@ from contextlib import closing
 import fcntl
 import hashlib
 import json
-from itertools import islice
 import os
 import platform
 import re
@@ -193,6 +192,81 @@ def verify_retained(evidence: Path, nonce: str) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+def retention_full(base: Path) -> bool:
+    pending = set()
+    for root in (base / 'retained-native', base / 'results'):
+        if not root.exists():
+            continue
+        with os.scandir(root) as entries:
+            for index, entry in enumerate(entries):
+                if index == RETAINED_WALK_ENTRIES:
+                    return True
+                if root.name == 'results':
+                    match = re.fullmatch(r'gateway-([a-f0-9]{32})', entry.name)
+                    if not match or not entry.is_dir(follow_symlinks=False):
+                        continue
+                    key = match[1]
+                else:
+                    match = re.fullmatch(r'([a-f0-9]{32})|\.([a-f0-9]{32})(?:\.building|\.ack-[a-f0-9]{64})', entry.name)
+                    key = (match[1] or match[2]) if match else (root.name, entry.name)
+                pending.add(key)
+                if len(pending) == RETAINED_JOBS:
+                    return True
+    return False
+
+
+def recover_retained(nonce: str, retained: Path, originals: Path, building: Path) -> int:
+    lock_path = Path.home() / BASE / 'jobs/gateway.lock'
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open('a+') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            lock.seek(0)
+            return no_result(f'native recovery refused: mini job lock held by {lock.read(4096).strip() or "an unrecorded job"}')
+        if any(path.is_symlink() for path in (retained, originals, building)):
+            raise ValueError('unsafe native recovery path')
+        lock.seek(0)
+        lock.truncate()
+        lock.write(json.dumps({'operation': 'recover-retained', 'nonce': nonce, 'pid': os.getpid()}))
+        lock.flush()
+        acknowledged = []
+        if retained.parent.exists():
+            with os.scandir(retained.parent) as entries:
+                for index, entry in enumerate(entries):
+                    if index == RETAINED_WALK_ENTRIES:
+                        raise ValueError('native recovery scan exceeds its entry bound')
+                    if re.fullmatch(rf'\.{nonce}\.ack-[a-f0-9]{{64}}', entry.name):
+                        if entry.is_symlink():
+                            raise ValueError('unsafe acknowledged snapshot')
+                        acknowledged.append(Path(entry.path))
+        if acknowledged:
+            if any(path.exists() for path in (retained, originals, building)):
+                raise ValueError('acknowledged snapshot overlaps unacknowledged evidence')
+            for path in acknowledged:
+                shutil.rmtree(path)
+            print(f'mini: acknowledged native cleanup complete: {nonce}')
+            return 0
+        if not retained.exists():
+            receipt_path = originals / 'receipt.json'
+            if receipt_path.is_symlink():
+                raise ValueError('unsafe original native receipt')
+            source_receipt = retained_json(receipt_path, RETAINED_MANIFEST_BYTES)[0] if receipt_path.is_file() else {'nonce': nonce}
+            receipt = {key: source_receipt[key] for key in ('nonce', 'commit', 'lane', 'host', 'exit', 'interrupted')
+                       if key in source_receipt}
+            if receipt.get('nonce') != nonce:
+                raise ValueError('native recovery receipt nonce mismatch')
+            retain_native(originals, retained, receipt)
+        verify_retained(retained, nonce)
+        if building.exists():
+            shutil.rmtree(building)
+        if originals.exists():
+            shutil.rmtree(originals)
+        originals.with_suffix('.tar.gz').unlink(missing_ok=True)
+        print(f'mini: native snapshot ready: {nonce}')
+        return 0
+
+
 def retained_main(nonce: str, action: str = 'retrieve', digest: str | None = None) -> int:
     if len(nonce) != 32 or any(character not in '0123456789abcdef' for character in nonce):
         raise ValueError('invalid retained native nonce')
@@ -200,27 +274,10 @@ def retained_main(nonce: str, action: str = 'retrieve', digest: str | None = Non
         retained = Path.home() / BASE / 'retained-native' / nonce
         originals = Path.home() / BASE / 'results' / f'gateway-{nonce}'
         building = retained.with_name(f'.{nonce}.building')
+        if action == 'recover-retained':
+            return recover_retained(nonce, retained, originals, building)
         if any(path.is_symlink() for path in (retained, originals, building)):
             raise ValueError('unsafe native recovery path')
-        if action == 'recover-retained':
-            if not retained.exists():
-                receipt_path = originals / 'receipt.json'
-                if receipt_path.is_symlink():
-                    raise ValueError('unsafe original native receipt')
-                source_receipt = retained_json(receipt_path, RETAINED_MANIFEST_BYTES)[0] if receipt_path.is_file() else {'nonce': nonce}
-                receipt = {key: source_receipt[key] for key in ('nonce', 'commit', 'lane', 'host', 'exit', 'interrupted')
-                           if key in source_receipt}
-                if receipt.get('nonce') != nonce:
-                    raise ValueError('native recovery receipt nonce mismatch')
-                retain_native(originals, retained, receipt)
-            verify_retained(retained, nonce)
-            if building.exists():
-                shutil.rmtree(building)
-            if originals.exists():
-                shutil.rmtree(originals)
-            originals.with_suffix('.tar.gz').unlink(missing_ok=True)
-            print(f'mini: native snapshot ready: {nonce}')
-            return 0
         if action == 'ack-retained':
             if digest is None or len(digest) != 64 or any(character not in '0123456789abcdef' for character in digest):
                 raise ValueError('invalid retained acknowledgement digest')
@@ -239,8 +296,6 @@ def retained_main(nonce: str, action: str = 'retrieve', digest: str | None = Non
                 raise ValueError('unsafe acknowledged snapshot')
             if acknowledged.exists():
                 shutil.rmtree(acknowledged, ignore_errors=False)
-            elif building.exists() or originals.exists():
-                raise ValueError('native construction is incomplete; recover it before acknowledgement')
             return 0
         if retained.is_symlink() or not retained.is_dir():
             raise ValueError('retained native evidence is unavailable; use recover for incomplete construction')
@@ -660,11 +715,8 @@ def remote_main(job: dict) -> int:
             lock.write(json.dumps({**job['requester'], 'sha': sha}))
             lock.flush()
 
-            retained_root = base / 'retained-native'
-            if job['lane'] in ('ios', 'verify') and retained_root.exists():
-                with os.scandir(retained_root) as pending:
-                    if sum(1 for _ in islice(pending, RETAINED_JOBS)) == RETAINED_JOBS:
-                        return refuse('native evidence retention is full; recover/retrieve pending evidence before another native job')
+            if job['lane'] in ('ios', 'verify') and retention_full(base):
+                return refuse('native evidence retention is full; recover/retrieve pending evidence before another native job')
             prepared = time.time()
             if (checkout / '.git').exists():
                 steps = [('git', '-C', str(checkout), 'checkout', '--quiet', '--detach', '--force', sha),

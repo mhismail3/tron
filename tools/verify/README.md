@@ -162,11 +162,17 @@ walk streams at most 8,192 filesystem entries, descends at most 32 directory lev
 links and encoded evidence paths over 1,024 bytes. Limit/truncation flags record early stops; they
 never claim an exact count for unvisited files or unparsed cases. Receipt context is capped at
 4 KiB. All derived metadata fits the two 1 MiB files, not an unbounded manifest alongside the data
-budget. Eight outstanding published/staging/ack entries stop native admission instead of eviction.
+budget. Eight outstanding nonces stop native admission instead of eviction: preserved original
+result directories count even before staging exists, and originals/staging/published/ack copies for
+the same nonce share one slot. Unrecognized retention entries each occupy a slot. Admission scans
+at most 8,192 entries per owner directory and refuses if that scan cannot finish within its bound.
 Snapshot construction uses `.<nonce>.building` and atomically publishes `<nonce>` only after its
 manifest is complete. A construction failure preserves the originals in `results/gateway-<nonce>`.
-`python3 tools/verify/mini.py recover <nonce>` rebuilds that exact incomplete staging copy from the
-preserved originals; only a verified published snapshot allows original cleanup. Recovery does not
+`python3 tools/verify/mini.py recover <nonce>` takes the same `jobs/gateway.lock` as native jobs
+before inspecting or changing recovery data, and holds it through publication and cleanup. If busy,
+it refuses with the recorded holder; retry after that owner finishes. This also serializes concurrent
+recoveries. It rebuilds that exact incomplete staging copy from the preserved originals; only a
+verified published snapshot allows original cleanup. Recovery does not
 require the incomplete copy to have a manifest. A copy, metadata-size, disk or publication failure
 leaves the original evidence intact; fix the resource/input error and retry recovery. Staging still
 occupies admission capacity until recovered. Recovery also finishes cleanup after publication if
@@ -177,7 +183,10 @@ Retry the same command after transfer/verification failure: it replaces only the
 copy while remote evidence remains. After an acknowledgement failure it reuses the verified local
 copy and retries the exact receipt acknowledgement, including when the remote deletion succeeded
 but its reply was lost. Remote acknowledgement renames the snapshot to a digest-bound `.ack-`
-directory before deleting it; retry also finishes interrupted deletion there. No evidence is evicted
+directory before deleting it; retry also finishes interrupted deletion there. If the caller is gone,
+`python3 tools/verify/mini.py recover <nonce>` also clears orphaned digest-bound `.ack-` directories
+under the job lock. It refuses if acknowledged directories overlap original/staging/published evidence
+rather than deleting ambiguous data. No evidence is evicted
 to make room. Interrupted outcomes remain interrupted, not completed shard passes.
 `execution-plan.json` in whole-verifier artifacts preserves the caller's duration/selector contract.
 

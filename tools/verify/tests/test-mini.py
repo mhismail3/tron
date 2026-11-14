@@ -327,8 +327,16 @@ while True:
             while not (self.mini / 'native-started').exists():
                 self.assertLess(time.monotonic(), deadline)
                 time.sleep(0.05)
+            live = next((self.mini / 'tron-ci/results').glob('gateway-*'))
+            recovered = self.lane('recover', live.name.removeprefix('gateway-'))
+            intact = (live / 'ios/partial-run/test.log').is_file()
+            live_running = runner.poll() is None
             runner.send_signal(signal.SIGTERM)
             output, _ = runner.communicate(timeout=30)
+            self.assertEqual(recovered.returncode, NO_RESULT, recovered.stdout + recovered.stderr)
+            self.assertIn('held by', recovered.stdout + recovered.stderr)
+            self.assertTrue(intact, 'recover must leave live originals intact')
+            self.assertTrue(live_running)
         finally:
             if runner.poll() is None:
                 runner.kill()
@@ -365,6 +373,27 @@ while True:
         self.assertEqual(full.returncode, NO_RESULT, full.stdout + full.stderr)
         self.assertIn('evidence retention is full', full.stdout + full.stderr)
         self.assertEqual(len(list(pending.iterdir())), 8)
+
+    def test_native_admission_counts_originals_before_staging_once_per_nonce(self) -> None:
+        self.write('scripts/tron-ios-test', "#!/usr/bin/env python3\nimport sys\nraise SystemExit(0 if 'probe' in sys.argv else 1)\n")
+        (self.local / 'scripts/tron-ios-test').chmod(0o755)
+        self.commit('native admission probe fixture')
+        pending = self.mini / 'tron-ci/retained-native'
+        pending.mkdir(parents=True)
+        originals = self.mini / 'tron-ci/results'
+        originals.mkdir()
+        for index in range(7):
+            directory = originals / f'gateway-{index:032x}'
+            directory.mkdir()
+            (directory / 'test.log').write_text('preserved before staging')
+        (pending / ('.' + '0' * 32 + '.building')).mkdir()
+        admitted = self.lane('ios', 'probe')
+        self.assertEqual(admitted.returncode, 0, admitted.stdout + admitted.stderr)
+        (originals / f'gateway-{7:032x}').mkdir()
+        full = self.lane('ios', 'probe')
+        self.assertEqual(full.returncode, NO_RESULT, full.stdout + full.stderr)
+        self.assertIn('evidence retention is full', full.stdout + full.stderr)
+        self.assertEqual(len(list(originals.iterdir())), 8)
 
     def test_native_recovery_retries_construction_transfer_verification_and_acknowledgement(self) -> None:
         nonce = 'a' * 32
@@ -443,6 +472,9 @@ module.retain_native(Path(sys.argv[2]), Path(sys.argv[3]), {'nonce': sys.argv[4]
         finally:
             for directory in retained.parent.glob(f'.{nonce}.ack-*/evidence/locked'):
                 directory.chmod(0o700)
+        orphan_cleanup = self.lane('recover', nonce)
+        self.assertEqual(orphan_cleanup.returncode, 0, orphan_cleanup.stdout + orphan_cleanup.stderr)
+        self.assertFalse(acknowledged.exists())
         cleanup = self.lane('retrieve', nonce)
         self.assertEqual(cleanup.returncode, 0, cleanup.stdout + cleanup.stderr)
         self.assertFalse(acknowledged.exists())
@@ -509,10 +541,6 @@ print('PEAK', tracemalloc.get_traced_memory()[1])
                 self.assertLessEqual(len(partial['cases']), 4096)
                 self.assertLessEqual(partial_path.stat().st_size, 1024 ** 2)
                 self.assertLessEqual(manifest['visitedEntries'], 8192)
-                print(f"retention {scenario}: peak={peak} entries={len(manifest['files'])} "
-                      f"manifest={manifest_path.stat().st_size} cases={len(partial['cases'])} "
-                      f"caseBytes={partial_path.stat().st_size} data={manifest['bytes']} "
-                      f"visited={manifest['visitedEntries']}", flush=True)
                 if scenario != 'receipt':
                     self.assertTrue(manifest['limitsReached'][scenario], manifest)
                     self.assertTrue(manifest['truncated'])
