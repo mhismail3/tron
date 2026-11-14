@@ -754,6 +754,102 @@ class UnownedSimulatorCleanupFixture(SimulatorHarness, unittest.TestCase):
         self.assertTrue(any(device["udid"] == UDID_A for device in json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID]))
 
 
+class SlimSimulatorFixture(SimulatorHarness, unittest.TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.checkout = self.root / "checkout"
+        (self.checkout / "scripts").mkdir(parents=True)
+        (self.checkout / "config").mkdir()
+        for source in (SIMULATOR, PROCESS):
+            shutil.copy2(source, self.checkout / "scripts" / source.name)
+        self.cli = self.root / "tools/bin/simslim"
+        self.cli_log = self.root / "simslim.jsonl"
+        self.synthetic_stub(self.cli, '''import json, os, subprocess, sys
+from pathlib import Path
+args = sys.argv[1:]
+with Path(os.environ["FAKE_SIMSLIM_LOG"]).open("a") as output:
+    output.write(json.dumps(args) + "\\n")
+if args[0] == "on":
+    raise SystemExit(subprocess.run([os.environ["TRON_IOS_XCRUN"], "simctl", "boot", args[1]]).returncode)
+if args[0] != "verify":
+    raise SystemExit(2)
+''')
+        self.pins = self.checkout / "config/ci-toolchain.env"
+        self.pins.write_text(
+            "TRON_CI_SIMSLIM_VERSION=0.14.0\n"
+            f"TRON_CI_SIMSLIM_BINARY_SHA256={hashlib.sha256(self.cli.read_bytes()).hexdigest()}\n"
+        )
+
+    def command(self, action: str, *, name: str = "Tron iOS Tests") -> list[str]:
+        command = super().command(action, name=name)
+        command[1] = str(self.checkout / "scripts/ios-test-simulator.py")
+        return command
+
+    def profile(self, action: str, slim: bool) -> subprocess.CompletedProcess[str]:
+        return self.invoke(action, override={
+            "TRON_IOS_TEST_SIMSLIM": "1" if slim else "0",
+            "TRON_CI_TOOLS_DIR": str(self.root / "tools"),
+            "FAKE_SIMSLIM_LOG": str(self.cli_log),
+        })
+
+    def test_slim_to_stock_leak_is_refused_without_mutation(self) -> None:
+        slim = self.profile("provision", True)
+        self.assertEqual(slim.returncode, 0, slim.stderr)
+        before = (self.marker.read_bytes(), self.inventory_path.read_bytes())
+        stock = self.profile("provision", False)
+        self.assertEqual(stock.returncode, 66, stock.stderr)
+        self.assertIn("clean", stock.stderr)
+        self.assertEqual((self.marker.read_bytes(), self.inventory_path.read_bytes()), before)
+
+    def test_stock_and_changed_profile_mismatches_are_refused(self) -> None:
+        stock = self.profile("provision", False)
+        self.assertEqual(stock.returncode, 0, stock.stderr)
+        before = (self.marker.read_bytes(), self.inventory_path.read_bytes())
+        mismatch = self.profile("provision", True)
+        self.assertEqual(mismatch.returncode, 66, mismatch.stderr)
+        self.assertIn("profile", mismatch.stderr)
+        self.assertEqual((self.marker.read_bytes(), self.inventory_path.read_bytes()), before)
+        self.assertFalse(self.cli_log.exists())
+        self.assertEqual(self.profile("delete", False).returncode, 0)
+        slim = self.profile("provision", True)
+        self.assertEqual(slim.returncode, 0, slim.stderr)
+        before = (self.marker.read_bytes(), self.inventory_path.read_bytes())
+        self.pins.write_text(self.pins.read_text().replace("0.14.0", "0.14.1"))
+        changed = self.profile("provision", True)
+        self.assertEqual(changed.returncode, 66, changed.stderr)
+        self.assertEqual((self.marker.read_bytes(), self.inventory_path.read_bytes()), before)
+
+    def test_explicit_clean_then_switch_preserves_foreign_device(self) -> None:
+        _, foreign = self.device(UDID_A, name="Foreign Simulator")
+        self.write_inventory(devices={RUNTIME_ID: [foreign]})
+        slim = self.profile("provision", True)
+        self.assertEqual(slim.returncode, 0, slim.stderr)
+        slim_name = json.loads(self.marker.read_text())["name"]
+        clean = self.profile("delete", False)
+        self.assertEqual(clean.returncode, 0, clean.stderr)
+        self.assertFalse(self.marker.exists())
+        stock = self.profile("provision", False)
+        self.assertEqual(stock.returncode, 0, stock.stderr)
+        self.assertNotEqual(json.loads(self.marker.read_text())["name"], slim_name)
+        calls = [json.loads(line) for line in self.cli_log.read_text().splitlines()]
+        self.assertEqual(calls, [["on", slim.stdout.strip(), "--except", "search,icloud,store,web,photos", "--keep", "com.apple.accessibility.axassetsd,com.apple.mobileassetd,com.apple.deviceaccessd"]])
+        devices = json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID]
+        self.assertEqual(next(device for device in devices if device["udid"] == UDID_A), foreign)
+        self.assertEqual(len(devices), 2)
+
+    def test_tampered_opt_in_tool_fails_before_creation_but_stock_needs_no_tool(self) -> None:
+        self.cli.write_bytes(self.cli.read_bytes() + b"\n")
+        slim = self.profile("provision", True)
+        self.assertEqual(slim.returncode, 66, slim.stderr)
+        self.assertIn("checksum", slim.stderr)
+        self.assertFalse(self.marker.exists())
+        self.assertEqual(json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID], [])
+        self.cli.unlink()
+        stock = self.profile("provision", False)
+        self.assertEqual(stock.returncode, 0, stock.stderr)
+        self.assertFalse(self.cli_log.exists())
+
+
 class SimulatorFixture(SimulatorHarness, unittest.TestCase):
     """Exercise the simulator owner directly against a synthetic simctl."""
 
