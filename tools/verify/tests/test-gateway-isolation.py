@@ -106,7 +106,10 @@ class GatewayTestScratchCleanup(unittest.TestCase):
             for script in (node, vitest):
                 script.chmod(0o755)
             commit_fixture(base)
+            ledger = tempfile.TemporaryDirectory(prefix='tron-gateway-ledger-')
+            self.addCleanup(ledger.cleanup)
             env = {key: value for key, value in os.environ.items() if key != GATEWAY.HELD_BY_CALLER}
+            env['TRON_TEST_LEDGER'] = str(Path(ledger.name) / 'results.sqlite3')
             runner = subprocess.Popen([sys.executable, str(verify / "gateway.py"), "x.test.ts"], env=env,
                                       stderr=subprocess.DEVNULL, start_new_session=True)
             deadline = time.monotonic() + 30
@@ -125,8 +128,10 @@ class GatewayTestConfigRouting(unittest.TestCase):
 
     def run_files(self, base: Path, *words: str):
         (base / "argv").unlink(missing_ok=True)
+        ledger = tempfile.TemporaryDirectory(prefix='tron-gateway-ledger-')
+        self.addCleanup(ledger.cleanup)
         result = subprocess.run([sys.executable, str(base / "tools/verify/gateway.py"), *words], cwd=base / "packages/gateway",
-                                env={**os.environ, GATEWAY.HELD_BY_CALLER: "1"}, capture_output=True, text=True, timeout=60)
+                                env={**os.environ, GATEWAY.HELD_BY_CALLER: "1", "TRON_TEST_LEDGER": str(Path(ledger.name) / "results.sqlite3")}, capture_output=True, text=True, timeout=60)
         return result, (base / "argv").read_text() if (base / "argv").exists() else None
 
     def test_a_listed_file_runs_under_its_own_config_and_a_mixed_list_is_refused(self) -> None:

@@ -207,7 +207,7 @@ case "$cmd" in
       tooling)
         if (($# == 0)); then set -- "$ROOT"/tools/work/tests/test-*.py; fi
         status=0
-        for suite in "$@"; do python3 "$ROOT/tools/verify/ledger.py" python "$suite" || status=1; done
+        for suite in "$@"; do python3 "$ROOT/tools/verify/ledger.py" python "$suite" || { code=$?; [[ "$status" -ne 0 ]] || status=$code; }; done
         exit "$status"
         ;;
       *) usage >&2; exit 64 ;;

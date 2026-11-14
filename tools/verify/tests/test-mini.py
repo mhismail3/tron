@@ -230,7 +230,7 @@ while len(list(barrier.iterdir())) < 2:
     def test_ios_lane_returns_native_artifacts_and_failure_through_the_normal_lease(self) -> None:
         self.write('tools/probe.py', RECORDED)
         self.write('scripts/tron-ios-test', '''#!/usr/bin/python3
-import json, os, subprocess, sys
+import json, os, sqlite3, subprocess, sys
 from pathlib import Path
 root = Path(__file__).resolve().parents[1]
 subprocess.run([sys.executable, str(root / 'tools/verify/ledger.py'), 'python', str(root / 'tools/probe.py'), *sys.argv[1:]])
@@ -240,6 +240,14 @@ results.mkdir(parents=True)
 (results / 'TestResults.xcresult/Info.plist').write_text('native result fixture')
 if 'unsafe' in sys.argv:
     (results / 'outside').symlink_to(root / 'README')
+if 'unsafe-ledger' in sys.argv:
+    spool = Path(os.environ['TRON_TEST_LEDGER'])
+    outside = root / 'test-results/private-ledger.sqlite3'
+    outside.parent.mkdir(parents=True, exist_ok=True)
+    spool.replace(outside)
+    with sqlite3.connect(outside) as connection:
+        connection.execute("UPDATE results SET test_id = 'private outside sentinel'")
+    spool.symlink_to(outside)
 (results / 'test.log').write_text('failure: fixture/native: deliberate red' if 'fail' in sys.argv else 'Executed 1 test, with 0 failures')
 (results / 'source.json').write_text(json.dumps({'sha': subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip(), 'args': sys.argv[1:], 'home': os.environ['HOME']}))
 print('Executed 1 test, with ' + ('1 failure' if 'fail' in sys.argv else '0 failures'), flush=True)
@@ -251,16 +259,16 @@ raise SystemExit(9 if 'fail' in sys.argv else 0)
         repository = self.mini / 'tron-ci/tron.git'
         foreign = self.git('rev-parse', 'HEAD^')
         self.git('push', '--quiet', str(repository), f'{foreign}:refs/tron-jobs/incoming')
-        for flag, expected in (('pass', 0), ('fail', 9), ('unsafe', NO_RESULT)):
+        for flag, expected in (('pass', 0), ('fail', 9), ('unsafe', NO_RESULT), ('unsafe-ledger', NO_RESULT)):
             with self.subTest(outcome=flag):
                 result = subprocess.run([str(self.local / 'scripts/tron'), 'test', 'ios', 'run', flag, '--ios-host', 'mini'],
                                         cwd=self.local, env=self.env, text=True, capture_output=True)
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
                 paths = [line.removeprefix('mini: artifacts: ') for line in result.stdout.splitlines() if line.startswith('mini: artifacts: ')]
-                if flag == 'unsafe':
+                if flag in ('unsafe', 'unsafe-ledger'):
                     self.assertEqual(paths, [])
                     self.assertIsNotNone(self.reader().no_result_reason(result.returncode, result.stdout + result.stderr))
-                    self.assertIn('unsafe mini artifact source', result.stdout + result.stderr)
+                    self.assertIn('unsafe mini artifact source' if flag == 'unsafe' else 'unsafe mini', result.stdout + result.stderr)
                     self.assertNotIn('cleanup unresolved', result.stderr)
                     continue
                 self.assertEqual(len(paths), 1, result.stdout + result.stderr)
@@ -277,7 +285,7 @@ raise SystemExit(9 if 'fail' in sys.argv else 0)
         self.assertTrue(Path(self.env['TRON_TEST_LEDGER']).is_file(), 'native records return to the caller, not a second mini ledger')
         with sqlite3.connect(self.env['TRON_TEST_LEDGER']) as connection:
             rows = connection.execute('SELECT test_id, commit_sha, outcome, host, contended FROM results').fetchall()
-        self.assertEqual(len(rows), 3, 'one record per completed probe, including a transport refusal without an invented failure')
+        self.assertEqual(len(rows), 3, 'one record per intact probe spool; artifact refusal retains cases but an untrusted ledger imports no rows')
         self.assertEqual([row[2] for row in rows], ['passed', 'failed', 'passed'])
         self.assertTrue(all(row[0] == 'tools/probe.py::Probe.test_case' and row[1] == sha and row[3] and row[4] == 0 for row in rows))
         with open(self.mini / 'tron-ci/jobs/gateway.lock') as lock:

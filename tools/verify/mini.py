@@ -341,7 +341,10 @@ def remote_main(job: dict) -> int:
 
     def finish(code: int) -> int:
         ledger_path = results / 'ledger.sqlite3'
-        if ledger_path.is_file():
+        if any((results / name).is_symlink() for name in ('ledger.sqlite3', 'ledger.sqlite3-wal', 'ledger.sqlite3-shm')):
+            out.write(b'\n' + frame(nonce) + b'refused "unsafe mini ledger spool"\n')
+            code = EXIT_NO_RESULT
+        elif ledger_path.is_file():
             with closing(sqlite3.connect(ledger_path.as_uri() + '?mode=ro', uri=True)) as connection:
                 rows = [list(row) for row in connection.execute('SELECT * FROM results')]
             out.write(b'\n' + frame(nonce) + b'ledger ' + base64.b64encode(json.dumps(rows).encode()) + b'\n')
@@ -501,10 +504,10 @@ def remote_main(job: dict) -> int:
                     total = 0
                     with tarfile.open(archive, 'w:gz', dereference=True) as bundle:
                         for path in sorted(results.rglob('*')):
-                            if path.parent == results and path.name in ('ledger.sqlite3', 'ledger.sqlite3-wal', 'ledger.sqlite3-shm'):
-                                continue
                             if path.is_symlink() or not (path.is_file() or path.is_dir()):
                                 raise ValueError('unsafe mini artifact source')
+                            if path.parent == results and path.name in ('ledger.sqlite3', 'ledger.sqlite3-wal', 'ledger.sqlite3-shm'):
+                                continue
                             total += path.stat().st_size if path.is_file() else 0
                             if total > ARTIFACT_LIMIT:
                                 raise ValueError('mini artifacts exceed the 2 GiB transport limit')

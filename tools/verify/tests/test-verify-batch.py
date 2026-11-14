@@ -23,9 +23,9 @@ def shipped_runner(root, lock):
     defaults = root / 'fixture-node'
     defaults.write_text('#!/bin/sh\nprintf \'["default"]\\n\'\n')
     defaults.chmod(0o755)
-    config = root / 'packages/gateway/node_modules/vitest/config.js'
-    config.parent.mkdir(parents=True)
-    config.write_text('exports.configDefaults = { reporters: ["default"] };\n')
+    vitest = root / 'packages/gateway/node_modules/vitest'
+    vitest.parent.mkdir(parents=True)
+    vitest.symlink_to(ROOT / 'packages/gateway/node_modules/vitest', target_is_directory=True)
     for name in ('gateway.py', 'vitest_configs.py', 'ledger.py', 'ledger-host.mjs', 'ledger-vitest.mjs'):
         (root / 'tools/verify' / name).write_text((ROOT / 'tools/verify' / name).read_text())
     source = (ROOT / 'tools/verify/host_lock.py').read_text()
@@ -1571,8 +1571,10 @@ class BrowserForkProvisionTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def run_gateway(self, *args, env=None):
+        ledger = tempfile.TemporaryDirectory(prefix='tron-gateway-ledger-')
+        self.addCleanup(ledger.cleanup)
         inherited = {key: value for key, value in os.environ.items() if key not in ('TRON_P99_17_BROWSER_FORK_COPY', 'TRON_FULL_GATEWAY_LOCK_HELD')}
-        return subprocess.run(['python3', str(self.root / 'tools/verify/gateway.py'), *args], env={**inherited, **(env or {})},
+        return subprocess.run(['python3', str(self.root / 'tools/verify/gateway.py'), *args], env={**inherited, **(env or {}), 'TRON_TEST_LEDGER': str(Path(ledger.name) / 'results.sqlite3')},
                               capture_output=True, text=True, timeout=60)
 
     def test_a_full_default_run_receives_the_provisioned_pinned_fork(self):
@@ -1779,8 +1781,10 @@ class FullGatewayLockTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def start(self, env=None, stderr=subprocess.PIPE):
+        ledger = tempfile.TemporaryDirectory(prefix='tron-gateway-ledger-')
+        self.addCleanup(ledger.cleanup)
         inherited = {key: value for key, value in os.environ.items() if key != 'TRON_FULL_GATEWAY_LOCK_HELD'}
-        return subprocess.Popen(['python3', str(self.gateway), 'some.test.ts'], env={**inherited, **(env or {})},
+        return subprocess.Popen(['python3', str(self.gateway), 'some.test.ts'], env={**inherited, **(env or {}), 'TRON_TEST_LEDGER': str(Path(ledger.name) / 'results.sqlite3')},
                                 stdout=subprocess.PIPE, stderr=stderr, text=True)
 
     def test_a_run_waits_for_the_held_lock_then_records_itself(self):

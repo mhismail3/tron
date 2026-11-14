@@ -237,7 +237,7 @@ def execute(kind: str, command: list[str], env: dict | None = None, cwd: Path | 
     begun = time.monotonic()
     env = {**os.environ, **(env or {}), 'TRON_TEST_LEDGER_WRAPPED': '1',
            'TRON_TEST_LEDGER_CPU_IDLE': str(capture.context['cpuIdlePercent'])}
-    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors='replace', env=env, cwd=cwd) as child:
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=cwd) as child:
         def forward(signum, _frame):
             if child.poll() is None:
                 child.send_signal(signum)
@@ -247,14 +247,16 @@ def execute(kind: str, command: list[str], env: dict | None = None, cwd: Path | 
         def pump(source, target):
             for line in source:
                 try:
-                    if line.startswith(NODE_CASE):
+                    if line.startswith(NODE_CASE.encode()):
                         case = json.loads(line[len(NODE_CASE):])
                         file = Path(case['file']).resolve().relative_to(ROOT).as_posix()
                         host_reading = {key: case[key] for key in ('host', 'cpuIdlePercent', 'memoryFreePercent', 'measuredAt')}
                         cases.append(capture.record(file + '::' + case['name'], case['outcome'], case['seconds'], host_reading))
                     else:
-                        print(line, end='', file=target, flush=True)
-                        output.append(line)
+                        target.buffer.write(line)
+                        target.buffer.flush()
+                        if kind == 'swift':
+                            output.append(line)
                 except Exception as error:
                     errors.append(error)
 
@@ -272,7 +274,7 @@ def execute(kind: str, command: list[str], env: dict | None = None, cwd: Path | 
             if kind == 'shell':
                 append([capture.record(Path(command[-1]).resolve().relative_to(ROOT).as_posix(), 'passed' if child.returncode == 0 else 'failed', time.monotonic() - begun)])
             if kind == 'swift':
-                capture.swift(''.join(output), [Path(command[index + 1]) for index, word in enumerate(command[:-1]) if word == '-resultBundlePath'])
+                capture.swift(b''.join(output).decode(errors='replace'), [Path(command[index + 1]) for index, word in enumerate(command[:-1]) if word == '-resultBundlePath'])
     if errors:
         raise errors[0]
     return code if code >= 0 else 128 - code
