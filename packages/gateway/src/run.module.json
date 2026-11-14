@@ -45,6 +45,9 @@
     "kernel/run/held-prompt-queue.ts",
     "kernel/run/queue-input.ts"
   ],
+  "verify": [
+    "scripts/tron test gateway src/e2e/kernel/delegation/delegation.lock.integration.test.ts"
+  ],
   "dependsOn": [
     "gateway/host",
     "gateway/pi",

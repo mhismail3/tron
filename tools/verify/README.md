@@ -17,10 +17,23 @@ scripts/tron verify --batch --base <main-anchor> # initialize coverage in a clea
 scripts/tron verify --batch [--repeat] [--plan] # next pinned batch, or rerun every lane at the green HEAD
 scripts/tron verify --batch --review <culprit> --decision ACCEPT|BLOCK --reviewer <id> --binding <digest>
 scripts/tron verify --update-locks <id>         # rewrite <id>'s goldens (lock or approved migration slices)
-scripts/tron verify ... --ios-jobs 3             # more simulator lanes (1|2|3; default 1), when the brief says the Mac is free
+scripts/tron verify ... --gateway-host mini --ios-host mini # Tron heavy checks: queued mini execution, no local fallback
+scripts/tron test ios checkpoint --only-testing TronMobileUITests/<Class>/<method> # mini by default, build then selected tests
+scripts/tron verify ... --ios-jobs 3             # more simulator lanes (1|2|3; default 1), only when the brief permits
 scripts/tron verify ... --skip ios,mac,relay    # accept, explicitly, selections this run will not run
 scripts/tron verify ... --gateway-host local    # override the test-host pool: run the Gateway Vitest lanes here
 ```
+
+## System-section consumers
+
+The workspace, resources, run and Pi SDK owners explicitly declare the nested delegation
+lock as verification. That lock observes both the runtime system-section preview and the
+persisted child replay: workspace core instructions, resource instruction assembly, runtime
+projection and the pinned SDK artifact can each change it without changing the lock file.
+These declarations keep that consumer in affected checks with its nested runner rather than
+deferring it to the full batch. Other unchanged serial tests remain batch-selected. The
+selection regression calls the shipped planner against the actual ownership graph and each
+producer path; it does not mirror the dependency list in a fixture graph.
 
 ## Worktree dependencies
 
@@ -83,10 +96,12 @@ The Gateway Vitest lanes (`gateway`, `gateway-nested`) of `verify` and `scripts/
 `mini.py`'s `choose_host` picks the mini when it is configured, the tree is committed and an ssh probe (5 s to
 connect, 30 s in all) finds it set up with its job lock free, and otherwise this Mac. Each run prints which host
 ran its lanes and why; verify records it (`gatewayHostReason`). `--gateway-host local|mini` (for both kinds of lane; `test gateway --local|--mini`) overrides the pool; `--update-locks` always runs here, and the pool runs a lane here when its arguments name a path outside the checkout (a relative one resolved against `packages/gateway`). The Gateway `node-gateway` lane (`node --test` files) runs on this Mac under the pool and under `--gateway-host local`, and on the mini only when `--gateway-host mini` names it explicitly; the pool never probes the mini for a node-only selection. Verify's node-gateway lane is not part of `scripts/tron test gateway`, which forwards Vitest arguments only.
-On the mini, `mini.py` refuses a dirty tree, or a HEAD other than the commit verify records, and pushes HEAD to the mini's `~/tron-ci/tron.git` as the one shared `refs/tron-jobs/incoming`, which each push
-overwrites, so a push whose job never starts leaves nothing that grows. One job at a time
+On the mini, `mini.py` refuses a dirty tree, or a HEAD other than the commit verify records, and pushes HEAD to the mini's `~/tron-ci/tron.git` under a nonce-owned `refs/tron-jobs/submissions/<nonce>`; concurrent submissions never update the same ref.
+The remote removes only its own ref, with its expected SHA. A session that returns no exit also attempts
+that cleanup from the caller; an unreachable cleanup is reported as unresolved, not silently successful. One job at a time
 (`~/tron-ci/jobs/gateway.lock`) checks out exactly that commit in `~/tron-ci/jobs/gateway`, cleaned except for the
-Gateway `node_modules`, refuses a Node binary or npm off the commit's `config/ci-toolchain.env`, reruns `npm ci`
+Gateway `node_modules` and generated iOS project (the native build-identity owner validates products
+before reuse), refuses a Node binary or npm off the commit's `config/ci-toolchain.env`, reruns `npm ci`
 only when `package.json`, `package-lock.json`, `third_party/` or the Node binary changed, and runs that commit's
 `gateway.py`, the Gateway's `node --test` files on the pinned Node (`mini.py node`), or the Python group's per-file command (stderr merged, the pinned Node first on PATH), each in its own process group killed before the lock is released, with a minimal PATH and only the mini user's HOME, USER, LOGNAME, SHELL and LANG. Output streams
 live; the Vitest output files come back with paths rewritten to this checkout, and the lane's exit code is the step's. With `--mini`, an unconfigured or
@@ -94,6 +109,48 @@ unreachable mini, a failed push, an off-pin toolchain, a job lock still held whe
 its whole process group, ends the session and SIGTERMs the mini job's child. Setup: `git config tron.verify.mini <user@host>` and
 `tron.verify.miniIdentity <key file>`, and a bare `~/tron-ci/tron.git` on the mini; until the pinned Node and Dafny are
 installed there, a job refuses with the `scripts/tron-node install` or (Python lanes) `scripts/tron proof bootstrap` command for its checkout. `verify --batch` runs every Gateway and Python run it starts on the mini, except the `mac-terminal` and `python-here` groups, which need this host ([batch](batch.md)); `mutate` runs its lanes here.
+
+## iOS checks on the mini
+
+Tron heavy tests, including simulator tests, run on the mini serially. Use
+`verify ... --gateway-host mini --ios-host mini`; `--ios-jobs 1` is the default. When the selection
+includes iOS work, `--ios-host mini` hands the entire verification to one normal mini lease. Cheap
+checks still precede the build on that host. The base is resolved to a committed source ancestor before
+transfer; the leased checkout also binds `origin/main` to the caller's committed main merge-base so
+native ownership ratchets see the same Git baseline. The remote invocation names local execution hosts
+so its own groups never reacquire the mini lease. `--plan` remains a submitting-host preview and records `iosHost`; it launches nothing. Without
+iOS work, the existing group routing remains in effect. A mini invocation refuses selections with
+`python-here` or `mac-terminal` before starting runners: those checks belong to their Mac's stores/SSH
+service. This includes `--all`; select a supported affected scope instead, never fall back to a local
+simulator run. Golden recording is local-only and cannot be combined with remote verification.
+
+The existing batch Apple path is not migrated by this flag. Its serial mini routing, explicit host-bound
+split and SHA-addressed asynchronous result retrieval are tracked in #2530. Do not launch that still-local
+Apple path as agent heavy-test evidence on this Mac.
+
+`scripts/tron test ios [--ios-host mini|local] <runner arguments>` defaults to the mini and invokes
+that commit's `scripts/tron-ios-test` there. A fresh source needs `checkpoint` (build and selected tests)
+or `build` before `run`; `run` still refuses missing or stale products. The underlying iOS helpers and
+explicit `--ios-host local` are host-local execution routes, not a fallback for a busy or unreachable mini.
+iOS and whole-verifier jobs use the existing `~/tron-ci/.ci-tools` dependency cache, outside the cleaned
+checkout. Prepare pinned XcodeGen there through the normal lease with its owning helper:
+
+```bash
+python3 tools/verify/mini.py python 'TRON_CI_TOOLS_DIR="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.ci-tools" scripts/install-ci-tools.sh xcodegen'
+```
+
+This is a pinned project test-tool dependency, not a live Gateway or app install.
+
+Output streams live. Each iOS/whole-verifier invocation returns a SHA-256-checked archive into a unique
+`test-results/mini/<sha-prefix>-<nonce>/`, prints `mini: artifacts: <directory>`, and keeps native logs,
+JSON reports and `.xcresult` bundles plus `receipt.json` (exact commit, execution host, lane and raw exit).
+Whole-verifier reports are `verify.json` and `verify/`; iOS runner output is `ios/`, profiling output is
+`profiles/`, and real-Gateway harness results/build attempts are `e2e/`. Fixture homes and credentials
+are not collected. Native reports retain execution-host paths. Archives reject links, unsafe paths and
+more than 2 GiB of content; missing, corrupt or refused transport is no result, never a test pass.
+A native red or exit 75 remains that lane's raw exit after artifacts return. Cancellation closes the
+session's input, signals and joins its owned process group, and releases the normal mini lease;
+the iOS helper owns its simulator release. No second scheduler, daemon or source checkout is created.
 
 ## Run output
 
@@ -156,7 +213,9 @@ host metrics on native case completion; other runners retain the lane-start host
 is raw OS free pages divided by physical memory (Node's `os.freemem()` definition on macOS), not the
 available-memory percentage reported by `memory_pressure`. The mini
 spools records outside its checkout and returns them through its existing nonce-bound transport
-to the invoking Mac's ledger, preserving the mini's readings. No result creates no invented cases.
+to the invoking Mac's ledger, preserving the mini's readings. iOS and whole-verifier jobs use that
+same spool and frame once; their native artifact archives exclude the temporary SQLite files.
+A transport refusal retains any completed native cases without inventing a failed-test row.
 XCTest uses the result bundle's test tree, with completed XCTest console cases retained when a
 bundle is unavailable. Parameterized native tests use the identities supplied by their native report.
 

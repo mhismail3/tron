@@ -1,24 +1,24 @@
 {
   "schemaVersion": 1,
   "name": "pi-subagents",
-  "version": "0.76.1-tron.15",
+  "version": "0.76.1-tron.16",
   "nodeVersion": "24.22.0",
   "npmVersion": "11.19.1",
   "sourceArchive": {
-    "path": "artifacts/pi-subagents-0.76.1-tron.15.tgz",
-    "sha256": "50a7f17342be49d462ca5311279d5df4e86b8bbd75ea830c738eff4a17bc3292"
+    "path": "artifacts/pi-subagents-0.76.1-tron.16.tgz",
+    "sha256": "3a21eabc774b95af78e46e968fdac12624364c05464b0fa378460959c7a353c9"
   },
   "lockfile": {
-    "path": "artifacts/pi-subagents-0.76.1-tron.15-package-lock.json",
-    "sha256": "2c97415ded5582d19568eda9e2bb7f53e919b82dab6ca346879a24854e5d9363"
+    "path": "artifacts/pi-subagents-0.76.1-tron.16-package-lock.json",
+    "sha256": "80790ba6e8f68de04cf901e9da5994ac9d00852bb13fa5a5eadef5b408ddf225"
   },
   "closure": {
-    "path": "artifacts/pi-subagents-0.76.1-tron.15-closure.tgz",
-    "sha512": "c92efc1c82c677cc20aeaf545ad5898b8c308b831ac25a1233c62256eed775a634e2f395a852baff7eb32cd10cff65ed04f586acf5d8803fa124f20c7b5bb6ca"
+    "path": "artifacts/pi-subagents-0.76.1-tron.16-closure.tgz",
+    "sha512": "90e65da6b9bd540d80f4fe52e497e73fd74bc3134beaba0b75b8e990555c9fdab65f13f628af3a11eac0c774442c0f053e65b93dbdfe077befe66cd558bc7094"
   },
   "fork": {
     "repository": null,
-    "commit": "2e088fc810cf9a215fe535652f51cb5ef3b83c22"
+    "commit": "255ce1322f8cd4aa3400e46df50bd7caf59e1ecc"
   },
   "upstream": {
     "package": "pi-subagents",
@@ -28,24 +28,24 @@
   "previous": {
     "schemaVersion": 1,
     "name": "pi-subagents",
-    "version": "0.76.1-tron.14",
+    "version": "0.76.1-tron.15",
     "nodeVersion": "24.22.0",
     "npmVersion": "11.19.1",
     "sourceArchive": {
-      "path": "artifacts/pi-subagents-0.76.1-tron.14.tgz",
-      "sha256": "60315eb63f29b8f48b529ef50dd93c69fe5b332faeeb2b61ae3e54b2f6b79371"
+      "path": "artifacts/pi-subagents-0.76.1-tron.15.tgz",
+      "sha256": "50a7f17342be49d462ca5311279d5df4e86b8bbd75ea830c738eff4a17bc3292"
     },
     "lockfile": {
-      "path": "artifacts/pi-subagents-0.76.1-tron.14-package-lock.json",
-      "sha256": "926a10bd9349c7aee181febe57f140116f1b04a238e26d8faf094ecfc8dcb84b"
+      "path": "artifacts/pi-subagents-0.76.1-tron.15-package-lock.json",
+      "sha256": "2c97415ded5582d19568eda9e2bb7f53e919b82dab6ca346879a24854e5d9363"
     },
     "closure": {
-      "path": "artifacts/pi-subagents-0.76.1-tron.14-closure.tgz",
-      "sha512": "af4f0d6f9b940bcdc12fa0c3aba69b3216754897bb7afd788c94a5492ab35223c35e0eec2b966292b9b13fc5bed25f99efef4bfb6513f46858bbf4f54aa17eed"
+      "path": "artifacts/pi-subagents-0.76.1-tron.15-closure.tgz",
+      "sha512": "c92efc1c82c677cc20aeaf545ad5898b8c308b831ac25a1233c62256eed775a634e2f395a852baff7eb32cd10cff65ed04f586acf5d8803fa124f20c7b5bb6ca"
     },
     "fork": {
       "repository": null,
-      "commit": "ade47bc3b9b53db97d3641be1da43cf77794a27a"
+      "commit": "2e088fc810cf9a215fe535652f51cb5ef3b83c22"
     },
     "upstream": {
       "package": "pi-subagents",
