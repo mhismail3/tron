@@ -3,7 +3,7 @@ import type { InputEnvelope, InputDelivery, InputTrigger, InputMessage, InputTri
 import type { ImageContent } from "../../kernel/pi/ai.js";
 import { utf8Page } from "../../kernel/host/utf8-page.js";
 import { isWakeEvidence, WakeInboxOwner, type HomeWakeEvidence, type HomeWakeEvidenceScope, type HomeWakeRoute, type HomeWakeTrigger } from "./home-wake-inbox.js";
-import { readCanonicalSession, visitCanonicalSessionEntries } from "../../kernel/session/canonical-reader.js";
+import { parseEntry, readCanonicalSession, visitCanonicalSessionEntries } from "../../kernel/session/canonical-reader.js";
 import { HOME_OBLIGATION, admitObligation, replayObligations, owed, type ObligationEvent, type ObligationRequest } from "./home-obligations.js";
 import { createHash } from "node:crypto";
 import type { NotificationService } from "../../notifications/notification-service.js";
@@ -28,6 +28,7 @@ import type { EpisodicMemory } from "../../episodic/episodic-memory.js";
 import { homeMemoryRevisionChanged, homeMemorySourceUnavailable, homeMemoryToolDisplay, type HomeMemoryViewRequest } from "../../episodic/home-memory-browser.js";
 import { GatewayError } from "../../errors.js";
 import type { TrustService } from "../../kernel/resources/trust-service.js";
+import { projectBranch } from "../../episodic/episodic-projection.js";
 import { HOME_MAX_CHAPTERS, EPISODIC_DEFAULTS, type EpisodicSummarizer } from "../../episodic/episodic-contract.js";
 import { EpisodicMemoryError } from "../../errors.js";
 import { EpisodicSourceChangedError } from "../../kernel/session/canonical-reader.js";
@@ -319,6 +320,15 @@ export class HomeOwner {
     }
     if (named.homeId !== record.homeId) throw refuse(new GatewayError("conflict", `task ${action}: "${taskId}" belongs to another Home`), "home-generation-changed");
     if (action === "status") return { control: await owner.controlRow(named, await this.continuation(named)), ...await this.taskStatus(taskId), host: owner.hostReading() };
+    if (action === "transcript") {
+      if (!named.sessionId) throw new GatewayError("not_found", "Task has no worker session");
+      const binding = this.routeBinding();
+      const entries = await this.options.runtimes.readTaskWorkerEntries(named.sessionId);
+      this.assertRouteBinding(binding);
+      const messages = projectBranch(entries.map(entry => parseEntry(JSON.stringify(entry))), EPISODIC_DEFAULTS, named.sessionId);
+      const text = messages.map(message => `entry=${message.entryId} kind=${message.kind}\n${message.text}`).join("\n\n");
+      return { taskId: named.taskId, sessionId: named.sessionId, untrusted: true, thinking: "excluded", ...utf8Page(text, "task transcript", request.offset, request.limit) };
+    }
     if (action === "report") {
       if (named.lifecycle !== "terminal") throw new GatewayError("conflict", `task report: "${taskId}" is ${named.lifecycle === "active" ? "still running" : "not started yet"}; it has no report until it settles`);
       const { text } = await this.immutableTaskReport(taskId);

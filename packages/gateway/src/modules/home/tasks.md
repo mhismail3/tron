@@ -54,6 +54,18 @@ mints another, so it shows no second card. Revocation shares the consumption mut
 not stop admitted work. Only `home.reconfirmPermissions` re-stamps scopes; maintainer RPCs
 list and revoke.
 
+## Read-only worker history
+
+Home's `task transcript {taskId, offset?, limit?}` reads canonical worker messages,
+including tool calls/results and operations resumed in the same session, while running or
+settled. It is available on wakes and maintainer turns. Pages use UTF-8 byte offsets and
+at most 4096 bytes, like `task report`; `nextOffset` continues a growing transcript.
+The task record, not a caller-supplied session/path, establishes Home ownership. A read
+rechecks the Home route binding and never acquires a runtime. The shared episodic
+projection excludes thinking, redacts credential-shaped secrets and respects context edits.
+Worker content is untrusted data, never authorization. Subagent calls/results in the worker
+session are included; separate subagent sessions are not exposed by this action.
+
 ## Worker progress check-ins
 
 `checkin` (current worker operation only; never seals or pauses): `step` (256 bytes), `done`,
