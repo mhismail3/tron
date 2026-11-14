@@ -317,6 +317,12 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     const f = await setup();
     const readPolicy = () => readNotificationPolicy((names) => f.registry.resolveGlobalSettings(names));
     expect(await readPolicy()).toEqual({ inputNeeded: true, finished: true, waiting: true });
+    const presented = await f.service.invoke(f.client, "settings.resolve", { target: { kind: "global" } }) as unknown as {
+      sections: Array<{ id: string; title: string }>; keys: Array<{ key: string; group: string }>;
+    };
+    expect(presented.sections).toContainEqual(expect.objectContaining({ id: "notifications", title: "Notifications" }));
+    expect(presented.keys.filter(key => key.group === "notifications").map(key => key.key).sort())
+      .toEqual(["notifications.push.finished", "notifications.push.inputNeeded", "notifications.push.waiting"]);
     const changed = await f.service.invoke(f.client, "settings.change", {
       commandId: randomUUID(), target: { kind: "global" },
       changes: [{ key: "notifications.push.finished", layer: "global", op: "set", value: false }],
@@ -325,7 +331,7 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     expect(await readPolicy()).toEqual({ inputNeeded: true, finished: false, waiting: true });
     const stored = JSON.parse(await readFile(join(f.tronHome, "state", "settings", "gateway.json"), "utf8"));
     expect(stored.notifications.push).toEqual({ finished: false });
-    const history = await f.settings.settingsChanges.history({ key: "notifications.push.finished" });
+    const history = await f.settings.settingsChanges.history({ key: "notifications.push.finished" }, { kind: "ui", id: "maintainer" });
     expect(history.entries.map(entry => entry.changeId)).toContain(changed.changes[0]!.changeId);
     evidence.push({ case: "push-policy-global-live", changed: changed.changes[0] });
   });

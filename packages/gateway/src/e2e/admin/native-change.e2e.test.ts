@@ -777,6 +777,7 @@ describe("push registration retry card is a typed native intent", () => {
       const settled = requested.then(value => ({ value }), error => ({ error }));
       const interaction = broker.interactions()[0]!;
       expect(interaction.method).toBe("change");
+      if (interaction.method !== "change") throw new Error("the push retry card is not a change review");
       expect(interaction.review).toMatchObject({ intent: "push-registration-retry", requiresTap: true, digest: review.digest });
       expect(() => broker.respond(interaction.id, interaction.hostEpoch, interaction.presentationRevision,
         { digest: "0".repeat(64), approved: true }, false, { deviceId: phone.identity, commandId: "stale-digest" })).toThrow(expect.objectContaining({ code: "invalid_request" }) as never);

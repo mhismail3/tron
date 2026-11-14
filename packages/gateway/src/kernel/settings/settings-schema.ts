@@ -13,6 +13,7 @@ export const SECTIONS: readonly SectionDeclaration[] = [
   { id: "tools", title: "Tools", description: "Available tools, code mode, and shell", order: 30, harness: true },
   { id: "run", title: "Connection", description: "Proxy and retained overrides", order: 50, harness: true },
   { id: "trust", title: "Trusted Projects", description: "Project trust decisions and default policy", order: 55, harness: true },
+  { id: "notifications", title: "Notifications", description: "Push alerts for agent events; the agent can change them", order: 57, harness: true },
   { id: "connections", title: "Mac Terminal", description: "This iPhone's key on the connected Mac", order: 58, harness: false },
   { id: "accounts", title: "Accounts", description: "Providers, custom models, and services", order: 60, harness: false },
   { id: "sources", title: "Sources", description: "Packages and how they install", order: 70, harness: false },

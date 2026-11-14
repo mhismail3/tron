@@ -36,6 +36,8 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   uses the shared settings row so its icon inherits the same sheet tint; known settings use
   semantic glyphs in the shared renderer, with control-kind glyphs for unknown keys. The
   groups are the app's; the Gateway serves schema sections, and unplaced sections join More.
+  Notifications is placed with no app link: its push alert keys are agent-changeable Global settings and the app
+  has no push editor (the D3 toggles stay removed).
   Model contains direct model/thinking; Workers & delegation contains all three ordered model queues
   and the task budget. Scoped Home navigation still names its workers/delegation destination Models.
   Queue drafts add available physical models through the shared picker, reorder/remove locally,
