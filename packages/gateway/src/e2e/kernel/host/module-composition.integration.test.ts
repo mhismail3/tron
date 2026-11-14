@@ -1,3 +1,4 @@
+import { DEFAULT_MAX_UPLOAD_BYTES } from "../../../config.js";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,7 +26,7 @@ describe("kernel/host production composition", () => {
     const trust = new TrustService(join(root, "agent"));
     const openAIModelEligibility = new OpenAIModelEligibility();
     const display = new DisplayOwner(new DisplayArtifactStore(tronHome), undefined, () => registry);
-    const composition = gatewayModules(() => ({ registry, display, openAIModelEligibility, home: { tronHome, agentDir: join(root, "agent"), trust, knowledge: () => undefined, settings: () => undefined } }));
+    const composition = gatewayModules(() => ({ registry, display, openAIModelEligibility, maxUploadBytes: DEFAULT_MAX_UPLOAD_BYTES, home: { tronHome, agentDir: join(root, "agent"), trust, knowledge: () => undefined, settings: () => undefined } }));
     const modules = await ModuleHost.start(composition.modules, { tronHome, log }, composition.runtimeOrder);
     const registry = new RuntimeRegistry({
       settingsSchema: TEST_SETTINGS_SCHEMA,

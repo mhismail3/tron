@@ -849,6 +849,67 @@ describe("Tron Home research tools", () => {
     recordCase("ledger-missing", { status: result.details?.status, leaked: result.text.includes("HOME-LEDGER-PRIVATE-CONTENT") });
   }, 60_000);
 
+  it("imports a named session file as a new canonical session and refuses relative or unscoped imports", async () => {
+    const f = await fixture("session-import");
+    const marker = "IMPORT-MARKER-7f3a";
+    const source = join(f.root, "to-import.jsonl");
+    const timestamp = new Date().toISOString();
+    await writeFile(source, [
+      { type: "session", version: 3, id: "external-source", timestamp, cwd: f.project },
+      { type: "message", id: "import-entry", parentId: null, timestamp,
+        message: { role: "user", content: [{ type: "text", text: marker }], timestamp: Date.now() } },
+    ].map(entry => JSON.stringify(entry)).join("\n") + "\n");
+    const [imported, relative, unscoped] = await toolAnswers(f, "import the named session", [
+      { name: "session_import", args: { path: source, cwd: f.project } },
+      { name: "session_import", args: { path: "to-import.jsonl", cwd: f.project } },
+      { name: "session_import", args: { path: source } },
+    ]);
+    expect(imported!.isError).toBe(false);
+    const { sessionId } = JSON.parse(imported!.text) as { sessionId: string };
+    expect(sessionId).not.toBe("external-source");
+    expect(JSON.stringify(imported!.details)).not.toContain(marker);
+    expect(JSON.stringify((await f.registry.acquire(sessionId)).canonicalSessionEntries())).toContain(marker);
+    expect(relative!.isError).toBe(true);
+    expect(relative!.text).toContain("absolute .jsonl file");
+    expect(unscoped!.isError).toBe(true);
+    expect(unscoped!.text).toContain("cwd is required in Home");
+    recordCase("session-import", { imported: imported!.isError === false, refused: [relative!.isError, unscoped!.isError] });
+  }, 60_000);
+
+  it("imports into an ordinary chat's own workspace and refuses a different workspace", async () => {
+    const f = await fixture("session-import-ordinary");
+    const marker = "IMPORT-ORDINARY-MARKER-9c1d";
+    const source = join(f.root, "ordinary-import.jsonl");
+    const timestamp = new Date().toISOString();
+    await writeFile(source, [
+      { type: "session", version: 3, id: "ordinary-source", timestamp, cwd: f.project },
+      { type: "message", id: "ordinary-entry", parentId: null, timestamp,
+        message: { role: "user", content: [{ type: "text", text: marker }], timestamp: Date.now() } },
+    ].map(entry => JSON.stringify(entry)).join("\n") + "\n");
+    const chat = await f.registry.create(f.project);
+    const calls = [
+      { id: "import-elsewhere", args: { path: source, cwd: f.root } },
+      { id: "import-here", args: { path: source } },
+    ];
+    f.faux.setResponses([
+      ...calls.map(call => fauxAssistantMessage(fauxToolCall("session_import", call.args, { id: call.id }), { stopReason: "toolUse" })),
+      fauxAssistantMessage("Done"),
+    ]);
+    await chat.prompt("Import the named session here");
+    await waitFor(() => !chat.isBusy && !chat.hasActiveAgentRun || undefined, "ordinary import turn settled", { boundMs: 30_000 });
+    const result = (id: string) => {
+      const entry = chat.canonicalSessionEntries().find(item => item.type === "message" && item.message.role === "toolResult" && item.message.toolCallId === id);
+      if (entry?.type !== "message" || entry.message.role !== "toolResult") throw new Error(`No canonical session_import result for ${id}`);
+      return entry.message;
+    };
+    expect(result("import-elsewhere").isError).toBe(true);
+    expect(result("import-elsewhere").content.map(part => part.type === "text" ? part.text : "").join("")).toContain("own workspace");
+    const imported = result("import-here");
+    expect(imported.isError).toBe(false);
+    const { sessionId } = JSON.parse(imported.content.map(part => part.type === "text" ? part.text : "").join("")) as { sessionId: string };
+    expect(JSON.stringify((await f.registry.acquire(sessionId)).canonicalSessionEntries())).toContain(marker);
+  }, 60_000);
+
   it("refuses cataloged children and malformed roots while reading an ordinary parent", async () => {
     const f = await fixture("delegated-admission", async (agentDir, cwd) => {
       const directory = join(agentDir, "sessions", "reader-fixture");

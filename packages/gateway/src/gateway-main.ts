@@ -290,7 +290,7 @@ const homeComposition: HomeComposition = {
   homeTaskDiagnostic,
 };
 const { modules, home, projects } = await startGatewayModules({ tronHome: config.tronHome, log: logger },
-  () => ({ registry: sessions, home: homeComposition, openAIModelEligibility, connections, scheduleToolOperations, sessionSearch,
+  () => ({ registry: sessions, home: homeComposition, openAIModelEligibility, connections, scheduleToolOperations, sessionSearch, maxUploadBytes: config.maxUploadBytes,
     display,
     recentModelsChanged: () => transport?.broadcast("models.recentChanged", {}), persistenceDiagnostic }));
 const globalProviderResources = await GlobalProviderResources.create({

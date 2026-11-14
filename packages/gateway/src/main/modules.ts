@@ -24,6 +24,7 @@ import type { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import type { SessionSearchService } from "../sessions/session-search-service.js";
+import { sessionImportModule } from "../sessions/session-import-module.js";
 
 export interface ModuleOwners extends RecentModelSignals {
   registry: RuntimeRegistry;
@@ -33,6 +34,7 @@ export interface ModuleOwners extends RecentModelSignals {
   connections?: ConnectionOwner | undefined;
   scheduleToolOperations?: ScheduleToolOperations | undefined;
   sessionSearch?: SessionSearchService | undefined;
+  maxUploadBytes: number;
 }
 
 export function gatewayModules(owners: () => ModuleOwners, projectOptions?: ConstructorParameters<typeof ProjectLifecycle>[2]) {
@@ -51,6 +53,7 @@ export function gatewayModules(owners: () => ModuleOwners, projectOptions?: Cons
     createCoreModule(() => ({ knowledge: owners().home.knowledge(), connections: owners().connections })),
     createWebResearchModule(() => owners().home.homeWebTransport),
     settingsModule,
+    sessionImportModule(() => ({ registry: registry(), maxBytes: owners().maxUploadBytes })),
     projects,
     askUserModule,
     createDisplayModule(() => owners().display),
