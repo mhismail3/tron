@@ -4256,7 +4256,9 @@ extension AppModel {
         case "auth.completed":
             providerAuth.dispatchCompletion(event.payload)
         case "device.preference.request":
-            devicePreference.handleRequest(event.payload)
+            if let admission = lifecycle.admission, admission.connectionID != nil {
+                devicePreference.handleRequest(event.payload, admission: admission, profileID: lifecycle.selectedProfileID)
+            }
         case "settings.changed":
             settingsTrust.noteSettingsChanged()
         case "trust.changed":

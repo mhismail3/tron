@@ -36,7 +36,7 @@ final class DevicePreferenceCoordinator {
         self.experiment = experiment
     }
 
-    func handleRequest(_ payload: JSONValue) {
+    func handleRequest(_ payload: JSONValue, admission: GatewayLifecycleCoordinator.Admission, profileID: String?) {
         guard let request = try? payload.decode(Request.self),
               request.key == SwiftAppExperiment.devicePreferenceKey else { return }
         let commandID = uuidSource.next().uuidString
@@ -58,12 +58,21 @@ final class DevicePreferenceCoordinator {
         default:
             return
         }
-        Task { [weak self] in await self?.respond(reply) }
+        Task { [weak self] in await self?.respond(reply, admission: admission, profileID: profileID) }
     }
 
-    private func respond(_ reply: Reply) async {
-        _ = try? await mutationExecutor.performValue(method: "device.preference.respond", commandID: reply.commandId) {
-            try await client.requestValue("device.preference.respond", reply)
+    private func respond(_ reply: Reply, admission: GatewayLifecycleCoordinator.Admission, profileID: String?) async {
+        _ = try? await mutationExecutor.performValue(
+            method: "device.preference.respond",
+            commandID: reply.commandId,
+            admission: admission,
+            profileID: profileID
+        ) {
+            try await client.requestValue(
+                "device.preference.respond",
+                reply,
+                expectedConnection: GatewayConnectionAdmission(connectionID: admission.connectionID)
+            )
         }
     }
 }

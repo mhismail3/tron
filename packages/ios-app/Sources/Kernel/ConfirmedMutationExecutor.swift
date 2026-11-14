@@ -54,7 +54,26 @@ final class ConfirmedMutationExecutor {
         send: () async throws -> JSONValue
     ) async throws -> JSONValue {
         guard let admission = lifecycle.generationAdmission else { throw CancellationError() }
-        let profileID = lifecycle.selectedProfileID
+        return try await performValue(
+            method: method,
+            commandID: commandID,
+            admission: admission,
+            profileID: lifecycle.selectedProfileID,
+            replayAdmission: replayAdmission,
+            replayMissingReceipt: replayMissingReceipt,
+            send: send
+        )
+    }
+
+    func performValue(
+        method: String,
+        commandID: String,
+        admission: GatewayLifecycleCoordinator.Admission,
+        profileID: String?,
+        replayAdmission: @escaping @MainActor () -> Bool = { true },
+        replayMissingReceipt: Bool = true,
+        send: () async throws -> JSONValue
+    ) async throws -> JSONValue {
         try lifecycle.require(admission)
         guard await lifecycle.waitForConnected(
             until: clock.now() + ConfirmedMutationConnectionPolicy.initialConnectionDeadline,
