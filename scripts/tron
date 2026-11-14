@@ -72,6 +72,9 @@ Commands:
                                     --plan includes dirty paths and exact commands.
                                     Live logs and partial test-results/verify/<sha>.json;
                                     no empty test passes, queue or landing gate.
+  verify --hunt [--rounds N] [--hours H] [--plan]
+                                    Repeat unchanged-main non-Apple suites on mini; zero-wait lease,
+                                    unique logs, partial receipts and first-red retention.
   verify --batch [--base <main-anchor> | --repeat] [--plan]
                                     Async full-main batch, run in a linked worktree (never
                                     the primary checkout); first use needs --base, then
