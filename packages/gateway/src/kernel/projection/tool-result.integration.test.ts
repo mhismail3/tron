@@ -2,6 +2,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
+import { once } from "node:events";
+import { WebSocketServer } from "ws";
+import { waitFor } from "../../../test-support/wait-for.js";
 import { ModuleHost } from "../host/module-host.js";
 import { workspaceModule } from "../../workspace/workspace-module.js";
 import { createDisplayModule } from "../../display/display-modules.js";
@@ -47,6 +50,71 @@ it("K3.toolResultProjection keeps provenance, exact call/session receipts and lo
       views.dispose();
       await rm(home, { recursive: true, force: true });
     }
+  }
+});
+
+it("K3.toolResultProjection binds Chrome's consent endpoint to a retained browser target and refuses a successor", async () => {
+  const home = await mkdtemp(join(tmpdir(), "tron-chrome-attach-"));
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0, path: "/devtools/browser" });
+  await once(server, "listening");
+  const address = server.address();
+  if (typeof address !== "object" || address === null) throw new Error("Fixture did not listen");
+  const endpoint = `ws://127.0.0.1:${address.port}/devtools/browser`;
+  let target = "original-browser-target";
+  const commands: string[] = [];
+  server.on("connection", socket => socket.on("message", raw => {
+    const command = JSON.parse(String(raw));
+    commands.push(command.method);
+    if (command.method === "Target.getTargetInfo") socket.send(JSON.stringify({ id: command.id,
+      ...(command.params?.targetId && command.params.targetId !== target
+        ? { error: { code: -32602, message: "No such target" } }
+        : { result: { targetInfo: { type: "browser", targetId: target } } }) }));
+  }));
+  const views = new BrowserLiveViewRegistry();
+  let host: ModuleHost | undefined;
+  try {
+    host = await ModuleHost.start([workspaceModule, createDisplayModule(() => ({ artifacts: new DisplayArtifactStore(home), liveViews: views }))], {
+      tronHome: home, log: { log: () => {} },
+    }, []);
+    const sessionId = "chrome-session";
+    const loadToken = views.beginSessionLoad(sessionId);
+    const result = { content: [{ type: "text", text: "Attached" }], details: {
+      agentBrowserStarted: true, command: "get", subcommand: "cdp-url", exitCode: 0, resultCategory: "success",
+      sessionName: "chrome", data: { cdpUrl: endpoint },
+    } };
+    const policy = host.policy("toolResultProjection")!();
+    const input = { owner: { id: "browser", title: "Browser", source: "git:github.com/fitchmultz/pi-agent-browser-native" },
+      toolName: "agent_browser", toolCallId: "attach", result, sessionId, runtimeGeneration: "runtime", loadToken };
+    const observed = await policy.observeBrowserResult(input) as { details: Record<string, unknown> };
+    const reference = admitBrowserToolReference("agent_browser", "attach", observed.details, sessionId);
+    expect(reference).toBeDefined();
+    const descriptor = reference!.descriptor;
+    expect(views.describe(sessionId, descriptor.viewId, descriptor.generation)).toEqual(descriptor);
+    expect(commands).toEqual(["Target.getTargetInfo"]);
+    expect(server.clients.size).toBe(1);
+    const reused = await policy.observeBrowserResult({ ...input, toolCallId: "reuse" }) as { details: Record<string, unknown> };
+    expect(admitBrowserToolReference("agent_browser", "reuse", reused.details, sessionId)?.descriptor).toEqual(descriptor);
+    expect(server.clients.size).toBe(1);
+    for (const socket of server.clients) socket.close();
+    await waitFor(() => server.clients.size === 0, "original browser disconnect");
+    await waitFor(() => {
+      try { views.describe(sessionId, descriptor.viewId, descriptor.generation); return false; } catch { return true; }
+    }, "the original view's terminal retirement");
+    target = "successor-browser-target";
+    expect(() => views.open(sessionId, descriptor.viewId, descriptor.generation, "late-viewer")).toThrow("no longer available");
+    const successor = await policy.observeBrowserResult({ ...input, toolCallId: "successor" }) as { details: Record<string, unknown> };
+    const next = admitBrowserToolReference("agent_browser", "successor", successor.details, sessionId)!.descriptor;
+    expect(next.generation).not.toBe(descriptor.generation);
+    expect(next.viewId).not.toBe(descriptor.viewId);
+    views.beginSessionLoad(sessionId);
+    await waitFor(() => server.clients.size === 0, "load retirement closes the browser identity socket");
+    expect(await policy.observeBrowserResult(input)).toBe(result);
+  } finally {
+    await host?.stop();
+    views.dispose();
+    for (const socket of server.clients) socket.terminate();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    await rm(home, { recursive: true, force: true });
   }
 });
 
