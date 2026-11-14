@@ -284,8 +284,10 @@ describe("settings package update installs one exact version through the owner",
       expect(await installedPathOf(`${source}@${second}`)).toBe(installedPath);
 
       await writeFile(join(installedPath, "index.txt"), "local edit\n");
-      await expect(packages.updatePackage({ cwd, source: `${source}@${second}`, version: third, reason: "Dirty" }, requester, async () => undefined))
+      await expect(packages.updatePackage({ cwd, source: `${source}@${second}`, version: third, reason: "Dirty" }, requester, async (_review, apply) => apply({ deviceId: "ios-device", commandId: "git-dirty" })))
         .rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("local edits") });
+      expect(await readFile(join(installedPath, "index.txt"), "utf8")).toBe("local edit\n");
+      expect(await gitHead(installedPath)).toBe(second);
       await execFileAsync("git", ["-C", installedPath, "checkout", "--", "index.txt"]);
 
       const pinnedReview = await packages.updatePackage({ cwd, source: `${source}@${second}`, version: third, reason: "Pin move" }, requester);

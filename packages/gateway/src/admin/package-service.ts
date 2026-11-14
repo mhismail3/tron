@@ -62,7 +62,7 @@ async function gitRead(cwd: string, args: string[]): Promise<string> {
   const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
   for (const key of Object.keys(env)) if (key.startsWith("GIT_") && key !== "GIT_TERMINAL_PROMPT") delete env[key];
   try {
-    return (await execFileAsync("git", ["--no-pager", "-c", "core.hooksPath=/dev/null", ...args], { cwd, env, timeout: 30_000, maxBuffer: 1024 * 1024 })).stdout.trim();
+    return (await execFileAsync("git", ["--no-pager", "--no-optional-locks", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", ...args], { cwd, env, timeout: 30_000, maxBuffer: 1024 * 1024 })).stdout.trim();
   } catch {
     throw new GatewayError("conflict", "Git could not inspect the installed checkout; inspect it before retrying");
   }
@@ -291,9 +291,6 @@ export class PackageService {
     if (normalizedGitLocator(origin) !== normalizedGitLocator(repo)) {
       throw new GatewayError("conflict", "The installed checkout's origin does not match the configured repository; refusing to replace it");
     }
-    if (await gitRead(installedPath, ["status", "--porcelain", "--untracked-files=no"]) !== "") {
-      throw new GatewayError("conflict", "The installed checkout has local edits to tracked files; refusing to replace them");
-    }
     const from = await gitRead(installedPath, ["rev-parse", "HEAD"]);
     if (from === request.version) throw new GatewayError("conflict", `${repo} is already at ${from}; nothing to update`);
     const target = `${repo}@${request.version}`;
@@ -317,6 +314,9 @@ export class PackageService {
     return changes.withTarget({ kind: "global" }, () => this.trackAdministrative(work => this.mutex.run(async () => {
       const plan = await this.planUpdate(request, requester);
       if (plan.review.digest !== digest) throw new GatewayError("conflict", "The package changed since review; nothing was applied");
+      if (plan.kind === "git" && await gitRead(plan.installedPath!, ["status", "--porcelain", "--untracked-files=no"]) !== "") {
+        throw new GatewayError("conflict", "The installed checkout has local edits to tracked files; refusing to replace them");
+      }
       await changes.record.recover();
       const changeId = randomUUID();
       const entry = { commandId: accepted.commandId, actor: { kind: "ui" as const, id: accepted.deviceId }, target: { kind: "global" as const },
