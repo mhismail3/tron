@@ -61,7 +61,7 @@ the test's module; `session-shapes` and `session-entries`, like the SDK behavior
 keep theirs in `test-fixtures/pi-sdk/` and write their actual traces to
 `test-results/session-*.actual.json`. `test-support/lock-scenarios.ts` holds the scenarios that a
 scenario lock and the consolidated locks (`client-event-schemas`, `session-entries`)
-both run; `client-event-schemas` adds one Session-scope `settings.change` of its own. Goldens are darwin-specific, as for the SDK boundary trace:
+both run; `client-event-schemas` adds one Session-scope `settings.change` of its own. Its prompt stream holds an empty-history socket write through settlement so later snapshots coalesce into a real rebaseline. After releasing it, the lock fences delivery with `session.context`, publishes one settled snapshot through the production owner and awaits its socket event before recording. Both snapshot schemas therefore cover thinking content without depending on write-callback timing. Goldens are darwin-specific, as for the SDK boundary trace:
 the `computer` module registers only on darwin.
 
 ## Locks

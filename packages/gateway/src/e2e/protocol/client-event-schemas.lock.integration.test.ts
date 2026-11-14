@@ -6,6 +6,7 @@ import {
 } from "../../../test-support/lock-scenarios.js";
 import { compareWithGolden, lockPaths, lockUpdateRequested, type TraceValue } from "../../../test-support/scenario-lock.js";
 import { sessionSettingChange } from "../../../test-support/session-settings-change.js";
+import { waitFor } from "../../../test-support/wait-for.js";
 
 const MODULE = "gateway/e2e";
 const owned: Array<() => Promise<void>> = [];
@@ -26,8 +27,16 @@ describe("gateway/protocol client event schemas", () => {
       ["run-queue-control", queueControlScenario]] as const) {
       const session = await openLockSession(`client-events-${name}`);
       own(session.gateway);
-      await scenario(session);
+      if (name === "run-prompt-stream") await promptStreamScenario(session, true);
+      else await scenario(session);
       await session.gateway.settled(session.sessionId);
+      if (name === "run-prompt-stream") {
+        expect((await session.client.request("session.context", { sessionId: session.sessionId })).ok).toBe(true);
+        const start = session.client.events.length;
+        (await session.gateway.registry.acquire(session.sessionId)).publishSnapshot();
+        await waitFor(() => session.client.events.slice(start).some((event) =>
+          event.topic === "session.snapshot" && event.sessionId === session.sessionId), "the settled thinking snapshot to reach the schema recorder");
+      }
       record(session.gateway);
     }
     {
