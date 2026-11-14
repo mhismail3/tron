@@ -66,7 +66,14 @@ native tap. Disabling, removing, or lowering exposure applies as routine. Undo u
 its own entry. The typed value carries no inline credentials: env, headers, OAuth and secret-named tokens are refused. Tron-made change entries retain the typed command, args or URL for Undo; outside-edit entries retain only a digest.
 
 `SettingsToolAccess` resolves and changes the current session or Home's delegated
-worker. Routine reversible changes, tool selection included, apply, log and can be undone.
+worker. Its `history` action pages the durable audit (50 records by default, at most 200),
+optionally filtered by key, using the returned cursor. The caller's actor is threaded into
+`SettingsChangePath.history` and `undo`, where `historyVisible` decides scope; `history` returns public entries (`publicHistoryEntry`: before/after only for a declared key or record subject, never for a flagged, retired or unknown key), so the RPC and the tool share one redaction: an agent sees and
+undoes only changes whose target is its session or that its session initiated (its Global changes
+included); Tron Home and the maintainer see and undo every change. `undo` takes a change id and
+reason; the target session's own store is acquired through its owner, never Home's snapshot.
+Writer grants, exact native taps, expected-value checks and busy/idle rules still apply.
+Routine reversible changes, tool selection included, apply, log and can be undone.
 Widening trust/executable authority, privacy access or spend, and any install or
 irreversible effect, require an exact native tap; narrowing them is routine. Writer
 grants and scope admission apply first.
@@ -77,6 +84,9 @@ unanswered after a day (`CHANGE_REVIEW_TTL_MS`) with nothing applied. Settings, 
 profile edits, project lifecycle and Home task grants all use it.
 
 A required review alone has no effects. The model tool supplies no digest argument.
+An agent's or Home's Undo follows the same rule through the shared `withConfirmation` wrapper: an Undo
+that needs a tap shows the same card, its acceptance re-reads the undone entry under its target stripe,
+and a stale or already-undone acceptance refuses with no effect.
 The built-in host's dedicated `change` interaction binds a server-owned typed callback,
 not a generic form. A paired-native response checks identity, epoch, revision, answer
 shape and exact digest, then consumes the interaction before awaiting that callback.
@@ -114,7 +124,9 @@ proofs live in `settings-three-layer.e2e.test.ts`.
 Expected-before checks, including Session-owned fields, run inside the target stripe.
 Undo checks both the original entry's history-derived consumption and its expected
 current-after value under that same stripe. Undo of Undo names the new fact, not the
-original operation. Redacted/action facts are not generically undoable.
+original operation. Redacted/action facts are not generically undoable. Key declarations
+contain no credentials or redaction mode; credential-bearing record subjects retain their
+digest-only outside audit and redaction-aware history and Undo guards.
 
 Segment replacement precedes index publication. Recovery adopts only complete,
 unambiguous bounded published bytes and never replays effects. Corrupt history

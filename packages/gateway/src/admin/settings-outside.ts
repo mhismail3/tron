@@ -185,13 +185,16 @@ export class OutsideChanges {
     return values;
   }
 
-  private observed(value: ObservedValue): ObservedValue {
-    if (value.value === undefined || !(recordSubject(value.key) || this.schemaKeyOrUndefined(value.key)?.redacted)) return value;
-    const { value: secret, ...rest } = value;
-    return { ...rest, hash: createHash("sha256").update(JSON.stringify(secret)).digest("hex") };
-  }
-
   private schemaKeyOrUndefined(id: string): KeyDeclaration | undefined { return this.schema.KEYS.find(key => key.id === id); }
+
+  private pruneUndeclared(state: StoreState): void {
+    for (const map of [state.values, state.outside, state.tron]) {
+      for (const instance of Object.keys(map)) {
+        const key = instance.split("\u0000")[0]!;
+        if (this.schemaKeyOrUndefined(key) === undefined && recordSubject(key) === undefined) delete map[instance];
+      }
+    }
+  }
 
   private async compareStores(stores: readonly ObservedStore[], heads?: ReadonlyMap<string, GitHeadState | undefined>): Promise<void> {
     const entries: ChangeEntry[] = [];
@@ -340,12 +343,13 @@ export class OutsideChanges {
     if (!current) return;
     const id = storeId(store);
     const state = document.stores[id];
-    const values = Object.fromEntries([...current].map(([instance, value]) => [instance, this.observed(value)]));
+    const values = Object.fromEntries(current);
     const git = isProjectStore(store) ? await gitHeadState(store.root) : undefined;
     if (!state) {
       document.stores[id] = { digest: digestOf(text), values, tron: {}, outside: {}, ...(git ? { head: git.head, staged: [] } : {}) };
       return;
     }
+    this.pruneUndeclared(state);
     for (const instance of Object.keys(state.outside)) {
       if (fingerprint(state.values[instance]) !== fingerprint(values[instance])) delete state.outside[instance];
     }
@@ -428,20 +432,21 @@ export class OutsideChanges {
     this.changed = true;
     if (!state) {
       document.stores[id] = {
-        digest, values: Object.fromEntries([...current].map(([instance, value]) => [instance, this.observed(value)])), tron: {}, outside: {},
+        digest, values: Object.fromEntries(current), tron: {}, outside: {},
         ...(git ? { head: git.head, staged: [] } : {}),
       };
       if (!planned) return [];
       state = document.stores[id]!;
     }
     const entries: ChangeEntry[] = [];
+    this.pruneUndeclared(state);
     const instances = new Set([...Object.keys(state.values), ...current.keys()]);
     for (const instance of instances) {
       const before = state.values[instance];
-      const after = current.has(instance) ? this.observed(current.get(instance)!) : undefined;
+      const after = current.get(instance);
       const write = planned?.get(instance);
       if (write) {
-        const landed = write.value === undefined ? after === undefined : after !== undefined && fingerprint(after) === fingerprint(this.observed({ key: after.key, value: write.value }));
+        const landed = write.value === undefined ? after === undefined : after !== undefined && fingerprint(after) === fingerprint(recordSubject(after.key) ? { key: after.key, hash: digestOf(JSON.stringify(write.value)) } : { key: after.key, value: write.value });
         const recorded = applied?.get(write.changeId);
         if (landed && recorded) {
           state.tron[instance] = recorded.changeId;
@@ -463,7 +468,7 @@ export class OutsideChanges {
       };
       delete state.tron[instance];
     }
-    state.values = Object.fromEntries([...current].map(([instance, value]) => [instance, this.observed(value)]));
+    state.values = Object.fromEntries(current);
     state.digest = digest;
     if (git) {
       if (git.head !== (state.head ?? null) && store.kind === "project") entries.push(...await this.committed(store, state, git.head, at));
@@ -474,10 +479,9 @@ export class OutsideChanges {
 
   private outsideEntry(store: ObservedStore, value: ObservedValue, before: ObservedValue | undefined, after: ObservedValue | undefined,
     replaced: string | undefined, git: { head: string | null; branch: string | null; root: string; path: string } | undefined, at: string): ChangeEntry {
-    const key = this.schemaKeyOrUndefined(value.key);
     const subject = recordSubject(value.key);
     const qualifiers = value.qualifiers ?? {};
-    const redacted = key?.redacted === true || subject !== undefined;
+    const redacted = subject !== undefined;
     const file = observedFile(store, this.agentDir);
     return {
       changeId: randomUUID(), at, actor: { kind: "outside", id: file },

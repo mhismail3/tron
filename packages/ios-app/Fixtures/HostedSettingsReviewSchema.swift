@@ -22,7 +22,7 @@ enum HostedSettingsReviewSchema {
         let layers = id.hasPrefix("model.queue") || id == "permissions.budget.task" ? ["session", "global"]
             : ["model.ref[role=chat]", "model.thinking[role=chat]", "tools.active"].contains(id) ? ["session", "project", "global"]
             : id.hasPrefix("tools.codemode") || id.hasPrefix("tools.shell") || id == "model.thinkingBudgets" ? ["project", "global"]
-            : id == "permissions.defaultProjectTrust" || id == "run.httpProxy" || id == "run.cacheWarming" ? ["global"]
+            : id == "permissions.defaultProjectTrust" || id == "run.cacheWarming" ? ["global"]
             : ["session", "project", "global"]
         var row: [String: JSONValue] = [
             "key": .string(id), "group": .string(group), "value": value, "display": .string(display),
@@ -103,7 +103,6 @@ enum HostedSettingsReviewSchema {
         key("run.transport", "run", "Transport", .string("auto"), "Automatic", order: 90, help: "How requests reach the provider.", essential: true),
         key("run.httpIdleTimeoutMs", "run", "Idle timeout", .number(300_000), "300 s", order: 100, help: "How long a silent HTTP stream may idle."),
         key("run.websocketConnectTimeoutMs", "run", "WebSocket connect timeout", .number(10_000), "10 s", order: 110, help: "How long a WebSocket connection may take to open."),
-        key("run.httpProxy", "run", "HTTP proxy", .null, "Not set", "secret", order: 120, help: "Proxy for model requests. Applies after a restart."),
         key("run.cacheWarming", "run", "Cache warming", .string("off"), "Off", order: 130, help: "Keep model prompt caches warm."),
         key("permissions.defaultProjectTrust", "trust", "Default trust policy", .string("ask"), "Ask", "choice", order: 20, help: "What happens with a project that has no trust decision.", options: [.object(["value": .string("ask"), "label": .string("Ask")])]),
         key("model.thinkingBudgets", "workers", "Thinking budgets", .object(["high": .number(16_384)]), "1 budget", order: 60, help: "Token budget per thinking level, for models that take one."),

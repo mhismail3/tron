@@ -77,7 +77,6 @@ struct SettingsRendererRow: View {
         case "permissions.budget.task": return "chart.pie"
         case "context.compaction.enabled": return "arrow.down.right.and.arrow.up.left"
         case "model.thinking[role=summarizer]": return "text.badge.checkmark"
-        case "run.httpProxy": return "network"
         default: return nil
         }
     }
@@ -88,7 +87,6 @@ struct SettingsRendererRow: View {
         return switch control {
         case .toggle: "switch.2"
         case .text: "character.cursor.ibeam"
-        case .secret: "key"
         case .list: "list.bullet"
         case .checklist: "checklist"
         case .catalog: "square.stack.3d.up"
@@ -171,7 +169,7 @@ struct SettingsRendererRow: View {
     }
 
     private var display: String {
-        return setting.value == nil && setting.display == "Not set" && presentation.redacted != true ? "—" : setting.display
+        return setting.value == nil && setting.display == "Not set" ? "—" : setting.display
     }
 
     @ViewBuilder
@@ -211,10 +209,6 @@ struct SettingsRendererRow: View {
         case .text:
             SettingsRendererTextRow(title: title, icon: icon, subtitle: entrySubtitle, example: presentation.entry?.example,
                                     value: setting.value?.stringValue ?? "", onCommit: { onChange(.string($0)) })
-        case .secret:
-            TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: display) {
-                SettingsSecretEditor(title: title, help: presentation.help, onChange: onChange)
-            }
         case .list:
             if setting.value == nil || setting.value?.arrayValue?.allSatisfy({ $0.stringValue != nil }) == true {
                 let values = setting.value?.arrayValue ?? []

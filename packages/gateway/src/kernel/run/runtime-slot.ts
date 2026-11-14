@@ -56,7 +56,7 @@ import { workerFinishTurn } from "../delegation/worker-turn-boundary.js";
 
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../delegation/task-report.js";
 import { ORDINARY_SESSION_PROFILE, type SessionProfile } from "../host/session-profile.js";
-import type { ChangeContext, SessionAppliers, SettingsChangePath, SettingsNotice } from "../settings/settings-change.js";
+import { historyVisible, type ChangeContext, type SessionAppliers, type SettingsChangePath, type SettingsNotice } from "../settings/settings-change.js";
 import { setPath, type SessionSettingsSource, type SettingsModel } from "../settings/settings-model.js";
 import { SETTINGS_OUTCOME_MESSAGE, CONTEXT_DELIVERY_RECEIPT_TYPE } from "../receipts/delivery-tags.js";
 import { type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting, type LayerId } from "../settings/tool-contract.js";
@@ -213,6 +213,7 @@ export interface RuntimeSlotDependencies {
   homeTaskSettings: (sessionId: string, taskId: string, purpose: "resolve" | "change") => Promise<{
     taskId: string; sessionId: string; operationId: string | null; state: string; resolvedFrom?: string; slot: RuntimeSlot;
   }>;
+  settingsTargetSlot: (sessionId: string) => Promise<RuntimeSlot>;
   validateTaskMarker: (sessionId: string, marker: unknown) => Promise<void>;
   homeTaskDiagnostic?: (record: TaskWorkerDiagnostic) => void;
   managedSubagents?: ManagedSubagents;
@@ -646,6 +647,10 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     };
   }
 
+  private async foreignSettingsSession(sessionId: string): Promise<SessionSettingsSource & { appliers: SessionAppliers }> {
+    return (await this.dependencies.settingsTargetSlot(sessionId)).settingsTargetSession();
+  }
+
   private settingsToolAccess(): SettingsToolAccess | undefined {
     const owners = this.dependencies.settings();
     if (!owners) return undefined;
@@ -667,10 +672,22 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       return { task, slot, target: { kind: "session" as const, sessionId: task.sessionId } };
     };
     return {
+      history: (input, toolCallId) => owners.changes.history(input, actor(toolCallId)),
+      undo: async (changeId, input) => {
+        const toolActor = actor(input.toolCallId);
+        const entry = (await owners.changes.record.entry(changeId))?.entry;
+        const session = !entry || entry.target.kind !== "session" || !historyVisible(toolActor, entry) ? undefined
+          : entry.target.sessionId === this.id ? source() : await this.foreignSettingsSession(entry.target.sessionId);
+        return owners.changes.undo(changeId, {
+          actor: toolActor, reason: input.reason, ...(session ? { session } : {}),
+          ...(entry?.target.kind === "home" && this.usesHomeSettings ? { homeChapter: chapter() } : {}),
+          ...(input.confirm ? { confirm: input.confirm } : {}),
+        });
+      },
       resolve: async (keys, taskId) => {
         if (taskId === undefined) return owners.model.resolve(target, source(), keys);
         const { task, slot, target: workerTarget } = await worker(taskId, "resolve");
-        const resolution = await owners.model.resolve(workerTarget, slot.taskWorkerSettingsSession(), keys);
+        const resolution = await owners.model.resolve(workerTarget, slot.settingsTargetSession(), keys);
         return { ...resolution, worker: { ...task, ...slot.taskWorkerSettingsState() } };
       },
       change: async (changes, input) => {
@@ -684,7 +701,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         const { task, slot, target: workerTarget } = await worker(input.taskId, "change");
         const result = await owners.changes.change(workerTarget, changes, {
           actor: { kind: "home", id: this.id, sessionId: this.id, toolCallId: input.toolCallId, taskId: task.taskId },
-          reason: input.reason, session: slot.taskWorkerSettingsSession(), ...(input.confirm ? { confirm: input.confirm } : {}),
+          reason: input.reason, session: slot.settingsTargetSession(), ...(input.confirm ? { confirm: input.confirm } : {}),
           ...(input.dryRun ? { dryRun: true } : {}),
         });
         return { ...result, worker: { ...task, ...slot.taskWorkerSettingsState() } };
@@ -692,7 +709,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     };
   }
 
-  taskWorkerSettingsSession(): SessionSettingsSource & { appliers: SessionAppliers } {
+  settingsTargetSession(): SessionSettingsSource & { appliers: SessionAppliers } {
     const read = () => {
       if (this.disposed) throw new GatewayError("not_found", "The worker runtime that owned this settings review has retired");
       return this.settingsSessionLayer();

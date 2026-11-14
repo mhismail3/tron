@@ -1154,17 +1154,25 @@
           }
         },
         {
-          "description": "Read and change Tron settings through typed writes. Reversible changes apply, are logged and can be undone. Only irreversible effects, trust/authority, privacy expansion, spend and installs need the exact shared native tap. dryRun validates and returns before/after without effects. Home may target its task worker; running workers adopt from the next model request and are signalled.",
+          "description": "Read and change Tron settings through typed writes. Reversible changes apply and are logged. Read durable audit records with history; reverse a change with undo and its changeId. Only irreversible effects, trust/authority, privacy expansion, spend and installs need the exact shared native tap. dryRun validates and returns before/after without effects. Home may target its task worker; running workers adopt from the next model request and are signalled.",
           "name": "settings",
           "parameters": {
             "additionalProperties": false,
             "properties": {
               "action": {
-                "description": "resolve: read current values and scopes. change: apply/log/Undo reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card.",
+                "description": "resolve: read current values and scopes. history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card.",
                 "enum": [
                   "resolve",
-                  "change"
+                  "change",
+                  "history",
+                  "undo"
                 ],
+                "type": "string"
+              },
+              "changeId": {
+                "description": "undo (required): changeId from history.",
+                "maxLength": 200,
+                "minLength": 1,
                 "type": "string"
               },
               "changes": {
@@ -1228,9 +1236,21 @@
                 "minItems": 1,
                 "type": "array"
               },
+              "cursor": {
+                "description": "history: nextCursor from the previous page.",
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
               "dryRun": {
                 "description": "change: validate and return exact before/after without applying.",
                 "type": "boolean"
+              },
+              "key": {
+                "description": "history: include only this key.",
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
               },
               "keys": {
                 "description": "resolve: the key ids to read; omit for every key.",
@@ -1242,8 +1262,14 @@
                 "maxItems": 200,
                 "type": "array"
               },
+              "limit": {
+                "description": "history: maximum records per page (default 50).",
+                "maximum": 200,
+                "minimum": 1,
+                "type": "integer"
+              },
               "reason": {
-                "description": "change (required): why, for the maintainer.",
+                "description": "change/undo (required): why, for the maintainer.",
                 "maxLength": 2000,
                 "minLength": 1,
                 "type": "string"
@@ -1861,17 +1887,25 @@
           }
         },
         {
-          "description": "Read and change Tron settings through typed writes. Reversible changes apply, are logged and can be undone. Only irreversible effects, trust/authority, privacy expansion, spend and installs need the exact shared native tap. dryRun validates and returns before/after without effects. Home may target its task worker; running workers adopt from the next model request and are signalled.",
+          "description": "Read and change Tron settings through typed writes. Reversible changes apply and are logged. Read durable audit records with history; reverse a change with undo and its changeId. Only irreversible effects, trust/authority, privacy expansion, spend and installs need the exact shared native tap. dryRun validates and returns before/after without effects. Home may target its task worker; running workers adopt from the next model request and are signalled.",
           "name": "settings",
           "parameters": {
             "additionalProperties": false,
             "properties": {
               "action": {
-                "description": "resolve: read current values and scopes. change: apply/log/Undo reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card.",
+                "description": "resolve: read current values and scopes. history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card.",
                 "enum": [
                   "resolve",
-                  "change"
+                  "change",
+                  "history",
+                  "undo"
                 ],
+                "type": "string"
+              },
+              "changeId": {
+                "description": "undo (required): changeId from history.",
+                "maxLength": 200,
+                "minLength": 1,
                 "type": "string"
               },
               "changes": {
@@ -1935,9 +1969,21 @@
                 "minItems": 1,
                 "type": "array"
               },
+              "cursor": {
+                "description": "history: nextCursor from the previous page.",
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
               "dryRun": {
                 "description": "change: validate and return exact before/after without applying.",
                 "type": "boolean"
+              },
+              "key": {
+                "description": "history: include only this key.",
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
               },
               "keys": {
                 "description": "resolve: the key ids to read; omit for every key.",
@@ -1949,8 +1995,14 @@
                 "maxItems": 200,
                 "type": "array"
               },
+              "limit": {
+                "description": "history: maximum records per page (default 50).",
+                "maximum": 200,
+                "minimum": 1,
+                "type": "integer"
+              },
               "reason": {
-                "description": "change (required): why, for the maintainer.",
+                "description": "change/undo (required): why, for the maintainer.",
                 "maxLength": 2000,
                 "minLength": 1,
                 "type": "string"

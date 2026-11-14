@@ -21,16 +21,15 @@ describe("codemode classifier usage projection", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-codemode-classify-cost-"));
     roots.push(root);
     const agentDir = join(root, "agent");
-    const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
     const extensions = join(cwd, ".pi", "extensions");
     await Promise.all([
-      mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true }),
+      mkdir(agentDir, { recursive: true }),
       mkdir(extensions, { recursive: true }), mkdir(cwd, { recursive: true }),
     ]);
     const sdkUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
     await Promise.all([
-      writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, defaultTools: ["+codemode"] })),
+      writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultTools: ["+codemode"] })),
       writeFile(join(extensions, "codemode.ts"), `import { createCodemodeExtension } from ${JSON.stringify(sdkUrl)}; export default createCodemodeExtension({ mode: "on" });\n`),
     ]);
     const trust = new TrustService(agentDir);

@@ -22,6 +22,7 @@ import { ExtensionPresentationStore } from "../../kernel/host/presentation/exten
 import { changeReview } from "../../kernel/settings/settings-types.js";
 import { SettingsChangeRecord } from "../../kernel/settings/settings-record.js";
 import { SettingsChangePath } from "../../kernel/settings/settings-change.js";
+import type { RuntimeSlot } from "../../kernel/run/runtime-slot.js";
 
 afterEach(disposeFixtures);
 const phone = { id: "phone", identity: "device:phone", isLocal: false, isSubscribed: () => true,
@@ -82,6 +83,18 @@ async function saveCase(name: string, evidence: unknown) {
   await mkdir(directory, { recursive: true });
   await writeFile(join(directory, `${name}.json`), `${JSON.stringify(evidence, null, 2)}\n`);
 }
+
+async function settingsTurn(f: Awaited<ReturnType<typeof fixture>>, chat: RuntimeSlot, args: Record<string, unknown>, id: string) {
+  f.faux.setResponses([fauxAssistantMessage([fauxToolCall("settings", args, { id })], { stopReason: "toolUse" }), fauxAssistantMessage("Done")]);
+  await chat.prompt(id);
+  await waitFor(() => !chat.isBusy && chat.snapshot().configurationBlocker === null || undefined, `${id} turn settled`);
+  const result = chat.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === id);
+  if (result?.type !== "message" || result.message.role !== "toolResult") throw new Error(`No canonical settings result for ${id}`);
+  return result.message;
+}
+const changeIdOf = (message: { details?: unknown }) => (message.details as { changes: Array<{ changeId: string }> }).changes[0]!.changeId;
+const entriesOf = (message: { details?: unknown }) => (message.details as { entries: Array<{ changeId: string }> }).entries;
+const textOf = (message: { content: Array<{ type: string; text?: string }> }) => message.content.map(part => part.type === "text" ? part.text : "").join("");
 
 describe("typed changes and exact native acceptance", () => {
   it("adds an MCP server from Home through the shared card: the exact command shows before any launch, one approval writes mcp.json and launches it, the idle ordinary session reloads and its next turn calls the server, and undo removes it", async () => {
@@ -181,7 +194,7 @@ describe("typed changes and exact native acceptance", () => {
     await raising;
     await waitFor(() => !home.isBusy, "approved budget raise settled");
     expect((await readBudget()).keys[0]!.value).toEqual({ outputTokens: 200 });
-    const history = await f.settings.settingsChanges.history({ key: "model.thinkingBudgets" });
+    const history = await f.settings.settingsChanges.history({ key: "model.thinkingBudgets" }, { kind: "ui", id: "maintainer" });
     const applied = history.entries.find(entry => entry.status === "applied")!;
     expect(applied).toBeDefined();
     await service.invoke(phone, "settings.undo", { commandId: `numeric-undo-${++sequence}`, changeId: applied.changeId });
@@ -308,7 +321,7 @@ describe("typed changes and exact native acceptance", () => {
     const f = await fixture(), home = await f.registry.acquire(f.home.sessionId);
     await home.setTools(["settings"]);
     expect((await f.settings.settingsModel.resolve({ kind: "home" }, undefined, ["tools.active"])).keys[0]!.value).toEqual(["settings"]);
-    expect((await f.settings.settingsChanges.history({ key: "tools.active" })).entries).toMatchObject([{ status: "applied", after: ["settings"] }]);
+    expect((await f.settings.settingsChanges.history({ key: "tools.active" }, { kind: "ui", id: "maintainer" })).entries).toMatchObject([{ status: "applied", after: ["settings"] }]);
   });
 
   it("keeps the canonical receipt pending after a real observer I/O failure, without reapplying the same command", async () => {
@@ -322,7 +335,7 @@ describe("typed changes and exact native acceptance", () => {
     const first = await service.invoke(phone, "settings.change", params).then(() => undefined, error => error);
     await expect(service.invoke(phone, "settings.change", params)).rejects.toMatchObject({ code: "conflict", details: { outcomeUnknown: true } });
     expect(notifications).toBe(1);
-    expect((await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" })).entries).toHaveLength(1);
+    expect((await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" }, { kind: "ui", id: "maintainer" })).entries).toHaveLength(1);
     expect(JSON.parse(await readFile(join(f.agentDir, "settings.json"), "utf8")).retry.maxRetries).toBe(9);
     expect(first).toMatchObject({ code: "conflict", details: { outcomeUnknown: true } });
     await saveCase("observer-io-uncertainty", { code: first.code, details: first.details, notifications });
@@ -340,15 +353,199 @@ describe("typed changes and exact native acceptance", () => {
     expect(winners[0]).toMatchObject({ value: { status: "applied" } });
     expect(race.filter(result => result.status === "rejected")).toHaveLength(15);
     expect(race.filter(result => result.status === "rejected").every(result => result.reason.code === "conflict")).toBe(true);
-    const history = (await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" })).entries;
+    const history = (await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" }, { kind: "ui", id: "maintainer" })).entries;
     expect(history.filter(entry => entry.undoOf === changeId)).toHaveLength(1);
     expect(JSON.parse(await readFile(join(f.agentDir, "settings.json"), "utf8")).retry?.maxRetries).toBeUndefined();
     await service.invoke(phone, "settings.change", { commandId: `undo-restored-after-${++sequence}`, target: { kind: "global" },
       changes: [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 3 }] });
     await expect(service.invoke(phone, "settings.undo", { commandId: `undo-consumed-${sequence}`, changeId })).rejects.toMatchObject({ code: "conflict" });
     expect(JSON.parse(await readFile(join(f.agentDir, "settings.json"), "utf8")).retry.maxRetries).toBe(3);
-    expect((await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" })).entries.filter(entry => entry.undoOf === changeId)).toHaveLength(1);
+    expect((await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" }, { kind: "ui", id: "maintainer" })).entries.filter(entry => entry.undoOf === changeId)).toHaveLength(1);
     await saveCase("undo-sixteen-way", { race, history });
+  });
+
+  it("lists Tron Home's own, its worker's and every chat's changes, and undoes its Global change with both values logged", async () => {
+    const f = await fixture();
+    await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
+    const worker = await settledWorker(f);
+    const home = await f.registry.acquire(f.home.sessionId);
+    const service = settingsService(f);
+    const other = await f.registry.create(f.cwd);
+    const valueOf = async (target: Record<string, unknown>, key: string) => ((await service.invoke(phone, "settings.resolve", { target, keys: [key] })) as unknown as Resolution).keys[0]!.value;
+    const baseBefore = await valueOf({ kind: "global" }, "run.retry.baseDelayMs");
+    const workerChange = await settingsTurn(f, home, { action: "change", taskId: worker, reason: "Worker retries", changes: [
+      { key: "run.retry.maxRetries", layer: "session", op: "set", value: 6 },
+    ] }, "home-worker-change");
+    const globalChange = await settingsTurn(f, home, { action: "change", reason: "Global backoff", changes: [
+      { key: "run.retry.baseDelayMs", layer: "global", op: "set", value: 1_500 },
+    ] }, "home-global-change");
+    const unrelated = await service.invoke(phone, "settings.change", { commandId: `home-scope-unrelated-${++sequence}`, target: { kind: "session", sessionId: other.id },
+      reason: "Unrelated chat retries", fence: { runtimeGeneration: other.snapshot().runtimeGeneration, model: other.snapshot().model },
+      changes: [{ key: "run.retry.maxRetries", layer: "session", op: "set", value: 8 }] }) as unknown as { changes: Array<{ changeId: string }> };
+    const listed = entriesOf(await settingsTurn(f, home, { action: "history", limit: 200 }, "home-history")).map(entry => entry.changeId);
+    expect(listed).toEqual(expect.arrayContaining([changeIdOf(workerChange), changeIdOf(globalChange), unrelated.changes[0]!.changeId]));
+    const undone = await settingsTurn(f, home, { action: "undo", changeId: changeIdOf(globalChange), reason: "Home restores the backoff" }, "home-undo-global");
+    expect(undone.isError).not.toBe(true);
+    expect(await valueOf({ kind: "global" }, "run.retry.baseDelayMs")).toEqual(baseBefore);
+    const history = (await service.invoke(phone, "settings.history", { key: "run.retry.baseDelayMs" })) as unknown as { entries: Array<{ changeId: string; undoOf?: string; actor: { kind: string }; before?: unknown; after?: unknown }> };
+    const original = history.entries.find(entry => entry.changeId === changeIdOf(globalChange))!;
+    const inverse = history.entries.find(entry => entry.undoOf === changeIdOf(globalChange))!;
+    expect(inverse).toMatchObject({ actor: { kind: "home" }, status: "applied", before: original.after });
+    expect(inverse.after ?? null).toEqual(original.before ?? null);
+  });
+
+  it("lets Tron Home undo an unrelated chat's change in that chat, with the inverse logged before and after", async () => {
+    const f = await fixture();
+    await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
+    const home = await f.registry.acquire(f.home.sessionId);
+    const service = settingsService(f);
+    const other = await f.registry.create(f.cwd);
+    const target = { kind: "session", sessionId: other.id };
+    const valueOf = async (scope: Record<string, unknown>) => ((await service.invoke(phone, "settings.resolve", { target: scope, keys: ["run.retry.maxRetries"] })) as unknown as Resolution).keys[0]!.value;
+    const otherBefore = await valueOf(target), homeBefore = await valueOf({ kind: "home" });
+    const change = await service.invoke(phone, "settings.change", { commandId: `home-undo-unrelated-${++sequence}`, target, reason: "Unrelated chat retries",
+      fence: { runtimeGeneration: other.snapshot().runtimeGeneration, model: other.snapshot().model },
+      changes: [{ key: "run.retry.maxRetries", layer: "session", op: "set", value: 8 }] }) as unknown as { changes: Array<{ changeId: string }> };
+    expect(await valueOf(target)).toEqual(8);
+    const undone = await settingsTurn(f, home, { action: "undo", changeId: change.changes[0]!.changeId, reason: "Home restores the unrelated chat" }, "home-undo-unrelated");
+    expect(undone.isError).not.toBe(true);
+    expect(await valueOf(target)).toEqual(otherBefore);
+    expect(await valueOf({ kind: "home" })).toEqual(homeBefore);
+    const history = (await service.invoke(phone, "settings.history", { key: "run.retry.maxRetries" })) as unknown as { entries: Array<{ changeId: string; undoOf?: string; actor: { kind: string }; target: unknown; before?: unknown; after?: unknown; status: string }> };
+    const original = history.entries.find(entry => entry.changeId === change.changes[0]!.changeId)!;
+    expect(history.entries.find(entry => entry.undoOf === original.changeId)).toMatchObject({ actor: { kind: "home" }, status: "applied", target, before: 8 });
+    expect(history.entries.find(entry => entry.undoOf === original.changeId)!.after ?? null).toEqual(original.before ?? null);
+  });
+
+  it("undoes Tron Home's worker change on that worker and never on Tron Home's own chat", async () => {
+    const f = await fixture();
+    await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
+    const worker = await settledWorker(f);
+    const workerSession = (await homeOwnerOf(f.registry).taskStatus(worker)).sessionId!;
+    const home = await f.registry.acquire(f.home.sessionId);
+    const service = settingsService(f);
+    const valueOf = async (scope: Record<string, unknown>) => ((await service.invoke(phone, "settings.resolve", { target: scope, keys: ["run.retry.maxRetries"] })) as unknown as Resolution).keys[0]!.value;
+    const target = { kind: "session", sessionId: workerSession };
+    const workerBefore = await valueOf(target), homeBefore = await valueOf({ kind: "home" });
+    const change = await settingsTurn(f, home, { action: "change", taskId: worker, reason: "Worker retries", changes: [
+      { key: "run.retry.maxRetries", layer: "session", op: "set", value: 6 },
+    ] }, "home-worker-change");
+    expect(change.isError).not.toBe(true);
+    expect(await valueOf(target)).toEqual(6);
+    const undone = await settingsTurn(f, home, { action: "undo", changeId: changeIdOf(change), reason: "Home restores the worker" }, "home-undo-worker");
+    expect(undone.isError).not.toBe(true);
+    expect(await valueOf(target)).toEqual(workerBefore);
+    expect(await valueOf({ kind: "home" })).toEqual(homeBefore);
+    const history = (await service.invoke(phone, "settings.history", { key: "run.retry.maxRetries" })) as unknown as { entries: Array<{ changeId: string; undoOf?: string; actor: { kind: string }; target: unknown; before?: unknown; after?: unknown; status: string }> };
+    const original = history.entries.find(entry => entry.changeId === changeIdOf(change))!;
+    const inverse = history.entries.find(entry => entry.undoOf === changeIdOf(change))!;
+    expect(inverse).toMatchObject({ actor: { kind: "home" }, status: "applied", target, before: original.after });
+    expect(inverse.after ?? null).toEqual(original.before ?? null);
+  });
+
+  it("keeps the writer grant and refuses a stale Tron Home undo before any effect", async () => {
+    const f = await fixture();
+    await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
+    const home = await f.registry.acquire(f.home.sessionId);
+    const service = settingsService(f);
+    const valueOf = async () => ((await service.invoke(phone, "settings.resolve", { target: { kind: "global" }, keys: ["run.retry.baseDelayMs"] })) as unknown as Resolution).keys[0]!.value;
+    const set = async (value: number) => (await service.invoke(phone, "settings.change", { commandId: `home-stale-${++sequence}`, target: { kind: "global" },
+      changes: [{ key: "run.retry.baseDelayMs", layer: "global", op: "set", value }] }) as unknown as { changes: Array<{ changeId: string }> }).changes[0]!.changeId;
+    const baseBefore = await valueOf();
+    const first = await set(1_500), second = await set(1_600);
+    const stale = await settingsTurn(f, home, { action: "undo", changeId: first, reason: "Home reverts the first backoff" }, "home-undo-stale");
+    expect(stale.isError).toBe(true);
+    expect(textOf(stale)).toContain("changed since it was read");
+    expect(await valueOf()).toEqual(1_600);
+    expect((await settingsTurn(f, home, { action: "undo", changeId: second, reason: "Home reverts the second backoff" }, "home-undo-second")).isError).not.toBe(true);
+    expect((await settingsTurn(f, home, { action: "undo", changeId: first, reason: "Home reverts the first backoff" }, "home-undo-first")).isError).not.toBe(true);
+    expect(await valueOf()).toEqual(baseBefore);
+    const trust = await service.invoke(phone, "settings.change", { commandId: `home-writer-${++sequence}`, target: { kind: "global" },
+      changes: [{ key: "permissions.defaultProjectTrust", layer: "global", op: "set", value: "always" }] }) as unknown as { changes: Array<{ changeId: string }> };
+    const refused = await settingsTurn(f, home, { action: "undo", changeId: trust.changes[0]!.changeId, reason: "Home reverts the trust policy" }, "home-undo-writer");
+    expect(refused.isError).toBe(true);
+    expect(textOf(refused)).toBe("Default trust policy cannot be changed by home");
+  });
+
+  it("an ordinary agent's Undo that restores image visibility shows one native card; decline and stale acceptance leave the store unchanged, and accept applies the reviewed change with its undoOf logged", async () => {
+    const f = await fixture();
+    const chat = await f.registry.create(f.cwd);
+    await chat.setModel(f.model.provider, f.model.id);
+    const service = settingsService(f);
+    const key = "context.images.block";
+    const blockValue = async () => ((await service.invoke(phone, "settings.resolve", { target: { kind: "global" }, keys: [key] })) as unknown as Resolution).keys[0]!.value;
+    const historyOf = async () => (await f.settings.settingsChanges.history({ key }, { kind: "ui", id: "maintainer" })).entries;
+    const toolResult = (id: string) => {
+      const entries = chat.canonicalSessionEntries();
+      const entry = entries.find(item => item.type === "message" && item.message.role === "toolResult" && item.message.toolCallId === id);
+      if (entry?.type !== "message" || entry.message.role !== "toolResult") {
+        throw new Error(`No canonical settings result for ${id}; canonical entries: ${JSON.stringify(entries.map(item => item.type === "message" ? item.message.role : item.type))}`);
+      }
+      return entry.message;
+    };
+    const turn = (args: Record<string, unknown>, id: string) => {
+      f.faux.setResponses([fauxAssistantMessage([fauxToolCall("settings", args, { id })], { stopReason: "toolUse" }), fauxAssistantMessage("Finished")]);
+      const prompting = chat.prompt(id);
+      let settled = false;
+      const done = prompting.then(() => waitFor(() => !chat.isBusy && !chat.hasActiveAgentRun || undefined, `${id} turn settled`)).then(() => { settled = true; });
+      const cards = waitFor(() => {
+        const pending = chat.snapshot().extensionPresentation.pendingInteractions;
+        return pending.length > 0 || settled ? pending : undefined;
+      }, `${id}: a native card or its settlement`);
+      return { cards, done };
+    };
+    const undoCard = async (changeId: string, id: string) => {
+      const attempt = turn({ action: "undo", changeId, reason: "Show images again" }, id);
+      const cards = await attempt.cards;
+      expect(cards).toHaveLength(1);
+      const card = cards[0]!;
+      if (card.method !== "change") throw new Error("Expected the shared change card");
+      expect(card.review).toMatchObject({ requiresTap: true, title: "Block images", reason: "Show images again" });
+      expect(JSON.parse(card.review.items[0]!.exact!)).toMatchObject({ target: { kind: "session", sessionId: chat.id }, key, layer: "global", before: true, after: false });
+      return { card, done: attempt.done };
+    };
+    const respond = (card: { id: string; hostEpoch: string; presentationRevision: number; review: { digest: string } }, commandId: string, approved: boolean) =>
+      service.invoke(phone, "extension.respond", { commandId, sessionId: chat.id, interactionId: card.id, hostEpoch: card.hostEpoch,
+        presentationRevision: card.presentationRevision, value: { digest: card.review.digest, approved } });
+    await service.invoke(phone, "settings.change", { commandId: `images-seed-${++sequence}`, target: { kind: "global" }, changes: [{ key, layer: "global", op: "set", value: false }] });
+    expect(await blockValue()).toBe(false);
+    const narrowed = turn({ action: "change", reason: "Block images for this chat", changes: [{ key, layer: "global", op: "set", value: true }] }, "images-narrow");
+    expect(await narrowed.cards).toEqual([]);
+    await narrowed.done;
+    expect(toolResult("images-narrow")).toMatchObject({ isError: false, details: { status: "applied", review: { requiresTap: false } } });
+    const narrowId = (toolResult("images-narrow").details as { changes: Array<{ changeId: string }> }).changes[0]!.changeId;
+    expect(await blockValue()).toBe(true);
+
+    const countBeforeDecline = (await historyOf()).length;
+    const declined = await undoCard(narrowId, "images-undo-decline");
+    await respond(declined.card, `images-decline-${++sequence}`, false);
+    await declined.done;
+    expect(toolResult("images-undo-decline")).toMatchObject({ details: { status: "declined", changes: [] } });
+    expect(chat.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
+    expect(await blockValue()).toBe(true);
+    expect(await historyOf()).toHaveLength(countBeforeDecline);
+
+    const stale = await undoCard(narrowId, "images-undo-stale");
+    await service.invoke(phone, "settings.change", { commandId: `images-stale-${++sequence}`, target: { kind: "global" }, changes: [{ key, layer: "global", op: "set", value: false }] });
+    await expect(respond(stale.card, `images-stale-accept-${++sequence}`, true)).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("changed since it was read") });
+    await stale.done;
+    expect(chat.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
+    expect(await blockValue()).toBe(false);
+    expect((await historyOf()).some(entry => entry.undoOf === narrowId)).toBe(false);
+
+    const renarrowed = turn({ action: "change", reason: "Block images again", changes: [{ key, layer: "global", op: "set", value: true }] }, "images-renarrow");
+    expect(await renarrowed.cards).toEqual([]);
+    await renarrowed.done;
+    const renarrowId = (toolResult("images-renarrow").details as { changes: Array<{ changeId: string }> }).changes[0]!.changeId;
+    const accepted = await undoCard(renarrowId, "images-undo-accept");
+    const acceptCommand = `images-accept-${++sequence}`;
+    await expect(respond(accepted.card, acceptCommand, true)).resolves.toEqual({ answered: true });
+    await accepted.done;
+    expect(toolResult("images-undo-accept")).toMatchObject({ isError: false, details: { status: "applied" } });
+    expect(await blockValue()).toBe(false);
+    const undone = (await historyOf()).filter(entry => entry.undoOf === renarrowId);
+    expect(undone).toHaveLength(1);
+    expect(undone[0]).toMatchObject({ actor: { kind: "ui", id: "device:phone" }, status: "applied", target: { kind: "session", sessionId: chat.id }, layer: "global", before: true, after: false, commandId: acceptCommand });
   });
 
   it("applies a reversible routine edit in its original real tool turn without any approval reader or form", async () => {
@@ -365,7 +562,7 @@ describe("typed changes and exact native acceptance", () => {
     const service = settingsService(f);
     await expect(service.invoke(phone, "settings.approvals", {})).rejects.toMatchObject({ code: "not_found" });
     await expect(service.invoke(phone, "settings.decide", { commandId: "retired-decision" })).rejects.toMatchObject({ code: "not_found" });
-    expect((await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" })).entries).toHaveLength(1);
+    expect((await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" }, { kind: "ui", id: "maintainer" })).entries).toHaveLength(1);
   });
 
   it("publishes the exact built-in card, refuses local/generic/stale answers without consuming it, then applies once under the response receipt", async () => {
@@ -379,25 +576,25 @@ describe("typed changes and exact native acceptance", () => {
       await expect(f.answer(true, { ...f.interaction, hostEpoch: "retired" })).rejects.toMatchObject({ code: "conflict" });
       await expect(f.answer(true, { ...f.interaction, presentationRevision: f.interaction.presentationRevision + 1 })).rejects.toMatchObject({ code: "conflict" });
       expect(f.home.snapshot().extensionPresentation.pendingInteractions).toHaveLength(1);
-      expect((await f.settings.settingsChanges.history({ key: "tools.shell.path" })).entries).toEqual([]);
+      expect((await f.settings.settingsChanges.history({ key: "tools.shell.path" }, { kind: "ui", id: "maintainer" })).entries).toEqual([]);
       const answers = await Promise.allSettled([f.answer(true), f.answer(true)]);
       expect(answers.filter(answer => answer.status === "fulfilled")).toEqual([{ status: "fulfilled", value: { answered: true } }]);
       expect(answers.filter(answer => answer.status === "rejected")).toEqual([{ status: "rejected", reason: expect.objectContaining({ code: "not_found" }) }]);
       await f.prompting;
       expect(JSON.parse(await readFile(join(f.agentDir, "settings.json"), "utf8")).shellPath).toBe("/bin/zsh");
-      const history = (await f.settings.settingsChanges.history({ key: "tools.shell.path" })).entries;
+      const history = (await f.settings.settingsChanges.history({ key: "tools.shell.path" }, { kind: "ui", id: "maintainer" })).entries;
       expect(history).toHaveLength(1);
       expect(history[0]).toMatchObject({ actor: { kind: "ui", id: "device:phone" }, status: "applied", after: "/bin/zsh", commandId: expect.stringMatching(/^native-response-/) });
       await expect(f.service.invoke(phone, "extension.respond", { commandId: history[0]!.commandId, sessionId: f.home.id,
         interactionId: f.interaction.id, hostEpoch: f.interaction.hostEpoch, presentationRevision: f.interaction.presentationRevision,
         value: { digest: f.interaction.review.digest, approved: true } })).resolves.toEqual({ answered: true });
-      expect((await f.settings.settingsChanges.history({ key: "tools.shell.path" })).entries).toHaveLength(1);
+      expect((await f.settings.settingsChanges.history({ key: "tools.shell.path" }, { kind: "ui", id: "maintainer" })).entries).toHaveLength(1);
       expect(f.home.snapshot().transcript.find(item => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "native-change"))
         .toMatchObject({ isError: false, details: { status: "applied" } });
       await expect(f.service.invoke(phone, "settings.undo", { commandId: `undo-tapped-${++sequence}`, changeId: history[0]!.changeId }))
         .resolves.toMatchObject({ status: "applied" });
       expect(JSON.parse(await readFile(join(f.agentDir, "settings.json"), "utf8")).shellPath).toBeUndefined();
-      expect((await f.settings.settingsChanges.history({ key: "tools.shell.path" })).entries.filter(entry => entry.undoOf === history[0]!.changeId)).toHaveLength(1);
+      expect((await f.settings.settingsChanges.history({ key: "tools.shell.path" }, { kind: "ui", id: "maintainer" })).entries.filter(entry => entry.undoOf === history[0]!.changeId)).toHaveLength(1);
       await saveCase("accepted", { interaction: f.interaction, history });
     } finally { await f.home.abort("agent"); await f.prompting; }
   });
@@ -409,7 +606,7 @@ describe("typed changes and exact native acceptance", () => {
       await f.prompting;
       expect(f.home.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
       expect(JSON.parse(await readFile(join(f.agentDir, "settings.json"), "utf8")).shellPath).toBeUndefined();
-      expect((await f.settings.settingsChanges.history({ key: "tools.shell.path" })).entries).toEqual([]);
+      expect((await f.settings.settingsChanges.history({ key: "tools.shell.path" }, { kind: "ui", id: "maintainer" })).entries).toEqual([]);
       await expect(f.answer(true)).rejects.toMatchObject({ code: "not_found" });
     } finally { await f.home.abort("agent"); await f.prompting; }
   });
@@ -422,7 +619,7 @@ describe("typed changes and exact native acceptance", () => {
       await expect(f.answer(true)).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("stale") });
       await f.prompting;
       expect(JSON.parse(await readFile(join(f.agentDir, "settings.json"), "utf8")).shellPath).toBe("/bin/bash");
-      expect((await f.settings.settingsChanges.history({ key: "tools.shell.path" })).entries).toHaveLength(1);
+      expect((await f.settings.settingsChanges.history({ key: "tools.shell.path" }, { kind: "ui", id: "maintainer" })).entries).toHaveLength(1);
     } finally { await f.home.abort("agent"); await f.prompting; }
   });
 
@@ -433,7 +630,7 @@ describe("typed changes and exact native acceptance", () => {
       await f.registry.delete(workerID);
       await expect(f.answer(true)).rejects.toBeDefined();
       await f.prompting;
-      expect((await f.settings.settingsChanges.history({ key: "tools.shell.path" })).entries).toEqual([]);
+      expect((await f.settings.settingsChanges.history({ key: "tools.shell.path" }, { kind: "ui", id: "maintainer" })).entries).toEqual([]);
       expect(JSON.parse(await readFile(join(f.agentDir, "settings.json"), "utf8")).shellPath).toBeUndefined();
     } finally { await f.home.abort("agent"); await f.prompting; }
   });
@@ -450,7 +647,7 @@ describe("typed changes and exact native acceptance", () => {
     if (dryRun) expect(result).toMatchObject({ isError: false, details: { dryRun: true, status: "failed", changes: [expect.objectContaining({ status: "failed", error: { code: "busy", message: expect.stringContaining("between runs") } })] } });
     else expect(result).toMatchObject({ isError: true, content: [expect.objectContaining({ text: expect.stringContaining("between runs") })] });
     expect(home.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
-    expect((await f.settings.settingsChanges.history({ key: "model.thinking" })).entries).toEqual([]);
+    expect((await f.settings.settingsChanges.history({ key: "model.thinking" }, { kind: "ui", id: "maintainer" })).entries).toEqual([]);
     expect(home.snapshot().thinkingLevel).toBe(before);
   });
 
@@ -469,7 +666,7 @@ describe("typed changes and exact native acceptance", () => {
     expect(await waitFor(() => home.snapshot().transcript.find(item => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "mixed-live"), "mixed live result"))
       .toMatchObject({ isError: true });
     expect(home.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
-    expect((await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" })).entries).toEqual([]);
+    expect((await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" }, { kind: "ui", id: "maintainer" })).entries).toEqual([]);
   });
 
   it("the shared card retains complete long text, raw tool selections and exact target scope", async () => {

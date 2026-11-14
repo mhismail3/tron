@@ -19,7 +19,7 @@ process.env.PI_CODING_AGENT_DIR = agentDir;
 process.env.PI_OFFLINE = "1";
 const model = { provider: "native-crash-faux", id: "chat" };
 const faux = fauxProvider({ provider: model.provider, models: [{ id: model.id }], tokensPerSecond: 1_000_000 });
-if (mode === "kill") await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir: join(root, "sessions"), defaultProvider: model.provider, defaultModel: model.id, images: { blockImages: true } }));
+if (mode === "kill") await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: model.provider, defaultModel: model.id, images: { blockImages: true } }));
 const createRuntime = async () => {
   const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
   runtime.registerNativeProvider(faux.provider);
@@ -70,6 +70,6 @@ try {
   try { replay = { result: await service.invoke(phone, "extension.respond", params) }; }
   catch (error) { const failure = error as { code?: string; details?: unknown }; replay = { error: { code: failure.code, details: failure.details } }; }
   const document = JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8"));
-  const history = (await settings.settingsChanges.history({ key: "context.images.block" })).entries;
+  const history = (await settings.settingsChanges.history({ key: "context.images.block" }, { kind: "ui", id: "maintainer" })).entries;
   await writeFile(join(root, "recovered.json"), JSON.stringify({ replay, blockImages: document.images?.blockImages ?? null, history }));
 } finally { await registry.dispose(); await receipts.dispose(); }

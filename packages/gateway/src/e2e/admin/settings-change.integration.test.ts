@@ -10,7 +10,7 @@ import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { fauxProvider } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../../kernel/resources/trust-service.js";
@@ -27,6 +27,7 @@ import { type SettingsStores } from "../../kernel/settings/settings-types.js";
 import { composedBelow, readBinding } from "../../kernel/settings/settings-resolver.js";
 import { type Resolution } from "../../kernel/settings/tool-contract.js";
 import { type KeyDeclaration } from "../../kernel/settings/settings-schema.js";
+import { instanceId } from "../../kernel/settings/scope-resolution.js";
 const { KEYS } = TEST_SETTINGS_SCHEMA;
 import type { PresentedResolution } from "../../admin/settings-presentation.js";
 import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
@@ -357,8 +358,7 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
   owner.roots.push(root);
   const tronHome = join(root, "tron");
   const agentDir = join(tronHome, "agent");
-  const sessionDir = join(root, "sessions");
-  await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true })]);
+  await mkdir(agentDir, { recursive: true });
   const faux = fauxProvider({ provider: "tron-settings-change", tokensPerSecond: 10_000, models: [{ id: "first", reasoning: true }, { id: "second", reasoning: true }] });
   const runtimeFactory = async () => {
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
@@ -366,7 +366,7 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
     return runtime;
   };
   const modelRuntime = await runtimeFactory();
-  await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, retry: { maxRetries: 4 } }));
+  await writeFile(join(agentDir, "settings.json"), JSON.stringify({ retry: { maxRetries: 4 } }));
   const trust = new TrustService(agentDir);
   const registry = await createTestRegistry({ agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: runtimeFactory, trust,
     broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
@@ -468,8 +468,8 @@ describe("settings.change", () => {
     const actor = { actor: { kind: "home" as const, id: "home-fixture" }, reason: "Change the declared setting" };
     await expect(f.settingsChanges.change({ kind: "global" }, [
       { key: "run.retry.maxRetries", layer: "global", op: "set", value: 8 },
-      { key: "run.httpProxy", layer: "global", op: "set", value: "http://private-fixture.invalid:3128" },
-    ], actor)).rejects.toMatchObject({ code: "invalid_request", message: "HTTP proxy cannot be changed by home" });
+      { key: "permissions.defaultProjectTrust", layer: "global", op: "set", value: "always" },
+    ], actor)).rejects.toMatchObject({ code: "invalid_request", message: "Default trust policy cannot be changed by home" });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
     expect(await f.history()).toEqual([]);
     const preview = await f.settingsChanges.change({ kind: "global" }, [
@@ -482,7 +482,175 @@ describe("settings.change", () => {
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
   });
 
-  caseIt("records every change once with actor and diff, undoes it, refuses a stale undo, and never undoes a redacted key", async owner => {
+  caseIt("an agent pages only its own settings history, never another chat's or the maintainer's rows", async owner => {
+    const f = await fixture(owner);
+    const cwd = join(f.root, "history-chat");
+    await mkdir(cwd);
+    const slot = await f.registry.create(cwd);
+    const other = await f.registry.create(cwd);
+    const model = f.faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await other.setModel(model.provider, model.id);
+    let calls = 0;
+    const turn = async (chat: typeof slot, input: Record<string, unknown>) => {
+      const id = `history-tool-${++calls}`;
+      f.faux.setResponses([
+        fauxAssistantMessage([fauxToolCall("settings", input, { id })], { stopReason: "toolUse" }),
+        fauxAssistantMessage("Done"),
+      ]);
+      await chat.prompt("Use the requested settings action");
+      await waitFor(() => !chat.isBusy && !chat.hasActiveAgentRun || undefined, "settings history tool turn settled");
+      const result = chat.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === id);
+      if (result?.type !== "message" || result.message.role !== "toolResult") throw new Error("No canonical settings tool result");
+      return result.message;
+    };
+    const entriesOf = (message: { details?: unknown }) => (message.details as { entries: ChangeEntry[]; nextCursor?: string }).entries;
+    const changeIdOf = (message: { details?: unknown }) => (message.details as { changes: Array<{ changeId: string }> }).changes[0]!.changeId;
+    const ownRetry = await turn(slot, { action: "change", reason: "Reduce retry attempts", changes: [
+      { key: "run.retry.maxRetries", layer: "global", op: "set", value: 3 },
+    ] });
+    expect(ownRetry.isError).not.toBe(true);
+    const ownId = changeIdOf(ownRetry);
+    const otherSession = await turn(other, { action: "change", reason: "Another chat's session retries", changes: [
+      { key: "run.retry.maxRetries", layer: "session", op: "set", value: 8 },
+    ] });
+    expect(otherSession.isError).not.toBe(true);
+    const otherSessionId = changeIdOf(otherSession);
+    const otherGlobal = await turn(other, { action: "change", reason: "Another chat's private backoff", changes: [
+      { key: "run.retry.baseDelayMs", layer: "global", op: "set", value: 1_500 },
+    ] });
+    expect(otherGlobal.isError).not.toBe(true);
+    const otherGlobalId = changeIdOf(otherGlobal);
+    const maintainer = await f.change({ kind: "global" }, [{ key: "tools.shell.path", layer: "global", op: "set", value: "/bin/sh" }]);
+    const maintainerId = maintainer.changes[0]!.changeId;
+    const page = await turn(slot, { action: "history", key: "run.retry.maxRetries", limit: 1 });
+    expect(page.isError).not.toBe(true);
+    expect(entriesOf(page)).toHaveLength(1);
+    expect(entriesOf(page)[0]).toMatchObject({ changeId: ownId, actor: { kind: "agent", sessionId: slot.id }, before: 4, after: 3 });
+    const undone = await turn(slot, { action: "undo", changeId: ownId, reason: "Restore retry attempts" });
+    expect(undone.isError).not.toBe(true);
+    const undoId = changeIdOf(undone);
+    expect((await f.macDocument()).retry).toEqual({ maxRetries: 4, baseDelayMs: 1_500 });
+    expect((await f.history({ key: "run.retry.maxRetries" })).find(entry => entry.undoOf === ownId)).toMatchObject({ changeId: undoId, actor: { kind: "agent", sessionId: slot.id }, status: "applied", before: 3, after: 4 });
+    expect(entriesOf(await turn(slot, { action: "history", key: "run.retry.maxRetries" })).map(entry => entry.changeId)).toEqual([undoId, ownId]);
+    const latest = (await turn(slot, { action: "history", key: "run.retry.maxRetries", limit: 1 })).details as { entries: ChangeEntry[]; nextCursor: string };
+    expect(latest.entries.map(entry => entry.changeId)).toEqual([undoId]);
+    expect(latest.nextCursor).toBeTypeOf("string");
+    const previous = await turn(slot, { action: "history", key: "run.retry.maxRetries", cursor: latest.nextCursor, limit: 1 });
+    expect(entriesOf(previous).map(entry => entry.changeId)).toEqual([ownId]);
+    expect((await turn(slot, { action: "history", reason: "Not a history parameter" })).isError).toBe(true);
+    const everything = entriesOf(await turn(slot, { action: "history", limit: 200 }));
+    const ids = everything.map(entry => entry.changeId);
+    expect(ids).toContain(ownId);
+    for (const foreign of [otherSessionId, otherGlobalId, maintainerId]) expect(ids).not.toContain(foreign);
+    expect(everything.every(entry => entry.actor.sessionId === slot.id || entry.target.kind === "session" && entry.target.sessionId === slot.id)).toBe(true);
+    expect(JSON.stringify(everything)).not.toContain("Another chat");
+    const agentActor = { kind: "agent" as const, id: "history-agent", sessionId: slot.id };
+    const retiredSecret = { changeId: "retired-private-entry", at: new Date().toISOString(), actor: agentActor, target: { kind: "session" as const, sessionId: slot.id },
+      layer: "session" as const, key: "retired.apiToken", op: "set" as const, before: "sk-retired-old-secret", after: "sk-retired-new-secret", status: "applied" as const };
+    const flaggedSecret = { changeId: "flagged-private-entry", at: new Date().toISOString(), actor: agentActor, target: { kind: "session" as const, sessionId: slot.id },
+      layer: "session" as const, key: "run.retry.maxRetries", op: "set" as const, before: "sk-flagged-old-secret", after: "sk-flagged-new-secret", status: "applied" as const, redacted: true as const };
+    await f.record.append([retiredSecret, flaggedSecret]);
+    const privateView = JSON.stringify(entriesOf(await turn(slot, { action: "history", limit: 200 })));
+    expect(privateView).not.toContain("sk-retired");
+    expect(privateView).not.toContain("sk-flagged");
+    expect(privateView).toContain("retired-private-entry");
+    expect(JSON.stringify(await f.history({ key: "retired.apiToken" }))).not.toContain("sk-retired");
+    expect(JSON.stringify(await f.history({ key: "run.retry.maxRetries" }))).not.toContain("sk-flagged");
+    const otherView = entriesOf(await turn(other, { action: "history", limit: 200 })).map(entry => entry.changeId);
+    expect(otherView).toEqual([otherGlobalId, otherSessionId]);
+  });
+
+  caseIt("an agent undoes only its own settings changes and refuses another chat's session change with the exact message", async owner => {
+    const f = await fixture(owner);
+    const cwd = join(f.root, "undo-chat");
+    await mkdir(cwd);
+    const slot = await f.registry.create(cwd);
+    const other = await f.registry.create(cwd);
+    const model = f.faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await other.setModel(model.provider, model.id);
+    let calls = 0;
+    const turn = async (chat: typeof slot, input: Record<string, unknown>) => {
+      const id = `undo-tool-${++calls}`;
+      f.faux.setResponses([
+        fauxAssistantMessage([fauxToolCall("settings", input, { id })], { stopReason: "toolUse" }),
+        fauxAssistantMessage("Done"),
+      ]);
+      await chat.prompt("Use the requested settings action");
+      await waitFor(() => !chat.isBusy && !chat.hasActiveAgentRun || undefined, "settings undo tool turn settled");
+      const result = chat.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === id);
+      if (result?.type !== "message" || result.message.role !== "toolResult") throw new Error("No canonical settings tool result");
+      return result.message;
+    };
+    const changeIdOf = (message: { details?: unknown }) => (message.details as { changes: Array<{ changeId: string }> }).changes[0]!.changeId;
+    const text = (message: { content: Array<{ type: string; text?: string }> }) => message.content.map(part => part.type === "text" ? part.text : "").join("");
+    const refusal = "An agent can undo only settings changes made by or in its own session";
+    const ownRetry = await turn(slot, { action: "change", reason: "Reduce retry attempts", changes: [
+      { key: "run.retry.maxRetries", layer: "global", op: "set", value: 3 },
+    ] });
+    const otherSession = await turn(other, { action: "change", reason: "Another chat's session retries", changes: [
+      { key: "run.retry.maxRetries", layer: "session", op: "set", value: 8 },
+    ] });
+    const refusedSession = await turn(slot, { action: "undo", changeId: changeIdOf(otherSession), reason: "Attempt cross-session undo" });
+    expect(refusedSession.isError).toBe(true);
+    expect(text(refusedSession)).toBe(refusal);
+    expect((await f.service.invoke(client([other.id]), "settings.resolve", { target: { kind: "session", sessionId: other.id }, keys: ["run.retry.maxRetries"] }) as unknown as Resolution).keys[0]!.value).toBe(8);
+    expect((await f.macDocument()).retry).toEqual({ maxRetries: 3 });
+    const undone = await turn(slot, { action: "undo", changeId: changeIdOf(ownRetry), reason: "Restore retry attempts" });
+    expect(undone.isError).not.toBe(true);
+    expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
+    const selfUndo = await turn(other, { action: "undo", changeId: changeIdOf(otherSession), reason: "Restore the other chat's retries" });
+    expect(selfUndo.isError).not.toBe(true);
+    expect((await f.service.invoke(client([other.id]), "settings.resolve", { target: { kind: "session", sessionId: other.id }, keys: ["run.retry.maxRetries"] }) as unknown as Resolution).keys[0]!.value).not.toBe(8);
+  });
+
+  caseIt("an agent refuses to undo another chat's Global change or the maintainer's, and its own Global change stays undoable", async owner => {
+    const f = await fixture(owner);
+    const cwd = join(f.root, "global-undo-chat");
+    await mkdir(cwd);
+    const slot = await f.registry.create(cwd);
+    const other = await f.registry.create(cwd);
+    const model = f.faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await other.setModel(model.provider, model.id);
+    let calls = 0;
+    const turn = async (chat: typeof slot, input: Record<string, unknown>) => {
+      const id = `global-undo-tool-${++calls}`;
+      f.faux.setResponses([
+        fauxAssistantMessage([fauxToolCall("settings", input, { id })], { stopReason: "toolUse" }),
+        fauxAssistantMessage("Done"),
+      ]);
+      await chat.prompt("Use the requested settings action");
+      await waitFor(() => !chat.isBusy && !chat.hasActiveAgentRun || undefined, "settings global undo tool turn settled");
+      const result = chat.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === id);
+      if (result?.type !== "message" || result.message.role !== "toolResult") throw new Error("No canonical settings tool result");
+      return result.message;
+    };
+    const changeIdOf = (message: { details?: unknown }) => (message.details as { changes: Array<{ changeId: string }> }).changes[0]!.changeId;
+    const text = (message: { content: Array<{ type: string; text?: string }> }) => message.content.map(part => part.type === "text" ? part.text : "").join("");
+    const refusal = "An agent can undo only settings changes made by or in its own session";
+    const otherGlobal = await turn(other, { action: "change", reason: "Another chat's private backoff", changes: [
+      { key: "run.retry.baseDelayMs", layer: "global", op: "set", value: 1_500 },
+    ] });
+    const ownGlobal = await turn(slot, { action: "change", reason: "This chat's retries", changes: [
+      { key: "run.retry.maxRetries", layer: "global", op: "set", value: 3 },
+    ] });
+    const maintainer = await f.change({ kind: "global" }, [{ key: "tools.shell.path", layer: "global", op: "set", value: "/bin/sh" }]);
+    const refusedGlobal = await turn(slot, { action: "undo", changeId: changeIdOf(otherGlobal), reason: "Attempt another chat's global undo" });
+    expect(refusedGlobal.isError).toBe(true);
+    expect(text(refusedGlobal)).toBe(refusal);
+    expect((await f.service.invoke(client(), "settings.resolve", { target: { kind: "global" }, keys: ["run.retry.baseDelayMs"] }) as unknown as Resolution).keys[0]!.value).toBe(1_500);
+    const refusedMaintainer = await turn(slot, { action: "undo", changeId: maintainer.changes[0]!.changeId, reason: "Attempt maintainer undo" });
+    expect(refusedMaintainer.isError).toBe(true);
+    expect(text(refusedMaintainer)).toBe(refusal);
+    expect((await f.macDocument()).retry).toEqual({ maxRetries: 3, baseDelayMs: 1_500 });
+    const undone = await turn(slot, { action: "undo", changeId: changeIdOf(ownGlobal), reason: "Restore this chat's retries" });
+    expect(undone.isError).not.toBe(true);
+    expect((await f.macDocument()).retry).toEqual({ maxRetries: 4, baseDelayMs: 1_500 });
+  });
+
+  caseIt("records every change once with actor and diff, undoes it, and refuses a stale undo", async owner => {
     const f = await fixture(owner);
     const applied = await f.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 6, expected: 4 }]);
     expect(applied.status).toBe("applied");
@@ -508,22 +676,10 @@ describe("settings.change", () => {
         display: { current: "10 retries", after: "8 retries" } } });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 10 });
 
-    const proxy = await f.change({ kind: "global" }, [{ key: "run.httpProxy", layer: "global", op: "set", value: "http://proxy.invalid:3128" }]);
-    expect(proxy.changes[0]).toMatchObject({ redacted: true });
-    expect(proxy.changes[0]).not.toHaveProperty("after");
-    expect(JSON.stringify(proxy)).not.toContain("proxy.invalid");
-    const proxyEntry = (await f.history({ key: "run.httpProxy" }))[0]!;
-    expect(proxyEntry).toMatchObject({ changed: true, redacted: true,
-      presentation: { label: "HTTP proxy", display: { before: "Hidden", after: "Changed" } } });
-    expect(JSON.stringify(await f.history())).not.toContain("proxy.invalid");
-    await expect(maintainerChange(f.service, client(), "settings.undo", { commandId: commandId(), changeId: proxy.changes[0]!.changeId }))
-      .rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("not undoable") });
-
     await expect(f.change({ kind: "global" }, [{ key: "setup.sessionDir", layer: "global", op: "set", value: "/elsewhere" }])).rejects.toMatchObject({ code: "invalid_request" });
     await f.record.append([{ ...entry!, changeId: "retired-key-entry", key: "retired.setting", actor: { kind: "outside", id: "fixture" }, before: "old", after: "new" }]);
-    expect((await f.history({ key: "retired.setting" }))[0]).toMatchObject({
-      presentation: { label: "retired.setting", actor: "Outside Tron", display: { before: '"old"', after: '"new"' } },
-    });
+    expect((await f.history({ key: "retired.setting" }))[0]).toMatchObject({ changed: true, redacted: true, presentation: { label: "retired.setting", actor: "Outside Tron", display: { before: "Hidden", after: "Changed" } } });
+    expect(JSON.stringify(await f.history({ key: "retired.setting" }))).not.toContain("\"old\"");
     expect((await f.record.entry(entry!.changeId))?.entry).not.toHaveProperty("presentation");
     transcript.push({ case: "record, undo and redaction", detail: await f.history() });
   });
@@ -783,13 +939,34 @@ describe("outside changes", () => {
     expect((await row(f, { kind: "global" }, "run.retry.maxRetries")).value).toBe(2);
     expect((await outsideEntries(f)).filter(entry => entry.key === "run.retry.maxRetries").map(entry => entry.after)).toEqual([2, 9]);
 
-    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), httpProxy: "http://user:secret@proxy.invalid" }));
-    await row(f, { kind: "global" }, "run.httpProxy");
-    const proxy = (await outsideEntries(f)).find(entry => entry.key === "run.httpProxy")!;
-    expect(proxy).toMatchObject({ redacted: true, changed: true });
-    expect(JSON.stringify(proxy)).not.toContain("secret");
-    expect(await readFile(f.outside.path, "utf8")).not.toContain("secret");
     transcript.push({ case: "outside mac", detail: await outsideEntries(f) });
+  });
+
+  caseIt("an observed state persisted before a key was retired records no outside entry or mark for it", async owner => {
+    const f = await fixture(owner);
+    const retired = (key: string) => instanceId(key, {});
+    const baseline = (await f.macDocument()).retry as { maxRetries: number };
+    await mkdir(dirname(f.outside.path), { recursive: true });
+    await writeFile(f.outside.path, JSON.stringify({ version: 1, stores: { global: {
+      digest: "stale",
+      values: {
+        [instanceId("run.retry.maxRetries", {})]: { key: "run.retry.maxRetries", value: baseline.maxRetries },
+        [retired("run.httpProxy")]: { key: "run.httpProxy", hash: "a".repeat(64) },
+        [retired("setup.sessionDir")]: { key: "setup.sessionDir", value: "/elsewhere" },
+      },
+      tron: { [retired("setup.sessionDir")]: "old-change" },
+      outside: { [retired("run.httpProxy")]: { changeId: "old-outside", applyAgain: false, before: "Set", after: "Not set" } },
+    } } }));
+    await row(f, { kind: "global" }, "run.retry.maxRetries");
+    await f.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 6 }]);
+    expect(await outsideEntries(f)).toEqual([]);
+
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), retry: { maxRetries: 9 } }));
+    expect((await row(f, { kind: "global" }, "run.retry.maxRetries")).value).toBe(9);
+    expect((await outsideEntries(f)).map(entry => entry.key)).toEqual(["run.retry.maxRetries"]);
+    const stored = JSON.parse(await readFile(f.outside.path, "utf8")).stores.global;
+    expect([...Object.keys(stored.values), ...Object.keys(stored.outside), ...Object.keys(stored.tron)]
+      .filter(instance => instance.startsWith("run.httpProxy") || instance.startsWith("setup.sessionDir"))).toEqual([]);
   });
 
   caseIt("a file event alone records and broadcasts each change without a tier push", async owner => {
@@ -941,6 +1118,10 @@ describe("outside changes to MCP servers and custom models", () => {
     expect(f.pushes).toEqual([]);
     expect(f.broadcasts.filter(event => event.topic === "mcp.changed").length).toBe(2);
     expect(JSON.stringify(await f.history())).not.toContain("outside-secret");
+    await expect(f.service.invoke(client(), "settings.undo", { commandId: commandId(), changeId: added.changeId }))
+      .rejects.toMatchObject({ code: "conflict", message: "This change is not undoable; inspect it with its owner" });
+    await expect(f.service.invoke(client(), "settings.applyAgain", { commandId: commandId(), changeId: added.changeId }))
+      .rejects.toMatchObject({ code: "conflict", message: "A hidden value cannot be applied again: it was never recorded" });
     expect(await readFile(f.outside.path, "utf8")).not.toContain("outside-secret");
     expect(await servers(f, { scope: "global" })).toEqual(["global:hand-added", "global:tron-added"]);
     const afterAdd = JSON.parse(await readFile(globalMcp, "utf8")) as { mcpServers: Record<string, unknown> };
@@ -1190,19 +1371,14 @@ describe("every key at every allowed layer", () => {
         }
         expect(applied.status, `${key.id}@${layer}`).toBe("applied");
         const after = await resolve(layer, key.id);
-        const expectedValue = key.redacted ? undefined : value;
         expect(after!.layer, `${key.id}@${layer} source`).toBe(scope);
-        if (!key.redacted) expect(after!.value, `${key.id}@${layer} value`).toEqual(expectedValue);
+        expect(after!.value, `${key.id}@${layer} value`).toEqual(value);
         expect(await stored(key, layer, after!.qualifiers ?? row.qualifiers ?? {}), `${key.id}@${layer} store`).toEqual(value);
         const undo = maintainerChange(f.service, client([slot.id]), "settings.undo", { commandId: commandId(), changeId: applied.changes[0]!.changeId, ...(layer === "session" ? { fence: fence() } : {}) });
-        if (key.redacted) {
-          await expect(undo).rejects.toMatchObject({ code: "conflict" });
-          await f.change(targets[layer]!, [{ key: key.id, layer: scope, op: "unset", ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) }], extra, client([slot.id]));
-          expect(await stored(key, layer, row.qualifiers ?? {}), `${key.id}@${layer} unset`).toBeUndefined();
-        } else await undo;
+        await undo;
         const undone = await resolve(layer, key.id);
-        if (!key.redacted) expect(undone!.value, `${key.id}@${layer} undo`).toEqual(row.value);
-        report.push({ ...instance, result: "round-trip", value: key.redacted ? "redacted" : value });
+        expect(undone!.value, `${key.id}@${layer} undo`).toEqual(row.value);
+        report.push({ ...instance, result: "round-trip", value });
       }
     }
     transcript.push({ case: `every key: ${only}`, detail: report.filter(entry => entry.layer === only) });
