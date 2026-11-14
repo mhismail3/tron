@@ -28,6 +28,10 @@ STAGED_REGISTRY = Path(home_layout.REGISTRY).name
 MAX_ENTRIES = 1_000_000
 MAX_JSON = 256 * 1024 * 1024
 LIBC = ctypes.CDLL(None, use_errno=True)
+WRITER = re.compile(r'Tron\.app/Contents/MacOS|Tron Native Host\.app|Tron Agent\.app|'
+                    r'Gateway/app/dist/index\.js|gateway/dist/index\.js|tron-dev.*__|'
+                    r'gateway-payload-deploy\.mjs|async-runner\.(?:ts|js)|'
+                    r'pi-coding-agent/.*/(cli|index)\.js|(?:^|/)(?:pi|npm|pnpm|yarn)(?: |$)')
 
 
 class Stop(Exception):
@@ -429,14 +433,18 @@ class MacPlatform:
         return {'team': team[1], 'cdhash': cdhash[1],
                 'resources': digest_file(safe_path(app / 'Contents/_CodeSignature/CodeResources'))}
 
-    def offline(self):
+    def isolated(self):
         for key in ('PI_CODING_AGENT_DIR', 'TRON_DATA_DIR', 'TRON_HOME_NAME',
                     'PI_AGENT_BROWSER_CONFIG', 'PI_AGENT_BROWSER_GLOBAL_CONFIG'):
             require(not os.environ.get(key), 'custom-configuration: environment override requires a reviewed owner decision')
             value = command(['/bin/launchctl', 'getenv', key], 'environment-probe', timeout=15)
             require(not value.strip(), 'custom-configuration: launchd override requires a reviewed owner decision')
         command(['/bin/launchctl', 'print', f'gui/{os.getuid()}'], 'launchd-probe', timeout=15)
-        for label in ('com.tron.server', 'com.tron.server.dev', 'com.tron.gateway.dev', 'com.tron.mac.native-host'):
+        self.services_absent(('com.tron.server.dev', 'com.tron.gateway.dev'))
+        self.port_free(9848)
+
+    def services_absent(self, labels):
+        for label in labels:
             result = subprocess.run(['/bin/launchctl', 'print', f'gui/{os.getuid()}/{label}'],
                                     capture_output=True, timeout=15)
             if result.returncode == 0:
@@ -445,21 +453,26 @@ class MacPlatform:
                 raise Stop(f'service-loaded: {label}; choose Quit Tron in the menu bar and wait for it to finish')
             require(b'Could not find service' in result.stderr,
                     'launchd-probe: could not distinguish absent service from inspection failure')
-        for port in (9847, 9848):
-            result = subprocess.run(['/usr/sbin/lsof', '-nP', f'-iTCP:{port}', '-sTCP:LISTEN', '-t'],
-                                    capture_output=True, timeout=15)
-            require(result.returncode == 1 and not result.stdout and not result.stderr,
-                    f'port-busy-or-unreadable: {port}; stop its owner through normal controls')
-        processes = command(['/bin/ps', '-axo', 'pid=,command='], 'process-probe', timeout=15).decode()
-        for line in processes.splitlines():
+
+    def port_free(self, port):
+        result = subprocess.run(['/usr/sbin/lsof', '-nP', f'-iTCP:{port}', '-sTCP:LISTEN', '-t'],
+                                capture_output=True, timeout=15)
+        require(result.returncode == 1 and not result.stdout and not result.stderr,
+                f'port-busy-or-unreadable: {port}; stop its owner through normal controls')
+
+    def writers(self):
+        found = []
+        for line in command(['/bin/ps', '-axo', 'pid=,command='], 'process-probe', timeout=15).decode().splitlines():
             pid, _, text = line.strip().partition(' ')
-            if pid == str(os.getpid()):
-                continue
-            if re.search(r'Tron\.app/Contents/MacOS|Tron Native Host\.app|Tron Agent\.app|'
-                         r'Gateway/app/dist/index\.js|gateway/dist/index\.js|tron-dev.*__|'
-                         r'gateway-payload-deploy\.mjs|async-runner\.(?:ts|js)|'
-                         r'pi-coding-agent/.*/(cli|index)\.js|(?:^|/)(?:pi|npm|pnpm|yarn)(?: |$)', text):
-                raise Stop('writer-present: stop standalone clients, workers and package operations before retry')
+            if int(pid) != os.getpid() and WRITER.search(text):
+                found.append((int(pid), text))
+        return found
+
+    def offline(self):
+        self.isolated()
+        self.services_absent(('com.tron.server', 'com.tron.mac.native-host'))
+        self.port_free(9847)
+        require(not self.writers(), 'writer-present: stop standalone clients, workers and package operations before retry')
 
     def verify_installed(self, require_bundled=False):
         command([REPO / 'scripts/verify-mac-install.sh', *(['--require-bundled'] if require_bundled else [])], 'installed-verification',

@@ -156,12 +156,15 @@ class MacPlatform:
     def token(self):
         return json.loads((self.tron_home / 'state/local-auth.json').read_text())['bearerToken']
 
-    def gateway_pid(self):
-        code, out, err = capture(['/bin/launchctl', 'print', f'gui/{os.getuid()}/{self.gateway_label}'], timeout=15)
+    def launchd_pid(self, label):
+        code, out, err = capture(['/bin/launchctl', 'print', f'gui/{os.getuid()}/{label}'], timeout=15)
         if code != 0 and 'Could not find service' not in err:
-            raise Failure(f'could not observe Gateway process ownership: {err.strip()}')
+            raise Failure(f'could not observe {label} process ownership: {err.strip()}')
         match = re.search(r'^\tpid = (\d+)$', out, re.M) if code == 0 else None
         return int(match.group(1)) if match else None
+
+    def gateway_pid(self):
+        return self.launchd_pid(self.gateway_label)
 
     def endpoints(self):
         """Plain WebSocket URLs of the Gateway job's own listeners on its port.

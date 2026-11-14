@@ -41,7 +41,7 @@ def retired_process(pid):
         queue.close()
 
 
-def process_owner(home):
+def process_owners(home):
     if sys.platform != "darwin":
         raise OSError("stopped_proof_unavailable")
     libc = ctypes.CDLL(None, use_errno=True)
@@ -54,6 +54,7 @@ def process_owner(home):
     count = proc.proc_listpids(4, os.geteuid(), None, 0)
     if count <= 0 or count > 4 * 100000:
         raise OSError("process_inventory_unavailable")
+    owners = set()
     pids = (ctypes.c_int * (count // 4 + 1024))()
     used = proc.proc_listpids(4, os.geteuid(), pids, ctypes.sizeof(pids))
     if used <= 0 or used >= ctypes.sizeof(pids):
@@ -84,7 +85,7 @@ def process_owner(home):
         if runtime:
             bindings.append(os.path.join(env.get("HOME", ""), env.get("TRON_HOME_NAME", ".tron")))
         if any(value.startswith("/") and within(os.path.realpath(value), home) for value in bindings):
-            return pid
+            owners.add(pid)
     result = subprocess.run(["/usr/sbin/lsof", "-nP", "-u", str(os.geteuid()), "-Fpn"], capture_output=True, timeout=30)
     if result.returncode or result.stderr or len(result.stdout) > 64 * 1024 * 1024:
         raise OSError("open_file_owners_unavailable")
@@ -93,8 +94,8 @@ def process_owner(home):
         if line.startswith(b"p"):
             pid = int(line[1:])
         elif pid != os.getpid() and line.startswith(b"n") and within(os.fsdecode(line[1:]), home):
-            return pid
-    return None
+            owners.add(pid)
+    return owners
 
 
 def wrapper_paths(l, home):
@@ -137,9 +138,9 @@ def probe(l, home, owned=None):
         finally:
             os.close(fd)
     try:
-        pid = process_owner(home)
-        if pid is not None:
-            return {"reason": "home_process_present", "pid": pid}
+        owners = process_owners(home)
+        if owners:
+            return {"reason": "home_process_present", "pid": min(owners)}
     except (OSError, ValueError, subprocess.SubprocessError) as failure:
         return {"reason": "stopped_proof_unavailable", "detail": str(failure)}
     return None

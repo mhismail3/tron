@@ -93,19 +93,28 @@ def snapshot(root: Path, contents_first: bool = True) -> dict:
 class OperatorCutoverTests(unittest.TestCase):
     def test_apply_and_rollback_pass_paths_to_every_platform_log_boundary(self):
         with tempfile.TemporaryDirectory(prefix="cutover-home-") as temporary:
-            user = Path(temporary)
+            user = Path(temporary).resolve()
             spec = importlib.util.spec_from_file_location("operator_cutover", ROOT / "tools/home-layout/operator_cutover.py")
             operator = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(operator)
             sys_path = list(sys.path)
             self.addCleanup(setattr, sys, "path", sys_path)
             sys.path[:0] = [str(ROOT / "scripts"), str(ROOT / "tools/home-layout")]
+            import home_layout
+            import stopped_home as stopped
+            import tron_mac_reinstall as reinstall
             import tron_mac_replace_platform as boundary
             import terminal_layout as terminal
             legacy = user / ".tron/mac-terminal"
+            legacy.mkdir(parents=True)
+            (legacy / "ssh_host_ed25519_key").write_bytes(b"host-key")
+            (legacy / "ssh_host_ed25519_key").chmod(0o600)
+            (user / ".tron/agent").mkdir()
+            (user / ".tron" / home_layout.RUNTIME_LOCK).touch()
             launch_agent = user / "Library/LaunchAgents" / (terminal.label(legacy) + ".plist")
             launch_agent.parent.mkdir(parents=True)
             launch_agent.write_bytes(terminal.plist(legacy))
+            launch_agent.chmod(0o600)
             launchd = {"prints": None}
 
             def launchctl(l, arguments, timeout=3):
@@ -116,9 +125,24 @@ class OperatorCutoverTests(unittest.TestCase):
                     if launchd["prints"]:
                         launchd["prints"] -= 1
                     listing = (f"\tpath = {launch_agent}\n\tprogram = /usr/sbin/sshd\n\targuments = {{\n\t\t/usr/sbin/sshd\n\t\t-D\n\t\t-e\n"
-                               f"\t\t-f\n\t\t{legacy}/sshd_config\n\t}}\n\tstate = exiting\n")
+                               f"\t\t-f\n\t\t{legacy}/sshd_config\n\t}}\n\tstate = running\n\tpid = 77\n")
                     return subprocess.CompletedProcess(arguments, 0, listing, "")
                 return subprocess.CompletedProcess(arguments, 113, "", "Could not find service")
+
+            table = [(10, 1, "/Applications/Tron.app/Contents/MacOS/Tron"), (11, 10, "node /x/pi-coding-agent/dist/cli.js"),
+                     (123, 1, "node /x/Gateway/app/dist/index.js"), (124, 123, "npm ci"), (125, 124, "/bin/zsh"),
+                     (30, 1, "/x/Tron Native Host.app/Contents/MacOS/host"), (77, 1, f"/usr/sbin/sshd -D -e -f {legacy}/sshd_config")]
+            owners = {10, 11, 123, 125, 30, 77, 999}
+            strays = {"writer": (900, 1, "node /w/settings/packages/gateway/dist/index.js"),
+                      "holder": (901, 1, f"python3 -m http.server --directory {user}/.tron/workspace/files")}
+
+            def probe(argv, category, timeout=1200, env=None, accepted=(0,)):
+                self.assertEqual(category, "process-probe")
+                return "".join(f"{pid} {text}\n" for pid, _, text in table).encode()
+
+            def process_owners(home):
+                self.assertEqual(home, str(user / ".tron"))
+                return owners | {pid for pid, _, _ in table}
 
             calls = []
             pending = []
@@ -170,6 +194,12 @@ class OperatorCutoverTests(unittest.TestCase):
                 def gateway_pid(self):
                     return 123
 
+                def launchd_pid(self, label):
+                    return 30 if label == self.helper_label else None
+
+                def app_identity(self):
+                    return {"pid": 10, "path": str(installed)}
+
                 def port_listening(self):
                     return True
 
@@ -212,7 +242,25 @@ class OperatorCutoverTests(unittest.TestCase):
                     patch.object(operator.shutil, "disk_usage", return_value=shutil._ntuple_diskusage(10**12, 0, 10**12)), \
                     patch.object(boundary, "MacPlatform", Platform), \
                     patch.object(operator, "command", side_effect=command), patch.object(operator, "migrate", side_effect=migrate), \
-                    patch.object(terminal, "command", side_effect=launchctl):
+                    patch.object(terminal, "command", side_effect=launchctl), \
+                    patch.object(operator, "processes", side_effect=lambda: list(table)), \
+                    patch.object(stopped, "process_owners", side_effect=process_owners), \
+                    patch.object(reinstall, "command", side_effect=probe), \
+                    patch.object(reinstall.MacPlatform, "isolated", autospec=True) as isolated:
+                for kind, stray in strays.items():
+                    table.append(stray)
+                    with patch("sys.argv", ["operator-cutover.py", "apply"]), self.assertRaisesRegex(RuntimeError, f"{kind}s through their owners before cutover: {stray[0]} "):
+                        operator.main()
+                    table.remove(stray)
+                applied = user / ".tron/state/mac-terminal"
+                applied.mkdir(parents=True)
+                with patch("sys.argv", ["operator-cutover.py", "apply"]), self.assertRaisesRegex(RuntimeError, "migration status refuses: .*applied_without_stamp"):
+                    operator.main()
+                shutil.rmtree(applied.parent)
+                self.assertFalse(platform.maintenance.joinpath("cutover-2500-" + revision[:12]).exists())
+                self.assertEqual(calls, [])
+                self.assertEqual(isolated.call_count, 3)
+                self.assertEqual(home_layout.migrate(str(user / ".tron"), True)[1]["blockers"], ["gateway_running"])
                 with patch("sys.argv", ["operator-cutover.py", "apply"]):
                     operator.main()
                 receipt = platform.maintenance / ("cutover-2500-" + revision[:12]) / "receipt.json"

@@ -230,6 +230,16 @@ The checkout and remote main must still equal the bound revision at invocation.
 Keep packet instructions beside it in `OPERATOR-CUTOVER.md`; never reuse an older
 failed operation or build directory. A new merge gets new maintenance paths.
 
+`apply` preflights before creating its operation, build or receipt, with the old app
+running or quit: remote main; absent build tree and maintenance pointers; the reinstall
+owner's isolation (no environment/launchd overrides, Debug services or 9848 listener);
+then reinstall writers and stopped-proof `~/.tron` holders outside what Quit and SSH
+retirement stop (the app, Gateway and native helper with descendants, and the owned
+SSH listener); and migration status `not_started` without errors. Status blockers that
+only mean the app is up (`gateway_running`, `terminal_runtime_lock_present`,
+`mac_wrapper_running`, `home_process_present`) pass here; the stopped dry-run after
+Quit proves them. A refusal names each process and leaves the packet reusable.
+
 Platform command logs are paths, whereas the packet's commands and migration use
 an open output stream. The adapter flushes the append-mode stream before handing
 its path to every platform call, including stop and rollback launch. Append mode

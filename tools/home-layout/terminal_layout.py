@@ -63,7 +63,8 @@ def job(l, root, path):
     if (not fields["path"] or fields["path"][1].strip() != str(path) or not fields["program"] or fields["program"][1].strip() != "/usr/sbin/sshd"
             or values != ["/usr/sbin/sshd", "-D", "-e", "-f", str(root / "sshd_config")]):
         raise l.LayoutError("terminal_job_not_owned")
-    return {"running": bool(fields["state"] and fields["state"][1].strip() == "running" and fields["pid"])}
+    return {"running": bool(fields["state"] and fields["state"][1].strip() == "running" and fields["pid"]),
+            "pid": int(fields["pid"][1]) if fields["pid"] else None}
 
 
 def retire_job(l, root, path, fence):
