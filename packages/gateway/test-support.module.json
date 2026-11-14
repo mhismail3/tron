@@ -37,6 +37,7 @@
     "test-support/mcp-oauth-fixture.mjs",
     "test-support/nested-vitest-payload.ts",
     "test-support/network-isolation.ts",
+    "test-support/persisted-logs.ts",
     "test-support/profile-partition-crash.ts",
     "test-support/profile-v1-fixture.ts",
     "test-support/runtime-registry-fixture.ts",
