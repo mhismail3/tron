@@ -29,7 +29,6 @@ const sample = await open(path, "r");
 const prototype = Object.getPrototypeOf(sample);
 await sample.close();
 const stat = prototype.stat;
-const close = prototype.close;
 const createReadStream = prototype.createReadStream;
 const decode = TextDecoder.prototype.decode;
 let handle;
@@ -40,12 +39,13 @@ const cleanup = new Promise(resolve => { closed = resolve; });
 prototype.stat = async function(...args) {
   const result = await stat.apply(this, args);
   handle = this;
+  const close = this.close;
+  this.close = async (...args) => {
+    const result = await close.apply(this, args);
+    closed();
+    return result;
+  };
   if (phase === "stat") controller.abort();
-  return result;
-};
-prototype.close = async function(...args) {
-  const result = await close.apply(this, args);
-  if (this === handle) closed();
   return result;
 };
 prototype.createReadStream = function(...args) {
