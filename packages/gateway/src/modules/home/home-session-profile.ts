@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { SettingsManager } from "../../kernel/pi/coding-agent.js";
+import { managedBrowserEnabled } from "../../kernel/pi/packages.js";
 import type { ProfileModelRuntime, SessionProfile } from "../../kernel/host/session-profile.js";
 import { HOME_TOOL_NAMES } from "./home-runtime-policy.js";
 import { GatewayError } from "../../errors.js";
@@ -21,7 +23,10 @@ export function homeSessionProfile(services: () => HomeSessionProfileServices): 
     extensions: [...HOME_MODULE_NAMES, "tron-home", "tron-home-research", "tron-web-research"],
     resources: {
       noExtensions: true,
-      additionalExtensionPaths: ["builtin:agent-browser"],
+      get additionalExtensionPaths() {
+        const { agentDir } = services();
+        return managedBrowserEnabled(SettingsManager.create(agentDir, agentDir)) ? ["builtin:agent-browser"] : [];
+      },
       noContextFiles: true,
       agentsFilesOverride: () => {
         const path = services().globalRulesPath;

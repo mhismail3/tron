@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
 import { cp, mkdir, readFile, readdir, symlink } from "node:fs/promises";
-import { dirname, join, relative } from "node:path";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { nativeBrowserPayloadFiles } from "./native-browser-payload.js";
 
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
 
@@ -12,8 +11,7 @@ export async function copyPayload(payload: string, ownTestFile: string): Promise
     recursive: true,
     filter: (source) => !source.endsWith(".test.ts") || source.endsWith(ownTestFile),
   });
-  for (const file of ["test-support", "vitest.config.ts", "vitest.nested.config.ts", "package.json", ...nativeBrowserPayloadFiles(packageRoot)]) {
-    await mkdir(dirname(join(payload, file)), { recursive: true });
+  for (const file of ["test-support", "vitest.config.ts", "vitest.nested.config.ts", "package.json"]) {
     await cp(join(packageRoot, file), join(payload, file), { recursive: true });
   }
   await symlink(join(packageRoot, "node_modules"), join(payload, "node_modules"));

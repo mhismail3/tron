@@ -71,9 +71,13 @@ only by an outside SIGKILL or by a Vitest still tearing down when the grace ends
 It never installs this checkout's missing packages.
 Browser integration tests use the file dependency from
 `pi-agent-browser-native-patch.json`, exactly as production; there is no separate
-upstream checkout or PATH-engine fixture. The runner supplies an existing cached
-Chrome for Testing with an isolated profile and mock keychain flags. Missing Chrome
-fails the selected browser journey instead of attaching to a personal browser.
+upstream checkout or PATH-engine fixture. Only a selection that includes those
+browser journeys (the default config, with no file filter or one matching them) needs
+Chrome for Testing. The runner then provisions it once per clone into
+`<git-common-dir>/verify/fixtures/chrome-for-testing-agent-browser-<version>/` with the
+pinned engine's own `agent-browser install` (HOME set to that directory, never the
+caller's), and passes its binary with mock keychain flags. If no binary results, the
+run refuses instead of attaching to a personal browser.
 The Gateway runner first waits
 its turn for the host's `/tmp/tron-full-gateway.lock` (printing the holder and earlier waiters) and
 records itself there, so local Gateway runs never overlap each other or a `mutate` sampling, which holds it

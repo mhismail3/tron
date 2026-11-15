@@ -156,7 +156,11 @@ checks listener PID, process birth, profile argv and issued launch nonce. Generi
 `owned-launch prepare|record|cleanup` gives those producers receipts without a second
 launcher. Personal profiles, state imports and cookie/profile copying are unavailable;
 existing personal-Chrome logins do not transfer. New owned-profile logins persist.
-User browser packages are ignored and cannot register the reserved browser tool names.
+Only a user-scope declaration of `pi-agent-browser-native` (npm or its GitHub fork source)
+enables the browser: `managedBrowserEnabled` then registers the managed builtin for ordinary
+sessions, Home (`builtin:agent-browser`) and the admin catalog. The declared source itself is
+never loaded and cannot register the reserved browser tool names. Without the declaration no
+session registers `agent_browser`, and the builtin's artifact checks never run.
 
 ## Signals
 
@@ -179,12 +183,7 @@ User browser packages are ignored and cannot register the reserved browser tool 
 - **Update:** verifies upstream tag and fork ancestry, builds a new `-tron.N` in a disposable
   tree, and must pass the offline real-Gateway activation/child-execution gate and the previous
   → candidate → previous probe before publishing immutable artifacts and renaming the pin
-  (current kept as previous). The staged Gateway also carries the running updater payload's
-  native-browser pin, confined artifact and canonical dependency lock, so its real activation
-  gates validate the same managed browser dependency without installing or updating it.
-  `test-support/native-browser-payload.ts` owns this input list for both updater staging
-  and nested rollback payloads; the copier carries its helper with the test-support tree.
-  `.pi-subagents-update-staging` is the exclusive lease; an
+  (current kept as previous). `.pi-subagents-update-staging` is the exclusive lease; an
   interrupted update leaves it for the operator. It never edits the fork, homes or manifests.
 - **Home task gate:** every pin change also re-reviews the fork's launch/control contract
   and updates the reviewed version in `src/kernel/delegation/delegated-provider.ts`.

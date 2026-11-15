@@ -10,6 +10,7 @@ import {
   createToolSearchExtension,
   type ExtensionFactory,
 } from "../pi/coding-agent.js";
+import { managedBrowserEnabled } from "../pi/packages.js";
 
 function browserExtension(agentDir: string): ExtensionFactory {
   const gateway = fileURLToPath(new URL("../../..", import.meta.url));
@@ -34,18 +35,17 @@ function browserExtension(agentDir: string): ExtensionFactory {
   return (pi) => nativeBrowser(pi, { ownedProfilePath: join(agentDir, "browser", "profile"), engineExecutable });
 }
 
-export function managedBrowserExtension(agentDir: string): { name: string; factory: ExtensionFactory; builtin: true; replaceable: false } {
-  return { name: "agent-browser", factory: browserExtension(agentDir), builtin: true, replaceable: false };
+export function managedBrowserExtensions(agentDir: string, settings: Parameters<typeof managedBrowserEnabled>[0]): Array<{ name: string; factory: ExtensionFactory; builtin: true; replaceable: false }> {
+  return managedBrowserEnabled(settings) ? [{ name: "agent-browser", factory: browserExtension(agentDir), builtin: true, replaceable: false }] : [];
 }
 
 export function piBuiltinExtensions(
   agentDir: string,
   openMcpUrl?: (url: string) => void,
-): Array<{ name: string; factory: ExtensionFactory; builtin: true; replaceable: boolean }> {
+): Array<{ name: string; factory: ExtensionFactory; builtin: true; replaceable: true }> {
   return [
     { name: "codemode", factory: createCodemodeExtension(), builtin: true, replaceable: true },
     { name: "tool-search", factory: createToolSearchExtension(), builtin: true, replaceable: true },
-    managedBrowserExtension(agentDir),
     {
       name: "mcp",
       factory: createMcpExtension({
