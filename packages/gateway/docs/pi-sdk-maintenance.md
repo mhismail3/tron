@@ -181,6 +181,8 @@ User browser packages are ignored and cannot register the reserved browser tool 
   (current kept as previous). The staged Gateway also carries the running updater payload's
   native-browser pin, confined artifact and canonical dependency lock, so its real activation
   gates validate the same managed browser dependency without installing or updating it.
+  `test-support/native-browser-payload.ts` owns this input list for both updater staging
+  and nested rollback payloads; the copier carries its helper with the test-support tree.
   `.pi-subagents-update-staging` is the exclusive lease; an
   interrupted update leaves it for the operator. It never edits the fork, homes or manifests.
 - **Home task gate:** every pin change also re-reviews the fork's launch/control contract

@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { closeSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { nativeBrowserPayloadFiles } from "../test-support/native-browser-payload.ts";
 
 const GATEWAY = dirname(dirname(fileURLToPath(import.meta.url)));
 const PIN = "pi-subagents-pin.json";
@@ -110,10 +111,7 @@ export function runUpdate({ gatewayDir = GATEWAY, forkRepo, commit, spawn = spaw
     writeFileSync(join(candidateRoot, PIN), JSON.stringify(candidate, null, 2) + "\n");
     invoke(process.execPath, [join(candidateRoot, "scripts/check-pi-subagents.mjs")], candidateRoot, env);
     for (const path of ["src", "test-support", "vitest.config.ts", "vitest.nested.config.ts", "package.json"]) cpSync(join(root, path), join(candidateRoot, path), { recursive: true });
-    const browserPin = "pi-agent-browser-native-patch.json";
-    const browserArtifact = JSON.parse(readFileSync(join(GATEWAY, browserPin), "utf8")).artifact.path;
-    if (!/^third_party\/pi-agent-browser-native\/[^/]+\.tgz$/u.test(browserArtifact)) throw new Error("native browser artifact must stay inside its carrier directory");
-    for (const path of ["package-lock.json", browserPin, browserArtifact]) {
+    for (const path of nativeBrowserPayloadFiles(GATEWAY)) {
       mkdirSync(dirname(join(candidateRoot, path)), { recursive: true });
       copyFileSync(join(GATEWAY, path), join(candidateRoot, path));
     }

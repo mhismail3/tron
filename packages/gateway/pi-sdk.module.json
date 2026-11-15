@@ -22,6 +22,7 @@
     "scripts/update-pi-subagents.integration.test.mjs",
     "scripts/update-pi-subagents.mjs",
     "test-fixtures/pi-sdk/**",
+    "test-support/native-browser-payload.ts",
     "test-support/pi-persisted-state-corpus.ts",
     "third_party/**",
     "vitest.corpus.config.ts"
