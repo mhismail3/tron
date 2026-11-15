@@ -81,8 +81,9 @@ assertion edit. **Not yet enforced:** commit prefixes and expected-fail regressi
 
 **Rule.** Every state, resource and lifecycle has one owner that holds its transitions and
 recovery, documented beside the code. Make invalid states unrepresentable rather than guarding
-them. Persisted `~/.tron` formats and user-visible design are on the global Approvals list
-(`~/.tron/agent/AGENTS.md`); wire protocol and RPC shapes take an independent ACCEPT. All ship in Mac, Gateway and iPhone lockstep, with
+them. Live `~/.tron` format migrations and subjective design are on the global Approvals list
+(`~/.tron/agent/AGENTS.md`); wire protocol and RPC shapes take an independent ACCEPT. All ship
+in Mac, Gateway and iPhone lockstep, with
 forward-only migrations that take a backup first.
 **Evidence.** Fourteen *Likely* state-machine defects (#2316 F1–F14) sit where two owners or an
 implicit boolean state meet.
