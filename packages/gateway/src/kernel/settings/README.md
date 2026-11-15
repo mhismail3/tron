@@ -28,6 +28,13 @@ setting and is not an approval queue.
   tokens and URL parts, every field outside the allowlist), the on-disk projection that refuses
   records it cannot carry, and the widen/narrow rule that decides the native tap. `RECORD_SUBJECTS`
   carries its `write` declaration; `schema.recordKey()` builds the change-path declaration from it.
+- `model-provider-value.ts`: the typed `accounts.models.provider` value (`baseUrl`, `api`, optional `name`
+  and `models`: `id`, `name?`, `reasoning?`, `input?`, `contextWindow?`, `maxTokens?`), closed to those fields
+  so no credential (`apiKey`, `headers`, `authHeader`), `oauth`, `compat` or `modelOverrides` can enter the
+  record; the on-disk projection refuses an existing provider it cannot carry, and the tap rule (a new provider or a
+  changed address or API taps).
+- `secret-free.ts`: the shared secret-shape refusals (credential detection, secret-named query and token names,
+  URL checks) that the MCP and provider values both use, with each owner's hint.
 - `settings-record.ts`: durable, byte/row-bounded segments, index recovery and
   paged history. Indexed immutable segments must retain their indexed row count;
   a grouped Undo requires exactly its unique, consistently sized members.

@@ -74,10 +74,10 @@ In short:
 RPCs (shapes in the [Gateway README](../../README.md)): `settings.resolve`,
 `settings.options`, `settings.change` (with `dryRun`), `settings.undo`,
 `settings.applyAgain`, `settings.history` (the maintainer's full view), plus `home.profileChange` for learned-profile notes.
-Broadcasts: `settings.changed`, `trust.changed`, `mcp.changed`,
-`models.customChanged`. Agents reach the same path through the `settings` tool
-(a thin client of resolve, change, history, undo and inventory, each carrying the calling chat's actor; history and undo are
-scoped by that actor as the kernel contract defines). `inventory` is read-only: it projects the hook registrations (by extension and by event), configured packages, Tron modules and configured MCP servers (`configured`, `disabled` or `unknown`; never probed) for the chat's directory. Hooks and packages come from `HookResources` and `PackageService`, which load extension definitions for a trusted project as the existing `hooks.list`/`packages.list` RPCs do (code loading, a residual risk; not a probe). MCP comes from `McpAdminService.configured`, which reads `mcp.json` and, for a trusted project, `.pi/mcp.json` directly. It never runs `pi mcp` (which connects servers and resolves `!command` credentials), so no MCP server is started and no credential is resolved. URLs are reduced to the transport kind, so no URL text reaches the result. Every string is sanitized through credential redaction. An undecided project fails with `trust_required`. Home's tool may target a delegated worker by `taskId`.
+Broadcasts: `settings.changed`, `trust.changed`, `mcp.changed`. Agents reach the same path through the `settings` tool
+(a thin client of resolve, change, history and undo, each carrying the calling chat's actor; history and undo are
+scoped by that actor as the kernel contract defines). Home's tool may target a delegated
+worker by `taskId`.
 
 Ports in: `gateway-main.ts` wires kernel `SettingsModel`/`SettingsChangePath`,
 admin `SettingsStoreAdapter`,
@@ -94,8 +94,10 @@ are installed; schema access never evaluates their late-bound service getter.
 
 - Every write of a declared key or record subject goes through
   `SettingsChangePath`; there are no per-key setters and no second store. A
-  Tron-made `mcp.json` write runs inside the outside-change bracket, so it is
-  audited once by the change path and never as a hand edit.
+  Tron-made `mcp.json` or `models.json` write runs inside the outside-change bracket, so it is
+  audited once by the change path and never as a hand edit. `ModelConfigService` is the only writer of
+  `models.json` providers; a provider change refreshes the shared runtime through
+  `GlobalProviderResources.refreshModels` before the change returns.
 - A value at a layer the key does not allow is ignored and reported, never
   applied. A repository never grants itself trust; an untrusted `.pi/` is
   present but not applied and never written.

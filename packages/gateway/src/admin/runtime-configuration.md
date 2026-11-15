@@ -53,9 +53,11 @@ its own owner; the displaced unadmitted request is rejected `busy` for explicit 
 ## Settings, trust and custom models
 
 Settings projections fail closed before projection would truncate. Trust changes reload idle runtimes
-before acknowledgement. Custom model documents are validated by a temporary pinned
-runtime before an atomic write (≤ 768 KiB, bounded depth and nodes); reads redact
-secrets and updates restore matching placeholders.
+before acknowledgement. Custom model providers change one provider at a time through `accounts.models.provider`.
+Each change validates the whole candidate `models.json` with a temporary pinned runtime
+before an atomic write (≤ 768 KiB, bounded depth and nodes); a file the runtime cannot load
+is refused and never written. Reads redact secrets; updates never restore placeholders, and a
+provider that carries a credential is edited in `models.json` or the app.
 
 ## Provider login
 

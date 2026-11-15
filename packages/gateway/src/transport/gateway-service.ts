@@ -6,7 +6,7 @@ import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
 import { contextWindowLimits } from "../providers/context-window-policy.js";
 import { ModelReleaseDateCatalog } from "../providers/model-release-date-catalog.js";
 import type { GatewayConfig } from "../config.js";
-import { GatewayError, isUncertainOutcome } from "../errors.js";
+import { asUncertainOutcome, GatewayError, isUncertainOutcome } from "../errors.js";
 import { runtimeIdentity } from "./runtime-identity.js";
 import { HOME_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY, HOME_MEMORY_VIEW_CAPABILITY, HOME_PROFILE_LIST_CAPABILITY, HOME_PROFILE_EDIT_CAPABILITY } from "../protocol/capabilities.js";
 import type { CommandDetail, GatewayRestartResponse, HomeTaskStatusResult, JsonValue, ModelPage, ModelRef, SessionCommands, SessionListPage, TronModuleList } from "../protocol/types.js";
@@ -277,7 +277,7 @@ export interface GatewayServiceDependencies {
   packages: PackageService;
   hookResources: HookResources;
   auth: AuthBroker;
-  globalProviderResources: Pick<GlobalProviderResources, "requestReload" | "withStableSnapshot">;
+  globalProviderResources: Pick<GlobalProviderResources, "requestReload" | "withStableSnapshot" | "refreshModels">;
   updateService?: GatewayUpdateService;
   iosDeviceInstallService?: IosDeviceInstallService;
   logger: GatewayLogger;
@@ -392,7 +392,6 @@ export class GatewayService {
       }
       if (group.some(entry => entry.key === "accounts.models.provider")) {
         this.dependencies.globalProviderResources.requestReload();
-        this.dependencies.broadcast("models.customChanged", {});
       }
     }
   }
@@ -1925,12 +1924,6 @@ export class GatewayService {
         });
       case "models.custom.get":
         return safeJson(await this.dependencies.modelConfig.get());
-      case "models.custom.put":
-        return this.mutation(client, method, params, async () => {
-          const result = await this.asTronWrite([{ kind: "models" }], () => this.dependencies.modelConfig.put(params.document));
-          this.dependencies.broadcast("models.customChanged", {});
-          return safeJson(result);
-        });
       case "models.refresh": {
         const controller = new AbortController();
         const work = this.workRegistry?.begin({
@@ -2137,6 +2130,11 @@ export class GatewayService {
       if (key.effect === "next-compaction" && (change.layer === "global" || projectDir)) {
         this.dependencies.sessions.refreshCompactionPolicies(change.layer === "global" ? "global" : "project", projectDir ?? this.dependencies.config.tronHome);
       }
+    }
+    if (changes.some(change => change.key === "accounts.models.provider")) {
+      await this.dependencies.globalProviderResources.refreshModels().catch(error => {
+        throw asUncertainOutcome(error, "Settings applied but the custom model catalog did not refresh");
+      });
     }
     this.dependencies.broadcast("settings.changed", safeJson({
       changeIds: changes.map(change => change.changeId), keys: [...new Set(changes.map(change => change.key))],

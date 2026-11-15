@@ -686,15 +686,15 @@ final class TronSmokeUITests: XCTestCase {
         app.buttons["settings-link-Model Providers"].tap()
         expandSettingsSheet(app, title: "Providers")
         XCTAssertTrue(app.staticTexts["3 models currently available"].waitForExistence(timeout: 10))
-        XCTAssertTrue(waitForLabel(operations, containing: "refresh:0 custom-read:0 custom-write:0 credentials:0", timeout: 5))
+        XCTAssertTrue(waitForLabel(operations, containing: "refresh:0 custom-read:0 credentials:0", timeout: 5))
         app.buttons["Refresh"].tap()
-        XCTAssertTrue(waitForLabel(operations, containing: "refresh:1 custom-read:0 custom-write:0 credentials:0", timeout: 5),
+        XCTAssertTrue(waitForLabel(operations, containing: "refresh:1 custom-read:0 credentials:0", timeout: 5),
                       "Refresh must dispatch only the owned global catalog command")
         XCTAssertFalse(app.buttons["settings-link-Custom Models"].exists, "Routine definitions use agent source configuration, not a second native editor")
         XCTAssertFalse(app.navigationBars.staticTexts["Custom Models"].exists, "Refresh must not navigate to the editor")
         app.buttons["Details for Fixture Provider"].tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Fixture Provider"].waitForExistence(timeout: 5))
-        XCTAssertTrue(waitForLabel(operations, containing: "refresh:1 custom-read:0 custom-write:0 credentials:0", timeout: 5),
+        XCTAssertTrue(waitForLabel(operations, containing: "refresh:1 custom-read:0 credentials:0", timeout: 5),
                       "Provider setup navigation must neither refresh the catalog nor edit custom definitions/credentials")
         closeTopSheet(app)
         XCTAssertTrue(app.navigationBars.staticTexts["Providers"].waitForExistence(timeout: 5))
