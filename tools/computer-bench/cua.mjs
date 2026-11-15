@@ -108,8 +108,8 @@ export function cua(options) {
     name: "cua",
     async probe() {
       if (!existsSync(DRIVER)) return { ok: false, reason: `missing ${DRIVER}` };
-      socket = driverSocket();
-      if (!socket) return { ok: false, reason: "no Tron Native Host Cua socket (tron-cua-*/s) in the user temp directory" };
+      socket = process.env.COMPUTER_BENCH_CUA_SOCKET ?? driverSocket();
+      if (!socket || !existsSync(socket)) return { ok: false, reason: "no configured or Native Host Cua socket is available" };
       const version = (await run(DRIVER, ["--version"], { env: ENV })).stdout.trim();
       try {
         const started = await call("start_session");

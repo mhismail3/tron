@@ -114,12 +114,15 @@ Composition supplies the same late K6 settings, Profile and raw model owners.
 - **Profile** (`home-session-profile.ts`) is fixed per runtime. An unrecorded new Home uses
   its creation recipe once; later runtimes read the record (enabled Home, otherwise ordinary).
   Only `tron-context-window`, `tron-compaction-policy`, `tron-settings`, `tron-projects`,
-  `tron-ask-user`, `tron-display`, `tron-notify`, `tron-schedule`, `tron-computer`, `tron-home`, `tron-home-research` and `tron-web-research` load.
+  `tron-ask-user`, `tron-display`, `tron-notify`, `tron-schedule`, `tron-computer`, `tron-home`, `tron-home-research` and `tron-web-research` load,
+  plus the already-installed, globally configured trusted browser package through its explicit local package path.
+  Package metadata retains its existing browser-source attribution. Missing browser assets leave that tool unavailable;
+  Home does not provision a second temporary checkout. Ambient extensions remain disabled.
   [Projects](../projects/README.md) owns tap-gated lifecycle actions. Shared Pi file/search/shell tools allow direct
-  work; only canonical maintainer turns admit general writes, edits, shell execution or `computer`.
+  work; only canonical maintainer turns admit general writes, edits, shell execution, `computer` or `agent_browser`.
   Home's current recipe owns model, thinking and tools on creation/reconstruction and every request; chapter choices are records, never overrides.
   Rollover carries only directional authorization ceilings (e.g. images blocked until approved) and the explicit chapter window.
-  Settings counts enabled tools; every producer-owned input is a wake, on which `write`, `edit`, `bash` and `computer` stay declared and every call to them is refused.
+  Settings counts enabled tools; every producer-owned input is a wake, on which `write`, `edit`, `bash`, `computer` and `agent_browser` stay declared and every call to them is refused.
   Agent `SYSTEM.md`/`APPEND_SYSTEM.md` are dropped; only `HOME_TOOL_NAMES`; no MCP or subagent discovery
   (empty `session.resources` catalog), no compaction (`session.compact` refuses). Fixed physical
   model on its Gateway-runtime view; the profile owns explicit model admission and physical

@@ -1,14 +1,17 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { DefaultPackageManager, SettingsManager } from "../../kernel/pi/coding-agent.js";
 import type { ProfileModelRuntime, SessionProfile } from "../../kernel/host/session-profile.js";
 import { HOME_TOOL_NAMES } from "./home-runtime-policy.js";
 import { GatewayError } from "../../errors.js";
 import { isVirtualModel } from "../../providers/virtual-model.js";
+import { isTrustedBrowserExtensionSource } from "../../display/browser-live-view-adapter.js";
 
 export const HOME_SESSION_PROFILE_NAME = "home";
 const HOME_MODULE_NAMES: readonly string[] = [
   "tron-context-window", "tron-compaction-policy", "tron-settings", "tron-projects", "tron-ask-user", "tron-display", "tron-notify", "tron-schedule", "tron-computer",
 ];
 export interface HomeSessionProfileServices {
+  agentDir: string;
   globalRulesPath: string;
   decision(sessionId: string, cwd: string): "home" | "ordinary" | "unnamed";
   runtime(): Promise<ProfileModelRuntime>;
@@ -20,6 +23,12 @@ export function homeSessionProfile(services: () => HomeSessionProfileServices): 
     extensions: [...HOME_MODULE_NAMES, "tron-home", "tron-home-research", "tron-web-research"],
     resources: {
       noExtensions: true,
+      get additionalExtensionPaths() {
+        const { agentDir } = services();
+        const packages = new DefaultPackageManager({ cwd: agentDir, agentDir, settingsManager: SettingsManager.create(agentDir, agentDir) });
+        return packages.listConfiguredPackages().filter(entry => entry.scope === "user" && isTrustedBrowserExtensionSource(entry.source))
+          .flatMap(entry => entry.installedPath && existsSync(entry.installedPath) ? [entry.installedPath] : []);
+      },
       noContextFiles: true,
       agentsFilesOverride: () => {
         const path = services().globalRulesPath;
