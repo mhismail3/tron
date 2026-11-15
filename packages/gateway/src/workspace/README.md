@@ -38,7 +38,7 @@ moving its product copy or changing prompt timing.
   do not load it.
 - **Browser preference.** Core context names `agent_browser` only while that tool
   is active. Desktop-only and tool-less requests do not advertise it.
-- **Delegation handoff.** `tron-core` registers the bounded (2 KiB UTF-8)
+- **Delegation handoff.** `tron-core` registers the bounded (4 KiB UTF-8)
   `[Tron handoff]` for its session through the managed provider's
   `child-task-context` API. The provider delivers it once at the start of every
   child's USER or external TASK text: direct, resume, workflow, slash/RPC, nested,
