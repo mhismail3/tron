@@ -15,6 +15,8 @@ import { isVirtualModel } from "../providers/virtual-model.js";
 import { updateJsonLocked } from "../foundation/json.js";
 import { gitHeadState, projectGitState, readProjectDocument } from "./project-settings-writer.js";
 import { observedInstance, projectStores, type ObservedReaders, type OutsideChanges } from "./settings-outside.js";
+import type { McpAdminService } from "./mcp-admin-service.js";
+import type { McpServerValue } from "../kernel/settings/mcp-server-value.js";
 import type { TrustService } from "../kernel/resources/trust-service.js";
 import { targetLayers } from "../kernel/settings/settings-resolver.js";
 import type { SettingsSchema } from "../kernel/settings/settings-schema.js";
@@ -29,6 +31,7 @@ interface SettingsModelDependencies {
   modelRuntime: ModelRuntime;
   toolCatalog?: (target: SettingsTarget) => Promise<readonly ToolCatalogEntry[]>;
   macTerminalKeys?: Pick<MacTerminalService, "read" | "set" | "enabled" | "setEnabled">;
+  mcpAdmin?: McpAdminService;
 }
 
 export interface ToolCatalogEntry { name: string; description?: string; resource: Record<string, unknown> }
@@ -38,6 +41,15 @@ export class SettingsStoreAdapter {
   private outside: OutsideChanges | undefined;
 
   constructor(private readonly dependencies: SettingsModelDependencies) {}
+
+  private mcp(): McpAdminService {
+    if (!this.dependencies.mcpAdmin) throw new GatewayError("unsupported", "This Gateway has no MCP configuration owner");
+    return this.dependencies.mcpAdmin;
+  }
+
+  mcpServer(server: string): Promise<McpServerValue | undefined> {
+    return this.mcp().server(server);
+  }
 
   async projectRoot(path: string): Promise<string> {
     return (await this.dependencies.trust.inspect(path)).projectDir;
@@ -254,6 +266,9 @@ export class SettingsStoreAdapter {
         await keys.set(qualifiers.device!, unset ? null : value as string);
         return {};
       }
+      case "mcp":
+        await this.mcp().setServer(qualifiers.server!, unset ? undefined : value as McpServerValue);
+        return {};
       case "trust":
         return { result: await writers.setTrust(qualifiers.project!, unset ? null : value as boolean) };
       case "gateway":

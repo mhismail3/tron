@@ -5,12 +5,11 @@ import { createHash } from "node:crypto";
 import lockfile from "proper-lockfile";
 import { GatewayError } from "../errors.js";
 import { durableAtomicWriteText } from "../foundation/durable-json.js";
+import { MCP_EXPOSURES, mcpServerOnDisk, type McpExposure, type McpServerValue } from "../kernel/settings/mcp-server-value.js";
 
 const MAX_CONFIG_BYTES = 256 * 1_024;
 const MAX_OUTPUT_BYTES = 1_048_576;
 const CLI_TIMEOUT_MS = 30_000;
-const EXPOSURES = ["codemode", "codemode-deferred", "deferred", "direct", "hidden"] as const;
-export type McpExposure = typeof EXPOSURES[number];
 export type McpScope = { scope: "global" } | { scope: "project"; cwd: string; trusted: true };
 
 export interface McpCredentialOwner {
@@ -172,7 +171,7 @@ export class McpAdminService {
       const row = item as Record<string, unknown>;
       if (typeof row.name !== "string" || !/^[A-Za-z0-9._-]{1,128}$/.test(row.name)) return [];
       const strings = (value: unknown, limit: number): string[] => Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string").slice(0, limit).map(entry => entry.slice(0, 256)) : [];
-      const exposure = (EXPOSURES as readonly string[]).includes(row.exposure as string) ? row.exposure as string : "codemode";
+      const exposure = (MCP_EXPOSURES as readonly string[]).includes(row.exposure as string) ? row.exposure as string : "codemode";
       const error = typeof row.error === "string" && row.error.length > 0
         ? row.error.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "").slice(0, 2_048) : undefined;
       return [{ name: row.name, state: typeof row.state === "string" ? row.state.slice(0, 64) : "unknown", scope: row.scope === "project" ? "project" : "global", enabled: row.enabled !== false, exposure, transport: typeof row.transport === "string" ? row.transport.slice(0, 256) : "unknown", tools: strings(row.tools, 128), ...(error ? { error } : {}) }];
@@ -202,12 +201,53 @@ export class McpAdminService {
       if (!servers || typeof servers !== "object" || Array.isArray(servers)) throw new GatewayError("conflict", "MCP configuration has no valid mcpServers object");
       const entry = (servers as Record<string, unknown>)[server];
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new GatewayError("not_found", `MCP server ${server} was not found`);
-      if (patch.exposure !== undefined && !(EXPOSURES as readonly string[]).includes(patch.exposure)) throw new GatewayError("invalid_request", "MCP exposure is invalid");
+      if (patch.exposure !== undefined && !(MCP_EXPOSURES as readonly string[]).includes(patch.exposure)) throw new GatewayError("invalid_request", "MCP exposure is invalid");
       Object.assign(entry, patch);
       const output = `${JSON.stringify(config, null, 2)}\n`;
       if (Buffer.byteLength(output) > MAX_CONFIG_BYTES) throw new GatewayError("conflict", "Updated MCP configuration exceeds its size limit");
       await durableAtomicWriteText(path, output);
       return { server, reloadRequired: true, changed: Object.keys(patch) };
+    } finally { await release(); }
+  }
+  async server(server: string): Promise<McpServerValue | undefined> {
+    const path = this.configPath({ scope: "global" });
+    const text = await readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return undefined;
+      throw error;
+    });
+    if (text === undefined) return undefined;
+    if (Buffer.byteLength(text) > MAX_CONFIG_BYTES) throw new GatewayError("conflict", "MCP configuration exceeds its size limit");
+    const servers = parseConfig(text).mcpServers;
+    if (servers === undefined) return undefined;
+    if (!servers || typeof servers !== "object" || Array.isArray(servers)) throw new GatewayError("conflict", "MCP configuration has no valid mcpServers object");
+    const entry = (servers as Record<string, unknown>)[server];
+    return entry === undefined ? undefined : mcpServerOnDisk(server, entry);
+  }
+  async setServer(server: string, value: McpServerValue | undefined): Promise<void> {
+    const path = this.configPath({ scope: "global" });
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, '{"mcpServers":{}}\n', { flag: "wx", mode: 0o600 }).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== "EEXIST") throw error;
+    });
+    const release = await lockfile.lock(path, { realpath: false, retries: { retries: 6, minTimeout: 20, maxTimeout: 150 } }).catch(() => undefined);
+    if (!release) throw new GatewayError("busy", "MCP configuration is being updated", true);
+    try {
+      const bytes = await readFile(path);
+      if (bytes.length > MAX_CONFIG_BYTES) throw new GatewayError("conflict", "MCP configuration exceeds its size limit");
+      const config = parseConfig(bytes.toString("utf8"));
+      const servers = config.mcpServers ?? {};
+      if (!servers || typeof servers !== "object" || Array.isArray(servers)) throw new GatewayError("conflict", "MCP configuration has no valid mcpServers object");
+      const table = servers as Record<string, unknown>;
+      const existing = table[server];
+      if (existing !== undefined) mcpServerOnDisk(server, existing);
+      if (value === undefined) {
+        if (existing === undefined) return;
+        delete table[server];
+      } else table[server] = value;
+      config.mcpServers = table;
+      const output = `${JSON.stringify(config, null, 2)}\n`;
+      if (Buffer.byteLength(output) > MAX_CONFIG_BYTES) throw new GatewayError("conflict", "Updated MCP configuration exceeds its size limit");
+      await durableAtomicWriteText(path, output);
     } finally { await release(); }
   }
   async storeBearer(scope: McpScope, server: string, token: string): Promise<unknown> {

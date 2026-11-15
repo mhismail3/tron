@@ -68,6 +68,7 @@ function observedFile(store: ObservedStore, agentDir: string): string {
 
 export function observedInstance(key: KeyDeclaration, layer: string, binding: Binding, qualifiers: Qualifiers, projectRoot: string | undefined): { store: ObservedStore; instance: string } | undefined {
   const fixed = key.fixed ?? {};
+  if (binding.store === "mcp") return layer === "global" ? { store: { kind: "mcp" }, instance: instanceId(key.id, qualifiers) } : undefined;
   if (binding.store === "trust") {
     return qualifiers.project === undefined ? undefined : { store: { kind: "trust" }, instance: instanceId(key.id, { ...fixed, project: qualifiers.project }) };
   }
@@ -444,7 +445,7 @@ export class OutsideChanges {
       const after = current.get(instance);
       const write = planned?.get(instance);
       if (write) {
-        const landed = write.value === undefined ? after === undefined : after !== undefined && fingerprint(after) === fingerprint({ key: after.key, value: write.value });
+        const landed = write.value === undefined ? after === undefined : after !== undefined && fingerprint(after) === fingerprint(recordSubject(after.key) ? { key: after.key, hash: digestOf(JSON.stringify(write.value)) } : { key: after.key, value: write.value });
         const recorded = applied?.get(write.changeId);
         if (landed && recorded) {
           state.tron[instance] = recorded.changeId;

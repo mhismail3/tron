@@ -4,6 +4,8 @@ import { createQueueSummarizer } from "../src/episodic/episodic-compactor.js";
 import { ModelQueueOwner } from "../src/providers/model-queue.js";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { SettingsStoreAdapter } from "../src/admin/settings-model.js";
+import { McpAdminService } from "../src/admin/mcp-admin-service.js";
+import { piCliBundle } from "../src/kernel/pi/packages.js";
 import { SettingsChangePath } from "../src/kernel/settings/settings-change.js";
 import { SettingsModel } from "../src/kernel/settings/settings-model.js";
 import { SettingsChangeRecord } from "../src/kernel/settings/settings-record.js";
@@ -28,6 +30,7 @@ export function settingsDependencies(input: {
 }): { settingsModel: SettingsModel<SettingsStoreAdapter>; settingsChanges: SettingsChangePath } {
   const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA,
     agentDir: input.agentDir, tronHome: input.tronHome, trust: input.trust, modelRuntime: input.modelRuntime,
+    mcpAdmin: new McpAdminService(input.agentDir, piCliBundle()),
     ...(input.toolCatalog ? { toolCatalog: input.toolCatalog } : {}),
   }));
   const settingsChanges: SettingsChangePath = new SettingsChangePath(settingsModel, new SettingsChangeRecord(input.tronHome), {
