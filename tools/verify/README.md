@@ -69,18 +69,12 @@ forwarding cancellation to the owned child. Every tool that stops it (verify, ba
 SIGTERM first and SIGKILL only after a grace (mutate 10 s, the others 30 s), so a root is left behind
 only by an outside SIGKILL or by a Vitest still tearing down when the grace ends.
 It never installs this checkout's missing packages.
-One test fixture is the exception: when the selection can include
-`browser-fork-receipts.integration.test.ts` or `home-tool-admission.e2e.test.ts` (the default
-config with no file filter, or one matching either owner), the runner hands Vitest `TRON_P99_17_BROWSER_FORK_COPY`, a checkout of the
-agent-browser fork commit pinned in `browser-live-view-adapter.ts`. It is fetched by SHA, built from
-the fork's lockfile (`npm ci --ignore-scripts`, then its build), and kept once per clone in
-`.git/verify/fixtures/`, so a batch's Gateway lane covers both cases instead of skipping them. The
-test's native case runs the `agent-browser` first on `PATH`, so the runner puts there the engine the
-fork itself declares (`TARGET_AGENT_BROWSER_VERSION` in the fork's own agent-browser target script):
-this host's native binary from the registry's `agent-browser@<version>` package (`npm pack
---ignore-scripts`), kept once per version beside the fork after it reports that version. Bumping
-the fork pin is the only engine update. An ambiguous pin or declaration, or failed provisioning,
-fails the run. It first waits
+Browser integration tests use the file dependency from
+`pi-agent-browser-native-patch.json`, exactly as production; there is no separate
+upstream checkout or PATH-engine fixture. The runner supplies an existing cached
+Chrome for Testing with an isolated profile and mock keychain flags. Missing Chrome
+fails the selected browser journey instead of attaching to a personal browser.
+The Gateway runner first waits
 its turn for the host's `/tmp/tron-full-gateway.lock` (printing the holder and earlier waiters) and
 records itself there, so local Gateway runs never overlap each other or a `mutate` sampling, which holds it
 throughout. Waiters take the lock first-come first-served: each holds the

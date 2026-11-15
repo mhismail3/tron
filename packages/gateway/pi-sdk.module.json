@@ -2,6 +2,7 @@
   "layer": "L2",
   "owns": [
     "artifacts/**",
+    "pi-agent-browser-native-patch.json",
     "pi-coding-agent-patch.json",
     "pi-sdk-baseline.json",
     "pi-sdk.module.json",

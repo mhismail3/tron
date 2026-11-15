@@ -61,7 +61,7 @@ import { setPath, type SessionSettingsSource, type SettingsModel } from "../sett
 import { SETTINGS_OUTCOME_MESSAGE, CONTEXT_DELIVERY_RECEIPT_TYPE } from "../receipts/delivery-tags.js";
 import { type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting, type LayerId } from "../settings/tool-contract.js";
 import type { Actor } from "../settings/settings-record.js";
-import { piBuiltinExtensions } from "../host/pi-builtins.js";
+import { piBuiltinExtensions, managedBrowserExtension } from "../host/pi-builtins.js";
 import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../host/extension-adapters.js";
 import type {
   ChatOrigin,
@@ -1192,7 +1192,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       const managedLoaderOptions = await managedSubagents?.loaderOptions(settingsManager,
         (content, options, owner, messages) => this.admitSubagentWake(content, options, owner, messages));
       const extensionFactories = profile.extensions !== "ordinary"
-        ? this.dependencies.modules.registrations(profile.extensions, sessionContext)
+        ? [...this.dependencies.modules.registrations(profile.extensions, sessionContext), managedBrowserExtension(this.dependencies.agentDir)]
         : [
             ...(managedLoaderOptions?.extensionFactories ?? []),
             ...piBuiltinExtensions(this.dependencies.agentDir, (url) => {

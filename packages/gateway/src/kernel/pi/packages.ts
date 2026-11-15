@@ -3,6 +3,13 @@ import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+export const IGNORED_BROWSER_MESSAGE = "Tron manages agent-browser from its pinned artifact; remove this ignored user package declaration.";
+export function isUserBrowserPackage(pkg: string | { source: string }): boolean {
+  const source = typeof pkg === "string" ? pkg : pkg.source;
+  return /^npm:pi-agent-browser-native(?:@|$)/u.test(source)
+    || /^(?:git:)?(?:https:\/\/github\.com\/|github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)fitchmultz\/pi-agent-browser-native(?:\.git)?(?:@|$)/u.test(source);
+}
+
 const PACKAGE_JSON_MAX_BYTES = 64 * 1024;
 
 export function piCodingAgentDirectory(nodeModulesRoot: string): string {

@@ -77,14 +77,14 @@ partial failure). It never synchronizes empty metadata just to erase it immediat
 
 **Browser live view** (`browser-live-view.v1`). `agent_browser` stays the only
 automation owner. Its `get cdp-url` result carries an opaque `browser_live` source that
-`display` consumes without connecting; live sources default to floating. Authority is
-finalized SDK package provenance of the configured
-`git:github.com/fitchmultz/pi-agent-browser-native` source (not a code-hash
-attestation), qualified with wrapper 0.9.19 at `6346982c0fec9e00b9f3ef6997cfb2d6f6893c6d` and engine 0.42.0;
-updates need requalification. `browser-fork-receipts.integration.test.ts` exercises
-explicit `open` then `get cdp-url` through the pinned fork with both controlled CLI
-envelopes and the real engine (including a viewed frame), parent resealing, cold
-reload and cancellation while a nested host tool is pending. Raw nested lifecycle
+`display` consumes without connecting; live sources default to floating. Authority is the nonreplaceable `builtin:agent-browser` factory backed by the
+pinned, digested native artifact, with engine 0.42.0. User Git/npm browser packages
+cannot replace that owner. Native launch records validate the actual loopback listener,
+process start identity, profile and issued launch nonce before attachment.
+`browser-fork-receipts.integration.test.ts` exercises actual packaged open/get-CDP,
+unrecorded-endpoint refusal, twenty authenticated owned attaches and restart persistence,
+parent resealing, cold reload and cancellation while a nested host tool is pending.
+Raw nested lifecycle
 metadata alone is not authority; `open` is not required to promote it. Per-action routing needs the provider's
 `agent-browser.browser-binding.v1` (`cdpUrl`, `session`, `owned`, `state:
 active|closed`), promoted only from native envelopes. The adapter seals the descriptor
@@ -97,29 +97,16 @@ Viewing is authorized only by an admitted display result or sealed browser proje
 on the exact active branch, inside the device credential admission. Frame and DELETE
 carry `X-Tron-Live-Lease`/`X-Tron-Live-Generation`; `X-Tron-Live-After` suppresses a
 repeat JPEG; 204 `X-Tron-Live-State: waiting` clears pixels, `unchanged` keeps them.
-One unfinished frame response per viewer. UUID endpoints identify their original browser directly. Chrome's consented
-`/devtools/browser` endpoint instead retains one read-only identity connection from
-a trusted `get cdp-url` result or active native browser binding until Chrome
-disconnects or the runtime load retires. It reads only
-`Target.getTargetInfo`, never account pages, and pins that connection's browser target.
-The handshake has a one-second bound and four pending slots; absent consent reports
-`browser_consent_required` in `browserLiveViewError`, without a receipt or retry.
-A rejected connection or invalid identity reports `browser_identity_unavailable`;
-a retiring load discards its pending result without diagnosing consent.
-Repeated results reuse the live identity connection. A new Chrome instance requires a
-fresh tool attachment and receipt; historical sources cannot follow the reused port.
-Every viewing connection verifies that retained browser target before reading any
-page or starting capture. Last-viewer close stops pixels but retains the identity
-socket; source retirement closes it. Kernel projection tests cover consent refusal,
-pending-load cancellation, disconnect and successor rejection; the pinned-fork journey
-also opens/reads/closes a fixture tab, obtains a real frame and observes Chrome exit.
+One unfinished frame response per viewer. Only GUID-bearing browser endpoints are
+admitted; they identify the original browser directly. There is no Gateway consent
+broker, retained identity socket or GUID-less attachment route. Native admission owns
+launch provenance; the projection owns exact active-load receipts. Historical sources
+cannot follow a reused port without the original browser GUID.
 
 A viewer makes one read-only CDP attachment
 to the exact loopback browser endpoint; target changes are followed; more than eight page
 targets, ambiguous visibility, a failed command or a 5 s setup/command/first-frame
-deadline ends observation. For a consent endpoint, any unexpected observer end also
-retires the retained identity and sealed reference, requiring a fresh tool result;
-it never silently reconnects a failed source. No phone input becomes a CDP command. ACK credits one per
+deadline ends observation. It never silently reconnects a failed source. No phone input becomes a CDP command. ACK credits one per
 200 ms, at most four pending, one replaceable frame; frames ≤ 2 MiB, 2,560 px edge,
 4 Mpx (requests cap at 1,280); 64 registrations, four viewers per view, 16 total.
 Last-viewer close, revocation, runtime replacement or transport disposal stops

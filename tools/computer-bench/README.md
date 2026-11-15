@@ -33,10 +33,7 @@ is reported as `absent`, never skipped.
 
 ## Tasks
 
-Everything uses local fixtures. Nothing signs in to a real account, changes the
-owner's Chrome settings or system permissions, or spends money. Ordinary runs never attach to the maintainer's
-profile; only an explicitly supplied, separately consented `--chrome-cdp` endpoint
-admits the signed-in Chrome task.
+Everything uses local fixtures. Nothing signs in to a real account, attaches to a personal browser, changes Chrome settings or system permissions, or spends money.
 
 - **Fixture site** (`fixtures/site.mjs`, `127.0.0.1:<random>`): form fields, a prefilled field,
   a counter button, select and checkbox, file input, download link, `target=_blank` link,
@@ -53,69 +50,11 @@ value over CDP, the scratch window's state file, a PNG header, a file on disk). 
 own claim (`confirmed`, `unverifiable`) is recorded but is not the result. Tasks run
 serially; each rep starts from a fresh page or window.
 
-For `agent-browser`, `signed-in-chrome` requires an explicit `--chrome-cdp` loopback
-browser WebSocket endpoint. Without one it reports `consent_required` and never probes
-or attaches. A GUID-less `/devtools/browser` endpoint with HTTP 404 on
-`/json/version` is treated as Chrome's per-connection approval admission signal.
-The adapter refuses before launching the attachment CLI with
-`OwnerConsentRequiredError`, JSON code
-`owner_consent_required`, and the reason `owner consent required for each new
-connection; prompt visibility not observed`. This is admission evidence, not a
-physically observed prompt or a timeout. It never presses Allow, opens another CDP
-client, or kills a daemon. Other discovery statuses are not classified as consent;
-normal browser endpoints continue through the existing attachment path.
+Managed-browser ownership and authenticated restart qualification belong to Gateway's
+`browser-fork-receipts.integration.test.ts`, which runs the same pinned native artifact
+as production. The scorecard measures only isolated engine tasks, not personal-profile
+attachment or launch admission.
 
-With an admitted endpoint it connects in a separate tool session, verifies the exact
-endpoint, opens only its own local fixture tab and reads a per-run nonce behind a
-fixture cookie. The first repetition seeds that fixture-only cookie; later repetitions
-must read the same protected fact after detach/re-attach without logging in again.
-The runner independently requires a server-authenticated read; the adapter verifies
-the returned nonce. A file-existence probe, public page title or copied expected nonce
-cannot satisfy this oracle. Each run has a unique fixture path and cookie scope. The
-last or a failed repetition expires only that synthetic cookie. Cleanup filters tab
-metadata internally to this run's exact fixture URLs, closes only matching IDs, and
-requests detach; a lost tab-creation response does not abandon a fixture tab. Cleanup
-errors preserve the original failure and cannot produce a passing attempt. Hard process
-termination cannot guarantee cleanup. Fixture evidence does not prove installed
-owner-Chrome preservation. No real Google/Chrome account status, email, cookie/token,
-account page or sign-in internals are inspected or returned in results.
-Every repetition starts detached; raw JSON records `attachMs` separately from total
-task wall time. For admitted GUID-less endpoints, `attachMs` includes discovery
-and engine connection; the same two-second acceptance bound is not relaxed.
-Absent consent, wrong authentication fact/title, changed endpoint or failed cleanup
-is failure.
-Use `COMPUTER_BENCH_AGENT_BROWSER` to select the qualified engine under test rather
-than assume the installed engine matches the repository pin. A headless fixture
-launched with `--remote-debugging-port` supplies a GUID-bearing browser endpoint:
-
-```bash
-scripts/tron computer-bench --tools agent-browser --only signed-in-chrome --reps 3 \
-  --chrome-cdp "$FIXTURE_BROWSER_ENDPOINT" --json test-results/chrome-attach.json
-```
-
-The adapter does not enable or revoke Chrome's setting. Qualification uses only
-throwaway profiles, never the owner's personal Chrome or its profile. An isolated
-profile run is fixture evidence, not proof of signed-in owner acceptance.
-
-The owning integration tests run real headless Chrome for Testing with separate
-profiles, HOME and sockets, and a passive CLI observer. The approval-mode fixture
-proves typed refusal before any attachment CLI command. The public benchmark runner
-must preserve the error code. The normal-port fixture proves nonce authentication,
-server receipt, cleanup, detach without closing Chrome, and no false consent refusal
-for non-404 discovery. Failed fixture teardown retires only its own daemon after a
-fresh Unix-socket ownership check before each signal; a PID file alone grants no
-authority. It retains the failed fixture root and the original graceful-settlement
-failure even if forced cleanup succeeds. These two tests explicitly skip without both an existing
-Chrome for Testing and a declared qualified engine; no binary is downloaded by tests:
-
-```bash
-COMPUTER_BENCH_AGENT_BROWSER=/absolute/path/to/qualified/agent-browser \
-  scripts/tron-node exec -- node --test tools/computer-bench/bench.test.mjs
-```
-
-The `browser-use`
-adapter has no signed-in-Chrome task and therefore reports unsupported, never a pass;
-it is not an attach oracle.
 `background-delivery` fails when any background
 Cua action changed the frontmost app. `foreground-delivery` runs only with `--foreground`
 and after 120 s without user input, so it never takes the shared Mac from a user;
@@ -127,7 +66,7 @@ measured: a real TCC prompt changes system permissions and refusal needs a locke
 [`surfaces.json`](surfaces.json) records, with code citations, whether each tool is a
 first-class tool (`first-class`), reachable only through bash (`shell`) or absent (`none`)
 on Home maintainer turns, Home wake turns, delegated workers and ordinary/automation
-sessions, and pi-subagents children. Home admits `computer` and its installed browser
+sessions, and pi-subagents children. Home admits `computer` and its managed native browser
 only on maintainer turns; trigger, automation and task-result wakes admit neither. A tool
 scores on a surface only where it is first-class: an availability gap is a failure.
 Update the file in the same change that moves a tool onto or off a surface.

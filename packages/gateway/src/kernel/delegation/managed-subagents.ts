@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { gunzipSync } from "node:zlib";
 import { DefaultPackageManager, SettingsManager, type Extension, type ExtensionFactory, type InlineExtension, type DefaultResourceLoader, type PackageSource, type ResolvedPaths, type SourceInfo } from "../pi/coding-agent.js";
-import { piExtensionAliases } from "../pi/packages.js";
+import { piExtensionAliases, isUserBrowserPackage } from "../pi/packages.js";
 import type { ModuleLog } from "../host/module-host.js";
 import { GatewayError } from "../../errors.js";
 import { delegatedArtifactRoot, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
@@ -34,7 +34,7 @@ export function isUserSubagentsPackage(pkg: PackageSource): boolean {
 }
 
 export function managedProviderSettingsView(settings: SettingsManager): SettingsManager {
-  const admitted = (pkg: PackageSource) => !isUserSubagentsPackage(pkg) && !/^npm:pi-web-access(?:@|$)/u.test(typeof pkg === "string" ? pkg : pkg.source);
+  const admitted = (pkg: PackageSource) => !isUserSubagentsPackage(pkg) && !isUserBrowserPackage(pkg) && !/^npm:pi-web-access(?:@|$)/u.test(typeof pkg === "string" ? pkg : pkg.source);
   const filter = (value: Settings): Settings => ({ ...value,
     ...(value.packages ? { packages: value.packages.filter(admitted) } : {}),
   });

@@ -1,0 +1,1072 @@
+diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md
+index 15a57c6..bca2272 100644
+--- a/docs/ARCHITECTURE.md
++++ b/docs/ARCHITECTURE.md
+@@ -283,0 +284,10 @@ Upstream restore-state persistence remains upstream-owned. The wrapper passes an
++## Tron-owned host
++
++Tron supplies `ownedProfilePath` and the pinned engine executable when registering this package through Pi's built-in extension loader. The native integration remains the only launch, restore, daemon and CDP owner; the host does not launch or broker browsers. Other package hosts do not acquire Tron's ownership authority.
++
++Owned mode uses one persistent custom profile and a private native HOME/socket pool. A profile setting is not an attachment receipt. After local execution, the native owner records the exact loopback endpoint, listener PID, process-start identity, issued launch nonce and profile command line. Every attachment revalidates that record before invoking the native CLI. Existing native execution claims serialize the store across runtimes; atomic records and bounded sessions survive reloads. Native restore remains within the private owned HOME.
++
++Generic `connect` remains available for recorded launches. Native Electron launch records its child before handoff, including known page endpoints. An external owned Chrome producer such as studio uses `owned-launch prepare`, launches ordinary Chrome with the returned arguments, then calls `owned-launch record <launchId> <pid>` before connecting to the returned endpoint. These are launch receipts, not a second launcher. After that temporary child has exited, `owned-launch cleanup <launchId>` retires its profile. Unknown or unrecorded cleanup ownership is refused and retained for diagnosis; no PID-file-based signalling is added.
++
++Personal profile selection/copying, auto-discovered or unrecorded endpoints, imported browser state, opaque plugin/flow runners and system-browser-opening commands are refused. Attachments must be standalone so their receipt precedes page work; batches may operate on an already attached owned browser. Existing personal-Chrome login state is unavailable and is never copied. New logins in the owned profile persist through native close/restart.
++
+diff --git a/extensions/agent-browser/index.ts b/extensions/agent-browser/index.ts
+index 7b8bd4a..ba49647 100644
+--- a/extensions/agent-browser/index.ts
++++ b/extensions/agent-browser/index.ts
+@@ -10 +10,7 @@ export default function agentBrowserExtension(
+-	}: { readonly beforeExecute?: (toolCallId: string, ctx: ExtensionContext) => Promise<void> } = {},
++		ownedProfilePath,
++		engineExecutable,
++	}: {
++		readonly beforeExecute?: (toolCallId: string, ctx: ExtensionContext) => Promise<void>;
++		readonly ownedProfilePath?: string;
++		readonly engineExecutable?: string;
++	} = {},
+@@ -12 +18 @@ export default function agentBrowserExtension(
+-	const runtime = new BrowserRuntime(pi, beforeExecute);
++	const runtime = new BrowserRuntime(pi, beforeExecute, ownedProfilePath, engineExecutable);
+diff --git a/extensions/agent-browser/lib/electron/launch.ts b/extensions/agent-browser/lib/electron/launch.ts
+index ac3f3e5..b9569f7 100644
+--- a/extensions/agent-browser/lib/electron/launch.ts
++++ b/extensions/agent-browser/lib/electron/launch.ts
+@@ -1,0 +2 @@ import { randomUUID } from "node:crypto";
++import { currentOwnedBrowser } from "../owned-browser.js";
+@@ -345,0 +347,6 @@ class ElectronLaunchAttempt {
++		const record = this.record(port, metadata.version);
++		try {
++			await currentOwnedBrowser()?.store.electron(record, metadata.targets);
++		} catch (error) {
++			return this.fail("spawn-error", error instanceof Error ? error.message : String(error));
++		}
+@@ -352 +359 @@ class ElectronLaunchAttempt {
+-				record: this.record(port, metadata.version),
++				record,
+diff --git a/extensions/agent-browser/lib/orchestration/browser-run/managed-session-close.ts b/extensions/agent-browser/lib/orchestration/browser-run/managed-session-close.ts
+index 49d3bb1..b3ece4f 100644
+--- a/extensions/agent-browser/lib/orchestration/browser-run/managed-session-close.ts
++++ b/extensions/agent-browser/lib/orchestration/browser-run/managed-session-close.ts
+@@ -13,0 +14 @@ import { withAgentBrowserProcessEnvironment } from "../../process-environment.js
++import { currentOwnedBrowser } from "../../owned-browser.js";
+@@ -217 +218 @@ async function closeWithDeadline(options: ManagedSessionCloseOptions): Promise<s
+-export function closeManagedSession(
++export async function closeManagedSession(
+@@ -219,0 +221,10 @@ export function closeManagedSession(
++	const owner = currentOwnedBrowser();
++	const identity = `${options.namespace ?? ""}:${options.sessionName}`;
++	if (
++		owner &&
++		(await owner.store.active()).some(
++			(launch) => launch.kind === "web" && launch.master === identity,
++		)
++	) {
++		return undefined;
++	}
+diff --git a/extensions/agent-browser/lib/orchestration/extension-command-admission.ts b/extensions/agent-browser/lib/orchestration/extension-command-admission.ts
+index 392bd0a..5a04e99 100644
+--- a/extensions/agent-browser/lib/orchestration/extension-command-admission.ts
++++ b/extensions/agent-browser/lib/orchestration/extension-command-admission.ts
+@@ -1,0 +2 @@ import { format } from "node:util";
++import { currentOwnedBrowser } from "../owned-browser.js";
+@@ -423 +424 @@ class BrowserAdmission {
+-export function executeBrowserInvocation(
++export async function executeBrowserInvocation(
+@@ -426,0 +428,10 @@ export function executeBrowserInvocation(
++	if (runtime.ownedBrowser && currentOwnedBrowser() !== runtime.ownedBrowser) {
++		return runtime.ownedBrowser.run(
++			() => executeBrowserInvocation(runtime, invocation),
++			invocation.signal,
++		);
++	}
++	const ownedCommand = await runtime.ownedBrowser?.store.command(invocation.params);
++	if (ownedCommand) {
++		return ownedCommand;
++	}
+diff --git a/extensions/agent-browser/lib/orchestration/extension-lifecycle.ts b/extensions/agent-browser/lib/orchestration/extension-lifecycle.ts
+index fa4808a..0261549 100644
+--- a/extensions/agent-browser/lib/orchestration/extension-lifecycle.ts
++++ b/extensions/agent-browser/lib/orchestration/extension-lifecycle.ts
+@@ -164,2 +164,4 @@ export function registerBrowserLifecycle(runtime: BrowserRuntime): void {
+-	runtime.pi.on("session_start", (_event, ctx) => lifecycle.start(ctx));
+-	runtime.pi.on("session_tree", (_event, ctx) => lifecycle.tree(ctx));
++	const owned = <T>(operation: () => Promise<T>): Promise<T> =>
++		runtime.ownedBrowser === undefined ? operation() : runtime.ownedBrowser.run(operation);
++	runtime.pi.on("session_start", (_event, ctx) => owned(() => lifecycle.start(ctx)));
++	runtime.pi.on("session_tree", (_event, ctx) => owned(() => lifecycle.tree(ctx)));
+@@ -167 +169 @@ export function registerBrowserLifecycle(runtime: BrowserRuntime): void {
+-		lifecycle.shutdown(ctx, getShutdownScope(event)),
++		owned(() => lifecycle.shutdown(ctx, getShutdownScope(event))),
+diff --git a/extensions/agent-browser/lib/orchestration/extension-runtime.ts b/extensions/agent-browser/lib/orchestration/extension-runtime.ts
+index dc63d54..152aeda 100644
+--- a/extensions/agent-browser/lib/orchestration/extension-runtime.ts
++++ b/extensions/agent-browser/lib/orchestration/extension-runtime.ts
+@@ -1,0 +2 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
++import { OwnedBrowser } from "../owned-browser.js";
+@@ -138,0 +140 @@ export class BrowserRuntime {
++	readonly ownedBrowser: OwnedBrowser | undefined;
+@@ -150,0 +153,2 @@ export class BrowserRuntime {
++		ownedProfilePath?: string,
++		engineExecutable?: string,
+@@ -152,0 +157,4 @@ export class BrowserRuntime {
++		this.ownedBrowser =
++			ownedProfilePath === undefined
++				? undefined
++				: new OwnedBrowser(ownedProfilePath, engineExecutable);
+diff --git a/extensions/agent-browser/lib/orchestration/native-session-defaults.ts b/extensions/agent-browser/lib/orchestration/native-session-defaults.ts
+index 0f54a91..3652e5c 100644
+--- a/extensions/agent-browser/lib/orchestration/native-session-defaults.ts
++++ b/extensions/agent-browser/lib/orchestration/native-session-defaults.ts
+@@ -1,0 +2 @@ import { createHash } from "node:crypto";
++import { currentOwnedBrowser } from "../owned-browser.js";
+@@ -56,0 +58,10 @@ type InputRunner = (
++function nativeBrowserHome(env: NodeJS.ProcessEnv): string {
++	return env.HOME ?? homedir();
++}
++function ownedRootName(root: NativeSessionCallContext["root"]): string | undefined {
++	const owner = currentOwnedBrowser();
++	if (owner !== undefined) {
++		return owner.store.session;
++	}
++	return root === undefined ? undefined : rootBrowserSessionName(root.sessionId);
++}
+@@ -123 +134 @@ class NativeSessionCall {
+-						join(homedir(), ".agent-browser", "config.json"),
++						join(nativeBrowserHome(this.env), ".agent-browser", "config.json"),
+@@ -126,2 +137 @@ class NativeSessionCall {
+-		this.rootName =
+-			context.root === undefined ? undefined : rootBrowserSessionName(context.root.sessionId);
++		this.rootName = ownedRootName(context.root);
+@@ -346,0 +357 @@ class NativeSessionCall {
++		await currentOwnedBrowser()?.settings(this.input.toolArgs, this.env, this.identity);
+diff --git a/extensions/agent-browser/lib/owned-browser.ts b/extensions/agent-browser/lib/owned-browser.ts
+new file mode 100644
+index 0000000..e18d70d
+--- /dev/null
++++ b/extensions/agent-browser/lib/owned-browser.ts
+@@ -0,0 +1,374 @@
++import { AsyncLocalStorage } from "node:async_hooks";
++import { join, dirname, resolve } from "node:path";
++import { randomUUID } from "node:crypto";
++import { parseArgvDescriptor } from "./argv-descriptor.js";
++import { needsManagedSession } from "./command-policy.js";
++import {
++	extractExplicitSessionName,
++	scanUpstreamGlobalFlagOccurrences,
++	getAutoConnectFlagValue,
++	isUpstreamEnvFlagEnabled,
++} from "./argv-grammar.js";
++import { getUpstreamEffectiveBatchSteps } from "./orchestration/batch-stdin.js";
++import { withAgentBrowserProcessEnvironment } from "./process-environment.js";
++import { isRecord } from "./parsing.js";
++import type { ProcessRunResult } from "./process-child.js";
++import { OwnedLaunches, type Launch } from "./owned-launches.js";
++
++const context = new AsyncLocalStorage<OwnedBrowser>();
++
++const query = new AsyncLocalStorage<boolean>();
++
++export const currentOwnedBrowser = (): OwnedBrowser | undefined => context.getStore();
++
++interface Prepared {
++	readonly args: readonly string[];
++	readonly env: NodeJS.ProcessEnv;
++	readonly token?: string;
++	readonly attached?: Launch;
++	readonly session: string;
++}
++
++interface Execution {
++	readonly args: readonly string[];
++	readonly env: NodeJS.ProcessEnv;
++	readonly stdin?: string | undefined;
++	readonly run: (args: readonly string[], env: NodeJS.ProcessEnv) => Promise<ProcessRunResult>;
++	readonly endpoint: () => Promise<ProcessRunResult>;
++}
++
++function refuse(): never {
++	throw new Error(
++		"owned_launch_required: endpoint requires a recorded Tron-owned launch; personal browser attachment and profile copying are unavailable",
++	);
++}
++
++const flag = (args: readonly string[], name: string): string | undefined =>
++	scanUpstreamGlobalFlagOccurrences(args, name).at(-1)?.value;
++
++const tokens = (args: readonly string[]): readonly string[] =>
++	parseArgvDescriptor(args).upstreamCommandTokens;
++
++function metadata(args: readonly string[], stdin?: string): boolean {
++	return (
++		["--help", "-h", "--version", "-V"].some((value) => args.includes(value)) ||
++		query.getStore() === true ||
++		(!needsManagedSession(parseArgvDescriptor(args), stdin) && !cdpInspection(args))
++	);
++}
++
++const present = (value: unknown): boolean => value !== undefined;
++
++function json(input: string): unknown {
++	return JSON.parse(input);
++}
++
++function resultData(stdout: string): Record<string, unknown> | undefined {
++	const value = json(stdout);
++	return isRecord(value) && value.success === true && isRecord(value.data) ? value.data : undefined;
++}
++
++function cdpInspection(args: readonly string[]): boolean {
++	return tokens(args).slice(0, 2).join(" ") === "get cdp-url";
++}
++
++function configurationOverride(args: readonly string[], nested: boolean): boolean {
++	const hidden = [
++		flag(args, "--config"),
++		flag(args, "--cdp"),
++		tokens(args)[0] === "connect" ? "connect" : undefined,
++	];
++	return (nested && hidden.some(present)) || getAutoConnectFlagValue(args) === true;
++}
++
++function dangerousCommand(args: readonly string[]): boolean {
++	const command = tokens(args).slice(0, 2).join(" ");
++	return [
++		"profile",
++		"profiles",
++		"flow run",
++		"plugin run",
++		"state load",
++		"inspect",
++		"dashboard",
++		"chat",
++	].some((value) => command === value || command.startsWith(`${value} `));
++}
++
++function customLaunchArgs(value: unknown): void {
++	if (
++		value !== undefined &&
++		(typeof value !== "string" ||
++			/--(?:user-data-dir|profile-directory|remote-debugging)/.test(value))
++	) {
++		refuse();
++	}
++}
++
++function nonceArgs(
++	args: readonly string[],
++	env: NodeJS.ProcessEnv,
++	token: string,
++): readonly string[] {
++	const occurrence = scanUpstreamGlobalFlagOccurrences(args, "--args").at(-1);
++	const value = `${occurrence?.value ?? env.AGENT_BROWSER_ARGS ?? ""},--tron-owned-launch=${token}`;
++	const changed = [...args];
++	if (occurrence) {
++		if ((args[occurrence.index] ?? "").startsWith("--args=")) {
++			changed[occurrence.index] = `--args=${value}`;
++		} else {
++			changed[occurrence.index + 1] = value;
++		}
++	} else {
++		changed.unshift("--args", value);
++	}
++	return changed;
++}
++
++function sessionIdentity(args: readonly string[], env: NodeJS.ProcessEnv): string {
++	return `${flag(args, "--namespace") ?? env.AGENT_BROWSER_NAMESPACE ?? ""}:${extractExplicitSessionName(args) ?? env.AGENT_BROWSER_SESSION ?? "default"}`;
++}
++
++export class OwnedBrowser {
++	readonly store: OwnedLaunches;
++	constructor(
++		profile: string,
++		readonly engineExecutable?: string,
++	) {
++		this.store = new OwnedLaunches(profile);
++	}
++	async run<T>(run: () => Promise<T>, signal?: AbortSignal): Promise<T> {
++		if (context.getStore() === this) {
++			return run();
++		}
++		const lock = await this.store.lock(signal);
++		try {
++			return await context.run(this, () =>
++				withAgentBrowserProcessEnvironment(
++					{
++						HOME: join(dirname(this.store.profile), "home"),
++						AGENT_BROWSER_SOCKET_DIR: this.store.socketDir,
++						PI_AGENT_BROWSER_SOCKET_DIR: this.store.socketDir,
++					},
++					run,
++				),
++			);
++		} finally {
++			await lock.release();
++		}
++	}
++
++	private profileSetting(value: unknown): void {
++		if (
++			value !== undefined &&
++			(typeof value !== "string" || resolve(value) !== this.store.profile)
++		) {
++			refuse();
++		}
++	}
++
++	async settings(
++		args: readonly string[],
++		env: NodeJS.ProcessEnv,
++		defaults: Readonly<Record<string, unknown>>,
++	): Promise<void> {
++		const automatic = [
++			getAutoConnectFlagValue(args) === true,
++			isUpstreamEnvFlagEnabled(env.AGENT_BROWSER_AUTO_CONNECT),
++			defaults.autoConnect === true,
++		];
++		if (automatic.some((value) => value)) {
++			refuse();
++		}
++		for (const value of [flag(args, "--cdp"), env.AGENT_BROWSER_CDP, defaults.cdp]) {
++			if (value !== undefined) {
++				if (typeof value !== "string") {
++					refuse();
++				}
++				await this.store.recorded(value);
++			}
++		}
++		for (const value of [flag(args, "--profile"), env.AGENT_BROWSER_PROFILE, defaults.profile]) {
++			this.profileSetting(value);
++		}
++		for (const value of [flag(args, "--args"), env.AGENT_BROWSER_ARGS, defaults.args]) {
++			customLaunchArgs(value);
++		}
++		if (
++			[flag(args, "--engine"), env.AGENT_BROWSER_ENGINE, defaults.engine].some(
++				(value) => value !== undefined && value !== "chrome",
++			)
++		) {
++			refuse();
++		}
++		const external = [
++			flag(args, "--provider"),
++			flag(args, "-p"),
++			env.AGENT_BROWSER_PROVIDER,
++			defaults.provider,
++			flag(args, "--state"),
++			env.AGENT_BROWSER_STATE,
++			defaults.state,
++		];
++		if (external.some(present)) {
++			refuse();
++		}
++	}
++
++	private async validate(args: readonly string[], stdin?: string, nested = false): Promise<void> {
++		if (dangerousCommand(args) || flag(args, "--state") !== undefined) {
++			refuse();
++		}
++		if (configurationOverride(args, nested)) {
++			refuse();
++		}
++		this.profileSetting(flag(args, "--profile"));
++		customLaunchArgs(flag(args, "--args"));
++		const command = tokens(args);
++		const endpoint = command[0] === "connect" ? command[1] : flag(args, "--cdp");
++		if (endpoint !== undefined) {
++			await this.store.recorded(endpoint);
++		}
++		const steps = getUpstreamEffectiveBatchSteps(command, stdin);
++		if (command[0] === "batch" && steps.length === 0) {
++			refuse();
++		}
++		for (const step of steps) {
++			await this.validate(step, undefined, true);
++		}
++	}
++
++	private async target(
++		args: readonly string[],
++		env: NodeJS.ProcessEnv,
++		session: string,
++	): Promise<Launch | undefined> {
++		const command = tokens(args);
++		const endpoint =
++			flag(args, "--cdp") ??
++			env.AGENT_BROWSER_CDP ??
++			(command[0] === "connect" ? command[1] : undefined);
++		if (endpoint !== undefined) {
++			return this.store.recorded(endpoint);
++		}
++		const launches = await this.store.active();
++		const known = launches.find((item) => item.sessions.includes(session));
++		if (command[0] === "get" && command[1] === "cdp-url") {
++			return known ?? refuse();
++		}
++		return known;
++	}
++
++	private local(
++		args: readonly string[],
++		env: NodeJS.ProcessEnv,
++		session: string,
++		primary?: Launch,
++	): Prepared {
++		const token = primary?.token ?? randomUUID();
++		return {
++			args: nonceArgs(args, env, token),
++			env: { ...env, AGENT_BROWSER_PROFILE: this.store.profile, AGENT_BROWSER_AUTO_CONNECT: "0" },
++			token,
++			session,
++		};
++	}
++
++	private async prepare(
++		args: readonly string[],
++		env: NodeJS.ProcessEnv,
++		stdin?: string,
++	): Promise<Prepared> {
++		await this.validate(args, stdin);
++		const session = sessionIdentity(args, env);
++		if (metadata(args, stdin)) {
++			return { args, env, session };
++		}
++		const command = tokens(args)[0];
++		if (["close", "quit", "exit"].includes(command ?? "")) {
++			return { args, env, session };
++		}
++		const known = await this.target(args, env, session);
++		if (known && known.master !== session) {
++			return { args, env, session, attached: known };
++		}
++		if (known && cdpInspection(args)) {
++			return { args, env, session, attached: known };
++		}
++		const primary = (await this.store.active()).find((item) => item.kind === "web");
++		if (primary && primary.master !== session) {
++			return {
++				args,
++				env: { ...env, AGENT_BROWSER_CDP: primary.endpoint },
++				session,
++				attached: primary,
++			};
++		}
++		return this.local(args, env, session, primary);
++	}
++
++	private async result(
++		prepared: Prepared,
++		stdout: string,
++		endpoint: () => Promise<ProcessRunResult>,
++	): Promise<void> {
++		if (prepared.attached) {
++			const data = resultData(stdout);
++			if (data) {
++				await this.store.connected(prepared.session, prepared.attached, data);
++			}
++			return;
++		}
++		if (prepared.token === undefined) {
++			return;
++		}
++		const result = await query.run(true, endpoint);
++		const observed = resultData(result.stdout);
++		if (result.exitCode !== 0 || typeof observed?.cdpUrl !== "string") {
++			refuse();
++		}
++		await this.store.launched(prepared.session, prepared.token, observed.cdpUrl);
++	}
++
++	async execute(options: Execution): Promise<ProcessRunResult> {
++		let prepared: Prepared;
++		try {
++			prepared = await this.prepare(options.args, options.env, options.stdin);
++		} catch (error) {
++			return {
++				aborted: false,
++				agentBrowserStarted: false,
++				exitCode: 1,
++				spawnError: new Error(String(error)),
++				stderr: "",
++				stdout: "",
++				timedOut: false,
++			};
++		}
++		const result = await options.run(prepared.args, prepared.env);
++		if (!result.agentBrowserStarted || result.aborted || result.timedOut) {
++			return result;
++		}
++		try {
++			if (
++				result.exitCode === 0 &&
++				["close", "quit", "exit"].includes(tokens(options.args)[0] ?? "")
++			) {
++				await this.store.detached(prepared.session);
++			}
++			await this.result(prepared, result.stdout, options.endpoint);
++			return result;
++		} catch (error) {
++			if (result.exitCode !== 0) {
++				return result;
++			}
++			return {
++				...result,
++				exitCode: 1,
++				stdout: "",
++				stderr: String(error),
++				spawnError: new Error(String(error)),
++			};
++		}
++	}
++}
+diff --git a/extensions/agent-browser/lib/owned-launches.ts b/extensions/agent-browser/lib/owned-launches.ts
+new file mode 100644
+index 0000000..748225e
+--- /dev/null
++++ b/extensions/agent-browser/lib/owned-launches.ts
+@@ -0,0 +1,448 @@
++import { execFile } from "node:child_process";
++import { randomUUID, createHash } from "node:crypto";
++import { mkdir, readFile, readdir, rename, rm, writeFile, lstat, realpath } from "node:fs/promises";
++import { dirname, join, resolve } from "node:path";
++import { promisify } from "node:util";
++import { Type, type Static } from "typebox";
++import { Check } from "typebox/value";
++import { readProcessStartIdentity } from "./process-identity.js";
++import {
++	acquireExecutionClaim,
++	type ManagedSessionPolicyLock,
++} from "./browser-execution-claims.js";
++
++interface OwnedCommandResult {
++	readonly content: Array<{ type: "text"; text: string }>;
++	readonly details: {
++		resultCategory: "success";
++		args: readonly string[];
++		data: Record<string, unknown>;
++	};
++}
++
++const execute = promisify(execFile);
++
++const launchSchema = Type.Object({
++	endpoint: Type.String(),
++	pid: Type.Integer({ minimum: 2 }),
++	start: Type.String({ minLength: 1 }),
++	profile: Type.String(),
++	token: Type.Optional(Type.String()),
++	targets: Type.Optional(Type.Array(Type.String(), { maxItems: 128 })),
++	kind: Type.Union([Type.Literal("web"), Type.Literal("electron"), Type.Literal("studio")]),
++	sessions: Type.Array(Type.String(), { maxItems: 128 }),
++	master: Type.Optional(Type.String()),
++});
++
++export type Launch = Static<typeof launchSchema>;
++
++function refuse(): never {
++	throw new Error(
++		"owned_launch_required: endpoint requires a recorded Tron-owned launch; personal browser attachment and profile copying are unavailable",
++	);
++}
++
++function json(input: string): unknown {
++	return JSON.parse(input);
++}
++
++function decodeLaunch(input: string): Launch {
++	const value = json(input);
++	if (!Check(launchSchema, value)) {
++		refuse();
++	}
++	return value;
++}
++
++function address(value: string): URL {
++	const url = new URL(/^\d+$/.test(value) ? `http://127.0.0.1:${value}` : value);
++	const identity = [url.username, url.password, url.search, url.hash];
++	if (
++		url.hostname !== "127.0.0.1" ||
++		!["ws:", "http:"].includes(url.protocol) ||
++		url.port.length === 0 ||
++		identity.some((entry) => entry.length > 0)
++	) {
++		refuse();
++	}
++	return url;
++}
++
++function matches(value: string, launch: Launch): boolean {
++	const url = address(value),
++		recorded = address(launch.endpoint);
++	return (
++		url.port === recorded.port &&
++		([recorded.href, ...(launch.targets ?? [])].includes(url.href) ||
++			(url.protocol === "http:" && url.pathname === "/"))
++	);
++}
++
++async function studioEndpoint(profile: string): Promise<string> {
++	const [port, path] = (await readFile(join(profile, "DevToolsActivePort"), "utf8"))
++		.trim()
++		.split("\n");
++	if (
++		port === undefined ||
++		path === undefined ||
++		!/^\d+$/.test(port) ||
++		!/^\/devtools\/browser\/[^/]+$/.test(path)
++	) {
++		refuse();
++	}
++	return `ws://127.0.0.1:${port}${path}`;
++}
++
++async function listener(endpoint: string): Promise<number> {
++	const { stdout } = await execute(
++		"/usr/sbin/lsof",
++		["-nP", "-a", `-iTCP:${address(endpoint).port}`, "-sTCP:LISTEN", "-Fp"],
++		{ timeout: 5000 },
++	);
++	const pids = [
++		...new Set(
++			stdout
++				.split("\n")
++				.filter((line) => /^p\d+$/.test(line))
++				.map((line) => Number(line.slice(1))),
++		),
++	];
++	const pid = pids[0];
++	if (pids.length !== 1 || pid === undefined || pid <= 1) {
++		refuse();
++	}
++	return pid;
++}
++
++async function privateDirectory(path: string): Promise<void> {
++	await mkdir(path, { recursive: true, mode: 0o700 });
++	const stat = await lstat(path);
++	if (
++		!stat.isDirectory() ||
++		stat.isSymbolicLink() ||
++		stat.uid !== process.getuid?.() ||
++		(stat.mode & 0o077) !== 0
++	) {
++		refuse();
++	}
++}
++
++export class OwnedLaunches {
++	readonly profile: string;
++	readonly root: string;
++	readonly socketDir: string;
++	readonly session: string;
++	constructor(profile: string) {
++		this.profile = resolve(profile);
++		this.root = `${this.profile}.launches`;
++		this.session = `tron-${createHash("sha256").update(this.profile).digest("hex").slice(0, 16)}`;
++		this.socketDir = join("/tmp", `pi-owned-${process.getuid?.() ?? "user"}-${this.session}`);
++	}
++	async lock(signal?: AbortSignal): Promise<ManagedSessionPolicyLock> {
++		for (const path of [
++			this.root,
++			this.socketDir,
++			join(dirname(this.profile), "home"),
++			this.profile,
++		]) {
++			await privateDirectory(path);
++		}
++		const lock = await acquireExecutionClaim({
++			identity: { socketContext: await realpath(this.root), sessionNames: null },
++			signal,
++		});
++		if (!lock) {
++			throw new Error("Owned browser operation cancelled or its existing native claim is busy");
++		}
++		try {
++			await this.profileMarker();
++			return lock;
++		} catch (error) {
++			await lock.release();
++			throw error;
++		}
++	}
++
++	private async profileMarker(): Promise<void> {
++		const marker = join(this.profile, ".tron-owned-profile");
++		const files = await readdir(this.profile);
++		if (!files.includes(".tron-owned-profile")) {
++			if (files.length !== 0) {
++				refuse();
++			}
++			await writeFile(marker, randomUUID(), { mode: 0o600, flag: "wx" });
++		}
++		const stat = await lstat(marker);
++		if (
++			!stat.isFile() ||
++			stat.isSymbolicLink() ||
++			stat.uid !== process.getuid?.() ||
++			(stat.mode & 0o077) !== 0
++		) {
++			refuse();
++		}
++	}
++
++	private file(endpoint: string): string {
++		return join(this.root, `${address(endpoint).port}.json`);
++	}
++
++	private async save(launch: Launch): Promise<void> {
++		const temporary = join(this.root, `.${randomUUID()}`);
++		try {
++			await writeFile(temporary, JSON.stringify(launch), { mode: 0o600, flag: "wx" });
++			await rename(temporary, this.file(launch.endpoint));
++		} finally {
++			await rm(temporary, { force: true });
++		}
++	}
++
++	private async live(launch: Launch): Promise<boolean> {
++		if ((await readProcessStartIdentity(launch.pid)) !== launch.start) {
++			return false;
++		}
++		if ((await listener(launch.endpoint)) !== launch.pid) {
++			return false;
++		}
++		const { stdout } = await execute(
++			"/bin/ps",
++			["-ww", "-p", String(launch.pid), "-o", "command="],
++			{ timeout: 5000 },
++		);
++		const command = ` ${stdout.trim()} `;
++		if (
++			![launch.profile, await realpath(launch.profile)].some((profile) =>
++				command.includes(` --user-data-dir=${profile} `),
++			)
++		) {
++			return false;
++		}
++		return (
++			launch.kind === "electron" ||
++			(launch.token !== undefined && command.includes(` --tron-owned-launch=${launch.token} `))
++		);
++	}
++
++	private async records(): Promise<Launch[]> {
++		const names = (await readdir(this.root)).filter((name) => /^\d+\.json$/.test(name));
++		if (names.length > 128) {
++			refuse();
++		}
++		return Promise.all(
++			names.map(async (name) => decodeLaunch(await readFile(join(this.root, name), "utf8"))),
++		);
++	}
++
++	async active(): Promise<Launch[]> {
++		const result: Launch[] = [];
++		for (const launch of await this.records()) {
++			let live = false;
++			try {
++				live = await this.live(launch);
++			} catch {
++				live = false;
++			}
++			if (live) {
++				result.push(launch);
++			} else if (launch.kind !== "studio") {
++				await rm(this.file(launch.endpoint));
++			}
++		}
++		return result;
++	}
++
++	async recorded(endpoint: string): Promise<Launch> {
++		const launch = (await this.active()).find((item) => matches(endpoint, item));
++		return launch ?? refuse();
++	}
++
++	async connected(session: string, launch: Launch, data: Record<string, unknown>): Promise<void> {
++		if (typeof data.cdpUrl === "string" && !matches(data.cdpUrl, launch)) {
++			refuse();
++		}
++		for (const entry of await this.active()) {
++			const sessions = entry.sessions.filter((item) => item !== session);
++			if (entry.endpoint === launch.endpoint) {
++				sessions.push(session);
++			}
++			if (sessions.length > 128) {
++				refuse();
++			}
++			await this.save({ ...entry, sessions });
++		}
++	}
++
++	async detached(session: string): Promise<void> {
++		for (const launch of await this.active()) {
++			await this.save({ ...launch, sessions: launch.sessions.filter((item) => item !== session) });
++		}
++	}
++
++	async launched(session: string, token: string, endpoint: string): Promise<void> {
++		if (!/^\/devtools\/browser\/[^/]+$/.test(address(endpoint).pathname)) {
++			refuse();
++		}
++		const pid = await listener(endpoint);
++		const start = await readProcessStartIdentity(pid);
++		if (start === undefined) {
++			refuse();
++		}
++		const launch: Launch = {
++			endpoint,
++			pid,
++			start,
++			profile: this.profile,
++			token: token,
++			kind: "web",
++			sessions: [session],
++			master: session,
++		};
++		if (!(await this.live(launch))) {
++			refuse();
++		}
++		const prior = (await this.active()).find((item) => item.kind === "web");
++		if (prior && prior.endpoint !== endpoint) {
++			refuse();
++		}
++		await this.save({ ...launch, sessions: prior?.sessions ?? launch.sessions });
++	}
++
++	private async studioPrepare(): Promise<Record<string, unknown>> {
++		if ((await readdir(this.root)).filter((name) => name.startsWith("studio-")).length >= 128) {
++			refuse();
++		}
++		const token = randomUUID();
++		const profile = join(this.root, `studio-${token}`);
++		await mkdir(profile, { mode: 0o700 });
++		return {
++			launchId: token,
++			profile,
++			args: [
++				`--user-data-dir=${profile}`,
++				"--remote-debugging-port=0",
++				`--tron-owned-launch=${token}`,
++			],
++		};
++	}
++
++	private studioProfile(token: string | undefined): string {
++		if (token === undefined || !/^[a-f0-9-]{36}$/.test(token)) {
++			refuse();
++		}
++		return join(this.root, `studio-${token}`);
++	}
++
++	private async studioRecord(
++		token: string | undefined,
++		rawPid: string | undefined,
++	): Promise<Record<string, unknown>> {
++		const profile = this.studioProfile(token);
++		const pid = Number(rawPid);
++		if (!Number.isSafeInteger(pid) || pid <= 1) {
++			refuse();
++		}
++		const endpoint = await studioEndpoint(profile);
++		const start = await readProcessStartIdentity(pid);
++		if (start === undefined) {
++			refuse();
++		}
++		const launch: Launch = {
++			endpoint,
++			pid,
++			start,
++			profile,
++			token: token ?? refuse(),
++			kind: "studio",
++			sessions: [],
++		};
++		if (!(await this.live(launch)) || (await this.records()).length >= 128) {
++			refuse();
++		}
++		await this.save(launch);
++		return { endpoint: launch.endpoint, launchId: token };
++	}
++
++	private async studioCleanup(token: string | undefined): Promise<Record<string, unknown>> {
++		const path = this.studioProfile(token);
++		const profile = await realpath(path);
++		if (profile !== join(await realpath(this.root), `studio-${String(token)}`)) {
++			refuse();
++		}
++		const record = (await this.records()).find(
++			(item) => item.profile === path && item.token === token,
++		);
++		if (!record || (await readProcessStartIdentity(record.pid)) === record.start) {
++			refuse();
++		}
++		await rm(profile, { recursive: true });
++		await rm(this.file(record.endpoint));
++		return { cleaned: true };
++	}
++
++	async command(params: { args?: readonly string[] }): Promise<OwnedCommandResult | undefined> {
++		const args = params.args;
++		if (args?.[0] !== "owned-launch") {
++			return;
++		}
++		let data: Record<string, unknown>;
++		switch (args[1] ?? "") {
++			case "prepare":
++				if (args.length !== 2) {
++					refuse();
++				}
++				data = await this.studioPrepare();
++				break;
++			case "record":
++				if (args.length !== 4) {
++					refuse();
++				}
++				data = await this.studioRecord(args[2], args[3]);
++				break;
++			case "cleanup":
++				if (args.length !== 3) {
++					refuse();
++				}
++				data = await this.studioCleanup(args[2]);
++				break;
++			default:
++				refuse();
++		}
++		return {
++			content: [{ type: "text", text: JSON.stringify(data) }],
++			details: { resultCategory: "success", args, data },
++		};
++	}
++
++	async electron(
++		record: {
++			webSocketDebuggerUrl?: string | undefined;
++			pid?: number | undefined;
++			startIdentity?: string | undefined;
++			userDataDir: string;
++		},
++		targets: readonly { webSocketDebuggerUrl?: string | undefined }[],
++	): Promise<void> {
++		if (
++			record.webSocketDebuggerUrl === undefined ||
++			record.startIdentity === undefined ||
++			record.pid === undefined
++		) {
++			refuse();
++		}
++		const launch: Launch = {
++			endpoint: record.webSocketDebuggerUrl,
++			pid: record.pid,
++			start: record.startIdentity,
++			profile: record.userDataDir,
++			kind: "electron",
++			sessions: [],
++			targets: targets.flatMap((target) =>
++				target.webSocketDebuggerUrl !== undefined ? [target.webSocketDebuggerUrl] : [],
++			),
++		};
++		if (!(await this.live(launch)) || (await this.records()).length >= 128) {
++			refuse();
++		}
++		await this.save(launch);
++	}
++}
+diff --git a/extensions/agent-browser/lib/process.ts b/extensions/agent-browser/lib/process.ts
+index eacb0c1..07f00b1 100644
+--- a/extensions/agent-browser/lib/process.ts
++++ b/extensions/agent-browser/lib/process.ts
+@@ -1,0 +2 @@ import { AsyncLocalStorage } from "node:async_hooks";
++import { currentOwnedBrowser } from "./owned-browser.js";
+@@ -312 +313 @@ export async function runAgentBrowserProcess(
+-	return await runBrowserChild({
++	return runOwnedBrowserChild(options, {
+@@ -330,0 +332,36 @@ export async function runAgentBrowserProcess(
++
++function ownedEndpointArgs(args: readonly string[]): string[] {
++	const flags = ["--session", "--namespace"].flatMap((flag) => {
++		const value = scanUpstreamGlobalFlagOccurrences(args, flag).at(-1)?.value;
++		return value === undefined ? [] : [flag, value];
++	});
++	return [...flags, "--json", "get", "cdp-url"];
++}
++
++function runOwnedBrowserChild(
++	options: AgentBrowserProcessOptions,
++	child: Parameters<typeof runBrowserChild>[0],
++): Promise<ProcessRunResult> {
++	const owner = currentOwnedBrowser();
++	if (owner === undefined) {
++		return runBrowserChild(child);
++	}
++	return owner.execute({
++		args: child.args,
++		env: { ...getAgentBrowserProcessEnvironment(), ...child.env },
++		stdin: options.stdin,
++		run: (args, env) =>
++			runBrowserChild({
++				...child,
++				args,
++				env,
++				stockLauncher: owner.engineExecutable ?? child.stockLauncher,
++			}),
++		endpoint: () =>
++			runAgentBrowserProcess({
++				...options,
++				args: ownedEndpointArgs(options.args),
++				stdin: undefined,
++			}),
++	});
++}
+diff --git a/package-lock.json b/package-lock.json
+index f844dfb..85c810c 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -3 +3 @@
+-	"version": "0.9.19",
++	"version": "0.9.19-tron.1",
+@@ -9 +9 @@
+-			"version": "0.9.19",
++			"version": "0.9.19-tron.1",
+@@ -11,0 +12 @@
++				"agent-browser": "0.42.0",
+@@ -3056,0 +3058,13 @@
++		"node_modules/agent-browser": {
++			"version": "0.42.0",
++			"resolved": "https://registry.npmjs.org/agent-browser/-/agent-browser-0.42.0.tgz",
++			"integrity": "sha512-4njBSXKDH75hu+xSOJE4msKFQPIrwcyREFgr/tfDWQ4+vWiibNvEbxA5cH3cbAFG3vJa9vhGCPV2fLp5Py6NzA==",
++			"hasInstallScript": true,
++			"license": "Apache-2.0",
++			"bin": {
++				"agent-browser": "bin/agent-browser.js"
++			},
++			"engines": {
++				"node": ">=22.0.0"
++			}
++		},
+diff --git a/package.json b/package.json
+index 1c5324e..cbacadc 100644
+--- a/package.json
++++ b/package.json
+@@ -3 +3,3 @@
+-	"version": "0.9.19",
++	"version": "0.9.19-tron.1",
++	"main": "./dist/extensions/agent-browser/index.js",
++	"types": "./dist/extensions/agent-browser/index.d.ts",
+@@ -35,0 +38 @@
++		"dist/extensions/agent-browser/index.d.ts",
+@@ -149,0 +153 @@
++		"agent-browser": "0.42.0",
+diff --git a/test/helpers/agent-browser-harness.ts b/test/helpers/agent-browser-harness.ts
+index 250b68e..b3d227a 100644
+--- a/test/helpers/agent-browser-harness.ts
++++ b/test/helpers/agent-browser-harness.ts
+@@ -603,0 +604,2 @@ export interface ExtensionHarnessOptions {
++	readonly extensionOptions?: Parameters<typeof agentBrowserExtension>[1];
++	readonly factory?: typeof agentBrowserExtension;
+@@ -836 +838 @@ export function createExtensionHarness(options: ExtensionHarnessOptions): Extens
+-	agentBrowserExtension(pi);
++	(options.factory ?? agentBrowserExtension)(pi, options.extensionOptions);

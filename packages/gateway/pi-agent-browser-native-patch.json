@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "package": "pi-agent-browser-native",
+  "version": "0.9.19-tron.1",
+  "artifact": {
+    "path": "third_party/pi-agent-browser-native/pi-agent-browser-native-0.9.19-tron.1.tgz",
+    "integrity": "sha512-9C4Exb1KoSEVbywlGWLfmqGgxrl3o+oVFBgPoULlN74DNQC5NAGlb+3R6qbX1tEbIersZ0oq7limBEd5Lui7iw=="
+  },
+  "patch": {
+    "path": "third_party/pi-agent-browser-native/tron.patch",
+    "sha256": "c52d49e7e42684e8db0e261289a1f6b2fc4cbe1bfd630ee1ffd4b725f03e7791"
+  },
+  "license": {
+    "path": "third_party/pi-agent-browser-native/LICENSE",
+    "spdx": "MIT"
+  },
+  "upstream": {
+    "repository": "https://github.com/fitchmultz/pi-agent-browser-native.git",
+    "commit": "6346982c0fec9e00b9f3ef6997cfb2d6f6893c6d"
+  },
+  "toolchain": {
+    "node": "24.22.0",
+    "npm": "11.19.1"
+  },
+  "removeWhen": "A qualified replacement provides the recorded-launch ownership boundary and single persistent owned profile without personal-profile attachment or copying."
+}

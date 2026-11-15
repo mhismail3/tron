@@ -1,3 +1,4 @@
+import { isUserBrowserPackage, IGNORED_BROWSER_MESSAGE } from "../kernel/pi/packages.js";
 import { isManagedSubagentExtension, isUserSubagentsPackage, IGNORED_SUBAGENTS_MESSAGE, MANAGED_SUBAGENTS_SOURCE, type ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
 import { readFile, stat } from "node:fs/promises";
 import { basename, dirname, join, sep } from "node:path";
@@ -184,8 +185,8 @@ export async function loadPackageProvides(request: PackageProvidesRequest): Prom
       const nodeRequirement = await packageNodeRequirement(pkg.installedPath);
       return {
         ...pkg,
-        ...(request.managedSubagents && isUserSubagentsPackage(pkg.source) ? {
-          conflict: { code: "managed-provider" as const, message: IGNORED_SUBAGENTS_MESSAGE },
+        ...((request.managedSubagents && isUserSubagentsPackage(pkg.source)) || isUserBrowserPackage(pkg.source) ? {
+          conflict: { code: "managed-provider" as const, message: isUserBrowserPackage(pkg.source) ? IGNORED_BROWSER_MESSAGE : IGNORED_SUBAGENTS_MESSAGE },
           provides: { skills: [], prompts: [], themes: [], subagents: [], tools: [], commands: [] },
         } : { provides: packageProvides({ pkg, resources, extensions, subagents: catalog.subagents }) }),
         ...(nodeRequirement ? { nodeRequirement } : {}),

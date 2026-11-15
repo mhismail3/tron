@@ -51,13 +51,16 @@ function humanizedDisplayName(extension: Extension): string {
 }
 
 function extensionOwnerFor(extension: Extension): ExtensionOwner {
-  const source = isManagedSubagentExtension(extension) ? MANAGED_SUBAGENTS_SOURCE : extension.path === TRON_ASK_USER_INLINE_PATH
+  const source = extension.path === "builtin:agent-browser" ? extension.path : isManagedSubagentExtension(extension) ? MANAGED_SUBAGENTS_SOURCE : extension.path === TRON_ASK_USER_INLINE_PATH
     ? TRON_ASK_USER_SOURCE
     : extension.sourceInfo.source;
   return producerIdentity(source, extension.resolvedPath, isManagedSubagentExtension(extension) ? "Subagents" : humanizedDisplayName(extension), source === MANAGED_SUBAGENTS_SOURCE ? "subagent" : "extension");
 }
 
 function assertAdmissibleToolName(extension: Extension, name: string, requireTronAskUser: boolean, requireManagedSubagents: boolean): void {
+  if ((name === "agent_browser" || name.startsWith("agent_browser_")) && extension.path !== "builtin:agent-browser") {
+    throw new GatewayError("conflict", "Browser tools are reserved by the Tron-managed native owner");
+  }
   if (name === "subagent" && requireManagedSubagents && !isManagedSubagentExtension(extension)) {
     throw new GatewayError("conflict", "The subagent tool is reserved by the Tron-managed provider");
   }
