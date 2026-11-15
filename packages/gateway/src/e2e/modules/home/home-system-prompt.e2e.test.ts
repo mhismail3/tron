@@ -30,7 +30,9 @@ describe("Home system prompt at the request seam", () => {
     const f = await fixture();
     const model = f.faux.getModel();
     await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
+    await writeFile(join(f.agentDir, "AGENTS.md"), "# Shared machines\n\n- Heavy work is a simulator test run, a large build, a full test suite or a load test: anything that keeps many cores, a simulator or several GB busy for more than a few minutes.\n");
     const home = await f.registry.acquire(f.home.sessionId);
+    await home.reload(true);
     const systems: string[][] = [];
     f.faux.setResponses([
       (context) => { systems.push(systemTexts(context.messages)); return fauxAssistantMessage([fauxToolCall("memory_search", { query: "earlier" })], { stopReason: "toolUse" }); },
@@ -43,6 +45,8 @@ describe("Home system prompt at the request seam", () => {
       expect(system).toHaveLength(1);
       expect(system[0]).toContain("## Tron Home");
       expect(system[0]).toContain("## Learned profile");
+      expect(system[0].match(/Heavy work is a simulator test run/g)).toHaveLength(1);
+      expect(system[0]).toContain("Before you start, resume or steer a worker into heavy work, read the resource-stewardship skill");
     }
     expect(systems[1]).toEqual(systems[0]);
   }, 30_000);
