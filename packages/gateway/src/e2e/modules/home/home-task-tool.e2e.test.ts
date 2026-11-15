@@ -222,8 +222,8 @@ describe("Home's task tool on the wire (#961)", () => {
     expect(definition.description).toMatch(/stop \{taskId\}/u);
     const settingsDefinition = wire.requests[0]!.tools!.find(tool => tool.name === "settings")!;
     const settingsSchema = settingsDefinition.input_schema as { properties: Record<string, { description?: string; enum?: string[] }>; required: string[] };
-    expect(Object.keys(settingsSchema.properties).sort()).toEqual(["action", "changes", "dryRun", "keys", "reason", "taskId"]);
-    expect(settingsSchema.properties.action!.enum).toEqual(["resolve", "change"]);
+    expect(Object.keys(settingsSchema.properties).sort()).toEqual(["action", "changeId", "changes", "cursor", "dryRun", "key", "keys", "limit", "reason", "taskId"]);
+    expect(settingsSchema.properties.action!.enum).toEqual(["resolve", "change", "history", "undo"]);
     expect(settingsSchema.required).toEqual(["action"]);
     for (const [field, property] of Object.entries(settingsSchema.properties)) expect(property.description, field).toBeTruthy();
     evidence.push({ definition, settingsDefinition });

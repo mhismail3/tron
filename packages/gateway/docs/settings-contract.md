@@ -147,9 +147,13 @@ Outcomes name key, layer, status and `before`/`after`; `review` includes the
 exact digest-bound before/after projection and whether a native tap is required. A chat's own Session scope
 changes only while idle; Home Chat compaction values are
 refused. **Record:** `<tronHome>/state/settings/changes/`, append-only 500-entry segments
-listed in `index.json`, kept forever, paged by `settings.history` (a page may be empty with a
-`nextCursor`); entries hold actor, target, key, `before`/`after` (never credentials), reason,
-status, git result and `undoOf`/`applyAgainOf`. Existing persisted facts remain readable;
+listed in `index.json`, kept forever, paged by `settings.history` (the maintainer's full view) or the tool's `history`
+action (optional key filter, cursor and limit 1–200; a page may be empty with a
+`nextCursor`); entries hold actor, target, key, `before`/`after` (never credentials; reads return values only for a declared key or record subject not flagged redacted, so a retired or unknown key's values never leave the Gateway), reason,
+status, git result and `undoOf`/`applyAgainOf`. Scope: an agent's history and Undo cover only its own
+chat's changes, meaning those targeting its session and those its session initiated (including its Global
+changes); foreign rows are absent from its pages and its Undo of them is refused. Tron Home sees and undoes every
+change, applied to the target session's own store. Existing persisted facts remain readable;
 there is no pending-request folding or tier basis in new facts. **Undo** (`settings.undo`) writes
 `before` back, refused with `conflict` when the store moved; redacted entries are **Not
 undoable**. Consumption is derived from permanent history, checked with the current-after
@@ -184,7 +188,7 @@ apply directly: his tap is the authority. A renderer that shows a key's review c
 may bind that tap to it with `confirmationDigest`; a changed store refuses it as stale.
 Project lifecycle uses `projects.change`, binding its exact typed intent and review;
 its owner revalidates filesystem, Git, occupancy and trust before effects.
-Project action facts do not invent generic inverses. Local RPC cannot confirm reviews.
+Project action facts do not invent generic inverses. Local RPC cannot confirm reviews. An agent's or Home's Undo that restores a tap-required value shows the same native card as a change.
 
 A refused bundle retains all per-change errors and before/after facts, but never
 opens a review or writes. Dry run has no effects. Fixed key IDs and qualifiers must

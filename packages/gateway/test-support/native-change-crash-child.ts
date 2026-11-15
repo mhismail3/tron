@@ -70,6 +70,6 @@ try {
   try { replay = { result: await service.invoke(phone, "extension.respond", params) }; }
   catch (error) { const failure = error as { code?: string; details?: unknown }; replay = { error: { code: failure.code, details: failure.details } }; }
   const document = JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8"));
-  const history = (await settings.settingsChanges.history({ key: "context.images.block" })).entries;
+  const history = (await settings.settingsChanges.history({ key: "context.images.block" }, { kind: "ui", id: "maintainer" })).entries;
   await writeFile(join(root, "recovered.json"), JSON.stringify({ replay, blockImages: document.images?.blockImages ?? null, history }));
 } finally { await registry.dispose(); await receipts.dispose(); }
