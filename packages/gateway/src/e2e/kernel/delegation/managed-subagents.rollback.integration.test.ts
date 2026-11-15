@@ -218,7 +218,9 @@ async function runLeg(): Promise<void> {
     }
     const slot = await registry.create(cwd);
     await slot.setModel(model.provider, model.id);
-    const resources = await slot.resources() as unknown as { subagents: Array<{ name: string }>; tools: Array<{ name: string }>; subagentDiagnostics?: string };
+    const resources = await slot.resources() as unknown as { subagents: Array<{ name: string }>; tools: Array<{ name: string }>; subagentDiagnostics?: string; extensionLoadErrors: unknown[] };
+    facts.extensionLoadErrors = resources.extensionLoadErrors;
+    expect(resources.extensionLoadErrors, "every extension, tron-core included, loads under this provider").toEqual([]);
     expect(resources.subagentDiagnostics).toBeUndefined();
     expect(resources.subagents.some((agent) => agent.name === "researcher")).toBe(true);
     expect(resources.subagents.some((agent) => agent.name === "rollback-worker")).toBe(true);
