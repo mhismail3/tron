@@ -95,7 +95,7 @@ that process death proves physical key/button release in every failure scenario.
 ## Console session admission
 
 Native Host owns a fresh, bounded snapshot of on-console/login-done, screen lock,
-screensaver activity when available, display sleep, lid state when available, up to64
+screensaver activity when available, display sleep, lid state when available, up to 64
 active displays, and a display-topology generation. It never infers lock state from
 black pixels or an empty AX tree. Admission refuses `no_console_session` before
 `mac_locked` (including an active screensaver), then `display_asleep`, then

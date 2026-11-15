@@ -243,24 +243,29 @@ export class CuaComputerClient {
     return work;
   }
 
+  private async endCuaSession(): Promise<void> {
+    const endpoint = this.endpoint; this.endpoint = undefined;
+    if (!endpoint) return;
+    for (;;) {
+      const { stdout } = await execFileAsync(DRIVER, ["call", "end_session", JSON.stringify({ session: this.binding.runtimeLoadID }), "--socket", endpoint.socket],
+        { env: this.environment(), maxBuffer: OUTPUT_LIMIT, encoding: "utf8", windowsHide: true });
+      const result = JSON.parse(stdout) as Record<string, unknown>;
+      if (result.code === "session_cleanup_pending") {
+        await delay(100); continue;
+      }
+      if (result.active !== false || result.code !== undefined || result.error !== undefined) throw new Error("Cua session cleanup was not confirmed");
+      return;
+    }
+  }
+
   close(): Promise<void> {
     if (this.closing) return this.closing;
     this.closed = true;
-    this.closing = (async () => {
-      await this.endTurn();
-      const endpoint = this.endpoint; this.endpoint = undefined;
-      if (!endpoint) return;
-      for (;;) {
-        const { stdout } = await execFileAsync(DRIVER, ["call", "end_session", JSON.stringify({ session: this.binding.runtimeLoadID }), "--socket", endpoint.socket],
-          { env: this.environment(), maxBuffer: OUTPUT_LIMIT, encoding: "utf8", windowsHide: true });
-        const result = JSON.parse(stdout) as Record<string, unknown>;
-        if (result.code === "session_cleanup_pending") {
-          await delay(100); continue;
-        }
-        if (result.active !== false || result.code !== undefined || result.error !== undefined) throw new Error("Cua session cleanup was not confirmed");
-        break;
-      }
-    })();
+    this.closing = this.endTurn().then(() => this.endCuaSession(), async cause => {
+      try { await this.endCuaSession(); }
+      catch (cleanup) { throw new AggregateError([cause, cleanup], "Native activity retirement and Cua session cleanup failed"); }
+      throw cause;
+    });
     return this.closing;
   }
 }
