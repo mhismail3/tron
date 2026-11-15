@@ -30,19 +30,23 @@ index 7b8bd4a..ba49647 100644
 -	const runtime = new BrowserRuntime(pi, beforeExecute);
 +	const runtime = new BrowserRuntime(pi, beforeExecute, ownedProfilePath, engineExecutable);
 diff --git a/extensions/agent-browser/lib/electron/launch.ts b/extensions/agent-browser/lib/electron/launch.ts
-index ac3f3e5..b9569f7 100644
+index ac3f3e5..59b3aee 100644
 --- a/extensions/agent-browser/lib/electron/launch.ts
 +++ b/extensions/agent-browser/lib/electron/launch.ts
 @@ -1,0 +2 @@ import { randomUUID } from "node:crypto";
 +import { currentOwnedBrowser } from "../owned-browser.js";
-@@ -345,0 +347,6 @@ class ElectronLaunchAttempt {
+@@ -190,0 +192 @@ class ElectronLaunchAttempt {
++	private readonly ownedToken = currentOwnedBrowser() === undefined ? undefined : randomUUID();
+@@ -293,0 +296 @@ class ElectronLaunchAttempt {
++			...(this.ownedToken === undefined ? [] : [`--tron-owned-launch=${this.ownedToken}`]),
+@@ -345,0 +349,6 @@ class ElectronLaunchAttempt {
 +		const record = this.record(port, metadata.version);
 +		try {
-+			await currentOwnedBrowser()?.store.electron(record, metadata.targets);
++			await currentOwnedBrowser()?.store.electron(record, metadata.targets, this.ownedToken);
 +		} catch (error) {
 +			return this.fail("spawn-error", error instanceof Error ? error.message : String(error));
 +		}
-@@ -352 +359 @@ class ElectronLaunchAttempt {
+@@ -352 +361 @@ class ElectronLaunchAttempt {
 -				record: this.record(port, metadata.version),
 +				record,
 diff --git a/extensions/agent-browser/lib/orchestration/browser-run/managed-session-close.ts b/extensions/agent-browser/lib/orchestration/browser-run/managed-session-close.ts
@@ -143,10 +147,10 @@ index 0f54a91..3652e5c 100644
 +		await currentOwnedBrowser()?.settings(this.input.toolArgs, this.env, this.identity);
 diff --git a/extensions/agent-browser/lib/owned-browser.ts b/extensions/agent-browser/lib/owned-browser.ts
 new file mode 100644
-index 0000000..e18d70d
+index 0000000..a673417
 --- /dev/null
 +++ b/extensions/agent-browser/lib/owned-browser.ts
-@@ -0,0 +1,374 @@
+@@ -0,0 +1,364 @@
 +import { AsyncLocalStorage } from "node:async_hooks";
 +import { join, dirname, resolve } from "node:path";
 +import { randomUUID } from "node:crypto";
@@ -162,7 +166,7 @@ index 0000000..e18d70d
 +import { withAgentBrowserProcessEnvironment } from "./process-environment.js";
 +import { isRecord } from "./parsing.js";
 +import type { ProcessRunResult } from "./process-child.js";
-+import { OwnedLaunches, type Launch } from "./owned-launches.js";
++import { OwnedLaunches, refuseOwnedLaunch as refuse, type Launch } from "./owned-launches.js";
 +
 +const context = new AsyncLocalStorage<OwnedBrowser>();
 +
@@ -186,12 +190,6 @@ index 0000000..e18d70d
 +	readonly endpoint: () => Promise<ProcessRunResult>;
 +}
 +
-+function refuse(): never {
-+	throw new Error(
-+		"owned_launch_required: endpoint requires a recorded Tron-owned launch; personal browser attachment and profile copying are unavailable",
-+	);
-+}
-+
 +const flag = (args: readonly string[], name: string): string | undefined =>
 +	scanUpstreamGlobalFlagOccurrences(args, name).at(-1)?.value;
 +
@@ -208,12 +206,8 @@ index 0000000..e18d70d
 +
 +const present = (value: unknown): boolean => value !== undefined;
 +
-+function json(input: string): unknown {
-+	return JSON.parse(input);
-+}
-+
 +function resultData(stdout: string): Record<string, unknown> | undefined {
-+	const value = json(stdout);
++	const value: unknown = JSON.parse(stdout);
 +	return isRecord(value) && value.success === true && isRecord(value.data) ? value.data : undefined;
 +}
 +
@@ -523,10 +517,10 @@ index 0000000..e18d70d
 +}
 diff --git a/extensions/agent-browser/lib/owned-launches.ts b/extensions/agent-browser/lib/owned-launches.ts
 new file mode 100644
-index 0000000..748225e
+index 0000000..1ea4800
 --- /dev/null
 +++ b/extensions/agent-browser/lib/owned-launches.ts
-@@ -0,0 +1,448 @@
+@@ -0,0 +1,456 @@
 +import { execFile } from "node:child_process";
 +import { randomUUID, createHash } from "node:crypto";
 +import { mkdir, readFile, readdir, rename, rm, writeFile, lstat, realpath } from "node:fs/promises";
@@ -556,7 +550,7 @@ index 0000000..748225e
 +	pid: Type.Integer({ minimum: 2 }),
 +	start: Type.String({ minLength: 1 }),
 +	profile: Type.String(),
-+	token: Type.Optional(Type.String()),
++	token: Type.String({ minLength: 1 }),
 +	targets: Type.Optional(Type.Array(Type.String(), { maxItems: 128 })),
 +	kind: Type.Union([Type.Literal("web"), Type.Literal("electron"), Type.Literal("studio")]),
 +	sessions: Type.Array(Type.String(), { maxItems: 128 }),
@@ -565,20 +559,16 @@ index 0000000..748225e
 +
 +export type Launch = Static<typeof launchSchema>;
 +
-+function refuse(): never {
++export function refuseOwnedLaunch(): never {
 +	throw new Error(
 +		"owned_launch_required: endpoint requires a recorded Tron-owned launch; personal browser attachment and profile copying are unavailable",
 +	);
 +}
 +
-+function json(input: string): unknown {
-+	return JSON.parse(input);
-+}
-+
 +function decodeLaunch(input: string): Launch {
-+	const value = json(input);
++	const value: unknown = JSON.parse(input);
 +	if (!Check(launchSchema, value)) {
-+		refuse();
++		refuseOwnedLaunch();
 +	}
 +	return value;
 +}
@@ -592,7 +582,7 @@ index 0000000..748225e
 +		url.port.length === 0 ||
 +		identity.some((entry) => entry.length > 0)
 +	) {
-+		refuse();
++		refuseOwnedLaunch();
 +	}
 +	return url;
 +}
@@ -617,7 +607,7 @@ index 0000000..748225e
 +		!/^\d+$/.test(port) ||
 +		!/^\/devtools\/browser\/[^/]+$/.test(path)
 +	) {
-+		refuse();
++		refuseOwnedLaunch();
 +	}
 +	return `ws://127.0.0.1:${port}${path}`;
 +}
@@ -638,7 +628,7 @@ index 0000000..748225e
 +	];
 +	const pid = pids[0];
 +	if (pids.length !== 1 || pid === undefined || pid <= 1) {
-+		refuse();
++		refuseOwnedLaunch();
 +	}
 +	return pid;
 +}
@@ -652,7 +642,7 @@ index 0000000..748225e
 +		stat.uid !== process.getuid?.() ||
 +		(stat.mode & 0o077) !== 0
 +	) {
-+		refuse();
++		refuseOwnedLaunch();
 +	}
 +}
 +
@@ -697,7 +687,7 @@ index 0000000..748225e
 +		const files = await readdir(this.profile);
 +		if (!files.includes(".tron-owned-profile")) {
 +			if (files.length !== 0) {
-+				refuse();
++				refuseOwnedLaunch();
 +			}
 +			await writeFile(marker, randomUUID(), { mode: 0o600, flag: "wx" });
 +		}
@@ -708,7 +698,7 @@ index 0000000..748225e
 +			stat.uid !== process.getuid?.() ||
 +			(stat.mode & 0o077) !== 0
 +		) {
-+			refuse();
++			refuseOwnedLaunch();
 +		}
 +	}
 +
@@ -727,7 +717,19 @@ index 0000000..748225e
 +	}
 +
 +	private async live(launch: Launch): Promise<boolean> {
-+		if ((await readProcessStartIdentity(launch.pid)) !== launch.start) {
++		const start = await readProcessStartIdentity(launch.pid);
++		if (start === undefined) {
++			try {
++				process.kill(launch.pid, 0);
++			} catch (error) {
++				if (error instanceof Error && "code" in error && error.code === "ESRCH") {
++					return false;
++				}
++				throw error;
++			}
++			throw new Error("Owned browser process identity is unavailable; launch receipt retained");
++		}
++		if (start !== launch.start) {
 +			return false;
 +		}
 +		if ((await listener(launch.endpoint)) !== launch.pid) {
@@ -746,16 +748,13 @@ index 0000000..748225e
 +		) {
 +			return false;
 +		}
-+		return (
-+			launch.kind === "electron" ||
-+			(launch.token !== undefined && command.includes(` --tron-owned-launch=${launch.token} `))
-+		);
++		return command.includes(` --tron-owned-launch=${launch.token} `);
 +	}
 +
 +	private async records(): Promise<Launch[]> {
 +		const names = (await readdir(this.root)).filter((name) => /^\d+\.json$/.test(name));
 +		if (names.length > 128) {
-+			refuse();
++			refuseOwnedLaunch();
 +		}
 +		return Promise.all(
 +			names.map(async (name) => decodeLaunch(await readFile(join(this.root, name), "utf8"))),
@@ -765,13 +764,7 @@ index 0000000..748225e
 +	async active(): Promise<Launch[]> {
 +		const result: Launch[] = [];
 +		for (const launch of await this.records()) {
-+			let live = false;
-+			try {
-+				live = await this.live(launch);
-+			} catch {
-+				live = false;
-+			}
-+			if (live) {
++			if (await this.live(launch)) {
 +				result.push(launch);
 +			} else if (launch.kind !== "studio") {
 +				await rm(this.file(launch.endpoint));
@@ -782,20 +775,23 @@ index 0000000..748225e
 +
 +	async recorded(endpoint: string): Promise<Launch> {
 +		const launch = (await this.active()).find((item) => matches(endpoint, item));
-+		return launch ?? refuse();
++		return launch ?? refuseOwnedLaunch();
 +	}
 +
 +	async connected(session: string, launch: Launch, data: Record<string, unknown>): Promise<void> {
 +		if (typeof data.cdpUrl === "string" && !matches(data.cdpUrl, launch)) {
-+			refuse();
++			refuseOwnedLaunch();
 +		}
 +		for (const entry of await this.active()) {
-+			const sessions = entry.sessions.filter((item) => item !== session);
-+			if (entry.endpoint === launch.endpoint) {
-+				sessions.push(session);
++			const owns = entry.endpoint === launch.endpoint;
++			if (owns === entry.sessions.includes(session)) {
++				continue;
 +			}
++			const sessions = owns
++				? [...entry.sessions, session]
++				: entry.sessions.filter((item) => item !== session);
 +			if (sessions.length > 128) {
-+				refuse();
++				refuseOwnedLaunch();
 +			}
 +			await this.save({ ...entry, sessions });
 +		}
@@ -803,18 +799,21 @@ index 0000000..748225e
 +
 +	async detached(session: string): Promise<void> {
 +		for (const launch of await this.active()) {
++			if (!launch.sessions.includes(session)) {
++				continue;
++			}
 +			await this.save({ ...launch, sessions: launch.sessions.filter((item) => item !== session) });
 +		}
 +	}
 +
 +	async launched(session: string, token: string, endpoint: string): Promise<void> {
 +		if (!/^\/devtools\/browser\/[^/]+$/.test(address(endpoint).pathname)) {
-+			refuse();
++			refuseOwnedLaunch();
 +		}
 +		const pid = await listener(endpoint);
 +		const start = await readProcessStartIdentity(pid);
 +		if (start === undefined) {
-+			refuse();
++			refuseOwnedLaunch();
 +		}
 +		const launch: Launch = {
 +			endpoint,
@@ -827,18 +826,18 @@ index 0000000..748225e
 +			master: session,
 +		};
 +		if (!(await this.live(launch))) {
-+			refuse();
++			refuseOwnedLaunch();
 +		}
 +		const prior = (await this.active()).find((item) => item.kind === "web");
 +		if (prior && prior.endpoint !== endpoint) {
-+			refuse();
++			refuseOwnedLaunch();
 +		}
 +		await this.save({ ...launch, sessions: prior?.sessions ?? launch.sessions });
 +	}
 +
 +	private async studioPrepare(): Promise<Record<string, unknown>> {
 +		if ((await readdir(this.root)).filter((name) => name.startsWith("studio-")).length >= 128) {
-+			refuse();
++			refuseOwnedLaunch();
 +		}
 +		const token = randomUUID();
 +		const profile = join(this.root, `studio-${token}`);
@@ -856,7 +855,7 @@ index 0000000..748225e
 +
 +	private studioProfile(token: string | undefined): string {
 +		if (token === undefined || !/^[a-f0-9-]{36}$/.test(token)) {
-+			refuse();
++			refuseOwnedLaunch();
 +		}
 +		return join(this.root, `studio-${token}`);
 +	}
@@ -868,24 +867,24 @@ index 0000000..748225e
 +		const profile = this.studioProfile(token);
 +		const pid = Number(rawPid);
 +		if (!Number.isSafeInteger(pid) || pid <= 1) {
-+			refuse();
++			refuseOwnedLaunch();
 +		}
 +		const endpoint = await studioEndpoint(profile);
 +		const start = await readProcessStartIdentity(pid);
 +		if (start === undefined) {
-+			refuse();
++			refuseOwnedLaunch();
 +		}
 +		const launch: Launch = {
 +			endpoint,
 +			pid,
 +			start,
 +			profile,
-+			token: token ?? refuse(),
++			token: token ?? refuseOwnedLaunch(),
 +			kind: "studio",
 +			sessions: [],
 +		};
 +		if (!(await this.live(launch)) || (await this.records()).length >= 128) {
-+			refuse();
++			refuseOwnedLaunch();
 +		}
 +		await this.save(launch);
 +		return { endpoint: launch.endpoint, launchId: token };
@@ -895,13 +894,13 @@ index 0000000..748225e
 +		const path = this.studioProfile(token);
 +		const profile = await realpath(path);
 +		if (profile !== join(await realpath(this.root), `studio-${String(token)}`)) {
-+			refuse();
++			refuseOwnedLaunch();
 +		}
 +		const record = (await this.records()).find(
 +			(item) => item.profile === path && item.token === token,
 +		);
 +		if (!record || (await readProcessStartIdentity(record.pid)) === record.start) {
-+			refuse();
++			refuseOwnedLaunch();
 +		}
 +		await rm(profile, { recursive: true });
 +		await rm(this.file(record.endpoint));
@@ -917,24 +916,24 @@ index 0000000..748225e
 +		switch (args[1] ?? "") {
 +			case "prepare":
 +				if (args.length !== 2) {
-+					refuse();
++					refuseOwnedLaunch();
 +				}
 +				data = await this.studioPrepare();
 +				break;
 +			case "record":
 +				if (args.length !== 4) {
-+					refuse();
++					refuseOwnedLaunch();
 +				}
 +				data = await this.studioRecord(args[2], args[3]);
 +				break;
 +			case "cleanup":
 +				if (args.length !== 3) {
-+					refuse();
++					refuseOwnedLaunch();
 +				}
 +				data = await this.studioCleanup(args[2]);
 +				break;
 +			default:
-+				refuse();
++				refuseOwnedLaunch();
 +		}
 +		return {
 +			content: [{ type: "text", text: JSON.stringify(data) }],
@@ -950,19 +949,22 @@ index 0000000..748225e
 +			userDataDir: string;
 +		},
 +		targets: readonly { webSocketDebuggerUrl?: string | undefined }[],
++		token: string | undefined,
 +	): Promise<void> {
 +		if (
 +			record.webSocketDebuggerUrl === undefined ||
 +			record.startIdentity === undefined ||
-+			record.pid === undefined
++			record.pid === undefined ||
++			token === undefined
 +		) {
-+			refuse();
++			refuseOwnedLaunch();
 +		}
 +		const launch: Launch = {
 +			endpoint: record.webSocketDebuggerUrl,
 +			pid: record.pid,
 +			start: record.startIdentity,
 +			profile: record.userDataDir,
++			token,
 +			kind: "electron",
 +			sessions: [],
 +			targets: targets.flatMap((target) =>
@@ -970,7 +972,7 @@ index 0000000..748225e
 +			),
 +		};
 +		if (!(await this.live(launch)) || (await this.records()).length >= 128) {
-+			refuse();
++			refuseOwnedLaunch();
 +		}
 +		await this.save(launch);
 +	}
@@ -1060,13 +1062,3 @@ index 1c5324e..cbacadc 100644
 +		"dist/extensions/agent-browser/index.d.ts",
 @@ -149,0 +153 @@
 +		"agent-browser": "0.42.0",
-diff --git a/test/helpers/agent-browser-harness.ts b/test/helpers/agent-browser-harness.ts
-index 250b68e..b3d227a 100644
---- a/test/helpers/agent-browser-harness.ts
-+++ b/test/helpers/agent-browser-harness.ts
-@@ -603,0 +604,2 @@ export interface ExtensionHarnessOptions {
-+	readonly extensionOptions?: Parameters<typeof agentBrowserExtension>[1];
-+	readonly factory?: typeof agentBrowserExtension;
-@@ -836 +838 @@ export function createExtensionHarness(options: ExtensionHarnessOptions): Extens
--	agentBrowserExtension(pi);
-+	(options.factory ?? agentBrowserExtension)(pi, options.extensionOptions);

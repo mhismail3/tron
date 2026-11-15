@@ -137,7 +137,7 @@ Projection reads the persisted details live and after cold reload.
 
 | Signal | One-step diagnosis / boundary |
 | --- | --- |
-| Chrome attached but no live source | Run `scripts/tron test gateway --local src/kernel/projection/tool-result.integration.test.ts`: fixed-path endpoints must produce a sealed receipt only after the browser-target handshake, and retire it on disconnect/load replacement. Inspect `browserLiveViewError` for a refused consent handshake. |
+| Chrome attached but no live source | Run `scripts/tron test gateway src/kernel/projection/tool-result.integration.test.ts`: only builtin GUID-bearing browser endpoints promote a sealed active-load receipt; GUID-less and user-package sources are refused. For `owned_launch_required`, run `src/e2e/sessions/browser-fork-receipts.integration.test.ts` through that runner to check native launch admission. |
 | Maintenance durable-write work | Run `scripts/tron test gateway src/e2e/display/display-image-lifetime.integration.test.ts -t 'durably removes unowned'`: the real fsync counter must record two retained metadata publications plus one deletion-directory sync, independent of the removed set's size. The same journey checks reader lifetime and cold-reopen authority. |
 
 ## Verify

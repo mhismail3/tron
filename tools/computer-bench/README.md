@@ -12,7 +12,9 @@ scripts/tron computer-bench --foreground --json .scratch/run.json --markdown too
 scripts/tron-node exec -- node --test tools/computer-bench/bench.test.mjs
 ```
 
-[`SCORECARD.md`](SCORECARD.md) is generated output; regenerate it, never edit it.
+[`SCORECARD.md`](SCORECARD.md) is generated output from the headless `agent-browser`
+fixture run; it does not qualify Cua, installed wrappers or the desktop. Regenerate it,
+never edit measured results.
 
 ## Tools
 

@@ -1,6 +1,6 @@
 import { createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { execFile, execFileSync, spawn } from "node:child_process";
 import WebSocket from "ws";
@@ -9,8 +9,8 @@ import { once } from "node:events";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { createHash, randomUUID } from "node:crypto";
-import { dirname, join, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
+import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -18,7 +18,7 @@ import { TrustService } from "../../kernel/resources/trust-service.js";
 import { admitBrowserToolReference } from "../../display/browser-tool-reference.js";
 import { BrowserLiveViewRegistry } from "../../display/browser-live-view.js";
 import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
-import { waitFor } from "../../../test-support/wait-for.js";
+import { awaitsWithin, HOOK_HANG_BOUND_MS, waitFor } from "../../../test-support/wait-for.js";
 
 const require = createRequire(import.meta.url);
 const installedFork = dirname(require.resolve("pi-agent-browser-native/package.json"));
@@ -39,8 +39,10 @@ afterEach(async () => {
     for (const cleanup of browserCleanups.splice(0)) {
       try { cleanup(); } catch (error) { failures.push(error); }
     }
-    for (const root of roots.splice(0)) {
-      try { await rm(root, { recursive: true, force: true }); } catch (error) { failures.push(error); }
+    if (!failures.length) {
+      for (const root of roots.splice(0)) {
+        try { await rm(root, { recursive: true, force: true }); } catch (error) { failures.push(error); }
+      }
     }
   } finally {
     if (oldPath === undefined) delete process.env.PATH;
@@ -54,11 +56,13 @@ function toolResult(slot: Awaited<ReturnType<RuntimeRegistry["create"]>>, toolCa
     item.kind === "message" && item.role === "toolResult" && item.toolCallId === toolCallId);
 }
 
-function closeNative(agentDir: string): void {
-  const session = `tron-${createHash("sha256").update(resolve(agentDir,"browser","profile")).digest("hex").slice(0,16)}`;
-  const sockets = join("/tmp",`pi-owned-${process.getuid?.() ?? "user"}-${session}`);
+function closeNative(agentDir: string, sockets: string | undefined): void {
+  if (!sockets) return;
   let names: string[];
-  try { names = execFileSync("/bin/ls", [sockets], {encoding:"utf8"}).trim().split("\n"); } catch { return; }
+  try { names = readdirSync(sockets); } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return;
+    throw error;
+  }
   for (const name of names.filter(name => name.endsWith(".pid"))) {
     execFileSync(executable, ["--session", name.slice(0,-4), "close"], {
       env: {...process.env, HOME:join(agentDir,"browser","home"), AGENT_BROWSER_SOCKET_DIR:sockets, PI_AGENT_BROWSER_SOCKET_DIR:sockets},
@@ -70,6 +74,7 @@ function closeNative(agentDir: string): void {
 describe("packaged agent-browser receipts", () => {
   describe("packaged owned-browser qualification", { concurrent: false }, () => {
     let root: string, agentDir: string, cwd: string, control: string, base: string, endpoint: string;
+    let sockets: string;
     let registry: RuntimeRegistry, slot: Awaited<ReturnType<RuntimeRegistry["create"]>>;
     let cli: (...args: string[]) => Promise<any>, step: (id:string,args:string[],fresh?:boolean)=>Promise<any>;
     let call: (id:string,name:string,params:Record<string,unknown>)=>Promise<any>;
@@ -114,10 +119,7 @@ describe("packaged agent-browser receipts", () => {
       faux.setResponses([fauxAssistantMessage([fauxToolCall(name,params,{id})],{stopReason:"toolUse"}),fauxAssistantMessage("done")]);
       await slot.prompt("Operate only on the isolated fixture");
       await waitFor(()=>!slot.isBusy && toolResult(slot,id)!==undefined, id);
-      const result = toolResult(slot,id);
-      await mkdir(join(process.cwd(),"test-results"),{recursive:true});
-      await writeFile(join(process.cwd(),"test-results/2556-packaged-last-step.json"),JSON.stringify({id,result},null,2));
-      return result;
+      return toolResult(slot,id);
     };
     step=(id,args,fresh=false)=>call(id,"agent_browser",{args,...(fresh?{sessionMode:"fresh"}:{})});
       await cli("--profile",join(root,"unrecorded-profile"),"open","about:blank");
@@ -131,6 +133,8 @@ describe("packaged agent-browser receipts", () => {
       const opened=await step("endpoint",["get","cdp-url"]);
       expect(opened).toMatchObject({isError:false});
       endpoint=opened.details.data.cdpUrl;
+      sockets=opened.details.managedSessionSocketDir;
+      expect(typeof sockets).toBe("string");
     });
     it.each([0,5,10,15])("admits five owned authenticated attaches starting at %i", async first => {
       for(let i=first;i<first+5;i++){
@@ -145,8 +149,8 @@ describe("packaged agent-browser receipts", () => {
       }
     });
     it("retains authentication through a native and Gateway runtime restart", async () => {
-      closeNative(agentDir);
-      expect((await readdir(join("/tmp",`pi-owned-${process.getuid?.() ?? "user"}-tron-${createHash("sha256").update(resolve(agentDir,"browser","profile")).digest("hex").slice(0,16)}`))).filter(name=>name.endsWith(".pid"))).toEqual([]);
+      closeNative(agentDir,sockets);
+      expect((await readdir(sockets)).filter(name=>name.endsWith(".pid"))).toEqual([]);
       await registry.dispose();
       registry=await createRegistry();slot=await registry.create(cwd);await slot.setModel(model.provider,model.id);
       const nonce=randomUUID();
@@ -173,12 +177,16 @@ describe("packaged agent-browser receipts", () => {
         endpoint=`ws://127.0.0.1:${port}${path}`;
         expect(await step("producer-live-cleanup",["owned-launch","cleanup",launchId])).toMatchObject({isError:true});
         expect(await step("producer-record",["owned-launch","record",launchId,String(child.pid)])).toMatchObject({isError:false,details:{data:{endpoint}}});
-        expect(await step("producer-connect",["connect",endpoint],true)).toMatchObject({isError:false});
+        expect(await step("producer-connect",["connect",`http://127.0.0.1:${port}`],true)).toMatchObject({isError:false});
         expect(await step("producer-verify",["get","url"])).toMatchObject({isError:false});
         expect(await step("producer-read",["get","cdp-url"])).toMatchObject({isError:false,details:{data:{cdpUrl:endpoint}}});
         expect(await step("producer-detach",["close"])).toMatchObject({isError:false});
       } finally {
-        if(child.exitCode===null && endpoint){const socket=new WebSocket(endpoint);await once(socket,"open");socket.send(JSON.stringify({id:1,method:"Browser.close"}));await exited;socket.terminate();}
+        try {
+          if(child.exitCode===null && endpoint){const socket=new WebSocket(endpoint);try {await awaitsWithin(once(socket,"open"),"producer cleanup connection",HOOK_HANG_BOUND_MS);socket.send(JSON.stringify({id:1,method:"Browser.close"}));await awaitsWithin(exited,"producer graceful exit",HOOK_HANG_BOUND_MS);} finally {socket.terminate();}}
+        } finally {
+          if(child.exitCode===null){if(!child.pid || child.pid<=1) throw new Error("Producer cleanup has no owned child PID; profile retained");child.kill("SIGTERM");await awaitsWithin(exited,"owned producer child exit",HOOK_HANG_BOUND_MS);}
+        }
       }
       expect(await step("producer-cleanup",["owned-launch","cleanup",launchId])).toMatchObject({isError:false,details:{data:{cleaned:true}}});
       await expect(readFile(join(profile,"DevToolsActivePort"))).rejects.toMatchObject({code:"ENOENT"});
@@ -188,9 +196,15 @@ describe("packaged agent-browser receipts", () => {
       await Promise.all(["MacOS","Frameworks/Electron Framework.framework","Resources/app"].map(path=>mkdir(join(contents,path),{recursive:true})));
       const chrome=process.env.AGENT_BROWSER_EXECUTABLE_PATH;
       if(!chrome) throw new Error("Chrome for Testing is required");
-      await writeFile(join(contents,"MacOS","OwnedFixture"),`#!/bin/sh\nexec ${JSON.stringify(chrome)} --headless=new --password-store=basic --use-mock-keychain "$@"\n`,{mode:0o755});
+      const launcher=join(contents,"MacOS","OwnedFixture");
+      const execute=`exec ${JSON.stringify(chrome)} --headless=new --password-store=basic --use-mock-keychain "$@"\n`;
+      await writeFile(launcher,`#!/bin/sh\nfor arg do shift; case "$arg" in --tron-owned-launch=*) ;; *) set -- "$@" "$arg" ;; esac; done\n${execute}`,{mode:0o755});
       await writeFile(join(contents,"Resources/app/package.json"),JSON.stringify({name:"owned-fixture",main:"index.js"}));
       try {
+        const stripped=await call("electron-stripped-nonce","agent_browser_electron",{action:"launch",appPath,handoff:"connect"});
+        expect(stripped).toMatchObject({isError:true});
+        expect(JSON.stringify(stripped)).toContain("owned_launch_required");
+        await writeFile(launcher,`#!/bin/sh\n${execute}`,{mode:0o755});
         const launched=await call("electron-launch","agent_browser_electron",{action:"launch",appPath,handoff:"connect"});
         expect(launched).toMatchObject({isError:false});
         expect(await step("electron-verify",["get","url"])).toMatchObject({isError:false});
@@ -200,12 +214,12 @@ describe("packaged agent-browser receipts", () => {
       }
     });
     afterAll(async () => {
-      try { await registry?.dispose(); } finally {
-        closeNative(agentDir);
-        await cli("close");
-        site.closeAllConnections(); await new Promise<void>(resolve=>site.close(()=>resolve()));
-        await rm(root,{recursive:true,force:true});
+      const failures: unknown[]=[];
+      for(const cleanup of [()=>registry?.dispose(),()=>closeNative(agentDir,sockets),()=>cli("close"),()=>{site.closeAllConnections();return new Promise<void>(resolve=>site.close(()=>resolve()));}]){
+        try {await cleanup();} catch(error) {failures.push(error);}
       }
+      if(failures.length) throw new AggregateError(failures,`Browser qualification cleanup failed; retained ${root}`);
+      await rm(root,{recursive:true,force:true});
     });
   });
   it("registers direct and parent-sealed packaged native views, reloads the parent receipt, and clears aborted stash", async () => {
@@ -221,7 +235,8 @@ describe("packaged agent-browser receipts", () => {
     await Promise.all([mkdir(agentDir), mkdir(sessionDir), mkdir(extensions, {recursive:true}), mkdir(fakeBin)]);
     const callsPath = join(root, "cli-calls.jsonl");
     const fakeExecutable = `#!${process.execPath}\nrequire("node:fs").appendFileSync(${JSON.stringify(callsPath)}, "unexpected PATH engine execution"); process.exit(1);\n`;
-    browserCleanups.push(() => closeNative(agentDir));
+    let sockets: string | undefined;
+    browserCleanups.push(() => closeNative(agentDir,sockets));
     const fakePath = join(fakeBin, "agent-browser");
     await writeFile(fakePath, fakeExecutable, { mode: 0o755 });
     await chmod(fakePath, 0o755);
@@ -277,6 +292,10 @@ describe("packaged agent-browser receipts", () => {
     let slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
+    const browserExtensions=slot.runtime.session.resourceLoader.getExtensions().extensions.filter(extension=>extension.tools.has("agent_browser"));
+    expect(browserExtensions).toHaveLength(1);
+    expect(browserExtensions[0]!.path).toBe("builtin:agent-browser");
+    expect(browserExtensions[0]!.sourceInfo.baseDir).toBeUndefined();
 
     await slot.prompt("reject a forged raw lifecycle binding");
     await waitFor(() => toolResult(slot, "browser-forged") !== undefined && !slot.isBusy, "the forged browser result");
@@ -288,6 +307,9 @@ describe("packaged agent-browser receipts", () => {
     await slot.prompt("run direct browser");
     await waitFor(() => toolResult(slot, "browser-direct") !== undefined && !slot.isBusy, "the direct browser tool result and an idle slot");
     const direct = toolResult(slot, "browser-direct");
+    sockets=direct.details.managedSessionSocketDir;
+    expect(typeof sockets).toBe("string");
+    let frameBytes=0;
     expect(direct?.details).toMatchObject({ browserLiveView: { schema: "tron.browser-live-view.v1" }, tronBrowserReference: { toolCallId: "browser-direct" } });
     expect(admitBrowserToolReference("agent_browser", "browser-direct", direct.details, slot.id))
       .toMatchObject({ descriptor: direct.details.browserLiveView, automatic: true });
@@ -302,6 +324,7 @@ describe("packaged agent-browser receipts", () => {
           return "sequence" in delivery.frame ? delivery.frame : undefined;
         }, "a real frame from the admitted native browser");
         expect(frame.data.length).toBeGreaterThan(0);
+        frameBytes=frame.data.length;
       } finally { views.close(viewer.leaseId); }
     }
 
@@ -356,8 +379,8 @@ describe("packaged agent-browser receipts", () => {
     const artifactPath = join(process.cwd(), "test-results", "pi-sdk-099-browser-fork-native.json");
     await mkdir(dirname(artifactPath), { recursive: true });
     await writeFile(artifactPath, `${JSON.stringify({
-      package: { version: "0.9.19-tron.1", source: installedForkSource, runtime: "pinned file artifact" },
-      cli: { mode: "native", forgedRawLifecycleRejected: true, nativeFrameObserved: true },
+      package: { version: JSON.parse(forkStat).version, source: browserExtensions[0]!.path, runtime: "pinned file artifact" },
+      cli: { mode: "native", forgedRawLifecycleRejected: toolResult(slot,"browser-forged")?.isError===true, nativeFrameObserved: frameBytes>0, frameBytes },
       proof: {
         direct: { toolCallId: direct.toolCallId, registered: true, receiptAuthorized: true },
         nested: { parentToolCallId: "browser-nested-parent", nestedToolCallId: nested.toolCallId, receiptResealedForParent: true, coldReload: "preserved" },

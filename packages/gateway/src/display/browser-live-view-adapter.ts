@@ -10,10 +10,6 @@ function record(value: unknown): RecordValue | undefined {
   return value && typeof value === "object" && !Array.isArray(value) ? value as RecordValue : undefined;
 }
 
-export function isTrustedBrowserExtensionSource(source: string): boolean {
-  return source === "builtin:agent-browser";
-}
-
 export function observeTrustedAgentBrowserResult(input: {
   owner: ExtensionOwner;
   toolName: string;
@@ -24,7 +20,7 @@ export function observeTrustedAgentBrowserResult(input: {
   loadToken: string;
   views: BrowserLiveViewRegistry;
 }): unknown {
-  if (input.toolName !== "agent_browser" || !isTrustedBrowserExtensionSource(input.owner.source)
+  if (input.toolName !== "agent_browser" || input.owner.source !== "builtin:agent-browser"
     || !input.views.isLoadActive(input.sessionId, input.loadToken)) return input.result;
   const result = record(input.result);
   const details = record(result?.details);
