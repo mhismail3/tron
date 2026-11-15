@@ -61,8 +61,9 @@ incompatible native assets fail the computer operation, not the whole Gateway.
 The first-party `computer({tool, arguments})` tool is a narrow adapter over Cua's
 public CLI. One extension load owns its endpoint binding, session identity, latest
 opaque references, and at most one accepted invocation. Pi remains the canonical
-session/operation owner. Its awaited `session_shutdown` event closes the bound Cua
-session before invalidating the load; no parallel session registry is introduced.
+session/operation owner. Its awaited `agent_end` releases the native computer-turn
+activity; `session_shutdown` also closes the bound Cua session before invalidating
+the load. No parallel session registry is introduced.
 
 Only explicit observation can establish or refresh an endpoint. Before that read,
 the adapter confirms Cua’s owner-bound `start_session`: an idle-expired CLI session
@@ -91,6 +92,32 @@ invocation. A command may complete after Stop was requested. Host/transport loss
 leaves its effect uncertain, not safe to replay. Crash containment is not a claim
 that process death proves physical key/button release in every failure scenario.
 
+## Console session admission
+
+Native Host owns a fresh, bounded snapshot of on-console/login-done, screen lock,
+screensaver activity when available, display sleep, lid state when available, up to64
+active displays, and a display-topology generation. It never infers lock state from
+black pixels or an empty AX tree. Admission refuses `no_console_session` before
+`mac_locked` (including an active screensaver), then `display_asleep`, then
+`no_active_display`. These are finite failures, not prompts to retry or change
+permissions. Live-view HTTP failures preserve the same causes for iPhone presentation.
+
+`computer` reads this state before dispatch and before publishing a result; native
+capture checks it before catalog/start/pull and before publishing metadata or pixels.
+A desktop becoming unavailable after input dispatch is `outcomeUnknown`, never a
+safe-to-replay refusal. This does not make the desktop immutable between checks.
+The disposable `sessionState` read uses the already authenticated connection's
+current process/payload/audit fence; it performs no launchctl query, capture or input.
+Sensitive endpoint/capture operations still perform full Stable provenance validation.
+
+The first GUI operation in a computer turn obtains the host-owned
+`PreventUserIdleDisplaySleep` IOPM assertion through `automationEndpoint`. The Gateway
+retains that one native connection through accepted CLI work and closes it at
+`agent_end`, Stop, failure or shutdown. Native Host releases the assertion before
+retirement and on peer loss; process death also releases its OS-owned assertion.
+Metadata-only help and live read-only viewing hold no assertion. It prevents idle
+display sleep only: it does not unlock, wake a sleeping display or override lid sleep.
+
 ## Installed capture wire contract
 
 The separate capture service `com.tron.mac.native-host.capture` remains in the
@@ -116,7 +143,8 @@ a closed-slot check alone is not a completed admission lifetime.
 Control JSON is nonempty UTF-8 and at most65,536 bytes. All requests carry version1,
 operation and loadID. Except hello, they carry issued bootID/connectionID/sessionID.
 Controls carry exact command IDs and bounded receipts (64, with Stop reserved).
-Pulls forbid commandID and use strictly increasing disposable readSequence values.
+Pulls and session-state reads forbid commandID and use strictly increasing disposable
+readSequence values; they consume no retained command receipts.
 The service reserves two cleanup replies independently of eight ordinary replies.
 
 | Operation | Payload / result |
@@ -127,7 +155,8 @@ The service reserves two cleanup replies independently of eight ordinary replies
 | pull | generation/readSequence → latest JPEG or empty |
 | suspend | actual stream join; only a clean join allows the retained target to resume |
 | stop | terminal scope retirement, joined or retirementFailed, optional diagnostic |
-| automationEndpoint | read-only Cua socket/generation bootstrap; no JPEG/input authority |
+| sessionState | fresh bounded console/topology snapshot and finite cause or null; no capture/input authority |
+| automationEndpoint | Cua socket/generation bootstrap and scoped computer-turn idle-display-sleep assertion; no JPEG/input authority |
 
 Native demand expiry requests Stop after15 seconds without demand and joins it.
 Timeout itself never releases the stream reservation. Joined retirement with a
@@ -146,8 +175,8 @@ whole-display streaming can follow changes on that same display.
 ## Direct Gateway capture client
 
 The Mac-owned `Contents/Library/Native/tron-native-capture.node` uses C Node-API8,
-not V8 APIs or a relay. API4 requires typed source metadata and immutable display
-regions alongside endpoint bootstrap. Import is inert;
+not V8 APIs or a relay. API5 requires disposable session-state reads alongside typed
+source metadata, immutable display regions and endpoint bootstrap. Import is inert;
 explicit open validates the installed outer/helper signatures against the actual
 signed Node publisher and pins the helper CDHash on NSXPC. No alternate binary,
 endpoint, credential or code requirement is accepted from a model.

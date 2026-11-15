@@ -41,19 +41,20 @@ struct NativeCaptureOperations: Sendable {
     let validate: @Sendable () async -> Bool
     let catalog: @Sendable (@escaping @Sendable () -> Bool) async throws -> [NativeCaptureTarget]
     let automationEndpoint: @Sendable () -> NativeAutomationEndpoint?
+    let sessionState: @Sendable () -> NativeConsoleSessionState
     var now: @Sendable () -> UInt64 = { DispatchTime.now().uptimeNanoseconds }
     var waitUntil: @Sendable (UInt64) async throws -> Void = { deadline in
         let now = DispatchTime.now().uptimeNanoseconds
         if deadline > now { try await Task.sleep(nanoseconds: deadline - now) }
     }
-    static func live(peer: NativeCapturePeer, automationEndpoint: @escaping @Sendable () -> NativeAutomationEndpoint?) -> Self {
+    static func live(peer: NativeCapturePeer, console: NativeConsoleSession, automationEndpoint: @escaping @Sendable () -> NativeAutomationEndpoint?) -> Self {
         Self(validate: { await peer.validate() }, catalog: { admission in
             try await NativeCaptureCatalog.load(admission: admission).map { source in
                 NativeCaptureTarget(kind: source.kind, applicationName: source.applicationName, title: source.title,
                                     width: source.width, height: source.height,
                                     make: { try source.makeStream(region: $0, admission: $1) })
             }
-        }, automationEndpoint: automationEndpoint)
+        }, automationEndpoint: automationEndpoint, sessionState: { console.snapshot() })
     }
 }
 
@@ -97,6 +98,7 @@ actor NativeCaptureSession {
     private let slot: NativeCaptureSlot
     private let ownerID: UUID
     private var ownsStream = false
+    private var computerActivity: NativeComputerActivity?
     private var demandTask: Task<Void, Never>?
     private var demandID = UUID()
     private var loadID: UUID?
@@ -122,7 +124,7 @@ actor NativeCaptureSession {
     }
 
     func execute(_ request: NativeCaptureRequest) async -> NativeCaptureResponse {
-        guard request.operation == "pull" ? request.commandID == nil : request.commandID != nil else { return .error(.invalidRequest) }
+        guard request.isRead ? request.commandID == nil : request.commandID != nil else { return .error(.invalidRequest) }
         if let commandID = request.commandID, let prior = receipts[commandID] {
             guard prior.0 == request else { return .error(.invalidRequest) }
             return await prior.1.value
@@ -163,7 +165,7 @@ actor NativeCaptureSession {
         }
         guard !suspending else { return .error(.stale) }
         guard pending == nil else { return .error(.busy) }
-        if request.operation == "pull" {
+        if request.isRead {
             guard request.readSequence! > lastRead else { return .error(.stale) }
             lastRead = request.readSequence!
         } else {
@@ -192,12 +194,19 @@ actor NativeCaptureSession {
     }
     private func perform(_ request: NativeCaptureRequest) async -> NativeCaptureResponse {
         defer { if closed { Task { [self] in _ = await drain() } } }
+        if let refusal = consoleRefusal(request.operation) { return refusal }
+        if request.operation == "sessionState" {
+            guard matches(request), fence.admits(), !suspending else { return .error(.unauthorized) }
+            return response(request, status: "sessionState", fields: ["readSequence": request.readSequence!, "state": operations.sessionState().wire])
+        }
         guard await admitted(request), !suspending else { return .error(.unauthorized) }
+        if let refusal = consoleRefusal(request.operation) { return refusal }
         do {
             switch request.operation {
             case "hello": return response(request, status: "ready")
             case "automationEndpoint":
                 guard let endpoint = operations.automationEndpoint() else { return .error(.unavailable) }
+                if computerActivity == nil { computerActivity = try NativeComputerActivity() }
                 return response(request, status: "automationEndpoint", fields: [
                     "socket": endpoint.socket, "generation": endpoint.generation.uuidString,
                 ])
@@ -259,6 +268,7 @@ actor NativeCaptureSession {
     func drain() async -> NativeCaptureRetirement {
         if let retirement { return await retirement.value }
         closed = true; fence.stopProducer(); targets.removeAll(); demandTask?.cancel(); demandTask = nil
+        computerActivity?.close(); computerActivity = nil
         let pending = pending
         let suspension = suspension
         let task = Task { [self] in
@@ -295,7 +305,15 @@ actor NativeCaptureSession {
         closed = true; fence.close()
         _ = await drain()
     }
+    private func consoleRefusal(_ operation: String) -> NativeCaptureResponse? {
+        guard ["automationEndpoint", "catalog", "start", "pull"].contains(operation),
+              let cause = operations.sessionState().refusal else { return nil }
+        closed = true; fence.stopProducer()
+        computerActivity?.close(); computerActivity = nil
+        return .error(cause)
+    }
     private func response(_ request: NativeCaptureRequest, status: String, fields: [String: Any] = [:], jpeg: Data? = nil) -> NativeCaptureResponse {
+        if let refusal = consoleRefusal(request.operation) { return refusal }
         var object: [String: Any] = ["version": 1, "status": status,
             "bootID": bootID.uuidString, "connectionID": connectionID.uuidString, "sessionID": sessionID.uuidString, "loadID": request.loadID.uuidString]
         if let commandID = request.commandID { object["commandID"] = commandID.uuidString }

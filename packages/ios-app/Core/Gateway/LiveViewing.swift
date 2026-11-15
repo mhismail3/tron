@@ -84,6 +84,7 @@ extension GatewayClient {
     package enum LiveError: Error, Equatable, Sendable {
         case ended, invalidResponse, permissionRequired, sourceUnavailable, captureBusy
         case captureUnavailable, firstFrameTimeout, temporarilyUnavailable, connectionInterrupted
+        case macLocked, displayAsleep, noConsoleSession, noActiveDisplay
 
         var isTransient: Bool { self == .temporarilyUnavailable || self == .connectionInterrupted }
         package var message: String {
@@ -94,6 +95,10 @@ extension GatewayClient {
             case .sourceUnavailable: "The selected source is unavailable. Make sure the window or display is available, then select it again."
             case .captureBusy: "Native capture is busy or still stopping. Close other live views before trying again."
             case .captureUnavailable: "The Mac could not provide this live preview. Check Tron on your Mac before selecting the source again."
+            case .macLocked: "The Mac is locked or showing its screensaver. Unlock it, then select the source again."
+            case .displayAsleep: "The Mac’s displays are asleep. Wake a display, then select the source again."
+            case .noConsoleSession: "Tron has no active signed-in console session on the Mac."
+            case .noActiveDisplay: "The Mac has no active display available for this live preview."
             case .firstFrameTimeout: "No live frames arrived. Check for a screen-capture dialog on your Mac, then select the source again."
             case .temporarilyUnavailable, .connectionInterrupted: "The live preview connection was interrupted. Reopen the view after the Gateway reconnects."
             }
@@ -126,6 +131,10 @@ extension GatewayClient {
             case "capture_busy": return .captureBusy
             case "capture_unavailable": return .captureUnavailable
             case "first_frame_timeout": return .firstFrameTimeout
+            case "mac_locked": return .macLocked
+            case "display_asleep": return .displayAsleep
+            case "no_console_session": return .noConsoleSession
+            case "no_active_display": return .noActiveDisplay
             default: break
             }
             if error?.retryable == true, ["busy", "internal"].contains(error?.code ?? ""), [429, 500, 502, 503, 504].contains(status) { return .temporarilyUnavailable }

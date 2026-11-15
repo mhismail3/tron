@@ -298,6 +298,20 @@ targets:
       - package: TronComputerControl
         product: TronComputerControl
 
+  NativeConsoleSessionProbe:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Tests/Fixtures/NativeConsoleSessionProbe
+        createIntermediateGroups: true
+        excludes:
+          - "**/*.module.json"
+          - "**/README.md"
+    dependencies:
+      - target: TronNativeCaptureHost
+      - package: TronComputerControl
+        product: TronComputerControl
+
   # Real-boundary tests only (spawned processes, loopback sockets, the built
   # launcher, shared cross-language format files). Unit tests are not kept;
   # see docs/development.md.
@@ -315,6 +329,7 @@ targets:
       - target: TronMac
       - target: SingleInstanceLockProbe
       - target: NativeHostRetirementProbe
+      - target: NativeConsoleSessionProbe
       - target: TronNativeCaptureHost
       - package: TronComputerControl
         product: TronComputerControl
@@ -345,6 +360,7 @@ schemes:
         TRON_DATA_DIR: "$(BUILT_PRODUCTS_DIR)/TronMacIntegrationTests-home"
         TRON_SINGLE_INSTANCE_LOCK_PROBE: "$(BUILT_PRODUCTS_DIR)/SingleInstanceLockProbe"
         TRON_NATIVE_HOST_RETIREMENT_PROBE: "$(BUILT_PRODUCTS_DIR)/NativeHostRetirementProbe"
+        TRON_NATIVE_CONSOLE_SESSION_PROBE: "$(BUILT_PRODUCTS_DIR)/NativeConsoleSessionProbe"
       targets:
         - TronMacIntegrationTests
     profile:

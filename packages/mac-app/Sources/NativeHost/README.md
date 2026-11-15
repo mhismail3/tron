@@ -28,6 +28,13 @@ contract: [computer control](../../docs/computer-control.md#installed-capture-wi
   team and the bundled peer's CDHash; PID, UID and endpoint bytes are not authentication. The
   capture role authenticates its peer against current Stable job, process, payload and signed
   Node provenance and cannot change permissions or lifecycle.
+- **Console admission.** `NativeConsoleSession` owns bounded console/lock/sleep/lid/topology
+  snapshots and their finite refusal causes. Sensitive operations check before work and
+  publication; disposable state reads use the already-authenticated current peer fence without
+  a launchctl query. `NativeCaptureSession` owns one idle-display-sleep IOPM assertion only
+  while its computer-turn connection is retained, releasing it on retirement or peer loss.
+  This does not unlock, wake or override lid sleep. See
+  [console session admission](../../docs/computer-control.md#console-session-admission).
 - **Consent.** Requests carry an operation UUID; the wrapper fences to the latest request and
   publishes only a fresh probe. The host keeps 16 bounded command receipts to reject duplicates
   (not a grant cache); TCC operations serialize on the main queue; revocation replaces old badges;
@@ -58,6 +65,10 @@ contract: [computer control](../../docs/computer-control.md#installed-capture-wi
 [development](../../docs/development.md#efficient-focused-tests)) and
 `scripts/validate-native-host.py` in packaging. Signed-service TCC attribution, update and
 background approval are release qualification, not provable by a qualification app.
+`NativeConsoleSessionProbe`, called by the existing retirement integration owner, uses
+shipped wire/session/snapshot logic and real process-owned IOPM assertions to prove finite
+refusals, disposable reads and release on Stop, peer loss and a newly locked snapshot.
+It does not certify manual lock/unlock, display sleep or a killed installed Gateway.
 
 ## Not here
 

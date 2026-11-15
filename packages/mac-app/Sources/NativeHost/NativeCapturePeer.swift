@@ -23,6 +23,7 @@ struct NativeCaptureProcess: Equatable, Sendable {
 }
 
 public struct NativeCaptureContext: Sendable {
+    let console = NativeConsoleSession()
     let automationEndpoint: @Sendable () -> NativeAutomationEndpoint?
     public init(outerBundle: URL, teamRequirement: String,
                 automationEndpoint: @escaping @Sendable () -> NativeAutomationEndpoint? = { nil }) {

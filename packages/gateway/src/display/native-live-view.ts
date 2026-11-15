@@ -1,13 +1,14 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { NativeCaptureBinding, NativeCaptureFrame, NativeCaptureJoin, NativeCaptureRegion, NativeCaptureSource } from "../machine/native-capture-client.js";
-import { NativeCaptureHostFailure, openNativeCaptureClient } from "../machine/native-capture-client.js";
+import { nativeConsoleCauses, type NativeConsoleCause, NativeCaptureHostFailure, openNativeCaptureClient } from "../machine/native-capture-client.js";
 import type { CapturedBrowserFrame } from "./browser-live-cdp.js";
 
-export type NativeLiveFailure = "permission_required" | "source_unavailable" | "capture_busy" | "capture_unavailable" | "first_frame_timeout";
+export type NativeLiveFailure = NativeConsoleCause | "permission_required" | "source_unavailable" | "capture_busy" | "capture_unavailable" | "first_frame_timeout";
 export function nativeLiveFailure(error: unknown): NativeLiveFailure {
   const outer = error instanceof AggregateError ? error.errors.slice(0, 2) : [error];
   const causes = outer.flatMap((cause: unknown) => cause instanceof AggregateError ? cause.errors.slice(0, 2) : [cause]);
   for (const cause of causes) if (cause instanceof NativeCaptureHostFailure) {
+    if (nativeConsoleCauses.has(cause.status as NativeConsoleCause)) return cause.status as NativeConsoleCause;
     if (cause.status === "permissionUnavailable") return "permission_required";
     if (cause.status === "sourceUnavailable") return "source_unavailable";
     if (cause.status === "busy" || cause.status === "exhausted") return "capture_busy";

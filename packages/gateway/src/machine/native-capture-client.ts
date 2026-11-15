@@ -6,10 +6,17 @@ import type { NativeCaptureTransport } from "./native-capture-transport.js";
 const CONTROL_LIMIT = 65_536;
 const JPEG_LIMIT = 2 * 1024 * 1024;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const errors = new Set(["invalidRequest", "unauthorized", "stale", "busy", "exhausted", "unavailable", "retirementFailed", "permissionUnavailable", "sourceUnavailable", "streamFailed"]);
+export const nativeConsoleCauses = new Set(["mac_locked", "display_asleep", "no_console_session", "no_active_display"] as const);
+export type NativeConsoleCause = "mac_locked" | "display_asleep" | "no_console_session" | "no_active_display";
+export interface NativeConsoleSessionState {
+  onConsole: boolean; loginDone: boolean; screenLocked: boolean; screensaverActive: boolean | null;
+  displaysAsleep: boolean; lidClosed: boolean | null; activeDisplayCount: number; topologyGeneration: string;
+  cause: NativeConsoleCause | null;
+}
+const errors = new Set(["invalidRequest", "unauthorized", "stale", "busy", "exhausted", "unavailable", "retirementFailed", "permissionUnavailable", "sourceUnavailable", "streamFailed", ...nativeConsoleCauses]);
 export class NativeCaptureHostFailure extends Error {
   constructor(readonly status: string, operation: string) {
-    super(`Native capture host rejected ${operation}: ${status}; remote retirement unconfirmed`);
+    super(`Native capture host rejected ${operation}: ${status}${nativeConsoleCauses.has(status as NativeConsoleCause) ? "" : "; remote retirement unconfirmed"}`);
   }
 }
 type RecordValue = Record<string, unknown>;
@@ -123,7 +130,8 @@ class NativeCaptureClient {
     throw cause;
   }
   async #exchange(operation: string, expected: string, fields: RecordValue = {}): Promise<RecordValue> {
-    const commandID = operation === "pull" ? undefined : randomUUID();
+    const read = operation === "pull" || operation === "sessionState";
+    const commandID = read ? undefined : randomUUID();
     const stopping = operation === "stop" || operation === "suspend";
     const request = {
       version: 1, operation, loadID: this.binding.runtimeLoadID, ...this.#identity,
@@ -145,7 +153,7 @@ class NativeCaptureClient {
         throw new NativeCaptureHostFailure(reply.status, operation);
       }
       const extra = expected === "catalog" ? ["sources"] : expected === "started" ? ["generation"] :
-        expected === "automationEndpoint" ? ["socket", "generation"] :
+        expected === "automationEndpoint" ? ["socket", "generation"] : expected === "sessionState" ? ["readSequence", "state"] :
         operation === "pull" ? (reply.status === "empty" ? ["readSequence"] : ["readSequence", "generation", "sequence", "width", "height"]) :
         stopping && "diagnostic" in reply ? ["diagnostic"] : [];
       keys(reply, ["version", "status", "loadID", "bootID", "connectionID", "sessionID", ...(commandID ? ["commandID"] : []), ...extra]);
@@ -160,8 +168,8 @@ class NativeCaptureClient {
       if (reply.status !== expected && !(operation === "pull" && reply.status === "empty")) throw new Error("Unexpected native capture reply status");
       if (reply.status !== "frame" && jpeg !== null) throw new Error("Native capture non-frame carried pixels");
       if (expected === "started") uuid(reply.generation);
+      if (read && reply.readSequence !== fields.readSequence) throw new Error("Stale native capture read reply");
       if (operation === "pull") {
-        if (reply.readSequence !== fields.readSequence) throw new Error("Stale native capture read reply");
         if (reply.status === "frame") {
           if (uuid(reply.generation) !== this.#generation || typeof reply.sequence !== "string" ||
               !/^(0|[1-9][0-9]{0,19})$/.test(reply.sequence) || BigInt(reply.sequence) > 18_446_744_073_709_551_615n ||
@@ -213,6 +221,22 @@ class NativeCaptureClient {
       this.#handles.clear();
       if (!this.#closing) { this.#closing = true; return this.#retireAfterFailure(cause); }
       throw cause;
+    } finally { this.#finishOrdinary(); }
+  }
+  async sessionState(): Promise<NativeConsoleSessionState> {
+    this.#admit();
+    try {
+      if (this.#readSequence === Number.MAX_SAFE_INTEGER) throw new Error("Native session-state read sequence exhausted");
+      const reply = await this.#exchange("sessionState", "sessionState", { readSequence: ++this.#readSequence });
+      const state = record(reply.state);
+      keys(state, ["onConsole", "loginDone", "screenLocked", "screensaverActive", "displaysAsleep", "lidClosed", "activeDisplayCount", "topologyGeneration", "cause"]);
+      for (const key of ["onConsole", "loginDone", "screenLocked", "displaysAsleep"]) if (typeof state[key] !== "boolean") throw new Error("Invalid native console state");
+      for (const key of ["screensaverActive", "lidClosed"]) if (state[key] !== null && typeof state[key] !== "boolean") throw new Error("Invalid native console state");
+      if (!Number.isSafeInteger(state.activeDisplayCount) || (state.activeDisplayCount as number) < 0 || (state.activeDisplayCount as number) > 64
+        || (state.cause !== null && !nativeConsoleCauses.has(state.cause as NativeConsoleCause))) throw new Error("Invalid native console state");
+      uuid(state.topologyGeneration);
+      if (this.#closing) throw new Error("Native session-state read retired before publication");
+      return Object.freeze(state) as unknown as NativeConsoleSessionState;
     } finally { this.#finishOrdinary(); }
   }
   async automationEndpoint(): Promise<NativeAutomationEndpoint> {

@@ -83,15 +83,17 @@ The iPhone pins the private host identity at enrollment
   this session's scopes (`stop`). Selection returns an opaque `native_live` source for
   `display`, never pixels or a grant. `native-capture-client.ts` binds one connection
   to the session and extension load and opens the signed
-  `Tron.app/Contents/Library/Native/tron-native-capture.node` (API4) only on explicit
+  `Tron.app/Contents/Library/Native/tron-native-capture.node` (API5) only on explicit
   catalog; missing or incompatible code disables capture only. First viewer starts
   capture; last viewer suspends and joins it; reopen reuses the exact retained source.
   Each native operation has an owner deadline; a silent host is an explicit uncertain
   failure, never a fabricated join. Frames are latest-only and never cached.
   Contract: [Mac computer control](../../../mac-app/docs/computer-control.md#direct-gateway-capture-client).
 - **`computer`** is a thin `{tool, arguments}` client of the pinned Cua Driver, whose
-  per-generation socket the Native Host owns; the Gateway gets only a read-only
-  `{socket, generation}` bootstrap and accepts no endpoint, environment or session
+  per-generation socket the Native Host owns; `{socket, generation}` bootstrap
+  starts a host-owned scoped idle-display-sleep assertion. The Gateway retains its
+  native connection through the turn and releases it at agent end/Stop/shutdown;
+  native peer loss releases it after a Gateway crash. It accepts no endpoint, environment or session
   from model input. Refused, malformed, non-zero or disconnected results are refusal
   or `outcomeUnknown`, never success or replay. Actions need fresh observations from
   the same load; accepted calls outlive a waiter's Stop. Observation images come from
@@ -99,6 +101,10 @@ The iPhone pins the private host identity at enrollment
   assets disable only this tool. Before foreground input, inspect the whole desktop
   for system dialogs; the agent handles permission prompts itself under the operating
   context (`workspace/tron-core-extension.ts`).
+- Both tools use Native Host's fresh console snapshot and finite `mac_locked`,
+  `display_asleep`, `no_console_session` or `no_active_display` admission failures.
+  Snapshot reads are disposable and do not consume command receipts. No retry,
+  lock inference from pixels/AX, wake/unlock action or persistent power setting is added.
 - A native executor keeps its tool promise through native cleanup
   ([native-tool settlement](../../docs/native-tool-settlement.md)).
 
@@ -120,12 +126,14 @@ The iPhone pins the private host identity at enrollment
 |---|---|---|
 | `uploads.storage-pressure` | info on return to `normal`; warning otherwise | A 10-minute maintenance pass changed attachment storage pressure; free bytes and the floor in the message |
 | `storage.maintenance-failed` | warning | The bounded artifact maintenance pass threw and will retry: `error` |
+| `mac_locked`, `display_asleep`, `no_console_session`, `no_active_display` | tool result / live-view error | Native Host refused the current console state before capture/input admission; no retry or black/empty observation |
 
 ## Verify
 
 ```bash
 scripts/tron verify --module gateway/machine
 scripts/tron test gateway src/e2e/kernel/resources/project-root.integration.test.ts
+scripts/tron test gateway --local src/e2e/sessions/native-console-admission.integration.test.ts
 cd packages/gateway && npm run test:mac-terminal   # needs the tailnet and Swift 6.2
 ```
 

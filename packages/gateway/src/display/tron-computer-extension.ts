@@ -8,6 +8,7 @@ export function createTronComputerExtension(input: { sessionId: () => string }):
     const computer = new CuaComputerClient({ canonicalSessionID: input.sessionId(), runtimeLoadID: randomUUID() });
     pi.on("session_shutdown", async () => { await computer.close(); });
     pi.on("before_agent_start", async () => { computer.invalidateObservation(); });
+    pi.on("agent_end", async () => { await computer.endTurn(); });
     pi.registerTool({
       name: "computer", label: "Mac computer",
       annotations: { openWorldHint: true },
