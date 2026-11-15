@@ -139,7 +139,6 @@ async function fixture(cause: string | null, hold = false) {
   const slot = await registry.create(root);
   const model = faux.getModel();
   await slot.setModel(model.provider, model.id);
-  await slot.ensureLoaded();
   const result = (id: string) => slot.snapshot().transcript.find((item: any) => item.kind === "message" && item.role === "toolResult" && item.toolCallId === id) as any;
   return { slot, result, requests, leases: () => leases, dispatched: async () => !!await readFile(marker).catch(() => false),
     release: () => writeFile(release, "released") };
