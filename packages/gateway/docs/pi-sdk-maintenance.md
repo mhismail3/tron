@@ -211,7 +211,9 @@ prompt-keyword handler is not part of that pin.
   `managed-subagents.integration.test.ts` (npm offline, TCP denied, a real child),
   `npm run test:pi-subagents-rollback` (previous → candidate → previous with resume; original
   JSONL prefixes unchanged; each provider runs with its own Gateway source, the previous one
-  exported from the commit that pinned it, because a rollback moves Gateway and provider together; `TRON_SUBAGENTS_ROLLBACK_ROOT` keeps the home; join failures go to
+  exported from the commit that pinned it (the updater names its Gateway repository through
+  `TRON_SUBAGENTS_SOURCE_GATEWAY`), because a rollback moves Gateway and provider together; every
+  leg requires all extensions to load; `TRON_SUBAGENTS_ROLLBACK_ROOT` keeps the home; join failures go to
   `TRON_TEST_PROCESS_OWNER_FAILURE`) and
   `src/kernel/delegation/managed-subagents.payload.integration.test.ts` (stages a `dist` it emits
   from this commit, never the checkout's build). Reports in `test-results/`.

@@ -14,7 +14,7 @@ import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "../../../kernel/dele
 import { RuntimeRegistry } from "../../../kernel/session/runtime-registry.js";
 import { delegatedProviderEnvironment } from "../../../kernel/delegation/delegated-provider.js";
 import { waitFor } from "../../../../test-support/wait-for.js";
-import { copyPayload, gatewayCommitForSubagentsVersion, refuseUnjoinedFixture, retainedFiles } from "../../../../test-support/nested-vitest-payload.js";
+import { copyPayload, gatewaySourceForSubagentsVersion, refuseUnjoinedFixture, retainedFiles } from "../../../../test-support/nested-vitest-payload.js";
 
 const gatewayRoot = fileURLToPath(new URL("../../../..", import.meta.url));
 const leg = process.env.TRON_SUBAGENTS_ROLLBACK_LEG;
@@ -31,7 +31,8 @@ it("executes previous → candidate → previous with detached resume through th
     if (retainedRoot) await mkdir(root);
     await Promise.all([mkdir(join(root, "agent")), mkdir(join(root, "workspace")), mkdir(join(root, "npm-cache")), mkdir(join(root, "home")), mkdir(join(root, "tmp"))]);
     const pin = JSON.parse(await readFile(join(gatewayRoot, "pi-subagents-pin.json"), "utf8"));
-    const previousGateway = report.previousGateway = await gatewayCommitForSubagentsVersion(pin.previous.version);
+    const previousGateway = await gatewaySourceForSubagentsVersion(pin.previous.version);
+    report.previousGateway = previousGateway.commit;
     for (const name of ["previous", "candidate", "rollback"]) {
       const payload = join(payloads, name);
       await copyPayload(payload, "managed-subagents.rollback.integration.test.ts", name === "candidate" ? undefined : previousGateway);
