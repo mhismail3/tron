@@ -112,6 +112,12 @@ The disposable `sessionState` read uses the already authenticated connection's
 current process/payload/audit fence; it performs no launchctl query, capture or input.
 Sensitive endpoint/capture operations still perform full Stable provenance validation.
 
+On macOS, every active agent turn retains a Gateway-owned `caffeinate -i -w <Gateway PID>`
+child through `AgentActivity`, independent of desktop admission. Its system-idle-sleep
+assertion covers browser-only and headless work while locked. `agent_end`, Stop and
+session shutdown join the child exit; OS parent monitoring releases it if the Gateway
+crashes. It neither activates the display nor changes lock-screen security settings.
+
 The first GUI operation in a computer turn obtains the host-owned
 `PreventUserIdleDisplaySleep` IOPM assertion through `automationEndpoint`. The Gateway
 retains that one native connection through accepted CLI work and closes it at

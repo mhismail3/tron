@@ -3,6 +3,9 @@ import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
+import { once } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
@@ -25,13 +28,25 @@ vi.mock("node:child_process", async original => {
   return { ...actual, execFile };
 });
 const cleanups: Array<() => Promise<void>> = [];
+const execute = promisify(execFile);
+async function systemActivities(owner = process.pid): Promise<number[]> {
+  const { stdout } = await execute("/bin/ps", ["-axo", "pid=,ppid=,comm="]);
+  return stdout.split("\n").flatMap(line => {
+    const [pid, parent, command] = line.trim().split(/\s+/u);
+    return Number(parent) === owner && command === "/usr/bin/caffeinate" ? [Number(pid)] : [];
+  });
+}
+async function hasSystemAssertion(pid: number): Promise<boolean> {
+  const { stdout } = await execute("/usr/bin/pmset", ["-g", "assertions"]);
+  return stdout.split("\n").some(line => line.includes(`pid ${pid}(caffeinate)`) && line.includes("PreventUserIdleSystemSleep"));
+}
 afterEach(async () => {
   const failures: unknown[] = [];
   for (const cleanup of cleanups.splice(0).reverse()) try { await cleanup(); } catch (error) { failures.push(error); }
   if (failures.length) throw new AggregateError(failures, "Native console fixture cleanup failed");
 });
 
-async function fixture(cause: string | null, hold = false) {
+async function fixture(cause: string | null, hold = false, background = false) {
   const root = await mkdtemp(join(tmpdir(), "tron-console-"));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const endpoint = join(root, "host");
@@ -118,11 +133,13 @@ async function fixture(cause: string | null, hold = false) {
   await mkdir(agentDir, { recursive: true });
   const views = new BrowserLiveViewRegistry();
   cleanups.push(async () => views.dispose());
-  await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultTools: ["+computer", "+native_capture"] }));
+  await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultTools: ["+computer", "+native_capture", "+bash"] }));
   const faux = fauxProvider({ provider: "tron-console-fixture", tokensPerSecond: 10_000 });
   faux.setResponses([
-    fauxAssistantMessage([fauxToolCall("computer", { tool: "get_desktop_state", arguments: { include_screenshot: false } }, { id: "desktop" })], { stopReason: "toolUse" }),
-    ...(cause ? [fauxAssistantMessage([fauxToolCall("native_capture", { action: "catalog" }, { id: "capture" })], { stopReason: "toolUse" })] : []),
+    fauxAssistantMessage([background
+      ? fauxToolCall("bash", { command: `printf background > ${JSON.stringify(marker)}; while ! test -f ${JSON.stringify(release)}; do sleep 0.01; done; printf complete` }, { id: "desktop" })
+      : fauxToolCall("computer", { tool: "get_desktop_state", arguments: { include_screenshot: false } }, { id: "desktop" })], { stopReason: "toolUse" }),
+    ...(cause && !background ? [fauxAssistantMessage([fauxToolCall("native_capture", { action: "catalog" }, { id: "capture" })], { stopReason: "toolUse" })] : []),
     fauxAssistantMessage("complete"),
   ]);
   const trust = new TrustService(agentDir);
@@ -145,6 +162,28 @@ async function fixture(cause: string | null, hold = false) {
 }
 
 describe.skipIf(process.platform !== "darwin")("native console admission through real Gateway/Pi and external transport/driver fixtures", () => {
+  it("releases the real system assertion when its owning runtime process is killed", async () => {
+    const source = new URL("../../machine/agent-activity.ts", import.meta.url).href;
+    const child = spawn(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e",
+      `import { AgentActivity } from ${JSON.stringify(source)}; const activity = new AgentActivity(); await activity.start(); process.on('message', () => {}); process.send('ready');`],
+      { stdio: ["ignore", "ignore", "pipe", "ipc"] });
+    let diagnostic = "";
+    child.stderr!.on("data", chunk => { diagnostic += chunk; });
+    const ended = once(child, "exit");
+    try {
+      await Promise.race([once(child, "message"), ended.then(() => { throw new Error(`Activity runtime exited before ready: ${diagnostic}`); })]);
+      const activities = await systemActivities(child.pid!);
+      expect(activities).toHaveLength(1);
+      const pid = activities[0]!;
+      await waitFor(() => hasSystemAssertion(pid), "crash fixture system assertion");
+      child.kill("SIGKILL");
+      await ended;
+      await waitFor(async () => !await hasSystemAssertion(pid), "OS parent-liveness assertion retirement");
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      await ended;
+    }
+  });
   it.each(["mac_locked", "display_asleep", "no_console_session", "no_active_display"])("refuses computer and native_capture finitely with %s, without GUI dispatch", async cause => {
     const f = await fixture(cause);
     const start = performance.now();
@@ -160,19 +199,27 @@ describe.skipIf(process.platform !== "darwin")("native console admission through
     expect(await f.dispatched()).toBe(false);
     expect(f.leases()).toBe(0);
   });
-  it.each([false, true])("holds one activity through accepted driver work, then retires it on normal/Stop end (Stop=%s)", async stop => {
-    const f = await fixture(null, true);
+  it.each([{ stop: false, background: false }, { stop: true, background: false }, { stop: false, background: true }, { stop: true, background: true }])(
+    "holds system activity through accepted work and retires on normal/Stop end (Stop=$stop, locked headless=$background)", async ({ stop, background }) => {
+    const f = await fixture(background ? "mac_locked" : null, true, background);
+    const before = new Set(await systemActivities());
     try {
       await f.slot.prompt("Inspect the fixture desktop");
       await waitFor(() => f.dispatched(), "accepted driver observation");
-      expect(f.leases()).toBe(1);
+      expect(f.leases()).toBe(background ? 0 : 1);
+      const activities = (await systemActivities()).filter(pid => !before.has(pid));
+      expect(activities).toHaveLength(1);
+      const pid = activities[0]!;
+      await waitFor(() => hasSystemAssertion(pid), "OS-owned system sleep assertion");
       const stopping = stop ? f.slot.abort("agent") : undefined;
       await f.release();
       await stopping;
       await waitFor(() => !f.slot.isBusy, "computer turn retirement");
       expect(f.leases()).toBe(0);
-      expect(f.requests.filter(operation => operation === "automationEndpoint")).toHaveLength(1);
-      expect(f.requests.filter(operation => operation === "stop")).toHaveLength(1);
+      expect((await systemActivities()).filter(pid => !before.has(pid))).toEqual([]);
+      expect(f.requests.filter(operation => operation === "automationEndpoint")).toHaveLength(background ? 0 : 1);
+      expect(f.requests.filter(operation => operation === "stop")).toHaveLength(background ? 0 : 1);
+      if (background) expect(f.requests).toEqual([]);
       if (!stop) expect(f.result("desktop").isError).not.toBe(true);
     } finally { await f.release(); }
   });

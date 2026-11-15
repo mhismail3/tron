@@ -2,13 +2,15 @@ import { randomUUID } from "node:crypto";
 import { Type } from "../kernel/pi/ai.js";
 import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
 import { CuaComputerClient } from "../machine/cua-client.js";
+import { AgentActivity } from "../machine/agent-activity.js";
 
 export function createTronComputerExtension(input: { sessionId: () => string }): ExtensionFactory {
   return (pi) => {
     const computer = new CuaComputerClient({ canonicalSessionID: input.sessionId(), runtimeLoadID: randomUUID() });
-    pi.on("session_shutdown", async () => { await computer.close(); });
-    pi.on("before_agent_start", async () => { computer.invalidateObservation(); });
-    pi.on("agent_end", async () => { await computer.endTurn(); });
+    const activity = new AgentActivity();
+    pi.on("session_shutdown", async () => { try { await computer.close(); } finally { await activity.close(); } });
+    pi.on("before_agent_start", async () => { computer.invalidateObservation(); await activity.start(); });
+    pi.on("agent_end", async () => { try { await computer.endTurn(); } finally { await activity.close(); } });
     pi.registerTool({
       name: "computer", label: "Mac computer",
       annotations: { openWorldHint: true },
