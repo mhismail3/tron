@@ -51,9 +51,8 @@ async function fixture() {
   roots.push(root);
   const tronHome = join(root, "tron");
   const agentDir = join(tronHome, "agent");
-  const sessionDir = join(root, "sessions");
   const project = join(root, "project");
-  await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true }), mkdir(join(project, ".pi"), { recursive: true })]);
+  await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(join(project, ".pi"), { recursive: true })]);
   const faux = fauxProvider({
     provider: "tron-settings-model", tokensPerSecond: 10_000,
     models: [{ id: "reasoner", name: "Reasoner Pro", reasoning: true, contextWindow: 200_000 }, { id: "plain", reasoning: false }],
@@ -69,7 +68,6 @@ async function fixture() {
   };
   const modelRuntime = await runtimeFactory();
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({
-    sessionDir,
     defaultProvider: model.provider,
     defaultModel: model.id,
     defaultThinkingLevel: "high",
@@ -77,7 +75,7 @@ async function fixture() {
     retry: { maxRetries: 5 },
     defaultTools: ["read", "bash"],
     compaction: { reserveTokens: 20_000 },
-    httpProxy: "http://proxy.invalid:8080",
+    transport: "sse",
   }));
   await writeFile(join(project, ".pi", "settings.json"), JSON.stringify({
     retry: { maxRetries: 7 },
@@ -181,6 +179,12 @@ describe("settings.resolve", () => {
 
     const projectFile = join(await trust.canonicalDirectory(project), ".pi", "settings.json");
     const untrusted = await resolve({ kind: "project", cwd: project });
+    for (const key of KEYS) {
+      expect(key.writers.length, `${key.id} needs a writer`).toBeGreaterThan(0);
+      expect(Object.keys(key.layers).length, `${key.id} needs a store binding`).toBeGreaterThan(0);
+    }
+    expect(untrusted.keys.map(key => key.key)).not.toContain("run.httpProxy");
+    expect(untrusted.keys.map(key => key.key)).not.toContain("setup.sessionDir");
     const retries = row(untrusted, "run.retry.maxRetries");
     expect(retries).toMatchObject({ value: 5, layer: "global", applied: false, reason: "untrusted", display: "5 retries" });
     expect(retries.layers.find(layer => layer.layer === "project")).toMatchObject({ value: 7, applied: false, reason: "untrusted" });
@@ -189,8 +193,6 @@ describe("settings.resolve", () => {
     for (const [key, expected] of Object.entries(piUntrusted)) expect(row(untrusted, key).value, key).toEqual(expected);
     expect(untrusted.diagnostics).toContainEqual({ key: "permissions.defaultProjectTrust", layer: "project", reason: "project-forbidden", path: "defaultProjectTrust", file: projectFile });
     expect(row(untrusted, "permissions.defaultProjectTrust").value).toBe("ask");
-    expect(row(untrusted, "run.httpProxy")).toMatchObject({ display: "Set", layer: "global" });
-    expect(JSON.stringify(untrusted)).not.toContain("proxy.invalid");
 
     await trust.set(project, true);
     const trusted = await resolve({ kind: "project", cwd: project });
@@ -223,6 +225,7 @@ describe("settings.resolve", () => {
     expect(row(mac, "run.retry.baseDelayMs").layer).toBe("global");
 
     const slot = await registry.create(project);
+    expect(slot.sessionFile?.startsWith(join(agentDir, "sessions"))).toBe(true);
     const session = await resolve({ kind: "session", sessionId: slot.id }, subscribed([slot.id]));
     expect(session.layers).toEqual(["project", "session", "global"]);
     const context = await slot.context() as { activeTools: string[] };
@@ -527,7 +530,6 @@ describe("settings renderer contract", () => {
     expect(presentedRow(surface, "permissions.budget.task").presentation).toMatchObject({ control: "list", valueKind: "numberMap" });
     expect(presentedRow(surface, "model.ref[role=chat]").presentation.control).toBe("catalog");
     expect(presentedRow(surface, "model.thinking[role=chat]", { model: f.modelKey }).presentation.control).toBe("choice");
-    expect(presentedRow(surface, "run.httpProxy").presentation.control).toBe("secret");
     expect(surface.keys.some(key => key.key === "permissions.floor")).toBe(false);
   });
 
@@ -559,7 +561,7 @@ describe("settings renderer contract", () => {
     }
   });
 
-  it("negotiates retained controls, redacts secrets and keeps no-control inspection intrinsic", async () => {
+  it("negotiates retained controls and keeps no-control inspection intrinsic", async () => {
     const f = await fixture();
     const everything = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
     const writable = everything.keys.filter(key => key.presentation.control === "text"
@@ -580,13 +582,9 @@ describe("settings renderer contract", () => {
     expect([...labelOwners].filter(([, owners]) => owners.size > 1)).toEqual([]);
     await maintainerChange(f, [
       { key: "sources.extensions", layer: "global", op: "set", value: ["beta", "gamma"] },
-      { key: "run.httpProxy", layer: "global", op: "set", value: "http://replacement.invalid:8080" },
     ]);
     const edited = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
     expect(presentedRow(edited, "sources.extensions")).toMatchObject({ value: ["beta", "gamma"], presentation: { control: "list", valueKind: "stringList" } });
-    expect(presentedRow(edited, "run.httpProxy")).toMatchObject({ value: null, presentation: { control: "secret", redacted: true } });
-    expect(JSON.stringify(edited)).not.toContain("replacement.invalid");
-    expect(JSON.stringify(await f.service.invoke(subscribed(), "settings.history", {}))).not.toContain("replacement.invalid");
     const toggles = await resolveWith(f, macTarget, { version: 1, controls: ["hologram", "toggle"] });
     expect(presentedRow(toggles, "model.thinking[role=chat]", { model: f.modelKey }).presentation).toMatchObject({ control: "readOnly", note: UPDATE_TRON_NOTE });
     expect(presentedRow(toggles, "context.images.block").presentation.control).toBe("toggle");
@@ -617,7 +615,7 @@ describe("settings renderer contract", () => {
     expect(before.sections.filter(section => section.chatInline).map(section => section.id)).toEqual(["model", "workers"]);
     const groups = (...keys: string[]) => keys.map(key => before.keys.find(row => row.key === key)?.group);
     expect(groups("permissions.budget.task")).toEqual(["workers"]);
-    expect(groups("run.retry.maxRetries", "run.httpProxy")).toEqual(["run", "run"]);
+    expect(groups("run.retry.maxRetries", "run.transport")).toEqual(["run", "run"]);
     expect(groups("context.images.block", "permissions.defaultProjectTrust")).toEqual(["tools", "trust"]);
     expect(before.keys.map(key => key.key)).not.toContain("permissions.floor");
     expect(before.sections.map(entry => entry.id)).not.toContain("advanced");

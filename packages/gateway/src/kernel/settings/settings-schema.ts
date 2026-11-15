@@ -53,7 +53,6 @@ export interface KeyDeclaration {
   tap?: "trust" | "privacy" | "spend" | "install" | "irreversible";
   direction?: (before: unknown, after: unknown) => Direction;
   writers: readonly Writer[];
-  redacted?: boolean;
   label: string;
   help: string;
   order: number;
@@ -424,11 +423,6 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       label: "WebSocket connect timeout", help: "How long a WebSocket connection may take to open.", order: 110, importance: "advanced",
     },
     {
-      id: "run.httpProxy", sessionOverridable: false, projectSettable: false, group: "run", subgroup: "Connection", type: types.text(4_096), redacted: true,
-      layers: { global: pi("httpProxy") }, timing: "live", effect: "restart", writers: ["ui"],
-      label: "HTTP proxy", help: "Proxy for model requests. Applies after a restart.", order: 120, importance: "advanced", control: "secret",
-    },
-    {
       tap: "spend", id: "run.cacheWarming", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "run", subgroup: "Connection",
       type: types.choice([
         { value: "off", label: "Off", detail: "Prompt caches are never kept warm" },
@@ -458,12 +452,6 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       tap: "trust", id: "sources.npmCommand", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "sources", type: types.stringList(20), layers: { global: pi("npmCommand") }, timing: "live", effect: "next-change",
       writers: ["ui", "home"], label: "npm command", help: "The command used to install packages.", order: 60, importance: "advanced", control: "list",
       entry: { hint: "One word per value: the program first (npm, pnpm or bun), then any arguments.", example: "pnpm" },
-    },
-    {
-      id: "setup.sessionDir", sessionOverridable: false, projectSettable: false, group: "setup", type: types.text(4_096), layers: { global: pi("sessionDir") }, timing: "live", effect: "restart",
-      writers: [], label: "Session folder", help: "Where chats are stored. Applies after a restart.",
-      order: 10, importance: "advanced", control: "text",
-      entry: { hint: "A folder path on the Mac. Start with ~ or /.", example: "~/Documents/Tron Sessions" },
     },
     {
       tap: "irreversible", id: "setup.installTelemetry", sessionOverridable: false, projectSettable: false, group: "setup", type: types.boolean(), layers: { global: pi("enableInstallTelemetry") }, defaultValue: true,

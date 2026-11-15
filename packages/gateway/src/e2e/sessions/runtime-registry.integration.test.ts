@@ -12,7 +12,7 @@ import * as fsPromises from "node:fs/promises";
 import { appendFileSync, existsSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { appendFile, copyFile, mkdir, readFile, readdir, realpath, rename, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { fileURLToPath } from "node:url";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
@@ -9637,10 +9637,8 @@ export default function (pi) {
     if (process.platform === "win32") return;
     const root = await temporaryRoot("tron-foreground-bash-abort-");
     const agentDir = join(root, "agent");
-    const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
-    await Promise.all([mkdir(agentDir), mkdir(sessionDir), mkdir(cwd)]);
-    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir }));
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
 
     const detachedPidPath = join(cwd, "detached.pid");
     const childProgram = "setInterval(() => {}, 1000)";
@@ -9695,10 +9693,8 @@ export default function (pi) {
   it("projects stable ordinals for parallel tools from start through completion", async () => {
     const root = await temporaryRoot("tron-tool-order-integration-");
     const agentDir = join(root, "agent");
-    const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
-    await Promise.all([mkdir(agentDir), mkdir(sessionDir), mkdir(cwd)]);
-    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir }));
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
 
     const faux = fauxProvider({ provider: "tron-tool-order", tokensPerSecond: 10_000 });
     const createModels = async () => {
@@ -9858,19 +9854,18 @@ export default function (pi) {
     expect(canonicalSegmentIDs).toEqual(new Set(grouped.map((event) => event.toolSegmentId)));
     expect(settled.transcript.find((item) => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "call-bash"))
       .toMatchObject({ durationMs: expect.any(Number), startedAt: expect.any(String), completedAt: expect.any(String) });
-    expect(slot.sessionFile?.startsWith(sessionDir)).toBe(true);
+    expect(slot.sessionFile?.startsWith(join(agentDir, "sessions") + sep)).toBe(true);
   });
 
   it("projects codemode nested calls live and after a cold reload", async () => {
     const root = await temporaryRoot("tron-nested-tools-e2e-");
     const agentDir = join(root, "agent");
-    const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
     const extensions = join(cwd, ".pi", "extensions");
     await Promise.all([
-      mkdir(agentDir), mkdir(sessionDir), mkdir(extensions, { recursive: true }),
+      mkdir(agentDir), mkdir(extensions, { recursive: true }),
     ]);
-    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, defaultTools: ["+codemode"] }));
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultTools: ["+codemode"] }));
     const sdkUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
     await Promise.all([
       writeFile(join(extensions, "codemode.ts"), `import { createCodemodeExtension } from ${JSON.stringify(sdkUrl)}; export default createCodemodeExtension({ mode: "on" });\n`),
@@ -9959,11 +9954,10 @@ export default function (pi) {
   it("projects every nested call Pi records, live and after a cold reload, within one argument budget", async () => {
     const root = await temporaryRoot("tron-nested-call-list-e2e-");
     const agentDir = join(root, "agent");
-    const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
     const extensions = join(cwd, ".pi", "extensions");
-    await Promise.all([mkdir(agentDir), mkdir(sessionDir), mkdir(extensions, { recursive: true })]);
-    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, defaultTools: ["+codemode"] }));
+    await Promise.all([mkdir(agentDir), mkdir(extensions, { recursive: true })]);
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultTools: ["+codemode"] }));
     const sdkUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
     await Promise.all([
       writeFile(join(extensions, "codemode.ts"), `import { createCodemodeExtension } from ${JSON.stringify(sdkUrl)}; export default createCodemodeExtension({ mode: "on" });\n`),
@@ -10030,13 +10024,12 @@ export default function (pi) {
   it("returns Pi structured bash output through nested codemode calls", async () => {
     const root = await temporaryRoot("tron-codemode-bash-output-e2e-");
     const agentDir = join(root, "agent");
-    const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
     const extensions = join(cwd, ".pi", "extensions");
     await Promise.all([
-      mkdir(agentDir), mkdir(sessionDir), mkdir(extensions, { recursive: true }),
+      mkdir(agentDir), mkdir(extensions, { recursive: true }),
     ]);
-    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, defaultTools: ["+codemode"] }));
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultTools: ["+codemode"] }));
     const sdkUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
     await writeFile(join(extensions, "codemode.ts"), `import { createCodemodeExtension } from ${JSON.stringify(sdkUrl)}; export default createCodemodeExtension({ mode: "on" });\n`);
     const faux = fauxProvider({ provider: "tron-codemode-bash-output", tokensPerSecond: 10_000 });
@@ -10103,13 +10096,12 @@ export default function (pi) {
     if (process.platform === "win32") return;
     const root = await temporaryRoot("tron-codemode-bash-abort-e2e-");
     const agentDir = join(root, "agent");
-    const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
     const extensions = join(cwd, ".pi", "extensions");
     await Promise.all([
-      mkdir(agentDir), mkdir(sessionDir), mkdir(extensions, { recursive: true }),
+      mkdir(agentDir), mkdir(extensions, { recursive: true }),
     ]);
-    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, defaultTools: ["+codemode"] }));
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultTools: ["+codemode"] }));
     const sdkUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
     await writeFile(join(extensions, "codemode.ts"), `import { createCodemodeExtension } from ${JSON.stringify(sdkUrl)}; export default createCodemodeExtension({ mode: "on" });\n`);
     const pidPath = join(cwd, "nested.pid");
@@ -10161,9 +10153,8 @@ export default function (pi) {
   it("connects Pi MCP stdio and streamable HTTP fixtures and exposes resources through composed built-ins", async () => {
     const root = await temporaryRoot("tron-pi-mcp-fixture-e2e-");
     const agentDir = join(root, "agent");
-    const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
-    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
+    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
     const fixtureScript = resolve(process.cwd(), "test-fixtures/pi-sdk/mcp-jsonrpc-fixture.mjs");
     const stdioState = join(root, "stdio-state.json");
     const stdioPidFile = join(root, "stdio.pid");
@@ -10287,14 +10278,13 @@ export default function (pi) {
   it("reaps a slow-starting MCP stdio process and its child when the runtime is disposed", async () => {
     const root = await temporaryRoot("tron-pi-mcp-startup-dispose-");
     const agentDir = join(root, "agent");
-    const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
     const fixtureScript = resolve(process.cwd(), "test-fixtures/pi-sdk/mcp-jsonrpc-fixture.mjs");
     const statePath = join(root, "state.json");
     const pidFile = join(root, "server.pid");
     const childPidFile = join(root, "child.pid");
     const readyPath = join(root, "ready");
-    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
+    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
     await writeFile(statePath, JSON.stringify({ tools: [{ name: "echo", description: "Fixture", inputSchema: { type: "object", properties: {} } }] }));
     await writeFile(join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: {
       slow: { command: process.execPath, args: [fixtureScript, "stdio", statePath, pidFile, childPidFile, "30000", readyPath], exposure: "direct" },
@@ -10532,10 +10522,8 @@ export default function (pi) {
   it("keeps one tool display segment across tool-only agent continuations", async () => {
     const root = await temporaryRoot("tron-tool-segment-continuation-");
     const agentDir = join(root, "agent");
-    const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
-    await Promise.all([mkdir(agentDir), mkdir(sessionDir), mkdir(cwd)]);
-    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir }));
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
     await writeFile(join(cwd, "one.txt"), "one\n");
     await writeFile(join(cwd, "two.txt"), "two\n");
 
@@ -10589,10 +10577,8 @@ export default function (pi) {
   it("rotates tool segment authority across a visible assistant barrier before new tool progress", async () => {
     const root = await temporaryRoot("tron-tool-segment-visible-barrier-");
     const agentDir = join(root, "agent");
-    const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
-    await Promise.all([mkdir(agentDir), mkdir(sessionDir), mkdir(cwd)]);
-    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir }));
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
     await Promise.all([
       writeFile(join(cwd, "one.txt"), "one\n"),
       writeFile(join(cwd, "two.txt"), "two\n"),
@@ -11542,10 +11528,10 @@ export default function (pi) {
   it("projects the canonical latest cache hit rate used by the terminal footer", async () => {
     const root = await temporaryRoot("tron-cache-rate-integration-");
     const agentDir = join(root, "agent");
-    const sessionDir = join(root, "sessions");
+    const ignoredSessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
-    await Promise.all([mkdir(agentDir), mkdir(sessionDir), mkdir(cwd)]);
-    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir }));
+    await Promise.all([mkdir(agentDir), mkdir(ignoredSessionDir), mkdir(cwd)]);
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir: ignoredSessionDir }));
     const faux = fauxProvider({ provider: "tron-cache-rate", tokensPerSecond: 10_000 });
     const createModels = async () => {
       const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
@@ -11566,11 +11552,13 @@ export default function (pi) {
     registries.push(registry);
     await initializeRegistry(registry);
     const slot = await registry.create(cwd);
-    expect(slot.sessionFile?.startsWith(sessionDir)).toBe(true);
+    expect(slot.sessionFile?.startsWith(join(agentDir, "sessions") + sep)).toBe(true);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await slot.prompt("cache stats");
     await waitFor(() => !slot.isBusy, "the slot to go idle");
+    expect(await readdir(ignoredSessionDir)).toEqual([]);
+    expect(await readFile(slot.sessionFile!, "utf8")).toContain("cached");
 
     const snapshot = slot.snapshot();
     const assistant = snapshot.transcript.find((item) => item.role === "assistant");

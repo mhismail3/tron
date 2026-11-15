@@ -1459,14 +1459,14 @@
           ],
           "details": {
             "artifacts": {
-              "dir": "<tmp>/sessions/subagent-artifacts",
+              "dir": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts",
               "files": [
                 {
-                  "inputPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_input.md",
-                  "jsonlPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0.jsonl",
-                  "metadataPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_meta.json",
-                  "outputPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_output.md",
-                  "transcriptPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_transcript.jsonl"
+                  "inputPath": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts/<id>_task-child_0_input.md",
+                  "jsonlPath": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts/<id>_task-child_0.jsonl",
+                  "metadataPath": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts/<id>_task-child_0_meta.json",
+                  "outputPath": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts/<id>_task-child_0_output.md",
+                  "transcriptPath": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts/<id>_task-child_0_transcript.jsonl"
                 }
               ]
             },
@@ -1527,12 +1527,12 @@
               "artifacts": [
                 {
                   "kind": "output",
-                  "path": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_output.md"
+                  "path": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts/<id>_task-child_0_output.md"
                 },
                 {
                   "description": "Child transcript",
                   "kind": "other",
-                  "path": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_transcript.jsonl"
+                  "path": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts/<id>_task-child_0_transcript.jsonl"
                 }
               ],
               "createdAt": "<timestamp>",
@@ -1540,7 +1540,7 @@
               "decisions": [],
               "id": "<id>",
               "objective": "[prompt redacted]",
-              "ownerSessionId": "<tmp>/sessions/<timestamp>_<id>.jsonl",
+              "ownerSessionId": "<tmp>/agent/sessions/<session-cwd>/<timestamp>_<id>.jsonl",
               "receipts": [],
               "runs": [
                 {
@@ -1618,11 +1618,11 @@
                 },
                 "agent": "task-child",
                 "artifactPaths": {
-                  "inputPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_input.md",
-                  "jsonlPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0.jsonl",
-                  "metadataPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_meta.json",
-                  "outputPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_output.md",
-                  "transcriptPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_transcript.jsonl"
+                  "inputPath": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts/<id>_task-child_0_input.md",
+                  "jsonlPath": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts/<id>_task-child_0.jsonl",
+                  "metadataPath": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts/<id>_task-child_0_meta.json",
+                  "outputPath": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts/<id>_task-child_0_output.md",
+                  "transcriptPath": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts/<id>_task-child_0_transcript.jsonl"
                 },
                 "context": "fresh",
                 "exitCode": 0,
@@ -1663,11 +1663,11 @@
                   "toolCount": 0
                 },
                 "requestedModel": "task-child/child",
-                "sessionFile": "<tmp>/sessions/<timestamp>_<id>/<id>/run-0/session.jsonl",
+                "sessionFile": "<tmp>/agent/sessions/<session-cwd>/<timestamp>_<id>/<id>/run-0/session.jsonl",
                 "sessionName": "task-child: [Tron workspace handoff] You are a delegated worker for T...",
                 "sessionOwnerId": "<id>",
                 "task": "[prompt redacted]",
-                "transcriptPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_transcript.jsonl",
+                "transcriptPath": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts/<id>_task-child_0_transcript.jsonl",
                 "usage": {
                   "cacheRead": "<value>",
                   "cacheWrite": "<value>",

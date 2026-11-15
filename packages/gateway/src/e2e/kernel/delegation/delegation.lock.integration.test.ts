@@ -1,4 +1,5 @@
 import { readFile, realpath } from "node:fs/promises";
+import { basename } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { disposeFixtures, fixture } from "../../../../test-support/home-task-fixture.js";
@@ -55,6 +56,8 @@ describe("gateway/delegation kernel locks", () => {
     await waitFor(() => !slot.isBusy && !slot.catalogHasActiveSubagents, "the parent and its child to settle", BOUND);
     const roots = [f.root, await realpath(f.root)];
     const normalization = { roots, stableIds: ["lock-subagent"] };
+    const sessionFolder = basename(f.registry.sessionDirectory(await realpath(f.cwd)));
+    const normalize = (value: unknown) => normalizeTraceValue(JSON.parse(JSON.stringify(value).replaceAll(sessionFolder, "<session-cwd>")), normalization);
     const canonical = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n").map((line) => JSON.parse(line));
     const activity = (slot.snapshot().processActivities ?? []).filter((item) => item.kind === "subagent");
     const childFile = canonical.flatMap((entry) => {
@@ -63,13 +66,13 @@ describe("gateway/delegation kernel locks", () => {
       return results.flatMap((result) => result.sessionFile ? [result.sessionFile] : []);
     })[0];
     const child = childFile
-      ? (await readFile(childFile, "utf8")).trimEnd().split("\n").map((line) => normalizeTraceValue(JSON.parse(line), normalization))
+      ? (await readFile(childFile, "utf8")).trimEnd().split("\n").map((line) => normalize(JSON.parse(line)))
       : [];
     const trace = {
       lock: "delegation-subagent",
       providerRequests: requests as unknown as TraceValue[],
-      canonicalJsonl: canonical.map((entry) => normalizeTraceValue(entry, normalization)),
-      processActivity: activity.map((item) => normalizeTraceValue(item, normalization)),
+      canonicalJsonl: canonical.map((entry) => normalize(entry)),
+      processActivity: activity.map((item) => normalize(item)),
       childJsonl: child,
     };
     const parent = split(trace.canonicalJsonl);

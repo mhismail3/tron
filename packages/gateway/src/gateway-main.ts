@@ -29,7 +29,7 @@ import { RuntimeRegistry } from "./kernel/session/runtime-registry.js";
 import { startGatewayModules } from "./main/modules.js";
 import { GatewayWorkRegistry } from "./kernel/run/gateway-work-registry.js";
 import { DRAIN_WAIT_LOG_INTERVAL_MS, logDrainBlockers, logUnresolvedDrainOwners, RestartDrainProgress, waitForStopDrain } from "./sessions/restart-drain.js";
-import { acquireAgentRuntimeLocks } from "./sessions/agent-runtime-lock.js";
+import { acquireAgentRuntimeLock } from "./sessions/agent-runtime-lock.js";
 import type { JsonValue } from "./protocol/types.js";
 import { GatewayLogger } from "./transport/logger.js";
 import { RotatingJsonl } from "./transport/rotating-jsonl.js";
@@ -86,11 +86,7 @@ const moduleGraphLoadedAt = performance.now();
 const tronHome = resolveTronHome();
 const agentDir = resolveAgentDir(tronHome);
 await assertHomeLayout(tronHome);
-const configuredSessionDir = SettingsManager.create(process.cwd(), agentDir, { projectTrusted: false }).getSessionDir();
-const releaseRuntimeLock = await acquireAgentRuntimeLocks([
-  agentDir,
-  ...(configuredSessionDir ? [configuredSessionDir] : []),
-]);
+const releaseRuntimeLock = await acquireAgentRuntimeLock(agentDir);
 try {
 const config = await loadConfig();
 const delegatedRoot = delegatedArtifactRoot(config.tronHome);

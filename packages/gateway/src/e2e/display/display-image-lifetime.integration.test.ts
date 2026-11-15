@@ -217,9 +217,7 @@ it("keeps a displayed photo viewable after source deletion and cold reopen until
   try {
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
-    const sessionDir = join(root, "sessions");
-    await Promise.all([agentDir, cwd, sessionDir].map(path => mkdir(path, { recursive: true })));
-    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir }));
+    await Promise.all([agentDir, cwd].map(path => mkdir(path, { recursive: true })));
     const image = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6sAAAAABJRU5ErkJggg==", "base64");
     const source = join(cwd, "photo.png");
     await writeFile(source, image);
@@ -293,9 +291,8 @@ async function displayedPhotoFixture() {
   const root = await mkdtemp(join(tmpdir(), "tron-display-ownership-"));
   let registry: RuntimeRegistry | undefined;
   try {
-    const agentDir = join(root, "agent"), cwd = join(root, "workspace"), sessionDir = join(root, "sessions");
-    await Promise.all([agentDir, cwd, sessionDir].map(path => mkdir(path, { recursive: true })));
-    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir }));
+    const agentDir = join(root, "agent"), cwd = join(root, "workspace");
+    await Promise.all([agentDir, cwd].map(path => mkdir(path, { recursive: true })));
     const image = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6sAAAAABJRU5ErkJggg==", "base64");
     await writeFile(join(cwd, "photo.png"), image);
     const faux = fauxProvider({ provider: "tron-display-ownership", tokensPerSecond: 10_000 });
