@@ -161,19 +161,19 @@ describe.skipIf(process.platform !== "darwin")("native console admission through
     expect(f.leases()).toBe(0);
   });
   it.each([false, true])("holds one activity through accepted driver work, then retires it on normal/Stop end (Stop=%s)", async stop => {
-    const f = await fixture(null, stop);
-    await f.slot.prompt("Inspect the fixture desktop");
-    if (stop) {
+    const f = await fixture(null, true);
+    try {
+      await f.slot.prompt("Inspect the fixture desktop");
       await waitFor(() => f.dispatched(), "accepted driver observation");
       expect(f.leases()).toBe(1);
-      const stopping = f.slot.abort("agent");
+      const stopping = stop ? f.slot.abort("agent") : undefined;
       await f.release();
       await stopping;
-    }
-    await waitFor(() => !f.slot.isBusy, "computer turn retirement");
-    expect(f.leases()).toBe(0);
-    expect(f.requests.filter(operation => operation === "automationEndpoint")).toHaveLength(1);
-    expect(f.requests.filter(operation => operation === "stop")).toHaveLength(1);
-    if (!stop) expect(f.result("desktop").isError).not.toBe(true);
+      await waitFor(() => !f.slot.isBusy, "computer turn retirement");
+      expect(f.leases()).toBe(0);
+      expect(f.requests.filter(operation => operation === "automationEndpoint")).toHaveLength(1);
+      expect(f.requests.filter(operation => operation === "stop")).toHaveLength(1);
+      if (!stop) expect(f.result("desktop").isError).not.toBe(true);
+    } finally { await f.release(); }
   });
 });
