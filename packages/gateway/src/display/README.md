@@ -97,10 +97,29 @@ Viewing is authorized only by an admitted display result or sealed browser proje
 on the exact active branch, inside the device credential admission. Frame and DELETE
 carry `X-Tron-Live-Lease`/`X-Tron-Live-Generation`; `X-Tron-Live-After` suppresses a
 repeat JPEG; 204 `X-Tron-Live-State: waiting` clears pixels, `unchanged` keeps them.
-One unfinished frame response per viewer. A viewer makes one read-only CDP attachment
-to the exact loopback browser UUID; target changes are followed; more than eight page
+One unfinished frame response per viewer. UUID endpoints identify their original browser directly. Chrome's consented
+`/devtools/browser` endpoint instead retains one read-only identity connection from
+a trusted `get cdp-url` result or active native browser binding until Chrome
+disconnects or the runtime load retires. It reads only
+`Target.getTargetInfo`, never account pages, and pins that connection's browser target.
+The handshake has a one-second bound and four pending slots; absent consent reports
+`browser_consent_required` in `browserLiveViewError`, without a receipt or retry.
+A rejected connection or invalid identity reports `browser_identity_unavailable`;
+a retiring load discards its pending result without diagnosing consent.
+Repeated results reuse the live identity connection. A new Chrome instance requires a
+fresh tool attachment and receipt; historical sources cannot follow the reused port.
+Every viewing connection verifies that retained browser target before reading any
+page or starting capture. Last-viewer close stops pixels but retains the identity
+socket; source retirement closes it. Kernel projection tests cover consent refusal,
+pending-load cancellation, disconnect and successor rejection; the pinned-fork journey
+also opens/reads/closes a fixture tab, obtains a real frame and observes Chrome exit.
+
+A viewer makes one read-only CDP attachment
+to the exact loopback browser endpoint; target changes are followed; more than eight page
 targets, ambiguous visibility, a failed command or a 5 s setup/command/first-frame
-deadline ends observation. No phone input becomes a CDP command. ACK credits one per
+deadline ends observation. For a consent endpoint, any unexpected observer end also
+retires the retained identity and sealed reference, requiring a fresh tool result;
+it never silently reconnects a failed source. No phone input becomes a CDP command. ACK credits one per
 200 ms, at most four pending, one replaceable frame; frames ≤ 2 MiB, 2,560 px edge,
 4 Mpx (requests cap at 1,280); 64 registrations, four viewers per view, 16 total.
 Last-viewer close, revocation, runtime replacement or transport disposal stops
@@ -131,6 +150,7 @@ Projection reads the persisted details live and after cold reload.
 
 | Signal | One-step diagnosis / boundary |
 | --- | --- |
+| Chrome attached but no live source | Run `scripts/tron test gateway --local src/kernel/projection/tool-result.integration.test.ts`: fixed-path endpoints must produce a sealed receipt only after the browser-target handshake, and retire it on disconnect/load replacement. Inspect `browserLiveViewError` for a refused consent handshake. |
 | Maintenance durable-write work | Run `scripts/tron test gateway src/e2e/display/display-image-lifetime.integration.test.ts -t 'durably removes unowned'`: the real fsync counter must record two retained metadata publications plus one deletion-directory sync, independent of the removed set's size. The same journey checks reader lifetime and cold-reopen authority. |
 
 ## Verify

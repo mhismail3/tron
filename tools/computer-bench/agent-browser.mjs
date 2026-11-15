@@ -3,13 +3,15 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { DOWNLOAD_BODY } from "./fixtures/site.mjs";
-import { pngSize, run, signedInChromeCdp } from "./process.mjs";
+import { pngSize, run } from "./process.mjs";
 
 const BINARY = process.env.COMPUTER_BENCH_AGENT_BROWSER ?? join(homedir(), ".tron/agent/bin/agent-browser");
 
-export function agentBrowser() {
+export function agentBrowser({ chromeCdp } = {}) {
   const session = `cb2476-${process.pid}`;
   const profileSession = `${session}-profile`;
+  const attachedSession = `${session}-attach`;
+  let attached = false;
   let profile;
 
   async function call(args, { sessionName = session, timeoutMs = 30_000, global = [] } = {}) {
@@ -35,6 +37,7 @@ export function agentBrowser() {
     async teardown() {
       await call(["close"]).catch(() => {});
       await call(["close"], { sessionName: profileSession }).catch(() => {});
+      if (attached) await call(["close"], { sessionName: attachedSession });
     },
     tasks: {
       async navigate(ctx) { await openForm(ctx); const title = await value(["get", "title"]); return { ok: title === "Bench Form", detail: title }; },
@@ -112,9 +115,35 @@ export function agentBrowser() {
         const text = await value(["get", "text", "#result"]);
         return { ok: text === `code=bench-code state=${state}`, detail: text };
       },
-      async "signed-in-chrome"() {
-        const port = signedInChromeCdp();
-        return { ok: port, detail: port ? "DevToolsActivePort present" : "signed-in Chrome exposes no CDP endpoint (DevToolsActivePort missing); --auto-connect has nothing to attach to" };
+      async "signed-in-chrome"(ctx) {
+        if (!chromeCdp) return { ok: false, detail: "consent_required: pass --chrome-cdp with the explicitly consented loopback browser endpoint; no attach attempted" };
+        let endpoint;
+        try { endpoint = new URL(chromeCdp); } catch { throw new Error("invalid Chrome CDP endpoint"); }
+        if (endpoint.href !== chromeCdp || endpoint.protocol !== "ws:" || !["127.0.0.1", "[::1]"].includes(endpoint.hostname)
+          || !endpoint.port || endpoint.username || endpoint.password || endpoint.search || endpoint.hash
+          || !/^\/devtools\/browser(?:\/[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12})?$/iu.test(endpoint.pathname)) throw new Error("Chrome CDP endpoint must be an exact loopback browser endpoint without credentials");
+        const options = { sessionName: attachedSession };
+        const started = performance.now();
+        attached = true;
+        let tab;
+        let attachMs;
+        try {
+          await call(["connect", chromeCdp], { ...options, timeoutMs: 2_000 });
+          attachMs = Math.round(performance.now() - started);
+          const connection = await call(["get", "cdp-url"], options);
+          if (connection.cdpUrl !== chromeCdp) throw new Error("Attached browser endpoint changed; refusing fixture operation");
+          const opened = await call(["tab", "new", `${ctx.site.origin}/form.html`], options);
+          tab = opened.tabId;
+          if (typeof tab !== "string" || !tab.length) throw new Error("Fixture tab identity unavailable; open outcome uncertain");
+          const title = await value(["get", "title"], options);
+          return { ok: title === "Bench Form" && attachMs <= 2_000, attachMs, detail: `fixture title=${title}; attach=${attachMs}ms; exact fixture tab closed in finally` };
+        } finally {
+          try { if (tab) await call(["tab", "close", tab], options); }
+          finally {
+            await call(["close"], options);
+            attached = false;
+          }
+        }
       },
     },
   };

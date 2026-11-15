@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
 import { GatewayError } from "../errors.js";
-import { observeBrowserCDP, type CapturedBrowserFrame } from "./browser-live-cdp.js";
+import { observeBrowserCDP, pinBrowserCDP, type PinnedBrowserCDP, type CapturedBrowserFrame } from "./browser-live-cdp.js";
 import { nativeLiveClientFactory, nativeLiveFailure, observeNativeWindow, type NativeLiveFailure, type NativeLiveClient, type NativeLiveClientFactory } from "./native-live-view.js";
 import { BROWSER_LIVE_VIEW_SCHEMA, NATIVE_LIVE_VIEW_SCHEMA, type BrowserLiveViewDescriptor, type LiveViewDescriptor, type NativeLiveViewDescriptor } from "../modules/display/contract.js";
 import { captureRegion, type NativeCaptureRegion, type NativeCaptureSource } from "../machine/native-capture-client.js";
@@ -14,8 +14,8 @@ export function browserCDPEndpoint(value: string): URL {
   } catch { throw new GatewayError("invalid_request", "Browser CDP endpoint is invalid"); }
   if (endpoint.href !== value || endpoint.protocol !== "ws:" || endpoint.username || endpoint.password || endpoint.search || endpoint.hash
     || !["127.0.0.1", "[::1]"].includes(endpoint.hostname) || !endpoint.port
-    || !/^\/devtools\/browser\/[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(endpoint.pathname)) {
-    throw new GatewayError("invalid_request", "Browser CDP endpoint must be an exact loopback browser UUID without credentials");
+    || !/^\/devtools\/browser(?:\/[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12})?$/i.test(endpoint.pathname)) {
+    throw new GatewayError("invalid_request", "Browser CDP endpoint must be an exact loopback browser endpoint without credentials");
   }
   return endpoint;
 }
@@ -56,6 +56,7 @@ interface View {
   epoch: number;
   sequence: number;
   firstFrameDeadline?: number;
+  browserPin?: PinnedBrowserCDP;
 }
 type BrowserLiveViewFrameResult = BrowserLiveViewFrame | { status: "waiting" | "unchanged" };
 type ViewIdentity = { sessionId: string; viewId: string; generation: string };
@@ -78,6 +79,7 @@ export class BrowserLiveViewRegistry {
   private expiryTimer: NodeJS.Timeout | undefined;
   private readonly nativeCatalogs = new Map<string, NativeCatalog>();
   private readonly nativeRetirements = new Set<Promise<void>>();
+  private readonly browserAttachments = new Map<string, { sessionId: string; abort: AbortController; promise: Promise<BrowserLiveViewDescriptor> }>();
 
   constructor(private readonly connect: (endpoint: string, maximumPayload: number) => WebSocket =
     (endpoint, maximumPayload) => new WebSocket(endpoint, { maxPayload: maximumPayload }),
@@ -177,8 +179,37 @@ export class BrowserLiveViewRegistry {
   isLoadActive(sessionId: string, loadToken: string): boolean {
     return this.activeLoadTokens.get(sessionId) === loadToken;
   }
-  register(registration: BrowserLiveViewRegistration): BrowserLiveViewDescriptor {
+  registerAttached(registration: BrowserLiveViewRegistration): Promise<BrowserLiveViewDescriptor> {
     this.assertRegistration(registration);
+    if (!this.isLoadActive(registration.sessionId, registration.loadToken)) throw new GatewayError("conflict", "Browser extension load is no longer active");
+    for (const view of this.views.values()) {
+      const old = view.registration;
+      if ("cdpUrl" in old && old.sessionId === registration.sessionId && old.loadToken === registration.loadToken
+        && old.cdpUrl === registration.cdpUrl && view.browserPin?.active) return Promise.resolve(this.descriptor(old));
+    }
+    const identity = `${registration.sessionId}\0${registration.loadToken}\0${registration.cdpUrl}`;
+    const pending = this.browserAttachments.get(identity);
+    if (pending) return pending.promise;
+    if (this.browserAttachments.size >= 4 || this.views.size >= BROWSER_LIVE_VIEW_MAXIMUM_REGISTRATIONS) {
+      throw new GatewayError("busy", "The Gateway has reached its browser attachment capacity", true);
+    }
+    const abort = new AbortController();
+    const entry = { sessionId: registration.sessionId, abort, promise: Promise.resolve().then(async () => {
+      const pin = await pinBrowserCDP({ endpoint: registration.cdpUrl, connect: this.connect, signal: abort.signal,
+        onEnd: () => this.retireView(registration.sessionId, registration.viewId, registration.generation) });
+      try {
+        if (!pin.active) throw new GatewayError("conflict", "The attached browser has ended");
+        return this.register(registration, pin);
+      } catch (error) { pin.close(); throw error; }
+    }).finally(() => { if (this.browserAttachments.get(identity) === entry) this.browserAttachments.delete(identity); }) };
+    this.browserAttachments.set(identity, entry);
+    return entry.promise;
+  }
+  register(registration: BrowserLiveViewRegistration, browserPin?: PinnedBrowserCDP): BrowserLiveViewDescriptor {
+    this.assertRegistration(registration);
+    if (browserCDPEndpoint(registration.cdpUrl).pathname === "/devtools/browser" && !browserPin?.active) {
+      throw new GatewayError("invalid_request", "Chrome's consent endpoint requires a retained browser identity connection");
+    }
     if (!this.isLoadActive(registration.sessionId, registration.loadToken)) {
       throw new GatewayError("conflict", "Browser extension load is no longer active");
     }
@@ -201,7 +232,8 @@ export class BrowserLiveViewRegistry {
     if (existing) this.retire(existing);
     const descriptor = this.descriptor(registration);
     this.observedGenerations.set(observed, descriptor);
-    const view: View = { registration: { ...registration }, viewers: new Map(), latest: undefined, observer: undefined, epoch: 0, sequence: 0 };
+    const view: View = { registration: { ...registration }, viewers: new Map(), latest: undefined, observer: undefined, epoch: 0, sequence: 0,
+      ...(browserPin ? { browserPin } : {}) };
     this.views.set(identity, view);
     return { ...descriptor };
   }
@@ -280,6 +312,7 @@ export class BrowserLiveViewRegistry {
   }
   retireSession(sessionId: string): void {
     this.activeLoadTokens.delete(sessionId);
+    for (const attachment of this.browserAttachments.values()) if (attachment.sessionId === sessionId) attachment.abort.abort();
     for (const id of this.nativeFailures.keys()) if (id.startsWith(key(sessionId, ""))) this.nativeFailures.delete(id);
     const catalog = this.nativeCatalogs.get(sessionId);
     if (catalog) { this.nativeCatalogs.delete(sessionId); this.joinNative(catalog.close()); }
@@ -312,6 +345,7 @@ export class BrowserLiveViewRegistry {
     return { ...descriptor };
   }
   dispose(): void {
+    for (const attachment of this.browserAttachments.values()) attachment.abort.abort();
     for (const catalog of this.nativeCatalogs.values()) this.joinNative(catalog.close());
     this.nativeCatalogs.clear();
     for (const view of this.views.values()) this.retire(view);
@@ -379,12 +413,14 @@ export class BrowserLiveViewRegistry {
     }
     const observer = observeBrowserCDP({
       endpoint: view.registration.cdpUrl, connect: this.connect,
+      ...(view.browserPin ? { browserTargetId: view.browserPin.targetId } : {}),
       onFrame: (frame) => { if (current()) view.latest = { ...frame, sequence: ++view.sequence }; },
       onReset: () => { if (current()) view.latest = undefined; },
     });
     view.observer = observer;
     void observer.done.then(() => {
       if (!current()) return;
+      if (view.browserPin) { this.retire(view); return; }
       for (const leaseId of view.viewers.keys()) this.close(leaseId);
     });
   }
@@ -413,6 +449,7 @@ export class BrowserLiveViewRegistry {
     for (const leaseId of view.viewers.keys()) this.close(leaseId);
     this.stop(view);
     this.views.delete(key(view.registration.sessionId, view.registration.viewId));
+    view.browserPin?.close();
     if ("native" in view.registration) this.joinNative(view.registration.native.close());
   }
 }

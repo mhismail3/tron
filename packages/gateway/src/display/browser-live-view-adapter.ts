@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { GatewayError } from "../errors.js";
+import { BrowserAttachError } from "./browser-live-cdp.js";
 import { browserCDPEndpoint, BrowserLiveViewRegistry } from "./browser-live-view.js";
 import { sealBrowserToolReference } from "./browser-tool-reference.js";
 import type { ExtensionOwner } from "../protocol/types.js";
+import type { BrowserLiveViewDescriptor } from "../modules/display/contract.js";
 
 interface RecordValue { [key: string]: unknown }
 
@@ -17,7 +19,7 @@ function successful(result: RecordValue, details: RecordValue): boolean {
 function browserGeneration(cdpUrl: string, runtimeGeneration: string): string | undefined {
   try {
     const url = browserCDPEndpoint(cdpUrl);
-    const browserUUID = url.pathname.slice("/devtools/browser/".length);
+    const browserUUID = url.pathname === "/devtools/browser" ? randomUUID() : url.pathname.slice("/devtools/browser/".length);
     return browserUUID ? `${runtimeGeneration}:${browserUUID}` : undefined;
   } catch { return undefined; }
 }
@@ -46,6 +48,7 @@ export function observeTrustedAgentBrowserResult(input: {
   const result = record(input.result);
   const details = record(result?.details);
   if (!result || !Array.isArray(result.content) || !details || details.agentBrowserStarted !== true) return input.result;
+  const content = result.content;
   const binding = record(details.browserBinding);
   const bound = binding?.schema === "agent-browser.browser-binding.v1"
     && (binding.state === "active" || (binding.state === "closed" && binding.owned === true))
@@ -61,6 +64,22 @@ export function observeTrustedAgentBrowserResult(input: {
   if (typeof cdpUrl !== "string") return input.result;
   const generation = browserGeneration(cdpUrl, input.runtimeGeneration);
   if (!generation || !input.views.isLoadActive(input.sessionId, input.loadToken)) return input.result;
+  const publish = (descriptor: BrowserLiveViewDescriptor): unknown => {
+    const source = { kind: "browser_live", viewId: descriptor.viewId, generation: descriptor.generation };
+    return { ...result,
+      content: explicitGet
+        ? [...content, { type: "text", text: `Read-only live browser source for display: ${JSON.stringify(source)}` }]
+        : content,
+      details: { ...details, browserLiveView: descriptor,
+        tronBrowserReference: sealBrowserToolReference(input.sessionId, input.toolCallId, descriptor, !bound || binding.state === "active") },
+    };
+  };
+  const failed = (error: unknown): unknown => {
+    if (!input.views.isLoadActive(input.sessionId, input.loadToken)) return input.result;
+    return error instanceof GatewayError || error instanceof BrowserAttachError
+      ? { ...result, details: { ...details, browserLiveViewError: error.message } }
+      : input.result;
+  };
   try {
     const registration = {
       sessionId: input.sessionId,
@@ -71,19 +90,10 @@ export function observeTrustedAgentBrowserResult(input: {
       title: "Browser view",
       fallbackText: "The original browser is no longer available.",
     };
-    const descriptor = bound && binding.state === "closed"
-      ? input.views.retireBrowser(registration)
-      : input.views.register(registration);
-    const source = { kind: "browser_live", viewId: descriptor.viewId, generation: descriptor.generation };
-    return { ...result,
-      content: explicitGet
-        ? [...result.content, { type: "text", text: `Read-only live browser source for display: ${JSON.stringify(source)}` }]
-        : result.content,
-      details: { ...details, browserLiveView: descriptor,
-        tronBrowserReference: sealBrowserToolReference(input.sessionId, input.toolCallId, descriptor, !bound || binding.state === "active") },
-    };
-  } catch (error) {
-    if (error instanceof GatewayError) return { ...result, details: { ...details, browserLiveViewError: error.message } };
-    return input.result;
-  }
+    if (browserCDPEndpoint(cdpUrl).pathname === "/devtools/browser") {
+      if (bound && binding.state === "closed") return input.result;
+      return input.views.registerAttached(registration).then(publish, failed);
+    }
+    return publish(bound && binding.state === "closed" ? input.views.retireBrowser(registration) : input.views.register(registration));
+  } catch (error) { return failed(error); }
 }
