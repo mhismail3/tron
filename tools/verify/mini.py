@@ -582,5 +582,5 @@ if __name__ == '__main__':
         sys.exit(local_main(sys.argv[2:], sys.argv[1]) if sys.argv[1:2] in (['python'], ['node'], ['verify']) else local_main(sys.argv[1:]))
     except KeyboardInterrupt:
         sys.exit(130)
-    except (OSError, ValueError, subprocess.SubprocessError) as error:
+    except (OSError, ValueError, subprocess.SubprocessError, tarfile.TarError) as error:
         sys.exit(no_result(str(error)))

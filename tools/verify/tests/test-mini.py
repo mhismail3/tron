@@ -304,6 +304,12 @@ sha = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], tex
 logs = root / 'test-results/verify' / sha
 logs.mkdir(parents=True)
 (logs / 'first-failure.log').write_text('native boundary fixture')
+if '--unsafe-verify' in sys.argv or '--unsafe-e2e' in sys.argv:
+    outside = root.parent / 'outside-artifact'
+    outside.write_text('outside target must not be copied')
+    directory = logs if '--unsafe-verify' in sys.argv else root / '.scratch/mini-e2e/results'
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / 'outside-link').symlink_to(outside)
 main = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'origin/main'], text=True).strip()
 (logs.parent / (sha + '.json')).write_text(json.dumps({'commit': sha, 'main': main, 'args': sys.argv[1:]}))
 raise SystemExit(75 if '--incomplete' in sys.argv else 0)
@@ -330,6 +336,72 @@ raise SystemExit(75 if '--incomplete' in sys.argv else 0)
         with sqlite3.connect(self.env['TRON_TEST_LEDGER']) as connection:
             rows = connection.execute('SELECT test_id, commit_sha, outcome FROM results').fetchall()
         self.assertEqual(rows, [('tools/probe.py::Probe.test_case', sha, 'passed')] * 2)
+        for flag in ('--unsafe-verify', '--unsafe-e2e'):
+            with self.subTest(source=flag):
+                result = self.lane('verify', flag)
+                self.assertEqual(result.returncode, NO_RESULT, result.stdout + result.stderr)
+                self.assertIn('unsafe mini artifact source', result.stdout + result.stderr)
+                self.assertIsNotNone(self.reader().no_result_reason(result.returncode, result.stdout + result.stderr))
+                self.assertNotIn('mini: artifacts:', result.stdout)
+                self.assertNotIn('outside target must not be copied', result.stdout + result.stderr)
+        relay = self.temporary / 'artifact-relay.py'
+        relay.write_text('''import base64, hashlib, io, os, shlex, subprocess, sys, tarfile
+os.setsid()
+command = sys.argv[1]
+if shlex.split(command)[-2:-1] != ['remote']:
+    os.execv('/bin/sh', ['sh', '-c', command])
+child = subprocess.run(['/bin/sh', '-c', command], stdout=subprocess.PIPE)
+lines = child.stdout.splitlines(keepends=True)
+mode = os.environ['MINI_ARTIFACT_DAMAGE']
+if mode in ('relative-path', 'absolute-path', 'link'):
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode='w:gz') as bundle:
+        member = tarfile.TarInfo('../../../../artifact-escape' if mode == 'relative-path' else
+                                 os.environ['MINI_ARTIFACT_ESCAPE'] if mode == 'absolute-path' else 'bundle-link')
+        if mode == 'link':
+            member.type, member.linkname = tarfile.SYMTYPE, os.environ['MINI_ARTIFACT_ESCAPE']
+        else:
+            member.size = 7
+        bundle.addfile(member, None if mode == 'link' else io.BytesIO(b'escaped'))
+    payload = buffer.getvalue()
+else:
+    payload = b'not a gzip archive' if mode == 'malformed' else b'\\x1f\\x8b'
+replaced = False
+for line in lines:
+    fields = line.split(b' ', 3)
+    if len(fields) == 4 and fields[0] == b'@@tron-mini':
+        prefix = b' '.join(fields[:2]) + b' '
+        if fields[2] == b'artifact':
+            if not replaced or mode == 'digest':
+                sys.stdout.buffer.write(prefix + b'artifact ' +
+                                        (fields[3] if mode == 'digest' else base64.b64encode(payload) + b'\\n'))
+                replaced = True
+            continue
+        if fields[2] == b'artifact-end':
+            digest = '0' * 64 if mode == 'digest' else hashlib.sha256(payload).hexdigest()
+            line = prefix + b'artifact-end ' + digest.encode() + b'\\n'
+    sys.stdout.buffer.write(line)
+assert replaced, 'the real remote controller returned no artifact frame'
+sys.exit(child.returncode)
+''')
+        ssh = self.temporary / 'bin/ssh'
+        prefix, separator, _ = SSH.rpartition('cd "$MINI_HOME"')
+        self.assertTrue(separator)
+        ssh.write_text(prefix + 'cd "$MINI_HOME" && HOME="$MINI_HOME" exec /usr/bin/python3 "$MINI_ARTIFACT_RELAY" "$*"\n')
+        for mode in ('digest', 'malformed', 'truncated', 'relative-path', 'absolute-path', 'link'):
+            with self.subTest(transport=mode):
+                result = self.lane('verify', '--changed', env={**self.env, 'MINI_ARTIFACT_RELAY': str(relay),
+                                   'MINI_ARTIFACT_DAMAGE': mode, 'MINI_ARTIFACT_ESCAPE': str(self.temporary / 'artifact-escape')})
+                self.assertEqual(result.returncode, NO_RESULT, result.stdout + result.stderr)
+                self.assertIsNotNone(self.reader().no_result_reason(result.returncode, result.stdout + result.stderr))
+                self.assertNotIn('mini: artifacts:', result.stdout)
+                self.assertNotIn('mini: lane exit 0', result.stdout)
+                self.assertFalse((self.temporary / 'artifact-escape').exists())
+                self.assertEqual(list(self.local.rglob('bundle-link')), [])
+                self.assertEqual(self.git('for-each-ref', '--format=%(refname)', 'refs/tron-jobs/submissions/',
+                                          cwd=self.mini / 'tron-ci/tron.git'), '')
+                with open(self.mini / 'tron-ci/jobs/gateway.lock') as lock:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         self.assertEqual(list((self.mini / 'tron-ci/results').iterdir()), [])
 
     def test_a_python_lane_runs_its_command_at_the_exact_commit_with_one_ordered_output(self) -> None:

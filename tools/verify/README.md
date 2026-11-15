@@ -146,8 +146,10 @@ Output streams live. Each iOS/whole-verifier invocation returns a SHA-256-checke
 JSON reports and `.xcresult` bundles plus `receipt.json` (exact commit, execution host, lane and raw exit).
 Whole-verifier reports are `verify.json` and `verify/`; iOS runner output is `ios/`, profiling output is
 `profiles/`, and real-Gateway harness results/build attempts are `e2e/`. Fixture homes and credentials
-are not collected. Native reports retain execution-host paths. Archives reject links, unsafe paths and
-more than 2 GiB of content; missing, corrupt or refused transport is no result, never a test pass.
+are not collected. Native reports retain execution-host paths. Copied report trees preserve links for
+rejection rather than following their targets. Archives reject links, absolute/traversing paths and more
+than 2 GiB of content; digest mismatches, malformed/truncated gzip or tar, missing or refused transport
+are no result (exit 75), never a test pass.
 A native red or exit 75 remains that lane's raw exit after artifacts return. Cancellation closes the
 session's input, signals and joins its owned process group, and releases the normal mini lease;
 the iOS helper owns its simulator release. No second scheduler, daemon or source checkout is created.
