@@ -226,7 +226,7 @@ function homeModuleServices(owner: HomeOwner, platform: HomeComposition, session
       publicationUncertain: () => owner.publicationUncertain,
     },
     profile: {
-      globalRulesPath: join(platform.agentDir, "AGENTS.md"),
+      agentDir: platform.agentDir, globalRulesPath: join(platform.agentDir, "AGENTS.md"),
       decision: (sessionId, cwd) => owner.profileFor(sessionId, cwd), runtime: platform.runtime,
     },
     appendGuard: {
