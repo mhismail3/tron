@@ -735,12 +735,6 @@ settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, {
   ),
   undoSubject: (entry, context) => new HomeProfileItems(() => knowledge).undo(settingsChanges, entry, context),
 });
-const mcpAdmin = new McpAdminService(
-  config.agentDir,
-  piCliBundle(),
-  new MacKeychainMcpCredentialOwner(),
-  (level, message, event, fields) => logger.log(level, message, { event, source: "mcp", ...fields }),
-);
 sessions.setSettings(settingsModel, settingsChanges, new SettingsInventoryReader(hookResources, packages, mcpAdmin, trust, modules));
 projects.register(settingsChanges);
 packages.register(settingsChanges, () => globalProviderResources.requestReload());
