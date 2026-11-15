@@ -5,7 +5,7 @@ import { constants } from "node:fs";
 import { mkdtemp, open as openFile, realpath, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { openNativeCaptureClient, type NativeAutomationEndpoint, type NativeCaptureBinding } from "./native-capture-client.js";
+import { nativeConsoleCauses, NativeCaptureHostFailure, openNativeCaptureClient, type NativeConsoleCause, type NativeAutomationEndpoint, type NativeCaptureBinding } from "./native-capture-client.js";
 
 const execFileAsync = promisify(execFile);
 const DRIVER = "/Applications/Tron.app/Contents/Library/Native/cua-driver";
@@ -38,6 +38,8 @@ function parseCuaOutput(stdout: string, endpointGeneration: string, kind: "obser
 
 export class CuaComputerClient {
   private endpoint: NativeAutomationEndpoint | undefined;
+  private native: Awaited<ReturnType<typeof openNativeCaptureClient>> | undefined;
+  private endingTurn: Promise<void> | undefined;
   private pending: Promise<CuaComputerResult> | undefined;
   private closing: Promise<void> | undefined;
   private closed = false;
@@ -55,7 +57,7 @@ export class CuaComputerClient {
 
   invoke(tool: string, arguments_: Record<string, unknown>, signal?: AbortSignal): Promise<CuaComputerResult> {
     signal?.throwIfAborted();
-    if (this.closed) throw new Error("Computer session ended");
+    if (this.closed || this.endingTurn) throw new Error("Computer turn is ending or session ended");
     if (this.pending) throw new Error("One computer operation may be pending");
     const observation = OBSERVATIONS.has(tool);
     if (!observation && !ACTIONS.has(tool)) throw new Error("This computer tool is not available through Tron");
@@ -105,16 +107,23 @@ export class CuaComputerClient {
         if (this.closed) throw new Error("Computer session ended before help publication");
         return { status: "completed", output: { documentation: stdout }, endpointGeneration: "metadata" };
       }
-      if (!this.endpoint || (observation && this.refreshEndpoint)) {
+      const startingTurn = this.native === undefined;
+      if (startingTurn && !observation) throw new Error("Observe before establishing a computer turn");
+      const native = this.native ??= await openNativeCaptureClient(this.binding);
+      const state = await native.sessionState();
+      if (state.cause) {
+        this.invalidateObservation(); this.refreshEndpoint = true;
+        await this.releaseActivity();
+        return { status: "refused", output: { code: state.cause, state }, endpointGeneration: this.endpoint?.generation ?? "unavailable" };
+      }
+      if (startingTurn || !this.endpoint || this.refreshEndpoint) {
         if (!observation) throw new Error("Observe before establishing a computer endpoint");
-        const native = await openNativeCaptureClient(this.binding);
-        let endpoint: NativeAutomationEndpoint;
-        try { endpoint = await native.automationEndpoint(); }
-        finally { await native.close(); }
+        const endpoint = await native.automationEndpoint();
         signal?.throwIfAborted();
         if (this.closed) throw new Error("Computer session ended during bootstrap");
         this.endpoint = endpoint; this.refreshEndpoint = false;
       }
+      signal?.throwIfAborted();
       const endpoint = this.endpoint!;
       if (observation) {
         const { stdout } = await execFileAsync(DRIVER, ["call", "start_session", JSON.stringify({ session: this.binding.runtimeLoadID }), "--socket", endpoint.socket],
@@ -146,6 +155,13 @@ export class CuaComputerClient {
       const { stdout } = await execFileAsync(DRIVER, ["call", tool, JSON.stringify(args), "--socket", endpoint.socket], {
         env: this.environment(), maxBuffer: OUTPUT_LIMIT, encoding: "utf8", windowsHide: true,
       });
+      const after = await native.sessionState();
+      if (after.cause) {
+        this.invalidateObservation(); this.refreshEndpoint = true;
+        await this.releaseActivity();
+        return { status: observation ? "refused" : "outcomeUnknown", output: { code: after.cause, state: after,
+          ...(observation ? {} : { message: "The desktop became unavailable after dispatch; do not replay uncertain input" }) }, endpointGeneration: endpoint.generation };
+      }
       const result = parseCuaOutput(stdout, endpoint.generation, observation ? "observation" : "action");
       if (signal?.aborted || this.closed) throw new Error("Computer operation interrupted; it may have completed. Do not replay it");
       let image: CuaComputerResult["image"];
@@ -189,6 +205,15 @@ export class CuaComputerClient {
     } catch (error) {
       this.invalidateObservation();
       this.refreshEndpoint = true;
+      if (error instanceof NativeCaptureHostFailure) {
+        this.native = undefined;
+        if (nativeConsoleCauses.has(error.status as NativeConsoleCause)) {
+          return { status: "refused", output: { code: error.status }, endpointGeneration: this.endpoint?.generation ?? "unavailable" };
+        }
+      } else {
+        try { await this.releaseActivity(); }
+        catch (cleanup) { throw new AggregateError([error, cleanup], "Computer operation and activity retirement failed; observe before acting again"); }
+      }
       throw new Error(`Computer operation unavailable or uncertain; observe before acting again. ${error instanceof Error ? error.message : String(error)}`);
     } finally { if (directory) await rm(directory, { recursive: true, force: true }); }
   }
@@ -198,24 +223,49 @@ export class CuaComputerClient {
       CUA_DRIVER_RS_TELEMETRY_ENABLED: "false", CUA_TELEMETRY_ENABLED: "false" };
   }
 
+  private async releaseActivity(): Promise<void> {
+    const native = this.native; this.native = undefined;
+    if (native) {
+      const joined = await native.close();
+      if (joined.diagnostic) throw new Error("Computer activity retirement had a diagnostic");
+    }
+  }
+
+  endTurn(): Promise<void> {
+    if (this.endingTurn) return this.endingTurn;
+    const work = (async () => {
+      await this.pending?.catch(() => {});
+      this.invalidateObservation();
+      await this.releaseActivity();
+    })();
+    this.endingTurn = work;
+    void work.finally(() => { if (this.endingTurn === work) this.endingTurn = undefined; }).catch(() => {});
+    return work;
+  }
+
+  private async endCuaSession(): Promise<void> {
+    const endpoint = this.endpoint; this.endpoint = undefined;
+    if (!endpoint) return;
+    for (;;) {
+      const { stdout } = await execFileAsync(DRIVER, ["call", "end_session", JSON.stringify({ session: this.binding.runtimeLoadID }), "--socket", endpoint.socket],
+        { env: this.environment(), maxBuffer: OUTPUT_LIMIT, encoding: "utf8", windowsHide: true });
+      const result = JSON.parse(stdout) as Record<string, unknown>;
+      if (result.code === "session_cleanup_pending") {
+        await delay(100); continue;
+      }
+      if (result.active !== false || result.code !== undefined || result.error !== undefined) throw new Error("Cua session cleanup was not confirmed");
+      return;
+    }
+  }
+
   close(): Promise<void> {
     if (this.closing) return this.closing;
     this.closed = true;
-    this.closing = (async () => {
-      await this.pending?.catch(() => {});
-      const endpoint = this.endpoint; this.endpoint = undefined;
-      if (!endpoint) return;
-      for (;;) {
-        const { stdout } = await execFileAsync(DRIVER, ["call", "end_session", JSON.stringify({ session: this.binding.runtimeLoadID }), "--socket", endpoint.socket],
-          { env: this.environment(), maxBuffer: OUTPUT_LIMIT, encoding: "utf8", windowsHide: true });
-        const result = JSON.parse(stdout) as Record<string, unknown>;
-        if (result.code === "session_cleanup_pending") {
-          await delay(100); continue;
-        }
-        if (result.active !== false || result.code !== undefined || result.error !== undefined) throw new Error("Cua session cleanup was not confirmed");
-        break;
-      }
-    })();
+    this.closing = this.endTurn().then(() => this.endCuaSession(), async cause => {
+      try { await this.endCuaSession(); }
+      catch (cleanup) { throw new AggregateError([cause, cleanup], "Native activity retirement and Cua session cleanup failed"); }
+      throw cause;
+    });
     return this.closing;
   }
 }

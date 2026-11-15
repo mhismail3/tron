@@ -6,6 +6,19 @@ import Testing
 
 @Suite("Native helper retirement over a real Mach service", .serialized)
 struct NativeHostRetirementTests {
+    @Test("console admission publishes finite causes and releases scoped display-sleep assertions")
+    func consoleAdmissionAndActivity() throws {
+        let executable = try #require(ProcessInfo.processInfo.environment["TRON_NATIVE_CONSOLE_SESSION_PROBE"])
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.standardOutput = output; process.standardError = output
+        try process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        #expect(process.terminationStatus == 0, "\(String(decoding: data, as: UTF8.self))")
+    }
+
     @Test("a signature-pinning wrapper receives the confirmation, then the helper exits")
     func confirmationReachesPinnedWrapper() async throws {
         let job = try RetirementJob()

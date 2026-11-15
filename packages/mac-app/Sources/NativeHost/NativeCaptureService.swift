@@ -159,7 +159,7 @@ public final class NativeCaptureListener: NSObject, NSXPCListenerDelegate {
                         guard await peer.validate(), fence.admits(), !Task.isCancelled else { transport.connection.invalidate(); return }
                         let activated = handshake.activate {
                             guard let session = slot.finishHandshake(id, fence: fence,
-                                operations: .live(peer: peer, automationEndpoint: context.automationEndpoint)) else { transport.connection.invalidate(); return }
+                                operations: .live(peer: peer, console: context.console, automationEndpoint: context.automationEndpoint)) else { transport.connection.invalidate(); return }
                             transport.connection.exportedInterface = NSXPCInterface(with: TronNativeCaptureService.self)
                             transport.connection.exportedObject = NativeCaptureService(session: session)
                             transport.connection.activate()

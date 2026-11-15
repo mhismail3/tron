@@ -45,7 +45,7 @@ export function openNativeCaptureTransport(): NativeCaptureTransport {
     addon = createRequire(import.meta.url)(
       "/Applications/Tron.app/Contents/Library/Native/tron-native-capture.node",
     );
-    if (typeof addon !== "object" || addon === null || !("apiVersion" in addon) || addon.apiVersion !== 4
+    if (typeof addon !== "object" || addon === null || !("apiVersion" in addon) || addon.apiVersion !== 5
         || !("open" in addon) || typeof addon.open !== "function") {
       throw new Error("Invalid native capture addon");
     }

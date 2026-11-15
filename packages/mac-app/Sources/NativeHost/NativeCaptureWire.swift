@@ -4,6 +4,7 @@ import TronComputerControl
 enum NativeCaptureHostError: String, Error, Sendable {
     case invalidRequest, unauthorized, stale, busy, exhausted, unavailable
     case permissionUnavailable, sourceUnavailable, streamFailed
+    case mac_locked, display_asleep, no_console_session, no_active_display
 
     static func capture(_ error: any Error) -> Self {
         if let error = error as? Self { return error }
@@ -29,13 +30,14 @@ struct NativeCaptureRequest: Decodable, Equatable, Sendable {
     let generation: UUID?
     let readSequence: UInt64?
     var region: NativeCaptureRegion? = nil
+    var isRead: Bool { operation == "pull" || operation == "sessionState" }
 
     static func decode(_ data: Data) throws -> Self {
         guard !data.isEmpty, data.count <= 65_536,
               let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw NativeCaptureHostError.invalidRequest }
         let request = try JSONDecoder().decode(Self.self, from: data)
         var keys: Set<String> = ["version", "operation", "loadID"]
-        if request.operation != "pull" { keys.insert("commandID") }
+        if !request.isRead { keys.insert("commandID") }
         if request.operation != "hello" { keys.formUnion(["bootID", "connectionID", "sessionID"]) }
         switch request.operation {
         case "hello", "automationEndpoint", "catalog", "suspend", "stop": break
@@ -47,13 +49,15 @@ struct NativeCaptureRequest: Decodable, Equatable, Sendable {
                       Set(region.keys) == Set(["x", "y", "width", "height"]) else { throw NativeCaptureHostError.invalidRequest }
             }
         case "pull": keys.formUnion(["generation", "readSequence"])
+        case "sessionState": keys.insert("readSequence")
         default: throw NativeCaptureHostError.invalidRequest
         }
         guard request.version == 1, Set(object.keys) == keys,
-              (request.operation == "pull" ? request.commandID == nil : request.commandID != nil),
+              (request.isRead ? request.commandID == nil : request.commandID != nil),
               request.operation == "hello" || (request.bootID != nil && request.connectionID != nil && request.sessionID != nil),
               request.operation != "start" || request.handle != nil,
-              request.operation != "pull" || (request.generation != nil && (1...9_007_199_254_740_991).contains(request.readSequence ?? 0)) else {
+              request.operation != "pull" || request.generation != nil,
+              !request.isRead || (1...9_007_199_254_740_991).contains(request.readSequence ?? 0) else {
             throw NativeCaptureHostError.invalidRequest
         }
         return request
