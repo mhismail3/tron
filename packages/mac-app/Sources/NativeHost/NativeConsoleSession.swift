@@ -74,23 +74,27 @@ final class NativeConsoleSession: @unchecked Sendable {
 
 final class NativeComputerActivity: @unchecked Sendable {
     private let lock = NSLock()
-    private var assertion: IOPMAssertionID
+    private var assertions: [IOPMAssertionID] = []
 
     init() throws {
-        var assertion = IOPMAssertionID(kIOPMNullAssertionID)
-        guard IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
-                                         IOPMAssertionLevel(kIOPMAssertionLevelOn), "Tron active computer turn" as CFString,
-                                         &assertion) == kIOReturnSuccess else { throw NativeCaptureHostError.unavailable }
-        self.assertion = assertion
+        for type in [kIOPMAssertionTypePreventUserIdleSystemSleep, kIOPMAssertionTypePreventUserIdleDisplaySleep] {
+            var assertion = IOPMAssertionID(kIOPMNullAssertionID)
+            guard IOPMAssertionCreateWithName(type as CFString, IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                                             "Tron active computer turn" as CFString, &assertion) == kIOReturnSuccess else {
+                close()
+                throw NativeCaptureHostError.unavailable
+            }
+            assertions.append(assertion)
+        }
     }
 
     func close() {
-        let value = lock.withLock {
-            let value = assertion
-            assertion = IOPMAssertionID(kIOPMNullAssertionID)
-            return value
+        let values = lock.withLock {
+            let values = assertions
+            assertions.removeAll()
+            return values
         }
-        if value != kIOPMNullAssertionID { IOPMAssertionRelease(value) }
+        for value in values { IOPMAssertionRelease(value) }
     }
 
     deinit { close() }

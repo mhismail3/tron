@@ -40,7 +40,7 @@ servers](docs/mcp.md). Virtual models and Jev: [providers](src/providers/README.
 
 `computer` and `native_capture` report finite `mac_locked`, `display_asleep`,
 `no_console_session` or `no_active_display` refusals. Native Host owns the snapshot
-and computer-turn idle-display-sleep assertion; see
+and computer-turn idle-system/display-sleep assertions; see
 [console session admission](../mac-app/docs/computer-control.md#console-session-admission)
 and the [machine clients](src/machine/README.md#native-capture-and-computer-use).
 

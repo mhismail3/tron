@@ -91,7 +91,7 @@ The iPhone pins the private host identity at enrollment
   Contract: [Mac computer control](../../../mac-app/docs/computer-control.md#direct-gateway-capture-client).
 - **`computer`** is a thin `{tool, arguments}` client of the pinned Cua Driver, whose
   per-generation socket the Native Host owns; `{socket, generation}` bootstrap
-  starts a host-owned scoped idle-display-sleep assertion. The Gateway retains its
+  starts host-owned scoped idle-system/display-sleep assertions. The Gateway retains its
   native connection through the turn and releases it at agent end/Stop/shutdown;
   native peer loss releases it after a Gateway crash. It accepts no endpoint, environment or session
   from model input. Refused, malformed, non-zero or disconnected results are refusal

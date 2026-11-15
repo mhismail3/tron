@@ -21,12 +21,15 @@ func state(console: Bool = true, login: Bool = true, locked: Bool = false, saver
     NativeConsoleSessionState(onConsole: console, loginDone: login, screenLocked: locked, screensaverActive: saver,
                               displaysAsleep: asleep, lidClosed: lid, activeDisplayCount: displays, topologyGeneration: UUID())
 }
-func assertionCount() throws -> Int {
+func assertionTypes() throws -> Set<String> {
     var result: Unmanaged<CFDictionary>?
     try require(IOPMCopyAssertionsByProcess(&result) == kIOReturnSuccess, "IOPM assertions unavailable")
     let assertions = result!.takeRetainedValue() as NSDictionary
     let own = assertions[NSNumber(value: getpid())] as? [[String: Any]] ?? []
-    return own.filter { $0[kIOPMAssertionNameKey] as? String == "Tron active computer turn" }.count
+    let activity = own.filter { $0[kIOPMAssertionNameKey] as? String == "Tron active computer turn" }
+    let types = activity.compactMap { $0[kIOPMAssertionTypeKey] as? String }
+    try require(types.count == activity.count && Set(types).count == types.count, "missing or duplicate activity assertion type")
+    return Set(types)
 }
 struct Session {
     let native: NativeCaptureSession
@@ -90,7 +93,7 @@ func run() async throws {
         let session = try await Session(ready)
         _ = try await session.request("automationEndpoint")
         _ = try await session.request("automationEndpoint")
-        try require(try assertionCount() == 1, "activity assertion absent or duplicated")
+        try require(try assertionTypes() == Set([kIOPMAssertionTypePreventUserIdleDisplaySleep, kIOPMAssertionTypePreventUserIdleSystemSleep]), "display or system activity assertion absent or duplicated")
         for sequence in 1...100 {
             let snapshot = try await session.request("sessionState", read: UInt64(sequence))
             try require(snapshot["status"] as? String == "sessionState", "disposable reads consumed command receipts")
@@ -109,7 +112,7 @@ func run() async throws {
             _ = await session.peerLost()
             ready.set(state())
         }
-        try require(try assertionCount() == 0, "activity assertion leaked after \(exit)")
+        try require(try assertionTypes().isEmpty, "activity assertion leaked after \(exit)")
     }
     print("PASS: real snapshot; finite capture/computer refusals; 100 disposable reads; scoped IOPM release after Stop, peer loss and lock")
 }
