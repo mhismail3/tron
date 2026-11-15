@@ -1,18 +1,44 @@
 import { createHash } from "node:crypto";
-import { cp, mkdir, readFile, readdir, symlink } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { cp, mkdir, readFile, readdir, rm, symlink } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
+const PAYLOAD_FILES = ["test-support", "vitest.config.ts", "vitest.nested.config.ts", "package.json"];
 
-export async function copyPayload(payload: string, ownTestFile: string): Promise<void> {
+export async function gatewayCommitForSubagentsVersion(version: string): Promise<string> {
+  const pin = ":(top)packages/gateway/pi-subagents-pin.json";
+  const { stdout } = await promisify(execFile)("git", ["-C", packageRoot, "log", "-1", "--format=%H", `-S"version": "${version}"`, "--", pin]);
+  const commit = stdout.trim();
+  if (!/^[0-9a-f]{40}$/u.test(commit)) throw new Error(`No Gateway commit pins pi-subagents ${version}`);
+  const pinned = JSON.parse((await promisify(execFile)("git", ["-C", packageRoot, "show", `${commit}:packages/gateway/pi-subagents-pin.json`])).stdout);
+  if (pinned.version !== version) throw new Error(`Gateway commit ${commit} does not select pi-subagents ${version}`);
+  return commit;
+}
+
+export async function copyPayload(payload: string, ownTestFile: string, gatewayCommit?: string): Promise<void> {
   await mkdir(payload);
-  await cp(join(packageRoot, "src"), join(payload, "src"), {
+  const source = gatewayCommit ? `${payload}.source` : packageRoot;
+  if (gatewayCommit) {
+    await mkdir(source);
+    await promisify(execFile)("sh", ["-c", 'git -C "$1" archive --format=tar "$2" packages/gateway/src packages/gateway/test-support packages/gateway/vitest.config.ts packages/gateway/vitest.nested.config.ts packages/gateway/package.json | tar -x --strip-components=2 -C "$3"', "sh", packageRoot, gatewayCommit, source]);
+  }
+  let ownTest: string | undefined;
+  await cp(join(source, "src"), join(payload, "src"), {
     recursive: true,
-    filter: (source) => !source.endsWith(".test.ts") || source.endsWith(ownTestFile),
+    filter: (path) => {
+      if (!path.endsWith(".test.ts")) return true;
+      if (path.endsWith(ownTestFile)) ownTest = relative(source, path);
+      return path.endsWith(ownTestFile);
+    },
   });
-  for (const file of ["test-support", "vitest.config.ts", "vitest.nested.config.ts", "package.json"]) {
-    await cp(join(packageRoot, file), join(payload, file), { recursive: true });
+  for (const file of PAYLOAD_FILES) await cp(join(source, file), join(payload, file), { recursive: true });
+  if (gatewayCommit) {
+    if (!ownTest) throw new Error(`Gateway commit ${gatewayCommit} has no ${ownTestFile}`);
+    await cp(join(packageRoot, ownTest), join(payload, ownTest));
+    await rm(source, { recursive: true, force: true });
   }
   await symlink(join(packageRoot, "node_modules"), join(payload, "node_modules"));
   await symlink(join(packageRoot, "artifacts"), join(payload, "artifacts"));
