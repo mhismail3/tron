@@ -81,7 +81,7 @@ async function retireFixture(directory) {
       if (sockets.includes(`n${owned.socket}`)) {
         try { process.kill(owned.pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; }
       }
-      await rm(owned.directory, { recursive: true, force: true });
+      if (owned.directory !== directory) await rm(owned.directory, { recursive: true, force: true });
     }
   }
   await rm(directory, { recursive: true });
@@ -135,4 +135,25 @@ test("attach cleanup honors a confirmed close and refuses a foreign PID receipt"
       } finally { await retireFixture(directory); }
     });
   }
+});
+
+test("the shipped bench reports every bounded cleanup diagnostic after long primary errors", async () => {
+  const directory = await mkdtemp("/tmp/cbb-test-");
+  try {
+    const report = join(directory, "report.json"), markdown = join(directory, "report.md");
+    const result = await run(process.execPath, [fileURLToPath(new URL("./bench.mjs", import.meta.url)), "--tools", "agent-browser", "--only", "signed-in-chrome", "--reps", "1", "--chrome-cdp", "ws://127.0.0.1:9222/devtools/browser", "--json", report, "--markdown", markdown], {
+      timeoutMs: 10000,
+      env: { ...process.env, COMPUTER_BENCH_AGENT_BROWSER: fileURLToPath(new URL("./fixtures/agent-browser-cli.mjs", import.meta.url)),
+        COMPUTER_BENCH_FIXTURE_MODE: "long-errors", COMPUTER_BENCH_FIXTURE_OWNER_DIRECTORY: directory,
+        COMPUTER_BENCH_FIXTURE_FOREIGN_PID: String(process.pid), AGENT_BROWSER_SOCKET_DIR: directory },
+    });
+    assert.equal(result.code, 0, result.stderr);
+    const attempt = JSON.parse(await readFile(report, "utf8")).tools[0].tasks["signed-in-chrome"][0];
+    assert.equal(attempt.status, "fail");
+    for (const diagnostics of [attempt.detail, result.stderr, await readFile(markdown, "utf8")]) {
+      assert.match(diagnostics, /primary fixture read failed/u);
+      assert.match(diagnostics, /secondary fixture cleanup failed/u);
+      assert.match(diagnostics, /does not own the expected attach session in \/tmp\/cba-/u);
+    }
+  } finally { await retireFixture(directory); }
 });

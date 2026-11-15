@@ -68,7 +68,11 @@ async function runTool(name, options, ctx) {
       for (const id of ids) {
         const started = performance.now();
         let outcome;
-        try { outcome = await adapter.tasks[id](ctx); } catch (error) { outcome = { ok: false, detail: String(error.message ?? error).slice(0, 400) }; }
+        try { outcome = await adapter.tasks[id](ctx); }
+        catch (error) {
+          const errors = error instanceof AggregateError && error.errors.length ? error.errors : [error];
+          outcome = { ok: false, detail: errors.slice(0, 4).map((entry, index) => `${index ? "cleanup: " : ""}${String(entry?.message ?? entry).slice(0, 400)}`).join("; ") };
+        }
         const ms = Math.round(performance.now() - started);
         const status = outcome.status ?? (outcome.ok ? "pass" : "fail");
         (tool.tasks[id] ??= []).push({ status, ms, ...(Number.isFinite(outcome.attachMs) ? { attachMs: outcome.attachMs } : {}), detail: outcome.detail?.replace(/\s+/gu, " ").trim(), stoleFocus: outcome.stoleFocus ?? false });

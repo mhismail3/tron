@@ -6,6 +6,8 @@ import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
+if (process.argv.includes("--version")) { process.stdout.write("fixture CLI\n"); process.exit(0); }
+
 const directory = process.env.AGENT_BROWSER_SOCKET_DIR;
 if (process.env.AGENT_BROWSER_DAEMON) {
   const session = process.env.AGENT_BROWSER_SESSION;
@@ -25,17 +27,18 @@ if (process.env.AGENT_BROWSER_DAEMON) {
           const pending = createConnection({ host: url.hostname, port: Number(url.port) });
           pending.on("error", () => {});
         } else reply({ success: true, data: {} });
-      } else if (process.env.COMPUTER_BENCH_FIXTURE_MODE === "success") {
+      } else if (command === "open") reply({ success: true, data: {} });
+      else if (process.env.COMPUTER_BENCH_FIXTURE_MODE === "success") {
         if (command === "get") reply({ success: true, data: endpoint === "cdp-url" ? { cdpUrl } : { title: "Bench Form" } });
         else if (command === "tab") reply({ success: true, data: { tabId: "t1" } });
         else { reply({ success: true, data: { closed: true } }); server.close(); }
-      } else if (command === "get") reply({ success: false, error: "primary fixture read failed" });
-      else reply({ success: false, error: "secondary fixture cleanup failed" });
+      } else if (command === "get") reply({ success: false, error: "primary fixture read failed" + (process.env.COMPUTER_BENCH_FIXTURE_MODE === "long-errors" ? "p".repeat(300) : "") });
+      else reply({ success: false, error: "secondary fixture cleanup failed" + (process.env.COMPUTER_BENCH_FIXTURE_MODE === "long-errors" ? "c".repeat(300) : "") });
     });
   });
   server.listen(join(directory, `${session}.sock`), () => {
     writeFileSync(join(process.env.COMPUTER_BENCH_FIXTURE_OWNER_DIRECTORY, `fixture-${process.pid}.json`), JSON.stringify({ pid: process.pid, directory, socket: join(directory, `${session}.sock`) }));
-    writeFileSync(join(directory, `${session}.pid`), process.env.COMPUTER_BENCH_FIXTURE_MODE === "foreign" ? process.env.COMPUTER_BENCH_FIXTURE_FOREIGN_PID : String(process.pid));
+    writeFileSync(join(directory, `${session}.pid`), ["foreign", "long-errors"].includes(process.env.COMPUTER_BENCH_FIXTURE_MODE) ? process.env.COMPUTER_BENCH_FIXTURE_FOREIGN_PID : String(process.pid));
   });
 } else {
   const args = process.argv.slice(2);

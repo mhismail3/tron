@@ -64,11 +64,13 @@ birth identity before terminating only that daemon, then verifies its exit. A co
 `close` instead waits for normal daemon exit. It never signals the owner Chrome process.
 Unproven retirement retains the namespace for inspection and reports failure rather
 than claiming cleanup. Primary errors remain first and are the aggregate's `cause`;
-tab-close, session-close and retirement failures are secondary diagnostics.
+tab-close, session-close and retirement failures are secondary diagnostics. Reporting
+bounds these four task diagnostics independently at 400 characters each, preserving
+primary-first ordering and cleanup ownership failures in JSON, Markdown and stderr.
 
 The existing bench test owner exercises this through an external CLI process fixture,
-including pending TCP consent, secondary close failure, confirmed close and a forged
-foreign-PID receipt. A local held-WebSocket-upgrade server can separately qualify the
+including pending TCP consent, secondary close failure, confirmed close, a forged
+foreign-PID receipt and long-error diagnostics through the shipped benchmark CLI. A local held-WebSocket-upgrade server can separately qualify the
 pinned native engine's retirement contract without launching Chrome. Transport
 retirement is not a live native-sheet dismissal or signed-in attach acceptance claim.
 Use `COMPUTER_BENCH_AGENT_BROWSER` to select the qualified engine under test rather
