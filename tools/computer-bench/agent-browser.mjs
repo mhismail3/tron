@@ -7,7 +7,7 @@ import { pngSize, run } from "./process.mjs";
 
 const BINARY = process.env.COMPUTER_BENCH_AGENT_BROWSER ?? join(homedir(), ".tron/agent/bin/agent-browser");
 
-export function agentBrowser({ chromeCdp } = {}) {
+export function agentBrowser({ chromeCdp, reps = 1 } = {}) {
   const session = `cb2476-${process.pid}`;
   const profileSession = `${session}-profile`;
   const attachedSession = `${session}-attach`;
@@ -125,29 +125,46 @@ export function agentBrowser({ chromeCdp } = {}) {
         const options = { sessionName: attachedSession };
         const started = performance.now();
         attached = true;
-        let tab;
         let attachMs;
-        const readsBefore = ctx.site.authenticatedReads();
+        let verifiedEndpoint = false;
+        let outcome;
+        const errors = [];
+        const fixtureURLs = ["login", "fact"].map(path => `${ctx.site.origin}${ctx.site.authPath}/${path}`);
         try {
           await call(["connect", chromeCdp], { ...options, timeoutMs: 2_000 });
           attachMs = Math.round(performance.now() - started);
           const connection = await call(["get", "cdp-url"], options);
           if (connection.cdpUrl !== chromeCdp) throw new Error("Attached browser endpoint changed; refusing fixture operation");
-          const opened = await call(["tab", "new", `${ctx.site.origin}/attach/${ctx.rep === 0 ? "login" : "fact"}`], options);
-          tab = opened.tabId;
-          if (typeof tab !== "string" || !tab.length) throw new Error("Fixture tab identity unavailable; open outcome uncertain");
+          verifiedEndpoint = true;
+          const opened = await call(["tab", "new", fixtureURLs[ctx.rep === 0 ? 0 : 1]], options);
+          if (typeof opened.tabId !== "string" || !opened.tabId.length) throw new Error("Fixture tab identity unavailable; open outcome uncertain");
           const title = await value(["get", "title"], options);
-          const fact = await value(["get", "text", "#authenticated-fact"], options);
-          const authenticated = title === "Bench Authenticated" && fact === ctx.site.authNonce && ctx.site.authenticatedReads() > readsBefore;
-          return { ok: authenticated && attachMs <= 2_000, attachMs,
-            detail: `fixture authentication=${authenticated ? "verified" : "failed"}; session=${ctx.rep === 0 ? "seeded" : "retained across detach"}; attach=${attachMs}ms; exact fixture tab closed in finally` };
-        } finally {
-          try { if (tab) await call(["tab", "close", tab], options); }
-          finally {
-            await call(["close"], options);
-            attached = false;
+          const fact = title === "Bench Authenticated" ? await value(["get", "text", "#authenticated-fact"], options) : "";
+          const authenticated = title === "Bench Authenticated" && fact === ctx.site.authNonce;
+          outcome = { ok: authenticated && attachMs <= 2_000, attachMs,
+            detail: `fixture authentication=${authenticated ? "verified" : "failed"}; session=${authenticated ? (ctx.rep === 0 ? "seeded" : "retained across detach") : "unverified"}; attach=${attachMs}ms` };
+        } catch (error) { errors.push(error); }
+        if (verifiedEndpoint) {
+          if (ctx.rep === reps - 1 || errors.length || !outcome?.ok) {
+            try {
+              await call(["cookies", "set", "bench_attach", "", "--domain", new URL(ctx.site.origin).hostname,
+                "--path", `${ctx.site.authPath}/`, "--httpOnly", "--sameSite", "Strict", "--expires", "1"], options);
+            } catch (error) { errors.push(error); }
           }
+          try {
+            const listed = await call(["tab", "list"], options);
+            const tabs = Object.values(listed).find(Array.isArray);
+            if (!tabs) throw new Error("Fixture cleanup tab enumeration unavailable");
+            for (const tab of tabs.filter(tab => fixtureURLs.includes(tab.url))) {
+              const id = tab.tabId ?? tab.id;
+              if (typeof id !== "string" || !id.length) { errors.push(new Error("Fixture cleanup tab identity unavailable")); continue; }
+              try { await call(["tab", "close", id], options); } catch (error) { errors.push(error); }
+            }
+          } catch (error) { errors.push(error); }
         }
+        try { await call(["close"], options); attached = false; } catch (error) { errors.push(error); }
+        if (errors.length) throw new AggregateError(errors, errors.map(error => error.message).join("; "));
+        return { ...outcome, detail: `${outcome.detail}; fixture tab cleanup and detach completed` };
       },
     },
   };

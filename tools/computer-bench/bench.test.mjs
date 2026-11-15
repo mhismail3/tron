@@ -42,21 +42,22 @@ test("the fixture site serves the consent redirect across origins, the cookie se
     const cookie = login.headers.get("set-cookie").split(";")[0];
     assert.match(await (await fetch(`${site.origin}/whoami`, { headers: { cookie } })).text(), /user=bench-user/u);
     assert.match(await (await fetch(`${site.origin}/whoami`)).text(), /user=anonymous/u);
-    const denied = await fetch(`${site.origin}/attach/fact`);
+    const denied = await fetch(`${site.origin}${site.authPath}/fact`);
     assert.equal(denied.status, 403);
-    const attachLogin = await fetch(`${site.origin}/attach/login`, { redirect: "manual" });
+    const attachLogin = await fetch(`${site.origin}${site.authPath}/login`, { redirect: "manual" });
     const attachCookie = attachLogin.headers.get("set-cookie").split(";")[0];
     assert.equal(attachLogin.status, 302);
-    assert.equal(attachLogin.headers.get("location"), "/attach/fact");
+    assert.equal(attachLogin.headers.get("location"), `${site.authPath}/fact`);
+    assert.match(attachLogin.headers.get("set-cookie"), new RegExp(`Path=${site.authPath}/;`, "u"));
     assert.equal(site.authenticatedReads(), 0);
-    const fact = await fetch(`${site.origin}/attach/fact`, { headers: { cookie: attachCookie } });
+    const fact = await fetch(`${site.origin}${site.authPath}/fact`, { headers: { cookie: attachCookie } });
     assert.equal(fact.status, 200);
     assert.match(await fact.text(), new RegExp(site.authNonce, "u"));
     assert.equal(site.authenticatedReads(), 1);
     const otherSite = await startSite();
     try {
       assert.notEqual(otherSite.authNonce, site.authNonce);
-      assert.equal((await fetch(`${otherSite.origin}/attach/fact`, { headers: { cookie: attachCookie } })).status, 403);
+      assert.equal((await fetch(`${otherSite.origin}${otherSite.authPath}/fact`, { headers: { cookie: attachCookie } })).status, 403);
     } finally { await otherSite.close(); }
     assert.equal(await (await fetch(`${site.origin}/download/bench.txt`)).text(), DOWNLOAD_BODY);
   } finally { await site.close(); }

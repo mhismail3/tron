@@ -54,10 +54,16 @@ or attaches. With one it connects in a separate tool session, verifies the exact
 endpoint, opens only its own local fixture tab and reads a per-run nonce behind a
 fixture cookie. The first repetition seeds that fixture-only cookie; later repetitions
 must read the same protected fact after detach/re-attach without logging in again.
-The server independently counts authenticated reads. A file-existence probe, public
-page title or copied expected nonce cannot satisfy this oracle. Only the issued tab ID
-is closed; detach never closes Chrome. No real Google/Chrome account status, email,
-cookie/token, account page or sign-in internals are inspected.
+The runner independently requires a server-authenticated read; the adapter verifies
+the returned nonce. A file-existence probe, public page title or copied expected nonce
+cannot satisfy this oracle. Each run has a unique fixture path and cookie scope. The
+last or a failed repetition expires only that synthetic cookie. Cleanup filters tab
+metadata internally to this run's exact fixture URLs, closes only matching IDs, and
+requests detach; a lost tab-creation response does not abandon a fixture tab. Cleanup
+errors preserve the original failure and cannot produce a passing attempt. Hard process
+termination cannot guarantee cleanup. Installed owner-Chrome preservation remains a
+live checkpoint gate. No real Google/Chrome account status, email, cookie/token,
+account page or sign-in internals are inspected or returned in results.
 Every repetition starts detached; raw JSON records `attachMs` separately from total
 task wall time. Attach has a two-second bound; absent consent, wrong authentication
 fact/title, changed endpoint or failed cleanup is failure.
