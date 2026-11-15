@@ -1333,7 +1333,8 @@ def main(argv: list[str]) -> int:
         if not args.plan and git("status", "--porcelain", "--untracked-files=normal").strip():
             raise VerifyError("the worktree has uncommitted or untracked changes; verify reads the committed state, commit first")
         sha = git("rev-parse", "HEAD").strip()
-        base = git("merge-base", args.base, "HEAD").strip() if name == "changed" else git("rev-parse", "--verify", args.base).strip()
+        branch_base = name == "changed" or (name == "all" and args.ios_host == "mini")
+        base = git(*(["merge-base", args.base, "HEAD"] if branch_base else ["rev-parse", "--verify", args.base])).strip()
         result, _ = ownership.check()
         modules = result["modules"]
         paths = changed_paths(base, working=True) if args.plan and name == "changed" else None

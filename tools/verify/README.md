@@ -124,10 +124,14 @@ iOS work, the existing group routing remains in effect. A direct mini invocation
 `python-here` or `mac-terminal` before starting runners: those checks belong to their Mac's stores/SSH
 service. Golden recording is local-only and cannot be combined with remote verification.
 
-For `--all --ios-host mini`, the submitting verifier runs its cheap checks and selected host-bound groups
-locally, then delegates the remaining selection under one normal mini lease. No simulator command runs
-on the submitting Mac. Exact `--skip python-here,mac-terminal` groups describe only the remote contribution;
-the parent covers them locally and retains the unmodified remote report and receipt. Its canonical
+For `--all --ios-host mini`, both halves use `merge-base(<requested base>, HEAD)` for their covered diff;
+the remote can resolve that reachable ancestor even when the requested tip is ahead of the branch.
+Local-only `--all` uses the requested base directly. The submitting verifier runs its cheap checks and
+selected host-bound groups locally, then delegates the remaining selection under one normal mini lease.
+No simulator command runs on the submitting Mac. The parent adds exact host-bound skip arguments only
+for groups it covers locally, and retains the unmodified remote report and receipt. User-requested skips
+remain genuine skips and make the report ineligible; removing all host-bound work leaves a whole-mini
+handoff with no local coverage of those groups. Its canonical
 `test-results/verify/<sha>.json` combines the disjoint steps, execution hosts and copied remote log paths
 only after commit/tree, host, selection, group, skip and raw-exit identity match. A local red suppresses the mini
 phase; remote failure, no result and interruption remain distinct, with owned process cleanup unchanged.
