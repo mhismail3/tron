@@ -582,6 +582,7 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
     await shutdownStep("search-close", async () => { await sessionSearch?.close(); }, recordShutdownStep);
     await shutdownStep("sessions-dispose", () => sessions.dispose(), recordShutdownStep);
     await shutdownStep("modules-stop", () => modules.stop(), recordShutdownStep);
+    await shutdownStep("model-runtime-settle", () => modelRuntime.settleCredentialWrites(), recordShutdownStep);
     await shutdownStep("command-receipts-dispose", () => receipts.dispose(), recordShutdownStep);
     await shutdownStep("runtime-lock-release", () => releaseRuntimeLock(), recordShutdownStep);
     if (forced) clearTimeout(forced);
