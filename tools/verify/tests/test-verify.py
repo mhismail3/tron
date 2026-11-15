@@ -1370,6 +1370,11 @@ class ContractTests(VerifyCase):
         self.assertEqual(r.report()["passingTests"], 1)
 
 
+MAC_STUB = ("import os, sys\nfrom pathlib import Path\n"
+            "if '--signing-preflight' in sys.argv:\n    sys.exit(int(os.environ.get('FIXTURE_MAC_PREFLIGHT_EXIT', '0')))\n"
+            "Path('test-results/mac-ran').touch()\nprint('Test run with 1 test in 1 suite passed after 1.0 seconds.')\n")
+
+
 IOS_TEST_STUB = r"""#!/bin/bash
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -1676,7 +1681,7 @@ class IosLaneTests(VerifyCase):
         mac = "packages/mac-app/Tests"
         r.write(f"{mac}/tests.module.json", json.dumps({"layer": "L5", "owns": ["**"]}))
         r.write(f"{mac}/Integration/FixtureTests.swift", "struct FixtureTests {}\n")
-        r.write("tools/verify/mac.py", "from pathlib import Path\nPath('test-results/mac-ran').touch()\nprint('Test run with 1 test in 1 suite passed after 1.0 seconds.')\n")
+        r.write("tools/verify/mac.py", MAC_STUB)
         r.write("mods/alpha/alpha.module.json", json.dumps({"layer": "L3", "owns": ["**"], "verify": [
             "scripts/tron test ios run --only-testing TronMobileUITests/FixtureLockTests --only-testing TronMobileUITests/TronMacTerminalUITests",
             "scripts/tron test mac"]}))
@@ -1707,6 +1712,28 @@ class IosLaneTests(VerifyCase):
         self.assertEqual(busy.returncode, 1, busy.stdout + busy.stderr)
         self.assertEqual(r.report()["verdict"], "incomplete")
         self.assertTrue(marker.exists(), "a busy boundary is incomplete, not a red that suppresses Mac tests")
+
+    def test_missing_mac_signing_identity_refuses_before_the_ios_shards_start(self) -> None:
+        r = self.repo
+        calls = self.ios_fixture()
+        mac = "packages/mac-app/Tests"
+        r.write(f"{mac}/tests.module.json", json.dumps({"layer": "L5", "owns": ["**"]}))
+        r.write(f"{mac}/Integration/FixtureTests.swift", "struct FixtureTests {}\n")
+        r.write("tools/verify/mac.py", MAC_STUB)
+        r.write("mods/alpha/alpha.module.json", json.dumps({"layer": "L3", "owns": ["**"], "verify": [
+            "scripts/tron test ios run --only-testing TronMobileUITests/FixtureLockTests", "scripts/tron test mac"]}))
+        r.commit("selected simulator and Mac coverage")
+        r.env["FIXTURE_MAC_PREFLIGHT_EXIT"] = "1"
+        result = r.verify("--module", "repo/alpha")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        report = r.report()
+        self.assertEqual(report["verdict"], "failed")
+        statuses = {step["name"]: step["status"] for step in report["steps"]}
+        self.assertEqual(statuses["mac signing preflight"], "failed", result.stdout)
+        self.assertEqual(statuses["tests: ios"], "skipped")
+        self.assertEqual(statuses["tests: mac"], "skipped")
+        self.assertFalse(calls.exists(), "an unsignable Mac selection must not build or run any iOS shard")
+        self.assertFalse((r.path / "test-results/mac-ran").exists(), "the Mac tests must not run after a refused preflight")
 
     def test_ios_change_builds_once_checks_references_and_runs_only_the_ui_locks(self) -> None:
         r = self.repo

@@ -9,7 +9,7 @@ export class AgentActivity {
   start(): Promise<void> {
     if (this.closing) return Promise.reject(new Error("Agent activity is retiring"));
     if (this.ready) return this.ready;
-    const child = this.child = spawn("/usr/bin/caffeinate", ["-i", "-w", String(process.pid)], { stdio: "ignore" });
+    const child = this.child = spawn("/usr/bin/caffeinate", ["-i", "-w", String(process.pid)], { stdio: "ignore", env: {} });
     this.ready = once(child, "spawn").then(() => {});
     return this.ready;
   }

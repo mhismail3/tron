@@ -163,6 +163,9 @@ live log, result and wall time. The cheap tier runs static/type checks, iOS sour
 Python tooling tests, shell/Node tests and selected Gateway/Relay tests before any simulator build,
 UI journey or Mac test stage. It collects every cheap-tier failure; the verdict lists them in
 step order, first red first. A cheap-tier failure prevents all expensive stages from starting.
+When the selection includes the Mac integration tests, the cheap tier also runs `mac signing preflight` (`tools/verify/mac.py --signing-preflight`):
+it reads the keychain only and passes when a valid Apple Development or Mac Development identity has a certificate whose OU is the team in
+`packages/mac-app/project.yml`. A refusal stops every expensive stage, including the iOS shards, before any of them start; `scripts/tron test mac` runs the same check before it generates or builds.
 After that boundary, expensive stages stop on red; pending stages remain selected and are
 reported as skipped, never passed. A failed `ios build` also skips `layers ios`.
 `test-results/verify/<sha>.json` is atomically updated before/after every step;

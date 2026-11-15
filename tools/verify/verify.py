@@ -1421,13 +1421,6 @@ def main(argv: list[str]) -> int:
     cheap_groups = [group for group in ("python", "python-here", "shell", "node", "node-gateway", "gateway", "gateway-nested", "relay") if group in groups]
     expensive_groups = sorted(set(groups) - set(cheap_groups))
     ordered_groups = cheap_groups + expensive_groups
-    plan_steps = ["ownership", "worktree residue", "documentation policy", "generated docs", "agent policy", "home layout", "privacy guard", "git diff --check",
-                  "no new comments"] \
-        + (["gateway typecheck", "gateway lint", "layers gateway"] if gateway_touched else []) \
-        + (["ios source policy"] if ios_lane else []) \
-        + [name for group in cheap_groups for name in test_step_names(group, shards, skipped_group(group))] \
-        + (["ios build"] if ios_lane else []) + ["layers ios"] \
-        + [name for group in expensive_groups for name in test_step_names(group, shards, skipped_group(group))]
     tron = str(ROOT / "scripts/tron")
     ios_test = str(ROOT / "scripts/tron-ios-test")
     ios_policy = [str(ROOT / "packages/ios-app/scripts/test-source-policy.sh")]
@@ -1448,10 +1441,17 @@ def main(argv: list[str]) -> int:
     ]
     if gateway_touched or any(path.startswith("tools/verify/context") or path == "tools/verify/tests/test-context.py" for path in selection["paths"]):
         checks.append(("context audit (report only)", [tron, "context", "audit", "--report-only"], {}))
-        plan_steps.insert(plan_steps.index("no new comments") + 1, "context audit (report only)")
+    if "mac" in groups and not skipped_group("mac"):
+        checks.append(("mac signing preflight", ["python3", str(ROOT / "tools/verify/mac.py"), "--signing-preflight"], {}))
     gateway_checks = [("gateway typecheck", node + ["npm", "run", "check"]),
                       ("gateway lint", node + ["npm", "run", "lint"]),
                       ("layers gateway", [tron, "layers", "gateway", "--base", base])]
+    plan_steps = [label for label, _, _ in checks] \
+        + (["gateway typecheck", "gateway lint", "layers gateway"] if gateway_touched else []) \
+        + (["ios source policy"] if ios_lane else []) \
+        + [name for group in cheap_groups for name in test_step_names(group, shards, skipped_group(group))] \
+        + (["ios build"] if ios_lane else []) + ["layers ios"] \
+        + [name for group in expensive_groups for name in test_step_names(group, shards, skipped_group(group))]
     if args.plan:
         commands = [{"name": label, "command": command, "cwd": ".", **options} for label, command, options in checks]
         if gateway_touched:

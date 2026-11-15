@@ -243,6 +243,17 @@ for arg in sys.argv:
         for name in ('swift', 'xcodebuild'):
             (binaries / name).write_text('#!/bin/sh\necho '+name+' >> test-results/executed\necho "Executed 2 tests, with 0 failures"\n')
             (binaries / name).chmod(0o755)
+        identity = Path(self.temporary.name) / 'identity.pem'
+        subprocess.run(['openssl', 'req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes', '-keyout', os.devnull,
+                        '-subj', '/CN=Apple Development: Fixture/OU=TEAMFIXT01/O=Fixture', '-days', '1', '-out', str(identity)],
+                       check=True, capture_output=True)
+        (binaries / 'security').write_text('''#!/bin/sh
+case "$1" in
+  find-identity) echo '  1) 0000000000000000000000000000000000000000 "Apple Development: Fixture"'; echo '     1 valid identities found' ;;
+  find-certificate) echo 'SHA-1 hash: 0000000000000000000000000000000000000000'; cat IDENTITY ;;
+esac
+'''.replace('IDENTITY', str(identity)))
+        (binaries / 'security').chmod(0o755)
         self.env['PATH'] = str(binaries) + os.pathsep + self.env['PATH']
         self.write('scripts/ios-test-lock.py', '''import sys,subprocess
 HOST_SLOTS=3
@@ -262,9 +273,10 @@ if sys.argv[1] in ('run', 'checkpoint'):
 ''', True)
         self.write('scripts/ios-gateway-e2e-test', '#!/bin/sh\nmkdir -p test-results\necho boundary-$1 >> test-results/executed\n', True)
         for file in ('packages/gateway/package-lock.json', 'packages/push-relay/package-lock.json',
-                     'packages/mac-app/project.yml', 'packages/mac-app/native-computer-control/Package.swift',
+                     'packages/mac-app/native-computer-control/Package.swift',
                      'packages/ios-app/project.yml', 'packages/gateway/src/example.test.ts'):
             self.write(file, '{}\n')
+        self.write('packages/mac-app/project.yml', 'settings:\n  base:\n    DEVELOPMENT_TEAM: TEAMFIXT01\n')
         self.commit('fixture lanes')
         self.base = self.git('rev-parse', 'HEAD')
 
