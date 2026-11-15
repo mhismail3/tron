@@ -19,7 +19,7 @@ import { modelQueueProjectionPath, type ModelQueueRecord } from "../src/provider
 import type { ProviderUsageOwner } from "../src/providers/provider-usage.js";
 import { HOOK_HANG_BOUND_MS, waitFor } from "./wait-for.js";
 
-const fixtures: Array<{ registry: RuntimeRegistry; root: string }> = [];
+const fixtures: Array<{ registry: RuntimeRegistry; root: string; gateway: ModelRuntime }> = [];
 export async function disposeFixtures(): Promise<void> {
   const failures: unknown[] = [];
   try {
@@ -27,6 +27,7 @@ export async function disposeFixtures(): Promise<void> {
       try {
         await fixture.registry.dispose();
         await fixture.registry.administrativeWorkRegistry.waitUntilSettled();
+        await fixture.gateway.settleCredentialWrites();
         const outlived = await awaitRunnersExited(fixture.root).then(() => undefined, (error: unknown) => error);
         await rm(fixture.root, { recursive: true, force: true });
         if (outlived) throw outlived;
@@ -168,7 +169,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
     home: () => homeOwnerOf(registry), knowledge,
     ...(options.settingsNow ? { now: options.settingsNow } : {}) });
   await settings.settingsChanges.start();
-  const owned = { registry, root };
+  const owned = { registry, root, gateway };
   fixtures.push(owned);
   await bringUpToReadiness(registry);
   await homeOwnerOf(registry).recoverTasks();

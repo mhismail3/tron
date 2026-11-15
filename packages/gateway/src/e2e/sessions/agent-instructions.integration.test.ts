@@ -294,14 +294,22 @@ describe("Agent Instructions projection through the pinned runtime", () => {
     const f = await fixture();
     const operating = async (tools: string[]) => {
       await f.slot.setTools(tools);
-      return (await instructions(f.slot)).sections.find(section => section.id === "tron")!.text;
+      return (await turn(f)).received;
     };
+    const guidance = "Use agent_browser for browser work; prefer it to browser shell commands or one-off workarounds.";
     const computer = await operating(["computer"]);
+    expect(computer).not.toContain(guidance);
     expect(computer).toContain("Do on-screen work yourself, by default and liberally: web flows (consoles, dashboards, OAuth consent, forms), macOS permission prompts and dialogs, app windows, and storing secrets in Keychain without echoing them to chat, logs or files. Use whichever available computer or browser tool does each step fastest and most accurately");
     const browser = await operating(["agent_browser"]);
     expect(browser).toContain("Do on-screen work yourself, by default and liberally: web flows (consoles, dashboards, OAuth consent, forms). Use whichever available computer or browser tool");
+    expect(browser.split(guidance)).toHaveLength(2);
     expect(browser).not.toContain("macOS permission prompts");
-    expect(await operating(["fixture_tool"])).not.toContain("Do on-screen work yourself");
+    const both = await operating(["computer", "agent_browser"]);
+    expect(both.split(guidance)).toHaveLength(2);
+    expect(both).toContain("macOS permission prompts");
+    const neither = await operating(["fixture_tool"]);
+    expect(neither).not.toContain("Do on-screen work yourself");
+    expect(neither).not.toContain(guidance);
   }, 20_000);
 
   it.each([false, true])("keeps a forced body verbatim and attributes appended sections (MCP=%s)", async (mcp) => {

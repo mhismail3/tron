@@ -81,8 +81,14 @@ prompt assembler that preserves extension sections after whole-prompt handlers, 
 run start that `preflightResult("started")` can revoke, and FIFO `ModelRuntime`
 config reads. A newer awaited refresh cannot overtake an older registration-triggered
 config read and let that continuation start storage work after readiness. Each call
-still loads current config and retains its own provider selection/error; this is not
-a general downstream credential/model-store drain API. The `pi` bin and `./rpc-entry`
+still loads current config and retains its own provider selection/error. The refreshes that
+provider and virtual-model registration start are tracked, and `settleCredentialWrites()`
+joins them before pending credential writes; it does not close the runtime or refuse new
+work, so the creator of a runtime calls it after its registrations stop and before its storage
+is removed (`AgentSessionRuntime.dispose` calls it for each session). It also carries
+direct-argv 1Password/Keychain references for MCP headers and env, a backed-up
+`SettingsManager.unsetGlobalSettings` whose reload reconciles at the settings write queue, and
+a root export of the config-only `loadMcpConfig` with a per-file byte budget. The `pi` bin and `./rpc-entry`
 bundle their dependencies, so only a release or a rebuild moves a dependency there, never a
 Gateway `overrides` entry. Both child entries are rebuilt with undici 8.12.4;
 `check-pi-sdk.integration.test.mjs` starts each real bundled entry on an isolated home and
@@ -97,9 +103,9 @@ mid-stream cancellation in isolated processes and joins handle closure. This one
 is removed when the pinned Pi includes
 [upstream PR #12025](https://github.com/earendil-works/pi/pull/12025); upstream owns the
 alternative signal-free stream with reader-owned cancellation. The previous
-`pi-coding-agent-1.5.1-tron.1.tgz` is retained as the rollback artifact; its complete pin and
+`pi-coding-agent-1.5.1-tron.2.tgz` is retained as the rollback artifact; its complete pin and
 patch inputs are available in the parent main tree. No installed runtime is changed by
-rebuilding or selecting `pi-coding-agent-1.5.1-tron.2.tgz` in a worktree.
+rebuilding or selecting `pi-coding-agent-1.5.1-tron.3.tgz` in a worktree.
 
 Pi activates newly registered declarable extension tools on a resumed branch, and the
 Gateway reapplies the transcript's explicit loadout over them. When that narrows the
@@ -133,7 +139,7 @@ prompt-keyword handler is not part of that pin.
 
 | Signal | One-step diagnosis / surviving oracle |
 | --- | --- |
-| `ENOTEMPTY` removing a fixture's `agent` directory, or SDK files reappearing after removal | Run `scripts/tron test gateway src/e2e/sessions/model-runtime-config-lifetime.integration.test.ts`. Its real filesystem gate distinguishes an older detached config read from the later awaited Gateway readiness, then checks actual registry disposal/root removal. Other downstream lock lifetimes still require their own writer trace. |
+| `ENOTEMPTY` removing a fixture's `agent` directory, or SDK files reappearing after removal | Run `scripts/tron test gateway src/e2e/sessions/model-runtime-config-lifetime.integration.test.ts`. Its real filesystem gate distinguishes an older detached config read from the later awaited Gateway readiness, then checks actual registry disposal/root removal; a second case holds a registration refresh with no live session and requires the fixture's settle to join it before root removal. MCP OAuth and other downstream lock lifetimes still require their own writer trace. |
 
 ## Tron-owned `pi-subagents` build
 

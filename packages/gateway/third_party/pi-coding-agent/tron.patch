@@ -41,6 +41,22 @@ Apply with git apply at tag v1.5.1 (dd30101cfc5b0609411dd80b6f93adbc14db14cf).
    undici 8.12.4. Gateway overrides do not replace their inlined dependency. The SDK
    checker executes both actual child entries against a loopback integrity-mismatch response.
 
+7. Credential references and backed-up global unset (Tron #2535). MCP headers and env may name
+   a 1Password or Keychain item ({source, reference|service, account, format?}); the resolver
+   runs a fixed executable with direct argv, never a shell, bounds output and time, and joins
+   the child on cancellation. SettingsManager.unsetGlobalSettings removes declared global keys
+   on the settings write queue after an exact-byte private backup, and reload reconciles at that
+   queue boundary without reviving deleted keys or dropping later setters.
+
+8. Public config-only MCP reader (Tron #2553). loadMcpConfig is exported from the package root
+   with an optional per-file maxConfigBytes budget; it reads only the applicable mcp.json files,
+   never connects or resolves values, and only a missing file is silent.
+
+9. Registration refresh settlement (Tron #2534). Provider and virtual-model registration start
+   an unawaited refresh that still reads the credential store. ModelRuntime tracks those
+   refreshes and settleCredentialWrites joins them before credential writes, so a host that
+   stops registrations can settle the runtime before removing its storage.
+
 diff --git a/package-lock.json b/package-lock.json
 index fbf84cc836f6a6ba7d4082e5e767be57e8a1091e..7ecc721909bb1013d455835170f9e9dad0e3bea7 100644
 --- a/package-lock.json
@@ -71,7 +87,7 @@ index fbf84cc836f6a6ba7d4082e5e767be57e8a1091e..7ecc721909bb1013d455835170f9e9da
  			"name": "@earendil-works/pi-durable",
  			"version": "1.5.1",
 diff --git a/packages/coding-agent/docs/mcp.md b/packages/coding-agent/docs/mcp.md
-index 5c6aa7d86d71cd9634fd0efff10f8784de84fb00..c8c33a516183b6c137c8b49273f5d52ac7d72e3b 100644
+index 5c6aa7d86d71cd9634fd0efff10f8784de84fb00..6b453902ac4a32ea7dafae6fc023d34ea2c1eccb 100644
 --- a/packages/coding-agent/docs/mcp.md
 +++ b/packages/coding-agent/docs/mcp.md
 @@ -59,7 +59,7 @@ The format matches other MCP clients:
@@ -83,8 +99,44 @@ index 5c6aa7d86d71cd9634fd0efff10f8784de84fb00..c8c33a516183b6c137c8b49273f5d52a
  
  HTTP servers use `url`, `headers`, and `oauth` (see [Authenticate with OAuth](#authenticate-with-oauth)). The legacy SSE transport is not supported.
  
+@@ -83,6 +83,35 @@ Keep personal servers and servers with credentials in the user-level file. Use t
+ 
+ `pi mcp add` and `pi mcp remove` cover common changes from a shell. See [MCP commands](cli.md#mcp-commands) for their options.
+ 
++### Credential references
++
++`env` and `headers` also accept validated credential references instead of strings:
++
++```json
++{
++  "mcpServers": {
++    "docs": {
++      "url": "https://example.com/mcp",
++      "headers": {
++        "Authorization": { "source": "1password", "reference": "op://vault/item/field", "format": "bearer" }
++      }
++    },
++    "local": {
++      "command": "tools-server",
++      "env": { "TOKEN": { "source": "keychain", "service": "tools", "account": "default" } }
++    }
++  }
++}
++```
++
++The optional `format` accepts only `bearer`, adding the fixed `Bearer ` prefix. References have no executable, interpolation, shell, or arbitrary prefix fields. Locators must be `op://vault/item/field` or `op://vault/item/section/field`; fields are nonempty, at most 2048 characters, and cannot contain control characters. Keychain service and account have the same string bounds. Unknown fields are rejected. These references authorize reading a credential and sending it to the configured server; project trust is not a sandbox. Keep them in the user-level file unless the project and destination are trusted.
++
++Validation and configuration loading do not resolve references. Connection setup runs `op read --no-newline <reference>` or, on macOS, `/usr/bin/security find-generic-password -s <service> -a <account> -w` with direct arguments. Pi finds `op` only at `/opt/homebrew/bin/op` or `/usr/local/bin/op` on macOS, and `/usr/local/bin/op` or `/usr/bin/op` elsewhere, never through project `PATH` or a server's `env`. An SDK host can select an absolute `opExecutable` through `resolveConfigValueAsync`; that option is trusted host configuration, not an `mcp.json` field.
++
++Each process has a 10-second deadline and a 64-KiB stdout limit. Stderr is discarded. Output must be nonempty, valid UTF-8 without NUL, CR or LF. 1Password output is decoded without trimming or BOM removal; only one final LF from the Keychain CLI is removed before validation. Additional line endings and malformed UTF-8 are refused, not normalized. All other bytes, including whitespace, are preserved, with only the requested fixed `Bearer ` prefix added. Resolution failures use fixed diagnostics without references or subprocess output. Shutdown cancels resolution and joins the actual child before returning. Reference results are not cached or persisted by the resolver. Existing string and `!command` resolution is unchanged, including its existing shell behavior.
++
++Reference-derived HTTP headers must additionally be representable as ASCII HTTP header values without normalization: HTTP-invalid controls, non-ASCII characters, edge spaces/tabs, invalid header names, and case-insensitive duplicate names are refused with `Invalid credential reference HTTP header` before transport construction. This prevents header validation from quoting credential values in connection errors. These HTTP-only constraints do not apply to stdio environment values, and unrelated transport errors keep their existing handling.
++
+ ### Inspect or change a server
+ 
+ `/mcp` lists configured servers with their state, tool count, exposure, and configuration source. Servers that need attention appear first. Select a server to inspect its tools and connection details, reconnect, sign in or out, change exposure, or enable and disable it.
 diff --git a/packages/coding-agent/docs/sdk.md b/packages/coding-agent/docs/sdk.md
-index 7d0883b3ff7926c077414ccce9b4f7aa31f7065b..18ea49a42b89422a640d11ffa6faa0310402d129 100644
+index 7d0883b3ff7926c077414ccce9b4f7aa31f7065b..e97245846001701970a7a80d188d9a43ae00d725 100644
 --- a/packages/coding-agent/docs/sdk.md
 +++ b/packages/coding-agent/docs/sdk.md
 @@ -29,7 +29,7 @@ The [complete minimal example](../examples/sdk/01-minimal.ts) also streams text
@@ -105,6 +157,35 @@ index 7d0883b3ff7926c077414ccce9b4f7aa31f7065b..18ea49a42b89422a640d11ffa6faa031
  `session.dispose()` aborts active work, invalidates extension contexts, disconnects from the agent, and removes event listeners. Call it when the session is no longer needed.
  
  `AgentSessionRuntime` adds `newSession()`, `switchSession()`, `fork()`, and `importFromJsonl()`. Each operation replaces the active `AgentSession` and recreates services for the target working directory.
+@@ -107,10 +109,28 @@ Each boundary can be supplied explicitly:
+ 
+ Use `DefaultResourceLoader` when you want standard discovery with selected overrides. Supply a custom `ResourceLoader` when the host owns resource storage and discovery completely.
+ 
++### Remove global settings with a backup
++
++`await settingsManager.unsetGlobalSettings(["theme", "hideThinkingBlock"])` removes declared top-level keys from file-backed global settings. It does not remove project overrides or change the host's approval policy. In-memory/custom storage and unknown keys are refused. An absent key is a no-op, without a backup.
++
++The operation shares the settings write queue and file lock with setters. It reads the current file under that lock, preserves unknown and unrelated parsed fields, and writes an exclusive, exact-byte `0600` backup beside `settings.json`. The backup and its directory are flushed before an atomic `0600` replacement, which is also flushed. The source must be a single-link regular file owned by the current POSIX user, with owner read/write permissions and no bits outside `0644`. Symlinked files or containing directories, unsafe source modes, invalid UTF-8/JSON, and detected file/directory identity, content, ownership or mode changes are refused. Directory identity is fenced from before lock acquisition through reading and replacement. This relies on the settings lock for cooperating writers; it is not an operating-system sandbox against an adversarial writer racing the final check and rename. Directory flushing requires a supporting filesystem. Retained backup files are not pruned automatically.
++
++The promise rejects on refusal or error; queued storage errors are also recorded by `drainErrors()`. A successful receipt contains only `status: "unchanged"` and `changedKeys: []`, or `status: "applied"`, changed key names, `backupPath`, and before/after SHA-256 digests. It never contains setting values. Await this promise for its own result; `flush()` joins the queue but retains its existing error-collection behavior. Failed setter edits remain owned until persistence succeeds or a successful unset explicitly deletes them. Later setters remain ordered after deletion, rebased at their field or map-entry granularity without reviving deleted siblings. Effective getters still include project settings.
++
++Filesystem failures reject with `SettingsUnsetError`: fixed message, `phase`, `replacement` (`"not-attempted"` or `"uncertain"`), optional `recovery`, and secondary `cleanupFailures`. The primary phase is preserved if descriptor close or lock release also fails. Before a rename attempt this operation has not replaced the source, but another writer may have changed it. Any failure from the rename attempt onward is conservatively uncertain, never an applied/unchanged receipt. The manager then refuses further global persistence and unset operations until explicit `reload()` reconciles its view with storage; a successful reload discards only pending global edits accepted before its call boundary, so the host must settle that intent first. Reload runs on the same queue, rebases later accepted global edits onto the loaded settings, and leaves those edits owned by their subsequent writes. Global persistence checks load/recovery errors at its queue turn, allowing writes ordered after a successful reload while still refusing writes before recovery. Do not interpret rejection or the running getters as proof of canonical state.
++
++`recovery.kind: "verified-backup"` carries `backupPath` and `beforeSha256` only after the exact-byte backup file and directory flushes succeed. `"unverified-backup"` carries only an owned retained path: it may be incomplete or not durably recorded and is not an authorized restore source. These describe acknowledged filesystem calls, not a guarantee against hardware/filesystem failure. Restore is an explicit host action: stop writers, inspect canonical state, verify the successful receipt's or verified recovery metadata's backup SHA-256, and atomically replace global `settings.json` from that backup with private permissions and filesystem flushing, then reload. If no verified backup metadata exists, establish recovery independently; do not restore from a filename alone. There is no automatic restore, rollback reader or fallback.
++
+ <a id="inlineextension"></a>
+ 
+ Inline extension factories can be supplied through `DefaultResourceLoader`. Give one an `InlineExtension` name only when it needs a stable name in diagnostics and startup output. A named inline extension with `replaceable: true` is left out when another extension registers a tool, command, or flag with a name it registers during loading, instead of both loading with a conflict. The CLI's built-in codemode, tool search, and MCP extensions are replaceable. A named entry with `builtin: true` is not an inline extension: it supplies the code of the `builtin:<name>` extension, which loads like a configured extension file. It loads by default, is listed in `pi config`, and is disabled by `-builtin:<name>` in the `extensions` setting or by `noExtensions`; `additionalExtensionPaths: ["builtin:<name>"]` loads it explicitly. It loads after project trust is resolved, so it cannot handle `project_trust`. The CLI's built-in extensions use it.
+ 
++### Inspect MCP configuration without connecting
++
++`loadMcpConfig({ agentDir, cwd: projectDir, projectTrusted, maxConfigBytes: 256 * 1024 })`, exported from the package root, reads the same canonical configuration as the MCP extension. It includes disabled servers, global/project precedence, project overrides, source metadata and validation errors. Pass the project configuration directory as `cwd`, and its actual trust decision as `projectTrusted`; untrusted project files are not read. `maxConfigBytes` is an optional per-file UTF-8 byte budget. An oversized file contributes an error and no entries; other valid sources remain. Omitting the budget keeps the normal SDK loading behavior.
++
++This call does not create a session, write files, start servers, connect, refresh providers, or resolve environment/command/credential values. It reads only the applicable `mcp.json` files. Returned configuration can still contain literal credentials, and parse diagnostics can contain source text. Hosts must project only bounded non-secret metadata and error counts into public or model-visible inventory; do not dump the result or raw diagnostics.
++
+ <a id="codemode-mcp"></a>
+ 
+ The CLI loads `codemode`, `tool_search`, and MCP as built-in extensions. SDK sessions do not; add `createCodemodeExtension()`, `createToolSearchExtension()`, and `createMcpExtension()` to the `extensionFactories` of `DefaultResourceLoader`. `codemode` and `tool_search` are registered inactive: enable them through the `defaultTools` setting (`["+codemode", "+tool_search"]` keeps the other default tools), or let the MCP extension activate them: `codemode` for servers with `codemode` exposure, `tool_search` for servers with `deferred` exposure. The MCP extension connects its servers on `session_start`, so call `session.bindExtensions()`. See [Codemode and MCP](../examples/sdk/14-codemode-mcp.ts).
 diff --git a/packages/coding-agent/install-lock/package-lock.json b/packages/coding-agent/install-lock/package-lock.json
 index eab89567b15c2db297d445219b0658ba02767adc..33dfa5f97949abccbce56dd640cb4fb3df96afa4 100644
 --- a/packages/coding-agent/install-lock/package-lock.json
@@ -418,21 +499,122 @@ index 7fcc870a99f799ebd19f3a4d51b300d63088ca78..780f8ad503a7d31231a29465c32073ff
  	/** Session manager (read-only) */
  	sessionManager: ReadonlySessionManager;
  	/** Model registry for API key resolution */
+diff --git a/packages/coding-agent/src/core/mcp-servers.ts b/packages/coding-agent/src/core/mcp-servers.ts
+index 002cf56f519490522d81ab1f1f09fc8cc3d304f9..ca3dce659d3703719734a926894367c5ad56f479 100644
+--- a/packages/coding-agent/src/core/mcp-servers.ts
++++ b/packages/coding-agent/src/core/mcp-servers.ts
+@@ -13,6 +13,7 @@ import {
+ 	type McpStdioServerConfig as McpStdioServerFields,
+ 	validateMcpServerConfig as validateMcpServerFields,
+ } from "@earendil-works/pi-mcp";
++import { type ConfigValue, isCredentialReference } from "./resolve-config-value.ts";
+ 
+ /**
+  * Regular expression for a tool name pattern where `*` matches any characters, as `toolExposure`,
+@@ -88,10 +89,10 @@ interface McpServerConfigBase {
+ 	timeout?: number;
+ }
+ 
+-export interface McpStdioServerConfig extends McpStdioServerFields, McpServerConfigBase {
++export interface McpStdioServerConfig extends Omit<McpStdioServerFields, "env">, McpServerConfigBase {
+ 	// Shared fields, declared again for pi's documentation.
+ 	/** Values may reference environment variables (`${NAME}`) or commands (`!cmd`). */
+-	env?: Record<string, string>;
++	env?: Record<string, ConfigValue>;
+ 	/** Relative paths resolve against the session working directory. */
+ 	cwd?: string;
+ }
+@@ -126,10 +127,10 @@ export function isClientMetadataDocumentCallback(callbackUrl: string | undefined
+ 	return url.hostname !== "[::1]" && url.pathname === "/callback";
+ }
+ 
+-export interface McpHttpServerConfig extends McpHttpServerFields, McpServerConfigBase {
++export interface McpHttpServerConfig extends Omit<McpHttpServerFields, "headers">, McpServerConfigBase {
+ 	// `headers` is shared, declared again for pi's documentation; `oauth` narrows to pi's documented type.
+ 	/** Values may reference environment variables (`${NAME}`) or commands (`!cmd`). */
+-	headers?: Record<string, string>;
++	headers?: Record<string, ConfigValue>;
+ 	oauth?: McpOAuthConfig;
+ 	/**
+ 	 * Send the token of a pi provider (`/login <provider>`) instead of using OAuth. Not allowed in project
+@@ -211,7 +212,27 @@ function checkAuth(auth: unknown, url: string): string | undefined {
+  * copy of the config with exposure aliases resolved, or an error message.
+  */
+ export function validateMcpServerConfig(name: string, raw: unknown): McpServerConfig | string {
+-	const result = validateMcpServerFields(name, isRecord(raw) ? resolveExposureAliases(raw) : raw, {
++	const entry = isRecord(raw) ? resolveExposureAliases(raw) : raw;
++	const values: Record<string, unknown> = {};
++	if (isRecord(entry)) {
++		const http =
++			typeof entry.url === "string" &&
++			(entry.type === undefined || entry.type === "http" || entry.type === "streamable-http");
++		const field = http ? "headers" : "env";
++		const record = entry[field];
++		if (isRecord(record)) {
++			const strings: Record<string, string> = {};
++			for (const [key, value] of Object.entries(record)) {
++				if (typeof value !== "string" && !isCredentialReference(value)) {
++					return `server "${name}": ${field} must map names to strings or credential references`;
++				}
++				strings[key] = typeof value === "string" ? value : "";
++			}
++			values[field] = record;
++			entry[field] = strings;
++		}
++	}
++	const result = validateMcpServerFields(name, entry, {
+ 		checkMetadataDocumentCallback: (callbackUrl) =>
+ 			isClientMetadataDocumentCallback(callbackUrl)
+ 				? undefined
+@@ -223,7 +244,7 @@ export function validateMcpServerConfig(name: string, raw: unknown): McpServerCo
+ 		(result.kind === "http" ? checkAuth(result.config.auth, result.config.url) : undefined);
+ 	if (error) return `server "${name}": ${error}`;
+ 	// The cast holds because pi's fields were checked above, which the types cannot express.
+-	return result.config as McpServerConfig;
++	return { ...result.config, ...values } as McpServerConfig;
+ }
+ 
+ /** A server an extension registered with `pi.registerMcpServer()`. */
 diff --git a/packages/coding-agent/src/core/model-runtime.ts b/packages/coding-agent/src/core/model-runtime.ts
-index ff5f42b3984a289c665855fe3ec676265bc8c4b9..b5cc3be9696f2df296e6987704980fb3abb42471 100644
+index ff5f42b3984a289c665855fe3ec676265bc8c4b9..c1dc062d30b29d74b366c3051045c395453cd68e 100644
 --- a/packages/coding-agent/src/core/model-runtime.ts
 +++ b/packages/coding-agent/src/core/model-runtime.ts
-@@ -184,6 +184,9 @@ export class ModelRuntime implements Models {
+@@ -184,6 +184,10 @@ export class ModelRuntime implements Models {
  	private readonly modelsPath: string | undefined;
  	private readonly modelNetworkEnabled: boolean;
  	private config: ModelConfig;
 +	// A later readiness pass must not overtake an older config read and leave
 +	// that detached registration refresh able to start storage work afterwards.
 +	private configLoadTail: Promise<void> = Promise.resolve();
++	private readonly registrationRefreshes = new Set<Promise<ModelsRefreshResult>>();
  	private snapshot: ModelRuntimeSnapshot = {
  		all: [],
  		available: [],
-@@ -883,7 +886,11 @@ export class ModelRuntime implements Models {
+@@ -641,11 +645,19 @@ export class ModelRuntime implements Models {
+ 	}
+ 
+ 	/**
+-	 * Wait until credential writes already in progress finish, such as an OAuth refresh started by a
+-	 * background catalog refresh. Call before the process exits so a rotated token is not lost.
++	 * Wait until credential work already in progress finishes: refreshes started by provider or virtual
++	 * model registration, and credential writes such as an OAuth refresh started by a background catalog
++	 * refresh. Call before the process exits or its storage is removed, after registrations have stopped.
+ 	 */
+-	settleCredentialWrites(): Promise<void> {
+-		return this.credentials.settled();
++	async settleCredentialWrites(): Promise<void> {
++		while (this.registrationRefreshes.size > 0) await Promise.allSettled(this.registrationRefreshes);
++		await this.credentials.settled();
++	}
++
++	private refreshAfterRegistration(): void {
++		const refresh = this.refresh({ allowNetwork: false });
++		this.registrationRefreshes.add(refresh);
++		void refresh.finally(() => this.registrationRefreshes.delete(refresh));
+ 	}
+ 
+ 	listCredentials(options?: AuthOperationOptions): Promise<readonly CredentialInfo[]> {
+@@ -883,7 +895,14 @@ export class ModelRuntime implements Models {
  	}
  
  	async refresh(options: ModelsRefreshOptions = {}): Promise<ModelsRefreshResult> {
@@ -440,11 +622,59 @@ index ff5f42b3984a289c665855fe3ec676265bc8c4b9..b5cc3be9696f2df296e6987704980fb3
 +		const configLoad = this.configLoadTail.then(() => ModelConfig.load(this.modelsPath));
 +		// Keep the sequencing tail usable after a failed read; this invocation
 +		// still observes its own failure through the original configLoad promise.
-+		this.configLoadTail = configLoad.then(() => undefined, () => undefined);
++		this.configLoadTail = configLoad.then(
++			() => undefined,
++			() => undefined,
++		);
 +		this.config = await configLoad;
  		this.configureRadiusProviders();
  		if (options.providers) {
  			for (const providerId of new Set(options.providers)) this.recomposeProvider(providerId);
+@@ -936,7 +955,7 @@ export class ModelRuntime implements Models {
+ 			configuredRequestAuthStatus(this.config.getProvider(provider.id), undefined),
+ 			provider.auth.oauth && !provider.auth.apiKey ? "oauth" : "api_key",
+ 		);
+-		void this.refresh({ allowNetwork: false });
++		this.refreshAfterRegistration();
+ 	}
+ 
+ 	/**
+@@ -982,7 +1001,7 @@ export class ModelRuntime implements Models {
+ 			configuredRequestAuthStatus(this.config.getProvider(providerId), effective),
+ 			effective.oauth && !effective.apiKey ? "oauth" : "api_key",
+ 		);
+-		void this.refresh({ allowNetwork: false });
++		this.refreshAfterRegistration();
+ 	}
+ 
+ 	unregisterProvider(providerId: string): void {
+@@ -990,7 +1009,7 @@ export class ModelRuntime implements Models {
+ 		this.nativeExtensionProviders.delete(providerId);
+ 		this.recomposeProvider(providerId);
+ 		this.updateModelSnapshot();
+-		void this.refresh({ allowNetwork: false });
++		this.refreshAfterRegistration();
+ 	}
+ 
+ 	/**
+@@ -1016,7 +1035,7 @@ export class ModelRuntime implements Models {
+ 			this.snapshot = { ...this.snapshot, auth, configuredProviders };
+ 		}
+ 		this.updateModelSnapshot();
+-		void this.refresh({ allowNetwork: false });
++		this.refreshAfterRegistration();
+ 	}
+ 
+ 	unregisterVirtualModel(providerId: string, id: string): void {
+@@ -1025,7 +1044,7 @@ export class ModelRuntime implements Models {
+ 		if (models.size === 0) this.virtualModels.delete(providerId);
+ 		this.recomposeProvider(providerId);
+ 		this.updateModelSnapshot();
+-		void this.refresh({ allowNetwork: false });
++		this.refreshAfterRegistration();
+ 	}
+ 
+ 	/**
 diff --git a/packages/coding-agent/src/core/package-manager.ts b/packages/coding-agent/src/core/package-manager.ts
 index 5fd93754ec14ac0a3a93872629cb830853cd75da..9c772632cc35c5c190467e82314b92e2cfef6532 100644
 --- a/packages/coding-agent/src/core/package-manager.ts
@@ -530,6 +760,130 @@ index 5fd93754ec14ac0a3a93872629cb830853cd75da..9c772632cc35c5c190467e82314b92e2
  		}
  		if (scope === "user") {
  			return this.agentDir;
+diff --git a/packages/coding-agent/src/core/resolve-config-value.ts b/packages/coding-agent/src/core/resolve-config-value.ts
+index 6d75b001e7c9e796484c1d09d59a5c81816397b3..8f6e2dbe9ca115eaba1fa1f985ff081338914572 100644
+--- a/packages/coding-agent/src/core/resolve-config-value.ts
++++ b/packages/coding-agent/src/core/resolve-config-value.ts
+@@ -3,7 +3,9 @@
+  * Used by auth-storage.ts and model-registry.ts.
+  */
+ 
+-import { execSync, spawnSync } from "child_process";
++import { existsSync } from "node:fs";
++import { isAbsolute } from "node:path";
++import { execSync, spawn, spawnSync } from "child_process";
+ import { getShellConfig } from "../utils/shell.ts";
+ 
+ // Cache for shell command results (persists for process lifetime)
+@@ -11,6 +13,108 @@ const commandResultCache = new Map<string, string | undefined>();
+ const ENV_VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+ const ENV_VAR_NAME_PREFIX_RE = /^[A-Za-z_][A-Za-z0-9_]*/;
+ 
++export type CredentialReference =
++	| { source: "1password"; reference: string; format?: "bearer" }
++	| { source: "keychain"; service: string; account: string; format?: "bearer" };
++
++export type ConfigValue = string | CredentialReference;
++
++export interface CredentialReferenceOptions {
++	signal?: AbortSignal;
++	opExecutable?: string;
++}
++
++export function isCredentialReference(value: unknown): value is CredentialReference {
++	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
++	const entry = value as Record<string, unknown>;
++	const data = (field: unknown): field is string =>
++		typeof field === "string" && field.trim().length > 0 && field.length <= 2048 && !/[\x00-\x1f\x7f]/.test(field);
++	if (entry.format !== undefined && entry.format !== "bearer") return false;
++	if (entry.source === "1password") {
++		return (
++			Object.keys(entry).every((key) => ["source", "reference", "format"].includes(key)) &&
++			data(entry.reference) &&
++			/^op:\/\/[^/?#]+\/[^/?#]+\/(?:[^/?#]+\/)?[^/?#]+$/.test(entry.reference) &&
++			entry.reference
++				.slice(5)
++				.split("/")
++				.every((part) => part.trim().length > 0)
++		);
++	}
++	return (
++		entry.source === "keychain" &&
++		Object.keys(entry).every((key) => ["source", "service", "account", "format"].includes(key)) &&
++		data(entry.service) &&
++		data(entry.account)
++	);
++}
++
++export async function resolveConfigValueAsync(
++	config: ConfigValue,
++	options: CredentialReferenceOptions = {},
++	description = "configuration value",
++): Promise<string> {
++	if (options.signal?.aborted) throw new Error("Credential resolution cancelled");
++	if (typeof config === "string") return resolveConfigValueOrThrow(config, description);
++	if (!isCredentialReference(config)) throw new Error("Invalid credential reference");
++	let executable: string;
++	let args: string[];
++	if (config.source === "1password") {
++		const paths =
++			process.platform === "darwin"
++				? ["/opt/homebrew/bin/op", "/usr/local/bin/op"]
++				: ["/usr/local/bin/op", "/usr/bin/op"];
++		executable = options.opExecutable ?? paths.find((path) => existsSync(path)) ?? "";
++		if (!isAbsolute(executable)) throw new Error("Credential resolver unavailable");
++		args = ["read", "--no-newline", config.reference];
++	} else {
++		if (process.platform !== "darwin") throw new Error("Credential resolver unavailable");
++		executable = "/usr/bin/security";
++		args = ["find-generic-password", "-s", config.service, "-a", config.account, "-w"];
++	}
++	const value = await new Promise<string>((resolve, reject) => {
++		const child = spawn(executable, args, { shell: false, stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
++		const chunks: Buffer[] = [];
++		let bytes = 0;
++		let failure: string | undefined;
++		const stop = (reason: string) => {
++			failure ??= reason;
++			child.kill("SIGKILL");
++			child.stdout.destroy();
++		};
++		const abort = () => stop("Credential resolution cancelled");
++		const timer = setTimeout(() => stop("Credential resolution timed out"), 10_000);
++		options.signal?.addEventListener("abort", abort, { once: true });
++		child.on("error", () => {
++			failure ??= "Credential resolver unavailable";
++		});
++		child.stdout.on("data", (chunk: Buffer) => {
++			bytes += chunk.length;
++			if (bytes > 64 * 1024) stop("Credential output exceeded limit");
++			else chunks.push(chunk);
++		});
++		child.once("close", (code) => {
++			clearTimeout(timer);
++			options.signal?.removeEventListener("abort", abort);
++			if (failure || code !== 0) {
++				reject(new Error(failure ?? "Credential resolution failed"));
++				return;
++			}
++			let bytes = Buffer.concat(chunks);
++			if (config.source === "keychain" && bytes.at(-1) === 0x0a) bytes = bytes.subarray(0, -1);
++			try {
++				const output = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
++				if (!output || /[\x00\r\n]/.test(output)) throw new Error();
++				resolve(output);
++			} catch {
++				reject(new Error("Credential resolution failed"));
++			}
++		});
++		if (options.signal?.aborted) abort();
++	});
++	return config.format === "bearer" ? `Bearer ${value}` : value;
++}
++
+ type TemplatePart = { type: "literal"; value: string } | { type: "env"; name: string };
+ 
+ type ConfigValueReference = { type: "command"; config: string } | { type: "template"; parts: TemplatePart[] };
 diff --git a/packages/coding-agent/src/core/resource-loader.ts b/packages/coding-agent/src/core/resource-loader.ts
 index bb0740e49675be6a28a537fc1d8ae92d06fbb924..397c4afa1f82fa3b098c8c74df06714d71aa38ab 100644
 --- a/packages/coding-agent/src/core/resource-loader.ts
@@ -690,6 +1044,594 @@ index dbab1d1d99f309ed9b3ebec3f2c3272520ef8d0b..d5b7ea0d5bac0c4efd80add3771ef71a
  		scopedModels: options.scopedModels,
  		resourceLoader,
  		customTools: options.customTools,
+diff --git a/packages/coding-agent/src/core/settings-manager.ts b/packages/coding-agent/src/core/settings-manager.ts
+index 99bbeade0d212549375da990199797a8afdce3d6..6ce98846b0af2831fd36ebe9b0abdcb312a3f242 100644
+--- a/packages/coding-agent/src/core/settings-manager.ts
++++ b/packages/coding-agent/src/core/settings-manager.ts
+@@ -1,8 +1,24 @@
+ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+ import type { Model } from "@earendil-works/pi-ai";
+ import type { ScrollViewScrollbar, TerminalCapabilities, WheelScrollLines } from "@earendil-works/pi-tui";
+-import { randomUUID } from "crypto";
+-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
++import { createHash, randomUUID } from "crypto";
++import {
++	closeSync,
++	constants,
++	existsSync,
++	fchmodSync,
++	fstatSync,
++	fsyncSync,
++	lstatSync,
++	mkdirSync,
++	openSync,
++	readFileSync,
++	realpathSync,
++	renameSync,
++	type Stats,
++	unlinkSync,
++	writeFileSync,
++} from "fs";
+ import { dirname, join } from "path";
+ import lockfile from "proper-lockfile";
+ import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
+@@ -25,6 +41,7 @@ import type {
+ 	TuiMode,
+ 	WarningSettings,
+ } from "./settings-schema.ts";
++import { SettingsSchema } from "./settings-schema.ts";
+ 
+ export type {
+ 	BranchSummarySettings,
+@@ -173,6 +190,52 @@ export interface SettingsError {
+ 	error: Error;
+ }
+ 
++export type UnsetGlobalSettingsReceipt =
++	| { status: "unchanged"; changedKeys: [] }
++	| {
++			status: "applied";
++			changedKeys: (keyof Settings)[];
++			backupPath: string;
++			beforeSha256: string;
++			afterSha256: string;
++	  };
++
++export type SettingsUnsetRecovery =
++	| { kind: "verified-backup"; backupPath: string; beforeSha256: string }
++	| { kind: "unverified-backup"; backupPath: string };
++
++export class SettingsUnsetError extends Error {
++	readonly phase: string;
++	readonly replacement: "not-attempted" | "uncertain";
++	readonly recovery: SettingsUnsetRecovery | undefined;
++	readonly cleanupFailures: readonly string[];
++
++	constructor(
++		phase: string,
++		replacement: "not-attempted" | "uncertain",
++		recovery: SettingsUnsetRecovery | undefined,
++		cleanupFailures: readonly string[],
++		reason?: "unsafe" | "invalid",
++	) {
++		super(
++			replacement === "uncertain"
++				? "Settings unset durability uncertain"
++				: reason === "unsafe"
++					? "Unsafe settings file"
++					: reason === "invalid"
++						? "Invalid settings file"
++						: "Settings unset refused before commit",
++		);
++		this.name = "SettingsUnsetError";
++		this.phase = phase;
++		this.replacement = replacement;
++		this.recovery = recovery;
++		this.cleanupFailures = cleanupFailures;
++	}
++}
++
++type SettingsMutation = { field: keyof Settings; nestedKey?: string; value: unknown };
++
+ type SettingsPaths = Partial<Record<SettingsScope, string>>;
+ 
+ function toSettingsError(scope: SettingsScope, error: unknown, path?: string): SettingsError {
+@@ -221,6 +284,201 @@ export class FileSettingsStorage implements SettingsStorage {
+ 		throw (lastError as Error) ?? new Error("Failed to acquire settings lock");
+ 	}
+ 
++	unsetGlobalSettings(keys: readonly (keyof Settings)[]): UnsetGlobalSettingsReceipt {
++		const path = this.globalSettingsPath;
++		const directory = dirname(path);
++		const descriptors: number[] = [];
++		let phase = "read";
++		let reason: "unsafe" | "invalid" | undefined;
++		let failure: { phase: string; reason?: "unsafe" | "invalid" } | undefined;
++		let release: (() => void) | undefined;
++		let directoryIdentity: Stats | undefined;
++		let realDirectory: string | undefined;
++		let temporary: string | undefined;
++		let temporaryIdentity: Stats | undefined;
++		let renamed = false;
++		let renameAttempted = false;
++		let recovery: SettingsUnsetRecovery | undefined;
++		let receipt: UnsetGlobalSettingsReceipt | undefined;
++		const cleanupFailures: string[] = [];
++		const open = (file: string, flags: string | number, mode?: number): number => {
++			const fd = openSync(file, flags, mode);
++			descriptors.push(fd);
++			return fd;
++		};
++		const sameDirectory = (): boolean => {
++			const current = lstatSync(directory, { throwIfNoEntry: false });
++			return (
++				!!current?.isDirectory() &&
++				current.dev === directoryIdentity?.dev &&
++				current.ino === directoryIdentity.ino &&
++				realpathSync(directory) === realDirectory
++			);
++		};
++		const assertDirectory = () => {
++			if (!sameDirectory()) throw new Error();
++		};
++		const assertSource = (identity: Stats) => {
++			if (
++				!identity.isFile() ||
++				identity.nlink !== 1 ||
++				identity.uid !== process.getuid?.() ||
++				(identity.mode & 0o600) !== 0o600 ||
++				(identity.mode & 0o7777 & ~0o644) !== 0
++			) {
++				reason = "unsafe";
++				throw new Error();
++			}
++		};
++		const settle = (stage: string, cleanup: () => void) => {
++			try {
++				cleanup();
++			} catch {
++				if (!failure) failure = { phase: stage };
++				else cleanupFailures.push(stage);
++			}
++		};
++		const apply = (): UnsetGlobalSettingsReceipt => {
++			const initialDirectory = lstatSync(directory, { throwIfNoEntry: false });
++			if (!initialDirectory) return { status: "unchanged", changedKeys: [] };
++			if (!initialDirectory.isDirectory()) {
++				reason = "unsafe";
++				throw new Error();
++			}
++			const directoryFd = open(directory, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
++			directoryIdentity = fstatSync(directoryFd);
++			realDirectory = realpathSync(directory);
++			if (initialDirectory.dev !== directoryIdentity.dev || initialDirectory.ino !== directoryIdentity.ino)
++				throw new Error();
++			assertDirectory();
++			const initial = lstatSync(path, { throwIfNoEntry: false });
++			if (!initial) return { status: "unchanged", changedKeys: [] };
++			assertSource(initial);
++			phase = "lock";
++			release = this.acquireLockSyncWithRetry(path);
++			phase = "read";
++			assertDirectory();
++			if (!lstatSync(path, { throwIfNoEntry: false })) return { status: "unchanged", changedKeys: [] };
++			const fd = open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
++			const identity = fstatSync(fd);
++			assertSource(identity);
++			const original = readFileSync(fd);
++			assertDirectory();
++			let parsed: unknown;
++			try {
++				parsed = JSON.parse(stripBom(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(original)));
++			} catch {
++				reason = "invalid";
++				throw new Error();
++			}
++			if (!isMergeableObject(parsed)) {
++				reason = "invalid";
++				throw new Error();
++			}
++			const changedKeys = keys.filter((key) => Object.hasOwn(parsed, key));
++			if (changedKeys.length === 0) return { status: "unchanged", changedKeys: [] };
++			for (const key of changedKeys) delete parsed[key];
++			const next = Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`);
++			const beforeSha256 = createHash("sha256").update(original).digest("hex");
++			const backupPath = `${path}.backup-${randomUUID()}`;
++			phase = "backup-create";
++			assertDirectory();
++			const backupFd = open(backupPath, "wx", 0o600);
++			recovery = { kind: "unverified-backup", backupPath };
++			phase = "backup-write";
++			fchmodSync(backupFd, 0o600);
++			writeFileSync(backupFd, original);
++			phase = "backup-sync";
++			fsyncSync(backupFd);
++			phase = "backup-directory-sync";
++			assertDirectory();
++			fsyncSync(directoryFd);
++			recovery = { kind: "verified-backup", backupPath, beforeSha256 };
++			temporary = `${path}.unset-${randomUUID()}`;
++			phase = "temporary-create";
++			assertDirectory();
++			const temporaryFd = open(temporary, "wx", 0o600);
++			temporaryIdentity = fstatSync(temporaryFd);
++			phase = "temporary-write";
++			fchmodSync(temporaryFd, 0o600);
++			writeFileSync(temporaryFd, next);
++			phase = "temporary-sync";
++			fsyncSync(temporaryFd);
++			phase = "validate";
++			assertDirectory();
++			const currentFd = open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
++			const current = fstatSync(currentFd);
++			assertSource(current);
++			if (
++				current.dev !== identity.dev ||
++				current.ino !== identity.ino ||
++				current.size !== identity.size ||
++				current.mtimeMs !== identity.mtimeMs ||
++				current.ctimeMs !== identity.ctimeMs ||
++				current.mode !== identity.mode ||
++				current.uid !== identity.uid ||
++				current.gid !== identity.gid ||
++				!readFileSync(currentFd).equals(original)
++			)
++				throw new Error();
++			const currentTemporary = lstatSync(temporary);
++			if (
++				!currentTemporary.isFile() ||
++				currentTemporary.nlink !== 1 ||
++				currentTemporary.dev !== temporaryIdentity.dev ||
++				currentTemporary.ino !== temporaryIdentity.ino ||
++				(currentTemporary.mode & 0o7777) !== 0o600 ||
++				currentTemporary.size !== next.length
++			)
++				throw new Error();
++			assertDirectory();
++			phase = "rename";
++			renameAttempted = true;
++			renameSync(temporary, path);
++			renamed = true;
++			phase = "commit-directory-sync";
++			fsyncSync(directoryFd);
++			return {
++				status: "applied",
++				changedKeys,
++				backupPath,
++				beforeSha256,
++				afterSha256: createHash("sha256").update(next).digest("hex"),
++			};
++		};
++		try {
++			receipt = apply();
++		} catch {
++			failure = { phase, reason };
++		} finally {
++			if (temporary && temporaryIdentity && !renamed) {
++				settle("temporary-cleanup", () => {
++					if (!sameDirectory()) throw new Error();
++					const current = lstatSync(temporary!, { throwIfNoEntry: false });
++					if (!current) return;
++					if (
++						!current.isFile() ||
++						current.dev !== temporaryIdentity!.dev ||
++						current.ino !== temporaryIdentity!.ino
++					)
++						throw new Error();
++					unlinkSync(temporary!);
++				});
++			}
++			for (const fd of descriptors.reverse()) settle("close", () => closeSync(fd));
++			if (release) settle("release", release);
++		}
++		if (failure)
++			throw new SettingsUnsetError(
++				failure.phase,
++				renameAttempted ? "uncertain" : "not-attempted",
++				recovery,
++				cleanupFailures,
++				failure.reason,
++			);
++		return receipt!;
++	}
++
+ 	withLock(scope: SettingsScope, fn: (current: string | undefined) => string | undefined): void {
+ 		const path = scope === "global" ? this.globalSettingsPath : this.projectSettingsPath;
+ 		const dir = dirname(path);
+@@ -275,8 +533,7 @@ export class SettingsManager {
+ 	private projectSettings: Settings;
+ 	private settings: Settings;
+ 	private projectTrusted: boolean;
+-	private modifiedFields = new Set<keyof Settings>(); // Track global fields modified during session
+-	private modifiedNestedFields = new Map<keyof Settings, Set<string>>(); // Track global nested field modifications
++	private globalMutations: SettingsMutation[] = [];
+ 	private modifiedProjectFields = new Set<keyof Settings>(); // Track project fields modified during session
+ 	private modifiedProjectNestedFields = new Map<keyof Settings, Set<string>>(); // Track project nested field modifications
+ 	private globalSettingsLoadError: Error | null = null; // Track if global settings file had parse errors
+@@ -498,31 +755,40 @@ export class SettingsManager {
+ 	}
+ 
+ 	async reload(): Promise<void> {
+-		await this.writeQueue;
+-		const globalLoad = SettingsManager.tryLoadFromStorage(this.storage, "global");
+-		if (!globalLoad.error) {
+-			this.globalSettings = globalLoad.settings;
+-			this.globalSettingsLoadError = null;
+-		} else {
+-			this.globalSettingsLoadError = globalLoad.error;
+-			this.recordError("global", globalLoad.error);
+-		}
++		const before = new Set(this.globalMutations);
++		const operation = this.writeQueue.then(() => {
++			const globalLoad = SettingsManager.tryLoadFromStorage(this.storage, "global");
++			if (!globalLoad.error) {
++				this.globalSettings = globalLoad.settings;
++				this.globalSettingsLoadError = null;
++				this.globalMutations = this.globalMutations.filter((mutation) => !before.has(mutation));
++				for (const mutation of this.globalMutations) SettingsManager.applyMutation(this.globalSettings, mutation);
++			} else {
++				this.globalSettingsLoadError = globalLoad.error;
++				this.recordError("global", globalLoad.error);
++			}
+ 
+-		this.modifiedFields.clear();
+-		this.modifiedNestedFields.clear();
+-		this.modifiedProjectFields.clear();
+-		this.modifiedProjectNestedFields.clear();
++			this.modifiedProjectFields.clear();
++			this.modifiedProjectNestedFields.clear();
+ 
+-		const projectLoad = SettingsManager.tryLoadFromStorage(this.storage, "project", this.projectTrusted);
+-		if (!projectLoad.error) {
+-			this.projectSettings = projectLoad.settings;
+-			this.projectSettingsLoadError = null;
+-		} else {
+-			this.projectSettingsLoadError = projectLoad.error;
+-			this.recordError("project", projectLoad.error);
+-		}
++			const projectLoad = SettingsManager.tryLoadFromStorage(this.storage, "project", this.projectTrusted);
++			if (!projectLoad.error) {
++				this.projectSettings = projectLoad.settings;
++				this.projectSettingsLoadError = null;
++			} else {
++				this.projectSettingsLoadError = projectLoad.error;
++				this.recordError("project", projectLoad.error);
++			}
+ 
+-		this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
++			this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
++		});
++		this.writeQueue = operation.then(
++			() => undefined,
++			(error) => {
++				this.recordError("global", error);
++			},
++		);
++		return operation;
+ 	}
+ 
+ 	/** Apply additional overrides on top of current settings */
+@@ -530,15 +796,30 @@ export class SettingsManager {
+ 		this.settings = deepMergeSettings(this.settings, overrides);
+ 	}
+ 
+-	/** Mark a global field as modified during this session */
+-	private markModified(field: keyof Settings, nestedKey?: string): void {
+-		this.modifiedFields.add(field);
+-		if (nestedKey) {
+-			if (!this.modifiedNestedFields.has(field)) {
+-				this.modifiedNestedFields.set(field, new Set());
+-			}
+-			this.modifiedNestedFields.get(field)!.add(nestedKey);
++	private static captureMutation(settings: Settings, field: keyof Settings, nestedKey?: string): SettingsMutation {
++		const value =
++			nestedKey === undefined
++				? settings[field]
++				: (settings[field] as Record<string, unknown> | undefined)?.[nestedKey];
++		return { field, nestedKey, value: structuredClone(value) };
++	}
++
++	private static applyMutation(settings: Settings, { field, nestedKey, value }: SettingsMutation): void {
++		const target = settings as Record<string, unknown>;
++		if (nestedKey === undefined) {
++			if (value === undefined) delete target[field];
++			else target[field] = structuredClone(value);
++			return;
+ 		}
++		const base = target[field];
++		const nested = { ...(isMergeableObject(base) ? base : {}), [nestedKey]: structuredClone(value) };
++		if (value === undefined) delete nested[nestedKey];
++		if (Object.keys(nested).length === 0) delete target[field];
++		else target[field] = nested;
++	}
++
++	private markModified(field: keyof Settings, nestedKey?: string): void {
++		this.globalMutations.push(SettingsManager.captureMutation(this.globalSettings, field, nestedKey));
+ 	}
+ 
+ 	/** Mark a project field as modified during this session */
+@@ -562,15 +843,9 @@ export class SettingsManager {
+ 		this.errors.push(toSettingsError(scope, error, this.settingsPaths[scope]));
+ 	}
+ 
+-	private clearModifiedScope(scope: SettingsScope): void {
+-		if (scope === "global") {
+-			this.modifiedFields.clear();
+-			this.modifiedNestedFields.clear();
+-			return;
+-		}
+-
+-		this.modifiedProjectFields.clear();
+-		this.modifiedProjectNestedFields.clear();
++	private assertGlobalSettingsLoaded(): void {
++		const error = this.globalSettingsLoadError;
++		if (error) throw error instanceof SettingsUnsetError ? error : new Error("Global settings could not be loaded");
+ 	}
+ 
+ 	private enqueueWrite(scope: SettingsScope, task: () => void): void {
+@@ -580,48 +855,23 @@ export class SettingsManager {
+ 					this.assertProjectTrustedForWrite();
+ 				}
+ 				task();
+-				this.clearModifiedScope(scope);
++				if (scope === "project") {
++					this.modifiedProjectFields.clear();
++					this.modifiedProjectNestedFields.clear();
++				}
+ 			})
+ 			.catch((error) => {
+ 				this.recordError(scope, error);
+ 			});
+ 	}
+ 
+-	private cloneModifiedNestedFields(source: Map<keyof Settings, Set<string>>): Map<keyof Settings, Set<string>> {
+-		const snapshot = new Map<keyof Settings, Set<string>>();
+-		for (const [key, value] of source.entries()) {
+-			snapshot.set(key, new Set(value));
+-		}
+-		return snapshot;
+-	}
+-
+-	private persistScopedSettings(
+-		scope: SettingsScope,
+-		snapshotSettings: Settings,
+-		modifiedFields: Set<keyof Settings>,
+-		modifiedNestedFields: Map<keyof Settings, Set<string>>,
+-	): void {
++	private persistScopedSettings(scope: SettingsScope, mutations: readonly SettingsMutation[]): void {
++		if (mutations.length === 0) return;
+ 		this.storage.withLock(scope, (current) => {
+-			const currentFileSettings = current
++			const mergedSettings = current
+ 				? SettingsManager.migrateSettings(JSON.parse(stripBom(current)) as Record<string, unknown>)
+ 				: {};
+-			const mergedSettings: Settings = { ...currentFileSettings };
+-			for (const field of modifiedFields) {
+-				const value = snapshotSettings[field];
+-				if (modifiedNestedFields.has(field) && typeof value === "object" && value !== null) {
+-					const nestedModified = modifiedNestedFields.get(field)!;
+-					const baseNested = (currentFileSettings[field] as Record<string, unknown>) ?? {};
+-					const inMemoryNested = value as Record<string, unknown>;
+-					const mergedNested = { ...baseNested };
+-					for (const nestedKey of nestedModified) {
+-						mergedNested[nestedKey] = inMemoryNested[nestedKey];
+-					}
+-					(mergedSettings as Record<string, unknown>)[field] = mergedNested;
+-				} else {
+-					(mergedSettings as Record<string, unknown>)[field] = value;
+-				}
+-			}
+-
++			for (const mutation of mutations) SettingsManager.applyMutation(mergedSettings, mutation);
+ 			return JSON.stringify(mergedSettings, null, 2);
+ 		});
+ 	}
+@@ -629,16 +879,14 @@ export class SettingsManager {
+ 	private save(): void {
+ 		this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
+ 
+-		if (this.globalSettingsLoadError) {
+-			return;
+-		}
+-
+-		const snapshotGlobalSettings = structuredClone(this.globalSettings);
+-		const modifiedFields = new Set(this.modifiedFields);
+-		const modifiedNestedFields = this.cloneModifiedNestedFields(this.modifiedNestedFields);
+-
++		const through = this.globalMutations.at(-1);
++		if (!through) return;
+ 		this.enqueueWrite("global", () => {
+-			this.persistScopedSettings("global", snapshotGlobalSettings, modifiedFields, modifiedNestedFields);
++			this.assertGlobalSettingsLoaded();
++			const mutations = this.globalMutations.slice(0, this.globalMutations.indexOf(through) + 1);
++			this.persistScopedSettings("global", mutations);
++			const persisted = new Set(mutations);
++			this.globalMutations = this.globalMutations.filter((mutation) => !persisted.has(mutation));
+ 		});
+ 	}
+ 
+@@ -651,11 +899,14 @@ export class SettingsManager {
+ 			return;
+ 		}
+ 
+-		const snapshotProjectSettings = structuredClone(this.projectSettings);
+-		const modifiedFields = new Set(this.modifiedProjectFields);
+-		const modifiedNestedFields = this.cloneModifiedNestedFields(this.modifiedProjectNestedFields);
++		const mutations = [...this.modifiedProjectFields].flatMap((field) => {
++			const nested = this.modifiedProjectNestedFields.get(field);
++			return nested
++				? [...nested].map((key) => SettingsManager.captureMutation(this.projectSettings, field, key))
++				: [SettingsManager.captureMutation(this.projectSettings, field)];
++		});
+ 		this.enqueueWrite("project", () => {
+-			this.persistScopedSettings("project", snapshotProjectSettings, modifiedFields, modifiedNestedFields);
++			this.persistScopedSettings("project", mutations);
+ 		});
+ 	}
+ 
+@@ -667,6 +918,44 @@ export class SettingsManager {
+ 		this.saveProjectSettings(projectSettings);
+ 	}
+ 
++	unsetGlobalSettings(keys: readonly (keyof Settings)[]): Promise<UnsetGlobalSettingsReceipt> {
++		const requested = [...new Set(keys)];
++		if (requested.some((key) => !Object.hasOwn(SettingsSchema.properties, key))) {
++			return Promise.reject(new Error("Unknown settings key"));
++		}
++		const storage = this.storage;
++		if (!(storage instanceof FileSettingsStorage))
++			return Promise.reject(new Error("Unset requires file settings storage"));
++		const before = new Set(this.globalMutations);
++		const operation = this.writeQueue.then(() => {
++			this.assertGlobalSettingsLoaded();
++			let receipt: UnsetGlobalSettingsReceipt;
++			try {
++				receipt = storage.unsetGlobalSettings(requested);
++			} catch (error) {
++				if (error instanceof SettingsUnsetError && error.replacement === "uncertain")
++					this.globalSettingsLoadError = error;
++				throw error;
++			}
++			this.globalMutations = this.globalMutations.filter(
++				(mutation) => !before.has(mutation) || !requested.includes(mutation.field),
++			);
++			for (const field of requested) delete this.globalSettings[field];
++			for (const mutation of this.globalMutations) {
++				if (requested.includes(mutation.field)) SettingsManager.applyMutation(this.globalSettings, mutation);
++			}
++			this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
++			return receipt;
++		});
++		this.writeQueue = operation.then(
++			() => undefined,
++			(error) => {
++				this.recordError("global", error);
++			},
++		);
++		return operation;
++	}
++
+ 	async flush(): Promise<void> {
+ 		await this.writeQueue;
+ 	}
+@@ -793,7 +1082,7 @@ export class SettingsManager {
+ 			this.globalSettings.modelThinkingLevels = {};
+ 		}
+ 		this.globalSettings.modelThinkingLevels[`${provider}/${modelId}`] = level;
+-		this.markModified("modelThinkingLevels");
++		this.markModified("modelThinkingLevels", `${provider}/${modelId}`);
+ 		this.save();
+ 	}
+ 
+@@ -803,7 +1092,7 @@ export class SettingsManager {
+ 		if (Object.keys(this.globalSettings.modelThinkingLevels).length === 0) {
+ 			delete this.globalSettings.modelThinkingLevels;
+ 		}
+-		this.markModified("modelThinkingLevels");
++		this.markModified("modelThinkingLevels", `${provider}/${modelId}`);
+ 		this.save();
+ 	}
+ 
 diff --git a/packages/coding-agent/src/core/system-prompt.ts b/packages/coding-agent/src/core/system-prompt.ts
 index e51e14fe4065d73c3a85947000eff04402fa7a52..c8882e7c2f89d53a64439a785315674f05fbdb63 100644
 --- a/packages/coding-agent/src/core/system-prompt.ts
@@ -737,6 +1679,18 @@ index e51e14fe4065d73c3a85947000eff04402fa7a52..c8882e7c2f89d53a64439a785315674f
  /**
   * Diff the sections the model currently has (replayed from the transcript, so never null)
   * against the desired ones. Returns a `SystemMessage.sections` patch, or undefined when
+diff --git a/packages/coding-agent/src/core/tools/read.ts b/packages/coding-agent/src/core/tools/read.ts
+index dd123cb4eb0373e4b97647a5a8b560d0f48b17cc..4e8a6d1b26e97d0dfcfe4d634e0d2ebe5b8dda1d 100644
+--- a/packages/coding-agent/src/core/tools/read.ts
++++ b/packages/coding-agent/src/core/tools/read.ts
+@@ -77,6 +77,7 @@ async function* readLocalFileChunks(path: string, { signal }: { signal?: AbortSi
+ 	try {
+ 		const stats = await handle.stat();
+ 		const end = stats.isFile() && stats.size > 0 ? stats.size - 1 : undefined;
++		signal?.throwIfAborted();
+ 		yield* handle.createReadStream({ end, signal, autoClose: false });
+ 	} finally {
+ 		await handle.close();
 diff --git a/packages/coding-agent/src/core/trust-manager.ts b/packages/coding-agent/src/core/trust-manager.ts
 index f0721efefd954e13c2b502168a2682e544298a2d..572cabf6e5b71b2721129f407d7c67e3a4bdc890 100644
 --- a/packages/coding-agent/src/core/trust-manager.ts
@@ -766,6 +1720,79 @@ index f0721efefd954e13c2b502168a2682e544298a2d..572cabf6e5b71b2721129f407d7c67e3
  	if (TRUST_REQUIRING_PROJECT_CONFIG_RESOURCES.some((entry) => existsSync(join(configDir, entry)))) {
  		return true;
  	}
+diff --git a/packages/coding-agent/src/extensions/mcp/config.ts b/packages/coding-agent/src/extensions/mcp/config.ts
+index 8e8553c2354fe43b9ca9ef24a0ff45af5b4d8eaa..a85e9ca6fc8da27f6c382bfe9df19018ed519633 100644
+--- a/packages/coding-agent/src/extensions/mcp/config.ts
++++ b/packages/coding-agent/src/extensions/mcp/config.ts
+@@ -29,7 +29,7 @@
+  * with `codemode` exposure connects. A project value overrides the global one.
+  */
+ 
+-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
++import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, writeFileSync } from "node:fs";
+ import { dirname, join } from "node:path";
+ import { isMcpServerOverride, mcpNamespace } from "@earendil-works/pi-mcp";
+ import { CONFIG_DIR_NAME } from "../../config.ts";
+@@ -80,13 +80,36 @@ interface McpConfigState {
+ 	errors: string[];
+ }
+ 
+-function readConfigFile(path: string, scope: "global" | "project", state: McpConfigState): void {
++function readConfigText(path: string, maxConfigBytes?: number): string {
++	if (maxConfigBytes === undefined) return readFileSync(path, "utf8");
++	const file = openSync(path, "r");
++	try {
++		const bytes = Buffer.alloc(maxConfigBytes + 1);
++		let used = 0;
++		while (used < bytes.length) {
++			const count = readSync(file, bytes, used, bytes.length - used, null);
++			if (count === 0) break;
++			used += count;
++		}
++		if (used > maxConfigBytes) throw new Error("MCP configuration exceeds its size limit");
++		return bytes.toString("utf8", 0, used);
++	} finally {
++		closeSync(file);
++	}
++}
++
++function readConfigFile(
++	path: string,
++	scope: "global" | "project",
++	state: McpConfigState,
++	maxConfigBytes?: number,
++): void {
+ 	const { servers, errors } = state;
+-	if (!existsSync(path)) return;
+ 	let parsed: unknown;
+ 	try {
+-		parsed = JSON.parse(stripBom(readFileSync(path, "utf8")));
++		parsed = JSON.parse(stripBom(readConfigText(path, maxConfigBytes)));
+ 	} catch (error) {
++		if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+ 		errors.push(`${path}: ${error instanceof Error ? error.message : String(error)}`);
+ 		return;
+ 	}
+@@ -134,11 +157,16 @@ function readConfigFile(path: string, scope: "global" | "project", state: McpCon
+  * Load global and (when trusted) project MCP configuration. Disabled servers are included with
+  * `enabled: false`, so they can be enabled again.
+  */
+-export function loadMcpConfig(options: { agentDir: string; cwd: string; projectTrusted: boolean }): LoadedMcpConfig {
++export function loadMcpConfig(options: {
++	agentDir: string;
++	cwd: string;
++	projectTrusted: boolean;
++	maxConfigBytes?: number;
++}): LoadedMcpConfig {
+ 	const state: McpConfigState = { servers: new Map(), errors: [] };
+-	readConfigFile(join(options.agentDir, "mcp.json"), "global", state);
++	readConfigFile(join(options.agentDir, "mcp.json"), "global", state, options.maxConfigBytes);
+ 	const projectConfig = options.projectTrusted ? join(options.cwd, CONFIG_DIR_NAME, "mcp.json") : undefined;
+-	if (projectConfig) readConfigFile(projectConfig, "project", state);
++	if (projectConfig) readConfigFile(projectConfig, "project", state, options.maxConfigBytes);
+ 	return {
+ 		servers: [...state.servers.values()],
+ 		...(state.autoEnableCodemode === undefined ? {} : { autoEnableCodemode: state.autoEnableCodemode }),
 diff --git a/packages/coding-agent/src/extensions/mcp/index.ts b/packages/coding-agent/src/extensions/mcp/index.ts
 index 1a2db568a126e31f1d69417e3b3ecadd2d767570..00ce5f4a0ecbe33888b75cbbfb1a37e1452d241e 100644
 --- a/packages/coding-agent/src/extensions/mcp/index.ts
@@ -817,6 +1844,138 @@ index 1a2db568a126e31f1d69417e3b3ecadd2d767570..00ce5f4a0ecbe33888b75cbbfb1a37e1
  }
  
  export default createMcpExtension();
+diff --git a/packages/coding-agent/src/extensions/mcp/runtime.ts b/packages/coding-agent/src/extensions/mcp/runtime.ts
+index 2e998f86ea52f90b38aa93fc1e93e9c6222b3ff5..f96592ba836f4ea9c34429392849124b72400c18 100644
+--- a/packages/coding-agent/src/extensions/mcp/runtime.ts
++++ b/packages/coding-agent/src/extensions/mcp/runtime.ts
+@@ -35,7 +35,11 @@ import {
+ 	type OAuthChallenge,
+ } from "@earendil-works/pi-mcp/oauth";
+ import { VERSION } from "../../config.ts";
+-import { resolveConfigValueOrThrow, resolveHeadersOrThrow } from "../../core/resolve-config-value.ts";
++import {
++	type CredentialReferenceOptions,
++	resolveConfigValueAsync,
++	resolveConfigValueOrThrow,
++} from "../../core/resolve-config-value.ts";
+ import { sliceTail } from "../../core/tools/truncate.ts";
+ import type { McpServerEntry } from "./config.ts";
+ import type { McpServerLog } from "./log.ts";
+@@ -62,7 +66,8 @@ export type McpTransportFactory = (
+ 	entry: McpServerEntry,
+ 	cwd: string,
+ 	authProvider: AuthProvider | undefined,
+-) => McpTransport;
++	signal?: AbortSignal,
++) => McpTransport | Promise<McpTransport>;
+ 
+ function errorMessage(error: unknown): string {
+ 	return error instanceof Error ? error.message : String(error);
+@@ -97,22 +102,43 @@ function expandHome(value: string): string {
+ 	return value;
+ }
+ 
+-export function createDefaultTransport(
++export async function createDefaultTransport(
+ 	entry: McpServerEntry,
+ 	cwd: string,
+ 	authProvider: AuthProvider | undefined,
+-): McpTransport {
++	signal?: AbortSignal,
++	options: Omit<CredentialReferenceOptions, "signal"> = {},
++): Promise<McpTransport> {
+ 	const { config, name } = entry;
++	const resolveOptions = { ...options, signal };
+ 	if ("url" in config) {
++		const headers: Record<string, string> = {};
++		for (const [key, value] of Object.entries(config.headers ?? {})) {
++			const resolved = await resolveConfigValueAsync(value, resolveOptions, `MCP server "${name}" header "${key}"`);
++			if (typeof value !== "string") {
++				try {
++					if (
++						/[^\x09\x20-\x7e]/.test(resolved) ||
++						new Headers([[key, resolved]]).get(key) !== resolved ||
++						Object.keys(config.headers ?? {}).filter((header) => header.toLowerCase() === key.toLowerCase())
++							.length !== 1
++					)
++						throw new Error();
++				} catch {
++					throw new Error("Invalid credential reference HTTP header");
++				}
++			}
++			headers[key] = resolved;
++		}
+ 		return new StreamableHttpTransport({
+ 			url: config.url,
+-			headers: resolveHeadersOrThrow(config.headers, `MCP server "${name}"`),
++			headers,
+ 			authProvider,
+ 		});
+ 	}
+ 	const env: Record<string, string> = {};
+ 	for (const [key, value] of Object.entries(config.env ?? {})) {
+-		env[key] = resolveConfigValueOrThrow(value, `MCP server "${name}" env "${key}"`);
++		env[key] = await resolveConfigValueAsync(value, resolveOptions, `MCP server "${name}" env "${key}"`);
+ 	}
+ 	return new StdioTransport({
+ 		command: expandHome(config.command),
+@@ -377,7 +403,11 @@ export class McpServerConnection implements McpToolCaller, McpResourceServer {
+ 		this.shutdown.signal.addEventListener("abort", closeClient, { once: true });
+ 		let transport: McpTransport | undefined;
+ 		try {
+-			transport = this.createTransport(this.entry, this.cwd, this.authProvider);
++			transport = await this.createTransport(this.entry, this.cwd, this.authProvider, this.shutdown.signal);
++			if (this.closed) {
++				await transport.close();
++				throw new Error("shut down while resolving configuration");
++			}
+ 			await client.connect(transport);
+ 			client.onNotification("notifications/tools/list_changed", () => {
+ 				void this.refreshTools(client);
+diff --git a/packages/coding-agent/src/index.ts b/packages/coding-agent/src/index.ts
+index bfa256ab8808c5cdba852aedbfacabf2950a15e9..c2c0e750a5662befef8fdaf59af904fd2457cfaf 100644
+--- a/packages/coding-agent/src/index.ts
++++ b/packages/coding-agent/src/index.ts
+@@ -249,6 +249,13 @@ export type {
+ 	ResolvedResource,
+ } from "./core/package-manager.ts";
+ export { DefaultPackageManager } from "./core/package-manager.ts";
++export {
++	type ConfigValue,
++	type CredentialReference,
++	type CredentialReferenceOptions,
++	isCredentialReference,
++	resolveConfigValueAsync,
++} from "./core/resolve-config-value.ts";
+ export type { ResourceCollision, ResourceDiagnostic, ResourceLoader } from "./core/resource-loader.ts";
+ export { DefaultResourceLoader, loadProjectContextFiles } from "./core/resource-loader.ts";
+ // SDK for programmatic usage
+@@ -323,7 +330,10 @@ export {
+ 	type RetrySettings,
+ 	SettingsManager,
+ 	type SettingsManagerCreateOptions,
++	SettingsUnsetError,
++	type SettingsUnsetRecovery,
+ 	type TuiMode,
++	type UnsetGlobalSettingsReceipt,
+ } from "./core/settings-manager.ts";
+ // Skills
+ export {
+@@ -414,7 +424,13 @@ export {
+ // Built-in extensions. The CLI loads them; SDK sessions add them to their extension factories.
+ export { type CodemodeExtensionOptions, createCodemodeExtension } from "./extensions/codemode/index.ts";
+ export type { CodemodeStoreEntryData, CodemodeToolDetails } from "./extensions/codemode/tool.ts";
+-export type { LoadedMcpConfig, McpExposure, McpServerConfig, McpServerEntry } from "./extensions/mcp/config.ts";
++export {
++	type LoadedMcpConfig,
++	loadMcpConfig,
++	type McpExposure,
++	type McpServerConfig,
++	type McpServerEntry,
++} from "./extensions/mcp/config.ts";
+ export { createMcpExtension, type McpExtensionOptions, type McpTransportFactory } from "./extensions/mcp/index.ts";
+ export { createToolSearchExtension } from "./extensions/tool-search/index.ts";
+ // Main entry point
 diff --git a/packages/coding-agent/src/modes/interactive/interactive-mode.ts b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
 index 2459c10df86459b63e749878db5ea140cac0ab07..19e4630259f1a4e1b534bb597a0e8edf797b1944 100644
 --- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
@@ -829,6 +1988,1132 @@ index 2459c10df86459b63e749878db5ea140cac0ab07..19e4630259f1a4e1b534bb597a0e8edf
  			sessionManager: this.sessionManager,
  			modelRegistry: extensionRunner.getModelRegistry(),
  			model: this.session.model,
+diff --git a/packages/coding-agent/test/mcp-extension.test.ts b/packages/coding-agent/test/mcp-extension.test.ts
+index 1b22e32fd7bc5d56930fa9be9b84fca7ea992dce..fb9826db171b0b68b29210aff7be3759f6734631 100644
+--- a/packages/coding-agent/test/mcp-extension.test.ts
++++ b/packages/coding-agent/test/mcp-extension.test.ts
+@@ -1,8 +1,20 @@
+-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
++import childProcess from "node:child_process";
++import {
++	chmodSync,
++	existsSync,
++	mkdirSync,
++	mkdtempSync,
++	readFileSync,
++	realpathSync,
++	rmSync,
++	writeFileSync,
++} from "node:fs";
+ import { createServer } from "node:http";
++import { syncBuiltinESMExports } from "node:module";
+ import type { AddressInfo } from "node:net";
+ import { tmpdir } from "node:os";
+ import { join } from "node:path";
++import { setTimeout as sleep } from "node:timers/promises";
+ import { renderToolOutputType } from "@earendil-works/pi-codemode/declarations";
+ import {
+ 	createMcpToolName,
+@@ -13,7 +25,7 @@ import {
+ 	McpSessionExpiredError,
+ } from "@earendil-works/pi-mcp";
+ import { createInMemoryTransportPair, type InMemoryTransport } from "@earendil-works/pi-mcp/testing";
+-import { afterEach, describe, expect, it } from "vitest";
++import { afterEach, describe, expect, it, vi } from "vitest";
+ import { InMemoryAuthStorageBackend } from "../src/core/auth-storage.ts";
+ import {
+ 	addMcpServerConfig,
+@@ -30,6 +42,7 @@ import {
+ 	McpServerLog,
+ } from "../src/extensions/mcp/runtime.ts";
+ import { convertMcpResult, createMcpResultSchema } from "../src/extensions/mcp/tools.ts";
++import { loadMcpConfig as loadPublicMcpConfig } from "../src/index.ts";
+ 
+ // Config values are resolved at connect time, so the literal reference must survive loading.
+ // biome-ignore lint/suspicious/noTemplateCurlyInString: literal config value reference
+@@ -38,6 +51,8 @@ const TOKEN_HEADER = "Bearer ${TOKEN}";
+ describe("MCP config", () => {
+ 	const dirs: string[] = [];
+ 	afterEach(() => {
++		vi.restoreAllMocks();
++		syncBuiltinESMExports();
+ 		for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+ 	});
+ 
+@@ -183,6 +198,40 @@ describe("MCP config", () => {
+ 		expect(trusted.errors).toContainEqual(expect.stringContaining("autoEnableCodemode must be a boolean"));
+ 	});
+ 
++	it("validates reference data without resolving it during inventory", () => {
++		const reference = { source: "1password", reference: "op://vault/item/field", format: "bearer" };
++		const keychain = { source: "keychain", service: "service", account: "account" };
++		const paths = setup(
++			{
++				mcpServers: {
++					remote: { url: "https://example.com/mcp", headers: { Authorization: reference }, enabled: false },
++					local: { command: "unused", env: { TOKEN: keychain }, enabled: false },
++					bad: { command: "unused", env: { TOKEN: { ...keychain, executable: "untrusted" } } },
++				},
++			},
++			{},
++		);
++		const marker = join(paths.agentDir, "resolution-attempt");
++		const refuseExecution = () => {
++			writeFileSync(marker, "attempted");
++			throw new Error("Inventory must not execute");
++		};
++		const spawn = vi.spyOn(childProcess, "spawn").mockImplementation(refuseExecution);
++		const spawnSync = vi.spyOn(childProcess, "spawnSync").mockImplementation(refuseExecution);
++		const execSync = vi.spyOn(childProcess, "execSync").mockImplementation(refuseExecution);
++		syncBuiltinESMExports();
++		const { servers, errors } = loadMcpConfig({ ...paths, projectTrusted: false });
++		expect(spawn).not.toHaveBeenCalled();
++		expect(spawnSync).not.toHaveBeenCalled();
++		expect(execSync).not.toHaveBeenCalled();
++		expect(existsSync(marker)).toBe(false);
++		expect(servers.map((entry) => entry.config)).toEqual([
++			{ url: "https://example.com/mcp", headers: { Authorization: reference }, enabled: false },
++			{ command: "unused", env: { TOKEN: keychain }, enabled: false },
++		]);
++		expect(errors).toEqual([expect.stringContaining("strings or credential references")]);
++	});
++
+ 	it("validates the OAuth callback URL, scope, and client name", () => {
+ 		const paths = setup(
+ 			{
+@@ -233,6 +282,22 @@ describe("MCP config", () => {
+ 		]);
+ 	});
+ 
++	it("bounds each configuration file through the public reader", () => {
++		const paths = setup(
++			{ mcpServers: { big: { command: "x".repeat(64) } } },
++			{ mcpServers: { small: { command: "y" } } },
++		);
++		const project = readFileSync(join(paths.cwd, ".pi", "mcp.json"));
++		const bounded = loadPublicMcpConfig({ ...paths, projectTrusted: true, maxConfigBytes: project.length });
++		expect(bounded.servers.map((server) => [server.name, server.scope])).toEqual([["small", "project"]]);
++		expect(bounded.errors).toEqual([expect.stringContaining("MCP configuration exceeds its size limit")]);
++		rmSync(join(paths.agentDir, "mcp.json"));
++		expect(loadPublicMcpConfig({ ...paths, projectTrusted: false, maxConfigBytes: 1 })).toEqual({
++			servers: [],
++			errors: [],
++		});
++	});
++
+ 	it("resolves per-tool exposure from exact names, then patterns in order", () => {
+ 		const paths = setup(
+ 			{
+@@ -572,6 +637,232 @@ for await (const line of createInterface({ input: process.stdin })) {
+ 		},
+ 	);
+ 
++	it.skipIf(process.platform === "win32")(
++		"resolves typed references at the real connection boundary without a shell or diagnostic leaks",
++		async () => {
++			const root = mkdtempSync(join(tmpdir(), "pi-mcp-reference-"));
++			const executable = join(root, "op");
++			const argv = join(root, "argv.json");
++			writeFileSync(
++				executable,
++				`#!${process.execPath}\nimport { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(argv)}, JSON.stringify(process.argv.slice(2)));\nprocess.stderr.write('private-resolver-diagnostic');\nprocess.exit(1);\n`,
++			);
++			chmodSync(executable, 0o700);
++			const reference = "op://vault/item/field ; $() | 'quoted'";
++			const connection = new McpServerConnection({
++				entry: {
++					name: "reference",
++					source: "test",
++					config: {
++						url: "https://unused.invalid",
++						headers: { Authorization: { source: "1password", reference, format: "bearer" } },
++					},
++				},
++				cwd: root,
++				createTransport: (entry, cwd, auth, signal) =>
++					createDefaultTransport(entry, cwd, auth, signal, { opExecutable: executable }),
++				credentials: new McpOAuthCredentialStore(new InMemoryAuthStorageBackend()),
++				onTools: () => {},
++			});
++			try {
++				expect(existsSync(argv)).toBe(false);
++				await expect(connection.getClient()).rejects.toThrow(
++					/^MCP server "reference" failed to connect: Credential resolution failed$/,
++				);
++				expect(JSON.parse(readFileSync(argv, "utf8"))).toEqual(["read", "--no-newline", reference]);
++				expect(connection.error).toBe("Credential resolution failed");
++			} finally {
++				await connection.close();
++				rmSync(root, { recursive: true, force: true });
++			}
++		},
++	);
++
++	it.skipIf(process.platform === "win32")(
++		"delivers fixture bearer headers through the default HTTP transport",
++		async () => {
++			const root = mkdtempSync(join(tmpdir(), "pi-mcp-reference-http-"));
++			const executable = join(root, "op.cjs");
++			const authorizations: (string | undefined)[] = [];
++			writeFileSync(executable, `#!${process.execPath}\nprocess.stdout.write('fixture-token');\n`);
++			chmodSync(executable, 0o700);
++			const server = createServer(async (request, response) => {
++				authorizations.push(request.headers.authorization);
++				const chunks: Buffer[] = [];
++				for await (const chunk of request) chunks.push(Buffer.from(chunk));
++				const body = Buffer.concat(chunks).toString("utf8");
++				const message = body ? JSON.parse(body) : undefined;
++				if (message?.method === "notifications/initialized") {
++					response.writeHead(202).end();
++					return;
++				}
++				const result =
++					message?.method === "initialize"
++						? {
++								protocolVersion: LATEST_PROTOCOL_VERSION,
++								capabilities: { tools: {} },
++								serverInfo: { name: "fixture", version: "1" },
++							}
++						: { tools: [] };
++				response.writeHead(200, { "content-type": "application/json" });
++				response.end(message ? JSON.stringify({ jsonrpc: "2.0", id: message.id, result }) : "");
++			});
++			await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
++			const { port } = server.address() as AddressInfo;
++			const connection = new McpServerConnection({
++				entry: {
++					name: "fixture",
++					source: "test",
++					config: {
++						url: `http://127.0.0.1:${port}/mcp`,
++						headers: { Authorization: { source: "1password", reference: "op://v/i/f", format: "bearer" } },
++					},
++				},
++				cwd: root,
++				createTransport: (entry, cwd, auth, signal) =>
++					createDefaultTransport(entry, cwd, auth, signal, { opExecutable: executable }),
++				credentials: new McpOAuthCredentialStore(new InMemoryAuthStorageBackend()),
++				onTools: () => {},
++			});
++			try {
++				await connection.getClient();
++				expect(connection.state).toBe("connected");
++				expect(authorizations.length).toBeGreaterThan(0);
++				expect(authorizations.every((value) => value === "Bearer fixture-token")).toBe(true);
++			} finally {
++				await connection.close();
++				await new Promise<void>((resolve) => server.close(() => resolve()));
++				rmSync(root, { recursive: true, force: true });
++			}
++		},
++	);
++
++	it.skipIf(process.platform === "win32")(
++		"preserves reference output in a real stdio server environment without HTTP constraints",
++		async () => {
++			const root = mkdtempSync(join(tmpdir(), "pi-mcp-reference-env-"));
++			const executable = join(root, "op.cjs");
++			const output = " \tfixture-雪\x01\x7f \t";
++			writeFileSync(executable, `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(output)});\n`);
++			chmodSync(executable, 0o700);
++			const serverPath = join(root, "server.mjs");
++			writeFileSync(
++				serverPath,
++				`import { createInterface } from 'node:readline';\nfor await (const line of createInterface({ input: process.stdin })) {\nconst message = JSON.parse(line); if (!("id" in message)) continue;\nconst result = message.method === 'initialize' ? { protocolVersion: ${JSON.stringify(LATEST_PROTOCOL_VERSION)}, capabilities: { tools: {} }, serverInfo: { name: 'fixture', version: '1' } } : message.method === 'tools/list' ? { tools: [{ name: 'env', inputSchema: { type: 'object' } }] } : { content: [{ type: 'text', text: process.env.TOKEN }] };\nprocess.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result }) + '\\n');\n}\n`,
++			);
++			const connection = new McpServerConnection({
++				entry: {
++					name: "fixture",
++					source: "test",
++					config: {
++						command: process.execPath,
++						args: [serverPath],
++						env: { TOKEN: { source: "1password", reference: "op://v/i/f" }, PATH: "untrusted-server-path" },
++					},
++				},
++				cwd: root,
++				createTransport: (entry, cwd, auth, signal) =>
++					createDefaultTransport(entry, cwd, auth, signal, { opExecutable: executable }),
++				credentials: new McpOAuthCredentialStore(new InMemoryAuthStorageBackend()),
++				onTools: () => {},
++			});
++			try {
++				expect(await connection.callTool("env", {}, {})).toEqual({ content: [{ type: "text", text: output }] });
++			} finally {
++				await connection.close();
++				rmSync(root, { recursive: true, force: true });
++			}
++		},
++	);
++
++	it.skipIf(process.platform === "win32")(
++		"refuses unrepresentable reference headers before transport errors can quote or normalize them",
++		async () => {
++			const root = mkdtempSync(join(tmpdir(), "pi-mcp-reference-header-errors-"));
++			const executable = join(root, "op.cjs");
++			try {
++				for (const [key, output] of [
++					["Authorization", "private-http\x7f"],
++					["Authorization", "private-http\x01"],
++					["Authorization", "private-http雪"],
++					["Authorization", " private-http"],
++					["Authorization", "private-http\t"],
++					["invalid name", "private-http"],
++					["authorization", "private-http"],
++				]) {
++					writeFileSync(executable, `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(output)});\n`);
++					chmodSync(executable, 0o700);
++					const errorSink: string[] = [];
++					const headers = { [key]: { source: "1password" as const, reference: "op://v/i/f" } };
++					if (key === "authorization") headers.Authorization = headers[key];
++					const connection = new McpServerConnection({
++						entry: {
++							name: "fixture",
++							source: "test",
++							config: {
++								url: "https://unused.invalid",
++								headers,
++							},
++						},
++						cwd: root,
++						createTransport: (entry, cwd, auth, signal) =>
++							createDefaultTransport(entry, cwd, auth, signal, { opExecutable: executable }),
++						credentials: new McpOAuthCredentialStore(new InMemoryAuthStorageBackend()),
++						onTools: () => {},
++						onChange: (current) => {
++							if (current.error) errorSink.push(current.error);
++						},
++					});
++					try {
++						await expect(connection.getClient()).rejects.toThrow(
++							/^MCP server "fixture" failed to connect: Invalid credential reference HTTP header$/,
++						);
++						expect(connection.error).toBe("Invalid credential reference HTTP header");
++						expect(errorSink).toEqual(["Invalid credential reference HTTP header"]);
++					} finally {
++						await connection.close();
++					}
++				}
++			} finally {
++				rmSync(root, { recursive: true, force: true });
++			}
++		},
++	);
++
++	it.skipIf(process.platform === "win32")("joins reference resolution before connection close returns", async () => {
++		const root = mkdtempSync(join(tmpdir(), "pi-mcp-reference-close-"));
++		const executable = join(root, "op");
++		const pidFile = join(root, "pid");
++		writeFileSync(
++			executable,
++			`#!${process.execPath}\nimport { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(pidFile)}, String(process.pid));\nsetInterval(() => {}, 1000);\n`,
++		);
++		chmodSync(executable, 0o700);
++		const connection = new McpServerConnection({
++			entry: {
++				name: "reference",
++				source: "test",
++				config: { command: "unused", env: { TOKEN: { source: "1password", reference: "op://vault/item/field" } } },
++			},
++			cwd: root,
++			createTransport: (entry, cwd, auth, signal) =>
++				createDefaultTransport(entry, cwd, auth, signal, { opExecutable: executable }),
++			credentials: new McpOAuthCredentialStore(new InMemoryAuthStorageBackend()),
++			onTools: () => {},
++		});
++		const opening = expect(connection.getClient()).rejects.toThrow("Credential resolution cancelled");
++		try {
++			for (let attempt = 0; !existsSync(pidFile) && attempt < 200; attempt++) await sleep(10);
++			expect(existsSync(pidFile)).toBe(true);
++			await connection.close();
++			await opening;
++			expect(() => process.kill(Number(readFileSync(pidFile, "utf8")), 0)).toThrow();
++		} finally {
++			await connection.close();
++			rmSync(root, { recursive: true, force: true });
++		}
++	});
++
+ 	it("connects to servers without the tools capability without listing tools", async () => {
+ 		const methods: string[] = [];
+ 		const { connection } = connect({ name: "fake", config: { command: "unused" }, source: "test" }, [
+diff --git a/packages/coding-agent/test/model-runtime-credential-sync.test.ts b/packages/coding-agent/test/model-runtime-credential-sync.test.ts
+index 8f38a9c18bb0913166a6d1cadb5ccb78a7451615..c7a052681b80d1a40de4c786d819544d5e84cd09 100644
+--- a/packages/coding-agent/test/model-runtime-credential-sync.test.ts
++++ b/packages/coding-agent/test/model-runtime-credential-sync.test.ts
+@@ -372,4 +372,34 @@ describe("ModelRuntime credential synchronization", () => {
+ 		await expect(login).rejects.toBeInstanceOf(CredentialSynchronizationError);
+ 		expect(await credentials.read("broken-sync")).toEqual({ type: "api_key", key: "broken-sync-key" });
+ 	});
++
++	// Tron #2534: a registration starts an unawaited refresh that still reads the credential store.
++	it("settles refreshes started by provider registration", async () => {
++		const listing = Promise.withResolvers<void>();
++		const held = Promise.withResolvers<void>();
++		let lists = 0;
++		const credentials: CredentialStore = {
++			read: async () => undefined,
++			list: async () => {
++				if (++lists === 1) return [];
++				listing.resolve();
++				await held.promise;
++				return [];
++			},
++			modify: async () => undefined,
++			delete: async () => {},
++		};
++		const runtime = await ModelRuntime.create({ credentials, modelsPath: null, allowModelNetwork: false });
++		runtime.registerNativeProvider(provider("registered"));
++		await listing.promise;
++		let settled = false;
++		const settling = runtime.settleCredentialWrites().then(() => {
++			settled = true;
++		});
++		await new Promise((resolve) => setTimeout(resolve, 20));
++		expect(settled).toBe(false);
++		held.resolve();
++		await settling;
++		expect(settled).toBe(true);
++	});
+ });
+diff --git a/packages/coding-agent/test/resolve-config-value.test.ts b/packages/coding-agent/test/resolve-config-value.test.ts
+index b202f1c89cfa93afe68c3a19df7ca6206b05d4b6..e88f974b2019e82df34916519ff06d4a6ec0f115 100644
+--- a/packages/coding-agent/test/resolve-config-value.test.ts
++++ b/packages/coding-agent/test/resolve-config-value.test.ts
+@@ -1,10 +1,14 @@
+-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
++import childProcess from "node:child_process";
++import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
++import { syncBuiltinESMExports } from "node:module";
+ import { tmpdir } from "node:os";
+ import { join } from "node:path";
+ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+ import {
+ 	clearConfigValueCache,
++	isCredentialReference,
+ 	resolveConfigValue,
++	resolveConfigValueAsync,
+ 	resolveConfigValueUncached,
+ } from "../src/core/resolve-config-value.ts";
+ import * as shellModule from "../src/utils/shell.ts";
+@@ -22,6 +26,7 @@ describe("resolveConfigValue", () => {
+ 		if (existsSync(tempDir)) rmSync(tempDir, { recursive: true });
+ 		clearConfigValueCache();
+ 		vi.restoreAllMocks();
++		syncBuiltinESMExports();
+ 	});
+ 
+ 	test("resolves literals, environment templates, and escapes", () => {
+@@ -102,6 +107,197 @@ describe("resolveConfigValue", () => {
+ 		expect(readFileSync(counterFile, "utf-8").trim()).toBe("2");
+ 	});
+ 
++	test.skipIf(process.platform === "win32")(
++		"keeps reference arguments inert and scrubs resolver failures",
++		async () => {
++			const executable = join(tempDir, "op");
++			const recorded = join(tempDir, "argv.json");
++			writeFileSync(
++				executable,
++				`#!${process.execPath}\nimport { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(recorded)}, JSON.stringify(process.argv.slice(2)));\nprocess.stderr.write('private-child-diagnostic');\nprocess.exit(9);\n`,
++			);
++			chmodSync(executable, 0o700);
++			const reference = "op://vault/item/field ; printf not-executed | $(echo unsafe) 'quoted'";
++			expect(isCredentialReference({ source: "1password", reference })).toBe(true);
++			await expect(
++				resolveConfigValueAsync({ source: "1password", reference }, { opExecutable: executable }),
++			).rejects.toThrow(/^Credential resolution failed$/);
++			expect(JSON.parse(readFileSync(recorded, "utf8"))).toEqual(["read", "--no-newline", reference]);
++			for (const invalid of [
++				{ source: "1password", reference: "op://v/i/f\n" },
++				{ source: "1password", reference: "!echo bad" },
++				{ source: "1password", reference: "op://v/i/f", executable: "/bin/sh" },
++				{ source: "keychain", service: "s", account: "a", format: "prefix" },
++				{ source: "keychain", service: "s", account: "a\0" },
++			])
++				expect(isCredentialReference(invalid)).toBe(false);
++			rmSync(recorded);
++			await expect(
++				resolveConfigValueAsync({ source: "1password", reference: "invalid" }, { opExecutable: executable }),
++			).rejects.toThrow("Invalid credential reference");
++			expect(existsSync(recorded)).toBe(false);
++			await expect(
++				resolveConfigValueAsync(
++					{ source: "1password", reference: "op://v/i/f" },
++					{ opExecutable: join(tempDir, "missing") },
++				),
++			).rejects.toThrow(/^Credential resolver unavailable$/);
++		},
++	);
++
++	test.skipIf(process.platform === "win32")(
++		"preserves successful reference bytes and fixed bearer formatting",
++		async () => {
++			const executable = join(tempDir, "op.cjs");
++			const recorded = join(tempDir, "argv.json");
++			for (const output of ["\uFEFF \tfixture-雪\t ", " \t "]) {
++				writeFileSync(
++					executable,
++					`#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(recorded)}, JSON.stringify(process.argv.slice(2)));\nprocess.stdout.write(Buffer.from(${JSON.stringify(Buffer.from(output).toString("base64"))}, 'base64'));\n`,
++				);
++				chmodSync(executable, 0o700);
++				const reference = "op://vault/item/field ; $() | 'quoted'";
++				expect(
++					await resolveConfigValueAsync({ source: "1password", reference }, { opExecutable: executable }),
++				).toBe(output);
++				expect(JSON.parse(readFileSync(recorded, "utf8"))).toEqual(["read", "--no-newline", reference]);
++				expect(
++					await resolveConfigValueAsync(
++						{ source: "1password", reference, format: "bearer" },
++						{ opExecutable: executable },
++					),
++				).toBe(`Bearer ${output}`);
++			}
++		},
++	);
++
++	test.skipIf(process.platform === "win32")("rejects malformed output without leaking or normalizing it", async () => {
++		const executable = join(tempDir, "op.cjs");
++		for (const output of [
++			Buffer.alloc(0),
++			Buffer.from("\nprivate-fixture\n"),
++			Buffer.from("private-fixture\r\n"),
++			Buffer.from("private-fixture\0"),
++			Buffer.from([0xc3, 0x28]),
++		]) {
++			writeFileSync(
++				executable,
++				`#!${process.execPath}\nprocess.stdout.write(Buffer.from(${JSON.stringify(output.toString("base64"))}, 'base64'));\n`,
++			);
++			chmodSync(executable, 0o700);
++			await expect(
++				resolveConfigValueAsync({ source: "1password", reference: "op://v/i/f" }, { opExecutable: executable }),
++			).rejects.toThrow(/^Credential resolution failed$/);
++		}
++	});
++
++	test.skipIf(process.platform !== "darwin")(
++		"uses Keychain argv and removes only its single CLI terminator with an inert child",
++		async () => {
++			const executable = join(tempDir, "security.cjs");
++			const recorded = join(tempDir, "argv.json");
++			const realSpawn = childProcess.spawn;
++			vi.spyOn(childProcess, "spawn").mockImplementation((command, args, options) => {
++				expect(command).toBe("/usr/bin/security");
++				return realSpawn(executable, args, options);
++			});
++			syncBuiltinESMExports();
++			for (const [output, expected] of [
++				[" \tfixture \t\n", " \tfixture \t"],
++				["private-fixture\n\n", undefined],
++				["private-fixture\r\n", undefined],
++			] as const) {
++				writeFileSync(
++					executable,
++					`#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(recorded)}, JSON.stringify(process.argv.slice(2)));\nprocess.stdout.write(${JSON.stringify(output)});\n`,
++				);
++				chmodSync(executable, 0o700);
++				const result = resolveConfigValueAsync({
++					source: "keychain",
++					service: "service ; $()",
++					account: "account 'quoted'",
++				});
++				if (expected === undefined) await expect(result).rejects.toThrow(/^Credential resolution failed$/);
++				else expect(await result).toBe(expected);
++				expect(JSON.parse(readFileSync(recorded, "utf8"))).toEqual([
++					"find-generic-password",
++					"-s",
++					"service ; $()",
++					"-a",
++					"account 'quoted'",
++					"-w",
++				]);
++			}
++		},
++	);
++
++	test.skipIf(process.platform === "win32")(
++		"refuses pre-abort without starting a child and joins immediate cancellation",
++		async () => {
++			const executable = join(tempDir, "op.cjs");
++			const marker = join(tempDir, "started");
++			writeFileSync(
++				executable,
++				`#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(marker)}, String(process.pid));\nsetInterval(() => {}, 1000);\n`,
++			);
++			chmodSync(executable, 0o700);
++			const realSpawn = childProcess.spawn;
++			const pids: number[] = [];
++			const spawn = vi.spyOn(childProcess, "spawn").mockImplementation((command, args, options) => {
++				const child = realSpawn(command, args, options);
++				if (child.pid !== undefined) pids.push(child.pid);
++				return child;
++			});
++			syncBuiltinESMExports();
++			const pre = new AbortController();
++			pre.abort();
++			await expect(
++				resolveConfigValueAsync(
++					{ source: "1password", reference: "op://v/i/f" },
++					{ opExecutable: executable, signal: pre.signal },
++				),
++			).rejects.toThrow(/^Credential resolution cancelled$/);
++			expect(spawn).not.toHaveBeenCalled();
++			expect(existsSync(marker)).toBe(false);
++			const immediate = new AbortController();
++			const result = resolveConfigValueAsync(
++				{ source: "1password", reference: "op://v/i/f" },
++				{ opExecutable: executable, signal: immediate.signal },
++			);
++			immediate.abort();
++			await expect(result).rejects.toThrow(/^Credential resolution cancelled$/);
++			expect(pids).toHaveLength(1);
++			for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow();
++		},
++	);
++
++	test.skipIf(process.platform === "win32")(
++		"bounds output and joins the actual child on overflow and timeout",
++		async () => {
++			const executable = join(tempDir, "op");
++			const pidFile = join(tempDir, "pid");
++			writeFileSync(
++				executable,
++				`#!${process.execPath}\nimport { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(pidFile)}, String(process.pid));\nif (process.argv.at(-1).endsWith('/overflow')) process.stdout.write('x'.repeat(65537));\nsetInterval(() => {}, 1000);\n`,
++			);
++			chmodSync(executable, 0o700);
++			for (const mode of ["overflow", "timeout"]) {
++				await expect(
++					resolveConfigValueAsync(
++						{ source: "1password", reference: `op://v/i/${mode}` },
++						{ opExecutable: executable },
++					),
++				).rejects.toThrow(
++					mode === "overflow" ? "Credential output exceeded limit" : "Credential resolution timed out",
++				);
++				const pid = Number(readFileSync(pidFile, "utf8"));
++				expect(() => process.kill(pid, 0)).toThrow();
++				rmSync(pidFile);
++			}
++		},
++		15_000,
++	);
++
+ 	test("uses stdin when the configured Windows shell requires it", () => {
+ 		if (process.platform === "win32") return;
+ 		const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+diff --git a/packages/coding-agent/test/settings-manager.test.ts b/packages/coding-agent/test/settings-manager.test.ts
+index 5ff78de92037f98ad3a2a3d773839fbd3159d1ce..14452b45100ef8b1300aaa6b269b8e7606855a73 100644
+--- a/packages/coding-agent/test/settings-manager.test.ts
++++ b/packages/coding-agent/test/settings-manager.test.ts
+@@ -1,7 +1,21 @@
+-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
++import { syncBuiltinESMExports } from "node:module";
++import { createHash } from "crypto";
++import fs, {
++	chmodSync,
++	existsSync,
++	linkSync,
++	mkdirSync,
++	readdirSync,
++	readFileSync,
++	rmSync,
++	statSync,
++	symlinkSync,
++	writeFileSync,
++} from "fs";
+ import { homedir } from "os";
+ import { join } from "path";
+-import { afterEach, beforeEach, describe, expect, it } from "vitest";
++import lockfile from "proper-lockfile";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ import { DEFAULT_HTTP_IDLE_TIMEOUT_MS } from "../src/core/http-dispatcher.ts";
+ import { type Settings, SettingsManager } from "../src/core/settings-manager.ts";
+ 
+@@ -20,6 +34,8 @@ describe("SettingsManager", () => {
+ 	});
+ 
+ 	afterEach(() => {
++		vi.restoreAllMocks();
++		syncBuiltinESMExports();
+ 		if (existsSync(testDir)) {
+ 			rmSync(testDir, { recursive: true });
+ 		}
+@@ -111,6 +127,437 @@ describe("SettingsManager", () => {
+ 		});
+ 	});
+ 
++	describe("backup-first global unset", () => {
++		it("backs up exact bytes and serializes deletion between setters without resurrecting keys", async () => {
++			const settingsPath = join(agentDir, "settings.json");
++			const original = Buffer.from('\uFEFF{ "theme": "dark", "hideThinkingBlock": true, "custom": {"keep": 1} }\n');
++			writeFileSync(settingsPath, original);
++			const manager = SettingsManager.create(projectDir, agentDir);
++			const unset = manager.unsetGlobalSettings(["theme", "hideThinkingBlock", "theme"]);
++			manager.setDefaultThinkingLevel("high");
++			const receipt = await unset;
++			await manager.flush();
++			expect(receipt.status).toBe("applied");
++			if (receipt.status !== "applied") throw new Error("Expected applied receipt");
++			expect(readFileSync(receipt.backupPath)).toEqual(original);
++			expect(statSync(receipt.backupPath).mode & 0o777).toBe(0o600);
++			expect(receipt.beforeSha256).toBe(createHash("sha256").update(original).digest("hex"));
++			expect(receipt.afterSha256).toBe(
++				createHash("sha256")
++					.update(`${JSON.stringify({ custom: { keep: 1 } }, null, 2)}\n`)
++					.digest("hex"),
++			);
++			expect(statSync(settingsPath).mode & 0o777).toBe(0o600);
++			expect(receipt.changedKeys).toEqual(["theme", "hideThinkingBlock"]);
++			expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({
++				custom: { keep: 1 },
++				defaultThinkingLevel: "high",
++			});
++			expect(manager.getTheme()).toBeUndefined();
++			expect(manager.getHideThinkingBlock()).toBe(false);
++			expect(SettingsManager.create(projectDir, agentDir).getGlobalSettings()).toEqual(manager.getGlobalSettings());
++			expect(await manager.unsetGlobalSettings(["theme"])).toEqual({ status: "unchanged", changedKeys: [] });
++			expect(await manager.unsetGlobalSettings([])).toEqual({ status: "unchanged", changedKeys: [] });
++			expect(manager.drainErrors()).toEqual([]);
++			expect(readdirSync(agentDir).filter((name) => name.includes(".backup-"))).toHaveLength(1);
++		});
++
++		it("preserves prior queued writes, external fields, later same-key setters and project overrides", async () => {
++			const settingsPath = join(agentDir, "settings.json");
++			writeFileSync(settingsPath, JSON.stringify({ theme: "dark", hideThinkingBlock: true }));
++			writeFileSync(join(projectDir, ".pi", "settings.json"), JSON.stringify({ theme: "project" }));
++			const manager = SettingsManager.create(projectDir, agentDir);
++			writeFileSync(settingsPath, JSON.stringify({ theme: "dark", hideThinkingBlock: true, external: 7 }));
++			manager.setDefaultThinkingLevel("low");
++			const unset = manager.unsetGlobalSettings(["theme", "hideThinkingBlock"]);
++			manager.setTheme("dark");
++			const receipt = await unset;
++			await manager.flush();
++			expect(receipt.status).toBe("applied");
++			expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({
++				theme: "dark",
++				defaultThinkingLevel: "low",
++				external: 7,
++			});
++			expect(manager.getGlobalSettings().theme).toBe("dark");
++			expect(manager.getTheme()).toBe("project");
++		});
++
++		it("retains failed setter ownership after storage repair unless unset explicitly deletes it", async () => {
++			const settingsPath = join(agentDir, "settings.json");
++			for (const unset of [false, true]) {
++				writeFileSync(settingsPath, '{"theme":"old"}');
++				const manager = SettingsManager.create(projectDir, agentDir);
++				writeFileSync(settingsPath, "{");
++				manager.setTheme("new");
++				await manager.flush();
++				expect(manager.drainErrors()).toHaveLength(1);
++				writeFileSync(settingsPath, '{"theme":"old"}');
++				if (unset) await manager.unsetGlobalSettings(["theme"]);
++				manager.setDefaultThinkingLevel("high");
++				await manager.flush();
++				const expected = unset ? { defaultThinkingLevel: "high" } : { theme: "new", defaultThinkingLevel: "high" };
++				expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual(expected);
++				expect(manager.getGlobalSettings()).toEqual(expected);
++				expect(SettingsManager.create(projectDir, agentDir).getGlobalSettings()).toEqual(expected);
++				expect(manager.drainErrors()).toEqual([]);
++			}
++		});
++
++		it("rebases later nested and map-entry edits onto deletion in memory and on disk", async () => {
++			const settingsPath = join(agentDir, "settings.json");
++			writeFileSync(
++				settingsPath,
++				JSON.stringify({
++					compaction: { enabled: true, reserveTokens: 321 },
++					terminal: { showImages: true, trueColor: false },
++					images: { autoResize: true, blockImages: true },
++					retry: { enabled: true, maxRetries: 9 },
++					markdown: { mermaid: "off", codeBlockIndent: "old" },
++					modelThinkingLevels: { "old/model": "low", "stale/model": "medium" },
++					extensionChangelogVersions: { old: "1" },
++				}),
++			);
++			const manager = SettingsManager.create(projectDir, agentDir);
++			const unset = manager.unsetGlobalSettings([
++				"compaction",
++				"terminal",
++				"images",
++				"retry",
++				"markdown",
++				"modelThinkingLevels",
++				"extensionChangelogVersions",
++			]);
++			manager.setCompactionEnabled(false);
++			manager.setShowImages(false);
++			manager.setImageAutoResize(false);
++			manager.setRetryEnabled(false);
++			manager.setMermaidRenderingMode("final");
++			manager.setModelThinkingLevel("new", "model", "high");
++			manager.removeModelThinkingLevel("old", "model");
++			manager.setExtensionChangelogVersion("new", "2");
++			await unset;
++			await manager.flush();
++			const expected = {
++				compaction: { enabled: false },
++				terminal: { showImages: false },
++				images: { autoResize: false },
++				retry: { enabled: false },
++				markdown: { mermaid: "final" },
++				modelThinkingLevels: { "new/model": "high" },
++				extensionChangelogVersions: { new: "2" },
++			};
++			expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual(expected);
++			expect(manager.getGlobalSettings()).toEqual(expected);
++			const fresh = SettingsManager.create(projectDir, agentDir);
++			expect(fresh.getGlobalSettings()).toEqual(expected);
++			expect(manager.getCompactionSettings()).toEqual(fresh.getCompactionSettings());
++			expect(manager.getRetrySettings()).toEqual(fresh.getRetrySettings());
++			expect(manager.getTerminalCapabilityOverrides()).toEqual(fresh.getTerminalCapabilityOverrides());
++			expect(manager.getBlockImages()).toBe(fresh.getBlockImages());
++			expect(manager.getCodeBlockIndent()).toBe(fresh.getCodeBlockIndent());
++			expect(manager.drainErrors()).toEqual([]);
++		});
++
++		it("does not create a backup or canonical file for a missing source", async () => {
++			const manager = SettingsManager.create(projectDir, agentDir);
++			expect(await manager.unsetGlobalSettings(["theme", "theme"])).toEqual({
++				status: "unchanged",
++				changedKeys: [],
++			});
++			expect(readdirSync(agentDir)).toEqual([]);
++		});
++
++		it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
++			"reaches backup creation under the real lock before filesystem write denial",
++			async () => {
++				const settingsPath = join(agentDir, "settings.json");
++				const original = '{"theme":"dark","private":"fixture-only"}';
++				writeFileSync(settingsPath, original);
++				const manager = SettingsManager.create(projectDir, agentDir);
++				const realOpen = fs.openSync;
++				let reachedBackup = false;
++				vi.spyOn(fs, "openSync").mockImplementation((path, flags, mode) => {
++					if (String(path).includes(".backup-")) {
++						expect(existsSync(`${settingsPath}.lock`)).toBe(true);
++						reachedBackup = true;
++						chmodSync(agentDir, 0o500);
++					}
++					return realOpen(path, flags, mode);
++				});
++				syncBuiltinESMExports();
++				try {
++					await expect(manager.unsetGlobalSettings(["theme"])).rejects.toMatchObject({
++						phase: "backup-create",
++						replacement: "not-attempted",
++						recovery: undefined,
++					});
++					expect(reachedBackup).toBe(true);
++					expect(readFileSync(settingsPath, "utf8")).toBe(original);
++					expect(manager.getTheme()).toBe("dark");
++					expect(
++						readdirSync(agentDir).filter((name) => name.includes(".backup-") || name.includes(".unset-")),
++					).toEqual([]);
++				} finally {
++					chmodSync(agentDir, 0o700);
++				}
++			},
++		);
++
++		it.skipIf(process.platform === "win32")(
++			"reports syscall failure phases and recovery without confusing injected errors with physical durability proof",
++			async () => {
++				const settingsPath = join(agentDir, "settings.json");
++				const original = Buffer.from('{"theme":"dark","private":"fixture-only"}\n');
++				for (const fault of [
++					"backup-sync",
++					"backup-directory-sync",
++					"temporary-sync",
++					"rename",
++					"commit-directory-sync",
++				] as const) {
++					writeFileSync(settingsPath, original);
++					const manager = SettingsManager.create(projectDir, agentDir);
++					const realOpen = fs.openSync;
++					const realSync = fs.fsyncSync;
++					const realRename = fs.renameSync;
++					const paths = new Map<number, string>();
++					let directorySyncs = 0;
++					vi.spyOn(fs, "openSync").mockImplementation((path, flags, mode) => {
++						const fd = realOpen(path, flags, mode);
++						paths.set(fd, String(path));
++						return fd;
++					});
++					vi.spyOn(fs, "fsyncSync").mockImplementation((fd) => {
++						const path = paths.get(fd);
++						if (path === agentDir) directorySyncs++;
++						if (
++							(fault === "backup-sync" && path?.includes(".backup-")) ||
++							(fault === "backup-directory-sync" && path === agentDir && directorySyncs === 1) ||
++							(fault === "temporary-sync" && path?.includes(".unset-")) ||
++							(fault === "commit-directory-sync" && path === agentDir && directorySyncs === 2)
++						)
++							throw new Error("injected fsync failure");
++						realSync(fd);
++					});
++					vi.spyOn(fs, "renameSync").mockImplementation((source, target) => {
++						if (fault === "rename") throw new Error("injected rename failure");
++						realRename(source, target);
++					});
++					syncBuiltinESMExports();
++					try {
++						const failure: unknown = await manager
++							.unsetGlobalSettings(["theme"])
++							.catch((error: unknown) => error);
++						const backups = readdirSync(agentDir).filter((name) => name.includes(".backup-"));
++						const backupPath = join(agentDir, backups[backups.length - 1]);
++						const verified = fault !== "backup-sync" && fault !== "backup-directory-sync";
++						expect(failure).toMatchObject({
++							phase: fault,
++							replacement:
++								fault === "rename" || fault === "commit-directory-sync" ? "uncertain" : "not-attempted",
++							recovery: verified
++								? {
++										kind: "verified-backup",
++										backupPath,
++										beforeSha256: createHash("sha256").update(original).digest("hex"),
++									}
++								: { kind: "unverified-backup", backupPath },
++						});
++						expect(readFileSync(backupPath)).toEqual(original);
++						expect(statSync(backupPath).mode & 0o777).toBe(0o600);
++						expect(readFileSync(settingsPath)).toEqual(
++							fault === "commit-directory-sync"
++								? Buffer.from(`${JSON.stringify({ private: "fixture-only" }, null, 2)}\n`)
++								: original,
++						);
++						expect(readdirSync(agentDir).filter((name) => name.includes(".unset-"))).toEqual([]);
++						if (fault === "commit-directory-sync") {
++							manager.setDefaultThinkingLevel("high");
++							await manager.flush();
++							expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({ private: "fixture-only" });
++							await manager.reload();
++							expect(manager.getGlobalSettings()).toEqual({ private: "fixture-only" });
++						}
++					} finally {
++						vi.restoreAllMocks();
++						syncBuiltinESMExports();
++						for (const name of readdirSync(agentDir).filter((name) => name.includes(".backup-")))
++							rmSync(join(agentDir, name));
++					}
++				}
++			},
++		);
++
++		it.skipIf(process.platform === "win32")(
++			"preserves primary phase and recovery when descriptor close and lock release also fail",
++			async () => {
++				const settingsPath = join(agentDir, "settings.json");
++				writeFileSync(settingsPath, '{"theme":"dark"}');
++				const manager = SettingsManager.create(projectDir, agentDir);
++				const realOpen = fs.openSync;
++				const realSync = fs.fsyncSync;
++				const realClose = fs.closeSync;
++				const realLock = lockfile.lockSync;
++				let directoryFd: number | undefined;
++				let backupFd: number | undefined;
++				vi.spyOn(fs, "openSync").mockImplementation((path, flags, mode) => {
++					const fd = realOpen(path, flags, mode);
++					if (String(path) === agentDir) directoryFd = fd;
++					if (String(path).includes(".backup-")) backupFd = fd;
++					return fd;
++				});
++				vi.spyOn(fs, "fsyncSync").mockImplementation((fd) => {
++					if (fd === backupFd) throw new Error("primary private-fixture");
++					realSync(fd);
++				});
++				vi.spyOn(fs, "closeSync").mockImplementation((fd) => {
++					realClose(fd);
++					if (fd === directoryFd) throw new Error("secondary private-fixture");
++				});
++				vi.spyOn(lockfile, "lockSync").mockImplementation((path, options) => {
++					const release = realLock(path, options);
++					return () => {
++						release();
++						throw new Error("release private-fixture");
++					};
++				});
++				syncBuiltinESMExports();
++				await expect(manager.unsetGlobalSettings(["theme"])).rejects.toMatchObject({
++					message: "Settings unset refused before commit",
++					phase: "backup-sync",
++					replacement: "not-attempted",
++					recovery: { kind: "unverified-backup" },
++					cleanupFailures: ["close", "release"],
++				});
++				expect(readFileSync(settingsPath, "utf8")).toBe('{"theme":"dark"}');
++				expect(existsSync(`${settingsPath}.lock`)).toBe(false);
++			},
++		);
++
++		it.skipIf(process.platform === "win32")(
++			"refuses real entry and metadata drift and never removes a foreign temporary pathname",
++			async () => {
++				const settingsPath = join(agentDir, "settings.json");
++				const original = '{"theme":"dark"}';
++				for (const fault of [
++					"collision",
++					"file",
++					"mode",
++					"directory-before-read",
++					"directory-after-temporary",
++				] as const) {
++					writeFileSync(settingsPath, original);
++					chmodSync(settingsPath, 0o644);
++					const manager = SettingsManager.create(projectDir, agentDir);
++					const realOpen = fs.openSync;
++					const realSync = fs.fsyncSync;
++					let temporary: string | undefined;
++					let temporaryFd: number | undefined;
++					let drifted = false;
++					const moved = join(testDir, `moved-${fault}`);
++					vi.spyOn(fs, "openSync").mockImplementation((path, flags, mode) => {
++						const name = String(path);
++						if (name.includes(".unset-") && flags === "wx") {
++							temporary = name;
++							if (fault === "collision") writeFileSync(name, "foreign-collision");
++						}
++						const fd = realOpen(path, flags, mode);
++						if (name === temporary) temporaryFd = fd;
++						if (
++							fault === "directory-before-read" &&
++							name === settingsPath &&
++							typeof flags === "number" &&
++							!drifted
++						) {
++							drifted = true;
++							fs.renameSync(agentDir, moved);
++							mkdirSync(agentDir);
++							fs.renameSync(join(moved, "settings.json"), settingsPath);
++						}
++						return fd;
++					});
++					vi.spyOn(fs, "fsyncSync").mockImplementation((fd) => {
++						realSync(fd);
++						if (fd !== temporaryFd || drifted) return;
++						drifted = true;
++						if (fault === "file") {
++							const other = join(agentDir, "writer");
++							writeFileSync(other, '{"theme":"intervening"}');
++							fs.renameSync(other, settingsPath);
++						}
++						if (fault === "mode") chmodSync(settingsPath, 0o640);
++						if (fault === "directory-after-temporary" && temporary) {
++							fs.renameSync(agentDir, moved);
++							mkdirSync(agentDir);
++							writeFileSync(settingsPath, "intervening-directory");
++							writeFileSync(temporary, "foreign-directory");
++						}
++					});
++					syncBuiltinESMExports();
++					try {
++						await expect(manager.unsetGlobalSettings(["theme"])).rejects.toThrow();
++						expect(readFileSync(settingsPath, "utf8")).toBe(
++							fault === "file"
++								? '{"theme":"intervening"}'
++								: fault === "directory-after-temporary"
++									? "intervening-directory"
++									: original,
++						);
++						if (fault === "mode") expect(statSync(settingsPath).mode & 0o777).toBe(0o640);
++						if (fault === "collision" || fault === "directory-after-temporary")
++							expect(readFileSync(temporary!, "utf8")).toBe(
++								fault === "collision" ? "foreign-collision" : "foreign-directory",
++							);
++					} finally {
++						vi.restoreAllMocks();
++						syncBuiltinESMExports();
++						for (const name of readdirSync(agentDir))
++							rmSync(join(agentDir, name), { recursive: true, force: true });
++					}
++				}
++			},
++		);
++
++		it("refuses unsupported storage, unknown keys, unsafe files and filesystem write denial without mutation", async () => {
++			await expect(SettingsManager.inMemory({ theme: "dark" }).unsetGlobalSettings(["theme"])).rejects.toThrow(
++				"Unset requires file settings storage",
++			);
++			const settingsPath = join(agentDir, "settings.json");
++			const original = '{"theme":"dark","private":"not-in-receipts"}';
++			writeFileSync(settingsPath, original);
++			const manager = SettingsManager.create(projectDir, agentDir);
++			await expect(manager.unsetGlobalSettings(["unknown" as "theme"])).rejects.toThrow("Unknown settings key");
++			linkSync(settingsPath, join(agentDir, "linked"));
++			await expect(manager.unsetGlobalSettings(["theme"])).rejects.toThrow("Unsafe settings file");
++			rmSync(join(agentDir, "linked"));
++			rmSync(settingsPath);
++			symlinkSync(join(agentDir, "target"), settingsPath);
++			writeFileSync(join(agentDir, "target"), original);
++			await expect(manager.unsetGlobalSettings(["theme"])).rejects.toThrow("Unsafe settings file");
++			expect(readFileSync(settingsPath, "utf8")).toBe(original);
++			rmSync(settingsPath);
++			writeFileSync(settingsPath, original);
++			chmodSync(settingsPath, 0o666);
++			await expect(manager.unsetGlobalSettings(["theme"])).rejects.toThrow("Unsafe settings file");
++			expect(readFileSync(settingsPath, "utf8")).toBe(original);
++			chmodSync(settingsPath, 0o600);
++			const invalidUtf8 = Buffer.concat([Buffer.from('{"theme":"'), Buffer.from([0xff]), Buffer.from('"}')]);
++			writeFileSync(settingsPath, invalidUtf8);
++			await expect(manager.unsetGlobalSettings(["theme"])).rejects.toThrow("Invalid settings file");
++			expect(readFileSync(settingsPath)).toEqual(invalidUtf8);
++			writeFileSync(settingsPath, original);
++			chmodSync(agentDir, 0o500);
++			try {
++				await expect(manager.unsetGlobalSettings(["theme"])).rejects.toThrow();
++				expect(readFileSync(settingsPath, "utf8")).toBe(original);
++				expect(manager.getTheme()).toBe("dark");
++			} finally {
++				chmodSync(agentDir, 0o700);
++			}
++		});
++	});
++
+ 	describe("deviceId", () => {
+ 		it("creates one global device ID and reuses it in later processes", async () => {
+ 			const settingsPath = join(agentDir, "settings.json");
+@@ -174,6 +621,36 @@ describe("SettingsManager", () => {
+ 	});
+ 
+ 	describe("reload", () => {
++		it.each([false, true])(
++			"preserves global setters accepted after reload starts (load recovery: %s)",
++			async (recovering) => {
++				const settingsPath = join(agentDir, "settings.json");
++				writeFileSync(settingsPath, JSON.stringify({ theme: "old" }));
++				const manager = SettingsManager.create(projectDir, agentDir);
++				if (recovering) {
++					writeFileSync(settingsPath, "{ invalid json");
++					await manager.reload();
++					expect(manager.drainErrors()).toMatchObject([{ scope: "global", path: settingsPath }]);
++					writeFileSync(settingsPath, JSON.stringify({ theme: "old" }));
++				}
++
++				const loading = manager.reload();
++				manager.setTheme("new");
++				await loading;
++				await manager.flush();
++
++				const expected = { theme: "new" };
++				expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual(expected);
++				expect(manager.getTheme()).toBe("new");
++				expect(manager.getGlobalSettings()).toEqual(expected);
++				const fresh = SettingsManager.create(projectDir, agentDir);
++				expect(fresh.getGlobalSettings()).toEqual(expected);
++				expect(fresh.getSettings()).toEqual(manager.getSettings());
++				expect(manager.drainErrors()).toEqual([]);
++				expect(fresh.drainErrors()).toEqual([]);
++			},
++		);
++
+ 		it("should reload global settings from disk", async () => {
+ 			const settingsPath = join(agentDir, "settings.json");
+ 			writeFileSync(
 diff --git a/packages/coding-agent/test/suite/regressions/8724-in-memory-fork-active-tool.test.ts b/packages/coding-agent/test/suite/regressions/8724-in-memory-fork-active-tool.test.ts
 index 9991520690bee8593e48b3f49c2eaff4c3748aa4..238f32d0c2d08c802b76282343993fa8e255b28f 100644
 --- a/packages/coding-agent/test/suite/regressions/8724-in-memory-fork-active-tool.test.ts
@@ -989,15 +3274,3 @@ index 71988d3a437254aeb4152793bff481f48f7dfc85..732fac5d7343b7abad69d19076fc505b
  		agentDir,
  		modelRuntime: session.modelRuntime,
  		settingsManager: session.settingsManager,
-diff --git a/packages/coding-agent/src/core/tools/read.ts b/packages/coding-agent/src/core/tools/read.ts
-index dd123cb..4e8a6d1 100644
---- a/packages/coding-agent/src/core/tools/read.ts
-+++ b/packages/coding-agent/src/core/tools/read.ts
-@@ -77,6 +77,7 @@ async function* readLocalFileChunks(path: string, { signal }: { signal?: AbortSi
- 	try {
- 		const stats = await handle.stat();
- 		const end = stats.isFile() && stats.size > 0 ? stats.size - 1 : undefined;
-+		signal?.throwIfAborted();
- 		yield* handle.createReadStream({ end, signal, autoClose: false });
- 	} finally {
- 		await handle.close();
