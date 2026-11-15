@@ -34,6 +34,8 @@ moving its product copy or changing prompt timing.
   and active-tool guidance to the parent runtime's prompt. It does not change `cwd`,
   load workspace contents, replace Pi's base prompt or write JSONL. It is inline, so
   native `pi-subagents` children do not load it.
+- **Browser preference.** Core context names `agent_browser` only while that tool
+  is active. Desktop-only and tool-less requests do not advertise it.
 - **Delegation handoff.** A public `tool_call` hook prefixes direct model-facing
   `subagent` task/resume text with a bounded (2 KiB UTF-8) advisory handoff, keeping
   the task verbatim. It never rewrites workflow source or mixed `agent`/`workflow`
