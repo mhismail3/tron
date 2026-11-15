@@ -18,6 +18,12 @@ function browserExtension(agentDir: string): ExtensionFactory {
   };
   const integrity = `sha512-${createHash("sha512").update(readFileSync(join(gateway, pin.artifact.path))).digest("base64")}`;
   if (integrity !== pin.artifact.integrity) throw new Error("Managed browser artifact integrity mismatch");
+  const lock = JSON.parse(readFileSync(join(gateway, "package-lock.json"), "utf8")) as {
+    packages: Record<string, { version?: string; resolved?: string; integrity?: string }>;
+  };
+  const dependency = lock.packages["node_modules/pi-agent-browser-native"];
+  if (dependency?.version !== pin.version || dependency.resolved !== `file:${pin.artifact.path}`
+    || dependency.integrity !== pin.artifact.integrity) throw new Error("Managed browser lock does not match its artifact pin");
   const require = createRequire(import.meta.url);
   const browser = require.resolve("pi-agent-browser-native/package.json");
   const metadata = JSON.parse(readFileSync(browser, "utf8")) as { version: string };
