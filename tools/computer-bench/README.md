@@ -22,6 +22,11 @@ node --test tools/computer-bench/bench.test.mjs   # fixture site and scoring
 | `cua` | The embedded Cua driver behind Tron's `computer` tool | `cua-driver call` on the Native Host socket (`$(getconf DARWIN_USER_TEMP_DIR)/tron-cua-*/s`), using only operations `computer` admits (`packages/gateway/src/machine/cua-client.ts`), element tokens from a fresh observation, and Tron's 200-element/16-depth observation cap |
 | `browser-use` | browser-use 1.0 / browser-harness, only if a venv already exists | `<venv>/bin/browser-use` with Python on stdin, its own headless Chrome for Testing on a free port; `BH_HOME` in the run directory; telemetry, update checks and domain skills off. Default venv `~/Workspace/browser-use-eval-20261110/.venv` (`COMPUTER_BENCH_BROWSER_USE_VENV`) |
 
+For an isolated Cua candidate, set both `COMPUTER_BENCH_CUA_DRIVER` to its CLI and
+`COMPUTER_BENCH_CUA_SOCKET` to its own daemon socket. The reported CLI version does
+not attest the daemon version; retain the daemon executable identity with the run.
+Without an explicit socket, the adapter uses the installed Native Host socket.
+
 Adapters measure the engines directly. The live per-call overhead of the Tron tool
 wrappers is small next to these times but is not part of a run. An adapter that is missing
 is reported as `absent`, never skipped.
@@ -79,13 +84,13 @@ measured: a real TCC prompt changes system permissions and refusal needs a locke
 [`surfaces.json`](surfaces.json) records, with code citations, whether each tool is a
 first-class tool (`first-class`), reachable only through bash (`shell`) or absent (`none`)
 on Home maintainer turns, Home wake turns, delegated workers and ordinary/automation
-sessions, and pi-subagents children. Home admits `computer` only on maintainer turns;
-trigger, automation and task-result wakes admit neither computer nor browser. A tool
+sessions, and pi-subagents children. Home admits `computer` and its installed browser
+only on maintainer turns; trigger, automation and task-result wakes admit neither. A tool
 scores on a surface only where it is first-class: an availability gap is a failure.
 Update the file in the same change that moves a tool onto or off a surface.
 
 Surface rows project the measured engine functions through declared tool admission;
 they are not live Home or subagent interaction timings. The Home admission E2E owns
 the maintainer/wake boundary. Delegation startup and end-to-end Home task latency are
-not measured by this harness. Browser-tool admission would add the worker's browser-only
-functions to Home, but remains a maintainer decision rather than a benchmark change.
+not measured by this harness. Home browser admission is proved through the actual pinned
+wrapper on a local fixture; the matrix still projects engine coverage rather than timing Home.

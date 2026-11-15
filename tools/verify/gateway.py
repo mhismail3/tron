@@ -30,7 +30,8 @@ def hold_full_gateway_lock():
 
 
 BROWSER_FORK_COPY = 'TRON_P99_17_BROWSER_FORK_COPY'
-BROWSER_FORK_TEST = 'src/e2e/sessions/browser-fork-receipts.integration.test.ts'
+BROWSER_FORK_TESTS = ('src/e2e/sessions/browser-fork-receipts.integration.test.ts',
+                      'src/e2e/automations/home-tool-admission.e2e.test.ts')
 BROWSER_FORK_REPOSITORY = 'https://github.com/fitchmultz/pi-agent-browser-native.git'
 VALUE_OPTIONS = {'--config', '-c', '--project', '--reporter', '--outputFile', '-t', '--testNamePattern', '--root', '-r', '--dir', '--shard',
                  '--testTimeout', '--hookTimeout', '--teardownTimeout', '--bail', '--retry', '--maxWorkers', '--minWorkers', '--pool',
@@ -65,7 +66,7 @@ def selects_browser_fork(args: list[str]) -> bool:
     config, filters = vitest_selection(args)
     if config is not None and Path(config).name != 'vitest.config.ts':
         return False
-    return not filters or any(filter_selects(relative, BROWSER_FORK_TEST) for _, relative in filters)
+    return not filters or any(filter_selects(relative, path) for _, relative in filters for path in BROWSER_FORK_TESTS)
 
 
 def with_own_config(args: list[str]) -> list[str]:

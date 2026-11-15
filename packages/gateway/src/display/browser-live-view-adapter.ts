@@ -29,8 +29,12 @@ const TRUSTED_BROWSER_EXTENSION_SOURCES = new Set([
   "git:github.com/fitchmultz/pi-agent-browser-native@6346982c0fec9e00b9f3ef6997cfb2d6f6893c6d",
 ]);
 
+export function isTrustedBrowserExtensionSource(source: string): boolean {
+  return TRUSTED_BROWSER_EXTENSION_SOURCES.has(source);
+}
+
 function isTrustedBrowserOwner(owner: ExtensionOwner, toolName: string): boolean {
-  return toolName === "agent_browser" && TRUSTED_BROWSER_EXTENSION_SOURCES.has(owner.source);
+  return toolName === "agent_browser" && isTrustedBrowserExtensionSource(owner.source);
 }
 
 export function observeTrustedAgentBrowserResult(input: {
