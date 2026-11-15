@@ -3,10 +3,10 @@ import type { RuntimeSlot } from "../../kernel/run/runtime-slot.js";
 export const HOME_TOOL_NAMES: readonly string[] = [
   "ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "schedule", "profile", "obligation",
   "web_search", "session_search", "session_read", "settings", "projects",
-  "read", "write", "edit", "bash", "grep", "find", "ls", "computer",
+  "read", "write", "edit", "bash", "grep", "find", "ls", "computer", "agent_browser",
 ];
 
-const MAINTAINER_TURN_TOOLS = new Set(["write", "edit", "bash", "computer"]);
+const MAINTAINER_TURN_TOOLS = new Set(["write", "edit", "bash", "computer", "agent_browser"]);
 
 export function homeToolAvailable(name: string, kind: "user" | "wake" | undefined): boolean {
   return HOME_TOOL_NAMES.includes(name) && (kind === "user" || !MAINTAINER_TURN_TOOLS.has(name));

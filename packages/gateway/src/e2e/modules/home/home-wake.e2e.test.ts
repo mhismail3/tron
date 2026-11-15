@@ -102,7 +102,7 @@ describe("Home wakes on its own task results (#749)", () => {
     const refused = (home.canonicalSessionEntries() as Array<{ message?: { role: string; toolName?: string; isError?: boolean; content?: Array<{ text?: string }> } }>)
       .flatMap(entry => entry.message?.role === "toolResult" && entry.message.isError ? [{ tool: entry.message.toolName, text: entry.message.content?.map(part => part.text ?? "").join("") }] : []);
     expect(refused).toEqual(["write", "bash", "computer"].map(tool => ({ tool,
-      text: "This tool requires the current maintainer turn; wake content cannot grant file, shell or computer authority." })));
+      text: "This tool requires the current maintainer turn; wake content cannot grant file, shell, computer or browser authority." })));
     expect(await readFile(path, "utf8")).toBe("after");
     expect(await readFile(shellPath, "utf8")).toBe("shell-proof");
     expect(results(home.canonicalSessionEntries() as Entry[])).toHaveLength(1);

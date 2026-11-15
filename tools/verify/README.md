@@ -70,8 +70,8 @@ SIGTERM first and SIGKILL only after a grace (mutate 10 s, the others 30 s), so 
 only by an outside SIGKILL or by a Vitest still tearing down when the grace ends.
 It never installs this checkout's missing packages.
 One test fixture is the exception: when the selection can include
-`browser-fork-receipts.integration.test.ts` (the default config with no file filter, or one it
-matches), the runner hands Vitest `TRON_P99_17_BROWSER_FORK_COPY`, a checkout of the
+`browser-fork-receipts.integration.test.ts` or `home-tool-admission.e2e.test.ts` (the default
+config with no file filter, or one matching either owner), the runner hands Vitest `TRON_P99_17_BROWSER_FORK_COPY`, a checkout of the
 agent-browser fork commit pinned in `browser-live-view-adapter.ts`. It is fetched by SHA, built from
 the fork's lockfile (`npm ci --ignore-scripts`, then its build), and kept once per clone in
 `.git/verify/fixtures/`, so a batch's Gateway lane covers both cases instead of skipping them. The
