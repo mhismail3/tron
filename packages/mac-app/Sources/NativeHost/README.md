@@ -31,9 +31,8 @@ contract: [computer control](../../docs/computer-control.md#installed-capture-wi
 - **Console admission.** `NativeConsoleSession` owns bounded console/lock/sleep/lid/topology
   snapshots and their finite refusal causes. Sensitive operations check before work and
   publication; disposable state reads use the already-authenticated current peer fence without
-  a launchctl query. `NativeCaptureSession` owns one idle-system-sleep and one
-  idle-display-sleep IOPM assertion only while its computer-turn connection is retained,
-  releasing both on retirement or peer loss.
+  a launchctl query. `NativeCaptureSession` owns one idle-display-sleep IOPM assertion only
+  while its computer-turn connection is retained, releasing it on retirement or peer loss.
   This does not unlock, wake or override lid sleep. See
   [console session admission](../../docs/computer-control.md#console-session-admission).
 - **Consent.** Requests carry an operation UUID; the wrapper fences to the latest request and

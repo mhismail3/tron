@@ -113,15 +113,12 @@ current process/payload/audit fence; it performs no launchctl query, capture or 
 Sensitive endpoint/capture operations still perform full Stable provenance validation.
 
 The first GUI operation in a computer turn obtains the host-owned
-`PreventUserIdleDisplaySleep` and `PreventUserIdleSystemSleep` IOPM assertions through
-`automationEndpoint`. The Gateway
+`PreventUserIdleDisplaySleep` IOPM assertion through `automationEndpoint`. The Gateway
 retains that one native connection through accepted CLI work and closes it at
 `agent_end`, Stop, failure or shutdown. Native Host releases the assertion before
 retirement and on peer loss; process death also releases its OS-owned assertion.
-Metadata-only help and live read-only viewing hold no assertion. These prevent idle
-system/display sleep only: they do not unlock, wake a sleeping display, override lid
-sleep or change lock-screen security settings. An explicit lock still refuses desktop
-input; background shell work and already-attached CDP do not consult desktop admission.
+Metadata-only help and live read-only viewing hold no assertion. It prevents idle
+display sleep only: it does not unlock, wake a sleeping display or override lid sleep.
 
 ## Installed capture wire contract
 
@@ -161,7 +158,7 @@ The service reserves two cleanup replies independently of eight ordinary replies
 | suspend | actual stream join; only a clean join allows the retained target to resume |
 | stop | terminal scope retirement, joined or retirementFailed, optional diagnostic |
 | sessionState | fresh bounded console/topology snapshot and finite cause or null; no capture/input authority |
-| automationEndpoint | Cua socket/generation bootstrap and scoped computer-turn idle-system/display-sleep assertions; no JPEG/input authority |
+| automationEndpoint | Cua socket/generation bootstrap and scoped computer-turn idle-display-sleep assertion; no JPEG/input authority |
 
 Native demand expiry requests Stop after15 seconds without demand and joins it.
 Timeout itself never releases the stream reservation. Joined retirement with a
