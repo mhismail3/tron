@@ -530,8 +530,9 @@ describe("settings.change", () => {
       expect.objectContaining({ name: "inventory-stdio", scope: "global", state: "configured", transport: "stdio" }),
       expect.objectContaining({ name: "inventory-disabled", scope: "global", state: "disabled", enabled: false }),
       expect.objectContaining({ name: "inventory-credential", state: "configured", transport: "http" }),
-      expect.objectContaining({ name: "inventory-slash-userinfo", state: "configured", transport: "http" }),
     ]));
+    expect(inventory.mcp.servers).not.toContainEqual(expect.objectContaining({ name: "inventory-slash-userinfo" }));
+    expect(inventory.mcp.errors).toBe(1);
     expect(JSON.stringify(inventory)).not.toMatch(/inventory-secret|inventory-query-secret|pa\/ss|user:|127\.0\.0\.1|secret/);
   });
 

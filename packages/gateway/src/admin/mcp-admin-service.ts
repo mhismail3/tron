@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import lockfile from "proper-lockfile";
+import { loadMcpConfig } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import { durableAtomicWriteText } from "../foundation/durable-json.js";
 import { MCP_EXPOSURES, mcpServerOnDisk, type McpExposure, type McpServerValue } from "../kernel/settings/mcp-server-value.js";
@@ -131,38 +132,10 @@ function parseConfig(text: string): Record<string, unknown> {
 }
 
 export interface McpConfiguredServer {
-  name: string; scope: "global" | "project"; state: "configured" | "disabled" | "unknown";
-  enabled: boolean; exposure: McpExposure; transport: "stdio" | "http" | "unknown";
+  name: string; scope: "global" | "project"; state: "configured" | "disabled";
+  enabled: boolean; exposure: McpExposure; transport: "stdio" | "http";
 }
 export interface McpConfiguration { servers: McpConfiguredServer[]; errors: number }
-
-const CONFIG_SERVER_NAME = /^[A-Za-z0-9_-]{1,128}$/;
-const OVERRIDE_KEYS = ["enabled", "exposure", "toolExposure"] as const;
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
-
-async function readServerEntries(path: string): Promise<{ entries: [string, unknown][]; error: boolean }> {
-  let text: string;
-  try { text = await readFile(path, "utf8"); } catch (error) {
-    return { entries: [], error: (error as NodeJS.ErrnoException).code !== "ENOENT" };
-  }
-  if (Buffer.byteLength(text) > MAX_CONFIG_BYTES) return { entries: [], error: true };
-  let servers: unknown;
-  try { servers = (JSON.parse(text) as { mcpServers?: unknown }).mcpServers; } catch { return { entries: [], error: true }; }
-  if (servers === undefined) return { entries: [], error: false };
-  if (!isRecord(servers)) return { entries: [], error: true };
-  return { entries: Object.entries(servers), error: false };
-}
-
-function describeConfiguredServer(name: string, scope: "global" | "project", config: Record<string, unknown>): McpConfiguredServer {
-  const transport = typeof config.command === "string" && (config.type === undefined || config.type === "stdio") ? "stdio"
-    : typeof config.url === "string" && (config.type === undefined || config.type === "http" || config.type === "streamable-http") ? "http" : "unknown";
-  const exposureKnown = config.exposure === undefined || (EXPOSURES as readonly unknown[]).includes(config.exposure);
-  const enabledKnown = config.enabled === undefined || typeof config.enabled === "boolean";
-  const enabled = config.enabled !== false;
-  const known = transport !== "unknown" && exposureKnown && enabledKnown;
-  return { name, scope, state: !known ? "unknown" : enabled ? "configured" : "disabled", enabled,
-    exposure: exposureKnown && config.exposure !== undefined ? config.exposure as McpExposure : "codemode", transport };
-}
 
 type McpAdminLog = (level: "warning", message: string, event: string, fields: Record<string, string>) => void;
 
@@ -216,25 +189,23 @@ export class McpAdminService {
     return { servers, errors };
   }
   async configured(project?: Extract<McpScope, { scope: "project" }>): Promise<McpConfiguration> {
-    const merged = new Map<string, { scope: "global" | "project"; config: Record<string, unknown> }>();
-    const global = await readServerEntries(join(this.agentDir, "mcp.json"));
-    let errors = global.error ? 1 : 0;
-    for (const [name, value] of global.entries) {
-      if (!isRecord(value) || !CONFIG_SERVER_NAME.test(name)) { errors += 1; continue; }
-      merged.set(name, { scope: "global", config: value });
-    }
-    if (project) {
-      const file = await readServerEntries(join(project.cwd, ".pi", "mcp.json"));
-      if (file.error) errors += 1;
-      for (const [name, value] of file.entries) {
-        if (!isRecord(value) || !CONFIG_SERVER_NAME.test(name)) { errors += 1; continue; }
-        const base = merged.get(name)?.config;
-        const override = value.command === undefined && value.url === undefined && value.type === undefined;
-        const keys = Object.fromEntries(OVERRIDE_KEYS.flatMap(key => value[key] === undefined ? [] : [[key, value[key]]]));
-        merged.set(name, { scope: "project", config: override && base ? { ...base, ...keys } : value });
-      }
-    }
-    return { servers: [...merged].map(([name, { scope, config }]) => describeConfiguredServer(name, scope, config)), errors };
+    const configured = loadMcpConfig({
+      agentDir: this.agentDir,
+      cwd: project?.cwd ?? this.agentDir,
+      projectTrusted: project?.trusted ?? false,
+      maxConfigBytes: MAX_CONFIG_BYTES,
+    });
+    return {
+      servers: configured.servers.map<McpConfiguredServer>(({ name, config, scope, override }) => ({
+        name,
+        scope: scope === "project" || override !== undefined ? "project" : "global",
+        state: config.enabled === false ? "disabled" : "configured",
+        enabled: config.enabled !== false,
+        exposure: config.exposure ?? "codemode",
+        transport: "url" in config ? "http" : "stdio",
+      })),
+      errors: configured.errors.length,
+    };
   }
   async mutate(scope: McpScope, operation: "add" | "remove" | "logout", args: string[], server?: string): Promise<unknown> {
     const result = await runProcess(process.execPath, this.cliArgs(scope, [operation, ...args]), { cwd: scope.scope === "project" ? scope.cwd : this.agentDir, timeoutMs: this.cliTimeoutMs, env: this.cliEnvironment() });

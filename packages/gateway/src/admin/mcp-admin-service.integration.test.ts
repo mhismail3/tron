@@ -100,6 +100,67 @@ describe("McpAdminService", () => {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
+  it("reads canonical MCP configuration without probing, resolving credentials or exposing diagnostics", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-mcp-configured-"));
+    const project = join(root, "project");
+    const globalPath = join(root, "mcp.json");
+    const projectPath = join(project, ".pi", "mcp.json");
+    const launched = join(root, "launched");
+    const resolved = join(root, "resolved");
+    const globalBytes = JSON.stringify({ mcpServers: {
+      kept: { command: process.execPath, args: ["-e", `require('node:fs').writeFileSync(${JSON.stringify(launched)}, 'launched')`] },
+      shared: { type: "http", url: "http://127.0.0.1:1/mcp", command: "unused", headers: { Authorization: `!touch ${resolved}` } },
+      broken: { command: 7 },
+    } });
+    const projectBytes = JSON.stringify({ mcpServers: {
+      kept: { enabled: false, exposure: "hidden" },
+      shared: { enabled: false, headers: { Authorization: "private-project-secret" } },
+      projectOnly: { url: "https://project.fixture.invalid/mcp", enabled: false },
+    } });
+    try {
+      await mkdir(dirname(projectPath), { recursive: true });
+      await mkdir(join(root, ".pi"));
+      await writeFile(join(root, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { kept: { enabled: false } } }));
+      await writeFile(globalPath, globalBytes);
+      await writeFile(projectPath, projectBytes);
+      const service = new McpAdminService(root, join(root, "must-not-run.mjs"));
+      const global = {
+        servers: [
+          { name: "kept", scope: "global", state: "configured", enabled: true, exposure: "codemode", transport: "stdio" },
+          { name: "shared", scope: "global", state: "configured", enabled: true, exposure: "codemode", transport: "http" },
+        ],
+        errors: 1,
+      };
+      expect(await service.configured()).toEqual(global);
+      const scoped = { scope: "project" as const, cwd: project, trusted: true as const };
+      const configured = await service.configured(scoped);
+      expect(configured).toEqual({
+        servers: [
+          { name: "kept", scope: "project", state: "disabled", enabled: false, exposure: "hidden", transport: "stdio" },
+          global.servers[1],
+          { name: "projectOnly", scope: "project", state: "disabled", enabled: false, exposure: "codemode", transport: "http" },
+        ],
+        errors: 2,
+      });
+      expect(await readFile(globalPath, "utf8")).toBe(globalBytes);
+      expect(await readFile(projectPath, "utf8")).toBe(projectBytes);
+      expect(JSON.stringify(configured)).not.toMatch(/private-project-secret|Authorization|127\.0\.0\.1|touch/);
+      expect(existsSync(launched)).toBe(false);
+      expect(existsSync(resolved)).toBe(false);
+      await writeFile(projectPath, '{"mcpServers":private-parser-secret}');
+      expect(await service.configured(scoped)).toEqual({ ...global, errors: 2 });
+      expect(await service.configured()).toEqual(global);
+      await writeFile(projectPath, JSON.stringify({ padding: "x".repeat(256 * 1_024), mcpServers: { kept: { enabled: false } } }));
+      expect(await service.configured(scoped)).toEqual({ ...global, errors: 2 });
+      await writeFile(projectPath, '{"mcpServers":{}}');
+      await chmod(project, 0);
+      expect(await service.configured(scoped)).toEqual({ ...global, errors: 2 });
+    } finally {
+      if (existsSync(project)) await chmod(project, 0o700);
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("lists the owner agent directory's servers when the ambient agent env names another root", async () => {
     const owner = await mkdtemp(join(tmpdir(), "tron-mcp-owner-"));
     const decoy = await mkdtemp(join(tmpdir(), "tron-mcp-decoy-"));
