@@ -178,7 +178,10 @@ User browser packages are ignored and cannot register the reserved browser tool 
 - **Update:** verifies upstream tag and fork ancestry, builds a new `-tron.N` in a disposable
   tree, and must pass the offline real-Gateway activation/child-execution gate and the previous
   → candidate → previous probe before publishing immutable artifacts and renaming the pin
-  (current kept as previous). `.pi-subagents-update-staging` is the exclusive lease; an
+  (current kept as previous). The staged Gateway also carries the running updater payload's
+  native-browser pin, confined artifact and canonical dependency lock, so its real activation
+  gates validate the same managed browser dependency without installing or updating it.
+  `.pi-subagents-update-staging` is the exclusive lease; an
   interrupted update leaves it for the operator. It never edits the fork, homes or manifests.
 - **Home task gate:** every pin change also re-reviews the fork's launch/control contract
   and updates the reviewed version in `src/kernel/delegation/delegated-provider.ts`.

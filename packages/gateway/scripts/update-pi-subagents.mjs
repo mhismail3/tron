@@ -110,6 +110,13 @@ export function runUpdate({ gatewayDir = GATEWAY, forkRepo, commit, spawn = spaw
     writeFileSync(join(candidateRoot, PIN), JSON.stringify(candidate, null, 2) + "\n");
     invoke(process.execPath, [join(candidateRoot, "scripts/check-pi-subagents.mjs")], candidateRoot, env);
     for (const path of ["src", "test-support", "vitest.config.ts", "vitest.nested.config.ts", "package.json"]) cpSync(join(root, path), join(candidateRoot, path), { recursive: true });
+    const browserPin = "pi-agent-browser-native-patch.json";
+    const browserArtifact = JSON.parse(readFileSync(join(GATEWAY, browserPin), "utf8")).artifact.path;
+    if (!/^third_party\/pi-agent-browser-native\/[^/]+\.tgz$/u.test(browserArtifact)) throw new Error("native browser artifact must stay inside its carrier directory");
+    for (const path of ["package-lock.json", browserPin, browserArtifact]) {
+      mkdirSync(dirname(join(candidateRoot, path)), { recursive: true });
+      copyFileSync(join(GATEWAY, path), join(candidateRoot, path));
+    }
     symlinkSync(join(root, "node_modules"), join(candidateRoot, "node_modules"));
     const gate = (label, file, reportName, reportEnv, config = ["--maxWorkers=2"]) => {
       const reportPath = join(staging, reportName);
