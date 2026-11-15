@@ -50,6 +50,7 @@ extension HostedPresentationProbe {
               let requestID = request["request"] as? String, requestID.count == 32,
               let birth = processBirth() else { return }
         var layers: [[String: Any]] = []
+        var firstResponders: [[String: Any]] = []
         var animationBudget = 128
         var visited = 0
         var truncated = false
@@ -57,11 +58,24 @@ extension HostedPresentationProbe {
         var pending = Array(windows.prefix(16).enumerated().map { ($0.element.layer, $0.offset, 0) })
         while let (layer, window, depth) = pending.popLast() {
             visited += 1
+            if let view = layer.delegate as? UIView, view.layer === layer, view.isFirstResponder {
+                if firstResponders.count < 16 {
+                    firstResponders.append([
+                        "window": window, "layerIndex": visited,
+                        "type": bounded(NSStringFromClass(type(of: view))),
+                    ])
+                } else {
+                    truncated = true
+                }
+            }
             let keys = layer.animationKeys() ?? []
             if !keys.isEmpty {
                 let animations: [[String: Any]] = keys.prefix(min(16, animationBudget)).compactMap { key in
                     guard let animation = layer.animation(forKey: key) else { return nil }
+                    let keyPath = (animation as? CAPropertyAnimation)?.keyPath
                     return [
+                        "key": bounded(key),
+                        "keyPath": keyPath.map { bounded($0) as Any } ?? NSNull(),
                         "type": NSStringFromClass(type(of: animation)),
                         "duration": finite(animation.duration),
                         "speed": finite(Double(animation.speed)),
@@ -74,13 +88,42 @@ extension HostedPresentationProbe {
                     ]
                 }
                 animationBudget -= animations.count
-                layers.append([
+                var record: [String: Any] = [
                     "index": visited, "window": window, "depth": depth,
                     "type": NSStringFromClass(type(of: layer)), "hidden": layer.isHidden,
                     "speed": finite(Double(layer.speed)), "timeOffset": finite(layer.timeOffset),
                     "hasPresentationLayer": layer.presentation() != nil,
                     "animationCount": keys.count, "animations": animations,
-                ])
+                ]
+                if !animations.isEmpty {
+                    record["delegateView"] = (layer.delegate as? UIView).map {
+                        bounded(NSStringFromClass(type(of: $0))) as Any
+                    } ?? NSNull()
+                    var ownerLayer: CALayer? = layer
+                    var owner: UIView?
+                    for _ in 0..<24 {
+                        guard let current = ownerLayer else { break }
+                        if let view = current.delegate as? UIView, view.layer === current {
+                            owner = view
+                            break
+                        }
+                        ownerLayer = current.superlayer
+                    }
+                    truncated = truncated || (owner == nil && ownerLayer != nil)
+                    var ancestry: [[String: Any]] = []
+                    for _ in 0..<4 {
+                        guard let view = owner else { break }
+                        ancestry.append([
+                            "type": bounded(NSStringFromClass(type(of: view))),
+                            "hidden": view.isHidden, "alpha": finite(Double(view.alpha)),
+                            "firstResponder": view.isFirstResponder,
+                        ])
+                        owner = view.superview
+                    }
+                    record["ownerAndAncestors"] = ancestry
+                    truncated = truncated || owner != nil
+                }
+                layers.append(record)
                 truncated = truncated || keys.count > animations.count
             }
             let children = layer.sublayers ?? []
@@ -101,9 +144,15 @@ extension HostedPresentationProbe {
             "transactionDisablesActions": CATransaction.disableActions(),
             "windowCount": windows.count, "visitedLayerCount": visited,
             "truncated": truncated || windows.count > 16, "animatedLayers": layers,
+            "firstResponders": firstResponders, "firstResponderScope": "visitedLayerBackingViews",
+            "identityPrefixBytes": 64,
             "surfaceCoordinators": coordinators.allObjects.map(\.hostedIdleSnapshot),
             "surfaceCoordinatorLimit": 16,
         ], name: "snapshot.json")
+    }
+
+    private static func bounded(_ value: String) -> String {
+        String(decoding: value.utf8.prefix(64), as: UTF8.self)
     }
 
     private static func finite(_ value: Double) -> Double {
