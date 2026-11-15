@@ -429,7 +429,8 @@ sys.exit(child.returncode)
     def test_a_python_lane_runs_its_command_at_the_exact_commit_with_one_ordered_output(self) -> None:
         self.write('tools/probe.py', PROBE)
         sha = self.commit('probe')
-        command = "echo '### one' && python3 tools/probe.py && echo '### two' && python3 tools/probe.py 4"
+        command = ('test "$TRON_CI_TOOLS_DIR" = "$HOME/tron-ci/.ci-tools" && '
+                   "echo '### one' && python3 tools/probe.py && echo '### two' && python3 tools/probe.py 4")
         result = subprocess.run(['python3', str(self.local / 'tools/verify/mini.py'), 'python', command], cwd=self.local,
                                 env={**self.env, 'TRON_VERIFY_COMMIT': sha}, text=True, capture_output=True, timeout=300)
         self.assertEqual(result.returncode, 4, result.stdout + result.stderr)
