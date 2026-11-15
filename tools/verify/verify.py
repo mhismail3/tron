@@ -37,7 +37,8 @@ WIDENING_LAYERS = {"L0", "L1", "L2"}
 WIDENING_MODULES = {"gateway/package", "gateway/test-support", "gateway/pi-sdk"}
 NAMED_LOCKS = {f"{GATEWAY}/src/e2e/sessions/sdk-behavior-trace.integration.test.ts",
                f"{GATEWAY}/src/e2e/sessions/pi-persisted-state-corpus.integration.test.ts"}
-SKIPPABLE = ("ios", "mac", "relay")
+HOST_BOUND = ("python-here", "mac-terminal")
+SKIPPABLE = ("ios", "mac", "relay", *HOST_BOUND)
 IOS = "packages/ios-app"
 IOS_TARGETS = {"UITests": "TronMobileUITests", "SwiftAppUITests": "TronSwiftAppUITests"}
 IOS_HARNESSED = {"RealGatewayPairAndChatUITests": "scripts/ios-gateway-e2e-test",
@@ -1307,7 +1308,7 @@ def main(argv: list[str]) -> int:
     mode.add_argument("--update-locks", metavar="ID")
     parser.add_argument("--base", default="origin/main")
     parser.add_argument("--ios-host", choices=("local", "mini"), default="local",
-                        help="run a verification that selects iOS checks on this host or entirely under the mini lease")
+                        help="run selected iOS work here or under the mini lease; --all keeps host-bound groups here")
     parser.add_argument("--ios-jobs", type=int, choices=(1, 2, 3), default=1,
                         help="maximum concurrent iOS shards and real-UI journey lanes (default: 1)")
     parser.add_argument("--skip", default="", help=f"comma-separated runner groups to skip explicitly: {', '.join(SKIPPABLE)}")
@@ -1364,27 +1365,36 @@ def main(argv: list[str]) -> int:
     except VerifyError as error:
         print(f"verify: {error}", file=sys.stderr)
         return 2
-    skipped_group = lambda group: group.split("-")[0] in skip  # noqa: E731  (--skip ios covers ios-lanes)
+    def skipped_group(group: str) -> bool:
+        return group in skip or group.split("-")[0] in skip
     ios_lane = "ios" not in skip and ((name == "all" and any(key.startswith("ios-app/") for key in modules)) or "ios" in groups or any(group in owner_jobs for group in groups) or (
         name == "changed" and any(key.startswith("ios-app/") and key != "ios-app/e2e-tests" for key in selection["modules"])))
-    host_bound = sorted(group for group in ("python-here", "mac-terminal") if group in groups and not skipped_group(group))
-    if on_mini and host_bound:
+    remote_ios = args.ios_host == "mini" and (ios_lane or any(group.startswith("ios") and not skipped_group(group) for group in groups))
+    host_bound = sorted(group for group in HOST_BOUND if group in groups and not skipped_group(group))
+    split_mini = bool(args.all and remote_ios and host_bound
+                      and os.environ.get("TRON_VERIFY_EXECUTION_HOST") != "mini")
+    if on_mini and host_bound and not split_mini:
         parser.error(f"mini verification cannot run host-bound groups: {', '.join(host_bound)}; "
                      "select a supported affected scope; these checks need their Mac owner")
-    if args.ios_host == "mini" and (ios_lane or any(group.startswith("ios") and not skipped_group(group) for group in groups)) and not args.plan:
+    remote_command = None
+    if remote_ios:
         forwarded = []
         omit_value = False
         for word in argv:
             if omit_value:
                 omit_value = False
-            elif word in ("--ios-host", "--gateway-host", "--base"):
+            elif word in ("--ios-host", "--gateway-host", "--base", "--skip"):
                 omit_value = True
-            elif not word.startswith(("--ios-host=", "--gateway-host=", "--base=")):
+            elif word != "--plan" and not word.startswith(("--ios-host=", "--gateway-host=", "--base=", "--skip=")):
                 forwarded.append(word)
+        remote_skip = skip | (set(host_bound) if split_mini else set())
+        if remote_skip:
+            forwarded += ["--skip", ",".join(sorted(remote_skip))]
         ancestor = git("merge-base", base, "HEAD").strip()
-        command = [sys.executable, str(ROOT / "tools/verify/mini.py"), "verify", *forwarded,
-                   "--base", ancestor, "--ios-host", "local", "--gateway-host", "local"]
-        os.execv(sys.executable, command)
+        remote_command = [sys.executable, str(ROOT / "tools/verify/mini.py"), "verify", *forwarded,
+                          "--base", ancestor, "--ios-host", "local", "--gateway-host", "local"]
+        if not args.plan and not split_mini:
+            os.execv(sys.executable, remote_command)
     gateway_touched = (name == "all" and any(key.startswith("gateway/") for key in modules)) or any(key.startswith("gateway/") for key in selection["modules"]) \
         or any(path.startswith(f"{GATEWAY}/") for path in selection["tests"])
 
@@ -1452,6 +1462,9 @@ def main(argv: list[str]) -> int:
     gateway_checks = [("gateway typecheck", node + ["npm", "run", "check"]),
                       ("gateway lint", node + ["npm", "run", "lint"]),
                       ("layers gateway", [tron, "layers", "gateway", "--base", base])]
+    if split_mini:
+        plan_steps = [label for label, _, _ in checks] + ([label for label, _ in gateway_checks] if gateway_touched else []) \
+            + (["ios source policy"] if ios_lane else []) + [f"tests: {group}" for group in ordered_groups if group in host_bound] + ["mini verification"]
     if args.plan:
         commands = [{"name": label, "command": command, "cwd": ".", **options} for label, command, options in checks]
         if gateway_touched:
@@ -1471,6 +1484,9 @@ def main(argv: list[str]) -> int:
                     command, cwd, _ = test_spec(group, files, shard, ROOT / "test-results/verify" / sha, gateway_host=gateway_host, node_host=node_host)
                     commands.append({"name": label, "command": command, "cwd": str(cwd.relative_to(ROOT)),
                                      **({"estimatedSeconds": round(shard.seconds, 1)} if group == "ios" else {})})
+        if split_mini:
+            commands = [step for step in commands if step["name"] in plan_steps]
+            commands.append({"name": "mini verification", "command": remote_command, "cwd": "."})
         commands.sort(key=lambda step: plan_steps.index(step["name"]))
         deferred_commands = []
         if selection["deferredTests"]:
@@ -1481,6 +1497,7 @@ def main(argv: list[str]) -> int:
                           "deferredCommands": deferred_commands,
                           "iosJobs": args.ios_jobs,
                           "iosHost": args.ios_host,
+                          "hostBoundGroups": host_bound if split_mini else [],
                           "iosLanes": [lane or "(this worktree's lane)" for lane in ios_phone_lanes()[:args.ios_jobs]] + [ios_pad_lane()] if "ios" in groups and "ios" not in skip else [],
                           "batchCommand": [tron, "verify", "--batch"] if selection["tier"] == "full" else None}, indent=2))
         return 0
@@ -1507,18 +1524,31 @@ def main(argv: list[str]) -> int:
         'environment': environment, 'updateLocks': args.update_locks,
         'runnerOverrides': {key: value for key, value in os.environ.items() if key.startswith(('TEST_', 'TRON_', 'VITEST_')) or key in ('CI', 'NODE_OPTIONS')}}, sort_keys=True).encode()).hexdigest()
     report_path = ROOT / "test-results" / "verify" / f"{sha}.json"
+    tree = git("rev-parse", f"{sha}^{{tree}}").strip()
 
     def finish(verdict: str, message: str, announce: bool = True) -> int:
+        for step in run.steps:
+            step.setdefault("executionHost", os.uname().nodename)
         comparable = {"commit": sha, "selection": selection, "steps": comparable_steps(run.steps), "verdict": verdict}
         case_steps = [step for step in run.steps if step['name'].startswith('tests:')]
-        report = {"schema": "tron.verify.v1", "commit": sha, "verdict": verdict, "message": message,
+        eligible = bool(verdict == "passed" and name == "all" and not skip and case_steps
+                        and (not ios_lane or split_mini or os.environ.get("TRON_VERIFY_EXECUTION_HOST") == "mini")
+                        and all(type(step.get("tests")) is int and step["tests"] > 0
+                                and isinstance(step.get("log"), str) and (ROOT / step["log"]).is_file() for step in case_steps)
+                        and not selection["deferredTests"]
+                        and set(groups) == {step["name"].split()[1] for step in case_steps
+                                            if step["status"] == "ok" and step.get("tests")}
+                        and all(step["status"] == "ok" for step in run.steps)
+                        and git("rev-parse", "HEAD").strip() == sha
+                        and not git("status", "--porcelain", "--untracked-files=normal").strip())
+        report = {"schema": "tron.verify.v1", "commit": sha, "tree": tree, "verdict": verdict, "message": message,
                   "attemptId": attempt_id, "configDigest": config_digest, "environment": environment, "startedAt": started_at,
                   "endedAt": datetime.now(timezone.utc).isoformat() if verdict != 'running' else None,
                   "caseEvidenceComplete": bool(case_steps) and all(step.get('caseEvidenceComplete') for step in case_steps),
                   "resultDigest": hashlib.sha256(json.dumps(comparable, sort_keys=True).encode()).hexdigest(),
                   "selection": selection, "delta": change, "groups": groups, "skipped": sorted(skip), "steps": run.steps,
                   "gatewayHostReason": gateway_reason,
-                  "checkpointEligible": False,
+                  "checkpointEligible": eligible,
                   "passingTests": sum(step.get("tests") or 0 for step in run.steps if step["name"].startswith("tests:"))}
         temporary = report_path.with_suffix(".tmp")
         temporary.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
@@ -1549,6 +1579,8 @@ def main(argv: list[str]) -> int:
         not_run, no_result = [], []
         ios_broken = False
         for group in [*cheap_groups, None, *expensive_groups]:
+            if split_mini and group not in host_bound:
+                continue
             if group is None:
                 if reds:
                     if ios_lane:
@@ -1578,7 +1610,7 @@ def main(argv: list[str]) -> int:
                 continue
             label = f"tests: {group}"
             if skipped_group(group):
-                run.skipped(label, f"{len(files)} file(s) skipped by --skip {group.split('-')[0]}")
+                run.skipped(label, f"{len(files)} file(s) skipped by --skip {group if group in skip else group.split('-')[0]}")
                 continue
             if group in NOT_DRIVEN:
                 not_run.append(group)
@@ -1661,6 +1693,73 @@ def main(argv: list[str]) -> int:
             elif not result.get("tests"):
                 result["status"] = "failed"
                 reds.append(f"{label} ran zero passing tests: an empty group is not evidence")
+        if split_mini:
+            if reds:
+                run.skipped("mini verification", "submitting-host tier did not pass")
+            else:
+                transfer = run.step("mini verification", remote_command, env={"TRON_VERIFY_COMMIT": sha})
+                output = (ROOT / transfer["log"]).read_text(errors="replace")
+                if transfer["exit"] in (130, 143):
+                    transfer["status"] = "interrupted"
+                    finish("interrupted", "mini verification stopped; partial results retained")
+                    return 130
+                reason = mini.no_result_reason(transfer["exit"], output)
+                if reason is None:
+                    try:
+                        matches = re.findall(r"^mini: artifacts: (.+)$", output, re.M)
+                        if not matches:
+                            raise ValueError("missing mini verification artifact path")
+                        artifacts = Path(matches[-1]).resolve()
+                        if not artifacts.is_relative_to(ROOT / "test-results/mini"):
+                            raise ValueError("mini verification artifacts are outside this checkout")
+                        receipt = json.loads((artifacts / "receipt.json").read_text())
+                        remote = json.loads((artifacts / "verify.json").read_text())
+                        if (receipt["commit"] != sha or receipt["lane"] != "verify" or receipt["exit"] != transfer["exit"]
+                                or not isinstance(receipt["host"], str) or not receipt["host"]
+                                or remote["schema"] != "tron.verify.v1" or remote["commit"] != sha or remote["tree"] != tree
+                                or remote["selection"] != selection or remote["groups"] != groups
+                                or set(remote["skipped"]) != remote_skip
+                                or remote["verdict"] not in ("passed", "failed", "incomplete")
+                                or transfer["exit"] != (0 if remote["verdict"] == "passed" else 1)):
+                            raise ValueError("mini verification report does not match this selection")
+                        local_names = {f"tests: {group}" for group in host_bound}
+                        if (any(step["executionHost"] != receipt["host"] for step in remote["steps"])
+                                or {step["name"] for step in remote["steps"] if step["name"] in local_names and step["status"] == "skipped"} != local_names
+                                or any(step["status"] != "skipped" for step in remote["steps"] if step["name"] in local_names)):
+                            raise ValueError("mini verification host or disjoint runner coverage does not match")
+                        imported = [dict(step) for step in remote["steps"] if step["name"] not in local_names]
+                        if remote["verdict"] == "passed" and (
+                                any(step["status"] != "ok" or type(step.get("tests")) is not int or step["tests"] <= 0
+                                    for step in imported if step["name"].startswith("tests:") and not skipped_group(step["name"].split()[1]))
+                                or {group for group in groups if not skipped_group(group)} - set(host_bound)
+                                != {step["name"].split()[1] for step in imported if step["name"].startswith("tests:")
+                                    and step["status"] == "ok" and step.get("tests")}):
+                            raise ValueError("mini verification report is missing selected runner evidence")
+                        for step in imported:
+                            step["executionHost"] = receipt["host"]
+                            if step["name"].startswith("tests:") and step["status"] == "ok" and "log" not in step:
+                                raise ValueError("missing mini verification runner log")
+                            if "log" in step:
+                                log = Path(step["log"]).relative_to(Path("test-results/verify") / sha)
+                                if ".." in log.parts:
+                                    raise ValueError("invalid mini verification log path")
+                                step["log"] = str((artifacts / "verify" / log).relative_to(ROOT))
+                                if not (ROOT / step["log"]).is_file():
+                                    raise ValueError("missing mini verification log file")
+                            if not step["name"].startswith("tests:"):
+                                step["name"] = "mini: " + step["name"]
+                        transfer["report"] = str((artifacts / "verify.json").relative_to(ROOT))
+                        run.steps.extend(imported)
+                        if remote["verdict"] == "failed":
+                            reds.append(remote["message"])
+                        elif remote["verdict"] == "incomplete":
+                            transfer.update(status="no result", reason=remote["message"])
+                            no_result.append(remote["message"])
+                    except (OSError, ValueError, KeyError, TypeError) as error:
+                        reason = f"invalid mini verification evidence: {error}"
+                if reason is not None:
+                    transfer.update(status="no result", reason=reason)
+                    no_result.append(reason)
         passing = sum(step.get("tests") or 0 for step in run.steps if step["name"].startswith("tests:"))
         if reds:
             return finish("failed", "; ".join(reds))

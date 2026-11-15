@@ -30,10 +30,12 @@ The last run's output is kept in `test-results/verify-cli/`.
 from __future__ import annotations
 
 import ast
+import fcntl
 import hashlib
 import json
 import os
 import random
+import runpy
 import select
 import shutil
 import signal
@@ -1573,9 +1575,8 @@ class IosLaneTests(VerifyCase):
         self.assertEqual(preview.returncode, 0, preview.stdout + preview.stderr)
         plan = json.loads(preview.stdout[preview.stdout.index("{"):])
         self.assertEqual(plan["groups"]["python-here"], ["tools/proof/tests/test-core.py"])
+        r.env["TRON_VERIFY_EXECUTION_HOST"] = "mini"
         for host in ("mini", "local"):
-            if host == "local":
-                r.env["TRON_VERIFY_EXECUTION_HOST"] = "mini"
             for args, message in ((("--all",), "host-bound"),
                                   (("--update-locks", "ios-app/ui-tests"), "golden recording")):
                 with self.subTest(host=host, mode=args):
@@ -1599,6 +1600,187 @@ class IosLaneTests(VerifyCase):
                                                     "--ios-host", "local", "--gateway-host", "local"])
         self.assertFalse(calls.exists(), "no iOS build or test runs on the submitting host")
         self.assertFalse((r.path / "test-results/verify").exists(), "the mini owns the report, not an outer local verifier")
+
+        for relative in ("tools/verify/mini.py", "scripts/tron-node", ".node-version", "config/ci-toolchain.env"):
+            target = r.path / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / relative, target)
+        manifest = json.loads((r.path / "tooling.module.json").read_text())
+        manifest["owns"] += ["scripts/tron-node", ".node-version", "config/**", "packages/gateway/package*.json",
+                             "packages/gateway/.npmrc", "packages/gateway/third_party/**"]
+        manifest["verify"] = ["scripts/tron test tooling tools/proof/tests/test-core.py tools/fixture/tests/test-peer.py"]
+        r.write("tooling.module.json", json.dumps(manifest))
+        r.write("tools/fixture/tests/test-peer.py", "import os\nassert os.environ.get('TRON_VERIFY_EXECUTION_HOST') == 'mini'\n" + PASSING)
+        r.write(".gitignore", "test-results/\nnode_modules/\n")
+        r.write("tools/proof/tests/test-core.py", "import os\nfrom pathlib import Path\n"
+                "assert os.environ.get('TRON_VERIFY_EXECUTION_HOST') != 'mini'\n"
+                "assert not (Path.home() / 'fail-host').exists()\n"
+                "with (Path.home() / 'host-bound-ran').open('a') as stream: stream.write('local\\n')\n" + PASSING)
+        r.write("packages/gateway/package.json", json.dumps({"name": "fixture", "version": "1.0.0", "private": True,
+                                                             "dependencies": {"fixture": "file:third_party/fixture"}}))
+        lock = {"name": "fixture", "version": "1.0.0", "lockfileVersion": 3, "packages": {
+            "": {"name": "fixture", "version": "1.0.0", "dependencies": {"fixture": "file:third_party/fixture"}},
+            "node_modules/fixture": {"resolved": "third_party/fixture", "link": True},
+            "third_party/fixture": {"version": "1.0.0"}}}
+        r.write("packages/gateway/package-lock.json", json.dumps(lock))
+        r.write("packages/gateway/third_party/fixture/package.json", '{"name":"fixture","version":"1.0.0"}')
+        pinned = Path(subprocess.check_output([str(ROOT / "scripts/tron-node")], text=True).strip())
+        version = (ROOT / ".node-version").read_text().strip()
+        local_node = Path(r.env["HOME"]) / ".nvm/versions/node"
+        local_node.mkdir(parents=True)
+        (local_node / f"v{version}").symlink_to(pinned.parent.parent)
+        subprocess.run([str(r.path / "scripts/tron-node"), "exec", "npm", "--prefix", "packages/gateway", "ci", "--include=dev", "--offline"],
+                       cwd=r.path, env=r.env, check=True, capture_output=True)
+        r.write("packages/gateway/.npmrc", "audit=false\nfund=false\noffline=true\n")
+        r.write("packages/gateway/third_party/README", "fixture\n")
+        path = "packages/ios-app/UITests/ui-tests.module.json"
+        owner = json.loads((r.path / path).read_text())
+        owner["verify"] = ["scripts/tron test ios run --only-testing TronMobileUITests/FixtureJourneyUITests "
+                           "--only-testing TronMobileUITests/FixtureLockTests"]
+        r.write(path, json.dumps(owner))
+        (r.path / "packages/ios-app/UITests/TronMacTerminalUITests.swift").unlink()
+        for file, method in (("FixtureLockTests", "testLock"), ("FixtureJourneyUITests", "testJourney")):
+            folder = "Locks/" if file == "FixtureLockTests" else ""
+            r.write(f"packages/ios-app/UITests/{folder}{file}.swift", f"class {file} {{ func {method}() {{}} }}\n")
+        setup = '''root="$(cd "$(dirname "$0")/.." && pwd)"
+export FIXTURE_IOS_CALLS="$root/test-results/ios-calls"
+key="$(python3 "$root/scripts/ios-test-build-identity.py" show --worktree "$root" | python3 -c 'import json,sys; print(json.load(sys.stdin)["worktree_key"])')"
+export TRON_IOS_TEST_DERIVED_DATA="${TRON_IOS_TEST_DERIVED_DATA:-$HOME/Library/Developer/Tron/ios/test-derived-data/$key}"
+export TMPDIR="$HOME/tmp"
+mkdir -p "$root/test-results" "$TMPDIR"
+if [[ "$1" == run && -f "$HOME/fail-run" ]]; then exit 65; fi
+if [[ "$1" == run && -f "$HOME/hang-run" ]]; then
+  trap 'echo stopped >"$HOME/run-stopped"; exit 143' TERM
+  echo started >"$HOME/run-started"
+  sleep 120
+fi
+'''
+        r.write("scripts/tron-ios-test", IOS_TEST_STUB.replace("set -euo pipefail\n", "set -euo pipefail\n" + setup))
+        r.commit("full split checkpoint fixture")
+        sha = r.git("rev-parse", "HEAD")
+        r.git("update-ref", "refs/remotes/origin/main", sha)
+        mini_home = Path(self.temp.name) / "mini-home"
+        subprocess.run(["git", "init", "-q", "--bare", str(mini_home / "tron-ci/tron.git")], check=True)
+        (mini_home / ".nvm/versions/node").mkdir(parents=True)
+        (mini_home / f".nvm/versions/node/v{version}").symlink_to(pinned.parent.parent)
+        bin_dir = Path(self.temp.name) / "bin"
+        bin_dir.mkdir()
+        real_ssh = bin_dir / "fixture-ssh"
+        real_ssh.write_text(runpy.run_path(str(Path(__file__).with_name("test-mini.py")))["SSH"])
+        real_ssh.chmod(0o755)
+        ssh = bin_dir / "ssh"
+        ssh.write_text('''#!/usr/bin/env python3
+import os, shlex, sys
+from pathlib import Path
+args = sys.argv[1:]
+if args and (Path(os.environ["MINI_HOME"]) / "bad-report").exists():
+    command = shlex.split(args[-1])
+    if len(command) == 5 and command[1] == "-c" and command[3] == "remote":
+        fault = (Path(os.environ["MINI_HOME"]) / "bad-report").read_text()
+        changes = {
+            "empty": 'report.write_text("{}")',
+            "commit": 'data=json.loads(report.read_text()); data["commit"]="0"*40; report.write_text(json.dumps(data))',
+            "host": 'data=json.loads(report.read_text()); data["steps"][0]["executionHost"]="other-host"; report.write_text(json.dumps(data))',
+            "selection": 'data=json.loads(report.read_text()); data["selection"]["mode"]="changed"; report.write_text(json.dumps(data))',
+            "missing": 'data=json.loads(report.read_text()); data["steps"]=[step for step in data["steps"] if step["name"]!="tests: python"]; report.write_text(json.dumps(data))',
+            "zero": 'data=json.loads(report.read_text()); data["steps"]=[dict(step,tests=0) if step["name"].startswith("tests:") and step["status"]=="ok" else step for step in data["steps"]]; report.write_text(json.dumps(data))',
+            "disjoint": 'data=json.loads(report.read_text()); data["steps"]=[dict(step,status="ok") if step["name"]=="tests: python-here" else step for step in data["steps"]]; report.write_text(json.dumps(data))',
+            "notRun": 'data=json.loads(report.read_text()); data["steps"]=[dict(step,status="not driven") if step["name"]=="tests: python" else step for step in data["steps"]]; report.write_text(json.dumps(data))',
+            "logs": 'data=json.loads(report.read_text()); data["steps"]=[dict(step,log="test-results/verify/"+data["commit"]+"/absent.log") if step["name"]=="tests: python" else step for step in data["steps"]]; report.write_text(json.dumps(data))',
+        }
+        command[2] = command[2].replace("if report.is_file():", "if report.is_file():\\n" + " " * 28 + changes[fault])
+        args[-1] = shlex.join(command)
+fixture = str(Path(__file__).with_name("fixture-ssh"))
+os.execv(fixture, [fixture, *args])
+''')
+        ssh.chmod(0o755)
+        r.env.update(PATH=f"{bin_dir}:{r.env['PATH']}", MINI_HOME=str(mini_home))
+        r.git("config", "tron.verify.mini", "mini.test")
+        preview = r.verify("--all", "--ios-host", "mini", "--gateway-host", "mini", "--plan")
+        self.assertEqual(preview.returncode, 0, preview.stdout + preview.stderr)
+        planned = json.loads(preview.stdout[preview.stdout.index("{"):])
+        self.assertEqual(planned["hostBoundGroups"], ["python-here"])
+        self.assertFalse(any(step["name"] in ("ios build", "layers ios", "tests: ios") for step in planned["commands"]))
+        self.assertEqual(planned["commands"][-1]["name"], "mini verification")
+        passed = r.verify("--all", "--ios-host", "mini", "--gateway-host", "mini")
+        self.assertEqual(passed.returncode, 0, passed.stdout + passed.stderr)
+        report = r.report()
+        self.assertTrue(report["checkpointEligible"], report)
+        self.assertFalse(report["caseEvidenceComplete"])
+        self.assertEqual(report["commit"], sha)
+        self.assertEqual(report["skipped"], [])
+        self.assertEqual(report["passingTests"], 4)
+        local = next(step for step in report["steps"] if step["name"] == "tests: python-here")
+        self.assertEqual((local["status"], local["tests"]), ("ok", 1))
+        self.assertEqual((Path(r.env["HOME"]) / "host-bound-ran").read_text(), "local\n")
+        self.assertFalse((mini_home / "host-bound-ran").exists())
+        self.assertFalse((r.path / "test-results/ios-calls").exists(), "no simulator command on the submitting Mac")
+        self.assertTrue((mini_home / "tron-ci/jobs/gateway/test-results/ios-calls").is_file())
+        transfer = next(step for step in report["steps"] if step["name"] == "mini verification")
+        self.assertEqual((r.path / transfer["log"]).read_text().count("mini: verify lane for"), 1)
+        self.assertTrue(all(step["executionHost"] for step in report["steps"] if step["name"].startswith("tests:")))
+        shutil.copytree(r.path / "test-results", ARTIFACTS / "checkpoint-pass", dirs_exist_ok=True)
+        skipped = r.verify("--all", "--ios-host", "mini", "--gateway-host", "mini", "--skip", "relay")
+        self.assertEqual(skipped.returncode, 0, skipped.stdout + skipped.stderr)
+        self.assertFalse(r.report()["checkpointEligible"])
+        (ARTIFACTS / "checkpoint-explicit-skip.json").write_text(json.dumps(r.report()))
+        local_fault = Path(r.env["HOME"]) / "fail-host"
+        local_fault.touch()
+        local_red = r.verify("--all", "--ios-host", "mini", "--gateway-host", "mini")
+        self.assertEqual(local_red.returncode, 1, local_red.stdout + local_red.stderr)
+        self.assertFalse(r.report()["checkpointEligible"])
+        self.assertEqual(next(step["status"] for step in r.report()["steps"] if step["name"] == "mini verification"), "skipped")
+        (ARTIFACTS / "checkpoint-host-red.json").write_text(json.dumps(r.report()))
+        local_fault.unlink()
+        (mini_home / "fail-run").touch()
+        red = r.verify("--all", "--ios-host", "mini", "--gateway-host", "mini")
+        self.assertEqual(red.returncode, 1, red.stdout + red.stderr)
+        self.assertEqual(r.report()["verdict"], "failed")
+        self.assertFalse(r.report()["checkpointEligible"])
+        (ARTIFACTS / "checkpoint-red.json").write_text(json.dumps(r.report()))
+        (mini_home / "fail-run").unlink()
+        for fault in ("empty", "commit", "host", "selection", "missing", "zero", "disjoint", "notRun", "logs"):
+            with self.subTest(report=fault):
+                (mini_home / "bad-report").write_text(fault)
+                invalid = r.verify("--all", "--ios-host", "mini", "--gateway-host", "mini")
+                self.assertEqual(invalid.returncode, 1, invalid.stdout + invalid.stderr)
+                self.assertEqual(r.report()["verdict"], "incomplete")
+                self.assertFalse(r.report()["checkpointEligible"])
+                invalid_step = next(step for step in r.report()["steps"] if step["name"] == "mini verification")
+                self.assertEqual(invalid_step["exit"], 0, "a valid transport receipt with invalid report data is still no result")
+                self.assertIn("invalid mini verification", invalid_step["reason"])
+                (ARTIFACTS / f"checkpoint-invalid-{fault}.json").write_text(json.dumps(r.report()))
+        (mini_home / "bad-report").unlink()
+        r.git("config", "tron.verify.mini", "unreachable.test")
+        missing = r.verify("--all", "--ios-host", "mini", "--gateway-host", "mini")
+        self.assertEqual(missing.returncode, 1, missing.stdout + missing.stderr)
+        self.assertEqual(r.report()["verdict"], "incomplete")
+        self.assertFalse(r.report()["checkpointEligible"])
+        (ARTIFACTS / "checkpoint-no-result.json").write_text(json.dumps(r.report()))
+        r.git("config", "tron.verify.mini", "mini.test")
+        (mini_home / "hang-run").touch()
+        process = subprocess.Popen([str(r.path / "scripts/tron"), "verify", "--all", "--base", "base",
+                                    "--ios-host", "mini", "--gateway-host", "mini"], cwd=r.path,
+                                   env=r.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        try:
+            deadline = time.monotonic() + 30
+            while not (mini_home / "run-started").exists() and process.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.05)
+            self.assertTrue((mini_home / "run-started").is_file())
+            process.send_signal(signal.SIGTERM)
+            output, _ = process.communicate(timeout=45)
+            (ARTIFACTS / "checkpoint-interrupted.log").write_text(output)
+            (ARTIFACTS / "checkpoint-interrupted.json").write_text(json.dumps(r.report()))
+            self.assertEqual(process.returncode, 130, output)
+            self.assertEqual(r.report()["verdict"], "interrupted")
+            self.assertFalse(r.report()["checkpointEligible"])
+            self.assertTrue((mini_home / "run-stopped").is_file())
+            with (mini_home / "tron-ci/jobs/gateway.lock").open() as stream:
+                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:
+            if process.poll() is None:
+                process.send_signal(signal.SIGTERM)
+                process.communicate(timeout=45)
 
     def test_real_gateway_boundary_tests_execute_through_their_owning_harness(self) -> None:
         r = self.repo

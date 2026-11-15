@@ -13,6 +13,7 @@ scripts/tron verify --plan                     # tier, paths, reasons and exact 
 scripts/tron verify --changed [--base <ref>]   # explicit diff selection, also used by mutation sampling
 scripts/tron verify --module <id>               # scoped baseline: owner tests + declarations + launching UI locks
 scripts/tron verify --all                       # all locks + serial files deferred by this base..HEAD diff
+scripts/tron verify --all --ios-jobs 1 --gateway-host mini --ios-host mini # split full selection; host-bound groups stay here
 scripts/tron verify --batch --base <main-anchor> # initialize coverage in a clean linked worktree (git worktree add --detach <path> origin/main)
 scripts/tron verify --batch [--repeat] [--plan] # next pinned batch, or rerun every lane at the green HEAD
 scripts/tron verify --batch --review <culprit> --decision ACCEPT|BLOCK --reviewer <id> --binding <digest>
@@ -119,10 +120,31 @@ checks still precede the build on that host. The base is resolved to a committed
 transfer; the leased checkout also binds `origin/main` to the caller's committed main merge-base so
 native ownership ratchets see the same Git baseline. The remote invocation names local execution hosts
 so its own groups never reacquire the mini lease. `--plan` remains a submitting-host preview and records `iosHost`; it launches nothing. Without
-iOS work, the existing group routing remains in effect. A mini invocation refuses selections with
+iOS work, the existing group routing remains in effect. A direct mini invocation refuses selections with
 `python-here` or `mac-terminal` before starting runners: those checks belong to their Mac's stores/SSH
-service. This includes `--all`; select a supported affected scope instead, never fall back to a local
-simulator run. Golden recording is local-only and cannot be combined with remote verification.
+service. Golden recording is local-only and cannot be combined with remote verification.
+
+For `--all --ios-host mini`, the submitting verifier runs its cheap checks and selected host-bound groups
+locally, then delegates the remaining selection under one normal mini lease. No simulator command runs
+on the submitting Mac. Exact `--skip python-here,mac-terminal` groups describe only the remote contribution;
+the parent covers them locally and retains the unmodified remote report and receipt. Its canonical
+`test-results/verify/<sha>.json` combines the disjoint steps, execution hosts and copied remote log paths
+only after commit/tree, host, selection, group, skip and raw-exit identity match. A local red suppresses the mini
+phase; remote failure, no result and interruption remain distinct, with owned process cleanup unchanged.
+Other affected scopes containing host-bound groups still refuse whole-mini handoff.
+
+A rebuild checkpoint means complete runner evidence: every selected runner group ran, the groups are
+disjoint and cover the selection, positive counts and log files exist, and no command failed, was skipped
+or remained not run. `checkpointEligible` additionally requires all-mode, no requested skip or deferred
+selection, mini execution for selected iOS work, and the same clean source at completion. Partial, failed,
+interrupted and incomplete reports are ineligible. This is the complete verifier selection, not the broader
+batch/journey or device matrix and not rebuild authorization.
+
+`caseEvidenceComplete` separately reports whether every runner supplies embedded per-case observations;
+it does not gate `checkpointEligible`. A runner-complete report can be eligible while its per-case flag is
+false. Only Vitest currently embeds those observations. Eligibility neither invents per-case data nor
+relabels the retained partial remote report.
+A plan previews the local host-bound steps and the single mini command without launching either.
 
 The existing batch Apple path is not migrated by this flag. Its serial mini routing, explicit host-bound
 split and SHA-addressed asynchronous result retrieval are tracked in #2530. Do not launch that still-local
