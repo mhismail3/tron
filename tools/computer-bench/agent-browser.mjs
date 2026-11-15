@@ -1,21 +1,67 @@
 // Purpose: computer-bench adapter for the agent-browser CLI (the engine behind Tron's agent_browser tool), driving its own managed Chrome for Testing.
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { DOWNLOAD_BODY } from "./fixtures/site.mjs";
-import { pngSize, run } from "./process.mjs";
+import { pngSize, run, waitFor } from "./process.mjs";
 
 const BINARY = process.env.COMPUTER_BENCH_AGENT_BROWSER ?? join(homedir(), ".tron/agent/bin/agent-browser");
+
+async function attachmentScope(session) {
+  const directory = await mkdtemp("/tmp/cba-");
+  const env = { ...process.env, AGENT_BROWSER_SOCKET_DIR: directory };
+  delete env.AGENT_BROWSER_DAEMON;
+  delete env.AGENT_BROWSER_NAMESPACE;
+  const inspect = (command, args) => execFileSync(command, args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  const identity = (pid) => {
+    try { return inspect("/bin/ps", ["-p", String(pid), "-o", "lstart=,comm="]); }
+    catch (error) { if (error.status === 1) return undefined; throw error; }
+  };
+  return {
+    env,
+    async retire(closed) {
+      let pid;
+      try { pid = Number(readFileSync(join(directory, `${session}.pid`), "utf8")); }
+      catch (error) {
+        if (error.code !== "ENOENT" || !closed) throw new Error(`Attach daemon retirement unconfirmed in ${directory}`, { cause: error });
+      }
+      if (pid !== undefined) {
+        if (!Number.isSafeInteger(pid) || pid <= 1 || pid === process.pid) throw new Error(`Invalid owned attach daemon PID in ${directory}`);
+        const before = identity(pid);
+        if (before && closed) {
+          if (!await waitFor(() => identity(pid) !== before)) throw new Error(`Closed attach daemon did not exit in ${directory}`);
+        } else if (before) {
+          const command = inspect("/bin/ps", ["-p", String(pid), "-o", "args="]);
+          const binary = realpathSync(BINARY);
+          if (!(command === binary || command.endsWith(` ${binary}`))) throw new Error(`Process does not own the expected attach session in ${directory}`);
+          let sockets;
+          try { sockets = inspect("/usr/sbin/lsof", ["-nP", "-a", "-p", String(pid), "-U", "-Fn"]).split("\n"); }
+          catch (error) { if (error.status === 1) sockets = []; else throw error; }
+          if (!sockets.includes(`n${join(directory, `${session}.sock`)}`) || identity(pid) !== before) throw new Error(`Process does not own the expected attach session in ${directory}`);
+          process.kill(pid, "SIGKILL");
+          if (!await waitFor(() => identity(pid) !== before)) throw new Error(`Attach daemon did not retire in ${directory}`);
+        }
+      }
+      await rm(directory, { recursive: true });
+    },
+  };
+}
+
+function throwFailures(errors) {
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) throw new AggregateError(errors, `${errors[0].message}; cleanup also failed: ${errors.slice(1).map((error) => error.message).join("; ")}`, { cause: errors[0] });
+}
 
 export function agentBrowser({ chromeCdp } = {}) {
   const session = `cb2476-${process.pid}`;
   const profileSession = `${session}-profile`;
   const attachedSession = `${session}-attach`;
-  let attached = false;
   let profile;
 
-  async function call(args, { sessionName = session, timeoutMs = 30_000, global = [] } = {}) {
-    const result = await run(BINARY, ["--json", "--session", sessionName, ...global, ...args], { timeoutMs });
+  async function call(args, { sessionName = session, timeoutMs = 30_000, global = [], env } = {}) {
+    const result = await run(BINARY, ["--json", "--session", sessionName, ...global, ...args], { timeoutMs, env });
     let parsed;
     try { parsed = JSON.parse(result.stdout); } catch { parsed = undefined; }
     if (result.timedOut) throw new Error(`timed out: ${args.join(" ")}`);
@@ -37,7 +83,6 @@ export function agentBrowser({ chromeCdp } = {}) {
     async teardown() {
       await call(["close"]).catch(() => {});
       await call(["close"], { sessionName: profileSession }).catch(() => {});
-      if (attached) await call(["close"], { sessionName: attachedSession });
     },
     tasks: {
       async navigate(ctx) { await openForm(ctx); const title = await value(["get", "title"]); return { ok: title === "Bench Form", detail: title }; },
@@ -124,11 +169,13 @@ export function agentBrowser({ chromeCdp } = {}) {
           || !/^\/devtools\/browser(?:\/[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12})?$/iu.test(endpoint.pathname)) throw new Error("Chrome CDP endpoint must be an exact loopback browser endpoint without credentials");
         const options = { sessionName: attachedSession };
         const started = performance.now();
-        attached = true;
-        let tab;
-        let attachMs;
+        let daemon, connected = false, closed = false, tab, attachMs;
+        const errors = [];
         try {
+          daemon = await attachmentScope(attachedSession);
+          options.env = daemon.env;
           await call(["connect", chromeCdp], { ...options, timeoutMs: 2_000 });
+          connected = true;
           attachMs = Math.round(performance.now() - started);
           const connection = await call(["get", "cdp-url"], options);
           if (connection.cdpUrl !== chromeCdp) throw new Error("Attached browser endpoint changed; refusing fixture operation");
@@ -137,12 +184,22 @@ export function agentBrowser({ chromeCdp } = {}) {
           if (typeof tab !== "string" || !tab.length) throw new Error("Fixture tab identity unavailable; open outcome uncertain");
           const title = await value(["get", "title"], options);
           return { ok: title === "Bench Form" && attachMs <= 2_000, attachMs, detail: `fixture title=${title}; attach=${attachMs}ms; exact fixture tab closed in finally` };
-        } finally {
-          try { if (tab) await call(["tab", "close", tab], options); }
-          finally {
-            await call(["close"], options);
-            attached = false;
+        } catch (error) { errors.push(error); }
+        finally {
+          if (tab) {
+            try { await call(["tab", "close", tab], options); } catch (error) { errors.push(error); }
           }
+          if (connected) {
+            try {
+              const result = await call(["close"], options);
+              if (result.closed !== true) throw new Error("Attached session close was not confirmed");
+              closed = true;
+            } catch (error) { errors.push(error); }
+          }
+          if (daemon) {
+            try { await daemon.retire(closed); } catch (error) { errors.push(error); }
+          }
+          throwFailures(errors);
         }
       },
     },

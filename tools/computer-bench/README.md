@@ -55,6 +55,22 @@ endpoint, opens the local Bench Form in a new tab, reads its title, closes only 
 issued tab ID and detaches without closing Chrome. Every repetition starts detached;
 raw JSON records `attachMs` separately from total task wall time. Attach has a two-second
 bound; absent consent, wrong title, changed endpoint or failed cleanup is failure.
+
+Each attach trial has a fresh private command-socket directory. The CLI remains the
+owner of daemon startup and its PID/version metadata. A failed connect never queues
+`close` behind a pending consent handshake. Retirement reads that private session's
+PID and requires the exact binary command, private Unix listener and unchanged process
+birth identity before terminating only that daemon, then verifies its exit. A confirmed
+`close` instead waits for normal daemon exit. It never signals the owner Chrome process.
+Unproven retirement retains the namespace for inspection and reports failure rather
+than claiming cleanup. Primary errors remain first and are the aggregate's `cause`;
+tab-close, session-close and retirement failures are secondary diagnostics.
+
+The existing bench test owner exercises this through an external CLI process fixture,
+including pending TCP consent, secondary close failure, confirmed close and a forged
+foreign-PID receipt. A local held-WebSocket-upgrade server can separately qualify the
+pinned native engine's retirement contract without launching Chrome. Transport
+retirement is not a live native-sheet dismissal or signed-in attach acceptance claim.
 Use `COMPUTER_BENCH_AGENT_BROWSER` to select the qualified engine under test rather
 than assume the installed engine matches the repository pin. For example, after Chrome
 has been released by its current owner and the per-instance setting consented:

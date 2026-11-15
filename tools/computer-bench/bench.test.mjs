@@ -3,6 +3,12 @@ import { test } from "node:test";
 import { FUNCTIONS, scorecard, summarize } from "./bench.mjs";
 import { DOWNLOAD_BODY, startSite } from "./fixtures/site.mjs";
 import { agentBrowser } from "./agent-browser.mjs";
+import { createServer } from "node:net";
+import { execFileSync } from "node:child_process";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { run, waitFor } from "./process.mjs";
 
 test("signed-in Chrome requires explicit loopback consent and never scores endpoint existence as an attach", async () => {
   const refused = await agentBrowser().tasks["signed-in-chrome"]();
@@ -41,4 +47,92 @@ test("the scorecard counts absent tools, partial passes and shell-only reach as 
   const markdown = scorecard({ startedAt: "t", reps: 2, tools: [present, absent], notes: [] });
   assert.match(markdown, new RegExp(`\\| worker: [^|]+\\| first-class \\| none \\| 1/${FUNCTIONS.length} \\|`, "u"));
   assert.match(markdown, /\*\*agent-browser click\*\* \(flaky\): missed/u);
+});
+
+
+async function failureProbe(mode, endpoint, directory) {
+  const module = new URL("./agent-browser.mjs", import.meta.url).href;
+  const script = `import { agentBrowser } from ${JSON.stringify(module)};
+    try {
+      const result = await agentBrowser({chromeCdp:process.env.BENCH_TEST_CDP}).tasks["signed-in-chrome"]({site:{origin:"http://fixture.invalid"}});
+      console.log(JSON.stringify({result}));
+    } catch(error) {
+      console.log(JSON.stringify({message:error.message,cause:error.cause?.message,secondary:Array.from(error.errors??[]).slice(1).map(item=>item.message)}));
+    }`;
+  const result = await run(process.execPath, ["--input-type=module", "--eval", script], {
+    env: { ...process.env, PATH: `${dirname(process.execPath)}:${process.env.PATH}`,
+      COMPUTER_BENCH_AGENT_BROWSER: fileURLToPath(new URL("./fixtures/agent-browser-cli.mjs", import.meta.url)),
+      COMPUTER_BENCH_FIXTURE_MODE: mode, COMPUTER_BENCH_FIXTURE_OWNER_DIRECTORY: directory,
+      COMPUTER_BENCH_FIXTURE_FOREIGN_PID: String(process.pid), AGENT_BROWSER_SOCKET_DIR: directory, BENCH_TEST_CDP: endpoint },
+  });
+  assert.equal(result.code, 0, result.stderr);
+  return JSON.parse(result.stdout);
+}
+
+async function retireFixture(directory) {
+  for (const file of await readdir(directory)) {
+    if (file.startsWith("fixture-") && file.endsWith(".json")) {
+      const owned = JSON.parse(await readFile(join(directory, file), "utf8"));
+      assert.equal(Number.isSafeInteger(owned.pid) && owned.pid > 1 && owned.pid !== process.pid, true);
+      assert.equal(owned.directory === directory || owned.directory.startsWith("/tmp/cba-"), true);
+      let sockets;
+      try { sockets = execFileSync("/usr/sbin/lsof", ["-nP", "-a", "-p", String(owned.pid), "-U", "-Fn"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).split("\n"); }
+      catch (error) { if (error.status === 1) sockets = []; else throw error; }
+      if (sockets.includes(`n${owned.socket}`)) {
+        try { process.kill(owned.pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; }
+      }
+      await rm(owned.directory, { recursive: true, force: true });
+    }
+  }
+  await rm(directory, { recursive: true });
+}
+
+test("a failed consent attach preserves its primary error and retires the pending transport", async (t) => {
+  const directory = await mkdtemp("/tmp/cbb-test-");
+  const sockets = new Set();
+  const server = createServer((socket) => {
+    sockets.add(socket);
+    socket.on("error", () => {});
+    socket.on("close", () => sockets.delete(socket));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const result = await failureProbe("pending", `ws://127.0.0.1:${server.address().port}/devtools/browser`, directory);
+    await t.test("primary connect failure survives cleanup", () => {
+      assert.match(result.message, /^timed out: connect /u);
+    });
+    await t.test("the consent transport has no remaining client", async () => {
+      assert.equal(await waitFor(() => sockets.size === 0), true);
+    });
+  } finally {
+    for (const socket of sockets) socket.destroy();
+    await retireFixture(directory);
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("a post-connect primary error retains a close failure as secondary", async () => {
+  const directory = await mkdtemp("/tmp/cbb-test-");
+  try {
+    const result = await failureProbe("connected", "ws://127.0.0.1:9222/devtools/browser", directory);
+    assert.match(result.message, /^get cdp-url: primary fixture read failed/u);
+    assert.equal(result.cause, "get cdp-url: primary fixture read failed");
+    assert.deepEqual(result.secondary, ["close: secondary fixture cleanup failed"]);
+  } finally { await retireFixture(directory); }
+});
+
+test("attach cleanup honors a confirmed close and refuses a foreign PID receipt", async (t) => {
+  for (const mode of ["success", "foreign"]) {
+    await t.test(mode, async () => {
+      const directory = await mkdtemp("/tmp/cbb-test-");
+      try {
+        const result = await failureProbe(mode, "ws://127.0.0.1:9222/devtools/browser", directory);
+        if (mode === "success") assert.equal(result.result.ok, true);
+        else {
+          assert.match(result.message, /^get cdp-url: primary fixture read failed/u);
+          assert.equal(result.secondary.some((message) => message.includes("does not own the expected attach session")), true);
+        }
+      } finally { await retireFixture(directory); }
+    });
+  }
 });
