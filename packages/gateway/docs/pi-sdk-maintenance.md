@@ -96,10 +96,17 @@ and ordinary errors still propagate. The existing SDK integration test runs stat
 mid-stream cancellation in isolated processes and joins handle closure. This one-line bridge
 is removed when the pinned Pi includes
 [upstream PR #12025](https://github.com/earendil-works/pi/pull/12025); upstream owns the
-alternative signal-free stream with reader-owned cancellation. The previous
-`pi-coding-agent-1.5.1-tron.1.tgz` is retained as the rollback artifact; its complete pin and
+alternative signal-free stream with reader-owned cancellation.
+
+`createAgentSession` and `createAgentSessionFromServices` accept a host `preamble` that replaces
+Pi's generic identity without suppressing tool snippets, tool guidelines or docs; a custom system
+prompt then renders as a separate `role` section. The Gateway supplies its common core this way.
+`system-prompt-updates.test.ts` proves the retained preamble across requests and the separate role.
+The bridge is removed when upstream offers an equivalent host identity option. The previous
+`pi-coding-agent-1.5.1-tron.2.tgz` is retained as the rollback artifact; its complete pin and
 patch inputs are available in the parent main tree. No installed runtime is changed by
-rebuilding or selecting `pi-coding-agent-1.5.1-tron.2.tgz` in a worktree.
+rebuilding or selecting `pi-coding-agent-1.5.1-tron.3.tgz` in a worktree. The reproducer's
+`--write` mode alone may build an artifact that does not yet exist; every other check requires it.
 
 Pi activates newly registered declarable extension tools on a resumed branch, and the
 Gateway reapplies the transcript's explicit loadout over them. When that narrows the

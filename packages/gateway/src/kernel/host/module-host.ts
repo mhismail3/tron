@@ -79,6 +79,7 @@ export interface SessionContext {
   fixedSettings(): Readonly<Record<string, FixedSetting>>;
   delegatedWorker(): boolean;
   requireChildExtensions?(sessionId: string, extensions: readonly { id: string; path: string }[]): Promise<{ dispose(): void }>;
+  requireChildTaskContext?(sessionId: string, taskPrefix: string): Promise<{ dispose(): void }>;
 
   profile(): SessionProfile;
   title(): string;
@@ -109,6 +110,7 @@ const KERNEL_HOOKS = {
   resourceRoot: "policy",
   extensionAdmission: "policy",
   operatingContext: "policy",
+  commonCore: "policy",
   requestPolicy: "policy",
   inputAdmission: "policy",
   appendGuard: "policy",
@@ -129,10 +131,11 @@ const KERNEL_HOOKS = {
 export type HookName = keyof typeof KERNEL_HOOKS;
 type PolicyHook = { [K in HookName]: typeof KERNEL_HOOKS[K] extends "policy" ? K : never }[HookName];
 type ObserverHook = Exclude<HookName, PolicyHook>;
-export type KernelHooks = { [K in Exclude<HookName, "extensionAdmission" | "resourceRoot" | "operatingContext" | "toolResultProjection" | "runTerminal" | "interactionRequired" | "sessionNotifications" | "runSettled" | "requestPolicy" | "appendGuard" | "inputAdmission" | "profileDecision" | "sessionLineage" | "taskLedger" | "kernelLifecycle" | "modelRuntimeInstalled" | "modelUsed" | "sessionRetired">]: (...args: never[]) => unknown } & {
+export type KernelHooks = { [K in Exclude<HookName, "extensionAdmission" | "resourceRoot" | "operatingContext" | "commonCore" | "toolResultProjection" | "runTerminal" | "interactionRequired" | "sessionNotifications" | "runSettled" | "requestPolicy" | "appendGuard" | "inputAdmission" | "profileDecision" | "sessionLineage" | "taskLedger" | "kernelLifecycle" | "modelRuntimeInstalled" | "modelUsed" | "sessionRetired">]: (...args: never[]) => unknown } & {
   extensionAdmission: ExtensionAdmission;
   resourceRoot(): ResourceRoot;
   operatingContext(workspace: TronWorkspaceDescriptor, cwd: string, tools: readonly string[]): string;
+  commonCore(workspace: TronWorkspaceDescriptor): string;
   modelRuntimeInstalled(): ModelRuntimePolicy;
   modelUsed(sessionId: string, model: { provider: string; id: string }): void;
   sessionRetired(sessionId: string): void;

@@ -42,8 +42,7 @@ interface AgentInstructionsInput {
   tools: { name: string; promptGuidelines?: string[]; sourceInfo: SourceInfoLike }[];
 }
 
-const SESSION_SECTIONS = new Set(["preamble", "tools", "rules", "docs", "addendum", "project_context", "skills", "cwd", "mcp_servers"]);
-const TRON_HEADING = "## Tron operating context\n";
+const SESSION_SECTIONS = new Set(["preamble", "role", "tools", "rules", "docs", "addendum", "project_context", "skills", "cwd", "mcp_servers"]);
 const OPEN_TAG = /\n\n<([a-z][a-z0-9_-]*)>\n/y;
 
 export function projectAgentInstructions(input: AgentInstructionsInput): AgentInstructions {
@@ -62,39 +61,36 @@ export function projectAgentInstructions(input: AgentInstructionsInput): AgentIn
     id: "preamble",
     timing: "session",
     text: parsed.preamble,
-    source: input.customPrompt ? (input.customPrompt.path ? { kind: "file", path: input.customPrompt.path } : { kind: "unknown" }) : { kind: "pi" },
+    source: { kind: "module", name: "tron-core" },
   }];
   for (const block of parsed.blocks) {
     const section: InstructionSection = { id: block.name, timing: SESSION_SECTIONS.has(block.name) ? "session" : "turn", text: block.body };
     const entries = sectionEntries(block.name, block.body, input, tools);
     if (entries) section.entries = entries;
-    else section.source = block.name === "tron" ? { kind: "module", name: "tron-core" } : SESSION_SECTIONS.has(block.name) ? { kind: "pi" } : { kind: "unknown" };
+    else section.source = block.name === "tron" ? { kind: "module", name: "tron-core" }
+      : block.name === "role" ? (input.customPrompt?.path ? { kind: "file", path: input.customPrompt.path } : { kind: "unknown" })
+        : SESSION_SECTIONS.has(block.name) ? { kind: "pi" } : { kind: "unknown" };
     sections.push(section);
   }
 
   if (parsed.blocks.some(block => block.name === "tron")) return { text: input.prompt, sections };
 
-  const appended = parsed.rest === "" ? input.tronContext : parsed.rest.slice(2);
-  const text = parsed.rest === "" ? `${input.prompt}\n\n<tron>\n${input.tronContext}\n</tron>` : input.prompt;
-  sections.push(appended.startsWith(TRON_HEADING)
-    ? { id: "tron", timing: "turn", text: appended, source: { kind: "module", name: "tron-core" } }
-    : { id: "appended", timing: "turn", text: appended, source: { kind: "unknown" } });
-  return { text, sections };
+  if (parsed.rest !== "") {
+    sections.push({ id: "appended", timing: "turn", text: parsed.rest.slice(2), source: { kind: "unknown" } });
+    return { text: input.prompt, sections };
+  }
+  sections.push({ id: "tron", timing: "turn", text: input.tronContext, source: { kind: "module", name: "tron-core" } });
+  return { text: `${input.prompt}\n\n<tron>\n${input.tronContext}\n</tron>`, sections };
 }
 
 function splitPrompt(input: AgentInstructionsInput) {
   const { prompt } = input;
-  let cursor: number;
-  if (input.customPrompt) {
-    if (!prompt.startsWith(input.customPrompt.text)) return undefined;
-    cursor = input.customPrompt.text.length;
-  } else {
-    const first = /\n\n<[a-z][a-z0-9_-]*>\n/.exec(prompt);
-    if (!first) return undefined;
-    cursor = first.index;
-  }
+  const first = /\n\n<[a-z][a-z0-9_-]*>\n/.exec(prompt);
+  if (!first) return undefined;
+  let cursor = first.index;
   const preamble = prompt.slice(0, cursor);
   const known: Record<string, string | undefined> = {
+    role: input.customPrompt?.text,
     project_context: input.contextFiles.length === 0 ? undefined : [
       "Project-specific instructions and guidelines:",
       ...input.contextFiles.map(({ path, content }) => `<project_instructions path="${path}">\n${content}\n</project_instructions>`),
@@ -126,7 +122,7 @@ function splitPrompt(input: AgentInstructionsInput) {
 }
 
 function isBoundary(prompt: string, at: number): boolean {
-  if (at === prompt.length || prompt.startsWith(`\n\n${TRON_HEADING}`, at)) return true;
+  if (at === prompt.length) return true;
   OPEN_TAG.lastIndex = at;
   return OPEN_TAG.test(prompt);
 }

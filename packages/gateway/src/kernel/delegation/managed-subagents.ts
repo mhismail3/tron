@@ -421,6 +421,16 @@ export class ManagedSubagents {
     try { publish(); } catch (error) { entry.groups.delete(key); publish(); throw error; }
     return { dispose: () => { if (entry!.groups.delete(key)) publish(); } };
   }
+  async requireChildTaskContext(sessionId: string, taskPrefix: string): Promise<{ dispose(): void }> {
+    this.requireBoundArtifactRoot(this.tronHome);
+    const root = this.verify();
+    this.childTaskApi ??= this.loadModule(join(root, "src", "api", "child-task-context.ts")) as Promise<{
+      registerChildTaskContext(input: { sessionId: string; taskPrefix: string }): { dispose(): void };
+    }>;
+    const api = await this.childTaskApi;
+    return api.registerChildTaskContext({ sessionId, taskPrefix });
+  }
+  private childTaskApi: Promise<{ registerChildTaskContext(input: { sessionId: string; taskPrefix: string }): { dispose(): void } }> | undefined;
   private requiredChildApi: Promise<RequiredChildApi> | undefined;
   private readonly childExtensions = new Map<string, { groups: Map<symbol, Array<{ id: string; path: string }>>; registration?: { dispose(): void } | undefined }>();
 

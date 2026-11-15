@@ -1,4 +1,4 @@
-import { APPROVAL_RULE } from "../../workspace/tron-core-extension.js";
+import { APPROVAL_RULE } from "../../kernel/host/tron-context.js";
 import { createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
@@ -214,8 +214,12 @@ describe("Agent Instructions projection through the pinned runtime", () => {
       );
       const tron = projection.sections.find(section => section.id === "tron")!;
       expect(tron.timing).toBe("turn");
-      expect(tron.text.startsWith("## Tron operating context")).toBe(true);
-      expect(projection.text.match(/\n## Tron operating context\n/g)).toHaveLength(2);
+      expect(tron.text.startsWith("Current execution working directory: ")).toBe(true);
+      const preamble = projection.sections[0]!;
+      expect(preamble).toMatchObject({ timing: "session", source: { kind: "module", name: "tron-core" } });
+      expect(preamble.text.startsWith("You are Tron, the user's private agent operating on the Mac.")).toBe(true);
+      expect(projection.text.match(/You are Tron, the user's private agent/g)).toHaveLength(1);
+      expect(projection.text).not.toContain("You are a coding assistant running inside pi");
     }
 
     const byId = new Map(during.sections.map(section => [section.id, section]));

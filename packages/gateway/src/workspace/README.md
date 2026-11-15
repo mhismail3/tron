@@ -26,24 +26,26 @@ moving its product copy or changing prompt timing.
 
 ## Contract
 
-- **Approval wording.** `APPROVAL_RULE` in `tron-core-extension.ts` is the one literal
-  approval list. Core context, Home's role text and the direct child handoff render it.
-  Core renders it even when no desktop tools are active; repository rules retain their
-  repository-specific approval routing, not a second list. Wording grants no authority.
-- `tron-core` appends Tron identity, the resolved workspace path and availability,
-  and active-tool guidance to the parent runtime's prompt. It does not change `cwd`,
-  load workspace contents, replace Pi's base prompt or write JSONL. It is inline, so
-  native `pi-subagents` children do not load it.
+- **One core.** `kernel/host/tron-context.ts` owns the fixed common core, the child
+  handoff and `APPROVAL_RULE`, the one literal approval list. Every runtime, Home
+  included, receives the core as the SDK host `preamble`, replacing Pi's generic
+  identity while Pi keeps its tool, rule and docs sections; a custom system prompt
+  renders as the separate `role` section. Repository rules keep their own approval
+  routing, not a second list. Wording grants no authority.
+- `tron-core` adds a trailing `tron` section with the cwd, the resolved workspace
+  path and availability, and active-tool guidance. It does not change `cwd`, load
+  workspace contents or write JSONL. It is inline, so native `pi-subagents` children
+  do not load it.
 - **Browser preference.** Core context names `agent_browser` only while that tool
   is active. Desktop-only and tool-less requests do not advertise it.
-- **Delegation handoff.** A public `tool_call` hook prefixes direct model-facing
-  `subagent` task/resume text with a bounded (2 KiB UTF-8) advisory handoff, keeping
-  the task verbatim. It never rewrites workflow source or mixed `agent`/`workflow`
-  requests. Workflow launches, slash/RPC/structured delegation and further children
-  bypass the hook, so those tasks must repeat identity, root, availability and
-  lifecycle (tmp/files/state, completion, index, owner README, deletion approval) and
-  store ownership explicitly. One shared guidance string supplies parents and direct
-  handoffs. The handoff grants no authority, cwd, extensions or tools.
+- **Delegation handoff.** `tron-core` registers the bounded (2 KiB UTF-8)
+  `[Tron handoff]` for its session through the managed provider's
+  `child-task-context` API. The provider delivers it once at the start of every
+  child's USER or external TASK text: direct, resume, workflow, slash/RPC, nested,
+  external CLI and Herdr launches, and retains it for resumes. Tool arguments are
+  never rewritten and parents never copy it. It grants no authority, cwd, extensions
+  or tools. The provider API is required: a rollback moves Gateway and provider
+  together.
 - **Pinned provider limits.** `pi-subagents` carries `extensionBindings` only as JSON in
   `PI_SUBAGENT_EXTENSION_BINDINGS` (no extension load, no prompt append) and keeps the
   original binding on resume; its request schema has no per-call extension override;
@@ -62,10 +64,9 @@ moving its product copy or changing prompt timing.
   or child settings. Children with a conflicting legacy provider fail explicitly;
   research builtins select an empty ambient-extension list. External CLI/job runners
   do not receive a secretly different web backend.
-- Model guidance: write a workflow script to a git-ignored file under the request cwd
-  and pass its relative path (absolute paths such as `/tmp` fail); never
-  `workflow: true`. Native tasks above 8,000 UTF-16 units use the launcher's private
-  task file; workflow stage limits stay runner-owned (1 MiB UTF-8).
+- Model guidance for workflows lives in the provider's `subagent` prompt guidelines.
+  Native tasks above 8,000 UTF-16 units use the launcher's private task file;
+  workflow stage limits stay runner-owned (1 MiB UTF-8).
 
 ## Invariants
 
@@ -76,7 +77,7 @@ moving its product copy or changing prompt timing.
 ## Entry points
 
 `TronWorkspace` (resolution and initialization); `tron-core-extension.ts` (prompt
-section and the `subagent` handoff hook).
+preamble, `tron` section and child handoff registration).
 
 ## Signals
 

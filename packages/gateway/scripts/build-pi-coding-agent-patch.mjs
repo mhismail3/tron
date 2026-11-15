@@ -23,7 +23,7 @@ function argument(name) {
 }
 
 const write = process.argv.includes("--write");
-const { value: pin, issues } = readPiCodingAgentPatch(gatewayDir, { requireSources: !write });
+const { value: pin, issues } = readPiCodingAgentPatch(gatewayDir, { requireSources: !write, requireArtifact: !write });
 if (!pin) throw new Error(`${PATCH_PIN_FILE} is not valid:\n- ${issues.join("\n- ")}`);
 const node = process.versions.node;
 const npm = run("npm", ["--version"], { capture: true });
