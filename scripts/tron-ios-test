@@ -3,6 +3,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "${1:-}" == measure-home-pulse ]]; then
+  [[ $# == 1 ]] || { printf '%s\n' 'measure-home-pulse takes no arguments' >&2; exit 74; }
+  exec /usr/bin/python3 "$ROOT/tools/verify/measure-home-pulse.py"
+fi
 if [[ -z "${TRON_TEST_LEDGER_WRAPPED:-}" ]]; then
   case "${1:-}" in
     run|checkpoint|prepare|diagnose) exec python3 "$ROOT/tools/verify/ledger.py" exec swift "$ROOT/scripts/tron-ios-test" "$@" ;;
