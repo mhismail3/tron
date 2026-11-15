@@ -104,7 +104,7 @@ describe("installed agent-browser fork receipts", () => {
         upstream.on("error", () => downstream.terminate());
         downstream.on("error", () => upstream.terminate());
       });
-      await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir: join(root, "sessions"), packages: [installedForkSource], defaultTools: ["+agent_browser"] }));
+      await writeFile(join(agentDir, "settings.json"), JSON.stringify({ packages: [installedForkSource], defaultTools: ["+agent_browser"] }));
       const faux = fauxProvider({ provider: "tron-chrome-attach", tokensPerSecond: 10_000 });
       faux.setResponses([
         fauxAssistantMessage([fauxToolCall("agent_browser", { args: ["connect", endpoint], sessionMode: "fresh" }, { id: "attach" })], { stopReason: "toolUse" }),

@@ -1,4 +1,5 @@
 import { readFile, realpath } from "node:fs/promises";
+import { basename } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { disposeFixtures, fixture } from "../../../../test-support/home-task-fixture.js";
@@ -13,8 +14,6 @@ afterEach(async () => {
   for (const server of servers.splice(0)) await server.close();
   await disposeFixtures();
 });
-
-const SESSION_FOLDER = /([/\\]sessions[/\\])--[^/\\\s"']+--/g;
 
 const NARROWED_ENTRY_TYPES = new Set(["tron.settings.v1", "tron.context-window.v1", "tron.extension-activity.v1"]);
 
@@ -57,7 +56,8 @@ describe("gateway/delegation kernel locks", () => {
     await waitFor(() => !slot.isBusy && !slot.catalogHasActiveSubagents, "the parent and its child to settle", BOUND);
     const roots = [f.root, await realpath(f.root)];
     const normalization = { roots, stableIds: ["lock-subagent"] };
-    const normalize = (value: unknown) => normalizeTraceValue(JSON.parse(JSON.stringify(value).replace(SESSION_FOLDER, "$1<session-cwd>")), normalization);
+    const sessionFolder = basename(f.registry.sessionDirectory(await realpath(f.cwd)));
+    const normalize = (value: unknown) => normalizeTraceValue(JSON.parse(JSON.stringify(value).replaceAll(sessionFolder, "<session-cwd>")), normalization);
     const canonical = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n").map((line) => JSON.parse(line));
     const activity = (slot.snapshot().processActivities ?? []).filter((item) => item.kind === "subagent");
     const childFile = canonical.flatMap((entry) => {
