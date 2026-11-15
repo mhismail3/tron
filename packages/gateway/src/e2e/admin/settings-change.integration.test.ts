@@ -393,7 +393,6 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
         async inspection => { await registry.abortProjectReload(inspection.projectDir); });
     },
   });
-  const mcpAdmin = new McpAdminService(agentDir, join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js"));
   registry.setSettings(settingsModel, settingsChanges, settingsInventorySource({ agentDir, trust, modules: registry.moduleHost, mcp: mcpAdmin }));
   const broadcasts: Array<{ topic: string; payload: unknown }> = [];
   const pushes: Array<{ sourceId: string; title: string; message: string }> = [];
@@ -472,8 +471,8 @@ describe("settings.change", () => {
     const actor = { actor: { kind: "home" as const, id: "home-fixture" }, reason: "Change the declared setting" };
     await expect(f.settingsChanges.change({ kind: "global" }, [
       { key: "run.retry.maxRetries", layer: "global", op: "set", value: 8 },
-      { key: "permissions.defaultProjectTrust", layer: "global", op: "set", value: "always" },
-    ], actor)).rejects.toMatchObject({ code: "invalid_request", message: "Default trust policy cannot be changed by home" });
+      { key: "setup.installTelemetry", layer: "global", op: "set", value: false },
+    ], actor)).rejects.toMatchObject({ code: "invalid_request", message: "Install telemetry cannot be changed by home" });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
     expect(await f.history()).toEqual([]);
     const preview = await f.settingsChanges.change({ kind: "global" }, [

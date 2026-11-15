@@ -461,11 +461,11 @@ describe("typed changes and exact native acceptance", () => {
     expect((await settingsTurn(f, home, { action: "undo", changeId: second, reason: "Home reverts the second backoff" }, "home-undo-second")).isError).not.toBe(true);
     expect((await settingsTurn(f, home, { action: "undo", changeId: first, reason: "Home reverts the first backoff" }, "home-undo-first")).isError).not.toBe(true);
     expect(await valueOf()).toEqual(baseBefore);
-    const trust = await service.invoke(phone, "settings.change", { commandId: `home-writer-${++sequence}`, target: { kind: "global" },
-      changes: [{ key: "permissions.defaultProjectTrust", layer: "global", op: "set", value: "always" }] }) as unknown as { changes: Array<{ changeId: string }> };
-    const refused = await settingsTurn(f, home, { action: "undo", changeId: trust.changes[0]!.changeId, reason: "Home reverts the trust policy" }, "home-undo-writer");
+    const telemetry = await service.invoke(phone, "settings.change", { commandId: `home-writer-${++sequence}`, target: { kind: "global" },
+      changes: [{ key: "setup.installTelemetry", layer: "global", op: "set", value: false }] }) as unknown as { changes: Array<{ changeId: string }> };
+    const refused = await settingsTurn(f, home, { action: "undo", changeId: telemetry.changes[0]!.changeId, reason: "Home reverts install telemetry" }, "home-undo-writer");
     expect(refused.isError).toBe(true);
-    expect(textOf(refused)).toBe("Default trust policy cannot be changed by home");
+    expect(textOf(refused)).toBe("Install telemetry cannot be changed by home");
   });
 
   it("an ordinary agent's Undo that restores image visibility shows one native card; decline and stale acceptance leave the store unchanged, and accept applies the reviewed change with its undoOf logged", async () => {
