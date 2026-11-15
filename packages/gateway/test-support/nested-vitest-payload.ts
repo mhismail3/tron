@@ -23,7 +23,10 @@ export async function copyPayload(payload: string, ownTestFile: string, gatewayC
   const source = gatewayCommit ? `${payload}.source` : packageRoot;
   if (gatewayCommit) {
     await mkdir(source);
-    await promisify(execFile)("sh", ["-c", 'git -C "$1" archive --format=tar "$2" packages/gateway/src packages/gateway/test-support packages/gateway/vitest.config.ts packages/gateway/vitest.nested.config.ts packages/gateway/package.json | tar -x --strip-components=2 -C "$3"', "sh", packageRoot, gatewayCommit, source]);
+    const top = (await promisify(execFile)("git", ["-C", packageRoot, "rev-parse", "--show-toplevel"])).stdout.trim();
+    await promisify(execFile)("git", ["-C", top, "archive", "--format=tar", `--output=${source}.tar`, `${gatewayCommit}:packages/gateway`, "src", ...PAYLOAD_FILES]);
+    await promisify(execFile)("tar", ["-xf", `${source}.tar`, "-C", source]);
+    await rm(`${source}.tar`);
   }
   let ownTest: string | undefined;
   await cp(join(source, "src"), join(payload, "src"), {
