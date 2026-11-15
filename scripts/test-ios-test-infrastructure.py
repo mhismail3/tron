@@ -314,6 +314,7 @@ class ContainedFixture:
             "TRON_TEST_LEDGER": str(home / '.tron-maintenance/test-ledger/results.sqlite3'),
             "TRON_IOS_TEST_STATE_DIR": str(home / ".tron/internal/ios-test"),
             "TRON_IOS_TEST_RESULTS_DIR": str(home / "Library/Developer/Tron/ios/test-runs"),
+            "TRON_IOS_TEST_SIMSLIM": "0",
             "TRON_IOS_SIMULATOR_STATE_DIR": str(home / ".tron/internal/run"),
             "TRON_IOS_SIMULATOR_DERIVED_DATA": str(home / "Library/Developer/Tron/ios/simulator-derived-data"),
             "TRON_PROFILE_RESULTS_DIR": str(home / "Library/Developer/Tron/profiles"),
