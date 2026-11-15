@@ -215,8 +215,8 @@ describe("Home's task tool on the wire (#961)", () => {
     const definition = wire.requests[0]!.tools!.find(tool => tool.name === "task")!;
     const schema = definition.input_schema as { type: string; properties: Record<string, { description?: string; enum?: string[] }>; required: string[] };
     expect(schema.type).toBe("object");
-    expect(Object.keys(schema.properties).sort()).toEqual(["action", "from", "limit", "offset", "operationId", "taskId", "text", "title", "to"]);
-    expect(schema.properties.action!.enum).toEqual(["list", "status", "report", "metrics", "steer", "interrupt", "stop", "resume", "rename"]);
+    expect(Object.keys(schema.properties).sort()).toEqual(["action", "from", "limit", "offset", "operationId", "subagentSessionId", "taskId", "text", "title", "to"]);
+    expect(schema.properties.action!.enum).toEqual(["list", "status", "report", "transcript", "metrics", "steer", "interrupt", "stop", "resume", "rename"]);
     expect(schema.required).toEqual(["action"]);
     for (const [field, property] of Object.entries(schema.properties)) expect(property.description, field).toBeTruthy();
     expect(definition.description).toMatch(/stop \{taskId\}/u);
