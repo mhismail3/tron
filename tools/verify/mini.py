@@ -358,7 +358,7 @@ def remote_main(job: dict) -> int:
         return finish(EXIT_NO_RESULT)
 
     clean = {'HOME': str(home), 'PATH': '/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin', 'PYTHONDONTWRITEBYTECODE': '1',
-             'LANG': os.environ.get('LANG', 'en_US.UTF-8'), **{key: os.environ[key] for key in ('USER', 'LOGNAME', 'SHELL') if key in os.environ}}
+             'TRON_CI_TOOLS_DIR': str(base / '.ci-tools'), 'LANG': os.environ.get('LANG', 'en_US.UTF-8'), **{key: os.environ[key] for key in ('USER', 'LOGNAME', 'SHELL') if key in os.environ}}
 
     def run(*command: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
         return subprocess.run(command, cwd=cwd, env=clean, stdin=subprocess.DEVNULL, text=True, capture_output=True)
@@ -481,7 +481,6 @@ def remote_main(job: dict) -> int:
                                else ['/usr/bin/python3', str(checkout / 'tools/verify/verify.py'), *job['args']])
                     env = {**clean, 'PATH': f'{node.parent}:{clean["PATH"]}',
                            'TRON_VERIFY_EXECUTION_HOST': 'mini',
-                           'TRON_CI_TOOLS_DIR': str(base / '.ci-tools'),
                            'TRON_IOS_TEST_RESULTS_DIR': str(results / 'ios'),
                            'TRON_PROFILE_RESULTS_DIR': str(results / 'profiles'),
                            'TRON_IOS_E2E_STATE_DIR': str(checkout / '.scratch/mini-e2e')}

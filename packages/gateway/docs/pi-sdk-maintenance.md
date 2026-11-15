@@ -2,7 +2,7 @@
 
 Owner: `gateway/pi-sdk` (`packages/gateway/pi-sdk.module.json`). How the pinned Pi SDK family
 and the Tron-owned `pi-subagents` provider change and what proves a change. Both change only
-atomically through their updaters, and a Pi behavior delta stops for a maintainer decision. No
+atomically through their updaters, and a Pi behavior delta is recorded in the update's issue. No
 deployment, Gateway lifecycle command, Stable install or restart is part of this.
 
 ## Update rules
@@ -13,7 +13,7 @@ deployment, Gateway lifecycle command, Stable install or restart is part of this
 - **`pi-subagents`** (never a user npm dependency): `npm run update:pi-subagents -- --fork-repo <path-or-url> <full-fork-commit>`, then `npm run check:pi-subagents` and `npm run test:pi-subagents-scripts`.
 - **Stop on any meaningful behavior delta** (event order, canonical JSONL, compaction and
   retries, extension UI, projections, settings/auth/models, packaging, visible UI): compare with
-  the approved baseline and decide explicitly; compiling is not acceptance. Changing the
+  the approved baseline and record the decision in the update's issue; compiling is not acceptance. Changing the
   executable contract (`app/node_modules/.bin/pi`, alias `../../app/node_modules/.bin/pi`) needs
   the one-time manual Mac Release reinstall.
 - Provider IDs and credentials follow the Pi catalog; retired IDs are never migrated or aliased.
@@ -27,7 +27,8 @@ tag as a patch queue, one commit per patch, versioned `<upstream>-tron.<n>`, wit
 list naming each patch's reason, upstream PR or issue, drop condition and the test that fails
 without it. Each bump (#2181) rebases onto the newest tag, runs upstream suites, the patch
 tests and Tron's affected checks, and deletes patches the release contains; a rebase
-conflict or a persisted-data migration is a maintainer decision, never applied automatically.
+conflict is resolved and recorded in the bump's issue; a persisted-data migration is on the
+Approvals list. Neither is applied automatically.
 
 | Fork | Pin | Current patch form |
 | --- | --- | --- |
