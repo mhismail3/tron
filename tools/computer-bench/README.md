@@ -12,7 +12,7 @@ scripts/tron computer-bench --foreground --json .scratch/run.json --markdown too
 scripts/tron-node exec -- node --test tools/computer-bench/bench.test.mjs
 ```
 
-[`SCORECARD.md`](SCORECARD.md) is the current generated scorecard; regenerate it, never edit it.
+[`SCORECARD.md`](SCORECARD.md) is generated output; regenerate it, never edit it.
 
 ## Tools
 
@@ -56,8 +56,9 @@ serially; each rep starts from a fresh page or window.
 For `agent-browser`, `signed-in-chrome` requires an explicit `--chrome-cdp` loopback
 browser WebSocket endpoint. Without one it reports `consent_required` and never probes
 or attaches. A GUID-less `/devtools/browser` endpoint with HTTP 404 on
-`/json/version` is Chrome's per-connection approval mode. The adapter refuses before
-launching the attachment CLI with `OwnerConsentRequiredError`, JSON code
+`/json/version` is treated as Chrome's per-connection approval admission signal.
+The adapter refuses before launching the attachment CLI with
+`OwnerConsentRequiredError`, JSON code
 `owner_consent_required`, and the reason `owner consent required for each new
 connection; prompt visibility not observed`. This is admission evidence, not a
 physically observed prompt or a timeout. It never presses Allow, opens another CDP
@@ -79,8 +80,10 @@ termination cannot guarantee cleanup. Fixture evidence does not prove installed
 owner-Chrome preservation. No real Google/Chrome account status, email, cookie/token,
 account page or sign-in internals are inspected or returned in results.
 Every repetition starts detached; raw JSON records `attachMs` separately from total
-task wall time. Attach has a two-second bound; absent consent, wrong authentication
-fact/title, changed endpoint or failed cleanup is failure.
+task wall time. For admitted GUID-less endpoints, `attachMs` includes discovery
+and engine connection; the same two-second acceptance bound is not relaxed.
+Absent consent, wrong authentication fact/title, changed endpoint or failed cleanup
+is failure.
 Use `COMPUTER_BENCH_AGENT_BROWSER` to select the qualified engine under test rather
 than assume the installed engine matches the repository pin. A headless fixture
 launched with `--remote-debugging-port` supplies a GUID-bearing browser endpoint:
@@ -99,7 +102,10 @@ profiles, HOME and sockets, and a passive CLI observer. The approval-mode fixtur
 proves typed refusal before any attachment CLI command. The public benchmark runner
 must preserve the error code. The normal-port fixture proves nonce authentication,
 server receipt, cleanup, detach without closing Chrome, and no false consent refusal
-for non-404 discovery. These two tests explicitly skip without both an existing
+for non-404 discovery. Failed fixture teardown retires only its own daemon after a
+fresh Unix-socket ownership check before each signal; a PID file alone grants no
+authority. It retains the failed fixture root and the original graceful-settlement
+failure even if forced cleanup succeeds. These two tests explicitly skip without both an existing
 Chrome for Testing and a declared qualified engine; no binary is downloaded by tests:
 
 ```bash

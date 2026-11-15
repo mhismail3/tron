@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
 import { createConnection } from "node:net";
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, readdir, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -113,13 +113,33 @@ async function withChromeFixture(approval, body) {
   } finally {
     if (chrome.exitCode === null) { const exited = once(chrome, "exit"); chrome.kill("SIGTERM"); await exited; }
     const settled = await waitFor(async () => !(await readdir(sockets)).some(name => name.endsWith(".pid")), 3_000);
-    await site.close();
+    try {
+      if (!settled) {
+        const canonical = await realpath(sockets);
+        for (const name of await readdir(sockets)) {
+          if (!name.endsWith(".pid")) continue;
+          const pid = Number(await readFile(join(sockets, name), "utf8").catch(() => ""));
+          if (!Number.isSafeInteger(pid) || pid <= 1) continue;
+          const ownsSocket = async () => {
+            try {
+              const { stdout } = await promisify(execFile)("/usr/sbin/lsof", ["-n", "-a", "-p", String(pid), "-U", "-Fn"]);
+              return stdout.split("\n").some(line => line.startsWith(`n${sockets}/`) || line.startsWith(`n${canonical}/`));
+            } catch { return false; }
+          };
+          for (const signal of ["SIGTERM", "SIGKILL"]) {
+            if (!await ownsSocket()) break;
+            try { process.kill(pid, signal); } catch (error) { if (error.code !== "ESRCH") throw error; }
+            await waitFor(() => { try { process.kill(pid, 0); return false; } catch (error) { return error.code === "ESRCH"; } }, 2_000);
+          }
+        }
+      }
+    } finally { await site.close(); }
     if (settled) await rm(root, { recursive: true, force: true });
     assert.ok(settled, `fixture attachment daemon did not exit; preserved ${root}`);
   }
 }
 
-const chromeIntegration = { skip: !process.env.COMPUTER_BENCH_AGENT_BROWSER || !chromeForTesting(), timeout: 60_000 };
+const chromeIntegration = { skip: !process.env.COMPUTER_BENCH_AGENT_BROWSER ? "COMPUTER_BENCH_AGENT_BROWSER must declare the qualified engine" : !chromeForTesting() ? "Chrome for Testing is not installed; tests do not download it" : false, timeout: 60_000 };
 
 test("pending Chrome connection approval fails fast with an owner-consent error", chromeIntegration, () => withChromeFixture(true, async ({ chrome, site, status, invoke, report, calls }) => {
   assert.equal(status, 404);
