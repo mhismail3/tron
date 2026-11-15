@@ -155,7 +155,12 @@ checks listener PID, process birth, profile argv and issued launch nonce. Generi
 `connect` accepts recorded native Electron and isolated external-producer launches;
 `owned-launch prepare|record|cleanup` gives those producers receipts without a second
 launcher. Personal profiles, state imports and cookie/profile copying are unavailable;
-existing personal-Chrome logins do not transfer. New owned-profile logins persist.
+existing personal-Chrome logins do not transfer. New owned-profile logins persist across browser
+and Gateway restarts: the owned browser always launches under its profile-bound root session with
+native restore, saving cookie and storage state under the private browser HOME
+(`<agent dir>/browser/home/.agent-browser/sessions/`, below 0700 directories). Trade-off: session
+cookies now outlive browser close, so a session-only login lasts until the site expires it or the
+saved state is removed, rather than ending when the browser quits.
 Only a user-scope declaration of `pi-agent-browser-native` (npm or its GitHub fork source)
 enables the browser: `managedBrowserEnabled` then registers the managed builtin for ordinary
 sessions, Home (`builtin:agent-browser`) and the admin catalog. The declared source itself is

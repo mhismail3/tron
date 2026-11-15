@@ -1,5 +1,5 @@
 diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md
-index 15a57c6..bca2272 100644
+index 15a57c6..d1b12cc 100644
 --- a/docs/ARCHITECTURE.md
 +++ b/docs/ARCHITECTURE.md
 @@ -283,0 +284,10 @@ Upstream restore-state persistence remains upstream-owned. The wrapper passes an
@@ -7,7 +7,7 @@ index 15a57c6..bca2272 100644
 +
 +Tron supplies `ownedProfilePath` and the pinned engine executable when registering this package through Pi's built-in extension loader. The native integration remains the only launch, restore, daemon and CDP owner; the host does not launch or broker browsers. Other package hosts do not acquire Tron's ownership authority.
 +
-+Owned mode uses one persistent custom profile and a private native HOME/socket pool. A profile setting is not an attachment receipt. After local execution, the native owner records the exact loopback endpoint, listener PID, process-start identity, issued launch nonce and profile command line. Every attachment revalidates that record before invoking the native CLI. Existing native execution claims serialize the store across runtimes; atomic records and bounded sessions survive reloads. Native restore remains within the private owned HOME.
++Owned mode uses one persistent custom profile and a private native HOME/socket pool. A profile setting is not an attachment receipt. After local execution, the native owner records the exact loopback endpoint, listener PID, process-start identity, issued launch nonce and profile command line. Every attachment revalidates that record before invoking the native CLI. Existing native execution claims serialize the store across runtimes; atomic records and bounded sessions survive reloads. The owned browser is always launched by the profile-bound root session (`tron-<profile hash>`) with native restore keyed to that session; any other session, including wrapper-managed and `fresh` sessions, first triggers that root launch and then attaches over CDP, so wrapper-managed sessions keep their restore-disabled policy. Restore state is saved on close and periodically under the private owned HOME (`.agent-browser/sessions/`), whose parents are mode 0700, and is restored by the next root launch after a Gateway or browser restart. Session cookies therefore outlive browser close: a login held only in a session cookie survives restarts, independent of Chrome's own session-cookie handling.
 +
 +Generic `connect` remains available for recorded launches. Native Electron launch records its child before handoff, including known page endpoints. An external owned Chrome producer such as studio uses `owned-launch prepare`, launches ordinary Chrome with the returned arguments, then calls `owned-launch record <launchId> <pid>` before connecting to the returned endpoint. These are launch receipts, not a second launcher. After that temporary child has exited, `owned-launch cleanup <launchId>` retires its profile. Unknown or unrecorded cleanup ownership is refused and retained for diagnosis; no PID-file-based signalling is added.
 +
@@ -147,10 +147,10 @@ index 0f54a91..3652e5c 100644
 +		await currentOwnedBrowser()?.settings(this.input.toolArgs, this.env, this.identity);
 diff --git a/extensions/agent-browser/lib/owned-browser.ts b/extensions/agent-browser/lib/owned-browser.ts
 new file mode 100644
-index 0000000..a673417
+index 0000000..79d22c7
 --- /dev/null
 +++ b/extensions/agent-browser/lib/owned-browser.ts
-@@ -0,0 +1,364 @@
+@@ -0,0 +1,421 @@
 +import { AsyncLocalStorage } from "node:async_hooks";
 +import { join, dirname, resolve } from "node:path";
 +import { randomUUID } from "node:crypto";
@@ -180,6 +180,7 @@ index 0000000..a673417
 +	readonly token?: string;
 +	readonly attached?: Launch;
 +	readonly session: string;
++	readonly root?: true;
 +}
 +
 +interface Execution {
@@ -411,7 +412,12 @@ index 0000000..a673417
 +		const token = primary?.token ?? randomUUID();
 +		return {
 +			args: nonceArgs(args, env, token),
-+			env: { ...env, AGENT_BROWSER_PROFILE: this.store.profile, AGENT_BROWSER_AUTO_CONNECT: "0" },
++			env: {
++				...env,
++				AGENT_BROWSER_PROFILE: this.store.profile,
++				AGENT_BROWSER_RESTORE: this.store.session,
++				AGENT_BROWSER_AUTO_CONNECT: "0",
++			},
 +			token,
 +			session,
 +		};
@@ -439,6 +445,15 @@ index 0000000..a673417
 +			return { args, env, session, attached: known };
 +		}
 +		const primary = (await this.store.active()).find((item) => item.kind === "web");
++		return this.launchPlan(args, env, session, primary);
++	}
++
++	private launchPlan(
++		args: readonly string[],
++		env: NodeJS.ProcessEnv,
++		session: string,
++		primary: Launch | undefined,
++	): Prepared {
 +		if (primary && primary.master !== session) {
 +			return {
 +				args,
@@ -447,7 +462,59 @@ index 0000000..a673417
 +				attached: primary,
 +			};
 +		}
++		if (!primary && session !== `:${this.store.session}`) {
++			return { args, env, session, root: true };
++		}
 +		return this.local(args, env, session, primary);
++	}
++
++	private async admit(options: Execution): Promise<Prepared | ProcessRunResult> {
++		try {
++			const prepared = await this.prepare(options.args, options.env, options.stdin);
++			if (!prepared.root) {
++				return prepared;
++			}
++			return (
++				(await this.launchRoot(options)) ??
++				(await this.prepare(options.args, options.env, options.stdin))
++			);
++		} catch (error) {
++			return {
++				aborted: false,
++				agentBrowserStarted: false,
++				exitCode: 1,
++				spawnError: new Error(String(error)),
++				stderr: "",
++				stdout: "",
++				timedOut: false,
++			};
++		}
++	}
++
++	private async launchRoot(options: Execution): Promise<ProcessRunResult | undefined> {
++		const {
++			AGENT_BROWSER_NAMESPACE: _namespace,
++			AGENT_BROWSER_SESSION: _session,
++			AGENT_BROWSER_CDP: _cdp,
++			...env
++		} = options.env;
++		const session = ["--session", this.store.session];
++		const launch = this.local([...session, "open", "about:blank"], env, `:${this.store.session}`);
++		const result = await options.run(launch.args, launch.env);
++		if (!result.agentBrowserStarted || result.aborted || result.timedOut || result.exitCode !== 0) {
++			return result;
++		}
++		const endpoint = await options.run([...session, "--json", "get", "cdp-url"], launch.env);
++		const observed = resultData(endpoint.stdout);
++		if (
++			endpoint.exitCode !== 0 ||
++			typeof observed?.cdpUrl !== "string" ||
++			launch.token === undefined
++		) {
++			refuse();
++		}
++		await this.store.launched(launch.session, launch.token, observed.cdpUrl);
++		return undefined;
 +	}
 +
 +	private async result(
@@ -474,19 +541,9 @@ index 0000000..a673417
 +	}
 +
 +	async execute(options: Execution): Promise<ProcessRunResult> {
-+		let prepared: Prepared;
-+		try {
-+			prepared = await this.prepare(options.args, options.env, options.stdin);
-+		} catch (error) {
-+			return {
-+				aborted: false,
-+				agentBrowserStarted: false,
-+				exitCode: 1,
-+				spawnError: new Error(String(error)),
-+				stderr: "",
-+				stdout: "",
-+				timedOut: false,
-+			};
++		const prepared = await this.admit(options);
++		if (!("session" in prepared)) {
++			return prepared;
 +		}
 +		const result = await options.run(prepared.args, prepared.env);
 +		if (!result.agentBrowserStarted || result.aborted || result.timedOut) {
