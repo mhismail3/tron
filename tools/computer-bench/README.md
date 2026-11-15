@@ -9,7 +9,7 @@ per tool and per surface. Every change to computer or browser use cites a scorec
 scripts/tron computer-bench                       # all tools, 3 reps, scorecard on stdout
 scripts/tron computer-bench --tools cua --reps 1 --only native-click,replace
 scripts/tron computer-bench --foreground --json .scratch/run.json --markdown tools/computer-bench/SCORECARD.md
-node --test tools/computer-bench/bench.test.mjs   # fixture site and scoring
+scripts/tron-node exec -- node --test tools/computer-bench/bench.test.mjs
 ```
 
 [`SCORECARD.md`](SCORECARD.md) is the current generated scorecard; regenerate it, never edit it.
@@ -33,8 +33,8 @@ is reported as `absent`, never skipped.
 
 ## Tasks
 
-Everything uses local fixtures. Nothing signs in anywhere, changes Chrome settings or
-system permissions, or spends money. Ordinary runs never attach to the maintainer's
+Everything uses local fixtures. Nothing signs in to a real account, changes the
+owner's Chrome settings or system permissions, or spends money. Ordinary runs never attach to the maintainer's
 profile; only an explicitly supplied, separately consented `--chrome-cdp` endpoint
 admits the signed-in Chrome task.
 
@@ -55,24 +55,61 @@ serially; each rep starts from a fresh page or window.
 
 For `agent-browser`, `signed-in-chrome` requires an explicit `--chrome-cdp` loopback
 browser WebSocket endpoint. Without one it reports `consent_required` and never probes
-or attaches. With one it connects in a separate tool session, verifies the exact
-endpoint, opens the local Bench Form in a new tab, reads its title, closes only that
-issued tab ID and detaches without closing Chrome. Every repetition starts detached;
-raw JSON records `attachMs` separately from total task wall time. Attach has a two-second
-bound; absent consent, wrong title, changed endpoint or failed cleanup is failure.
+or attaches. A GUID-less `/devtools/browser` endpoint with HTTP 404 on
+`/json/version` is Chrome's per-connection approval mode. The adapter refuses before
+launching the attachment CLI with `OwnerConsentRequiredError`, JSON code
+`owner_consent_required`, and the reason `owner consent required for each new
+connection; prompt visibility not observed`. This is admission evidence, not a
+physically observed prompt or a timeout. It never presses Allow, opens another CDP
+client, or kills a daemon. Other discovery statuses are not classified as consent;
+normal browser endpoints continue through the existing attachment path.
+
+With an admitted endpoint it connects in a separate tool session, verifies the exact
+endpoint, opens only its own local fixture tab and reads a per-run nonce behind a
+fixture cookie. The first repetition seeds that fixture-only cookie; later repetitions
+must read the same protected fact after detach/re-attach without logging in again.
+The runner independently requires a server-authenticated read; the adapter verifies
+the returned nonce. A file-existence probe, public page title or copied expected nonce
+cannot satisfy this oracle. Each run has a unique fixture path and cookie scope. The
+last or a failed repetition expires only that synthetic cookie. Cleanup filters tab
+metadata internally to this run's exact fixture URLs, closes only matching IDs, and
+requests detach; a lost tab-creation response does not abandon a fixture tab. Cleanup
+errors preserve the original failure and cannot produce a passing attempt. Hard process
+termination cannot guarantee cleanup. Fixture evidence does not prove installed
+owner-Chrome preservation. No real Google/Chrome account status, email, cookie/token,
+account page or sign-in internals are inspected or returned in results.
+Every repetition starts detached; raw JSON records `attachMs` separately from total
+task wall time. Attach has a two-second bound; absent consent, wrong authentication
+fact/title, changed endpoint or failed cleanup is failure.
 Use `COMPUTER_BENCH_AGENT_BROWSER` to select the qualified engine under test rather
-than assume the installed engine matches the repository pin. For example, after Chrome
-has been released by its current owner and the per-instance setting consented:
+than assume the installed engine matches the repository pin. A headless fixture
+launched with `--remote-debugging-port` supplies a GUID-bearing browser endpoint:
 
 ```bash
 scripts/tron computer-bench --tools agent-browser --only signed-in-chrome --reps 3 \
-  --chrome-cdp ws://127.0.0.1:9222/devtools/browser --json test-results/chrome-attach.json
+  --chrome-cdp "$FIXTURE_BROWSER_ENDPOINT" --json test-results/chrome-attach.json
 ```
 
-The adapter does not enable or revoke Chrome's setting. The operator owns that exact
-consent window and verifies revocation through Chrome's UI when finished. An isolated
-profile run is fixture evidence, not proof of signed-in acceptance. The `browser-use`
-adapter still reports only its endpoint-existence probe and is not an attach oracle.
+The adapter does not enable or revoke Chrome's setting. Qualification uses only
+throwaway profiles, never the owner's personal Chrome or its profile. An isolated
+profile run is fixture evidence, not proof of signed-in owner acceptance.
+
+The owning integration tests run real headless Chrome for Testing with separate
+profiles, HOME and sockets, and a passive CLI observer. The approval-mode fixture
+proves typed refusal before any attachment CLI command. The public benchmark runner
+must preserve the error code. The normal-port fixture proves nonce authentication,
+server receipt, cleanup, detach without closing Chrome, and no false consent refusal
+for non-404 discovery. These two tests explicitly skip without both an existing
+Chrome for Testing and a declared qualified engine; no binary is downloaded by tests:
+
+```bash
+COMPUTER_BENCH_AGENT_BROWSER=/absolute/path/to/qualified/agent-browser \
+  scripts/tron-node exec -- node --test tools/computer-bench/bench.test.mjs
+```
+
+The `browser-use`
+adapter has no signed-in-Chrome task and therefore reports unsupported, never a pass;
+it is not an attach oracle.
 `background-delivery` fails when any background
 Cua action changed the frontmost app. `foreground-delivery` runs only with `--foreground`
 and after 120 s without user input, so it never takes the shared Mac from a user;
