@@ -118,7 +118,11 @@ uses those same identity codecs as the scheduler, executor and cold catalog.
   and the shared host byte pager used by task reports; it never reads the current mutable
   definition in place of the firing snapshot. Home’s canonical trigger text remains whole.
   Composition supplies the canonical receipt owner's existing mutation operation;
-  this tool owns no receipt lane or completion policy. Diagnostics use the shared
+  this tool owns no receipt lane or completion policy. `update` requires `automationId`
+  and `expectedRevision`, patches supplied name, trigger, action or target fields, and
+  preserves omitted fields, activation and expiry. Trigger replacements use the same
+  exclusive forms as create; action replacements supply either prompt or notification.
+  Revision conflicts reject the update without writing. Diagnostics use the shared
   module log port, not a transport logger dependency.
 
 ## Invariants
