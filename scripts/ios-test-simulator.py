@@ -55,6 +55,10 @@ SWAP_USED_PATTERN = re.compile(r"\bused\s*=\s*([0-9.]+)\s*([KMGT]?)")
 SIZE_SCALES = {"": 1, "K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40}
 READER_TIMEOUT_SECONDS = 10.0
 BOOT_TIMEOUT_SECONDS = 180.0
+SIMSLIM_ARGUMENTS = (
+    "--except", "search,icloud,store,web,photos",
+    "--keep", "com.apple.accessibility.axassetsd,com.apple.mobileassetd,com.apple.deviceaccessd",
+)
 
 
 class DestinationError(RuntimeError):
@@ -1469,6 +1473,34 @@ def stamp_lane_use(arguments: argparse.Namespace, marker: dict[str, Any]) -> dic
     return updated
 
 
+def requested_boot_profile(name: str) -> tuple[str, Path | None, str]:
+    selected = os.environ.get("TRON_IOS_TEST_SIMSLIM", "0")
+    if selected == "0":
+        return name, None, ""
+    if selected != "1":
+        raise DestinationError("TRON_IOS_TEST_SIMSLIM must be 0 or 1")
+    root = Path(__file__).resolve().parent.parent
+    pins = dict(re.findall(r"^(TRON_CI_SIMSLIM_\w+)=(\S+)$", (root / "config/ci-toolchain.env").read_text(), re.M))
+    checksum = pins["TRON_CI_SIMSLIM_BINARY_SHA256"]
+    identity = hashlib.sha256(json.dumps([pins["TRON_CI_SIMSLIM_VERSION"], checksum, SIMSLIM_ARGUMENTS]).encode()).hexdigest()[:12]
+    tool = Path(os.environ.get("TRON_CI_TOOLS_DIR", str(root / ".ci-tools"))) / "bin/simslim"
+    return f"{name} [simslim {identity}]", tool, checksum
+
+
+def run_simslim(tool: Path, command: str, udid: str, marker: Path) -> None:
+    with tempfile.TemporaryDirectory(prefix="simslim-", dir=marker.parent) as temporary:
+        evidence = Path(temporary)
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).with_name("ios-test-process.py")),
+             "--log", str(evidence / "simslim.log"), "--evidence-dir", str(evidence),
+             "--overall-seconds", str(BOOT_TIMEOUT_SECONDS), "--no-output-seconds", str(BOOT_TIMEOUT_SECONDS),
+             "--", str(tool), command, udid, *SIMSLIM_ARGUMENTS],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=False,
+        )
+        if result.returncode != 0:
+            raise DestinationError(f"simslim {command} failed ({result.returncode}): {result.stdout.strip()}")
+
+
 def provision(arguments: argparse.Namespace) -> dict[str, Any]:
     lane_repository()
     document = inventory()
@@ -1476,6 +1508,19 @@ def provision(arguments: argparse.Namespace) -> dict[str, Any]:
     runtime = exact_runtime(document, arguments.runtime, device_type)
     dev_udid = development_udid(arguments)
     marker = load_marker(arguments.marker)
+    requested_name, slim_tool, checksum = requested_boot_profile(arguments.name)
+    if marker is not None and marker["name"] != requested_name:
+        raise DestinationError(
+            f"owned simulator profile/name mismatch: {marker['name']!r}, requested {requested_name!r}; "
+            "run an explicit clean on this lane before switching profiles"
+        )
+    if slim_tool is not None:
+        try:
+            actual = hashlib.sha256(slim_tool.read_bytes()).hexdigest()
+        except OSError as error:
+            raise DestinationError(f"pinned simslim is unavailable; run scripts/install-ci-tools.sh simslim: {error}") from error
+        if actual != checksum:
+            raise DestinationError(f"simslim checksum mismatch: {slim_tool}; run scripts/install-ci-tools.sh simslim")
 
     if marker is not None:
         try:
@@ -1502,12 +1547,12 @@ def provision(arguments: argparse.Namespace) -> dict[str, Any]:
             document = inventory()
 
     if marker is None:
-        collisions = [device for _, device in all_devices(document) if device.get("name") == arguments.name]
+        collisions = [device for _, device in all_devices(document) if device.get("name") == requested_name]
         if collisions:
             raise DestinationError(
-                f"refusing to adopt {len(collisions)} unmarked simulator(s) named {arguments.name!r}; remove them manually or choose a unique owned name"
+                f"refusing to adopt {len(collisions)} unmarked simulator(s) named {requested_name!r}; remove them manually or choose a unique owned name"
             )
-        udid = simctl("create", arguments.name, device_type["identifier"], runtime["identifier"]).strip()
+        udid = simctl("create", requested_name, device_type["identifier"], runtime["identifier"]).strip()
         if not udid:
             raise DestinationError("simctl create returned an empty UDID")
         if udid == dev_udid:
@@ -1516,7 +1561,7 @@ def provision(arguments: argparse.Namespace) -> dict[str, Any]:
             "schema": SCHEMA,
             "owner": OWNER,
             "udid": udid,
-            "name": arguments.name,
+            "name": requested_name,
             "runtime_identifier": runtime["identifier"],
             "runtime_version": runtime["version"],
             "runtime_build": runtime.get("buildversion"),
@@ -1529,11 +1574,11 @@ def provision(arguments: argparse.Namespace) -> dict[str, Any]:
     else:
         marker = stamp_lane_use(arguments, marker)
 
-    if device.get("state") != "Booted":
+    if slim_tool is not None:
+        run_simslim(slim_tool, "verify" if device.get("state") == "Booted" else "on", marker["udid"], arguments.marker)
+    elif device.get("state") != "Booted":
         simctl("boot", marker["udid"], timeout=BOOT_TIMEOUT_SECONDS)
-        simctl("bootstatus", marker["udid"], "-b", timeout=BOOT_TIMEOUT_SECONDS)
-    else:
-        simctl("bootstatus", marker["udid"], "-b", timeout=BOOT_TIMEOUT_SECONDS)
+    simctl("bootstatus", marker["udid"], "-b", timeout=BOOT_TIMEOUT_SECONDS)
     document = inventory()
     device = validate_marker(document, marker, runtime, device_type, dev_udid)
     return {**marker, "state": device.get("state"), "udid_sha256": hashlib.sha256(marker["udid"].encode()).hexdigest()}

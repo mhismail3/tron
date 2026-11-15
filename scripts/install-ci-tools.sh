@@ -94,6 +94,24 @@ fi
 for tool in "$@"; do
   case "$tool" in
     node) install_node ;;
+    simslim)
+      [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]] \
+        || { echo "simslim needs an Apple silicon Mac" >&2; exit 1; }
+      if [[ -f "$BIN/simslim" && "$(shasum -a 256 "$BIN/simslim" | awk '{print $1}')" == "$TRON_CI_SIMSLIM_BINARY_SHA256" ]]; then
+        continue
+      fi
+      (
+        stage="$(mktemp -d "$CACHE/.simslim-install.XXXXXX")"
+        trap 'rm -rf "$stage"' EXIT
+        fetch "$TRON_CI_SIMSLIM_URL" "$TRON_CI_SIMSLIM_SHA256" "$stage/simslim.tar.gz"
+        tar -xzf "$stage/simslim.tar.gz" -C "$stage" simslim
+        [[ "$(shasum -a 256 "$stage/simslim" | awk '{print $1}')" == "$TRON_CI_SIMSLIM_BINARY_SHA256" ]] \
+          || { echo "simslim binary checksum mismatch" >&2; exit 1; }
+        [[ "$("$stage/simslim" --version)" == "simslim $TRON_CI_SIMSLIM_VERSION" ]] \
+          || { echo "simslim version mismatch" >&2; exit 1; }
+        mv -f "$stage/simslim" "$BIN/simslim"
+      )
+      ;;
     xcodegen)
       archive="$DOWNLOADS/xcodegen-$TRON_CI_XCODEGEN_VERSION.zip"
       fetch "$TRON_CI_XCODEGEN_URL" "$TRON_CI_XCODEGEN_SHA256" "$archive"

@@ -167,6 +167,37 @@ unavailable), without timing out admitted work. The Development simulator and ea
 leases (exit 73 names the holder). Neither
 PPID 1 nor high CPU proves abandonment: diagnose with `scripts/tron-ios-test status --all`.
 
+### Opt-in simulator slimming
+
+The native simulator owner supports an experimental, default-off simslim profile on Apple
+silicon. Install the archive/binary-checksum-pinned v0.14.0 tool into the checkout's CI cache,
+then use an isolated lane with the same explicit setting for every provisioning command:
+
+```bash
+scripts/install-ci-tools.sh simslim
+TRON_IOS_TEST_SIMSLIM=1 scripts/tron-ios-test build --lane simslim
+TRON_IOS_TEST_SIMSLIM=1 scripts/tron-ios-test run --lane simslim
+scripts/tron-ios-test clean --lane simslim
+```
+
+`TRON_CI_TOOLS_DIR` selects another tool cache. Unset or `0` keeps stock provisioning and
+needs no simslim binary; `1` requires the exact binary pin. Other values fail closed.
+This is a native-host opt-in, not a remote verify setting or a default/concurrency change.
+
+The requested simulator name includes a fingerprint of the binary/version and conservative
+profile. Reusing a marked lane with a different requested name/profile fails before device
+mutation: explicitly clean that lane before switching stock/slim, changing the profile, or
+upgrading simslim. The marker schema is unchanged. Shutdown is not profile rollback; there is
+no restore, watch daemon, unowned-device adoption or separate lifecycle owner. The existing
+lease/host slot and process supervisor bound the exact owned UUID; existing boot deadlines,
+runner timeouts and concurrency stay unchanged. An already booted slim device is verified
+without rebooting it; drift fails rather than being silently repaired.
+
+The profile leaves search, iCloud, store, web and photos enabled, and keeps accessibility
+assets, mobile assets and device access daemons. Other managed categories are disabled, so
+work requiring additional services must use stock. Fixture UI parity does not prove every
+service, real-Gateway journey, physical haptic, APNs or device behavior.
+
 ### Test runner safety contract
 
 - Only the exact owned simulator UDID reaches Xcode; only marked simulators are ever deleted.
