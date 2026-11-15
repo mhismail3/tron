@@ -19,7 +19,10 @@ export function agentBrowser({ chromeCdp, reps = 1 } = {}) {
     let parsed;
     try { parsed = JSON.parse(result.stdout); } catch { parsed = undefined; }
     if (result.timedOut) throw new Error(`timed out: ${args.join(" ")}`);
-    if (!parsed?.success) throw new Error(`${args.join(" ")}: ${(parsed?.error ?? result.stderr ?? result.stdout).slice(0, 300)}`);
+    if (!parsed?.success) {
+      if (args[0] === "tab" && args[1] === "list") throw new Error("Fixture cleanup tab enumeration failed; engine output withheld");
+      throw new Error(`${args.join(" ")}: ${(parsed?.error ?? result.stderr ?? result.stdout).slice(0, 300)}`);
+    }
     const { lifecycle, ...data } = parsed.data ?? {};
     return data;
   }
@@ -145,12 +148,6 @@ export function agentBrowser({ chromeCdp, reps = 1 } = {}) {
             detail: `fixture authentication=${authenticated ? "verified" : "failed"}; session=${authenticated ? (ctx.rep === 0 ? "seeded" : "retained across detach") : "unverified"}; attach=${attachMs}ms` };
         } catch (error) { errors.push(error); }
         if (verifiedEndpoint) {
-          if (ctx.rep === reps - 1 || errors.length || !outcome?.ok) {
-            try {
-              await call(["cookies", "set", "bench_attach", "", "--domain", new URL(ctx.site.origin).hostname,
-                "--path", `${ctx.site.authPath}/`, "--httpOnly", "--sameSite", "Strict", "--expires", "1"], options);
-            } catch (error) { errors.push(error); }
-          }
           try {
             const listed = await call(["tab", "list"], options);
             const tabs = Object.values(listed).find(Array.isArray);
@@ -161,6 +158,12 @@ export function agentBrowser({ chromeCdp, reps = 1 } = {}) {
               try { await call(["tab", "close", id], options); } catch (error) { errors.push(error); }
             }
           } catch (error) { errors.push(error); }
+          if (ctx.rep === reps - 1 || errors.length || !outcome?.ok) {
+            try {
+              await call(["cookies", "set", "bench_attach", "", "--domain", new URL(ctx.site.origin).hostname,
+                "--path", `${ctx.site.authPath}/`, "--httpOnly", "--sameSite", "Strict", "--expires", "1"], options);
+            } catch (error) { errors.push(error); }
+          }
         }
         try { await call(["close"], options); attached = false; } catch (error) { errors.push(error); }
         if (errors.length) throw new AggregateError(errors, errors.map(error => error.message).join("; "));
