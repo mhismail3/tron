@@ -11,6 +11,8 @@ const MAX_CONFIG_BYTES = 256 * 1_024;
 const MAX_OUTPUT_BYTES = 1_048_576;
 const CLI_TIMEOUT_MS = 30_000;
 export type McpScope = { scope: "global" } | { scope: "project"; cwd: string; trusted: true };
+export interface McpServerStatus { name: string; state: string; scope: "global" | "project"; enabled: boolean; exposure: string; transport: string; tools: string[]; error?: string }
+export interface McpListing { servers: McpServerStatus[]; errors: number }
 
 export interface McpCredentialOwner {
   store(scope: McpScope, server: string, token: string): Promise<string>;
@@ -128,6 +130,40 @@ function parseConfig(text: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
+export interface McpConfiguredServer {
+  name: string; scope: "global" | "project"; state: "configured" | "disabled" | "unknown";
+  enabled: boolean; exposure: McpExposure; transport: "stdio" | "http" | "unknown";
+}
+export interface McpConfiguration { servers: McpConfiguredServer[]; errors: number }
+
+const CONFIG_SERVER_NAME = /^[A-Za-z0-9_-]{1,128}$/;
+const OVERRIDE_KEYS = ["enabled", "exposure", "toolExposure"] as const;
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+
+async function readServerEntries(path: string): Promise<{ entries: [string, unknown][]; error: boolean }> {
+  let text: string;
+  try { text = await readFile(path, "utf8"); } catch (error) {
+    return { entries: [], error: (error as NodeJS.ErrnoException).code !== "ENOENT" };
+  }
+  if (Buffer.byteLength(text) > MAX_CONFIG_BYTES) return { entries: [], error: true };
+  let servers: unknown;
+  try { servers = (JSON.parse(text) as { mcpServers?: unknown }).mcpServers; } catch { return { entries: [], error: true }; }
+  if (servers === undefined) return { entries: [], error: false };
+  if (!isRecord(servers)) return { entries: [], error: true };
+  return { entries: Object.entries(servers), error: false };
+}
+
+function describeConfiguredServer(name: string, scope: "global" | "project", config: Record<string, unknown>): McpConfiguredServer {
+  const transport = typeof config.command === "string" && (config.type === undefined || config.type === "stdio") ? "stdio"
+    : typeof config.url === "string" && (config.type === undefined || config.type === "http" || config.type === "streamable-http") ? "http" : "unknown";
+  const exposureKnown = config.exposure === undefined || (EXPOSURES as readonly unknown[]).includes(config.exposure);
+  const enabledKnown = config.enabled === undefined || typeof config.enabled === "boolean";
+  const enabled = config.enabled !== false;
+  const known = transport !== "unknown" && exposureKnown && enabledKnown;
+  return { name, scope, state: !known ? "unknown" : enabled ? "configured" : "disabled", enabled,
+    exposure: exposureKnown && config.exposure !== undefined ? config.exposure as McpExposure : "codemode", transport };
+}
+
 type McpAdminLog = (level: "warning", message: string, event: string, fields: Record<string, string>) => void;
 
 export class McpAdminService {
@@ -145,7 +181,7 @@ export class McpAdminService {
   private cliEnvironment(): NodeJS.ProcessEnv {
     return { ...process.env, PI_CODING_AGENT_DIR: this.agentDir };
   }
-  async list(scope: McpScope): Promise<unknown> {
+  async list(scope: McpScope): Promise<McpListing> {
     const result = await runProcess(process.execPath, this.cliArgs(scope, ["list", "--json"]), { cwd: scope.scope === "project" ? scope.cwd : this.agentDir, timeoutMs: this.cliTimeoutMs, env: this.cliEnvironment() });
     if (result.code !== 0 && result.code !== 1) {
       this.log("warning", "Bundled MCP status listing failed", "mcp.startup.problem", { reason: "cli-failure", scope: scope.scope });
@@ -166,7 +202,7 @@ export class McpAdminService {
     }
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new GatewayError("conflict", "Bundled MCP CLI returned invalid JSON");
     const raw = parsed as { servers?: unknown; errors?: unknown };
-    const servers = Array.isArray(raw.servers) ? raw.servers.slice(0, 128).flatMap((item) => {
+    const servers = Array.isArray(raw.servers) ? raw.servers.slice(0, 128).flatMap((item): McpServerStatus[] => {
       if (!item || typeof item !== "object" || Array.isArray(item)) return [];
       const row = item as Record<string, unknown>;
       if (typeof row.name !== "string" || !/^[A-Za-z0-9._-]{1,128}$/.test(row.name)) return [];
@@ -178,6 +214,27 @@ export class McpAdminService {
     }) : [];
     const errors = Array.isArray(raw.errors) ? raw.errors.length : 0;
     return { servers, errors };
+  }
+  async configured(project?: Extract<McpScope, { scope: "project" }>): Promise<McpConfiguration> {
+    const merged = new Map<string, { scope: "global" | "project"; config: Record<string, unknown> }>();
+    const global = await readServerEntries(join(this.agentDir, "mcp.json"));
+    let errors = global.error ? 1 : 0;
+    for (const [name, value] of global.entries) {
+      if (!isRecord(value) || !CONFIG_SERVER_NAME.test(name)) { errors += 1; continue; }
+      merged.set(name, { scope: "global", config: value });
+    }
+    if (project) {
+      const file = await readServerEntries(join(project.cwd, ".pi", "mcp.json"));
+      if (file.error) errors += 1;
+      for (const [name, value] of file.entries) {
+        if (!isRecord(value) || !CONFIG_SERVER_NAME.test(name)) { errors += 1; continue; }
+        const base = merged.get(name)?.config;
+        const override = value.command === undefined && value.url === undefined && value.type === undefined;
+        const keys = Object.fromEntries(OVERRIDE_KEYS.flatMap(key => value[key] === undefined ? [] : [[key, value[key]]]));
+        merged.set(name, { scope: "project", config: override && base ? { ...base, ...keys } : value });
+      }
+    }
+    return { servers: [...merged].map(([name, { scope, config }]) => describeConfiguredServer(name, scope, config)), errors };
   }
   async mutate(scope: McpScope, operation: "add" | "remove" | "logout", args: string[], server?: string): Promise<unknown> {
     const result = await runProcess(process.execPath, this.cliArgs(scope, [operation, ...args]), { cwd: scope.scope === "project" ? scope.cwd : this.agentDir, timeoutMs: this.cliTimeoutMs, env: this.cliEnvironment() });

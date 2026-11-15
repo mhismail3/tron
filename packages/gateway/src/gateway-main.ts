@@ -20,6 +20,7 @@ import { SettingsChangeRecord } from "./kernel/settings/settings-record.js";
 import { OutsideChanges } from "./admin/settings-outside.js";
 import { ModelConfigService } from "./admin/model-config-service.js";
 import { PackageService } from "./admin/package-service.js";
+import { SettingsInventoryReader } from "./admin/settings-inventory.js";
 import { ScopeToolCatalog } from "./admin/tool-catalog.js";
 import { HookResources } from "./admin/hook-resources.js";
 import { AuthBroker } from "./admin/auth-broker.js";
@@ -732,7 +733,13 @@ settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, {
   ),
   undoSubject: (entry, context) => new HomeProfileItems(() => knowledge).undo(settingsChanges, entry, context),
 });
-sessions.setSettings(settingsModel, settingsChanges);
+const mcpAdmin = new McpAdminService(
+  config.agentDir,
+  piCliBundle(),
+  new MacKeychainMcpCredentialOwner(),
+  (level, message, event, fields) => logger.log(level, message, { event, source: "mcp", ...fields }),
+);
+sessions.setSettings(settingsModel, settingsChanges, new SettingsInventoryReader(hookResources, packages, mcpAdmin, trust, modules));
 projects.register(settingsChanges);
 
 const service = new GatewayService({

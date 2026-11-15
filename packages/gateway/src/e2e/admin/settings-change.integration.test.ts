@@ -22,10 +22,11 @@ import { maintainerChange } from "../../../test-support/native-change.js";
 import { OutsideChanges } from "../../admin/settings-outside.js";
 import { McpAdminService } from "../../admin/mcp-admin-service.js";
 import { createTronSettingsExtension } from "../../admin/tron-settings-extension.js";
+import { settingsInventorySource } from "../../../test-support/settings-dependencies.js";
 import { ModelConfigService } from "../../admin/model-config-service.js";
 import { type SettingsStores } from "../../kernel/settings/settings-types.js";
 import { composedBelow, readBinding } from "../../kernel/settings/settings-resolver.js";
-import { type Resolution } from "../../kernel/settings/tool-contract.js";
+import { type Resolution, type SettingsInventory } from "../../kernel/settings/tool-contract.js";
 import { type KeyDeclaration } from "../../kernel/settings/settings-schema.js";
 import { instanceId } from "../../kernel/settings/scope-resolution.js";
 const { KEYS } = TEST_SETTINGS_SCHEMA;
@@ -389,7 +390,8 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
         async inspection => { await registry.abortProjectReload(inspection.projectDir); });
     },
   });
-  registry.setSettings(settingsModel, settingsChanges);
+  const mcpAdmin = new McpAdminService(agentDir, join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js"));
+  registry.setSettings(settingsModel, settingsChanges, settingsInventorySource({ agentDir, trust, modules: registry.moduleHost, mcp: mcpAdmin }));
   const broadcasts: Array<{ topic: string; payload: unknown }> = [];
   const pushes: Array<{ sourceId: string; title: string; message: string }> = [];
   const notifications = { enqueue: async (push: { sourceId: string; title: string; message: string }) => { pushes.push(push); } };
@@ -478,6 +480,55 @@ describe("settings.change", () => {
     expect(JSON.stringify(preview)).not.toContain("fixture-secret-token");
     expect(await f.history()).toEqual([]);
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
+  });
+
+  caseIt("an agent reads its chat's inventory of hooks, packages and MCP status with credentials masked", async owner => {
+    const f = await fixture(owner);
+    const cwd = join(f.root, "inventory-chat");
+    await mkdir(cwd);
+    const slot = await f.registry.create(cwd);
+    const model = f.faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    const pkg = join(f.root, "inventory-package");
+    await mkdir(pkg);
+    await writeFile(join(pkg, "package.json"), JSON.stringify({ name: "inventory-package", version: "1.0.0" }));
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), packages: [pkg] }));
+    await f.service.invoke(client(), "mcp.add", { commandId: commandId(), scope: "global", server: "inventory-http", transport: "http", url: "http://user:inventory-secret@127.0.0.1:1/mcp?token=inventory-query-secret" });
+    const markers = join(f.root, "inventory-markers");
+    await mkdir(markers);
+    const launched = join(markers, "stdio-launched");
+    const disabledLaunched = join(markers, "disabled-launched");
+    const resolved = join(markers, "credential-resolved");
+    const mcpPath = join(f.agentDir, "mcp.json");
+    const mcpDocument = JSON.parse(await readFile(mcpPath, "utf8")) as { mcpServers: Record<string, unknown> };
+    mcpDocument.mcpServers["inventory-stdio"] = { command: "/bin/sh", args: ["-c", `touch ${launched}`] };
+    mcpDocument.mcpServers["inventory-disabled"] = { command: "/bin/sh", args: ["-c", `touch ${disabledLaunched}`], enabled: false };
+    mcpDocument.mcpServers["inventory-credential"] = { url: "http://127.0.0.1:1/credential", headers: { Authorization: `!touch ${resolved}; printf secret` } };
+    mcpDocument.mcpServers["inventory-slash-userinfo"] = { url: "https://user:pa/ss@127.0.0.1:1/mcp" };
+    await writeFile(mcpPath, JSON.stringify(mcpDocument, null, 2));
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("settings", { action: "inventory" }, { id: "inventory-tool" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage("Done"),
+    ]);
+    await slot.prompt("Read the settings inventory");
+    await waitFor(() => !slot.isBusy && !slot.hasActiveAgentRun || undefined, "settings inventory tool turn settled");
+    const result = slot.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === "inventory-tool");
+    if (result?.type !== "message" || result.message.role !== "toolResult") throw new Error("No canonical settings tool result");
+    expect(result.message.isError).not.toBe(true);
+    const inventory = result.message.details as SettingsInventory;
+    expect(inventory.hooks.extensions.find(extension => extension.name === "builtin:mcp")?.handlers).toContainEqual({ event: "session_start", count: 1 });
+    expect(inventory.packages).toContainEqual(expect.objectContaining({ source: pkg, scope: "user" }));
+    expect(existsSync(launched)).toBe(false);
+    expect(existsSync(disabledLaunched)).toBe(false);
+    expect(existsSync(resolved)).toBe(false);
+    expect(inventory.mcp.servers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "inventory-http", scope: "global", state: "configured", transport: "http" }),
+      expect.objectContaining({ name: "inventory-stdio", scope: "global", state: "configured", transport: "stdio" }),
+      expect.objectContaining({ name: "inventory-disabled", scope: "global", state: "disabled", enabled: false }),
+      expect.objectContaining({ name: "inventory-credential", state: "configured", transport: "http" }),
+      expect.objectContaining({ name: "inventory-slash-userinfo", state: "configured", transport: "http" }),
+    ]));
+    expect(JSON.stringify(inventory)).not.toMatch(/inventory-secret|inventory-query-secret|pa\/ss|user:|127\.0\.0\.1|secret/);
   });
 
   caseIt("an agent pages only its own settings history, never another chat's or the maintainer's rows", async owner => {

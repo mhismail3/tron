@@ -76,9 +76,8 @@ RPCs (shapes in the [Gateway README](../../README.md)): `settings.resolve`,
 `settings.applyAgain`, `settings.history` (the maintainer's full view), plus `home.profileChange` for learned-profile notes.
 Broadcasts: `settings.changed`, `trust.changed`, `mcp.changed`,
 `models.customChanged`. Agents reach the same path through the `settings` tool
-(a thin client of resolve, change, history and undo, each carrying the calling chat's actor; history and undo are
-scoped by that actor as the kernel contract defines). Home's tool may target a delegated
-worker by `taskId`.
+(a thin client of resolve, change, history, undo and inventory, each carrying the calling chat's actor; history and undo are
+scoped by that actor as the kernel contract defines). `inventory` is read-only: it projects the hook registrations (by extension and by event), configured packages, Tron modules and configured MCP servers (`configured`, `disabled` or `unknown`; never probed) for the chat's directory. Hooks and packages come from `HookResources` and `PackageService`, which load extension definitions for a trusted project as the existing `hooks.list`/`packages.list` RPCs do (code loading, a residual risk; not a probe). MCP comes from `McpAdminService.configured`, which reads `mcp.json` and, for a trusted project, `.pi/mcp.json` directly. It never runs `pi mcp` (which connects servers and resolves `!command` credentials), so no MCP server is started and no credential is resolved. URLs are reduced to the transport kind, so no URL text reaches the result. Every string is sanitized through credential redaction. An undecided project fails with `trust_required`. Home's tool may target a delegated worker by `taskId`.
 
 Ports in: `gateway-main.ts` wires kernel `SettingsModel`/`SettingsChangePath`,
 admin `SettingsStoreAdapter`,
