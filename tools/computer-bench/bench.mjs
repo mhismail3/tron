@@ -58,6 +58,7 @@ async function runTool(name, options, ctx) {
   const tool = { name, probe, tasks: {} };
   if (!probe.ok) return tool;
   const ids = Object.keys(adapter.tasks).filter((id) => !options.only || options.only.includes(id));
+  if (!ids.length) return tool;
   const setupStarted = performance.now();
   try { await adapter.setup(ctx); } catch (error) { tool.probe = { ...probe, ok: false, reason: `setup failed: ${error.message}` }; await adapter.teardown().catch(() => {}); return tool; }
   tool.setupMs = Math.round(performance.now() - setupStarted);
@@ -67,11 +68,15 @@ async function runTool(name, options, ctx) {
       if (adapter.beforeRep) await adapter.beforeRep(ctx);
       for (const id of ids) {
         const started = performance.now();
+        const authenticatedBefore = ctx.site.authenticatedReads();
         let outcome;
-        try { outcome = await adapter.tasks[id](ctx); } catch (error) { outcome = { ok: false, detail: String(error.message ?? error).slice(0, 400) }; }
+        try { outcome = await adapter.tasks[id](ctx); } catch (error) { outcome = { ok: false, ...(error.code === "owner_consent_required" ? { code: error.code } : {}), detail: String(error.message ?? error).slice(0, 400) }; }
+        if (id === "signed-in-chrome" && outcome.ok && ctx.site.authenticatedReads() <= authenticatedBefore) {
+          outcome = { ...outcome, ok: false, detail: "No authenticated fixture read reached the server; endpoint existence or a public title is not attach acceptance" };
+        }
         const ms = Math.round(performance.now() - started);
         const status = outcome.status ?? (outcome.ok ? "pass" : "fail");
-        (tool.tasks[id] ??= []).push({ status, ms, ...(Number.isFinite(outcome.attachMs) ? { attachMs: outcome.attachMs } : {}), detail: outcome.detail?.replace(/\s+/gu, " ").trim(), stoleFocus: outcome.stoleFocus ?? false });
+        (tool.tasks[id] ??= []).push({ status, ms, ...(outcome.code ? { code: outcome.code } : {}), ...(Number.isFinite(outcome.attachMs) ? { attachMs: outcome.attachMs } : {}), detail: outcome.detail?.replace(/\s+/gu, " ").trim(), stoleFocus: outcome.stoleFocus ?? false });
         process.stderr.write(`${name} ${id} #${rep + 1}: ${status} ${ms}ms ${outcome.detail ?? ""}\n`);
       }
     }
