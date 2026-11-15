@@ -42,7 +42,7 @@ const options = { automations: true, home: { memorySummarizer: () => async () =>
 const originalTools = ["ask_user", "display", "notify", "zoom", "date", "memory_search", "session_search",
   "session_read", "delegate", "web_search", "settings", "task", "profile"];
 const nonMaintainerTools = [...originalTools, "read", "grep", "find", "ls", "schedule", "obligation", "projects"].sort();
-const userTools = [...nonMaintainerTools, "write", "edit", "bash", "computer", "agent_browser"].sort();
+const userTools = [...nonMaintainerTools, "write", "edit", "bash", "computer"].sort();
 const WAKE_REFUSAL = "This tool requires the current maintainer turn; wake content cannot grant file, shell, computer or browser authority.";
 
 async function refusedCalls(gateway: LockGateway, sessionId: string): Promise<Array<{ tool: string | undefined; text: string }>> {
@@ -102,7 +102,7 @@ for (const kind of ["maintainer", "automation"] as const) {
     const { gateway, phone, sessionId } = await resumedHome(kind);
     const resolved = await phone.request("settings.resolve", { target: { kind: "home" }, keys: ["tools.active"] });
     expect(resolved.ok, JSON.stringify(resolved)).toBe(true);
-    expect([...resolved.result.keys[0].value].sort()).toEqual([...userTools].sort());
+    expect([...resolved.result.keys[0].value].sort()).toEqual([...userTools, "agent_browser"].sort());
     gateway.script([() => fauxAssistantMessage("Observed the current activation tools.")]);
     if (kind === "maintainer") {
       expect((await phone.request("home.prompt", { commandId: gateway.commandId(), text: "Inspect my files if needed." })).ok).toBe(true);
@@ -278,7 +278,8 @@ it("real Gateway: a settled task result wakes Home with every tool listed and ma
 
 it("real Gateway: Home uses the packaged managed browser on maintainer turns and refuses forged wake browser calls", async () => {
   const source = "builtin";
-  const gateway = await startLockGateway("home-browser", options);
+  const declaration = "git:github.com/fitchmultz/pi-agent-browser-native@6346982c0fec9e00b9f3ef6997cfb2d6f6893c6d";
+  const gateway = await startLockGateway("home-browser", { ...options, settings: { packages: [declaration] } });
   owned.push(gateway);
   const ambientProbe = join(gateway.cwd, "ambient-browser-probe.txt");
   await mkdir(join(gateway.agentDir, "extensions"), { recursive: true });
@@ -315,7 +316,7 @@ it("real Gateway: Home uses the packaged managed browser on maintainer turns and
     expect((await phone.request("home.prompt", { commandId: gateway.commandId(), text: "Open and read the local browser fixture." })).ok).toBe(true);
     await waitFor(() => gateway.record().providerRequests.length > 0, "Home browser provider request");
     await gateway.settled(sessionId);
-    expect([...gateway.record().providerRequests[0]!.tools].sort()).toEqual([...userTools].sort());
+    expect([...gateway.record().providerRequests[0]!.tools].sort()).toEqual([...userTools, "agent_browser"].sort());
     const slot = await gateway.registry.acquire(sessionId);
     const browser = slot.runtime.session.resourceLoader.getExtensions().extensions.filter(extension => extension.tools.has("agent_browser"));
     expect(browser).toHaveLength(1);

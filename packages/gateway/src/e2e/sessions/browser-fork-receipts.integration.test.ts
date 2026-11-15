@@ -105,7 +105,7 @@ describe("packaged agent-browser receipts", () => {
     const address=site.address(); if(!address || typeof address==="string")throw new Error("No fixture address");
     base=`http://127.0.0.1:${address.port}`;
     const faux=fauxProvider({provider:"tron-owned-browser",tokensPerSecond:10000});
-    await writeFile(join(agentDir,"settings.json"),JSON.stringify({defaultTools:["+agent_browser","+agent_browser_electron"]}));
+    await writeFile(join(agentDir,"settings.json"),JSON.stringify({packages:[installedForkSource],defaultTools:["+agent_browser","+agent_browser_electron"]}));
     const trust=new TrustService(agentDir);await trust.set(cwd,true);
     createRegistry=async()=>{
       const registry=await createTestRegistry({agentDir,tronHome:join(root,"tron"),trust,idleRuntimeMs:60000,
