@@ -67,8 +67,12 @@ async function runTool(name, options, ctx) {
       if (adapter.beforeRep) await adapter.beforeRep(ctx);
       for (const id of ids) {
         const started = performance.now();
+        const authenticatedBefore = ctx.site.authenticatedReads();
         let outcome;
         try { outcome = await adapter.tasks[id](ctx); } catch (error) { outcome = { ok: false, detail: String(error.message ?? error).slice(0, 400) }; }
+        if (id === "signed-in-chrome" && outcome.ok && ctx.site.authenticatedReads() <= authenticatedBefore) {
+          outcome = { ...outcome, ok: false, detail: "No authenticated fixture read reached the server; endpoint existence or a public title is not attach acceptance" };
+        }
         const ms = Math.round(performance.now() - started);
         const status = outcome.status ?? (outcome.ok ? "pass" : "fail");
         (tool.tasks[id] ??= []).push({ status, ms, ...(Number.isFinite(outcome.attachMs) ? { attachMs: outcome.attachMs } : {}), detail: outcome.detail?.replace(/\s+/gu, " ").trim(), stoleFocus: outcome.stoleFocus ?? false });

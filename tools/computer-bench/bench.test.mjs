@@ -1,5 +1,10 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
+import { execFile } from "node:child_process";
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import { FUNCTIONS, scorecard, summarize } from "./bench.mjs";
 import { DOWNLOAD_BODY, startSite } from "./fixtures/site.mjs";
 import { agentBrowser } from "./agent-browser.mjs";
@@ -13,6 +18,20 @@ test("signed-in Chrome requires explicit loopback consent and never scores endpo
   }
 });
 
+test("browser-use cannot score DevToolsActivePort existence as signed-in Chrome acceptance", async () => {
+  const home = await mkdtemp(join(tmpdir(), "bench-chrome-probe-"));
+  try {
+    const profile = join(home, "Library/Application Support/Google/Chrome");
+    await mkdir(profile, { recursive: true });
+    await writeFile(join(profile, "DevToolsActivePort"), "9222\n/devtools/browser\n");
+    const source = new URL("./browser-use.mjs", import.meta.url).href;
+    const { stdout } = await promisify(execFile)(process.execPath, ["--input-type=module", "-e",
+      `import { browserUse } from ${JSON.stringify(source)}; const task = browserUse().tasks['signed-in-chrome']; console.log(JSON.stringify(task ? await task() : {ok:false}));`],
+      { env: { ...process.env, HOME: home } });
+    assert.equal(JSON.parse(stdout).ok, false);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
 test("the fixture site serves the consent redirect across origins, the cookie session and the download", async () => {
   const site = await startSite();
   try {
@@ -23,6 +42,22 @@ test("the fixture site serves the consent redirect across origins, the cookie se
     const cookie = login.headers.get("set-cookie").split(";")[0];
     assert.match(await (await fetch(`${site.origin}/whoami`, { headers: { cookie } })).text(), /user=bench-user/u);
     assert.match(await (await fetch(`${site.origin}/whoami`)).text(), /user=anonymous/u);
+    const denied = await fetch(`${site.origin}/attach/fact`);
+    assert.equal(denied.status, 403);
+    const attachLogin = await fetch(`${site.origin}/attach/login`, { redirect: "manual" });
+    const attachCookie = attachLogin.headers.get("set-cookie").split(";")[0];
+    assert.equal(attachLogin.status, 302);
+    assert.equal(attachLogin.headers.get("location"), "/attach/fact");
+    assert.equal(site.authenticatedReads(), 0);
+    const fact = await fetch(`${site.origin}/attach/fact`, { headers: { cookie: attachCookie } });
+    assert.equal(fact.status, 200);
+    assert.match(await fact.text(), new RegExp(site.authNonce, "u"));
+    assert.equal(site.authenticatedReads(), 1);
+    const otherSite = await startSite();
+    try {
+      assert.notEqual(otherSite.authNonce, site.authNonce);
+      assert.equal((await fetch(`${otherSite.origin}/attach/fact`, { headers: { cookie: attachCookie } })).status, 403);
+    } finally { await otherSite.close(); }
     assert.equal(await (await fetch(`${site.origin}/download/bench.txt`)).text(), DOWNLOAD_BODY);
   } finally { await site.close(); }
 });

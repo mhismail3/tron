@@ -127,16 +127,20 @@ export function agentBrowser({ chromeCdp } = {}) {
         attached = true;
         let tab;
         let attachMs;
+        const readsBefore = ctx.site.authenticatedReads();
         try {
           await call(["connect", chromeCdp], { ...options, timeoutMs: 2_000 });
           attachMs = Math.round(performance.now() - started);
           const connection = await call(["get", "cdp-url"], options);
           if (connection.cdpUrl !== chromeCdp) throw new Error("Attached browser endpoint changed; refusing fixture operation");
-          const opened = await call(["tab", "new", `${ctx.site.origin}/form.html`], options);
+          const opened = await call(["tab", "new", `${ctx.site.origin}/attach/${ctx.rep === 0 ? "login" : "fact"}`], options);
           tab = opened.tabId;
           if (typeof tab !== "string" || !tab.length) throw new Error("Fixture tab identity unavailable; open outcome uncertain");
           const title = await value(["get", "title"], options);
-          return { ok: title === "Bench Form" && attachMs <= 2_000, attachMs, detail: `fixture title=${title}; attach=${attachMs}ms; exact fixture tab closed in finally` };
+          const fact = await value(["get", "text", "#authenticated-fact"], options);
+          const authenticated = title === "Bench Authenticated" && fact === ctx.site.authNonce && ctx.site.authenticatedReads() > readsBefore;
+          return { ok: authenticated && attachMs <= 2_000, attachMs,
+            detail: `fixture authentication=${authenticated ? "verified" : "failed"}; session=${ctx.rep === 0 ? "seeded" : "retained across detach"}; attach=${attachMs}ms; exact fixture tab closed in finally` };
         } finally {
           try { if (tab) await call(["tab", "close", tab], options); }
           finally {

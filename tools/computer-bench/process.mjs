@@ -76,11 +76,6 @@ export function userIdleSeconds() {
   } catch { return 0; }
 }
 
-export function signedInChromeCdp() {
-  const file = join(homedir(), "Library/Application Support/Google/Chrome/DevToolsActivePort");
-  return existsSync(file);
-}
-
 export function pngSize(buffer) {
   if (buffer.length < 24 || !buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return undefined;
   return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };

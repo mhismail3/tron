@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { DOWNLOAD_BODY } from "./fixtures/site.mjs";
-import { chromeForTesting, freePort, pngSize, run, signedInChromeCdp, waitForCdp } from "./process.mjs";
+import { chromeForTesting, freePort, pngSize, run, waitForCdp } from "./process.mjs";
 
 const VENV = process.env.COMPUTER_BENCH_BROWSER_USE_VENV ?? join(homedir(), "Workspace/browser-use-eval-20261110/.venv");
 const MARK = "BENCH_RESULT ";
@@ -107,10 +107,6 @@ export function browserUse() {
         const path = `/oauth/authorize?redirect_uri=${encodeURIComponent(`${ctx.site.altOrigin}/callback`)}&state=${state}`;
         const text = await py(`${open(ctx, path)}\n${center("#allow")}\nimport time\nfor _ in range(50):\n    if '/callback' in page_info().get('url', ''): break\n    time.sleep(0.1)\nwait_for_load()\n${emit("js(\"document.querySelector('#result').textContent\")")}`);
         return { ok: text === `code=bench-code state=${state}`, detail: text };
-      },
-      async "signed-in-chrome"() {
-        const present = signedInChromeCdp();
-        return { ok: present, detail: present ? "DevToolsActivePort present" : "signed-in Chrome exposes no CDP endpoint (DevToolsActivePort missing)" };
       },
     },
   };

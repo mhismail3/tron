@@ -1,5 +1,6 @@
 // Purpose: the computer-bench local fixture site: form controls, upload, download, tabs, dialogs, cookie session and a two-origin consent flow.
 import { createServer } from "node:http";
+import { randomUUID } from "node:crypto";
 
 const page = (title, body, script = "") => `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title></head><body>${body}${script ? `<script>${script}</script>` : ""}</body></html>`;
 
@@ -21,10 +22,22 @@ document.getElementById("confirm").onclick=()=>{document.getElementById("dialogr
 export const DOWNLOAD_BODY = "tron-bench-download\n";
 
 export function startSite() {
+  const authNonce = randomUUID();
+  let authenticatedReads = 0;
   const server = createServer((request, response) => {
     const url = new URL(request.url, "http://fixture");
     const html = (body, status = 200, headers = {}) => { response.writeHead(status, { "content-type": "text/html; charset=utf-8", ...headers }); response.end(body); };
     if (url.pathname === "/form.html") return html(FORM);
+    if (url.pathname === "/attach/login") {
+      response.writeHead(302, { location: "/attach/fact", "set-cookie": `bench_attach=${authNonce}; HttpOnly; Path=/attach/; SameSite=Strict` });
+      return response.end();
+    }
+    if (url.pathname === "/attach/fact") {
+      const authenticated = request.headers.cookie?.split(/;\s*/u).includes(`bench_attach=${authNonce}`) === true;
+      if (!authenticated) return html(page("Bench Authentication Required", "<p>unauthenticated</p>"), 403);
+      authenticatedReads++;
+      return html(page("Bench Authenticated", `<p id="authenticated-fact">${authNonce}</p>`));
+    }
     if (url.pathname === "/tab2.html") return html(page("Bench Tab 2", "<h1>Second tab</h1>"));
     if (url.pathname === "/download/bench.txt") {
       response.writeHead(200, { "content-type": "text/plain", "content-disposition": "attachment; filename=bench.txt" });
@@ -54,6 +67,6 @@ export function startSite() {
   });
   return new Promise((resolve) => server.listen(0, "127.0.0.1", () => {
     const port = server.address().port;
-    resolve({ port, origin: `http://127.0.0.1:${port}`, altOrigin: `http://localhost:${port}`, close: () => new Promise((done) => { server.closeAllConnections(); server.close(done); }) });
+    resolve({ port, authNonce, authenticatedReads: () => authenticatedReads, origin: `http://127.0.0.1:${port}`, altOrigin: `http://localhost:${port}`, close: () => new Promise((done) => { server.closeAllConnections(); server.close(done); }) });
   }));
 }

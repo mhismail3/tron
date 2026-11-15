@@ -51,10 +51,16 @@ serially; each rep starts from a fresh page or window.
 For `agent-browser`, `signed-in-chrome` requires an explicit `--chrome-cdp` loopback
 browser WebSocket endpoint. Without one it reports `consent_required` and never probes
 or attaches. With one it connects in a separate tool session, verifies the exact
-endpoint, opens the local Bench Form in a new tab, reads its title, closes only that
-issued tab ID and detaches without closing Chrome. Every repetition starts detached;
-raw JSON records `attachMs` separately from total task wall time. Attach has a two-second
-bound; absent consent, wrong title, changed endpoint or failed cleanup is failure.
+endpoint, opens only its own local fixture tab and reads a per-run nonce behind a
+fixture cookie. The first repetition seeds that fixture-only cookie; later repetitions
+must read the same protected fact after detach/re-attach without logging in again.
+The server independently counts authenticated reads. A file-existence probe, public
+page title or copied expected nonce cannot satisfy this oracle. Only the issued tab ID
+is closed; detach never closes Chrome. No real Google/Chrome account status, email,
+cookie/token, account page or sign-in internals are inspected.
+Every repetition starts detached; raw JSON records `attachMs` separately from total
+task wall time. Attach has a two-second bound; absent consent, wrong authentication
+fact/title, changed endpoint or failed cleanup is failure.
 Use `COMPUTER_BENCH_AGENT_BROWSER` to select the qualified engine under test rather
 than assume the installed engine matches the repository pin. For example, after Chrome
 has been released by its current owner and the per-instance setting consented:
@@ -67,7 +73,8 @@ scripts/tron computer-bench --tools agent-browser --only signed-in-chrome --reps
 The adapter does not enable or revoke Chrome's setting. The operator owns that exact
 consent window and verifies revocation through Chrome's UI when finished. An isolated
 profile run is fixture evidence, not proof of signed-in acceptance. The `browser-use`
-adapter still reports only its endpoint-existence probe and is not an attach oracle.
+adapter has no signed-in-Chrome task and therefore reports unsupported, never a pass;
+it is not an attach oracle.
 `background-delivery` fails when any background
 Cua action changed the frontmost app. `foreground-delivery` runs only with `--foreground`
 and after 120 s without user input, so it never takes the shared Mac from a user;
