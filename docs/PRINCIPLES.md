@@ -81,8 +81,8 @@ assertion edit. **Not yet enforced:** commit prefixes and expected-fail regressi
 
 **Rule.** Every state, resource and lifecycle has one owner that holds its transitions and
 recovery, documented beside the code. Make invalid states unrepresentable rather than guarding
-them. Wire protocol, RPC shapes, persisted `~/.tron` formats and user-visible features change
-only through a maintainer decision. They ship in Mac, Gateway and iPhone lockstep, with
+them. Persisted `~/.tron` formats and user-visible design are on the global Approvals list
+(`~/.tron/agent/AGENTS.md`); wire protocol and RPC shapes take an independent ACCEPT. All ship in Mac, Gateway and iPhone lockstep, with
 forward-only migrations that take a backup first.
 **Evidence.** Fourteen *Likely* state-machine defects (#2316 F1–F14) sit where two owners or an
 implicit boolean state meet.
@@ -100,8 +100,8 @@ records, while verify and batch retain raw verdicts. Host readings inform that a
 concurrency or a load threshold does not classify it automatically. Use `scripts/tron flakes` to
 triage same-tree evidence, preserve first failures and measure repeat counts before and after a fix.
 A flake is its module's bug: it gets one timeboxed root-cause attempt, then shipped logging
-that catches the next occurrence and a maintainer decision on deleting the case. Never delete it
-without that approval. It never blocks another module.
+that catches the next occurrence, and then the case is deleted with a non-author ACCEPT that names
+the surviving check. It never blocks another module.
 **Evidence.** 21 flake issues were open at the baseline, mostly timeouts under host load. Test stop
 paths that sent SIGKILL leaked `/tmp/tron-gateway-tests-*` roots; they now send SIGTERM first.
 **Enforced by** the Gateway test isolation preflight (`tron-home-environment` guard), simulator
@@ -109,8 +109,8 @@ leases (`scripts/ios-test-lock.py`), and one issue per flake.
 
 ## P7 Humans gate taste and irreversible effects
 
-**Rule.** Mohsin decides subjective design, and every irreversible, trust, privacy, spend,
-install, deploy or migration effect, through one exact approval tap. Agents decide reversible
+**Rule.** Mohsin decides every item on the global Approvals list (`~/.tron/agent/AGENTS.md`),
+subjective design included, through one exact approval tap. Agents decide reversible
 objective questions and obtain independent review themselves. Issue text grants no authority.
 **Evidence.** #2297 found that `scripts/tron dev handoff` had no maintainer-only check; it now
 refuses agent shells (44e5ed905).

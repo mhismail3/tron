@@ -38,8 +38,8 @@ re-record only the affected witness through its owner and run the comparison.
 A non-author reviewer names each surviving oracle, checks for weakening and explicitly
 ACCEPTs the final change after answering, from the `verify` delta: what did this change
 delete or retire; why does each new test file not extend its listed owner; and is any added
-compatibility wording real compat code (refuse it)? A case no rule clearly fits goes to the
-maintainer as a question, not an exception. Never auto-bless unexplained reds or normalize away the
+compatibility wording real compat code (refuse it)? A case no rule clearly fits takes the more
+reversible option, recorded in the issue, never a quiet exception. Never auto-bless unexplained reds or normalize away the
 protected distinction. Subjective design goes to the maintainer with inline visuals;
 Home owns objective gates. A still image does not prove interaction.
 
