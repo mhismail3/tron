@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ModelRuntime, SettingsManager } from "../pi/coding-agent.js";
-import type { FixedSetting, Resolution, SettingsTarget, Qualifiers } from "./tool-contract.js";
+import type { ChangeResult, ConfirmChange, FixedSetting, Resolution, SettingsTarget, Qualifiers } from "./tool-contract.js";
+import type { Actor } from "./settings-record.js";
 import { resolveSettings } from "./settings-resolver.js";
 import { GatewayError } from "../../errors.js";
 import { hasRuntimeRequestApplier, timingFor, type SettingsSchema, type Binding, type KeyDeclaration } from "./settings-schema.js";
@@ -33,6 +34,7 @@ export interface SettingsOptionsResult {
 
 
 export interface SettingsReadOwner {
+  updatePackage(request: { cwd: string; source: string; version: string; reason: string }, requester: Actor, confirm?: ConfirmChange): Promise<ChangeResult>;
   readonly schema: SettingsSchema;
   readonly modelRuntime: ModelRuntime;
   readonly admitModelChoice: (runtime: ModelRuntime, provider: string, id: string) => Promise<void>;

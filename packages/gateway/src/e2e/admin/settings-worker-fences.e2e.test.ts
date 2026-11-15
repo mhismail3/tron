@@ -92,10 +92,16 @@ async function delegateSettled(f: Awaited<ReturnType<typeof gateway>>, home: Awa
 const defaultTrustOnDisk = async (agentDir: string) => (JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8")) as Record<string, unknown>).defaultProjectTrust;
 
 describe("settings worker changes and Session fences", () => {
-  it("Home applies routine model/thinking changes to a settled worker without a client opening that worker", async () => {
+  it("a worker cannot update packages; Home changes its routine settings without a client opening it", async () => {
     const f = await gateway();
-    const { home, homeSays } = await homeScript(f);
+    const { home, homeSays, workerResult } = await homeScript(f, { taskId: "settled-worker", call: { name: "settings", args: {
+      action: "update", source: "npm:worker-refusal-probe", version: "1.2.3", reason: "A worker must not install a package",
+    } } });
     const workerSessionId = await delegateSettled(f, home, homeSays, "settled-worker");
+    expect(workerResult()).toMatchObject({ isError: true, text: expect.stringContaining("Package updates are available only in Tron Home") });
+    const settled = await f.registry.acquire(workerSessionId);
+    expect(settled.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
+    expect((await f.settingsChanges.history({}, { kind: "ui", id: "maintainer" })).entries.filter(entry => entry.action)).toEqual([]);
 
     const REASONING = { provider: f.model.provider, id: TASK_REASONING_MODEL_ID };
     const applied = await homeSays("Switch settled-worker to reasoning", "settings", { action: "change", taskId: "settled-worker", reason: "Harder step on resume",
