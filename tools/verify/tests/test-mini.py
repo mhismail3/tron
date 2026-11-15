@@ -345,7 +345,7 @@ raise SystemExit(75 if '--incomplete' in sys.argv else 0)
                 self.assertNotIn('mini: artifacts:', result.stdout)
                 self.assertNotIn('outside target must not be copied', result.stdout + result.stderr)
         relay = self.temporary / 'artifact-relay.py'
-        relay.write_text('''import base64, hashlib, io, os, shlex, subprocess, sys, tarfile
+        relay.write_text('''import base64, hashlib, io, json, os, shlex, subprocess, sys, tarfile
 os.setsid()
 command = sys.argv[1]
 if shlex.split(command)[-2:-1] != ['remote']:
@@ -353,7 +353,26 @@ if shlex.split(command)[-2:-1] != ['remote']:
 child = subprocess.run(['/bin/sh', '-c', command], stdout=subprocess.PIPE)
 lines = child.stdout.splitlines(keepends=True)
 mode = os.environ['MINI_ARTIFACT_DAMAGE']
-if mode in ('relative-path', 'absolute-path', 'link'):
+if mode.startswith('receipt-'):
+    fields = [line.split(b' ', 3) for line in lines]
+    original = b''.join(base64.b64decode(item[3]) for item in fields
+                        if len(item) == 4 and item[0] == b'@@tron-mini' and item[2] == b'artifact')
+    with tarfile.open(fileobj=io.BytesIO(original), mode='r:gz') as bundle:
+        receipt = json.loads(bundle.extractfile('receipt.json').read())
+    if mode == 'receipt-null':
+        receipt = None
+    elif mode == 'receipt-list':
+        receipt = []
+    else:
+        del receipt['commit' if mode == 'receipt-no-commit' else 'lane']
+    data = json.dumps(receipt).encode()
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode='w:gz') as bundle:
+        member = tarfile.TarInfo('receipt.json')
+        member.size = len(data)
+        bundle.addfile(member, io.BytesIO(data))
+    payload = buffer.getvalue()
+elif mode in ('relative-path', 'absolute-path', 'link'):
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode='w:gz') as bundle:
         member = tarfile.TarInfo('../../../../artifact-escape' if mode == 'relative-path' else
@@ -388,12 +407,15 @@ sys.exit(child.returncode)
         prefix, separator, _ = SSH.rpartition('cd "$MINI_HOME"')
         self.assertTrue(separator)
         ssh.write_text(prefix + 'cd "$MINI_HOME" && HOME="$MINI_HOME" exec /usr/bin/python3 "$MINI_ARTIFACT_RELAY" "$*"\n')
-        for mode in ('digest', 'malformed', 'truncated', 'relative-path', 'absolute-path', 'link'):
+        for mode in ('digest', 'malformed', 'truncated', 'relative-path', 'absolute-path', 'link',
+                     'receipt-null', 'receipt-list', 'receipt-no-commit', 'receipt-no-lane'):
             with self.subTest(transport=mode):
                 result = self.lane('verify', '--changed', env={**self.env, 'MINI_ARTIFACT_RELAY': str(relay),
                                    'MINI_ARTIFACT_DAMAGE': mode, 'MINI_ARTIFACT_ESCAPE': str(self.temporary / 'artifact-escape')})
                 self.assertEqual(result.returncode, NO_RESULT, result.stdout + result.stderr)
                 self.assertIsNotNone(self.reader().no_result_reason(result.returncode, result.stdout + result.stderr))
+                if mode.startswith('receipt-'):
+                    self.assertIn('mini artifact receipt does not match this submission', result.stderr)
                 self.assertNotIn('mini: artifacts:', result.stdout)
                 self.assertNotIn('mini: lane exit 0', result.stdout)
                 self.assertFalse((self.temporary / 'artifact-escape').exists())

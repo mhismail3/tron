@@ -265,7 +265,7 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
                         raise ValueError('mini artifact archive digest mismatch')
                     unpack_artifacts(archive, artifacts)
                     receipt = json.loads((artifacts / 'receipt.json').read_text())
-                    if receipt['commit'] != sha or receipt['lane'] != lane:
+                    if not isinstance(receipt, dict) or receipt.get('commit') != sha or receipt.get('lane') != lane:
                         raise ValueError('mini artifact receipt does not match this submission')
                     artifacts_received = True
                     archive.unlink()
