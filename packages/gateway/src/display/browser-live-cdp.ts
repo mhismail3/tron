@@ -54,6 +54,12 @@ function admitBrowserJPEG(data: Buffer): CapturedBrowserFrame | undefined {
   }
 }
 
+export class BrowserAttachError extends Error {
+  constructor(readonly reason: "browser_consent_required" | "browser_identity_unavailable") {
+    super(`${reason}: Chrome did not admit the live browser identity connection`);
+  }
+}
+
 export interface PinnedBrowserCDP {
   readonly targetId: string;
   readonly active: boolean;
@@ -71,20 +77,21 @@ export function pinBrowserCDP(input: {
   return new Promise((resolve, reject) => {
     let finished = false;
     let pinned = false;
-    const end = (): void => {
+    const end = (cause: "browser_consent_required" | "browser_identity_unavailable" = "browser_identity_unavailable"): void => {
       if (finished) return;
       finished = true;
       clearTimeout(timer);
-      input.signal.removeEventListener("abort", end);
+      input.signal.removeEventListener("abort", abort);
       socket.terminate();
       if (pinned) input.onEnd();
-      else reject(new Error("browser_consent_required: Chrome did not admit a browser identity connection"));
+      else reject(input.signal.aborted ? input.signal.reason : new BrowserAttachError(cause));
     };
-    const timer = setTimeout(end, 1_000);
+    const abort = (): void => end();
+    const timer = setTimeout(() => end("browser_consent_required"), 1_000);
     timer.unref();
-    input.signal.addEventListener("abort", end, { once: true });
-    socket.once("close", end);
-    socket.once("error", end);
+    input.signal.addEventListener("abort", abort, { once: true });
+    socket.once("close", () => end());
+    socket.once("error", () => end());
     socket.once("open", () => {
       if (finished) return;
       socket.send(JSON.stringify({ id: 1, method: "Target.getTargetInfo" }), error => { if (error) end(); });

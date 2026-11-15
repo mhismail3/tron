@@ -125,6 +125,7 @@ it("K3.toolResultProjection binds Chrome's consent endpoint to a retained browse
     await waitFor(() => server.clients.size === 1, "the pending identity handshake");
     views.beginSessionLoad(sessionId);
     const cancelled = await loading as { details: Record<string, unknown> };
+    expect(cancelled).toBe(result);
     expect(cancelled.details.browserLiveView).toBeUndefined();
     expect(admitBrowserToolReference("agent_browser", "attach", cancelled.details, sessionId)).toBeUndefined();
     await waitFor(() => server.clients.size === 0, "load retirement cancels the pending browser handshake");

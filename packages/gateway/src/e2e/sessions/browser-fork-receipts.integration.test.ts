@@ -112,6 +112,7 @@ describe("installed agent-browser fork receipts", () => {
         fauxAssistantMessage([fauxToolCall("agent_browser", { args: ["get", "title"] }, { id: "fixture-title" })], { stopReason: "toolUse" }),
         fauxAssistantMessage([fauxToolCall("agent_browser", { args: ["get", "cdp-url"] }, { id: "fixture-view" })], { stopReason: "toolUse" }),
         fauxAssistantMessage([fauxToolCall("agent_browser", { args: ["tab", "close"] }, { id: "fixture-close" })], { stopReason: "toolUse" }),
+        fauxAssistantMessage([fauxToolCall("agent_browser", { args: ["close"] }, { id: "fixture-detach" })], { stopReason: "toolUse" }),
         fauxAssistantMessage("complete"),
       ]);
       const trust = new TrustService(agentDir);
@@ -130,12 +131,15 @@ describe("installed agent-browser fork receipts", () => {
       const model = faux.getModel();
       await slot.setModel(model.provider, model.id);
       await slot.prompt("Attach to the isolated local Chrome fixture, open and read only the fixture tab, then close it");
-      await waitFor(() => !slot.isBusy && toolResult(slot, "fixture-close") !== undefined, "real attached browser task completion");
-      for (const id of ["attach", "fixture-open", "fixture-title", "fixture-view", "fixture-close"]) {
+      await waitFor(() => !slot.isBusy && toolResult(slot, "fixture-detach") !== undefined, "real attached browser task completion");
+      for (const id of ["attach", "fixture-open", "fixture-title", "fixture-view", "fixture-close", "fixture-detach"]) {
         expect(toolResult(slot, id), id).toMatchObject({ isError: false });
       }
       expect(JSON.stringify(toolResult(slot, "fixture-title"))).toContain("Consented attach fixture");
+      expect((await cli("get", "cdp-url")).cdpUrl).toBe(upstreamEndpoint);
+      expect((await cli("get", "title")).title).toBe("Consented attach fixture");
       const observed = toolResult(slot, "fixture-view");
+      expect(observed.details.data.cdpUrl).toBe(endpoint);
       const reference = admitBrowserToolReference("agent_browser", "fixture-view", observed.details, slot.id);
       expect(reference).toBeDefined();
       const descriptor = reference!.descriptor;

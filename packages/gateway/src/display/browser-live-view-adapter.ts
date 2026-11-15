@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { GatewayError } from "../errors.js";
+import { BrowserAttachError } from "./browser-live-cdp.js";
 import { browserCDPEndpoint, BrowserLiveViewRegistry } from "./browser-live-view.js";
 import { sealBrowserToolReference } from "./browser-tool-reference.js";
 import type { ExtensionOwner } from "../protocol/types.js";
@@ -73,8 +74,12 @@ export function observeTrustedAgentBrowserResult(input: {
         tronBrowserReference: sealBrowserToolReference(input.sessionId, input.toolCallId, descriptor, !bound || binding.state === "active") },
     };
   };
-  const failed = (error: unknown): unknown => ({ ...result, details: { ...details,
-    browserLiveViewError: error instanceof GatewayError ? error.message : "browser_consent_required: Chrome did not admit the live browser identity connection" } });
+  const failed = (error: unknown): unknown => {
+    if (!input.views.isLoadActive(input.sessionId, input.loadToken)) return input.result;
+    return error instanceof GatewayError || error instanceof BrowserAttachError
+      ? { ...result, details: { ...details, browserLiveViewError: error.message } }
+      : input.result;
+  };
   try {
     const registration = {
       sessionId: input.sessionId,
