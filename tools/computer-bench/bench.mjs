@@ -58,6 +58,7 @@ async function runTool(name, options, ctx) {
   const tool = { name, probe, tasks: {} };
   if (!probe.ok) return tool;
   const ids = Object.keys(adapter.tasks).filter((id) => !options.only || options.only.includes(id));
+  if (!ids.length) return tool;
   const setupStarted = performance.now();
   try { await adapter.setup(ctx); } catch (error) { tool.probe = { ...probe, ok: false, reason: `setup failed: ${error.message}` }; await adapter.teardown().catch(() => {}); return tool; }
   tool.setupMs = Math.round(performance.now() - setupStarted);
