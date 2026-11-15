@@ -17,11 +17,9 @@ import type { ProfileStore } from "../src/modules/home/profile-store.js";
 import { homeOwnerOf, projectsOwnerOf } from "./gateway-registry.js";
 import { HookResources } from "../src/admin/hook-resources.js";
 import { PackageService } from "../src/admin/package-service.js";
-import { McpAdminService } from "../src/admin/mcp-admin-service.js";
 import { SettingsInventoryReader } from "../src/admin/settings-inventory.js";
 import type { SettingsInventorySource } from "../src/kernel/settings/tool-contract.js";
 import type { ModuleHost } from "../src/kernel/host/module-host.js";
-import { piCliBundle } from "../src/kernel/pi/packages.js";
 
 export function settingsInventorySource(input: { agentDir: string; trust: TrustService; modules: ModuleHost; mcp: McpAdminService }): SettingsInventorySource {
   return new SettingsInventoryReader(new HookResources(input.agentDir, input.trust), new PackageService(input.agentDir, input.trust, () => {}), input.mcp, input.trust, input.modules);
