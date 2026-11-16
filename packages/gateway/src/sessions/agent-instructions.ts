@@ -37,12 +37,12 @@ interface AgentInstructionsInput {
   tronContext: string;
   customPrompt?: { text: string; path?: string };
   append: { text: string; path?: string }[];
-  contextFiles: { path: string; content: string }[];
+  contextFiles: { path: string; content: string; global?: boolean }[];
   skills: { name: string; description: string; filePath: string; disableModelInvocation: boolean; sourceInfo: SourceInfoLike }[];
   tools: { name: string; promptGuidelines?: string[]; sourceInfo: SourceInfoLike }[];
 }
 
-const SESSION_SECTIONS = new Set(["preamble", "role", "tools", "rules", "docs", "addendum", "project_context", "skills", "cwd", "mcp_servers"]);
+const SESSION_SECTIONS = new Set(["preamble", "role", "tools", "rules", "docs", "addendum", "global_context", "skills", "project_context", "project_skills", "cwd", "mcp_servers"]);
 const OPEN_TAG = /\n\n<([a-z][a-z0-9_-]*)>\n/y;
 
 export function projectAgentInstructions(input: AgentInstructionsInput): AgentInstructions {
@@ -91,10 +91,9 @@ function splitPrompt(input: AgentInstructionsInput) {
   const preamble = prompt.slice(0, cursor);
   const known: Record<string, string | undefined> = {
     role: input.customPrompt?.text,
-    project_context: input.contextFiles.length === 0 ? undefined : [
-      "Project-specific instructions and guidelines:",
-      ...input.contextFiles.map(({ path, content }) => `<project_instructions path="${path}">\n${content}\n</project_instructions>`),
-    ].join("\n\n"),
+    global_context: contextText(input.contextFiles.filter(file => file.global)),
+    project_context: input.contextFiles.some(file => !file.global)
+      ? `Project-specific instructions and guidelines:\n\n${contextText(input.contextFiles.filter(file => !file.global))}` : undefined,
     addendum: input.append.length === 0 ? undefined : input.append.map((item) => item.text).join("\n\n"),
   };
   const blocks: { name: string; body: string }[] = [];
@@ -121,6 +120,11 @@ function splitPrompt(input: AgentInstructionsInput) {
   return { preamble, blocks, rest };
 }
 
+function contextText(files: AgentInstructionsInput["contextFiles"]): string | undefined {
+  return files.length === 0 ? undefined
+    : files.map(({ path, content }) => `<project_instructions path="${path}">\n${content}\n</project_instructions>`).join("\n\n");
+}
+
 function isBoundary(prompt: string, at: number): boolean {
   if (at === prompt.length) return true;
   OPEN_TAG.lastIndex = at;
@@ -143,11 +147,14 @@ function sectionEntries(
     }
     case "rules":
       return ruleEntries(body, input.tools);
+    case "global_context":
     case "project_context":
-      return input.contextFiles.map(({ path, content }) => ({ name: basename(path), path, text: content, source: { kind: "file", path } }));
+      return input.contextFiles.filter(file => Boolean(file.global) === (name === "global_context"))
+        .map(({ path, content }) => ({ name: basename(path), path, text: content, source: { kind: "file", path } }));
     case "addendum":
       return input.append.map(({ text, path }) => ({ ...(path ? { name: basename(path), path } : {}), text, source: path ? { kind: "file", path } : { kind: "unknown" } }));
     case "skills":
+    case "project_skills":
       return input.skills
         .filter((skill) => !skill.disableModelInvocation && body.includes(`<location>${escapeXml(skill.filePath)}</location>`))
         .map((skill) => ({ name: skill.name, path: skill.filePath, text: skill.description, source: sourceOf(skill.sourceInfo) }));

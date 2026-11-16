@@ -3,12 +3,12 @@
   "package": "@earendil-works/pi-coding-agent",
   "version": "1.5.1",
   "artifact": {
-    "path": "third_party/pi-coding-agent/pi-coding-agent-1.5.1-tron.3.tgz",
-    "integrity": "sha512-fv89hSwmlIh5WIpjakuHdmttsTj+MfY+iD6k4JtjuSPN5Vg1EhFs5WLSCzOUe5/19sTlrqv93M2cM1Q0mdpoog=="
+    "path": "third_party/pi-coding-agent/pi-coding-agent-1.5.1-tron.4.tgz",
+    "integrity": "sha512-NvYkkHep1cn8NhPH7II/bQ2/E5IyI1NEyeEC9c4R5MjSY+f7ABQkXBv0xEWzp81dYSu+Snc+DQpNqVvvfP7FJQ=="
   },
   "patch": {
     "path": "third_party/pi-coding-agent/tron.patch",
-    "sha256": "5326f462aa8d7e7d63e0543527359635ceb8167f7978e01a3c0c36f12752a270"
+    "sha256": "0aa45eaa80525459fbb94a2777d4a6ad63c6e27121c5c3adb94ba13d56fbbb8f"
   },
   "license": {
     "path": "third_party/pi-coding-agent/LICENSE",
