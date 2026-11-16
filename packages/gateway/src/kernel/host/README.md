@@ -108,7 +108,11 @@ semantic form adapters, including their exact audited package admission.
   not a best-effort observer. `operatingContext` is the module's actual formatter;
   preview calls it after the awaited root description and trust fences, using live tools.
   `commonCore` renders the fixed core (`tron-context.ts`) that every runtime receives as
-  the SDK host `preamble` at creation.
+  the SDK host `preamble` at creation. `context-index.ts` is the one index renderer:
+  `<index name open kind>` with one `- id: description | locator` row per item, id-sorted,
+  whitespace collapsed and escaped. A description over 160 characters or an index over its
+  byte budget throws; nothing is truncated or paraphrased. Overflow listing arrives with the
+  first caller whose items can exceed their budget.
 - **Hooks (D6).** A `policy` hook has one implementer; `observers` hooks run every
   implementer in composition order. Dispatch reads each module's `hooks` at the
   call, never a copy taken at start. Notification hooks resolve optional owner
