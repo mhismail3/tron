@@ -1318,6 +1318,11 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           }
         },
         compactionStream: compactionPolicy.wrap.bind(compactionPolicy),
+        frame: {
+          activation: () => homeRequestPolicy?.turnFrame()?.kind ?? (taskWorker ? "task"
+            : currentInvocationContext()?.operationId?.startsWith("automation:") ? "automation" : "user"),
+          facts: async () => await homeRequestPolicy?.turnFrame()?.facts,
+        },
         ...(this.dependencies.requestRecord ? { record: outcome => this.dependencies.requestRecord?.({ sessionId: this.id, kind: taskWorker ? "worker" : profile.name, ...outcome }) } : {}),
         ...(homeRequestPolicy ? {
           policyStream: baseStream => homeRequestPolicy.wrapStreamFunction(baseStream),

@@ -3,12 +3,12 @@
   "package": "@earendil-works/pi-coding-agent",
   "version": "1.5.1",
   "artifact": {
-    "path": "third_party/pi-coding-agent/pi-coding-agent-1.5.1-tron.5.tgz",
-    "integrity": "sha512-oC0BMP1MXfEWd1QQZcn26ibBXsiogRXYOynKf6XoDusyXjFTAz75Os3oj1DQCFZrEUM+izQpXY22H8Ou7IQXrQ=="
+    "path": "third_party/pi-coding-agent/pi-coding-agent-1.5.1-tron.6.tgz",
+    "integrity": "sha512-9h/qXze0W5jxId0B36PoAlh2LbGWiCAyx2Q95c2h/yPtCENroFgfIxiB/ju5Qd4+qfQCCDXPXUyC1SFP3uGuLQ=="
   },
   "patch": {
     "path": "third_party/pi-coding-agent/tron.patch",
-    "sha256": "a0d35bb2207f7c8086cd493019b4d9995cb9fff2323655b0ae4ae2b055dc7f4a"
+    "sha256": "9064f52385d7d03b636521b665f9e7bed1bab6b688a6a252311118ed30a2c790"
   },
   "license": {
     "path": "third_party/pi-coding-agent/LICENSE",
@@ -31,5 +31,5 @@
     "node": "22.22.0",
     "npm": "10.9.4"
   },
-  "removeWhen": "When a published @earendil-works/pi-coding-agent release provides projectDir (or a reviewed equivalent the Gateway adopts), keeps transcript-held extension prompt sections in the idle session.systemPrompt (#1312), and ends a run start whose preflightResult(\"started\") callback throws without leaving the session busy (#1340), serializes ModelRuntime config reads so readiness cannot overtake a detached registration refresh (#2199), preserves explicitly requested pending tool names when a host narrows the restored loadout before MCP registration (#2181), bundles undici 8.12.4 or later in both child entry points (#2470), and prevents the read cancellation-window crash fixed upstream by https://github.com/earendil-works/pi/pull/12025 (#2529), and lets a host supply its system-prompt preamble, order global context and skills before project sections, and render the skills sections (context 3.1-3.3b), remove the patch as the Gateway README section 'Tron-patched pi-coding-agent' lists, then npm run update:pi-sdk to that release."
+  "removeWhen": "When a published @earendil-works/pi-coding-agent release provides projectDir (or a reviewed equivalent the Gateway adopts), keeps transcript-held extension prompt sections in the idle session.systemPrompt (#1312), and ends a run start whose preflightResult(\"started\") callback throws without leaving the session busy (#1340), serializes ModelRuntime config reads so readiness cannot overtake a detached registration refresh (#2199), preserves explicitly requested pending tool names when a host narrows the restored loadout before MCP registration (#2181), bundles undici 8.12.4 or later in both child entry points (#2470), and prevents the read cancellation-window crash fixed upstream by https://github.com/earendil-works/pi/pull/12025 (#2529), and lets a host supply its system-prompt preamble, order global context and skills before project sections, render the skills sections and defer prompt sections of tools enabled mid-run to the next run (context 3.1-3.4), remove the patch as the Gateway README section 'Tron-patched pi-coding-agent' lists, then npm run update:pi-sdk to that release."
 }

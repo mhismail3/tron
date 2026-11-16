@@ -5,6 +5,7 @@ import { installAgentPipeline, wrapModelRuntimeStream, type AgentPipelineStages 
 import { getSystemMessageText, lazyStream, type AssistantMessageEvent, type AssistantMessageEventStream, type Context } from "../pi/ai.js";
 import { recordingStream, type RequestOutcome } from "./request-record.js";
 import { projectInjectedMessages } from "../host/injected-text.js";
+import { turnFrameStream, type TurnFrameSource } from "./turn-frame.js";
 
 async function* abortAwareEvents(
   source: AssistantMessageEventStream,
@@ -81,6 +82,7 @@ interface RunRequestPipelineOptions {
   settingsApplied(): void;
   compactionStream(stream: StreamFn): StreamFn;
   policyStream?: (stream: StreamFn) => StreamFn;
+  frame: TurnFrameSource;
   record?: (outcome: RequestOutcome) => void;
   outer?: AgentPipelineStages["outer"];
   finishTurn?: AgentPipelineStages["finishTurn"];
@@ -130,7 +132,8 @@ export class RunRequestPipeline {
             ...(settings.retry?.provider?.maxRetryDelayMs === undefined ? {} : { maxRetryDelayMs: settings.retry.provider.maxRetryDelayMs }),
           }));
         };
-        const sent = abortAwareStream(options.policyStream ? options.policyStream(baseStream) : baseStream);
+        const framed = turnFrameStream(options.frame, baseStream);
+        const sent = abortAwareStream(options.policyStream ? options.policyStream(framed) : framed);
         return options.compactionStream(sharedPrefixStream(options.record ? recordingStream(sent, options.record) : sent));
       },
       ...(options.outer ? { outer: options.outer } : {}),

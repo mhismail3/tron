@@ -10,7 +10,7 @@ import { homeProfileTool } from "./home-profile-tool.js";
 import { markHomeMemoryCache, type HomeSystemPrompt } from "./home-request-policy.js";
 import type { ProfileStore } from "./profile-store.js";
 import { abortableRead } from "../../util/abortable-read.js";
-import { HOME_TASK_THINKING_LEVELS, type HomeTaskWorkerChoice } from "./home-task-worker-choice.js";
+import { HOME_TASK_THINKING_LEVELS } from "./home-task-worker-choice.js";
 import type { ConfirmChange } from "../../kernel/settings/tool-contract.js";
 import { nativeChangeConfirmer, type NativeChangeRequest } from "../../kernel/host/native-change.js";
 import { homeToolAvailable } from "./home-runtime-policy.js";
@@ -120,17 +120,9 @@ export function admitHomeTaskToolRequest(value: unknown): HomeTaskToolRequest {
   return request;
 }
 
-const HOME_TURN_STATE_OPEN = "<turn-state>";
-const HOME_TURN_STATE_CLOSE = "</turn-state>";
-
-export async function homeSystemPrompt(base: string, knowledge: () => ProfileStore | undefined, choice: Required<HomeTaskWorkerChoice>, activation: "user" | "wake"): Promise<HomeSystemPrompt> {
+export async function homeSystemPrompt(base: string, knowledge: () => ProfileStore | undefined, activation: "user" | "wake"): Promise<HomeSystemPrompt> {
   const profile = await homeProfileTurnState(knowledge, activation);
-  return {
-    instructions: `${base}\n\n${HOME_OPERATING_CONTEXT}`,
-    profile: PROFILE_AREAS_SECTION,
-    profileNotes: profile.notes,
-    turn: [HOME_TURN_STATE_OPEN, `Current Home chat model: ${choice.model.provider}/${choice.model.id}`, `Current Home thinking level: ${choice.thinking}`, profile.text, HOME_TURN_STATE_CLOSE].join("\n"),
-  };
+  return { instructions: `${base}\n\n${HOME_OPERATING_CONTEXT}`, profile: PROFILE_AREAS_SECTION, profileNotes: profile.notes, turn: profile.text };
 }
 
 export function createTronHomeExtension(memoryTools: () => HomeMemoryToolAccess | undefined,

@@ -151,6 +151,15 @@ actual K3 host; native frames do not select product modules or keep another list
   cache mark to the end of the sections every project of a role shares (core through user-scope
   skills) by splitting the marked system block there, so another project's first request
   reads that prefix; the mark count is unchanged. `shared-prefix.integration.test.ts` proves it.
+- `turn-frame.ts`: the one `<turn-frame>` per provider request, appended as a request-only user
+  block after the newest user input or tool results and never written to JSONL: the Gateway host's
+  local date and timezone, model and thinking, activation (`user`, `wake`, `automation`, `task`), tools
+  declared since the runtime's previous request, context layers whose system sections or project
+  files changed since then (none on a runtime's first request), and Home's profile turn facts. For
+  Anthropic the request's last cache mark stays on the input, before the frame, so the next request
+  reads the whole history from cache. Pi defers prompt-section changes from tools enabled mid-run to
+  the next run, so the system text stays byte-identical within a run and new declarations follow the
+  earlier ones. `turn-frame.integration.test.ts` proves both.
 - `request-record.ts`: one content-free record per provider request of a Gateway session,
   taken outside the abort-aware stream and after every Pi and Gateway payload hook, so its
   stop reason is the run's. The request is read as units in cache order: each `tools` item;
