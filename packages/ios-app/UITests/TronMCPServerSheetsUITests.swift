@@ -7,14 +7,12 @@ final class TronMCPServerSheetsUITests: XCTestCase {
         let app = launch("mcp-held-add")
         defer { app.terminate() }
         fillAdd(app, name: "original-server", token: "fixture-original-token")
-        let submitting = app.buttons.matching(identifier: "Add Server")
-        submitting.element(boundBy: submitting.count - 1).tap()
+        submitAddAndApprove(app)
         XCTAssertTrue(counters(app, owner: "original", contain: "add:1"))
         replace(app.textFields["For example, calendar"], with: "newer-draft")
         replace(app.secureTextFields["Paste token"], with: "fixture-newer-token")
         XCUIDevice.shared.press(.home); app.activate()
-        XCTAssertTrue(counters(app, owner: "original", contain: "token:1"))
-        XCTAssertTrue(counters(app, owner: "original", contain: "retargets:0"), "The follow-up must use the accepted payload, not the newer draft")
+        XCTAssertTrue(counters(app, owner: "original", contain: "add:1 token:1 retargets:0 released:1"), "The approved change must carry the submitted server and its own bearer reference, not the newer draft")
         XCTAssertTrue(app.textFields["For example, calendar"].exists, "Accepted completion must not dismiss newer unsent input")
         XCTAssertEqual(app.textFields["For example, calendar"].value as? String, "newer-draft")
         XCTAssertNotEqual(app.secureTextFields["Paste token"].value as? String, "Paste token", "The newer bearer-token draft must not be cleared")
@@ -27,8 +25,7 @@ final class TronMCPServerSheetsUITests: XCTestCase {
         let app = launch("mcp-replace-mac")
         defer { app.terminate() }
         fillAdd(app, name: "original-server", token: "fixture-original-token")
-        let submitting = app.buttons.matching(identifier: "Add Server")
-        submitting.element(boundBy: submitting.count - 1).tap()
+        submitAddAndApprove(app)
         XCTAssertTrue(counters(app, owner: "original", contain: "add:1"))
         replace(app.textFields["For example, calendar"], with: "unsent-old-mac-draft")
         XCUIDevice.shared.press(.home); app.activate()
@@ -36,8 +33,7 @@ final class TronMCPServerSheetsUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [replacement], timeout: 15), .completed)
         let oldForm = app.textFields["For example, calendar"]
         XCTAssertFalse(oldForm.waitForExistence(timeout: 2), "A real authority change closes the credential form instead of retargeting it")
-        XCTAssertTrue(counters(app, owner: "original", contain: "released:1"))
-        XCTAssertTrue(counters(app, owner: "original", contain: "token:0"))
+        XCTAssertTrue(counters(app, owner: "original", contain: "add:1 token:1 retargets:0 released:1"))
         XCTAssertTrue(counters(app, owner: "replacement", contain: "token:0"))
         fillAdd(app, name: "replacement-draft", token: "fixture-replacement-token")
         XCTAssertEqual(app.textFields["For example, calendar"].value as? String, "replacement-draft")
@@ -173,6 +169,15 @@ final class TronMCPServerSheetsUITests: XCTestCase {
         app.textFields["For example, calendar"].tap(); app.textFields["For example, calendar"].typeText(name)
         app.textFields["https://server.example"].tap(); app.textFields["https://server.example"].typeText("https://example.test/mcp")
         app.secureTextFields["Paste token"].tap(); app.secureTextFields["Paste token"].typeText(token)
+    }
+    @MainActor private func submitAddAndApprove(_ app: XCUIApplication) {
+        let submitting = app.buttons.matching(identifier: "Add Server")
+        submitting.element(boundBy: submitting.count - 1).tap()
+        XCTAssertTrue(counters(app, owner: "original", contain: "token:1"))
+        let approve = app.buttons["change-review-approve"]
+        XCTAssertTrue(approve.waitForExistence(timeout: 10), "Adding a server shows the shared change card: \(app.debugDescription)")
+        XCTAssertTrue(counters(app, owner: "original", contain: "add:0"), "Nothing is written before the card is approved")
+        approve.tap()
     }
     @MainActor private func replace(_ field: XCUIElement, with text: String) {
         let app = XCUIApplication()

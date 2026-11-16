@@ -3585,7 +3585,7 @@ extension AppModel {
     }
 
     func mutateMCPAdmin(_ method: String, parameters: [String: JSONValue]) async throws -> JSONValue {
-        let allowed = ["mcp.add", "mcp.remove", "mcp.update", "mcp.logout", "mcp.token.set", "mcp.auth.start", "mcp.auth.cancel"]
+        let allowed = ["mcp.logout", "mcp.token.set", "mcp.auth.start", "mcp.auth.cancel"]
         guard allowed.contains(method) else {
             throw GatewayFailure(code: "invalid_request", message: "Unsupported MCP administration operation.", retryable: false, details: nil)
         }
