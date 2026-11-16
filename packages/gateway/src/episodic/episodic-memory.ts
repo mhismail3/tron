@@ -144,8 +144,10 @@ export class EpisodicMemory {
     memory.storeKey = storeKey;
     try {
       let snapshot: EpisodicStoreSnapshot;
+      let layout: Awaited<ReturnType<EpisodicStore["readLayout"]>>;
       try {
         snapshot = await memory.store.read();
+        layout = await memory.store.readLayout();
         await memory.store.cleanupOrphans();
       } catch (error) {
         if (error instanceof EpisodicMemoryError && (error.kind === "invalid-store" || error.kind === "unsafe-store")) {
@@ -171,7 +173,6 @@ export class EpisodicMemory {
           counts: { bytes: snapshot.recoveredTornBytes },
         });
       }
-      const layout = await memory.store.readLayout();
       memory.frozen = layout !== undefined;
       if (!memory.frozen) memory.view = await memory.foldView([], false);
       await memory.repairOrphanedDependencies();
@@ -1068,8 +1069,12 @@ export class EpisodicMemory {
       }
       const part: EpisodicViewPart = { level, index: start / span, start, span };
       if (this.lineDigest(part) === digest) {
-        parts.push(part);
-        kept += 1;
+        if (span === 1 || this.nodes.has(nodeAddress(level, part.index))) kept += 1;
+        else {
+          split += 1;
+          reason ??= "missing-node";
+        }
+        keepBuilt(part);
       } else {
         split += 1;
         reason ??= "content";
@@ -1104,6 +1109,8 @@ export class EpisodicMemory {
     if (!this.frozen || this.messages.size === 0) return;
     await this.enqueueAppend(async () => {
       const text = `${JSON.stringify({ lines: this.view.map(part => [part.start, part.span, this.lineDigest(part)]) })}\n`;
+      const current = new Set(this.view.map(part => `${part.start}+${part.span}`));
+      for (const key of this.lineDigests.keys()) if (!current.has(key)) this.lineDigests.delete(key);
       if (text === this.layoutWritten) return;
       try {
         await this.store.saveLayout(text);

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -509,7 +509,7 @@ describe("frozen layout recovery", () => {
     } finally { await again.dispose(); }
   }, 180_000);
 
-  it("rebuilds a corrupt, truncated, oversized or misshapen layout from history without touching it", async () => {
+  it("rebuilds a corrupt, truncated, oversized, misshapen or summary-less layout from history without touching it", async () => {
     const fx = await frozenRecoveryFixture("corrupt", 70);
     const built = await openMemory(fx, stubSummarizer, FROZEN_LIMITS);
     let original: string;
@@ -548,6 +548,19 @@ describe("frozen layout recovery", () => {
       expect(JSON.stringify((await readPersistedState(fx)).catalog), `${variant.name} leaves the catalog alone`).toBe(catalog);
       expect(await layoutLines(fx)).not.toHaveLength(0);
     }
+
+    const valid = (await layoutLines(fx)).find(([, span]) => span > 1)!;
+    const snapshot = await new EpisodicStore(fx.workspace, fx.sessionId, EPISODIC_DEFAULTS.maxStoreLineBytes).read();
+    const level = Math.log2(valid[1]);
+    await appendFile(fx.nodesPath, `${JSON.stringify({ revision: snapshot.highestRevision + 1, generation: Math.max(snapshot.state!.generation, snapshot.highestGeneration) + 1, part: 0, parts: 1, nodes: (valid[0] * 32 + level).toString(36) })}\n`);
+    fx.diagnostics.length = 0;
+    const missing = await openMemory(fx, stubSummarizer, FROZEN_LIMITS);
+    try {
+      expect(fx.diagnostics.filter(record => record.event === "episodic.layout-rebuilt").map(record => record.reason), "a kept line whose summary is gone").toEqual(["missing-node"]);
+      expect(missing.status().view.unbuilt, "no multi-message line enters the view without its summary").toBe(0);
+      await assertRecoveredView(fx, missing, 140);
+    } finally { await missing.dispose(); }
+    expect(await sha256File(fx.sessionFile)).toBe(history);
 
     await rm(layoutPath);
     await writeFile(join(fx.root, "elsewhere.json"), text, { mode: 0o600 });

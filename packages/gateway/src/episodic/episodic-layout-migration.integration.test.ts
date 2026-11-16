@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { appendFile, copyFile, cp, lstat, mkdir, mkdtemp, open, readdir, readFile, rename, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
+import { syncDurably } from "../foundation/durable-json.js";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -128,7 +129,7 @@ it("kills the migration before every file-system step and leaves v2 live and unt
   }
 }, 600_000);
 
-it("backs up every store file, and refuses a re-run, a changed store and a backup inside the home before any switch", async () => {
+it("backs up every store file, and refuses a re-run, a changed or racing store, an uninitialized store and a backup inside the home before any switch", async () => {
   const fx = await base("refusals");
   await expect(applyLayoutMigration(await planLayoutMigration(fx.home, fx.homeId), join(fx.home, "backup"), process.ppid)).rejects.toThrow(/outside the Tron home/u);
   await expect(stat(join(fx.home, "backup"))).rejects.toMatchObject({ code: "ENOENT" });
@@ -138,8 +139,25 @@ it("backs up every store file, and refuses a re-run, a changed store and a backu
   await writeFile(join(fx.storeRoot, "state.json"), `${(await readFile(join(fx.storeRoot, "state.json"), "utf8")).trimEnd()} \n`, { mode: 0o600 });
   const touched = await digests(fx.storeRoot);
   expect(touched).not.toEqual(planned);
-  await expect(applyLayoutMigration(plan, join(fx.root, "backup-changed"), process.ppid)).rejects.toThrow(/differs from the store|changed during migration/u);
+  await expect(applyLayoutMigration(plan, join(fx.root, "backup-changed"), process.ppid)).rejects.toThrow(/differs from the store/u);
   expect(await digests(fx.storeRoot), "a refused migration switches nothing").toEqual(touched);
+
+  const racing = { lstat, readdir, copyFile, mkdir, open, rename, rm, syncDurably,
+    writeFile: (async (...args: Parameters<typeof writeFile>) => {
+      await appendFile(join(fx.storeRoot, "catalog.jsonl"), " ");
+      return writeFile(...args);
+    }) as typeof writeFile };
+  await expect(applyLayoutMigration(await planLayoutMigration(fx.home, fx.homeId), join(fx.root, "backup-racing"), process.ppid, racing)).rejects.toThrow(/changed during migration/u);
+  await expect(stat(join(fx.storeRoot, "layout.json")), "a store written during the backup is never switched").rejects.toMatchObject({ code: "ENOENT" });
+  await writeFile(join(fx.storeRoot, "catalog.jsonl"), (await readFile(join(fx.storeRoot, "catalog.jsonl"), "utf8")).trimEnd() + "\n", { mode: 0o600 });
+
+  await mkdir(join(fx.root, "inside"));
+  await symlink(fx.home, join(fx.root, "inside", "home-link"));
+  await expect(applyLayoutMigration(await planLayoutMigration(fx.home, fx.homeId), join(fx.root, "inside", "home-link", "backup"), process.ppid)).rejects.toThrow(/outside the Tron home/u);
+
+  const bare = await base("uninitialized");
+  await rm(join(bare.storeRoot, "initialized.json"));
+  await expect(planLayoutMigration(bare.home, bare.homeId)).rejects.toThrow(/no initialization record/u);
 
   const backup = join(fx.root, "backup");
   const fresh = await planLayoutMigration(fx.home, fx.homeId);

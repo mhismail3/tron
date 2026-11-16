@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { copyFile, lstat, mkdir, open, readdir, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { copyFile, lstat, mkdir, open, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readSecureJson } from "../foundation/secure-json.js";
 import { syncDurably } from "../foundation/durable-json.js";
@@ -65,7 +65,9 @@ export async function planLayoutMigration(home: string, homeId?: string): Promis
   }
   if (!/^[A-Za-z0-9._-]{1,160}$/u.test(homeId)) throw new Error("Invalid Home id");
   const storeRoot = join(tronHomePath(home, "workspace"), "state", "episodic", homeId);
-  return { home, homeId, storeRoot, ...(await inventory(storeRoot)) };
+  const planned = await inventory(storeRoot);
+  if (!planned.files.some(file => file.path === "initialized.json")) throw new Error("The memory store has no initialization record; the Gateway would refuse it, so it is not migrated");
+  return { home, homeId, storeRoot, ...planned };
 }
 
 async function syncPath(path: string, fileSystem: LayoutMigrationFileSystem): Promise<void> {
@@ -79,7 +81,7 @@ export async function applyLayoutMigration(plan: LayoutMigrationPlan, backup: st
   };
   assertLeaseOwner();
   backup = resolve(backup);
-  const inside = relative(plan.home, backup);
+  const inside = relative(await realpath(plan.home), join(await realpath(dirname(backup)), basename(backup)));
   if (!(inside === ".." || inside.startsWith("../") || isAbsolute(inside))) throw new Error("The backup must lie outside the Tron home");
   const workspace = new TronWorkspace(plan.home);
   await workspace.initialize();

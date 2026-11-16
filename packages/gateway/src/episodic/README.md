@@ -96,7 +96,8 @@ workspace record `state/workspace-state/episodic-initialized.json`.
   rollover (the admitted chapter count grew) is pending; the fold is that batched fit.
   Otherwise only recent lines (under 64 messages) merge, by `due`, once their bytes pass
   `3·VIEW/16`, down toward `5·VIEW/64`. A pending rollover lives in memory only; a lost
-  one degrades to the cap. The pump builds
+  one degrades to the cap. The cap bounds that measure, so the total can pass it while the
+  pump still builds recent parents (activations refuse a paused or blocked memory). The pump builds
   a node only when unbuilt, its children built and every view part before its end
   built (leaves in order); up to
   `JOBS` at once, refilled per completion; paid merges only while the view exceeds
@@ -171,9 +172,11 @@ workspace record `state/workspace-state/episodic-initialized.json`.
   and never trusted: each line's digest covers, per message, chapter, entry id, kind,
   omitted flag and `projectedDigest`. Open runs the node repairs first, then walks the
   lines from 0: the first gap, overlap, misaligned or past-catalog line stops the walk
-  and the rest of the catalog is appended through the rule; a line whose digest differs
-  is replaced by its built descendants; an unreadable, oversized, malformed or empty
-  file is rebuilt by the full fold; an unsafe one refuses the store. A rebuild logs
+  and the rest of the catalog is appended through the rule; a line whose digest differs,
+  or whose summary is gone (an invalidation through stored context runs), is replaced by
+  its built descendants, so no multi-message line enters the view unbuilt; an unreadable,
+  oversized, malformed or empty file is rebuilt by the full fold; an unsafe one, or an I/O
+  error other than a missing file, refuses the store like every store file. A rebuild logs
   `episodic.layout-rebuilt`; history and catalog are never written. Saves go through
   `ensureRoot` and the append queue (temp, fsync, rename, directory fsync) only for a
   frozen store holding messages, at the end of open, each ingest cut, each drain and
@@ -193,7 +196,7 @@ workspace record `state/workspace-state/episodic-initialized.json`.
 | Event | Level | Diagnosis |
 | --- | --- | --- |
 | `episodic.node-blocked` (`reason: source-unavailable`) | warning | Inspect `workspace/state/episodic/<homeId>/state.json` → `blocked.detail`; `Sealed Home source changed since ingestion` after a layout relocation means the session bytes and admitted cursor disagree. Prove the receipted header/body before rebinding; never reset memory or weaken the sealed-source guard. |
-| `episodic.layout-rebuilt` (`reason`: `unreadable`, `structure`, `past-catalog`, `content`; counts `kept`, `split`, `appended`) | warning | Saved layout lines that the catalog could not back were rebuilt from it; a crash or a store edited outside the Gateway. History and catalog are untouched; repeated reasons on every open mean saves are failing (look for `episodic.layout-unsaved`). |
+| `episodic.layout-rebuilt` (`reason`: `unreadable`, `structure`, `past-catalog`, `content`, `missing-node`; counts `kept`, `split`, `appended`) | warning | Saved layout lines that the catalog could not back were rebuilt from it; a crash or a store edited outside the Gateway. History and catalog are untouched; repeated reasons on every open mean saves are failing (look for `episodic.layout-unsaved`). |
 | `episodic.layout-unsaved` | warning | The frozen layout could not be saved (disk full, permissions); memory keeps running and the next open validates the older file. Free space or fix ownership of `layout.json`; never delete store files. |
 
 ## Entry points

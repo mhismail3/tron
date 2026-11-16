@@ -935,7 +935,7 @@ def main(argv: list[str]) -> int:
             script = "const m=await import(process.argv[1]); console.log(JSON.stringify(await m.applyLayoutMigration(await m.planLayoutMigration(process.argv[2]),process.argv[3],Number(process.argv[4]))));"
             script_args = [memory_home]
         if not module.is_file():
-            parser.error("Build the Gateway CLI before migrating memory")
+            parser.error("Build the Gateway CLI before repairing memory" if args.command == "repair-memory" else "Build the Gateway CLI before migrating memory")
         if args.apply and not args.backup:
             parser.error("--apply requires a new --backup directory")
         command = [str(ROOT / "scripts/tron-node"), "exec", "node", str(module), *module_args]
