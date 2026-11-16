@@ -1584,7 +1584,7 @@ def main(argv: list[str]) -> int:
                 continue
             label = f"tests: {group}"
             if skipped_group(group):
-                run.skipped(label, f"{len(files)} file(s) skipped by --skip {group.split('-')[0]}")
+                run.skipped(label, f"{len(files)} file(s) skipped by --skip {group if group in skip else group.split('-')[0]}")
                 continue
             if group in NOT_DRIVEN:
                 not_run.append(group)
