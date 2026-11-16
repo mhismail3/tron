@@ -27,7 +27,6 @@
     "Sources/UI/Terminal": {"name": "terminal", "layer": "L4"},
     "SwiftAppEngine": {"name": "swift-app-engine", "layer": "L3"},
     "SwiftAppUITests": {"name": "swift-app-ui-tests", "layer": "L5"},
-    "ViewTests": {"name": "view-tests", "layer": "L5"},
     "docs": {"name": "docs", "layer": "L5"}
   }
 }
