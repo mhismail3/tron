@@ -78,6 +78,7 @@ async function fixture(mcp = false) {
   vi.stubEnv("PI_OFFLINE", "1");
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({ retry: { enabled: false }, compaction: { enabled: false, keepRecentTokens: 1 } }));
   await writeFile(join(agentDir, "AGENTS.md"), "Global rule: applies everywhere.");
+  await writeFile(join(agentDir, "SYSTEM.md"), "System file rule.");
   await writeFile(join(agentDir, "APPEND_SYSTEM.md"), "Appended rule.");
   await writeFile(join(agentDir, "extensions", "fixture.ts"), FIXTURE_EXTENSION);
   await writeFile(join(agentDir, "skills", "fixture-skill", "SKILL.md"), "---\nname: fixture-skill\ndescription: Fixture skill <with> markup & more.\n---\nBody\n");
@@ -104,6 +105,7 @@ async function fixture(mcp = false) {
     } }));
   }
   const faux = fauxProvider({ provider: "instructions-fixture", tokensPerSecond: 100_000 });
+  await new TrustService(agentDir).set(cwd, true);
   const registry = await openRegistry(agentDir, tronHome, faux);
   const slot = await registry.create(cwd);
   const model = faux.getModel();
@@ -210,7 +212,7 @@ describe("Agent Instructions projection through the pinned runtime", () => {
     expect(during.text).toBe(received);
     for (const projection of [idle, during]) {
       expect(projection.sections.map(section => section.id)).toEqual(
-        ["preamble", "tools", "rules", "docs", "addendum", "global_context", "skills", "project_context", "cwd", "tron"],
+        ["preamble", "tools", "rules", "docs", "global_context", "skills", "project_context", "cwd", "tron"],
       );
       const tron = projection.sections.find(section => section.id === "tron")!;
       expect(tron.timing).toBe("turn");
@@ -229,9 +231,7 @@ describe("Agent Instructions projection through the pinned runtime", () => {
     expect(byId.get("project_context")!.entries).toEqual([
       { name: "AGENTS.md", path: join(f.cwd, "AGENTS.md"), text: HOSTILE_PROJECT_RULES, source: { kind: "file", path: join(f.cwd, "AGENTS.md") } },
     ]);
-    expect(byId.get("addendum")!.entries).toEqual([
-      { name: "APPEND_SYSTEM.md", path: join(f.agentDir, "APPEND_SYSTEM.md"), text: "Appended rule.", source: { kind: "file", path: join(f.agentDir, "APPEND_SYSTEM.md") } },
-    ]);
+    for (const ignored of ["System file rule.", "Appended rule."]) expect(during.text).not.toContain(ignored);
     const tools = new Map(byId.get("tools")!.entries!.map(entry => [entry.name, entry]));
     expect(tools.get("read")).toMatchObject({ text: "Read file contents", source: { kind: "pi" } });
     expect(tools.get("fixture_tool")).toMatchObject({ text: "Fixture snippet", source: { kind: "local", scope: "user", path: join(f.agentDir, "extensions", "fixture.ts") } });

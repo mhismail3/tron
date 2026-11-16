@@ -33,8 +33,6 @@ export function homeSessionProfile(services: () => HomeSessionProfileServices): 
         try { return { agentsFiles: [{ path, content: readFileSync(path, "utf8") }] }; }
         catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return { agentsFiles: [] }; throw error; }
       },
-      systemPromptOverride: () => undefined,
-      appendSystemPromptOverride: () => [],
     },
     projectTrust: "never", projectSettings: false, managedSubagents: false, directBash: true,
     tools: [...HOME_TOOL_NAMES], modelRuntime: "gateway", acquireModelRuntime: () => services().runtime(),

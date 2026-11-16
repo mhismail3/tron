@@ -49,7 +49,7 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 ## Keys
 
 <!-- tron docs settings -->
-46 keys, declared in `packages/gateway/src/kernel/settings/settings-schema.ts` (`KEYS`).
+48 keys, declared in `packages/gateway/src/kernel/settings/settings-schema.ts` (`KEYS`).
 
 | Key | Qualifier | Group | Layers | Home layers | Timing | Effect | Native tap |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -67,6 +67,8 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 | `context.compaction.keepRecentTokens` | model | context | project, session, global | none | live | next-compaction | — |
 | `context.compaction.instructions` | — | context | project, session, global | none | live | next-compaction | — |
 | `context.branchSummary.reserveTokens` | — | context | project, global | none | live | next-compaction | — |
+| `context.rules.global` | — | context | session, global | none | fixed | reload | — |
+| `context.rules.project` | — | context | session, global | none | fixed | reload | — |
 | `context.images.autoResize` | — | tools | project, session, global | as allowed | fixed | reload | — |
 | `context.images.block` | — | tools | project, session, global | as allowed | narrow live, widen fixed | next-request | privacy |
 | `tools.active` | — | tools | project, session, global, home | session, home | fixed | next-turn | — |

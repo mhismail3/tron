@@ -86,7 +86,7 @@ Composition supplies the same late K6 settings, Profile and raw model owners.
   Home disables default context discovery and its override reads only
   `<agentDir>/AGENTS.md`; absence is empty and other read errors refuse loading.
   That same global file is already an explicit freshness input. Workspace/ancestor
-  context and SDK `SYSTEM.md`/`APPEND_SYSTEM.md` are excluded, so changing them does
+  context is excluded and no runtime reads `SYSTEM.md`/`APPEND_SYSTEM.md`, so changing them does
   not reload Home. No additional watcher is installed. The owner reloads changed
   inputs at idle, skips unchanged inputs and retains failed work.
 - **Identity.** Every chapter is titled **Home** (no JSONL rewrite) and omitted from
@@ -123,7 +123,7 @@ Composition supplies the same late K6 settings, Profile and raw model owners.
   Home's current recipe owns model, thinking and tools on creation/reconstruction and every request; chapter choices are records, never overrides.
   Rollover carries only directional authorization ceilings (e.g. images blocked until approved) and the explicit chapter window.
   Settings counts enabled tools; every producer-owned input is a wake, on which `write`, `edit`, `bash`, `computer` and `agent_browser` stay declared and every call to them is refused.
-  Agent `SYSTEM.md`/`APPEND_SYSTEM.md` are dropped; only `HOME_TOOL_NAMES`; no MCP or subagent discovery
+  Only `HOME_TOOL_NAMES`; no MCP or subagent discovery
   (empty `session.resources` catalog), no compaction (`session.compact` refuses). Fixed physical
   model on its Gateway-runtime view; the profile owns explicit model admission and physical
   selection metadata. Composition supplies lazy runtime acquisition, proxy isolation and Home

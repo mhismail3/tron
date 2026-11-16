@@ -36,14 +36,12 @@ interface AgentInstructionsInput {
   preview: boolean;
   prompt: string;
   tronContext: string;
-  customPrompt?: { text: string; path?: string };
-  append: { text: string; path?: string }[];
   contextFiles: { path: string; content: string; global?: boolean }[];
   skills: { name: string; description: string; filePath: string; disableModelInvocation: boolean; sourceInfo: SourceInfoLike }[];
   tools: { name: string; promptGuidelines?: string[]; sourceInfo: SourceInfoLike }[];
 }
 
-const SESSION_SECTIONS = new Set(["preamble", "role", "tools", "rules", "docs", "addendum", "global_context", "skills", "project_context", "project_skills", "cwd", "mcp_servers"]);
+const SESSION_SECTIONS = new Set(["preamble", "role", "tools", "rules", "docs", "global_context", "skills", "project_context", "project_skills", "cwd", "mcp_servers"]);
 const OPEN_TAG = /\n\n<([a-z][a-z0-9_-]*)>\n/y;
 
 export function projectAgentInstructions(input: AgentInstructionsInput): AgentInstructions {
@@ -69,8 +67,7 @@ export function projectAgentInstructions(input: AgentInstructionsInput): AgentIn
     const entries = sectionEntries(block.name, block.body, input, tools);
     if (entries) section.entries = entries;
     else section.source = block.name === "tron" ? { kind: "module", name: "tron-core" }
-      : block.name === "role" ? (input.customPrompt?.path ? { kind: "file", path: input.customPrompt.path } : { kind: "unknown" })
-        : SESSION_SECTIONS.has(block.name) ? { kind: "pi" } : { kind: "unknown" };
+      : block.name !== "role" && SESSION_SECTIONS.has(block.name) ? { kind: "pi" } : { kind: "unknown" };
     sections.push(section);
   }
 
@@ -91,11 +88,9 @@ function splitPrompt(input: AgentInstructionsInput) {
   let cursor = first.index;
   const preamble = prompt.slice(0, cursor);
   const known: Record<string, string | undefined> = {
-    role: input.customPrompt?.text,
     global_context: contextText(input.contextFiles.filter(file => file.global)),
     project_context: input.contextFiles.some(file => !file.global)
       ? `Project-specific instructions and guidelines:\n\n${contextText(input.contextFiles.filter(file => !file.global))}` : undefined,
-    addendum: input.append.length === 0 ? undefined : input.append.map((item) => item.text).join("\n\n"),
   };
   const blocks: { name: string; body: string }[] = [];
   for (;;) {
@@ -152,8 +147,6 @@ function sectionEntries(
     case "project_context":
       return input.contextFiles.filter(file => Boolean(file.global) === (name === "global_context"))
         .map(({ path, content }) => ({ name: basename(path), path, text: content, source: { kind: "file", path } }));
-    case "addendum":
-      return input.append.map(({ text, path }) => ({ ...(path ? { name: basename(path), path } : {}), text, source: path ? { kind: "file", path } : { kind: "unknown" } }));
     case "skills":
     case "project_skills":
       return input.skills

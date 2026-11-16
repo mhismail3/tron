@@ -27,7 +27,7 @@ retryable error. `TrustService` resolves it with every inspection
 is a standalone directory, so its untrusted decision never reaches an enclosing
 repository. Each runtime build passes the root as the SDK's `projectDir` (from the
 [Tron-patched `pi-coding-agent`](../../docs/pi-sdk-maintenance.md#tron-patched-pi-coding-agent)),
-so Pi reads Project settings, packages, `.pi/` resources, `SYSTEM.md` and MCP
+so Pi reads Project settings, packages, `.pi/` resources and MCP
 configuration there and starts stdio MCP servers there. The chat's cwd still owns
 tools, context files (`AGENTS.md` up the tree), session grouping and `ctx.cwd`. Trust
 and Project settings changes reload every live chat of the root.

@@ -24,8 +24,7 @@ interface PendingResource {
   draining?: Promise<void> | undefined;
 }
 
-const AGENT_INPUTS = new Set(["settings.json", "prompts", "skills", "npm", "extensions", "AGENTS.md", "SYSTEM.md", "APPEND_SYSTEM.md"]);
-const CONTEXT_FILES = ["AGENTS.md", "SYSTEM.md", "APPEND_SYSTEM.md"];
+const AGENT_INPUTS = new Set(["settings.json", "prompts", "skills", "npm", "extensions", "AGENTS.md"]);
 
 export class ResourceFreshness {
   private readonly watchers = new Map<string, { watcher: FSWatcher; recursive: boolean }>();
@@ -228,7 +227,7 @@ export class ResourceFreshness {
     inputs.push(["packages", settings.getPackages()]);
     if (!profile.resources.noContextFiles) {
       for (const context of loadProjectContextFiles({ cwd: slot.cwd, agentDir })) { inputs.push([context.path, context.content]); await watchPath(context.path); }
-      for (const root of [agentDir, slot.projectDir, join(slot.projectDir, ".pi")]) for (const name of CONTEXT_FILES) await file(join(root, name), inputs);
+      for (const root of [agentDir, slot.projectDir, join(slot.projectDir, ".pi")]) await file(join(root, "AGENTS.md"), inputs);
     }
     state.paths = paths;
     return requestLayers({ system: [...new Map(inputs)].sort(([a], [b]) => a.localeCompare(b)) }).request.hash;

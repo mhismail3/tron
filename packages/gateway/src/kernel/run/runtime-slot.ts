@@ -46,6 +46,7 @@ import { RunOperations } from "./run-operations.js";
 import { successfulAssistantCompletion, type CanonicalAssistantCompletion, type SessionAttentionRebindDisposition } from "./completion-facts.js";
 import { RunRequestPipeline } from "./request-pipeline.js";
 import { skillsIndex } from "../resources/context-index.js";
+import { admittedContextRules } from "../resources/context-rules.js";
 import type { RequestRecord } from "./request-record.js";
 import { boundToolCancellation } from "./bounded-tool-cancellation.js";
 import { CompactionOperationPolicy } from "./compaction-policy.js";
@@ -1243,14 +1244,16 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
               ownsSupervisorRequest: requestId => this.ownedTurns.ownsSupervisorRequest(requestId),
             }) }] : []),
           ];
+      const loaderSettings = managedLoaderOptions?.settingsManager ?? managedProviderSettingsView(settingsManager);
       const services = await createAgentSessionServices({
-        settingsManager: managedLoaderOptions?.settingsManager ?? managedProviderSettingsView(settingsManager),
+        settingsManager: loaderSettings,
         cwd: trust.cwd,
         projectDir: trust.projectDir,
         agentDir: this.dependencies.agentDir,
         modelRuntime,
         resourceLoaderOptions: {
           ...(managedLoaderOptions ?? {}),
+          ...admittedContextRules(loaderSettings),
           ...profile.resources,
           extensionFactories,
           extensionsOverride: (base) => this.dependencies.modules.policy("extensionAdmission")!(base,
@@ -3807,15 +3810,10 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   private agentInstructions(turnContext: string): AgentInstructions {
     const session = this.runtime.session;
     const loader = session.resourceLoader;
-    const customPrompt = loader.getSystemPrompt();
-    const appendTexts = loader.getAppendSystemPrompt();
-    const appendPaths = loader.getAppendSystemPromptSources().map((source) => source.path);
     return projectAgentInstructions({
       preview: session.isIdle,
       prompt: session.systemPrompt,
       tronContext: turnContext,
-      ...(customPrompt ? { customPrompt: { text: customPrompt, ...(loader.getSystemPromptSource() ? { path: loader.getSystemPromptSource()!.path } : {}) } } : {}),
-      append: appendTexts.map((text, index) => ({ text, ...(appendPaths.length === appendTexts.length ? { path: appendPaths[index]! } : {}) })),
       contextFiles: loader.getAgentsFiles().agentsFiles,
       skills: loader.getSkills().skills,
       tools: session.getAllTools(),
