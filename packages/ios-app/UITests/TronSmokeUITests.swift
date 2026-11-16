@@ -3388,6 +3388,12 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(labelled(app, "Tron module tron-core").exists, app.debugDescription)
         XCTAssertTrue(labelled(app, "Added each turn").exists, app.debugDescription)
         keepScreenshot(named: "agent-instructions-tron-sheet")
+        dismissTopSheet(app, revealing: headers[0])
+
+        headers[0].tap()
+        let preamblePurpose = app.descendants(matching: .any)["agent-instructions-purpose"]
+        XCTAssertTrue(preamblePurpose.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertEqual(preamblePurpose.label, "Sets the agent's basic role. Pi writes it.")
         dismissTopSheet(app, revealing: headers[4])
 
         headers[4].tap()
