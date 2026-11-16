@@ -110,7 +110,7 @@ semantic form adapters, including their exact audited package admission.
   `commonCore` renders the fixed core (`tron-context.ts`) that every runtime receives as
   the SDK host `preamble` at creation. `context-index.ts` is the one index renderer:
   `<index name open kind>` with one `- id: description | locator` row per item, id-sorted,
-  whitespace collapsed and escaped. A rendered description over 160 characters or an index over its
+  whitespace collapsed and escaped. A source description over 160 characters or an index over its
   byte budget is rendered in full and returned as a diagnostic; nothing is truncated, omitted or
   paraphrased. `skillsIndex` renders each skill section through the SDK's `renderSkills` host option
   (`<index name="skills" open="read" kind="procedure">`, 10,000 bytes), and the session resources

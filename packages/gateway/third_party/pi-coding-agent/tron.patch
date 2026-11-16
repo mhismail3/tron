@@ -41,7 +41,7 @@ index 5c6aa7d..c8c33a5 100644
  HTTP servers use `url`, `headers`, and `oauth` (see [Authenticate with OAuth](#authenticate-with-oauth)). The legacy SSE transport is not supported.
  
 diff --git a/packages/coding-agent/docs/sdk.md b/packages/coding-agent/docs/sdk.md
-index 7d0883b..7531274 100644
+index 7d0883b..5895b19 100644
 --- a/packages/coding-agent/docs/sdk.md
 +++ b/packages/coding-agent/docs/sdk.md
 @@ -29,7 +29,9 @@ The [complete minimal example](../examples/sdk/01-minimal.ts) also streams text
@@ -49,7 +49,7 @@ index 7d0883b..7531274 100644
  Read current state through `session.messages`, `session.model`, `session.thinkingLevel`, `session.systemPrompt`, and `session.getActiveToolNames()`.
  
 -`session.systemPrompt` is read-only and returns the current effective system prompt, including changes that have not yet been sent to the model. Tool changes are declared to the model before the next request.
-+`createAgentSession` and `createAgentSessionFromServices` accept a host-owned `preamble`. It replaces the default harness identity without suppressing tool snippets, tool-contributed guidelines or documentation. With a custom system prompt, the custom text becomes a separate `role` section after that preamble. Extensions can update the run's preamble through `before_agent_start` prompt options.
++`createAgentSession` and `createAgentSessionFromServices` accept a host-owned `preamble`. It replaces the default harness identity without suppressing tool snippets, tool-contributed guidelines or documentation. With a custom system prompt, the custom text becomes a separate `role` section after that preamble. Extensions can update the run's preamble through `before_agent_start` prompt options. A host `renderSkills(skills, fileReadTool, instructions)` option renders the `skills` and `project_skills` sections in place of Pi's skills block, for idle previews and requests alike.
 +
 +`session.systemPrompt` is read-only and returns the current effective system prompt, including changes that have not yet been sent to the model. Tool changes are declared to the model before the next request. During a run it is the run's prompt, forced text included. Between runs it is the base prompt plus the extension sections the transcript still gives the model, such as the `mcp_servers` listing; a `before_agent_start` handler that stops setting a section removes it at the next request.
  

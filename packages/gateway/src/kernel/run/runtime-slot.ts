@@ -3858,8 +3858,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           };
         }),
         diagnostics: [...loader.getSkills().diagnostics, ...[false, true].flatMap(project =>
-          skillsIndex(loader.getSkills().skills.filter(skill => (skill.sourceInfo.scope === "project") === project), "read").diagnostics)
-          .map(message => ({ type: "warning" as const, message }))],
+          skillsIndex(loader.getSkills().skills.filter(skill => (skill.sourceInfo.scope === "project") === project), "read").diagnostics
+            .map(message => ({ type: "warning" as const, message: project ? `project ${message}` : message })))],
       },
       prompts: {
         prompts: loader.getPrompts().prompts.map((prompt) => {

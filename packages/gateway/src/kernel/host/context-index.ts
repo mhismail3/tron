@@ -1,4 +1,4 @@
-export interface ContextIndex {
+interface ContextIndex {
   name: string;
   open: string;
   kind: "procedure" | "data" | "tool";
@@ -12,9 +12,8 @@ export const escapeIndexValue = (text: string) => collapse(text).replace(/&/gu, 
 export function renderIndex(index: ContextIndex): { text: string; diagnostics: string[] } {
   const diagnostics: string[] = [];
   const rows = [...index.items].sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0).map(item => {
-    const description = escapeIndexValue(item.description);
-    if (description.length > 160) diagnostics.push(`${index.name}/${item.id}: description exceeds 160 characters`);
-    return `- ${escapeIndexValue(item.id)}: ${description} | ${escapeIndexValue(item.locator)}`;
+    if (collapse(item.description).length > 160) diagnostics.push(`${index.name}/${item.id}: description exceeds 160 characters`);
+    return `- ${escapeIndexValue(item.id)}: ${escapeIndexValue(item.description)} | ${escapeIndexValue(item.locator)}`;
   });
   const text = [`<index name="${escapeIndexValue(index.name)}" open="${escapeIndexValue(index.open)}" kind="${index.kind}">`, ...rows, "</index>"].join("\n");
   if (Buffer.byteLength(text) > index.budget) diagnostics.push(`${index.name}: index exceeds ${index.budget} bytes`);
