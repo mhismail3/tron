@@ -6,6 +6,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { fauxAssistantMessage, fauxToolCall, getSystemMessageText, type TranscriptContext } from "@earendil-works/pi-ai";
 import { disposeFixtures, fixture, reportCall, TASK_REASONING_MODEL_ID } from "../../../test-support/home-task-fixture.js";
 import { setModelQueue } from "../../../test-support/settings-dependencies.js";
+import { droppingAnyTurnFrame } from "../../../test-support/turn-frame.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
@@ -415,7 +416,8 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
         observed.push(model.id);
         return fauxAssistantMessage([reportCall("three-layer-worker")], { stopReason: "toolUse" });
       }
-      const current = context.messages.slice(context.messages.findLastIndex(message => message.role === "user"));
+      const messages = droppingAnyTurnFrame(context.messages);
+      const current = messages.slice(messages.findLastIndex(message => message.role === "user"));
       return current.some(message => message.role === "toolResult" && message.toolName === "delegate")
         ? fauxAssistantMessage("Delegation accepted")
         : fauxAssistantMessage([fauxToolCall("delegate", {
