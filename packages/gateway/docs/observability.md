@@ -49,6 +49,7 @@ stderr, because the launcher has already redirected stderr to
 | --- | --- | --- | --- |
 | `gateway.jsonl` | Gateway logger, `packages/gateway/src/transport/logger.ts` | Gateway logger | Eight 5 MB numbered segments (`gateway.jsonl`, `.1` … `.7`), 40 MB total; size tracked in memory; debug kept in a 4,000-record / 2 MB memory buffer; the newest 1,000 persisted records are served by `system.logs` |
 | `requests.jsonl` | Gateway request record, `packages/gateway/src/kernel/run/request-record.ts`, through `transport/rotating-jsonl.ts` | Gateway | Sixteen 5 MB numbered segments, 80 MB total; sizes, keyed hashes and provider usage only ([run signals](../src/kernel/run/README.md#signals)) |
+| `observations/` | Gateway observation counts, `packages/gateway/src/transport/observation-counts.ts` | Gateway, when a new UTC day opens | One JSON file per UTC day of content-free counts per request kind ([run signals](../src/kernel/run/README.md#signals)); the newest 30 days are kept; the directory is 0700 and each file 0600 |
 | `deploy.jsonl` | Deploy helper, `scripts/gateway-payload-deploy.mjs`; the C launcher appends its own `launcher.*` records | Deploy helper, once at operation start (`DEPLOY_LOG_MAX_BYTES`) | 1 MB plus one `deploy.jsonl.1`; each launcher record is one `O_APPEND` write of at most 4 KB |
 | `gateway-stderr.log` | C launcher, `packages/mac-app/scripts/tron-gateway-launcher.c`, redirects supervised stderr before executing Node | Mac app startup maintenance, `packages/mac-app/Sources/App/Lifecycle/MacAppStartupMaintenance.swift` | Emptied above 1 MiB (`gatewayStderrMaxBytes`). It holds launcher messages and Node aborts only, not the Gateway record stream |
 | `mac.jsonl` | Mac app `TronLog`, `packages/mac-app/Sources/Support/TronLog.swift` | Mac app logger | Four 1 MiB segments (`mac.jsonl`, `.1` … `.3`). Warning and error are also mirrored to `os.Logger` (subsystem `com.tron.mac`) so a sysdiagnose carries them |
@@ -81,6 +82,7 @@ would remove. Test-tooling signals are rows of the
 | --- | --- | --- |
 | `gateway.jsonl` | 40 MB (8 × 5 MB; the user's chosen cap) | Months |
 | `requests.jsonl` | 80 MB (16 × 5 MB) | **Not yet measured:** the build that writes this stream is not installed on this Mac |
+| `observations/` | 30 daily files of a few KB each | Thirty days of request, tool-call and skill-open counts |
 | `deploy.jsonl` | 1 MB + one 1 MB segment | Hundreds of deployments; a source rebuild writes about a dozen records (about 3 KB) |
 | `gateway-stderr.log` | 1 MiB, emptied | Rare launcher and Node abort text; a day's output is normally zero bytes |
 | `mac.jsonl` | 4 MB (4 × 1 MiB) | Several days of lifecycle transitions. **Not yet measured:** the build that writes this stream is not installed on this Mac |
