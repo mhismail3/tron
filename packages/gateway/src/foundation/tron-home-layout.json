@@ -39,6 +39,7 @@
     "state/ios-device-installs": {"owner": "gateway/admin", "subtree": true},
     "state/home": {"owner": "gateway/home", "container": true},
     "state/home/home.json": {"owner": "gateway/home"},
+    "state/home/lessons.json": {"owner": "gateway/home"},
     "state/home/profile.json": {"owner": "gateway/admin"},
     "state/home/tasks": {"owner": "gateway/home", "subtree": true},
     "state/home/workspace": {"owner": "gateway/home", "subtree": true},

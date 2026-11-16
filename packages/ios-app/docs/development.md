@@ -229,9 +229,14 @@ service, real-Gateway journey, physical haptic, APNs or device behavior.
   overflow; any partial sample stdout survives its deadline. PID listing is capped at 64 KiB; sample and snapshot each at 256,000 bytes (sample
   retains its beginning if capped). Capture failure is evidence, never a test failure.
 - `HostedPresentationProbe` installs this signal hook only in `HOSTED_TEST`. It reads the actual
-  window layer trees (at most 16 windows, 512 layers, depth 24, 128 animations, 16 per layer)
-  and timing/repeat/visibility metadata, never pixels, view text, animation keys or surface
-  identities. Its at-most-16 weak coordinator references read aggregate mounted/activity
+  window layer trees (at most 16 windows, 4,096 layers, depth 64, 128 animations, 16 per layer)
+  with each animation's key, key path and timing/repeat/visibility metadata, and the class chain
+  of the layer's owning view and up to 11 superviews, never pixels, view text or surface identities.
+  In every hosted simulator launch (never on device) it also keeps the ledger XCTest's
+  animation-idle wait counts: `UIViewAnimationState` animations that started and never stopped
+  (`unstoppedViewAnimations`: start/stop totals, at most 256 outstanding with an explicit
+  `outstandingTruncated`, and the newest 16 with key path, layer owner chain and the symbolized
+  stack that added them). It holds animations and layers only weakly. Its at-most-16 weak coordinator references read aggregate mounted/activity
   counts directly from `PresentationActivityCoordinator`; activity counting is omitted and marked
   truncated above 64 mounted surfaces. These reads are not a second surface graph.
   Limits/truncation are explicit. Three fixed cache files hold readiness, the supervisor request and the latest snapshot;
