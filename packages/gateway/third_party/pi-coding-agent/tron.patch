@@ -1151,6 +1151,19 @@ index 2459c10..19e4630 100644
  			sessionManager: this.sessionManager,
  			modelRegistry: extensionRunner.getModelRegistry(),
  			model: this.session.model,
+diff --git a/packages/coding-agent/test/resource-loader.test.ts b/packages/coding-agent/test/resource-loader.test.ts
+index e68b4cf..e7f49ee 100644
+--- a/packages/coding-agent/test/resource-loader.test.ts
++++ b/packages/coding-agent/test/resource-loader.test.ts
+@@ -534,7 +534,7 @@ Content`,
+ 			await loader.reload();
+ 
+ 			expect(loader.getAgentsFiles().agentsFiles).toEqual([
+-				{ path: join(agentDir, "AGENTS.override.md"), content: "global override" },
++				{ path: join(agentDir, "AGENTS.override.md"), content: "global override", global: true },
+ 				{ path: join(cwd, "AGENTS.md"), content: "project instructions" },
+ 				{ path: join(nestedCwd, "AGENTS.override.md"), content: "service override" },
+ 			]);
 diff --git a/packages/coding-agent/test/suite/harness.ts b/packages/coding-agent/test/suite/harness.ts
 index 988e9e8..eba9cc8 100644
 --- a/packages/coding-agent/test/suite/harness.ts
@@ -1171,6 +1184,28 @@ index 988e9e8..eba9cc8 100644
  		agent,
  		sessionManager,
  		settingsManager,
+diff --git a/packages/coding-agent/test/suite/regressions/6162-extension-active-tools-next-turn.test.ts b/packages/coding-agent/test/suite/regressions/6162-extension-active-tools-next-turn.test.ts
+index 27ba2e2..4b8ebac 100644
+--- a/packages/coding-agent/test/suite/regressions/6162-extension-active-tools-next-turn.test.ts
++++ b/packages/coding-agent/test/suite/regressions/6162-extension-active-tools-next-turn.test.ts
+@@ -70,7 +70,7 @@ describe("extension active tools next-turn refresh", () => {
+ 		}
+ 	});
+ 
+-	it("reports the refreshed system prompt during the run", async () => {
++	it("keeps the run's system prompt when tools change mid-run", async () => {
+ 		const harness = await createHarness({ extensionFactories: [registerSwitchTools] });
+ 		try {
+ 			harness.session.setActiveToolsByName(["switch_tools"]);
+@@ -92,7 +92,7 @@ describe("extension active tools next-turn refresh", () => {
+ 			await harness.session.prompt("start");
+ 
+ 			expect(providerPrompts).toHaveLength(2);
+-			expect(providerPrompts[0]).not.toBe(providerPrompts[1]);
++			expect(providerPrompts[1]).toBe(providerPrompts[0]);
+ 			expect(sessionPrompts).toEqual(providerPrompts);
+ 		} finally {
+ 			harness.cleanup();
 diff --git a/packages/coding-agent/test/suite/regressions/8724-in-memory-fork-active-tool.test.ts b/packages/coding-agent/test/suite/regressions/8724-in-memory-fork-active-tool.test.ts
 index 9991520..238f32d 100644
 --- a/packages/coding-agent/test/suite/regressions/8724-in-memory-fork-active-tool.test.ts
