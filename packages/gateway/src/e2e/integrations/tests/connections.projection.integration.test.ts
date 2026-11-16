@@ -44,7 +44,7 @@ it("projects retained connection state read-only and redacts credential referenc
     const before = await readFile(path, "utf8");
 
     let tool: { execute: () => Promise<{ content: Array<{ text: string }>; details: unknown }> } | undefined;
-    createTronCoreExtension({ describe: async () => ({ root, available: true }) } as never, undefined, new ConnectionOwner(home))({
+    await createTronCoreExtension({ describe: async () => ({ root, available: true }) } as never, undefined, new ConnectionOwner(home))({
       registerTool: (definition: typeof tool) => { tool = definition; },
       on: () => {},
     } as never);
