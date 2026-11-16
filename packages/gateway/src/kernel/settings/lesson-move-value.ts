@@ -6,7 +6,7 @@ export interface LessonMoveValue {
   destination: { kind: "global-rule"; file: "AGENTS.md"; anchor?: string } | { kind: "global-skill-description"; skill: string };
   text: string;
   replaces?: string;
-  retire: { notes: Array<{ id: string; revisionId: string }> };
+  retire: { notes: Array<{ id: string; revisionId: string; text: string }> };
 }
 
 const object = (value: unknown, label: string): Record<string, unknown> => {
@@ -48,8 +48,9 @@ function validateLessonMove(raw: unknown, label: string): LessonMoveValue {
   if (!Array.isArray(retire.notes) || retire.notes.length === 0 || retire.notes.length > 32) throw new GatewayError("invalid_request", `${label}.retire.notes must name 1 to 32 notes`);
   const notes = retire.notes.map((note, index) => {
     const entry = object(note, `${label}.retire.notes[${index}]`);
-    only(entry, ["id", "revisionId"], `${label}.retire.notes[${index}]`);
-    return { id: text(entry.id, `${label}.retire.notes[${index}].id`, 200), revisionId: text(entry.revisionId, `${label}.retire.notes[${index}].revisionId`, 200) };
+    only(entry, ["id", "revisionId", "text"], `${label}.retire.notes[${index}]`);
+    return { id: text(entry.id, `${label}.retire.notes[${index}].id`, 200), revisionId: text(entry.revisionId, `${label}.retire.notes[${index}].revisionId`, 200),
+      text: text(entry.text, `${label}.retire.notes[${index}].text`, 2_000) };
   });
   return { destination: target, text: moved, ...(replaces === undefined ? {} : { replaces }), retire: { notes } };
 }
@@ -62,6 +63,6 @@ export const lessonMoveType: ValueType = {
   format: value => {
     const move = value as LessonMoveValue;
     const where = move.destination.kind === "global-rule" ? "global AGENTS.md" : `skill ${move.destination.skill} description`;
-    return `${where}: ${move.text}${move.replaces ? ` (replaces: ${move.replaces})` : ""}; retires ${move.retire.notes.length} note${move.retire.notes.length === 1 ? "" : "s"}`;
+    return `${where}: ${move.text}${move.replaces ? ` (replaces: ${move.replaces})` : ""}; retires ${move.retire.notes.length} note${move.retire.notes.length === 1 ? "" : "s"}: ${move.retire.notes.map(note => JSON.stringify(note.text)).join("; ")}`;
   },
 };

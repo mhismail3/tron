@@ -256,7 +256,8 @@ proposes it; the maintainer's native card applies it under the trust tap. Moves 
 time.
 
 **A move:**
-1. Refuses a note that is no longer the active revision Home read.
+1. Refuses a note that is no longer the active revision and text Home read. The card lists each retired
+   note's text.
 2. Refuses a stale anchor or replaced text. A skill description must name its current value in
    `replaces`, compared against Pi's parsed frontmatter.
 3. Edits the global `AGENTS.md` (after an exact anchor line, in place of exact text, or appended) or a global
@@ -268,7 +269,8 @@ time.
 Any failure after the file write restores the file and any notes already retired.
 
 **Undo**, through `settings.undo`, refuses if the destination or a retired note changed since the move. It
-then restores the notes and the file bytes. `home-lesson-move.e2e.test.ts` proves propose, card, apply,
+then restores the file bytes and the notes. If restoring the notes fails part-way, Undo puts back the moved
+file and re-retires the notes. `home-lesson-move.e2e.test.ts` proves propose, card, apply,
 stale refusal and Undo for both destinations.
 
 ### RPCs and clients

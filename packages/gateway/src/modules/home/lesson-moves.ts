@@ -88,7 +88,7 @@ export class LessonMoves {
     const priors = await profile.values(ids);
     for (const note of value.retire.notes) {
       const prior = priors.get(note.id);
-      if (!prior || prior.revisionId !== note.revisionId || prior.state !== "active") stale(`Note ${note.id} is no longer the active revision you read; read it again`);
+      if (!prior || prior.revisionId !== note.revisionId || prior.state !== "active" || prior.text !== note.text) stale(`Note ${note.id} is no longer the active revision you read; read it again`);
     }
     const before = await readFile(path, "utf8");
     const after = edited(before, value);
@@ -119,10 +119,19 @@ export class LessonMoves {
     const profile = this.profile();
     const current = await profile.values(moved.notes.map(note => note.id));
     if (moved.notes.some(note => JSON.stringify(current.get(note.id) ?? null) !== JSON.stringify(note.moved))) stale("A retired note changed since the move; restore it by hand");
-    await profile.restore(moved.notes.map(note => ({ id: note.id, value: note.prior })), MAINTAINER, `${commandId}:restore`);
     await durableAtomicWriteText(moved.path, moved.before, moved.mode);
-    delete state[lesson];
-    await durableAtomicWriteJson(this.statePath(), state);
+    try {
+      await profile.restore(moved.notes.map(note => ({ id: note.id, value: note.prior })), MAINTAINER, `${commandId}:restore`);
+      delete state[lesson];
+      await durableAtomicWriteJson(this.statePath(), state);
+    } catch (error) {
+      await durableAtomicWriteText(moved.path, edited(moved.before, moved.value), moved.mode);
+      await profile.restore(moved.notes.map(note => ({ id: note.id, value: note.moved })), MAINTAINER, `${commandId}:rollback`);
+      const current = await profile.values(moved.notes.map(note => note.id));
+      moved.notes = moved.notes.map(note => ({ ...note, moved: current.get(note.id) ?? null }));
+      await durableAtomicWriteJson(this.statePath(), state);
+      throw error;
+    }
   }
 
   private statePath(): string {
