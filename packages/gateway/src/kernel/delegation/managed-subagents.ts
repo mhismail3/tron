@@ -14,7 +14,10 @@ import { managedProducerAPI, type ManagedInternalWake } from "./managed-producer
 import { loadSubagentCatalog } from "./subagent-catalog.js";
 import { producerIdentity } from "../host/extension-registration.js";
 import { withExtensionOwner } from "../host/extension-execution-context.js";
+import { subagentTypesIndex } from "../resources/context-index.js";
 import { tronHomePath } from "../../foundation/tron-home-layout.js";
+
+let subagentTypes: Promise<void> | undefined;
 
 const gatewayRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const pin = JSON.parse(readFileSync(join(gatewayRoot, "pi-subagents-pin.json"), "utf8")) as {
@@ -372,6 +375,12 @@ export class ManagedSubagents {
 
   async loaderOptions(settings: SettingsManager, internalWake?: ManagedInternalWake): Promise<ManagedLoaderOptions> {
     this.requireBoundArtifactRoot(this.tronHome);
+    subagentTypes ??= (this.loadModule(join(this.verify(), "src", "api", "subagent-types.ts")) as Promise<{
+      registerSubagentTypesRenderer(render: typeof subagentTypesIndex): { dispose(): void };
+      subagentTypesRenderer(): unknown;
+    }>).then(api => { if (!api.subagentTypesRenderer()) api.registerSubagentTypesRenderer(subagentTypesIndex); },
+      (error: unknown) => { subagentTypes = undefined; throw error; });
+    await subagentTypes;
     const resources = existsSync(this.root) ? await this.resources() : { extensions: [], skills: [], prompts: [], themes: [] };
     const paths = resources.extensions.filter(resource => resource.enabled).map(resource => resource.path);
     const sourceInfo = new Map<string, SourceInfo>([...resources.skills, ...resources.prompts].filter(resource => resource.enabled)

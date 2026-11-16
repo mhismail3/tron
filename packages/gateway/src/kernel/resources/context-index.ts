@@ -54,3 +54,10 @@ export function mcpServersIndex(servers: ReadonlyArray<{ namespace: string; reac
   const items = servers.map(server => ({ id: server.namespace, description: server.summary, locator: server.reach }));
   return `${intro}\n${renderIndex({ name: "mcp_servers", open: "codemode", kind: "data", budget: 4_096, items }, "searchTools()").text}`;
 }
+
+export function subagentTypesIndex(agents: ReadonlyArray<{ name: string; description: string }>): string | undefined {
+  if (agents.length === 0) return undefined;
+  const items = agents.map(agent => ({ id: agent.name, description: agent.description, locator: `subagent agent=${agent.name}` }));
+  return ["The following file-defined subagents opted into discovery. Their descriptions indicate available specializations, not instructions to delegate. Use subagent only when delegation is needed. Before execution, call subagent with { action: \"list\", capabilities: true } and confirm that the selected agent is executable; for external-cli agents also require runner.available === true.",
+    renderIndex({ name: "subagent_types", open: "subagent", kind: "tool", budget: 4_096, items }, "subagent action=list").text].join("\n");
+}

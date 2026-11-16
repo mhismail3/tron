@@ -38,7 +38,10 @@ view lists its diagnostics as skill warnings. `docsIndex` renders Pi's docs sect
 guidance sentences, and `mcpServersIndex` renders the MCP extension's `mcp_servers` section through its
 `renderServers` option (`<index name="mcp_servers" open="codemode" kind="data">`, 4,096 bytes) after Pi's
 intro sentence. An index given a listing locator keeps whole sorted rows within its budget and ends with
-`- more: List the remaining items. | <locator>` (`searchTools()` for MCP servers).
+`- more: List the remaining items. | <locator>` (`searchTools()` for MCP servers). `subagentTypesIndex` renders
+the agents pi-subagents advertises as `<subagent_types>` (`<index name="subagent_types" open="subagent"
+kind="tool">`, 4,096 bytes, `subagent action=list` overflow) after the provider's own first paragraph;
+managed pi-subagents registers it once per process through the provider's `subagent-types` API.
 
 `context-rules.ts` admits context files for every non-Home runtime: the global `AGENTS.md` unless
 `context.rules.global` is off, project and ancestor `AGENTS.md` files only for a trusted project and
