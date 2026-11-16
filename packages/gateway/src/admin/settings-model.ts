@@ -1,4 +1,4 @@
-import { type Resolution, type SettingsTarget, type Qualifiers, type GitResult, type ChangeResult } from "../kernel/settings/tool-contract.js";
+import { type Resolution, type SettingsTarget, type Qualifiers, type GitResult, type ChangeResult, type ConfirmChange } from "../kernel/settings/tool-contract.js";
 import type { MacTerminalService } from "../security/mac-terminal-service.js";
 import { setPath, unsetPath, qualifiedWrite, fillPath, type SessionSettingsSource, type SettingsOptionsRequest, type SettingsOptionsResult } from "../kernel/settings/settings-model.js";
 import type { ChangeContext, SettingsWriters, Planned } from "../kernel/settings/settings-change.js";
@@ -26,7 +26,6 @@ import { type FormatContext, type ModelRefValue, type OptionSources, type Settin
 import { tronHomePath } from "../foundation/tron-home-layout.js";
 import type { PackageUpdateRequest } from "./package-service.js";
 import type { Actor } from "../kernel/settings/settings-record.js";
-import type { ConfirmChange } from "../kernel/settings/tool-contract.js";
 
 interface SettingsModelDependencies {
   schema: SettingsSchema;
