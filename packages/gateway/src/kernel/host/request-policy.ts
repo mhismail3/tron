@@ -19,6 +19,7 @@ export interface RequestPolicy {
   cancel(operationId: string | undefined): void;
   transferOperation(from: string | undefined, to: string): void;
   contextEvidence(): unknown;
+  turnFrame(): { kind: "user" | "wake"; facts: Promise<string> | undefined } | undefined;
   deliveryHeadroom(session: AgentSession, input: AgentMessage, systemPrompt: string, signal?: AbortSignal): Promise<{
     tokens: number; freshTokens: number; signal: AbortSignal;
   }>;

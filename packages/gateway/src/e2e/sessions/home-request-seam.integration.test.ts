@@ -660,7 +660,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     };
     item.record("C1", row);
     expect(row.providerRequests).toBe(2);
-    expect(row.roleSequences).toEqual([["system", "user"], ["system", "user", "assistant", "user"]]);
+    expect(row.roleSequences).toEqual([["system", "user", "user"], ["system", "user", "assistant", "user", "user"]]);
     expect(row.secondIncludesPriorActivation).toBe(true);
     expect(row.policyInstalled).toBe(false);
   }, 30_000);
@@ -1081,7 +1081,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     };
     item.record("C11", row);
     expect(row.ordinaryPolicy).toBeNull();
-    expect(row.roleSequences).toEqual([["system", "user"], ["system", "user", "assistant", "user"]]);
+    expect(row.roleSequences).toEqual([["system", "user", "user"], ["system", "user", "assistant", "user", "user"]]);
     expect(row.secondIncludesPrior).toBe(true);
   }, 30_000);
 
@@ -1329,8 +1329,8 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
       homeDesignated: (await homeOwnerOf(item.registry).status()).enabled,
     };
     item.record("negative-control", row);
-    expect(row.requestsBefore).toEqual([["system", "user"]]);
-    expect(row.requestsAfter).toEqual([["system", "user"]]);
+    expect(row.requestsBefore).toEqual([["system", "user", "user"]]);
+    expect(row.requestsAfter).toEqual([["system", "user", "user"]]);
     expect(row.byteIdentical).toBe(true);
     expect(row.policyForBefore).toBeNull();
     expect(row.policyForAfter).toBeNull();

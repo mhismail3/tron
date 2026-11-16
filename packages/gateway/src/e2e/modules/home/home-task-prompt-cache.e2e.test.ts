@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { disposeFixtures, fixture } from "../../../../test-support/home-task-fixture.js";
 import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
+import { withoutTurnFrame } from "../../../../test-support/turn-frame.js";
 
 const PROVIDER = "local-openai";
 const MODEL_ID = "worker-wire";
@@ -79,8 +80,9 @@ describe("Home task worker prompt cache on the wire", { concurrent: false }, () 
     for (let i = 1; i < wire.requests.length; i++) {
       const previous = wire.requests[i - 1]!, next = wire.requests[i]!;
       expect(JSON.stringify(next.tools)).toBe(JSON.stringify(previous.tools));
+      const history = withoutTurnFrame(previous.input);
       expect(next.input.length).toBeGreaterThan(previous.input.length);
-      expect(JSON.stringify(next.input.slice(0, previous.input.length))).toBe(JSON.stringify(previous.input));
+      expect(JSON.stringify(next.input.slice(0, history.length))).toBe(JSON.stringify(history));
     }
 
     const fresh = wire.usages.reduce((sum, usage) => sum + usage.input - usage.cached, 0);

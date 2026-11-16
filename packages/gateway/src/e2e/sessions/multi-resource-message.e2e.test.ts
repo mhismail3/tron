@@ -9,13 +9,14 @@ import { disposeFixtures, fixture } from "../../../test-support/home-task-fixtur
 import { waitFor } from "../../../test-support/wait-for.js";
 import { INVOCATION_RECEIPT_TYPE } from "../../kernel/receipts/invocation-receipts.js";
 import { displayOwnerOf, homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import { droppingAnyTurnFrame } from "../../../test-support/turn-frame.js";
 
 const REPORT = "test-results/multi-resource-message.json";
 
 afterEach(disposeFixtures);
 
 function lastUserText(messages: readonly { role: string; content?: unknown }[]): string {
-  const content = messages.filter(message => message.role === "user").at(-1)?.content;
+  const content = droppingAnyTurnFrame(messages).filter(message => message.role === "user").at(-1)?.content;
   return typeof content === "string" ? content
     : (content as Array<{ type: string; text?: string }>).filter(part => part.type === "text").map(part => part.text).join("");
 }

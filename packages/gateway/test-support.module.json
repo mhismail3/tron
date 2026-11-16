@@ -53,6 +53,7 @@
     "test-support/tron-store-corpus.ts",
     "test-support/tron-store-specs-derived.ts",
     "test-support/tron-store-specs.ts",
+    "test-support/turn-frame.ts",
     "test-support/wait-for.ts"
   ]
 }

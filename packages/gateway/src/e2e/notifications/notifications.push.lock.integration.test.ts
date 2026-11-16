@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { expectRequestShapes } from "../../../test-support/lock-projections.js";
 import { notificationsPushScenario, PUSH_RELAY_ORIGIN } from "../../../test-support/lock-scenarios.js";
+import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
 
 const owned: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const release of owned.splice(0).reverse()) await release(); });
@@ -60,7 +61,7 @@ describe("gateway/notifications push lock", () => {
     const worker = [{ role: "user", text: "do the lock task" }, { role: "assistant", text: "Worker reply without a report." }, { role: "user",
       text: "[from: gateway; kind: reminder; authority: task]\nCall report now with the current outcome and partial evidence. Do not continue implementation or validation. Use progress for unfinished work or needs-input "
         + "for a blocker; do not claim final success without acceptance evidence. If you cannot report, the task will settle with no report." }];
-    expect(requests.map((request) => request.messages), "each request's messages: the chat's turns so far, then the worker's turn and its reminder").toEqual([
+    expect(requests.map((request) => withoutTurnFrame(request.messages)), "each request's messages: the chat's turns so far, then the worker's turn and its reminder").toEqual([
       ...[1, 3, 5, 7, 9, 11, 13].map((count) => chat.slice(0, count)), worker.slice(0, 1), worker]);
   });
 });

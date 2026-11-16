@@ -1281,12 +1281,14 @@
     "lock": "delegation-subagent",
     "providerRequests": [
       [
+        "user",
         "user"
       ],
       [
         "user",
         "assistant",
-        "toolResult"
+        "toolResult",
+        "user"
       ]
     ],
     "canonicalJsonl": [

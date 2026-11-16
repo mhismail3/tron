@@ -147,7 +147,11 @@ failures. OpenCode Go's usage endpoint retains its distinct entitlement/auth/oth
 - Usage adapters: `provider-usage.ts`; eligibility: `OpenAIModelEligibility`.
 - Queue availability and fallback for worker, background and subagent roles:
   `model-queue.ts`; Home owns worker choice at delegation. Typed queues are the
-  routing authority, not learned Profile prose.
+  routing authority, not learned Profile prose. In a Home task worker with a subagent
+  queue, `model-queue-session.ts` adds the worker's choice (from its fixed model and
+  thinking settings and their recorded source) and the live subagent queue availability
+  to the turn frame, and the `tron/subagent` extension sets the `subagent_models` system
+  section with the standing launch guidance. Briefs carry only the task.
 - `readWorkerQueueSelection` projects this owner's canonical fallback entries
   after the latest explicit choice. Settings can mask that progression with
   Project without resetting it to the original worker seed.

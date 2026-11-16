@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { type LockGateway } from "../../../test-support/gateway-lock-harness.js";
 import { expectRequestShapes, expectSystemShapes } from "../../../test-support/lock-projections.js";
 import { openLockSession, queueControlScenario } from "../../../test-support/lock-scenarios.js";
+import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
 
 const gateways: LockGateway[] = [];
 afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
@@ -76,7 +77,7 @@ describe("gateway/run queue lock", () => {
     const conversation = ["user:hold the first run open", "assistant:Held run settled.", "user:third follow-up", "assistant:Third follow-up answered.",
       "user:first follow-up", "assistant:First follow-up answered.", "user:hold the second run open", "assistant:Second held run settled.",
       "user:hold a run to stop", "assistant:", "user:steer queued at stop"];
-    expect(recorded.providerRequests.map((request) => request.messages.map((message) => {
+    expect(recorded.providerRequests.map((request) => withoutTurnFrame(request.messages).map((message) => {
       const { role, text } = message as { role: string; text?: string };
       return `${role}:${text ?? ""}`;
     }))).toEqual([1, 3, 5, 7, 9, 11].map((length) => conversation.slice(0, length)));
