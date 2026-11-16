@@ -1,4 +1,5 @@
 import { yieldToEventLoop } from "../util/event-loop-yield.js";
+import { VIEW_SETTLED_SPAN } from "./cache-layout.js";
 import { EPISODIC_PLACEHOLDER, type EpisodicContextRun } from "./episodic-contract.js";
 
 export interface EpisodicViewPart {
@@ -111,13 +112,15 @@ function fitView(
   bytesOf: EpisodicViewBytes,
   isBuilt: (address: string) => boolean,
   total = viewBytes(parts, bytesOf),
+  maxSpan = Number.POSITIVE_INFINITY,
 ): number {
+  const counted = (part: EpisodicViewPart): number => part.span < maxSpan ? bytesOf(part).bytes : 0;
   while (total > viewBudget) {
     let best: { position: number; due: number } | undefined;
     for (let position = 0; position + 1 < parts.length; position += 1) {
       const a = parts[position]!;
       const b = parts[position + 1]!;
-      if (!siblings(a, b)) continue;
+      if (a.span >= maxSpan || !siblings(a, b)) continue;
       if (!isBuilt(nodeAddress(a.level + 1, a.index / 2))) continue;
       const due = (count - a.start) / 2 ** (a.level + 2);
       if (!best || due > best.due) best = { position, due };
@@ -125,15 +128,31 @@ function fitView(
     if (!best) break;
     const a = parts[best.position]!;
     const merged: EpisodicViewPart = { level: a.level + 1, index: a.index / 2, start: a.start, span: a.span * 2 };
-    total -= bytesOf(a).bytes + bytesOf(parts[best.position + 1]!).bytes;
+    total -= counted(a) + counted(parts[best.position + 1]!);
     parts.splice(best.position, 2, merged);
-    total += bytesOf(merged).bytes;
+    total += counted(merged);
   }
   return total;
 }
 
 function viewLowWater(viewBudget: number): number {
   return viewBudget - Math.floor(viewBudget / 8);
+}
+
+function foldTo(
+  parts: EpisodicViewPart[],
+  count: number,
+  target: number,
+  bytesOf: EpisodicViewBytes,
+  isBuilt: (address: string) => boolean,
+  total: number,
+): number | undefined {
+  const fitted = [...parts];
+  const bytes = fitView(fitted, count, target, bytesOf, isBuilt, total);
+  if (bytes > target && fitted.some((part, index) => siblings(part, fitted[index + 1]))) return undefined;
+  for (let index = 0; index < fitted.length; index += 1) parts[index] = fitted[index]!;
+  parts.length = fitted.length;
+  return bytes;
 }
 
 export function rebalanceView(
@@ -145,31 +164,58 @@ export function rebalanceView(
   total = viewBytes(parts, bytesOf),
 ): number {
   if (total <= viewBudget) return total;
-  const lowWater = viewLowWater(viewBudget);
-  const fitted = [...parts];
-  const bytes = fitView(fitted, count, lowWater, bytesOf, isBuilt, total);
-  if (bytes > lowWater && fitted.some((part, index) => siblings(part, fitted[index + 1]))) return total;
-  for (let index = 0; index < fitted.length; index += 1) parts[index] = fitted[index]!;
-  parts.length = fitted.length;
-  return bytes;
+  return foldTo(parts, count, viewLowWater(viewBudget), bytesOf, isBuilt, total) ?? total;
+}
+
+export function recentViewHigh(viewBudget: number): number {
+  return Math.floor(viewBudget * 3 / 16);
+}
+
+export interface EpisodicViewTotals { total: number; recent: number }
+
+export function viewTotals(parts: readonly EpisodicViewPart[], bytesOf: EpisodicViewBytes): EpisodicViewTotals {
+  let total = 0;
+  let recent = 0;
+  for (const part of parts) {
+    const bytes = bytesOf(part).bytes;
+    total += bytes;
+    if (part.span < VIEW_SETTLED_SPAN) recent += bytes;
+  }
+  return { total, recent };
+}
+
+export function freezeView(
+  parts: EpisodicViewPart[],
+  count: number,
+  viewBudget: number,
+  bytesOf: EpisodicViewBytes,
+  isBuilt: (address: string) => boolean,
+  rollover: boolean,
+  totals = viewTotals(parts, bytesOf),
+): EpisodicViewTotals & { folded: boolean } {
+  const settling = totals.total - Math.max(0, totals.recent - recentViewHigh(viewBudget));
+  if (settling > viewBudget + Math.floor(viewBudget / 8) || (rollover && settling > viewBudget)) {
+    if (foldTo(parts, count, viewLowWater(viewBudget), bytesOf, isBuilt, settling) !== undefined) return { ...viewTotals(parts, bytesOf), folded: true };
+  }
+  if (totals.recent > recentViewHigh(viewBudget)) {
+    fitView(parts, count, Math.floor(viewBudget * 5 / 64), bytesOf, isBuilt, totals.recent, VIEW_SETTLED_SPAN);
+    return { ...viewTotals(parts, bytesOf), folded: false };
+  }
+  return { ...totals, folded: false };
 }
 
 const EPISODIC_FOLD_SLICE_MESSAGES = 2_000;
 
 export async function foldViewSliced(
+  parts: EpisodicViewPart[],
   count: number,
-  viewBudget: number,
-  bytesOf: EpisodicViewBytes,
-  isBuilt: (address: string) => boolean,
+  fit: (parts: EpisodicViewPart[], count: number) => void,
 ): Promise<EpisodicViewPart[]> {
-  const parts: EpisodicViewPart[] = [];
-  let total = 0;
-  for (let index = 0; index < count; index += 1) {
-    const part: EpisodicViewPart = { level: 0, index, start: index, span: 1 };
-    parts.push(part);
-    total += bytesOf(part).bytes;
-    total = rebalanceView(parts, index + 1, viewBudget, bytesOf, isBuilt, total);
-    if ((index + 1) % EPISODIC_FOLD_SLICE_MESSAGES === 0) await yieldToEventLoop();
+  const from = parts.reduce((end, part) => Math.max(end, part.start + part.span), 0);
+  for (let index = from; index < count; index += 1) {
+    parts.push({ level: 0, index, start: index, span: 1 });
+    fit(parts, index + 1);
+    if ((index + 1 - from) % EPISODIC_FOLD_SLICE_MESSAGES === 0) await yieldToEventLoop();
   }
   return parts;
 }

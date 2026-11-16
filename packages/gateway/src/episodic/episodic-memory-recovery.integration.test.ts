@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -342,5 +343,249 @@ describe("episodic memory crash recovery", () => {
     expect(memory.status().view.unbuilt).toBe(0);
     assertConsistentStore(liveMemoryNodes(), memory.status().messages);
     await memory.dispose();
+  }, 180_000);
+});
+
+const FROZEN_LIMITS = { viewBytes: 4_096, jobs: 4, retryMs: 0 };
+const KILL_POINTS = [
+  "catalog:before", "catalog:after", "node:before", "node:after", "invalidation:before", "invalidation:after",
+  "state:before", "layout:before", "layout:after", "checkpoint:before", "checkpoint:after",
+] as const;
+
+async function frozenRecoveryFixture(label: string, pairs: number): Promise<RecoveryFixture> {
+  const fx = await fixture(label, 1);
+  const prebuild = new TronWorkspace(fx.home);
+  const memory = await openMemory({ ...fx, workspace: prebuild }, stubSummarizer, FROZEN_LIMITS);
+  try { await memory.entriesCommitted(fx.sessionId); } finally { await memory.dispose(); await prebuild.dispose(); }
+  await writeFile(join(fx.storeRoot, "layout.json"), `${JSON.stringify({ lines: [] })}\n`, { mode: 0o600, flag: "wx" });
+  for (let index = 1; index < pairs; index += 1) {
+    fx.manager.appendMessage({ role: "user", content: `recovery prompt ${index} ${"r".repeat(700)}`, timestamp: Date.now() } satisfies Message);
+    fx.manager.appendMessage(fauxAssistantMessage([{ type: "text", text: `recovery reply ${index} ${"s".repeat(700)}` }]));
+  }
+  return fx;
+}
+
+async function layoutLines(fx: RecoveryFixture): Promise<Array<[number, number, string]>> {
+  return (JSON.parse(await readFile(join(fx.storeRoot, "layout.json"), "utf8")) as { lines: Array<[number, number, string]> }).lines;
+}
+
+async function sha256File(path: string): Promise<string> {
+  return createHash("sha256").update(await readFile(path)).digest("hex");
+}
+
+async function releaseCrashedLock(fx: RecoveryFixture): Promise<void> {
+  const past = new Date(Date.now() - 120_000);
+  await utimes(join(fx.home, "state", "workspace-state.lock"), past, past);
+}
+
+async function assertRecoveredView(fx: RecoveryFixture, memory: EpisodicMemory, messages: number): Promise<string> {
+  await memory.entriesCommitted(fx.sessionId);
+  await memory.whenReady(messages);
+  const status = memory.status();
+  expect(status.blocked).toBeNull();
+  expect(status.messages).toBe(messages);
+  expect(status.view.unbuilt).toBe(0);
+  let cursor = 0;
+  for (const part of status.view.parts) {
+    expect(part.start, "the view covers every message once, in order").toBe(cursor);
+    cursor += part.messages;
+  }
+  expect(cursor).toBe(messages);
+  const nodes = (await readPersistedState(fx)).nodes;
+  assertConsistentStore(nodes, messages);
+  const live = liveNodes(nodes) as unknown as Map<string, { text: string }>;
+  const rendered = memory.renderView(messages).text;
+  for (const part of status.view.parts) if (part.messages > 1) expect(rendered).toContain(live.get(part.address)!.text.replace(/\n+/gu, " "));
+  return rendered;
+}
+
+async function writeFrozenChildProgram(fx: RecoveryFixture): Promise<{ program: string; hook: string }> {
+  const { hook } = await writeChildProgram(fx);
+  const program = join(fx.root, "frozen-child.mjs");
+  await writeFile(program, `import { existsSync } from "node:fs";
+import { EpisodicMemory } from ${JSON.stringify(EPISODIC_MEMORY_MODULE)};
+import { singleChapterSource } from ${JSON.stringify(CHAPTER_SOURCE_MODULE)};
+import { TronWorkspace } from ${JSON.stringify(WORKSPACE_MODULE)};
+const [home, sessionFile, sessionId, marker, point] = process.argv.slice(2);
+const zero = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
+const memory = await EpisodicMemory.open({
+  workspace: new TronWorkspace(home), sessionId, sessionSource: singleChapterSource(sessionId, sessionFile),
+  limits: ${JSON.stringify(FROZEN_LIMITS)},
+  summarizer: async (request) => {
+    const last = request.turns[request.turns.length - 1].text.replace(/\\s+/g, " ").trim().slice(-200);
+    return { role: "assistant", content: [{ type: "text", text: last }], api: "faux", provider: "faux", model: "child", usage: zero, stopReason: "stop", timestamp: Date.now() };
+  },
+});
+await memory.entriesCommitted(sessionId);
+await memory.whenReady(memory.status().messages);
+process.stdout.write("ready\\n");
+while (!existsSync(marker)) await new Promise(resolve => setTimeout(resolve, 1));
+const [kind, when] = point.split(":");
+const store = memory.store;
+const kill = () => { process.stdout.write("killed\\n"); process.kill(process.pid, "SIGKILL"); };
+const wrap = (name, matches) => {
+  const original = store[name].bind(store);
+  store[name] = async (...args) => {
+    const hit = matches(...args);
+    if (hit && when === "before") kill();
+    const result = await original(...args);
+    if (hit && when === "after") kill();
+    return result;
+  };
+};
+if (kind === "catalog") wrap("appendCatalog", () => true);
+if (kind === "node") wrap("appendNode", record => !("nodes" in record));
+if (kind === "invalidation") wrap("appendNode", record => "nodes" in record);
+const target = { state: "state.json", layout: "layout.json", checkpoint: "checkpoint.current.json" }[kind];
+if (target) {
+  const fileSystem = { ...store.fileSystem };
+  const rename = fileSystem.rename;
+  fileSystem.rename = async (from, to) => {
+    const hit = String(to).endsWith("/" + target);
+    if (hit && when === "before") kill();
+    await rename(from, to);
+    if (hit && when === "after") kill();
+  };
+  store.fileSystem = fileSystem;
+  if (kind === "checkpoint") store.shouldCheckpoint = async () => true;
+}
+await memory.entriesCommitted(sessionId);
+process.stdout.write("done\\n");
+`, "utf8");
+  return { program, hook };
+}
+
+describe("frozen layout recovery", () => {
+  it.each(KILL_POINTS)("kills a frozen memory at %s and reopens it with history intact and a valid view", async (point) => {
+    const fx = await frozenRecoveryFixture(`kill-${point.replace(":", "-")}`, 70);
+    const marker = join(fx.root, "commit-marker");
+    const { program, hook } = await writeFrozenChildProgram(fx);
+    const child = spawn(process.execPath, ["--experimental-transform-types", "--import", hook, program, fx.home, fx.sessionFile, fx.sessionId, marker, point], { stdio: ["ignore", "pipe", "pipe"] });
+    children.push(child);
+    const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(resolve => child.once("exit", (code, signal) => resolve({ code, signal })));
+    let output = "";
+    child.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+    child.stderr.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+    await waitForChildLine(child, "ready", () => output);
+
+    const before = await layoutLines(fx);
+    const frozen = before.find(([, span]) => span >= 64);
+    expect(frozen, "the base view holds a settled line").toBeDefined();
+    const editedIndex = frozen![0] + 2;
+    const target = fx.manager.getBranch().filter(entry => entry.type === "message")[editedIndex]!;
+    const editedText = `edited inside a frozen line at ${point}`;
+    fx.manager.appendContextEdit(target.id, { content: editedText });
+    for (let index = 0; index < 3; index += 1) {
+      fx.manager.appendMessage({ role: "user", content: `after crash ${index} ${"a".repeat(700)}`, timestamp: Date.now() } satisfies Message);
+      fx.manager.appendMessage(fauxAssistantMessage([{ type: "text", text: `after reply ${index} ${"b".repeat(700)}` }]));
+    }
+    const history = await sha256File(fx.sessionFile);
+    await writeFile(marker, "go", "utf8");
+    const exit = await awaitsWithin(exited, `child to reach ${point}`);
+    expect(output, `the kill point ${point} was reached`).toContain("killed");
+    expect(output).not.toContain("done");
+    expect(exit.signal).toBe("SIGKILL");
+    await releaseCrashedLock(fx);
+
+    const messages = 146;
+    const memory = await openMemory(fx, stubSummarizer, FROZEN_LIMITS);
+    let rendered: string;
+    try {
+      rendered = await assertRecoveredView(fx, memory, messages);
+      expect(memory.zoomLines(editedIndex, 1)![0]).toContain(editedText);
+    } finally { await memory.dispose(); }
+    expect(await sha256File(fx.sessionFile), "memory never writes canonical history").toBe(history);
+    const saved = await layoutLines(fx);
+    expect(saved.reduce((cursor, [start, span]) => { expect(start).toBe(cursor); return cursor + span; }, 0)).toBe(messages);
+    for (const [start, span] of before) {
+      if (span >= 64 && (editedIndex < start || editedIndex >= start + span)) expect(saved.some(line => line[0] === start && line[1] === span), `frozen line ${start}+${span} survives`).toBe(true);
+    }
+
+    fx.diagnostics.length = 0;
+    const again = await openMemory(fx, stubSummarizer, FROZEN_LIMITS);
+    try {
+      expect(again.renderView(messages).text, "the saved layout reopens byte-identically").toBe(rendered);
+      expect(fx.diagnostics.filter(record => record.event === "episodic.layout-rebuilt")).toEqual([]);
+    } finally { await again.dispose(); }
+  }, 180_000);
+
+  it("rebuilds a corrupt, truncated, oversized, misshapen or summary-less layout from history without touching it", async () => {
+    const fx = await frozenRecoveryFixture("corrupt", 70);
+    const built = await openMemory(fx, stubSummarizer, FROZEN_LIMITS);
+    let original: string;
+    try { original = await assertRecoveredView(fx, built, 140); } finally { await built.dispose(); }
+    const layoutPath = join(fx.storeRoot, "layout.json");
+    const text = await readFile(layoutPath, "utf8");
+    const lines = (JSON.parse(text) as { lines: Array<[number, number, string]> }).lines;
+    const settled = lines.findIndex(([, span]) => span >= 64);
+    expect(settled).toBeGreaterThanOrEqual(0);
+    const history = await sha256File(fx.sessionFile);
+    const catalog = JSON.stringify((await readPersistedState(fx)).catalog);
+    const variants: Array<{ name: string; text: string; reason: string; keptPrefix: number }> = [
+      { name: "garbage", text: "{", reason: "unreadable", keptPrefix: 0 },
+      { name: "truncated", text: text.slice(0, Math.floor(text.length / 2)), reason: "unreadable", keptPrefix: 0 },
+      { name: "empty", text: "", reason: "unreadable", keptPrefix: 0 },
+      { name: "oversized", text: " ".repeat(16 * 1024 * 1024 + 1), reason: "unreadable", keptPrefix: 0 },
+      { name: "unknown field", text: JSON.stringify({ version: 2, lines }), reason: "unreadable", keptPrefix: 0 },
+      { name: "gap", text: JSON.stringify({ lines: lines.filter((_, index) => index !== settled + 1) }), reason: "structure", keptPrefix: settled + 1 },
+      { name: "overlap", text: JSON.stringify({ lines: [...lines.slice(0, settled + 1), lines[settled]!, ...lines.slice(settled + 1)] }), reason: "structure", keptPrefix: settled + 1 },
+      { name: "misaligned", text: JSON.stringify({ lines: [...lines.slice(0, settled), [lines[settled]![0], 3, lines[settled]![2]], ...lines.slice(settled + 1)] }), reason: "structure", keptPrefix: settled },
+      { name: "past the catalog", text: JSON.stringify({ lines: [...lines, [140, 1, "0".repeat(64)]] }), reason: "past-catalog", keptPrefix: lines.length },
+      { name: "stale content", text: JSON.stringify({ lines: lines.map((line, index) => index === settled ? [line[0], line[1], "0".repeat(64)] : line) }), reason: "content", keptPrefix: settled },
+    ];
+    for (const variant of variants) {
+      await writeFile(layoutPath, variant.text, { mode: 0o600 });
+      fx.diagnostics.length = 0;
+      const memory = await openMemory(fx, stubSummarizer, FROZEN_LIMITS);
+      try {
+        const rebuilt = fx.diagnostics.filter(record => record.event === "episodic.layout-rebuilt");
+        expect(rebuilt.map(record => record.reason), variant.name).toEqual([variant.reason]);
+        const rendered = await assertRecoveredView(fx, memory, 140);
+        const keptLines = original.split("\n").slice(0, variant.keptPrefix);
+        expect(rendered.split("\n").slice(0, keptLines.length), `${variant.name} keeps the lines before the damage`).toEqual(keptLines);
+      } finally { await memory.dispose(); }
+      expect(await sha256File(fx.sessionFile)).toBe(history);
+      expect(JSON.stringify((await readPersistedState(fx)).catalog), `${variant.name} leaves the catalog alone`).toBe(catalog);
+      expect(await layoutLines(fx)).not.toHaveLength(0);
+    }
+
+    const valid = (await layoutLines(fx)).find(([, span]) => span > 1)!;
+    const snapshot = await new EpisodicStore(fx.workspace, fx.sessionId, EPISODIC_DEFAULTS.maxStoreLineBytes).read();
+    const level = Math.log2(valid[1]);
+    await appendFile(fx.nodesPath, `${JSON.stringify({ revision: snapshot.highestRevision + 1, generation: Math.max(snapshot.state!.generation, snapshot.highestGeneration) + 1, part: 0, parts: 1, nodes: (valid[0] * 32 + level).toString(36) })}\n`);
+    fx.diagnostics.length = 0;
+    const missing = await openMemory(fx, stubSummarizer, FROZEN_LIMITS);
+    try {
+      expect(fx.diagnostics.filter(record => record.event === "episodic.layout-rebuilt").map(record => record.reason), "a kept line whose summary is gone").toEqual(["missing-node"]);
+      expect(missing.status().view.unbuilt, "no multi-message line enters the view without its summary").toBe(0);
+      await assertRecoveredView(fx, missing, 140);
+    } finally { await missing.dispose(); }
+    expect(await sha256File(fx.sessionFile)).toBe(history);
+
+    await rm(layoutPath);
+    await writeFile(join(fx.root, "elsewhere.json"), text, { mode: 0o600 });
+    await symlink(join(fx.root, "elsewhere.json"), layoutPath);
+    await expect(openMemory(fx, stubSummarizer, FROZEN_LIMITS)).rejects.toMatchObject({ kind: "unsafe-store" });
+  }, 300_000);
+
+  it("keeps memory running when the layout cannot be saved, and validates the older layout on reopen", async () => {
+    const fx = await frozenRecoveryFixture("unsaved", 70);
+    const memory = await openMemory(fx, stubSummarizer, FROZEN_LIMITS);
+    let older: string;
+    try {
+      await assertRecoveredView(fx, memory, 140);
+      older = await readFile(join(fx.storeRoot, "layout.json"), "utf8");
+      (memory as unknown as { store: { saveLayout(text: string): Promise<void> } }).store.saveLayout = async () => {
+        throw Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" });
+      };
+      for (let index = 0; index < 8; index += 1) {
+        fx.manager.appendMessage({ role: "user", content: `unsaved ${index} ${"u".repeat(700)}`, timestamp: Date.now() } satisfies Message);
+      }
+      await assertRecoveredView(fx, memory, 148);
+      expect(fx.diagnostics.some(record => record.event === "episodic.layout-unsaved")).toBe(true);
+    } finally { await memory.dispose(); }
+    expect(await readFile(join(fx.storeRoot, "layout.json"), "utf8"), "a failed save leaves the last saved layout").toBe(older);
+    const reopened = await openMemory(fx, stubSummarizer, FROZEN_LIMITS);
+    try { await assertRecoveredView(fx, reopened, 148); } finally { await reopened.dispose(); }
   }, 180_000);
 });

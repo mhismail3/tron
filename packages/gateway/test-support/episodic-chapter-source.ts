@@ -1,12 +1,16 @@
 import type { EpisodicSessionSource } from "../src/episodic/episodic-contract.js";
 import { episodicDigest } from "../src/kernel/session/canonical-reader.js";
-import { readCanonicalHomeDeltas, readCanonicalHomeIndex } from "../src/episodic/home-source.js";
+import { readCanonicalHomeDeltas, readCanonicalHomeIndex, type HomeSourceSnapshot } from "../src/episodic/home-source.js";
 
 export function singleChapterSource(sessionId: string, sessionFile: string): EpisodicSessionSource {
   const snapshot = { homeId: sessionId, ledgerRevision: 1, chapters: [{ sessionId, path: sessionFile, sealed: false }] };
+  return homeChapterSource(() => snapshot);
+}
+
+export function homeChapterSource(snapshot: () => HomeSourceSnapshot): EpisodicSessionSource {
   return {
-    read: (cursor, limits) => readCanonicalHomeDeltas(snapshot, cursor, limits),
-    branchAtCursor: (cursor, limits) => readCanonicalHomeIndex(snapshot, cursor, limits),
+    read: (cursor, limits) => readCanonicalHomeDeltas(snapshot(), cursor, limits),
+    branchAtCursor: (cursor, limits) => readCanonicalHomeIndex(snapshot(), cursor, limits),
   };
 }
 
