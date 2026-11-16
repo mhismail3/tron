@@ -197,6 +197,10 @@ class HostedIdleEvidenceTests(unittest.TestCase):
         self.assertTrue(any(animation["type"] == "CABasicAnimation" and animation["autoreverses"]
                             and animation["repeatCount"] > 1 and animation["duration"] == 0.8
                             for animation in animations), snapshot)
+        self.assertTrue(any(entry["keyPath"] == "transform" and entry["inWindow"]
+                            and any("HostedIdleUIViewAnimation" in frame for frame in entry["addedFrom"])
+                            for entry in snapshot["unstoppedViewAnimations"]["animations"]), snapshot)
+        self.assertGreater(snapshot["unstoppedViewAnimations"]["starts"], 0)
 
     def test_blocked_main_retains_unanswered_signal_and_external_sample(self) -> None:
         assert self.blocked_run is not None
