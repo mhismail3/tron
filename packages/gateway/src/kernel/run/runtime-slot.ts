@@ -63,7 +63,7 @@ import { setPath, type SessionSettingsSource, type SettingsModel } from "../sett
 import { SETTINGS_OUTCOME_MESSAGE, CONTEXT_DELIVERY_RECEIPT_TYPE } from "../receipts/delivery-tags.js";
 import { type SettingsSignal, type SettingsInventorySource, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting, type LayerId } from "../settings/tool-contract.js";
 import type { Actor } from "../settings/settings-record.js";
-import { piBuiltinExtensions, managedBrowserExtensions } from "../host/pi-builtins.js";
+import { piBuiltinExtensions, managedBrowserExtensions, toolSearchExtension } from "../host/pi-builtins.js";
 import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../host/extension-adapters.js";
 import type {
   ChatOrigin,
@@ -841,7 +841,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     await applyModelAdmission(session, admission, Boolean(this.ownedTurns.worker) || this.liveProfile().modelSelection?.physicalOnly === true,
       owners.model.owner.admitModelChoice);
     if (this.runtime.session !== session) throw new GatewayError("conflict", "Runtime changed during model admission");
-    this.applyHomeToolRecipe(session, this.liveProfile(), admission);
+    this.applyHomeToolRecipe(session, this.liveProfile(), admission, true);
     session.settingsManager.applyOverrides(settings);
     session.agent.steeringMode = session.settingsManager.getSteeringMode();
     session.agent.followUpMode = session.settingsManager.getFollowUpMode();
@@ -850,10 +850,13 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     return settings;
   }
 
-  private applyHomeToolRecipe(session: AgentSession, profile: SessionProfile, rows: readonly { key: string; value: unknown }[]): void {
+  private applyHomeToolRecipe(session: AgentSession, profile: SessionProfile, rows: readonly { key: string; value: unknown }[], keepLoaded: boolean): void {
     if (profile.launchDefaults !== "settings-home-recipe") return;
     const tools = rows.find(row => row.key === "tools.active")?.value;
-    if (Array.isArray(tools)) session.setActiveToolsByName(tools.filter((name): name is string => typeof name === "string" && profile.tools?.includes(name) === true));
+    if (!Array.isArray(tools)) return;
+    const deferred = new Set(session.getAllTools().filter(tool => tool.exposure === "deferred").map(tool => tool.name));
+    const loaded = keepLoaded ? session.getActiveToolNames().filter(name => deferred.has(name)) : [];
+    session.setActiveToolsByName([...new Set([...tools, ...loaded])].filter((name): name is string => typeof name === "string" && profile.tools?.includes(name) === true));
   }
 
   private async persistChatRunSetting(key: string, value: unknown, allowFixedDirection: boolean, fixedAt?: FixedSetting): Promise<number> {
@@ -1193,6 +1196,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         modelRuntime, profile: () => this.liveProfile(),
         fixedSettings: () => readSessionFixedSettings(this.sessionManager.getBranch()),
         delegatedWorker: () => Boolean(this.ownedTurns.worker),
+        defersRareTools: profile.chapter || Boolean(this.ownedTurns.worker),
         turnFacts: provider => { turnFacts.push(provider); },
         ...(profile.managedSubagents && this.dependencies.managedSubagents ? {
           requireChildExtensions: this.dependencies.managedSubagents.requireChildExtensions.bind(this.dependencies.managedSubagents),
@@ -1222,7 +1226,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       const managedLoaderOptions = await managedSubagents?.loaderOptions(settingsManager,
         (content, options, owner, messages) => this.admitSubagentWake(content, options, owner, messages));
       const extensionFactories = profile.extensions !== "ordinary"
-        ? [...this.dependencies.modules.registrations(profile.extensions, sessionContext), ...managedBrowserExtensions(this.dependencies.agentDir, settingsManager)]
+        ? [...this.dependencies.modules.registrations(profile.extensions, sessionContext), ...managedBrowserExtensions(this.dependencies.agentDir, settingsManager),
+          ...(sessionContext.defersRareTools ? [{ name: "tron-tool-search", factory: toolSearchExtension(false).factory }] : [])]
         : [
             ...managedBrowserExtensions(this.dependencies.agentDir, settingsManager),
             ...(managedLoaderOptions?.extensionFactories ?? []),
@@ -1236,7 +1241,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
                 throw new Error("MCP authorization URL does not match the active session operation");
               }
               this.dependencies.mcpAuth.openUrl(operationId, url, this.id, target.server);
-            }),
+            }, sessionContext.defersRareTools),
             ...this.dependencies.modules.registrations(this.dependencies.modules.runtimeOrder, sessionContext),
             ...(modelRuntimePolicy?.extensions(sessionContext,
               managedSubagents?.requireChildExtensions.bind(managedSubagents)) ?? []),
@@ -1322,7 +1327,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       });
       if (startsNewChat) this.newSettingsSessions.add(created.session);
       if (profile.launchDefaults === "settings-home-recipe") {
-        this.applyHomeToolRecipe(created.session, profile, launchDefaults?.keys ?? []);
+        this.applyHomeToolRecipe(created.session, profile, launchDefaults?.keys ?? [], false);
       } else {
         const toolChoice = readSessionToolChoice(sessionManager.getBranch());
         if (toolChoice && toolChoice.fixed?.from !== "project") created.session.setActiveToolsByName(toolChoice.tools);

@@ -78,6 +78,7 @@ export interface SessionContext {
   modelRuntime: ModelRuntime;
   fixedSettings(): Readonly<Record<string, FixedSetting>>;
   delegatedWorker(): boolean;
+  readonly defersRareTools: boolean;
   turnFacts(provider: () => Promise<string | undefined>): void;
   requireChildExtensions?(sessionId: string, extensions: readonly { id: string; path: string }[]): Promise<{ dispose(): void }>;
   requireChildTaskContext?(sessionId: string, taskPrefix: string): Promise<{ dispose(): void }>;
