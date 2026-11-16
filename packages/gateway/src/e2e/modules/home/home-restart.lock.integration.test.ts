@@ -8,6 +8,7 @@ import { startLockGateway, type LockGateway } from "../../../../test-support/gat
 import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../../../test-support/scenario-lock.js";
 import { awaitsWithin, waitFor } from "../../../../test-support/wait-for.js";
 import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
+import { withoutTurnFrame } from "../../../../test-support/turn-frame.js";
 
 const MODULE = "gateway/e2e";
 const NARROWED_ENTRY_TYPES = new Set(["tron.settings.v1", "tron.chat-invocation.v1", "tron.context-delivery.v4", "tron.home-task-result.v1"]);
@@ -52,7 +53,7 @@ type Caller = "worker" | "home-input" | "home-delegated" | "home-second" | "home
 function callerOf(context: TranscriptContext): Caller {
   const messages = context.messages as Array<{ role: string; content?: unknown; toolName?: string }>;
   if (messages.some((message) => (message.role === "user" || message.role === "system") && textOf(message.content).includes(WORKER_MARKER))) return "worker";
-  const last = messages.at(-1);
+  const last = withoutTurnFrame(messages).at(-1);
   if (last?.role === "toolResult" && last.toolName === "delegate") return "home-delegated";
   const text = last?.role === "user" ? textOf(last.content) : "";
   if (text.includes("Delegate the restart work")) return "home-input";

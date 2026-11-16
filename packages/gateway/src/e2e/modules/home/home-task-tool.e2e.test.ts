@@ -12,6 +12,7 @@ import { disposeFixtures, fixture, reportCall } from "../../../../test-support/h
 import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
 import { WakeInboxOwner } from "../../../modules/home/home-wake-inbox.js";
 import type { HomeTaskDispatcher } from "../../../modules/home/home-task-dispatcher.js";
+import { withoutTurnFrame } from "../../../../test-support/turn-frame.js";
 
 const PROVIDER = "local-anthropic";
 const MODEL_ID = "home-wire";
@@ -40,7 +41,7 @@ async function homeEndpoint() {
     request.on("end", () => {
       const body = JSON.parse(raw) as Body;
       requests.push(body);
-      const last = body.messages.at(-1);
+      const last = withoutTurnFrame(body.messages).at(-1);
       const answersTool = Array.isArray(last?.content) && last.content.some(block => block.type === "tool_result");
       const text = typeof last?.content === "string" ? last.content : (last?.content ?? []).map(block => block.type === "text" ? block.text : "").join("\n");
       const index = answersTool ? -1 : calls.findIndex(call => text.includes(call.prompt));
@@ -66,7 +67,7 @@ async function homeEndpoint() {
 }
 
 const lastUser = (context: Context) => {
-  const content = context.messages.findLast(message => message.role === "user")?.content;
+  const content = withoutTurnFrame(context.messages).findLast(message => message.role === "user")?.content;
   return typeof content === "string" ? content : (content ?? []).map(part => part.type === "text" ? part.text : "").join("");
 };
 function gate() {
@@ -110,7 +111,7 @@ describe("Home's task tool on the wire (#961)", () => {
         return fauxAssistantMessage([fauxToolCall("task", { action: "status", taskId: "race-worker" })], { stopReason: "toolUse" });
       },
       context => {
-        results.push(context.messages.at(-1));
+        results.push(withoutTurnFrame(context.messages).at(-1));
         return fauxAssistantMessage("Control handled");
       },
     ]);
@@ -160,7 +161,7 @@ describe("Home's task tool on the wire (#961)", () => {
         return fauxAssistantMessage("Wake handled");
       },
       () => fauxAssistantMessage([fauxToolCall("task", { action: "status", taskId: "race-worker" })], { stopReason: "toolUse" }),
-      context => { results.push(context.messages.at(-1)); return fauxAssistantMessage("Control handled"); },
+      context => { results.push(withoutTurnFrame(context.messages).at(-1)); return fauxAssistantMessage("Control handled"); },
     ]);
     try {
       const run = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "race-worker", intent: "Finite work", target: f.cwd });
@@ -196,7 +197,7 @@ describe("Home's task tool on the wire (#961)", () => {
       const prompt = `${id}: call ${name} ${JSON.stringify(input)}`;
       wire.calls.push({ id, prompt, name, input });
       const readResult = () => wire.requests.slice(before).flatMap(body => {
-        const content = body.messages.at(-1)?.content;
+        const content = withoutTurnFrame(body.messages).at(-1)?.content;
         return Array.isArray(content) ? content.filter((block): block is ToolResult => block.type === "tool_result" && block.tool_use_id === id) : [];
       })[0];
       await promptHomeControl(home, prompt);
@@ -237,7 +238,7 @@ describe("Home's task tool on the wire (#961)", () => {
       turns += 1;
       const text = lastUser(context);
       seen.push(text.slice(0, 200));
-      const lastMessage = context.messages.at(-1);
+      const lastMessage = withoutTurnFrame(context.messages).at(-1);
       if (lastMessage?.role === "toolResult") return fauxAssistantMessage("command finished");
       if (text.includes("STEER-TWO")) return fauxAssistantMessage([reportCall("tool-journey", "Resumed and steered")], { stopReason: "toolUse" });
       if (text.includes("STEER-ONE")) {
@@ -453,7 +454,7 @@ wait
         const result = context.messages.findLast(message => message.role === "toolResult");
         results.push(JSON.stringify(result?.content ?? null));
         seen.push(lastUser(context));
-        order.push(context.messages.slice(-2).map(message => message.role).join(","));
+        order.push(withoutTurnFrame(context.messages).slice(-2).map(message => message.role).join(","));
         return fauxAssistantMessage([fauxToolCall("bash", { command: "trap '' INT TERM; echo $$ > stubborn.pid; exec sleep 600" }, { id: "stubborn" })], { stopReason: "toolUse" });
       },
       (context: Context) => {

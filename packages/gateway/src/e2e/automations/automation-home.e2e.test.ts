@@ -12,6 +12,7 @@ import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
 import { SessionManager } from "../../kernel/pi/coding-agent.js";
 import { AutomationStore } from "../../automations/automation-store.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "../../kernel/receipts/invocation-receipts.js";
+import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
 
 const owned: LockGateway[] = [];
 const retainedRoots = new Set<string>();
@@ -85,7 +86,7 @@ it("real Gateway: retains each Home automation firing while paused, batches on r
   const held = new Promise<void>(resolve => { release = resolve; });
   const pages: string[] = [];
   const readPage: FauxResponseFactory = async context => {
-    const last = context.messages.at(-1)!;
+    const last = withoutTurnFrame(context.messages).at(-1)!;
     if (last.role !== "toolResult") throw new Error("Expected the native schedule reader response");
     expect(last.isError).not.toBe(true);
     const page = JSON.parse(last.content.flatMap(part => part.type === "text" ? [part.text] : []).join(""));
@@ -620,7 +621,7 @@ it("real Gateway: a Home-created automation wake cannot approve settings, trust,
     if (context.messages.some(message => message.role === "system" && getSystemMessageText(message).includes("This is a finite Home task"))) {
       return fauxAssistantMessage([fauxToolCall("report", { resultId: "scope-setup-result", outcome: "final", text: "Scope setup completed.", evidence: ["Fixture report completed"] })], { stopReason: "toolUse" });
     }
-    const last = context.messages.at(-1);
+    const last = withoutTurnFrame(context.messages).at(-1);
     return last?.role === "user" && JSON.stringify(last.content).includes("Initialize authority scopes")
       ? fauxAssistantMessage([fauxToolCall("delegate", { taskId: "authority-scope-setup", title: "Authority scope setup", intent: "Report at once", target: gateway.cwd })], { stopReason: "toolUse" })
       : fauxAssistantMessage("Setup result acknowledged.");

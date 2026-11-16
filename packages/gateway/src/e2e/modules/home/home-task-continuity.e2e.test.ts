@@ -15,6 +15,7 @@ import { disposeFixtures, fixture, reportCall } from "../../../../test-support/h
 import { TRON_ASK_USER_INTERRUPTED } from "../../../extensions/tron-ask-user-contract.js";
 import { GatewayProtocolClient } from "../../../client/gateway-client.js";
 import { readLocalCredential } from "../../../client/local-credential.js";
+import { withoutTurnFrame } from "../../../../test-support/turn-frame.js";
 
 const REPO = resolve(process.cwd(), "../..");
 const evidence: Array<Record<string, unknown>> = [];
@@ -59,7 +60,7 @@ async function listen(f: Fixture) {
 
 const APPROVAL = { title: "Approval", questions: [{ question: "Move the claim to the active worker?", options: [{ label: "Move it" }, { label: "Keep it" }] }] };
 const lastUser = (context: Context) => {
-  const message = context.messages.findLast(candidate => candidate.role === "user");
+  const message = withoutTurnFrame(context.messages).findLast(candidate => candidate.role === "user");
   const content = message?.content;
   return typeof content === "string" ? content : (content ?? []).map(part => part.type === "text" ? part.text : "").join("");
 };
@@ -447,7 +448,7 @@ describe("resuming a stopped Home worker in place", () => {
     const f = await fixture(false, true);
     const seen: string[] = [];
     const turn = (context: Context) => {
-      const last = context.messages.at(-1);
+      const last = withoutTurnFrame(context.messages).at(-1);
       if (last?.role === "toolResult" && last.toolName === "ask_user") {
         seen.push(JSON.stringify(last.content));
         return fauxAssistantMessage([reportCall("resumed-result", "Claim moved")], { stopReason: "toolUse" });
