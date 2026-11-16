@@ -1,6 +1,6 @@
 import { createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { execFile, execFileSync, spawn } from "node:child_process";
 import WebSocket from "ws";
@@ -68,6 +68,11 @@ function closeNative(agentDir: string, sockets: string | undefined): void {
       env: {...process.env, HOME:join(agentDir,"browser","home"), AGENT_BROWSER_SOCKET_DIR:sockets, PI_AGENT_BROWSER_SOCKET_DIR:sockets},
       timeout:15000, stdio:"pipe",
     });
+    const deadline = Date.now() + HOOK_HANG_BOUND_MS;
+    while (existsSync(join(sockets, name))) {
+      if (Date.now() > deadline) throw new Error(`native daemon ${name} kept its pid file ${HOOK_HANG_BOUND_MS}ms after close`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
   }
 }
 
