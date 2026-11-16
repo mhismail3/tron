@@ -41,7 +41,7 @@ index 5c6aa7d..c8c33a5 100644
  HTTP servers use `url`, `headers`, and `oauth` (see [Authenticate with OAuth](#authenticate-with-oauth)). The legacy SSE transport is not supported.
  
 diff --git a/packages/coding-agent/docs/sdk.md b/packages/coding-agent/docs/sdk.md
-index 7d0883b..7531274 100644
+index 7d0883b..5895b19 100644
 --- a/packages/coding-agent/docs/sdk.md
 +++ b/packages/coding-agent/docs/sdk.md
 @@ -29,7 +29,9 @@ The [complete minimal example](../examples/sdk/01-minimal.ts) also streams text
@@ -49,7 +49,7 @@ index 7d0883b..7531274 100644
  Read current state through `session.messages`, `session.model`, `session.thinkingLevel`, `session.systemPrompt`, and `session.getActiveToolNames()`.
  
 -`session.systemPrompt` is read-only and returns the current effective system prompt, including changes that have not yet been sent to the model. Tool changes are declared to the model before the next request.
-+`createAgentSession` and `createAgentSessionFromServices` accept a host-owned `preamble`. It replaces the default harness identity without suppressing tool snippets, tool-contributed guidelines or documentation. With a custom system prompt, the custom text becomes a separate `role` section after that preamble. Extensions can update the run's preamble through `before_agent_start` prompt options.
++`createAgentSession` and `createAgentSessionFromServices` accept a host-owned `preamble`. It replaces the default harness identity without suppressing tool snippets, tool-contributed guidelines or documentation. With a custom system prompt, the custom text becomes a separate `role` section after that preamble. Extensions can update the run's preamble through `before_agent_start` prompt options. A host `renderSkills(skills, fileReadTool, instructions)` option renders the `skills` and `project_skills` sections in place of Pi's skills block, for idle previews and requests alike.
 +
 +`session.systemPrompt` is read-only and returns the current effective system prompt, including changes that have not yet been sent to the model. Tool changes are declared to the model before the next request. During a run it is the run's prompt, forced text included. Between runs it is the base prompt plus the extension sections the transcript still gives the model, such as the `mcp_servers` listing; a `before_agent_start` handler that stops setting a section removes it at the next request.
  
@@ -123,10 +123,18 @@ index 2015066..422b781 100644
  	},
  	"overrides": {
 diff --git a/packages/coding-agent/src/core/agent-session-services.ts b/packages/coding-agent/src/core/agent-session-services.ts
-index 9673ba6..d862780 100644
+index 9673ba6..03e1be2 100644
 --- a/packages/coding-agent/src/core/agent-session-services.ts
 +++ b/packages/coding-agent/src/core/agent-session-services.ts
-@@ -36,12 +36,14 @@ export interface AgentSessionRuntimeDiagnostic {
+@@ -14,6 +14,7 @@ import {
+ import { type CreateAgentSessionOptions, type CreateAgentSessionResult, createAgentSession } from "./sdk.ts";
+ import type { SessionManager } from "./session-manager.ts";
+ import { SettingsManager } from "./settings-manager.ts";
++import type { SkillsRenderer } from "./system-prompt.ts";
+ 
+ /**
+  * Non-fatal issues collected while creating services or sessions.
+@@ -36,12 +37,14 @@ export interface AgentSessionRuntimeDiagnostic {
   */
  export interface CreateAgentSessionServicesOptions {
  	cwd: string;
@@ -142,15 +150,16 @@ index 9673ba6..d862780 100644
  	resourceLoaderReloadOptions?: ResourceLoaderReloadOptions;
  }
  
-@@ -52,6 +54,7 @@ export interface CreateAgentSessionServicesOptions {
+@@ -52,6 +55,8 @@ export interface CreateAgentSessionServicesOptions {
   * have been resolved against those services.
   */
  export interface CreateAgentSessionFromServicesOptions {
 +	preamble?: string;
++	renderSkills?: SkillsRenderer;
  	services: AgentSessionServices;
  	sessionManager: SessionManager;
  	sessionStartEvent?: SessionStartEvent;
-@@ -72,6 +75,7 @@ export interface CreateAgentSessionFromServicesOptions {
+@@ -72,6 +77,7 @@ export interface CreateAgentSessionFromServicesOptions {
   */
  export interface AgentSessionServices {
  	cwd: string;
@@ -158,7 +167,7 @@ index 9673ba6..d862780 100644
  	agentDir: string;
  	modelRuntime: ModelRuntime;
  	settingsManager: SettingsManager;
-@@ -136,6 +140,7 @@ export async function createAgentSessionServices(
+@@ -136,6 +142,7 @@ export async function createAgentSessionServices(
  	options: CreateAgentSessionServicesOptions,
  ): Promise<AgentSessionServices> {
  	const cwd = resolvePath(options.cwd);
@@ -166,7 +175,7 @@ index 9673ba6..d862780 100644
  	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getAgentDir();
  	const modelRuntime =
  		options.modelRuntime ??
-@@ -144,10 +149,11 @@ export async function createAgentSessionServices(
+@@ -144,10 +151,11 @@ export async function createAgentSessionServices(
  			modelsPath: join(agentDir, "models.json"),
  			signal: options.modelRuntimeSignal,
  		}));
@@ -179,7 +188,7 @@ index 9673ba6..d862780 100644
  		agentDir,
  		settingsManager,
  	});
-@@ -196,6 +202,7 @@ export async function createAgentSessionServices(
+@@ -196,6 +204,7 @@ export async function createAgentSessionServices(
  
  	return {
  		cwd,
@@ -187,21 +196,22 @@ index 9673ba6..d862780 100644
  		agentDir,
  		modelRuntime,
  		settingsManager,
-@@ -215,7 +222,9 @@ export async function createAgentSessionFromServices(
+@@ -215,7 +224,10 @@ export async function createAgentSessionFromServices(
  	options: CreateAgentSessionFromServicesOptions,
  ): Promise<CreateAgentSessionResult> {
  	return createAgentSession({
 +		preamble: options.preamble,
++		renderSkills: options.renderSkills,
  		cwd: options.services.cwd,
 +		projectDir: options.services.projectDir,
  		agentDir: options.services.agentDir,
  		modelRuntime: options.services.modelRuntime,
  		settingsManager: options.services.settingsManager,
 diff --git a/packages/coding-agent/src/core/agent-session.ts b/packages/coding-agent/src/core/agent-session.ts
-index f76247d..31edabf 100644
+index f76247d..b3f6759 100644
 --- a/packages/coding-agent/src/core/agent-session.ts
 +++ b/packages/coding-agent/src/core/agent-session.ts
-@@ -141,6 +141,7 @@ import {
+@@ -141,11 +141,13 @@ import {
  import type { SlashCommandInfo } from "./slash-commands.ts";
  import { BUILTIN_PATH_PREFIX, createSyntheticSourceInfo, isSyntheticPath, type SourceInfo } from "./source-info.ts";
  import {
@@ -209,11 +219,18 @@ index f76247d..31edabf 100644
  	buildSystemPrompt,
  	buildSystemPromptSections,
  	diffSystemPromptSections,
-@@ -264,10 +265,13 @@ function withoutDeletedHeaders(headers: ProviderHeaders | undefined): Record<str
+ 	type NormalizedBuildSystemPromptOptions,
+ 	normalizeBuildSystemPromptOptions,
++	type SkillsRenderer,
+ } from "./system-prompt.ts";
+ import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
+ import { createAllToolDefinitions } from "./tools/index.ts";
+@@ -264,10 +266,14 @@ function withoutDeletedHeaders(headers: ProviderHeaders | undefined): Record<str
  }
  
  export interface AgentSessionConfig {
 +	preamble?: string;
++	renderSkills?: SkillsRenderer;
  	agent: Agent;
  	sessionManager: SessionManager;
  	settingsManager: SettingsManager;
@@ -223,7 +240,7 @@ index f76247d..31edabf 100644
  	/** Models to cycle through with Ctrl+P (from --models flag) */
  	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
  	/** Resource loader for extensions, skills, prompts, themes, context files, and system prompt */
-@@ -470,6 +474,7 @@ export class AgentSession {
+@@ -470,6 +476,7 @@ export class AgentSession {
  	private _customTools: ToolDefinition[];
  	private _baseToolDefinitions: Map<string, ToolDefinition> = new Map();
  	private _cwd: string;
@@ -231,21 +248,23 @@ index f76247d..31edabf 100644
  	private _extensionRunnerRef?: { current?: ExtensionRunner };
  	private _initialActiveToolNames?: string[];
  	/**
-@@ -511,11 +516,13 @@ export class AgentSession {
+@@ -511,11 +518,15 @@ export class AgentSession {
  	private _toolPromptSnippets: Map<string, string> = new Map();
  	private _toolPromptGuidelines: Map<string, string[]> = new Map();
  
 +	private readonly _preamble?: string;
++	private readonly _renderSkills?: SkillsRenderer;
  	private _baseSystemPromptOptions!: NormalizedBuildSystemPromptOptions;
  	/** Prompt options after before_agent_start mutations for the active run. */
  	private _runSystemPromptOptions?: NormalizedBuildSystemPromptOptions;
  
  	constructor(config: AgentSessionConfig) {
 +		this._preamble = config.preamble;
++		this._renderSkills = config.renderSkills;
  		this.agent = config.agent;
  		this.sessionManager = config.sessionManager;
  		this.settingsManager = config.settingsManager;
-@@ -523,6 +530,7 @@ export class AgentSession {
+@@ -523,6 +534,7 @@ export class AgentSession {
  		this._resourceLoader = config.resourceLoader;
  		this._customTools = config.customTools ?? [];
  		this._cwd = config.cwd;
@@ -253,7 +272,7 @@ index f76247d..31edabf 100644
  		this._modelRuntime = config.modelRuntime;
  		this._cacheWarmer = config.cacheWarmer;
  		if (this._cacheWarmer) {
-@@ -1550,9 +1558,17 @@ export class AgentSession {
+@@ -1550,9 +1562,17 @@ export class AgentSession {
  		return !this._isAgentRunActive && !this.isCompacting;
  	}
  
@@ -273,7 +292,7 @@ index f76247d..31edabf 100644
  	}
  
  	/** Current retry attempt (0 if not retrying) */
-@@ -1603,10 +1619,16 @@ export class AgentSession {
+@@ -1603,10 +1623,16 @@ export class AgentSession {
  	setActiveToolsByName(toolNames: string[]): void {
  		const previous = this.getActiveToolNames();
  		this._setActiveTools(toolNames);
@@ -293,15 +312,16 @@ index f76247d..31edabf 100644
  	}
  
  	private _setActiveTools(toolNames: string[]): void {
-@@ -1803,6 +1825,7 @@ export class AgentSession {
+@@ -1803,6 +1829,8 @@ export class AgentSession {
  		const loadedContextFiles = this._resourceLoader.getAgentsFiles().agentsFiles;
  
  		this._baseSystemPromptOptions = normalizeBuildSystemPromptOptions({
 +			preamble: this._preamble,
++			renderSkills: this._renderSkills,
  			cwd: this._cwd,
  			skills: loadedSkills,
  			contextFiles: loadedContextFiles,
-@@ -1883,7 +1906,7 @@ export class AgentSession {
+@@ -1883,7 +1911,7 @@ export class AgentSession {
  			const current = getCurrentSystemMessage(transformed);
  			const head: SystemMessage = {
  				role: "system",
@@ -310,7 +330,7 @@ index f76247d..31edabf 100644
  				...(current?.toolsAdded ? { toolsAdded: current.toolsAdded } : {}),
  				timestamp: current?.timestamp ?? Date.now(),
  			};
-@@ -1946,8 +1969,13 @@ export class AgentSession {
+@@ -1946,8 +1974,13 @@ export class AgentSession {
  		let messages: AgentMessage[];
  		try {
  			messages = await this._prepareRun(trigger);
@@ -324,7 +344,7 @@ index f76247d..31edabf 100644
  			this._flushPendingBashMessages();
  			this._flushPendingCustomMessages();
  			this._resolveIdleWaitIfIdle();
-@@ -1957,7 +1985,6 @@ export class AgentSession {
+@@ -1957,7 +1990,6 @@ export class AgentSession {
  		// have while idle. No run exists yet, so they cannot split a tool call from its result.
  		this._flushPendingBashMessages();
  		this._flushPendingCustomMessages();
@@ -332,7 +352,7 @@ index f76247d..31edabf 100644
  
  		// Compaction before the prompt may have scheduled a retry; the new prompt replaces it.
  		this._failedResponse = undefined;
-@@ -2591,6 +2618,11 @@ export class AgentSession {
+@@ -2591,6 +2623,11 @@ export class AgentSession {
  		return this._followUpMessages;
  	}
  
@@ -344,7 +364,7 @@ index f76247d..31edabf 100644
  	get resourceLoader(): ResourceLoader {
  		return this._resourceLoader;
  	}
-@@ -3795,6 +3827,7 @@ export class AgentSession {
+@@ -3795,6 +3832,7 @@ export class AgentSession {
  			this._cwd,
  			this.sessionManager,
  			new ModelRegistry(this._modelRuntime),
@@ -700,14 +720,23 @@ index bb0740e..a1bd3d3 100644
  			return projectPath;
  		}
 diff --git a/packages/coding-agent/src/core/sdk.ts b/packages/coding-agent/src/core/sdk.ts
-index dbab1d1..61eb387 100644
+index dbab1d1..90a0db0 100644
 --- a/packages/coding-agent/src/core/sdk.ts
 +++ b/packages/coding-agent/src/core/sdk.ts
-@@ -46,8 +46,15 @@ import { getBranchSelection } from "./virtual-models.ts";
+@@ -39,6 +39,7 @@ import {
+ 	withFileMutationQueue,
+ } from "./tools/index.ts";
+ import { getBranchSelection } from "./virtual-models.ts";
++import type { SkillsRenderer } from "./system-prompt.ts";
+ 
+ // Preserve the pre-0.81 fallback for extensions that construct Agent instances
+ // or invoke low-level agent loops without supplying streamFn. Agent core remains
+@@ -46,8 +47,16 @@ import { getBranchSelection } from "./virtual-models.ts";
  setDefaultStreamFn(streamSimple);
  
  export interface CreateAgentSessionOptions {
 +	preamble?: string;
++	renderSkills?: SkillsRenderer;
  	/** Working directory for project-local discovery. Default: process.cwd() */
  	cwd?: string;
 +	/**
@@ -719,7 +748,7 @@ index dbab1d1..61eb387 100644
  	/** Global config directory. Default: ~/.pi/agent */
  	agentDir?: string;
  
-@@ -99,7 +106,7 @@ export interface CreateAgentSessionOptions {
+@@ -99,7 +108,7 @@ export interface CreateAgentSessionOptions {
  	/** Session manager. Default: SessionManager.create(cwd) */
  	sessionManager?: SessionManager;
  
@@ -728,7 +757,7 @@ index dbab1d1..61eb387 100644
  	settingsManager?: SettingsManager;
  	/** Session start event metadata for extension runtime startup. */
  	sessionStartEvent?: SessionStartEvent;
-@@ -190,6 +197,7 @@ function getDefaultAgentDir(): string {
+@@ -190,6 +199,7 @@ function getDefaultAgentDir(): string {
   */
  export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
  	const cwd = resolvePath(options.cwd ?? options.sessionManager?.getCwd() ?? process.cwd());
@@ -736,7 +765,7 @@ index dbab1d1..61eb387 100644
  	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getDefaultAgentDir();
  	let resourceLoader = options.resourceLoader;
  
-@@ -197,11 +205,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
+@@ -197,11 +207,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
  	const modelsPath = options.agentDir ? join(agentDir, "models.json") : undefined;
  	const modelRuntime = options.modelRuntime ?? (await ModelRuntime.create({ authPath, modelsPath }));
  
@@ -750,11 +779,12 @@ index dbab1d1..61eb387 100644
  		await resourceLoader.reload();
  		time("resourceLoader.reload");
  	}
-@@ -453,10 +461,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
+@@ -453,10 +463,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
  	}
  
  	const session = new AgentSession({
 +		preamble: options.preamble,
++		renderSkills: options.renderSkills,
  		agent,
  		sessionManager,
  		settingsManager,
@@ -811,18 +841,22 @@ index 48df453..62157b3 100644
  	for (const skill of visibleSkills) {
  		lines.push("  <skill>");
 diff --git a/packages/coding-agent/src/core/system-prompt.ts b/packages/coding-agent/src/core/system-prompt.ts
-index e51e14f..eefecae 100644
+index e51e14f..9786d3b 100644
 --- a/packages/coding-agent/src/core/system-prompt.ts
 +++ b/packages/coding-agent/src/core/system-prompt.ts
-@@ -7,6 +7,7 @@ import { getDocsPath, getExamplesPath, getReadmePath } from "../config.ts";
+@@ -6,7 +6,11 @@ import { getSystemMessageText } from "@earendil-works/pi-ai";
+ import { getDocsPath, getExamplesPath, getReadmePath } from "../config.ts";
  import { formatSkillsForPrompt, type Skill } from "./skills.ts";
  
++export type SkillsRenderer = (skills: Skill[], fileReadTool: "read" | "bash" | "indirect", instructions: boolean) => string;
++
  export interface BuildSystemPromptOptions {
 +	preamble?: string;
++	renderSkills?: SkillsRenderer;
  	/** Custom system prompt (replaces the default prefix). */
  	customPrompt?: string;
  	/** Exact full prompt replacement set by a before_agent_start handler. */
-@@ -30,8 +31,8 @@ export interface BuildSystemPromptOptions {
+@@ -30,8 +34,8 @@ export interface BuildSystemPromptOptions {
  	sections?: Record<string, string>;
  	/** Working directory. */
  	cwd: string;
@@ -833,7 +867,7 @@ index e51e14f..eefecae 100644
  	/** Pre-loaded skills. */
  	skills?: Skill[];
  }
-@@ -44,7 +45,7 @@ export type NormalizedBuildSystemPromptOptions = BuildSystemPromptOptions & {
+@@ -44,7 +48,7 @@ export type NormalizedBuildSystemPromptOptions = BuildSystemPromptOptions & {
  	promptGuidelines: string[];
  	appendSystemPrompt: string;
  	sections: Record<string, string>;
@@ -842,15 +876,16 @@ index e51e14f..eefecae 100644
  	skills: Skill[];
  };
  
-@@ -59,6 +60,7 @@ const SYSTEM_PROMPT_SECTION_NAME = /^[a-z][a-z0-9_-]*$/;
+@@ -59,6 +63,8 @@ const SYSTEM_PROMPT_SECTION_NAME = /^[a-z][a-z0-9_-]*$/;
  /** Normalize prompt input into the mutable, collection-complete shape exposed to extensions. */
  export function normalizeBuildSystemPromptOptions(input: BuildSystemPromptOptions): NormalizedBuildSystemPromptOptions {
  	return {
 +		preamble: input.preamble,
++		renderSkills: input.renderSkills,
  		customPrompt: input.customPrompt,
  		forceSystemPrompt: input.forceSystemPrompt,
  		selectedTools: [...(input.selectedTools ?? ["read", "bash", "edit", "write"])],
-@@ -76,13 +78,10 @@ export function normalizeBuildSystemPromptOptions(input: BuildSystemPromptOption
+@@ -76,13 +82,10 @@ export function normalizeBuildSystemPromptOptions(input: BuildSystemPromptOption
  	};
  }
  
@@ -868,15 +903,16 @@ index e51e14f..eefecae 100644
  }
  
  function buildRules(
-@@ -128,6 +127,7 @@ function buildRules(
+@@ -128,6 +131,8 @@ function buildRules(
  export function buildSystemPromptSections(input: BuildSystemPromptOptions): SystemPromptSections {
  	const options = normalizeBuildSystemPromptOptions(input);
  	const {
 +		preamble,
++		renderSkills = formatSkillsForPrompt,
  		customPrompt,
  		selectedTools,
  		hiddenTools,
-@@ -149,11 +149,10 @@ export function buildSystemPromptSections(input: BuildSystemPromptOptions): Syst
+@@ -149,11 +154,10 @@ export function buildSystemPromptSections(input: BuildSystemPromptOptions): Syst
  
  	const declaredTools = selectedTools.filter((name) => !hiddenTools.includes(name));
  	const promptSections: Record<string, string> = {};
@@ -892,7 +928,7 @@ index e51e14f..eefecae 100644
  		const visibleTools = declaredTools.filter((name) => !!toolSnippets[name]);
  		const tools =
  			visibleTools.length > 0 ? visibleTools.map((name) => `- ${name}: ${toolSnippets[name]}`).join("\n") : "(none)";
-@@ -169,16 +168,26 @@ export function buildSystemPromptSections(input: BuildSystemPromptOptions): Syst
+@@ -169,16 +173,26 @@ export function buildSystemPromptSections(input: BuildSystemPromptOptions): Syst
  	}
  
  	if (appendSystemPrompt) promptSections.addendum = appendSystemPrompt;
@@ -909,20 +945,20 @@ index e51e14f..eefecae 100644
 -		const skillsPrompt = formatSkillsForPrompt(skills, skillFileReadTool).trim();
 +	const projectSkills = skills.filter((skill) => skill.sourceInfo.scope === "project");
 +	if (skillFileReadTool) {
-+		const skillsPrompt = formatSkillsForPrompt(skills.filter((skill) => skill.sourceInfo.scope !== "project"), skillFileReadTool).trim();
++		const skillsPrompt = renderSkills(skills.filter((skill) => skill.sourceInfo.scope !== "project"), skillFileReadTool, true).trim();
  		if (skillsPrompt) promptSections.skills = skillsPrompt;
  	}
 +	if (projectFiles.length > 0) {
 +		promptSections.project_context = ["Project-specific instructions and guidelines:", renderContextFiles(projectFiles)].join("\n\n");
 +	}
 +	if (skillFileReadTool) {
-+		const projectSkillsPrompt = formatSkillsForPrompt(projectSkills, skillFileReadTool, !promptSections.skills).trim();
++		const projectSkillsPrompt = renderSkills(projectSkills, skillFileReadTool, !promptSections.skills).trim();
 +		if (projectSkillsPrompt) promptSections.project_skills = projectSkillsPrompt;
 +	}
  	promptSections.cwd = cwd.replace(/\\/g, "/");
  	for (const [name, content] of Object.entries(customSections)) {
  		if (content) promptSections[name] = content;
-@@ -199,7 +208,13 @@ export function buildSystemPromptState(input: BuildSystemPromptOptions): {
+@@ -199,7 +213,13 @@ export function buildSystemPromptState(input: BuildSystemPromptOptions): {
  	content: string;
  	sections?: SystemPromptSections;
  } {
@@ -937,7 +973,7 @@ index e51e14f..eefecae 100644
  	return { content: "", sections: buildSystemPromptSections(input) };
  }
  
-@@ -208,6 +223,27 @@ export function buildSystemPrompt(input: BuildSystemPromptOptions): string {
+@@ -208,6 +228,27 @@ export function buildSystemPrompt(input: BuildSystemPromptOptions): string {
  	return getSystemMessageText({ role: "system", ...buildSystemPromptState(input), timestamp: 0 });
  }
  
