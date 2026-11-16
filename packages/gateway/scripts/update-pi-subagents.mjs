@@ -111,17 +111,17 @@ export function runUpdate({ gatewayDir = GATEWAY, forkRepo, commit, spawn = spaw
     invoke(process.execPath, [join(candidateRoot, "scripts/check-pi-subagents.mjs")], candidateRoot, env);
     for (const path of ["src", "test-support", "vitest.config.ts", "vitest.nested.config.ts", "package.json"]) cpSync(join(root, path), join(candidateRoot, path), { recursive: true });
     symlinkSync(join(root, "node_modules"), join(candidateRoot, "node_modules"));
-    const gate = (label, file, reportName, reportEnv, config = ["--maxWorkers=2"]) => {
+    const gate = (label, file, reportName, reportEnv, config = ["--maxWorkers=2"], extraEnv = {}) => {
       const reportPath = join(staging, reportName);
       try {
-        invoke(process.execPath, [join(root, "node_modules/vitest/vitest.mjs"), "run", ...config, file], candidateRoot, { ...env, [reportEnv]: reportPath, TRON_TEST_PROCESS_OWNER_FAILURE: processOwnerFailure });
+        invoke(process.execPath, [join(root, "node_modules/vitest/vitest.mjs"), "run", ...config, file], candidateRoot, { ...env, ...extraEnv, [reportEnv]: reportPath, TRON_TEST_PROCESS_OWNER_FAILURE: processOwnerFailure });
         const report = JSON.parse(readFileSync(reportPath, "utf8"));
         if (report.passed !== true) throw new Error("execution report did not pass");
         return report;
       } catch (error) { throw new Error(`${label} failed: ${error.message}`, { cause: error }); }
     };
     const executionGate = gate("offline real-Gateway execution gate", "src/e2e/kernel/delegation/managed-subagents.integration.test.ts", "activation.json", "TRON_SUBAGENTS_REPORT", NESTED_CONFIG);
-    const rollbackProbe = gate("previous-candidate-previous rollback probe", "src/e2e/kernel/delegation/managed-subagents.rollback.integration.test.ts", "rollback.json", "TRON_SUBAGENTS_ROLLBACK_REPORT", NESTED_CONFIG);
+    const rollbackProbe = gate("previous-candidate-previous rollback probe", "src/e2e/kernel/delegation/managed-subagents.rollback.integration.test.ts", "rollback.json", "TRON_SUBAGENTS_ROLLBACK_REPORT", NESTED_CONFIG, { TRON_SUBAGENTS_SOURCE_GATEWAY: root });
     invoke(process.execPath, [join(root, "node_modules/vitest/vitest.mjs"), "run", ...NESTED_CONFIG, "src/kernel/delegation/managed-subagents.invalid-entry.integration.test.ts"], candidateRoot, { ...env, TRON_TEST_PROCESS_OWNER_FAILURE: processOwnerFailure });
     if (existsSync(processOwnerFailure)) throw new Error("probe process join failed before publication");
     for (const path of Object.values(paths)) {

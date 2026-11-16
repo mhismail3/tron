@@ -66,7 +66,7 @@ function boundedRegularFile(path, maximum) {
   } catch { return false; }
 }
 
-export function readPiCodingAgentPatch(gatewayDir, { requireSources = false } = {}) {
+export function readPiCodingAgentPatch(gatewayDir, { requireSources = false, requireArtifact = true } = {}) {
   const root = resolve(gatewayDir);
   const path = join(root, PATCH_PIN_FILE);
   if (!existsSync(path)) return { present: false, value: undefined, issues: [] };
@@ -94,9 +94,11 @@ export function readPiCodingAgentPatch(gatewayDir, { requireSources = false } = 
     addIssue(issues, `${PATCH_PIN_FILE} must be schemaVersion 1 for ${PATCHED_PACKAGE} with exact artifact/patch/license/upstream/modelData/toolchain records and a removeWhen condition`);
     return { present: true, value: undefined, issues };
   }
-  const artifact = join(root, value.artifact.path);
-  if (!boundedRegularFile(artifact, ARTIFACT_MAX_BYTES)) addIssue(issues, `${value.artifact.path} is missing or not a bounded regular file`);
-  else if (sha512Integrity(artifact) !== value.artifact.integrity) addIssue(issues, `${value.artifact.path} does not match its declared integrity`);
+  if (requireArtifact) {
+    const artifact = join(root, value.artifact.path);
+    if (!boundedRegularFile(artifact, ARTIFACT_MAX_BYTES)) addIssue(issues, `${value.artifact.path} is missing or not a bounded regular file`);
+    else if (sha512Integrity(artifact) !== value.artifact.integrity) addIssue(issues, `${value.artifact.path} does not match its declared integrity`);
+  }
   if (requireSources) {
     const patch = join(root, value.patch.path);
     if (!boundedRegularFile(patch, ARTIFACT_MAX_BYTES)) addIssue(issues, `${value.patch.path} is missing`);

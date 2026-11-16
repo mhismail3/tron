@@ -27,7 +27,7 @@ const pinFile = argument("--pin") ?? PATCH_PIN_FILE;
 const sdk = pinFile === PATCH_PIN_FILE;
 if (!sdk && pinFile !== "pi-agent-browser-native-patch.json") throw new Error("unknown patched package pin");
 const { value: pin, issues } = sdk
-  ? readPiCodingAgentPatch(gatewayDir, { requireSources: !write })
+  ? readPiCodingAgentPatch(gatewayDir, { requireSources: !write, requireArtifact: !write })
   : { value: JSON.parse(readFileSync(join(gatewayDir, pinFile), "utf8")), issues: [] };
 if (!pin) throw new Error(`${pinFile} is not valid:\n- ${issues.join("\n- ")}`);
 if (!sdk && (pin.schemaVersion !== 1 || pin.package !== "pi-agent-browser-native"

@@ -1,6 +1,7 @@
 import { attributeExtensions } from "../extensions/owner-attribution.js";
 import type { ModuleDescriptor } from "../kernel/host/module-host.js";
 import { createTronCoreExtension, tronContext } from "./tron-core-extension.js";
+import { tronCore } from "../kernel/host/tron-context.js";
 import { workspaceModule } from "./workspace-module.js";
 import { JevDecisionClient } from "../providers/jev-client.js";
 import type { ConnectionAccess } from "../modules/integrations/contract.js";
@@ -16,11 +17,13 @@ export function createCoreModule(services: () => CoreModuleServices): ModuleDesc
       const workspace = host.contract(workspaceModule);
       return { hooks: {
         operatingContext: tronContext,
+        commonCore: tronCore,
         extensionAdmission: (base, browserLiveView, managedSubagents) => attributeExtensions(base, browserLiveView,
           { requireTronAskUser: true, ...(managedSubagents ? { managedSubagents } : {}) }),
       }, extension: session => {
         const owners = services();
-        return createTronCoreExtension(workspace, new JevDecisionClient(session.modelRuntime), owners.connections);
+        return createTronCoreExtension(workspace, new JevDecisionClient(session.modelRuntime), owners.connections,
+          session.requireChildTaskContext ? prefix => session.requireChildTaskContext!(session.sessionId(), prefix) : undefined);
       } };
     },
   };

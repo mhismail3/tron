@@ -14,7 +14,7 @@ import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "../../../kernel/dele
 import { RuntimeRegistry } from "../../../kernel/session/runtime-registry.js";
 import { delegatedProviderEnvironment } from "../../../kernel/delegation/delegated-provider.js";
 import { waitFor } from "../../../../test-support/wait-for.js";
-import { copyPayload, refuseUnjoinedFixture, retainedFiles } from "../../../../test-support/nested-vitest-payload.js";
+import { copyPayload, gatewaySourceForSubagentsVersion, refuseUnjoinedFixture, retainedFiles } from "../../../../test-support/nested-vitest-payload.js";
 
 const gatewayRoot = fileURLToPath(new URL("../../../..", import.meta.url));
 const leg = process.env.TRON_SUBAGENTS_ROLLBACK_LEG;
@@ -26,14 +26,16 @@ it("executes previous → candidate → previous with detached resume through th
   const root = retainedRoot ?? await mkdtemp(join(tmpdir(), "tron-subagents-rollback-"));
   const payloads = await mkdtemp(join(tmpdir(), "tron-subagents-payloads-"));
   const reportPath = process.env.TRON_SUBAGENTS_ROLLBACK_REPORT ?? join(gatewayRoot, "test-results", "managed-subagents.rollback.json");
-  const report: { passed: boolean; legs: unknown[]; error?: string } = { passed: false, legs: [] };
+  const report: { passed: boolean; legs: unknown[]; previousGateway?: string; error?: string } = { passed: false, legs: [] };
   try {
     if (retainedRoot) await mkdir(root);
     await Promise.all([mkdir(join(root, "agent")), mkdir(join(root, "workspace")), mkdir(join(root, "npm-cache")), mkdir(join(root, "home")), mkdir(join(root, "tmp"))]);
     const pin = JSON.parse(await readFile(join(gatewayRoot, "pi-subagents-pin.json"), "utf8"));
+    const previousGateway = await gatewaySourceForSubagentsVersion(pin.previous.version);
+    report.previousGateway = previousGateway.commit;
     for (const name of ["previous", "candidate", "rollback"]) {
       const payload = join(payloads, name);
-      await copyPayload(payload, "managed-subagents.rollback.integration.test.ts");
+      await copyPayload(payload, "managed-subagents.rollback.integration.test.ts", name === "candidate" ? undefined : previousGateway);
       const selection = name === "candidate" ? pin : pin.previous.fork ? pin.previous
         : { ...pin, version: pin.previous.version, closure: pin.previous.closure, fork: { commit: null } };
       await writeFile(join(payload, "pi-subagents-pin.json"), JSON.stringify(selection));
@@ -217,7 +219,9 @@ async function runLeg(): Promise<void> {
     }
     const slot = await registry.create(cwd);
     await slot.setModel(model.provider, model.id);
-    const resources = await slot.resources() as unknown as { subagents: Array<{ name: string }>; tools: Array<{ name: string }>; subagentDiagnostics?: string };
+    const resources = await slot.resources() as unknown as { subagents: Array<{ name: string }>; tools: Array<{ name: string }>; subagentDiagnostics?: string; extensionLoadErrors: unknown[] };
+    facts.extensionLoadErrors = resources.extensionLoadErrors;
+    expect(resources.extensionLoadErrors, "every extension, tron-core included, loads under this provider").toEqual([]);
     expect(resources.subagentDiagnostics).toBeUndefined();
     expect(resources.subagents.some((agent) => agent.name === "researcher")).toBe(true);
     expect(resources.subagents.some((agent) => agent.name === "rollback-worker")).toBe(true);

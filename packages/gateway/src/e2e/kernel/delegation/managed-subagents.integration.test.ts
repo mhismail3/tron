@@ -1,4 +1,4 @@
-import { APPROVAL_RULE } from "../../../workspace/tron-core-extension.js";
+import { APPROVAL_RULE } from "../../../kernel/host/tron-context.js";
 import { createTestRegistry } from "../../../../test-support/gateway-registry.js";
 import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
@@ -259,6 +259,9 @@ it.each([
     };
     expect(childSystem).toContain("GLOBAL_CHILD_RULES_MARKER");
     expect(childUserMessages.split(APPROVAL_RULE)).toHaveLength(2);
+    expect(childUserMessages.split("[Tron handoff]")).toHaveLength(2);
+    expect(childUserMessages).toContain(JSON.stringify(join(tronHome, "workspace")).slice(1, -1));
+    expect(childSystem).not.toContain("[Tron handoff]");
     expect(childSystem).not.toContain("PROJECT_CHILD_RULES_MARKER");
     expect(details.results).toHaveLength(1);
     const result = details.results[0]!;

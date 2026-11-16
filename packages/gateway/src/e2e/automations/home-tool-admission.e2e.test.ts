@@ -1,4 +1,4 @@
-import { APPROVAL_RULE } from "../../workspace/tron-core-extension.js";
+import { APPROVAL_RULE } from "../../kernel/host/tron-context.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createServer } from "node:http";

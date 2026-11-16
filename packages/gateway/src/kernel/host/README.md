@@ -107,6 +107,8 @@ semantic form adapters, including their exact audited package admission.
   disposal after lifecycle owners, retaining failed disposal for retry. This is
   not a best-effort observer. `operatingContext` is the module's actual formatter;
   preview calls it after the awaited root description and trust fences, using live tools.
+  `commonCore` renders the fixed core (`tron-context.ts`) that every runtime receives as
+  the SDK host `preamble` at creation.
 - **Hooks (D6).** A `policy` hook has one implementer; `observers` hooks run every
   implementer in composition order. Dispatch reads each module's `hooks` at the
   call, never a copy taken at start. Notification hooks resolve optional owner
