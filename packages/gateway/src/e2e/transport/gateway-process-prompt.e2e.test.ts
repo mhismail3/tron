@@ -106,6 +106,9 @@ describe("prompt journeys across the real Gateway process", () => {
       expect(Date.parse(requestLog[0].timestamp)).toBeGreaterThan(0);
       expect(new Set([requestLog[0].tools.hash, requestLog[0].request.hash, requestLog[0].params.hash]).size).toBe(3);
       expect(JSON.stringify(requestLog[0])).not.toContain(prompt);
+      const observed = JSON.parse(await readFile(join(gateway.tronHome, "logs", "observations", `${new Date(requestLog[0].timestamp).toISOString().slice(0, 10)}.json`), "utf8"));
+      expect(observed.kinds.ordinary).toMatchObject({ requests: 1 });
+      expect(JSON.stringify(observed)).not.toContain(prompt);
       await phone.close();
 
       const normalRestartStarted = performance.now();

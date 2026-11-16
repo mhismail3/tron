@@ -18,7 +18,8 @@ NODE_BIN=""
 NPM_BIN=""
 fixture_environment=()
 build_fixture_environment() {
-  fixture_environment=("PATH=$(dirname "$NODE_BIN"):/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin")
+  fixture_environment=("PATH=$(dirname "$NODE_BIN"):/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin"
+                       "GIT_CEILING_DIRECTORIES=$(realpath "$run_root")")
   local name
   for name in USER LOGNAME SHELL TMPDIR LANG LC_ALL LC_CTYPE TERM __CF_USER_TEXT_ENCODING; do
     if [[ -n "${!name:-}" ]]; then fixture_environment+=("$name=${!name}"); fi
@@ -259,7 +260,8 @@ Environment:
                                 default lane's state directory)
   TRON_IOS_TEST_DEVICE_NAME     pre-lane device name of the default lane (selects it)
   TRON_IOS_E2E_STATE_DIR        persistent fixture directory (default: this worktree's
-                                $TMPDIR/tron-ios-gateway-e2e-UID-WORKTREE_KEY)
+                                $TMPDIR/tron-ios-gateway-e2e-UID-WORKTREE_KEY); the fixture
+                                Gateway never resolves a Git root above it
   TRON_IOS_E2E_DERIVED_DATA     persistent focused-test DerivedData (default: this
                                 worktree's $TMPDIR/tron-ios-gateway-e2e-derived-UID-WORKTREE_KEY)
   TRON_IOS_E2E_UI_RUN_TIMEOUT_SECONDS  per-journey process deadline for run-ui (default: 900)
