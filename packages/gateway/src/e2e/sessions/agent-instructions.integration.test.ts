@@ -210,7 +210,7 @@ describe("Agent Instructions projection through the pinned runtime", () => {
     expect(during.text).toBe(received);
     for (const projection of [idle, during]) {
       expect(projection.sections.map(section => section.id)).toEqual(
-        ["preamble", "tools", "rules", "docs", "addendum", "project_context", "skills", "cwd", "tron"],
+        ["preamble", "tools", "rules", "docs", "addendum", "global_context", "skills", "project_context", "cwd", "tron"],
       );
       const tron = projection.sections.find(section => section.id === "tron")!;
       expect(tron.timing).toBe("turn");
@@ -223,8 +223,10 @@ describe("Agent Instructions projection through the pinned runtime", () => {
     }
 
     const byId = new Map(during.sections.map(section => [section.id, section]));
-    expect(byId.get("project_context")!.entries).toEqual([
+    expect(byId.get("global_context")!.entries).toEqual([
       { name: "AGENTS.md", path: join(f.agentDir, "AGENTS.md"), text: "Global rule: applies everywhere.", source: { kind: "file", path: join(f.agentDir, "AGENTS.md") } },
+    ]);
+    expect(byId.get("project_context")!.entries).toEqual([
       { name: "AGENTS.md", path: join(f.cwd, "AGENTS.md"), text: HOSTILE_PROJECT_RULES, source: { kind: "file", path: join(f.cwd, "AGENTS.md") } },
     ]);
     expect(byId.get("addendum")!.entries).toEqual([
