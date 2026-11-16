@@ -8,7 +8,7 @@ import { SESSION_SETTINGS_ENTRY, readSessionFixedSettings } from "../../../sessi
 import { disposeFixtures, fixture, reportCall, TASK_REASONING_MODEL_ID, TASK_VIRTUAL_MODEL_ID } from "../../../../test-support/home-task-fixture.js";
 import { waitFor } from "../../../../test-support/wait-for.js";
 import { homeOwnerOf, queueOwnerOf } from "../../../../test-support/gateway-registry.js";
-import { droppingAnyTurnFrame } from "../../../../test-support/turn-frame.js";
+import { droppingAnyTurnFrame, withoutTurnFrame } from "../../../../test-support/turn-frame.js";
 
 import { ProfileStore } from "../../../modules/home/profile-store.js";
 import { workspaceModule } from "../../../workspace/workspace-module.js";
@@ -170,6 +170,40 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     expect(prompt).toContain("Otherwise, launch subagents with model tron/subagent");
     expect(prompt).toContain("disclose the reason and the chosen fallback");
     expect(prompt).not.toMatch(/\. Launch subagents with model tron\/subagent/u);
+  });
+
+  it("gives the worker its choice and live subagent models in the turn frame and the launch guidance as a system section", async () => {
+    const f = await fixture();
+    const first = `${f.model.provider}/${f.model.id}`;
+    await setModelQueue(queueOwners(f), "subagent", [first]);
+    const workers: TranscriptContext[] = [];
+    const observed: ObservedRequest[] = [];
+    const refusals: string[] = [];
+    f.faux.setResponses(Array.from({ length: 4 }, () => {
+      const respond = scriptedHome({ taskId: "frame-facts", intent: "Use subagents for the finite lookup.", target: f.cwd }, observed, refusals);
+      return (context, options, state, model) => {
+        if (isWorkerTurn(context)) workers.push(context);
+        return respond(context, options, state, model);
+      };
+    }));
+    await setModelQueue(queueOwners(f), "background", [f.model]);
+    const home = await f.registry.acquire(f.home.sessionId);
+    await home.prompt("Delegate the finite work");
+    await waitFor(() => home.snapshot().configurationBlocker === null, "Home delegation turn");
+    expect(refusals).toEqual([]);
+    await taskIsTerminal(f, "frame-facts");
+    expect(workers).toHaveLength(1);
+    const worker = workers[0]!;
+    const brief = withoutTurnFrame(worker.messages).filter(message => message.role === "user").map(textOf).join("\n");
+    const frame = textOf(worker.messages.at(-1)!);
+    const system = worker.messages.filter(message => message.role === "system").map(getSystemMessageText).join("\n");
+    expect(brief).toContain("Use subagents for the finite lookup.");
+    expect(brief).not.toMatch(/Worker choice|Worker at start|Subagent models/u);
+    const pattern = first.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+    expect(frame).toMatch(new RegExp(`^<turn-frame>[\\s\\S]*\\nWorker choice: ${pattern}\\. Thinking: [^\\n]+\\. Source: model same as Home; thinking same as Home\\.\\nSubagent models: ${pattern} \\(available\\)\\.\\n</turn-frame>$`, "u"));
+    expect(system).toContain("<subagent_models>\nExplicit eligible subagent model choices in your brief take precedence over the default queue");
+    expect(system).toContain("launch subagents with model tron/subagent");
+    expect((await homeOwnerOf(f.registry).taskStatus("frame-facts")).intent.text).toBe("Use subagents for the finite lookup.");
   });
 
   it("resolves typed worker profile fields at delegation and freezes their source on the worker", async () => {

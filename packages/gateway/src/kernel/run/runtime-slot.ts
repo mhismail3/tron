@@ -1165,12 +1165,14 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           : async () => (await this.dependencies.trust.inspect(trust.cwd)).effectiveDecision === true,
       };
       this.explicitProfile = undefined;
+      const turnFacts: Array<() => Promise<string | undefined>> = [];
       const sessionContext: SessionContext = {
         sessionId: () => this.id,
         cwd: () => this.cwd,
         modelRuntime, profile: () => this.liveProfile(),
         fixedSettings: () => readSessionFixedSettings(this.sessionManager.getBranch()),
         delegatedWorker: () => Boolean(this.ownedTurns.worker),
+        turnFacts: provider => { turnFacts.push(provider); },
         ...(profile.managedSubagents && this.dependencies.managedSubagents ? {
           requireChildExtensions: this.dependencies.managedSubagents.requireChildExtensions.bind(this.dependencies.managedSubagents),
           requireChildTaskContext: this.dependencies.managedSubagents.requireChildTaskContext.bind(this.dependencies.managedSubagents),
@@ -1325,7 +1327,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
             return homeRequestPolicy?.turnFrame()?.kind ?? (taskWorker ? "task" : operationId?.startsWith("automation:") ? "automation"
               : operationId && this.runInvocations.invocationForOperation(operationId)?.source === "subagentWake" ? "subagent" : "user");
           },
-          facts: async () => await homeRequestPolicy?.turnFrame()?.facts,
+          facts: async () => (await Promise.all([homeRequestPolicy?.turnFrame()?.facts, ...turnFacts.map(provider => provider())]))
+            .filter(Boolean).join("\n") || undefined,
         },
         ...(this.dependencies.requestRecord ? { record: outcome => this.dependencies.requestRecord?.({ sessionId: this.id, kind: taskWorker ? "worker" : profile.name, ...outcome }) } : {}),
         ...(homeRequestPolicy ? {
