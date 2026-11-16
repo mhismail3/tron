@@ -343,7 +343,7 @@ describe("Home task authorization RPC", () => {
 
 describe("Home task bounded backlogs", () => {
   it("delivers a backlog across bounded activations exactly once in order without context-overflow", async () => {
-    const f = await fixture(undefined, false, 19_000);
+    const f = await fixture(undefined, false, 20_000);
     const model = f.faux.getModel();
     await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     const tasks = [];

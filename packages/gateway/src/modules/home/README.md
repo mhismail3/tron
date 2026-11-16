@@ -239,7 +239,7 @@ changes keep its store, cursors and spend.
   prepares the original facts in shared Changes before effects, then publishes applied
   facts only after proving the atomic current-file commit. Retry repairs only a committed audit or explicitly resumes its
   precommit intent; existing Changes Undo restores exact labels without rewriting content.
-  `## Learned profile` in the system text is static: the rules for reading Profile and one `profile read` pointer per area.
+  `## Learned profile` in the system text is static: one `profile` data index (`kernel/host/context-index.ts`) with one `profile read` row per area.
   The turn state carries the bounded count/revision metadata, sorting state and diagnostic references. Neither carries note text. Home explicitly reads v2 paths or Prior organization and
   chooses relevance and worker-brief content; unavailable Profile says so. Placement
   never weaken confirmed standing authority. See [profile contract](profile.md).

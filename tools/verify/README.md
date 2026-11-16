@@ -296,11 +296,8 @@ The module exports the same `render` and `audit` functions used by the CLI so bo
 reports can compare an explicitly supplied global-rules draft against canonical rendered
 layers without collecting live stores or duplicating the renderer.
 
-Verify runs `context audit --report-only` for Gateway changes and audit-tool edits while
-the context plan's producer slices are landing. This transitional invocation retains every
-diagnostic but does not make today's duplicates a red gate. Direct audit remains strict.
-Stage 2 resolves duplicated prose; Stage 3.3 supplies canonical index markup. Strict
-verify wiring waits for both inputs. Home's composed system/profile comes from
+Verify runs the strict `context audit` for Gateway changes and audit-tool edits: a duplicate,
+volatile token or malformed index is a red gate. Home's composed system/profile comes from
 `homeSystemPrompt`; changing model/thinking/activation state stays outside those layers.
 The report compares rendered role totals with the review budgets in the plan's
 `PRINCIPLES.md` section 9. These are partial source-rendered totals, not whole-request sizes:

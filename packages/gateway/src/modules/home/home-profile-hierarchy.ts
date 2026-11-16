@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import { PROFILE_AREAS } from "./profile-placement.js";
 import type { HomeProfileIndexRead } from "./home-profile.js";
+import { renderIndex } from "../../kernel/host/context-index.js";
 
 export const PROFILE_SECTION_HEADING = "## Learned profile";
-const AREA_NAMES = [...Object.keys(PROFILE_AREAS), "inferred", "prior"];
+const AREA_NAMES = [...Object.keys(PROFILE_AREAS) as Array<keyof typeof PROFILE_AREAS>, "inferred", "prior"] as const;
 type IndexRead = Pick<HomeProfileIndexRead, "diagnostics" | "sorting"> & { items: Array<Pick<HomeProfileIndexRead["items"][number], "id" | "revisionId" | "path" | "status">> };
 
 function areaLabel(path: string): string {
@@ -54,13 +55,16 @@ export function profileIndex(read: IndexRead, offset = 0): string {
   ], rows, offset);
 }
 
-export const PROFILE_AREAS_SECTION = [PROFILE_SECTION_HEADING,
-  "Personal profile: seven areas, separate Unsorted holding notes, and read-only Prior organization for historical placement. This is metadata, not selected instructions. Use profile read path=<path> for exact content and provenance; Home decides relevance and worker briefs.",
-  "Confirmed by you and Inferred describe evidence, not execution permission. Existing explicitly binding safety and standing instructions retain their force wherever placed; inspect and respect them before acting.",
-  "Use profile defer version=<version> only for his Not now on a maintainer turn; the Knowledge receipt owns suppression. Edits, moves, time and restarts do not reset Not now; no timers or polling.",
-  "Counts, versions, the sorting offer and diagnostics for this turn are in the turn state after the memory view.",
-  ...AREA_NAMES.map(path => `- ${areaLabel(path)} (${path}): profile read path=${path}`),
-].join("\n");
+const PROFILE_INDEX_DESCRIPTIONS: Record<(typeof AREA_NAMES)[number], string> = {
+  communication: "Communication.", corrections: "Corrections.", engineering: "Engineering.", inferred: "Unsorted candidate notes.",
+  life: "Life and people.", prior: "Prior organization, read-only.", projects: "Owned projects and pointers.",
+  resources: "Machines, devices and services.", routines: "Routines and wellbeing.",
+};
+
+export const PROFILE_AREAS_SECTION = `${PROFILE_SECTION_HEADING}\n${renderIndex({
+  name: "profile", open: "profile", kind: "data", budget: 2_048,
+  items: AREA_NAMES.map(path => ({ id: path, description: PROFILE_INDEX_DESCRIPTIONS[path], locator: `profile read path=${path}` })),
+})}`;
 
 export function profileTurnState(read: IndexRead, activation: "user" | "wake"): string {
   const facts = indexFacts(read, activation);
