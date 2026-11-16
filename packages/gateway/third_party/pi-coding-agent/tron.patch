@@ -1,48 +1,5 @@
-pi-coding-agent 1.5.1 + Tron backports (declared by packages/gateway/pi-coding-agent-patch.json)
-
-Apply with git apply at tag v1.5.1 (dd30101cfc5b0609411dd80b6f93adbc14db14cf).
-
-1. projectDir. Upstream proposal commit 7a795da1c69cbc2df30485c173d14d2266ead2ba (parent a447ba1).
-   A session can run in a subdirectory (cwd) while its project .pi comes from projectDir:
-   settings, resources, packages, SYSTEM.md, and built-in MCP config, whose stdio servers
-   start in projectDir. Tools, context files, .agents/skills discovery and session grouping
-   keep cwd. Extensions read ctx.projectDir. projectDir defaults to cwd.
-
-2. Idle systemPrompt keeps extension sections (Tron #1312). A before_agent_start handler sets
-   systemPromptOptions.sections for its run (the built-in MCP extension's mcp_servers listing),
-   and the transcript keeps a section until a later run stops setting it, but settlement dropped
-   the run options so session.systemPrompt rendered only the base options between runs. Between
-   runs it now adds the sections the transcript still gives the model that Pi does not render
-   itself (buildIdleSystemPrompt). It is read-only: no section is written into base or run
-   options, so a section set for one run is still removed by the next request's diff. A
-   transcript section with a built-in name is left to the base options, which the next diff
-   applies; a handler that overrides a built-in section therefore shows only during its run.
-
-3. Revocable run start (Tron #1340). Pi 1.2 counts a run busy from _startRun, and calls a
-   host's prompt preflightResult("started") after preparing it but outside the start's
-   failure cleanup. A host that revokes the prepared prompt by throwing there (the Gateway
-   does when Stop arrived during preflight compaction or before_agent_start) left the
-   session streaming with no run, so abort() and waitForIdle() never settled. The callback
-   now runs inside that cleanup: a throw ends the start like a failed preparation, the
-   session is idle again, and the prompt is neither appended nor sent.
-
-4. Config-read lifetime (Tron #2199). Registration refreshes load models.json
-   asynchronously before downstream provider supersession. Serialize fresh config
-   reads in admission order, so an older detached refresh cannot start store work
-   after a newer awaited readiness pass. Independent targeted refreshes are retained.
-
-5. Explicit pending loadout names (Tron #2181). Reapplying a saved selection may remove
-   newly autoactivated direct tools before MCP servers register. When that narrows the
-   loadout, preserve pending restored names explicitly requested by the same call, while
-   discarding unrequested ones. Addition-only discovery updates still keep pending names.
-   Upstream 1.4 auto-activation remains enabled; Tron still reapplies the recorded selection.
-
-6. Bundled HTTP dependency (Tron #2470). Rebuild the child CLI and RPC entry with
-   undici 8.12.4. Gateway overrides do not replace their inlined dependency. The SDK
-   checker executes both actual child entries against a loopback integrity-mismatch response.
-
 diff --git a/package-lock.json b/package-lock.json
-index fbf84cc836f6a6ba7d4082e5e767be57e8a1091e..7ecc721909bb1013d455835170f9e9dad0e3bea7 100644
+index fbf84cc..7ecc721 100644
 --- a/package-lock.json
 +++ b/package-lock.json
 @@ -6451,7 +6451,7 @@
@@ -71,7 +28,7 @@ index fbf84cc836f6a6ba7d4082e5e767be57e8a1091e..7ecc721909bb1013d455835170f9e9da
  			"name": "@earendil-works/pi-durable",
  			"version": "1.5.1",
 diff --git a/packages/coding-agent/docs/mcp.md b/packages/coding-agent/docs/mcp.md
-index 5c6aa7d86d71cd9634fd0efff10f8784de84fb00..c8c33a516183b6c137c8b49273f5d52ac7d72e3b 100644
+index 5c6aa7d..c8c33a5 100644
 --- a/packages/coding-agent/docs/mcp.md
 +++ b/packages/coding-agent/docs/mcp.md
 @@ -59,7 +59,7 @@ The format matches other MCP clients:
@@ -84,19 +41,21 @@ index 5c6aa7d86d71cd9634fd0efff10f8784de84fb00..c8c33a516183b6c137c8b49273f5d52a
  HTTP servers use `url`, `headers`, and `oauth` (see [Authenticate with OAuth](#authenticate-with-oauth)). The legacy SSE transport is not supported.
  
 diff --git a/packages/coding-agent/docs/sdk.md b/packages/coding-agent/docs/sdk.md
-index 7d0883b3ff7926c077414ccce9b4f7aa31f7065b..18ea49a42b89422a640d11ffa6faa0310402d129 100644
+index 7d0883b..7531274 100644
 --- a/packages/coding-agent/docs/sdk.md
 +++ b/packages/coding-agent/docs/sdk.md
-@@ -29,7 +29,7 @@ The [complete minimal example](../examples/sdk/01-minimal.ts) also streams text
+@@ -29,7 +29,9 @@ The [complete minimal example](../examples/sdk/01-minimal.ts) also streams text
  
  Read current state through `session.messages`, `session.model`, `session.thinkingLevel`, `session.systemPrompt`, and `session.getActiveToolNames()`.
  
 -`session.systemPrompt` is read-only and returns the current effective system prompt, including changes that have not yet been sent to the model. Tool changes are declared to the model before the next request.
++`createAgentSession` and `createAgentSessionFromServices` accept a host-owned `preamble`. It replaces the default harness identity without suppressing tool snippets, tool-contributed guidelines or documentation. With a custom system prompt, the custom text becomes a separate `role` section after that preamble. Extensions can update the run's preamble through `before_agent_start` prompt options.
++
 +`session.systemPrompt` is read-only and returns the current effective system prompt, including changes that have not yet been sent to the model. Tool changes are declared to the model before the next request. During a run it is the run's prompt, forced text included. Between runs it is the base prompt plus the extension sections the transcript still gives the model, such as the `mcp_servers` listing; a `before_agent_start` handler that stops setting a section removes it at the next request.
  
  <a id="sessionmanager-api"></a>
  
-@@ -53,6 +53,8 @@ See the checked [sessions example](../examples/sdk/11-sessions.ts) for creating,
+@@ -53,6 +55,8 @@ See the checked [sessions example](../examples/sdk/11-sessions.ts) for creating,
  
  `cwd` selects the workspace used for project resource discovery, context files, session grouping, and built-in tool paths. Pass it explicitly when the target differs from `process.cwd()`.
  
@@ -106,7 +65,7 @@ index 7d0883b3ff7926c077414ccce9b4f7aa31f7065b..18ea49a42b89422a640d11ffa6faa031
  
  `AgentSessionRuntime` adds `newSession()`, `switchSession()`, `fork()`, and `importFromJsonl()`. Each operation replaces the active `AgentSession` and recreates services for the target working directory.
 diff --git a/packages/coding-agent/install-lock/package-lock.json b/packages/coding-agent/install-lock/package-lock.json
-index eab89567b15c2db297d445219b0658ba02767adc..33dfa5f97949abccbce56dd640cb4fb3df96afa4 100644
+index eab8956..33dfa5f 100644
 --- a/packages/coding-agent/install-lock/package-lock.json
 +++ b/packages/coding-agent/install-lock/package-lock.json
 @@ -516,7 +516,7 @@
@@ -151,7 +110,7 @@ index eab89567b15c2db297d445219b0658ba02767adc..33dfa5f97949abccbce56dd640cb4fb3
  			"version": "6.21.0",
  			"resolved": "https://registry.npmjs.org/undici-types/-/undici-types-6.21.0.tgz",
 diff --git a/packages/coding-agent/package.json b/packages/coding-agent/package.json
-index 20150665edcd78ce937030462d22fa1f6f8fd41a..422b781360eb8691c3a832176225ea516f44a6b4 100644
+index 2015066..422b781 100644
 --- a/packages/coding-agent/package.json
 +++ b/packages/coding-agent/package.json
 @@ -61,7 +61,7 @@
@@ -164,7 +123,7 @@ index 20150665edcd78ce937030462d22fa1f6f8fd41a..422b781360eb8691c3a832176225ea51
  	},
  	"overrides": {
 diff --git a/packages/coding-agent/src/core/agent-session-services.ts b/packages/coding-agent/src/core/agent-session-services.ts
-index 9673ba6a84a593d3a87d07a29649a747bf18c981..2c41265789dcc992531745c3cfe5ca085834e102 100644
+index 9673ba6..d862780 100644
 --- a/packages/coding-agent/src/core/agent-session-services.ts
 +++ b/packages/coding-agent/src/core/agent-session-services.ts
 @@ -36,12 +36,14 @@ export interface AgentSessionRuntimeDiagnostic {
@@ -183,7 +142,15 @@ index 9673ba6a84a593d3a87d07a29649a747bf18c981..2c41265789dcc992531745c3cfe5ca08
  	resourceLoaderReloadOptions?: ResourceLoaderReloadOptions;
  }
  
-@@ -72,6 +74,7 @@ export interface CreateAgentSessionFromServicesOptions {
+@@ -52,6 +54,7 @@ export interface CreateAgentSessionServicesOptions {
+  * have been resolved against those services.
+  */
+ export interface CreateAgentSessionFromServicesOptions {
++	preamble?: string;
+ 	services: AgentSessionServices;
+ 	sessionManager: SessionManager;
+ 	sessionStartEvent?: SessionStartEvent;
+@@ -72,6 +75,7 @@ export interface CreateAgentSessionFromServicesOptions {
   */
  export interface AgentSessionServices {
  	cwd: string;
@@ -191,7 +158,7 @@ index 9673ba6a84a593d3a87d07a29649a747bf18c981..2c41265789dcc992531745c3cfe5ca08
  	agentDir: string;
  	modelRuntime: ModelRuntime;
  	settingsManager: SettingsManager;
-@@ -136,6 +139,7 @@ export async function createAgentSessionServices(
+@@ -136,6 +140,7 @@ export async function createAgentSessionServices(
  	options: CreateAgentSessionServicesOptions,
  ): Promise<AgentSessionServices> {
  	const cwd = resolvePath(options.cwd);
@@ -199,7 +166,7 @@ index 9673ba6a84a593d3a87d07a29649a747bf18c981..2c41265789dcc992531745c3cfe5ca08
  	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getAgentDir();
  	const modelRuntime =
  		options.modelRuntime ??
-@@ -144,10 +148,11 @@ export async function createAgentSessionServices(
+@@ -144,10 +149,11 @@ export async function createAgentSessionServices(
  			modelsPath: join(agentDir, "models.json"),
  			signal: options.modelRuntimeSignal,
  		}));
@@ -212,7 +179,7 @@ index 9673ba6a84a593d3a87d07a29649a747bf18c981..2c41265789dcc992531745c3cfe5ca08
  		agentDir,
  		settingsManager,
  	});
-@@ -196,6 +201,7 @@ export async function createAgentSessionServices(
+@@ -196,6 +202,7 @@ export async function createAgentSessionServices(
  
  	return {
  		cwd,
@@ -220,16 +187,18 @@ index 9673ba6a84a593d3a87d07a29649a747bf18c981..2c41265789dcc992531745c3cfe5ca08
  		agentDir,
  		modelRuntime,
  		settingsManager,
-@@ -216,6 +222,7 @@ export async function createAgentSessionFromServices(
+@@ -215,7 +222,9 @@ export async function createAgentSessionFromServices(
+ 	options: CreateAgentSessionFromServicesOptions,
  ): Promise<CreateAgentSessionResult> {
  	return createAgentSession({
++		preamble: options.preamble,
  		cwd: options.services.cwd,
 +		projectDir: options.services.projectDir,
  		agentDir: options.services.agentDir,
  		modelRuntime: options.services.modelRuntime,
  		settingsManager: options.services.settingsManager,
 diff --git a/packages/coding-agent/src/core/agent-session.ts b/packages/coding-agent/src/core/agent-session.ts
-index f76247d5647a6ab17923425ebb0cee5b4ca6495b..faa5426daa6d209bcbcef72d1f3ce055f672b6f0 100644
+index f76247d..31edabf 100644
 --- a/packages/coding-agent/src/core/agent-session.ts
 +++ b/packages/coding-agent/src/core/agent-session.ts
 @@ -141,6 +141,7 @@ import {
@@ -240,7 +209,12 @@ index f76247d5647a6ab17923425ebb0cee5b4ca6495b..faa5426daa6d209bcbcef72d1f3ce055
  	buildSystemPrompt,
  	buildSystemPromptSections,
  	diffSystemPromptSections,
-@@ -268,6 +269,8 @@ export interface AgentSessionConfig {
+@@ -264,10 +265,13 @@ function withoutDeletedHeaders(headers: ProviderHeaders | undefined): Record<str
+ }
+ 
+ export interface AgentSessionConfig {
++	preamble?: string;
+ 	agent: Agent;
  	sessionManager: SessionManager;
  	settingsManager: SettingsManager;
  	cwd: string;
@@ -249,7 +223,7 @@ index f76247d5647a6ab17923425ebb0cee5b4ca6495b..faa5426daa6d209bcbcef72d1f3ce055
  	/** Models to cycle through with Ctrl+P (from --models flag) */
  	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
  	/** Resource loader for extensions, skills, prompts, themes, context files, and system prompt */
-@@ -470,6 +473,7 @@ export class AgentSession {
+@@ -470,6 +474,7 @@ export class AgentSession {
  	private _customTools: ToolDefinition[];
  	private _baseToolDefinitions: Map<string, ToolDefinition> = new Map();
  	private _cwd: string;
@@ -257,7 +231,21 @@ index f76247d5647a6ab17923425ebb0cee5b4ca6495b..faa5426daa6d209bcbcef72d1f3ce055
  	private _extensionRunnerRef?: { current?: ExtensionRunner };
  	private _initialActiveToolNames?: string[];
  	/**
-@@ -523,6 +527,7 @@ export class AgentSession {
+@@ -511,11 +516,13 @@ export class AgentSession {
+ 	private _toolPromptSnippets: Map<string, string> = new Map();
+ 	private _toolPromptGuidelines: Map<string, string[]> = new Map();
+ 
++	private readonly _preamble?: string;
+ 	private _baseSystemPromptOptions!: NormalizedBuildSystemPromptOptions;
+ 	/** Prompt options after before_agent_start mutations for the active run. */
+ 	private _runSystemPromptOptions?: NormalizedBuildSystemPromptOptions;
+ 
+ 	constructor(config: AgentSessionConfig) {
++		this._preamble = config.preamble;
+ 		this.agent = config.agent;
+ 		this.sessionManager = config.sessionManager;
+ 		this.settingsManager = config.settingsManager;
+@@ -523,6 +530,7 @@ export class AgentSession {
  		this._resourceLoader = config.resourceLoader;
  		this._customTools = config.customTools ?? [];
  		this._cwd = config.cwd;
@@ -265,7 +253,7 @@ index f76247d5647a6ab17923425ebb0cee5b4ca6495b..faa5426daa6d209bcbcef72d1f3ce055
  		this._modelRuntime = config.modelRuntime;
  		this._cacheWarmer = config.cacheWarmer;
  		if (this._cacheWarmer) {
-@@ -1550,9 +1555,17 @@ export class AgentSession {
+@@ -1550,9 +1558,17 @@ export class AgentSession {
  		return !this._isAgentRunActive && !this.isCompacting;
  	}
  
@@ -285,7 +273,7 @@ index f76247d5647a6ab17923425ebb0cee5b4ca6495b..faa5426daa6d209bcbcef72d1f3ce055
  	}
  
  	/** Current retry attempt (0 if not retrying) */
-@@ -1603,10 +1616,16 @@ export class AgentSession {
+@@ -1603,10 +1619,16 @@ export class AgentSession {
  	setActiveToolsByName(toolNames: string[]): void {
  		const previous = this.getActiveToolNames();
  		this._setActiveTools(toolNames);
@@ -305,7 +293,15 @@ index f76247d5647a6ab17923425ebb0cee5b4ca6495b..faa5426daa6d209bcbcef72d1f3ce055
  	}
  
  	private _setActiveTools(toolNames: string[]): void {
-@@ -1883,7 +1902,7 @@ export class AgentSession {
+@@ -1803,6 +1825,7 @@ export class AgentSession {
+ 		const loadedContextFiles = this._resourceLoader.getAgentsFiles().agentsFiles;
+ 
+ 		this._baseSystemPromptOptions = normalizeBuildSystemPromptOptions({
++			preamble: this._preamble,
+ 			cwd: this._cwd,
+ 			skills: loadedSkills,
+ 			contextFiles: loadedContextFiles,
+@@ -1883,7 +1906,7 @@ export class AgentSession {
  			const current = getCurrentSystemMessage(transformed);
  			const head: SystemMessage = {
  				role: "system",
@@ -314,7 +310,7 @@ index f76247d5647a6ab17923425ebb0cee5b4ca6495b..faa5426daa6d209bcbcef72d1f3ce055
  				...(current?.toolsAdded ? { toolsAdded: current.toolsAdded } : {}),
  				timestamp: current?.timestamp ?? Date.now(),
  			};
-@@ -1946,8 +1965,13 @@ export class AgentSession {
+@@ -1946,8 +1969,13 @@ export class AgentSession {
  		let messages: AgentMessage[];
  		try {
  			messages = await this._prepareRun(trigger);
@@ -328,7 +324,7 @@ index f76247d5647a6ab17923425ebb0cee5b4ca6495b..faa5426daa6d209bcbcef72d1f3ce055
  			this._flushPendingBashMessages();
  			this._flushPendingCustomMessages();
  			this._resolveIdleWaitIfIdle();
-@@ -1957,7 +1981,6 @@ export class AgentSession {
+@@ -1957,7 +1985,6 @@ export class AgentSession {
  		// have while idle. No run exists yet, so they cannot split a tool call from its result.
  		this._flushPendingBashMessages();
  		this._flushPendingCustomMessages();
@@ -336,7 +332,7 @@ index f76247d5647a6ab17923425ebb0cee5b4ca6495b..faa5426daa6d209bcbcef72d1f3ce055
  
  		// Compaction before the prompt may have scheduled a retry; the new prompt replaces it.
  		this._failedResponse = undefined;
-@@ -2591,6 +2614,11 @@ export class AgentSession {
+@@ -2591,6 +2618,11 @@ export class AgentSession {
  		return this._followUpMessages;
  	}
  
@@ -348,7 +344,7 @@ index f76247d5647a6ab17923425ebb0cee5b4ca6495b..faa5426daa6d209bcbcef72d1f3ce055
  	get resourceLoader(): ResourceLoader {
  		return this._resourceLoader;
  	}
-@@ -3795,6 +3823,7 @@ export class AgentSession {
+@@ -3795,6 +3827,7 @@ export class AgentSession {
  			this._cwd,
  			this.sessionManager,
  			new ModelRegistry(this._modelRuntime),
@@ -357,7 +353,7 @@ index f76247d5647a6ab17923425ebb0cee5b4ca6495b..faa5426daa6d209bcbcef72d1f3ce055
  		if (this._extensionRunnerRef) {
  			this._extensionRunnerRef.current = this._extensionRunner;
 diff --git a/packages/coding-agent/src/core/extensions/runner.ts b/packages/coding-agent/src/core/extensions/runner.ts
-index bf2c6380835fccb77a1896d6ef89469ca359f1e4..2849a90ed39c5b3cf549c9b25ce367d1f125605d 100644
+index bf2c638..2849a90 100644
 --- a/packages/coding-agent/src/core/extensions/runner.ts
 +++ b/packages/coding-agent/src/core/extensions/runner.ts
 @@ -367,6 +367,7 @@ export class ExtensionRunner {
@@ -403,7 +399,7 @@ index bf2c6380835fccb77a1896d6ef89469ca359f1e4..2849a90ed39c5b3cf549c9b25ce367d1
  			{},
  			Object.getOwnPropertyDescriptors(this.createContext()),
 diff --git a/packages/coding-agent/src/core/extensions/types.ts b/packages/coding-agent/src/core/extensions/types.ts
-index 7fcc870a99f799ebd19f3a4d51b300d63088ca78..780f8ad503a7d31231a29465c32073ff512266fd 100644
+index 7fcc870..780f8ad 100644
 --- a/packages/coding-agent/src/core/extensions/types.ts
 +++ b/packages/coding-agent/src/core/extensions/types.ts
 @@ -352,6 +352,11 @@ export interface ExtensionContext {
@@ -419,7 +415,7 @@ index 7fcc870a99f799ebd19f3a4d51b300d63088ca78..780f8ad503a7d31231a29465c32073ff
  	sessionManager: ReadonlySessionManager;
  	/** Model registry for API key resolution */
 diff --git a/packages/coding-agent/src/core/model-runtime.ts b/packages/coding-agent/src/core/model-runtime.ts
-index ff5f42b3984a289c665855fe3ec676265bc8c4b9..b5cc3be9696f2df296e6987704980fb3abb42471 100644
+index ff5f42b..b5cc3be 100644
 --- a/packages/coding-agent/src/core/model-runtime.ts
 +++ b/packages/coding-agent/src/core/model-runtime.ts
 @@ -184,6 +184,9 @@ export class ModelRuntime implements Models {
@@ -446,7 +442,7 @@ index ff5f42b3984a289c665855fe3ec676265bc8c4b9..b5cc3be9696f2df296e6987704980fb3
  		if (options.providers) {
  			for (const providerId of new Set(options.providers)) this.recomposeProvider(providerId);
 diff --git a/packages/coding-agent/src/core/package-manager.ts b/packages/coding-agent/src/core/package-manager.ts
-index 5fd93754ec14ac0a3a93872629cb830853cd75da..9c772632cc35c5c190467e82314b92e2cfef6532 100644
+index 5fd9375..9c77263 100644
 --- a/packages/coding-agent/src/core/package-manager.ts
 +++ b/packages/coding-agent/src/core/package-manager.ts
 @@ -156,7 +156,10 @@ export interface PackageManager {
@@ -531,7 +527,7 @@ index 5fd93754ec14ac0a3a93872629cb830853cd75da..9c772632cc35c5c190467e82314b92e2
  		if (scope === "user") {
  			return this.agentDir;
 diff --git a/packages/coding-agent/src/core/resource-loader.ts b/packages/coding-agent/src/core/resource-loader.ts
-index bb0740e49675be6a28a537fc1d8ae92d06fbb924..397c4afa1f82fa3b098c8c74df06714d71aa38ab 100644
+index bb0740e..397c4af 100644
 --- a/packages/coding-agent/src/core/resource-loader.ts
 +++ b/packages/coding-agent/src/core/resource-loader.ts
 @@ -302,7 +302,13 @@ export function loadProjectContextFiles(options: {
@@ -635,11 +631,14 @@ index bb0740e49675be6a28a537fc1d8ae92d06fbb924..397c4afa1f82fa3b098c8c74df06714d
  			return projectPath;
  		}
 diff --git a/packages/coding-agent/src/core/sdk.ts b/packages/coding-agent/src/core/sdk.ts
-index dbab1d1d99f309ed9b3ebec3f2c3272520ef8d0b..d5b7ea0d5bac0c4efd80add3771ef71a6d8234e7 100644
+index dbab1d1..61eb387 100644
 --- a/packages/coding-agent/src/core/sdk.ts
 +++ b/packages/coding-agent/src/core/sdk.ts
-@@ -48,6 +48,12 @@ setDefaultStreamFn(streamSimple);
+@@ -46,8 +46,15 @@ import { getBranchSelection } from "./virtual-models.ts";
+ setDefaultStreamFn(streamSimple);
+ 
  export interface CreateAgentSessionOptions {
++	preamble?: string;
  	/** Working directory for project-local discovery. Default: process.cwd() */
  	cwd?: string;
 +	/**
@@ -651,7 +650,7 @@ index dbab1d1d99f309ed9b3ebec3f2c3272520ef8d0b..d5b7ea0d5bac0c4efd80add3771ef71a
  	/** Global config directory. Default: ~/.pi/agent */
  	agentDir?: string;
  
-@@ -99,7 +105,7 @@ export interface CreateAgentSessionOptions {
+@@ -99,7 +106,7 @@ export interface CreateAgentSessionOptions {
  	/** Session manager. Default: SessionManager.create(cwd) */
  	sessionManager?: SessionManager;
  
@@ -660,7 +659,7 @@ index dbab1d1d99f309ed9b3ebec3f2c3272520ef8d0b..d5b7ea0d5bac0c4efd80add3771ef71a
  	settingsManager?: SettingsManager;
  	/** Session start event metadata for extension runtime startup. */
  	sessionStartEvent?: SessionStartEvent;
-@@ -190,6 +196,7 @@ function getDefaultAgentDir(): string {
+@@ -190,6 +197,7 @@ function getDefaultAgentDir(): string {
   */
  export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
  	const cwd = resolvePath(options.cwd ?? options.sessionManager?.getCwd() ?? process.cwd());
@@ -668,7 +667,7 @@ index dbab1d1d99f309ed9b3ebec3f2c3272520ef8d0b..d5b7ea0d5bac0c4efd80add3771ef71a
  	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getDefaultAgentDir();
  	let resourceLoader = options.resourceLoader;
  
-@@ -197,11 +204,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
+@@ -197,11 +205,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
  	const modelsPath = options.agentDir ? join(agentDir, "models.json") : undefined;
  	const modelRuntime = options.modelRuntime ?? (await ModelRuntime.create({ authPath, modelsPath }));
  
@@ -682,7 +681,12 @@ index dbab1d1d99f309ed9b3ebec3f2c3272520ef8d0b..d5b7ea0d5bac0c4efd80add3771ef71a
  		await resourceLoader.reload();
  		time("resourceLoader.reload");
  	}
-@@ -457,6 +464,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
+@@ -453,10 +461,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
+ 	}
+ 
+ 	const session = new AgentSession({
++		preamble: options.preamble,
+ 		agent,
  		sessionManager,
  		settingsManager,
  		cwd,
@@ -691,10 +695,50 @@ index dbab1d1d99f309ed9b3ebec3f2c3272520ef8d0b..d5b7ea0d5bac0c4efd80add3771ef71a
  		resourceLoader,
  		customTools: options.customTools,
 diff --git a/packages/coding-agent/src/core/system-prompt.ts b/packages/coding-agent/src/core/system-prompt.ts
-index e51e14fe4065d73c3a85947000eff04402fa7a52..c8882e7c2f89d53a64439a785315674f05fbdb63 100644
+index e51e14f..bcc456f 100644
 --- a/packages/coding-agent/src/core/system-prompt.ts
 +++ b/packages/coding-agent/src/core/system-prompt.ts
-@@ -199,7 +199,13 @@ export function buildSystemPromptState(input: BuildSystemPromptOptions): {
+@@ -7,6 +7,7 @@ import { getDocsPath, getExamplesPath, getReadmePath } from "../config.ts";
+ import { formatSkillsForPrompt, type Skill } from "./skills.ts";
+ 
+ export interface BuildSystemPromptOptions {
++	preamble?: string;
+ 	/** Custom system prompt (replaces the default prefix). */
+ 	customPrompt?: string;
+ 	/** Exact full prompt replacement set by a before_agent_start handler. */
+@@ -59,6 +60,7 @@ const SYSTEM_PROMPT_SECTION_NAME = /^[a-z][a-z0-9_-]*$/;
+ /** Normalize prompt input into the mutable, collection-complete shape exposed to extensions. */
+ export function normalizeBuildSystemPromptOptions(input: BuildSystemPromptOptions): NormalizedBuildSystemPromptOptions {
+ 	return {
++		preamble: input.preamble,
+ 		customPrompt: input.customPrompt,
+ 		forceSystemPrompt: input.forceSystemPrompt,
+ 		selectedTools: [...(input.selectedTools ?? ["read", "bash", "edit", "write"])],
+@@ -128,6 +130,7 @@ function buildRules(
+ export function buildSystemPromptSections(input: BuildSystemPromptOptions): SystemPromptSections {
+ 	const options = normalizeBuildSystemPromptOptions(input);
+ 	const {
++		preamble,
+ 		customPrompt,
+ 		selectedTools,
+ 		hiddenTools,
+@@ -149,11 +152,10 @@ export function buildSystemPromptSections(input: BuildSystemPromptOptions): Syst
+ 
+ 	const declaredTools = selectedTools.filter((name) => !hiddenTools.includes(name));
+ 	const promptSections: Record<string, string> = {};
+-	if (customPrompt) {
+-		promptSections.preamble = customPrompt;
+-	} else {
+-		promptSections.preamble =
+-			"You are a coding assistant running inside pi, a coding agent harness. Help users inspect files, run commands, and modify code.";
++	promptSections.preamble = preamble ?? customPrompt ??
++		"You are a coding assistant running inside pi, a coding agent harness. Help users inspect files, run commands, and modify code.";
++	if (preamble !== undefined && customPrompt) promptSections.role = customPrompt;
++	if (preamble !== undefined || !customPrompt) {
+ 		const visibleTools = declaredTools.filter((name) => !!toolSnippets[name]);
+ 		const tools =
+ 			visibleTools.length > 0 ? visibleTools.map((name) => `- ${name}: ${toolSnippets[name]}`).join("\n") : "(none)";
+@@ -199,7 +201,13 @@ export function buildSystemPromptState(input: BuildSystemPromptOptions): {
  	content: string;
  	sections?: SystemPromptSections;
  } {
@@ -709,7 +753,7 @@ index e51e14fe4065d73c3a85947000eff04402fa7a52..c8882e7c2f89d53a64439a785315674f
  	return { content: "", sections: buildSystemPromptSections(input) };
  }
  
-@@ -208,6 +214,27 @@ export function buildSystemPrompt(input: BuildSystemPromptOptions): string {
+@@ -208,6 +216,27 @@ export function buildSystemPrompt(input: BuildSystemPromptOptions): string {
  	return getSystemMessageText({ role: "system", ...buildSystemPromptState(input), timestamp: 0 });
  }
  
@@ -737,8 +781,20 @@ index e51e14fe4065d73c3a85947000eff04402fa7a52..c8882e7c2f89d53a64439a785315674f
  /**
   * Diff the sections the model currently has (replayed from the transcript, so never null)
   * against the desired ones. Returns a `SystemMessage.sections` patch, or undefined when
+diff --git a/packages/coding-agent/src/core/tools/read.ts b/packages/coding-agent/src/core/tools/read.ts
+index dd123cb..4e8a6d1 100644
+--- a/packages/coding-agent/src/core/tools/read.ts
++++ b/packages/coding-agent/src/core/tools/read.ts
+@@ -77,6 +77,7 @@ async function* readLocalFileChunks(path: string, { signal }: { signal?: AbortSi
+ 	try {
+ 		const stats = await handle.stat();
+ 		const end = stats.isFile() && stats.size > 0 ? stats.size - 1 : undefined;
++		signal?.throwIfAborted();
+ 		yield* handle.createReadStream({ end, signal, autoClose: false });
+ 	} finally {
+ 		await handle.close();
 diff --git a/packages/coding-agent/src/core/trust-manager.ts b/packages/coding-agent/src/core/trust-manager.ts
-index f0721efefd954e13c2b502168a2682e544298a2d..572cabf6e5b71b2721129f407d7c67e3a4bdc890 100644
+index f0721ef..572cabf 100644
 --- a/packages/coding-agent/src/core/trust-manager.ts
 +++ b/packages/coding-agent/src/core/trust-manager.ts
 @@ -185,17 +185,18 @@ function withTrustFileLock<T>(path: string, fn: () => T): T {
@@ -767,7 +823,7 @@ index f0721efefd954e13c2b502168a2682e544298a2d..572cabf6e5b71b2721129f407d7c67e3
  		return true;
  	}
 diff --git a/packages/coding-agent/src/extensions/mcp/index.ts b/packages/coding-agent/src/extensions/mcp/index.ts
-index 1a2db568a126e31f1d69417e3b3ecadd2d767570..00ce5f4a0ecbe33888b75cbbfb1a37e1452d241e 100644
+index 1a2db56..00ce5f4 100644
 --- a/packages/coding-agent/src/extensions/mcp/index.ts
 +++ b/packages/coding-agent/src/extensions/mcp/index.ts
 @@ -68,7 +68,7 @@ import { type McpMenu, type McpUi, showMcpManager } from "./ui.ts";
@@ -818,7 +874,7 @@ index 1a2db568a126e31f1d69417e3b3ecadd2d767570..00ce5f4a0ecbe33888b75cbbfb1a37e1
  
  export default createMcpExtension();
 diff --git a/packages/coding-agent/src/modes/interactive/interactive-mode.ts b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
-index 2459c10df86459b63e749878db5ea140cac0ab07..19e4630259f1a4e1b534bb597a0e8edf797b1944 100644
+index 2459c10..19e4630 100644
 --- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
 +++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
 @@ -2383,6 +2383,7 @@ export class InteractiveMode {
@@ -829,8 +885,28 @@ index 2459c10df86459b63e749878db5ea140cac0ab07..19e4630259f1a4e1b534bb597a0e8edf
  			sessionManager: this.sessionManager,
  			modelRegistry: extensionRunner.getModelRegistry(),
  			model: this.session.model,
+diff --git a/packages/coding-agent/test/suite/harness.ts b/packages/coding-agent/test/suite/harness.ts
+index 988e9e8..eba9cc8 100644
+--- a/packages/coding-agent/test/suite/harness.ts
++++ b/packages/coding-agent/test/suite/harness.ts
+@@ -109,6 +109,7 @@ export function createTestUiContext(overrides: Partial<ExtensionUIContext> = {})
+ }
+ 
+ export interface HarnessOptions {
++	preamble?: string;
+ 	provider?: string;
+ 	models?: FauxModelDefinition[];
+ 	settings?: Partial<Settings>;
+@@ -232,6 +233,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
+ 		options.resourceLoader ?? createTestResourceLoader(extensionsResult ? { extensionsResult } : undefined);
+ 
+ 	const session = new AgentSession({
++		preamble: options.preamble,
+ 		agent,
+ 		sessionManager,
+ 		settingsManager,
 diff --git a/packages/coding-agent/test/suite/regressions/8724-in-memory-fork-active-tool.test.ts b/packages/coding-agent/test/suite/regressions/8724-in-memory-fork-active-tool.test.ts
-index 9991520690bee8593e48b3f49c2eaff4c3748aa4..238f32d0c2d08c802b76282343993fa8e255b28f 100644
+index 9991520..238f32d 100644
 --- a/packages/coding-agent/test/suite/regressions/8724-in-memory-fork-active-tool.test.ts
 +++ b/packages/coding-agent/test/suite/regressions/8724-in-memory-fork-active-tool.test.ts
 @@ -42,6 +42,7 @@ describe("regression #8724: in-memory fork during an active tool turn", () => {
@@ -843,7 +919,7 @@ index 9991520690bee8593e48b3f49c2eaff4c3748aa4..238f32d0c2d08c802b76282343993fa8
  			settingsManager: harness.settingsManager,
 diff --git a/packages/coding-agent/test/suite/regressions/preflight-started-revoke.test.ts b/packages/coding-agent/test/suite/regressions/preflight-started-revoke.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..199f0930c9bd13c8d16bfafc02d97b2e2f4d399a
+index 0000000..199f093
 --- /dev/null
 +++ b/packages/coding-agent/test/suite/regressions/preflight-started-revoke.test.ts
 @@ -0,0 +1,42 @@
@@ -890,10 +966,42 @@ index 0000000000000000000000000000000000000000..199f0930c9bd13c8d16bfafc02d97b2e
 +	});
 +});
 diff --git a/packages/coding-agent/test/system-prompt-updates.test.ts b/packages/coding-agent/test/system-prompt-updates.test.ts
-index bbe5fb9f0b12cc1cf38c4f1a3a51fce6aef3b8d5..e31d9f6a4ec9fd3e012a6e1a5307764db2fcd9e0 100644
+index bbe5fb9..77774c6 100644
 --- a/packages/coding-agent/test/system-prompt-updates.test.ts
 +++ b/packages/coding-agent/test/system-prompt-updates.test.ts
-@@ -158,8 +158,11 @@ describe("system prompt updates", () => {
+@@ -25,8 +25,8 @@ import type { ExtensionFactory } from "../src/index.ts";
+ import { createHarness } from "./suite/harness.ts";
+ 
+ describe("system prompt updates", () => {
+-	test("declares the prompt and tools once and reuses them across resume", async () => {
+-		const harness = await createHarness();
++	test("declares the host preamble and tool guidelines once and reuses them across resume", async () => {
++		const harness = await createHarness({ preamble: "Host identity." });
+ 		try {
+ 			harness.setResponses([fauxAssistantMessage("first"), fauxAssistantMessage("second")]);
+ 			await harness.session.prompt("one");
+@@ -45,6 +45,9 @@ describe("system prompt updates", () => {
+ 			const head = harness.session.messages[0];
+ 			if (head?.role !== "system") throw new Error("expected system message");
+ 			expect(head.content).toBe("");
++			expect(head.sections?.preamble).toBe("Host identity.");
++			expect(head.sections?.rules).toContain("Use read");
++			expect(head.sections?.docs).toContain("Pi documentation");
+ 			expect(Object.keys(head.sections ?? {})).toEqual(["preamble", "tools", "rules", "docs", "cwd"]);
+ 			expect(head.toolsAdded?.map((tool) => tool.name)).toEqual(["read", "bash", "edit", "write"]);
+ 			expect(getSystemMessageText(head)).toBe(harness.session.systemPrompt);
+@@ -112,6 +115,10 @@ describe("system prompt updates", () => {
+ 		const previous = buildSystemPromptSections({ customPrompt: "You are A.", cwd: "/tmp" });
+ 		const current = buildSystemPromptSections({ customPrompt: "You are B.", cwd: "/tmp" });
+ 		expect(previous.preamble).toBe("You are A.");
++		const hosted = buildSystemPromptSections({ preamble: "Host identity.", customPrompt: "Role instructions.", cwd: "/tmp" });
++		expect(hosted.preamble).toBe("Host identity.");
++		expect(hosted.role).toBe("<role>\nRole instructions.\n</role>");
++		expect(hosted.rules).toContain("Be concise");
+ 		expect(diffSystemPromptSections(previous, current)).toEqual({ preamble: "You are B." });
+ 
+ 		expect(buildSystemPromptState({ forceSystemPrompt: "Exact prompt.", cwd: "/tmp" })).toEqual({
+@@ -158,8 +165,11 @@ describe("system prompt updates", () => {
  				toolsAdded: systemMessages[0]?.[0]?.toolsAdded,
  				timestamp: systemMessages[0]?.[0]?.timestamp,
  			});
@@ -907,7 +1015,7 @@ index bbe5fb9f0b12cc1cf38c4f1a3a51fce6aef3b8d5..e31d9f6a4ec9fd3e012a6e1a5307764d
  			expect(requests[2]!.messages.map((message) => message.role)).toEqual([
  				"system",
  				"user",
-@@ -184,6 +187,57 @@ describe("system prompt updates", () => {
+@@ -184,6 +194,57 @@ describe("system prompt updates", () => {
  		}
  	});
  
@@ -966,7 +1074,7 @@ index bbe5fb9f0b12cc1cf38c4f1a3a51fce6aef3b8d5..e31d9f6a4ec9fd3e012a6e1a5307764d
  		const extension: ExtensionFactory = (pi) => {
  			for (const name of ["first", "second"]) {
 diff --git a/packages/coding-agent/test/trigger-compact-extension.test.ts b/packages/coding-agent/test/trigger-compact-extension.test.ts
-index 930769f378e26f1b458ea36ccddbcc685c60f811..3e6cf0ea5e99ccaffa90369c6a17e52d4d0820e1 100644
+index 930769f..3e6cf0e 100644
 --- a/packages/coding-agent/test/trigger-compact-extension.test.ts
 +++ b/packages/coding-agent/test/trigger-compact-extension.test.ts
 @@ -8,6 +8,7 @@ function createContext(tokens: number | null, compact = vi.fn()): ExtensionConte
@@ -978,7 +1086,7 @@ index 930769f378e26f1b458ea36ccddbcc685c60f811..3e6cf0ea5e99ccaffa90369c6a17e52d
  		modelRegistry: {} as ExtensionContext["modelRegistry"],
  		model: undefined,
 diff --git a/packages/evals/evals/tui.docs.eval.ts b/packages/evals/evals/tui.docs.eval.ts
-index 71988d3a437254aeb4152793bff481f48f7dfc85..732fac5d7343b7abad69d19076fc505bc56d2999 100644
+index 71988d3..732fac5 100644
 --- a/packages/evals/evals/tui.docs.eval.ts
 +++ b/packages/evals/evals/tui.docs.eval.ts
 @@ -131,6 +131,7 @@ async function inspectContextFooter(session: AgentSession, agentDir: string): Pr
@@ -989,15 +1097,3 @@ index 71988d3a437254aeb4152793bff481f48f7dfc85..732fac5d7343b7abad69d19076fc505b
  		agentDir,
  		modelRuntime: session.modelRuntime,
  		settingsManager: session.settingsManager,
-diff --git a/packages/coding-agent/src/core/tools/read.ts b/packages/coding-agent/src/core/tools/read.ts
-index dd123cb..4e8a6d1 100644
---- a/packages/coding-agent/src/core/tools/read.ts
-+++ b/packages/coding-agent/src/core/tools/read.ts
-@@ -77,6 +77,7 @@ async function* readLocalFileChunks(path: string, { signal }: { signal?: AbortSi
- 	try {
- 		const stats = await handle.stat();
- 		const end = stats.isFile() && stats.size > 0 ? stats.size - 1 : undefined;
-+		signal?.throwIfAborted();
- 		yield* handle.createReadStream({ end, signal, autoClose: false });
- 	} finally {
- 		await handle.close();

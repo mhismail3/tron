@@ -97,10 +97,17 @@ and ordinary errors still propagate. The existing SDK integration test runs stat
 mid-stream cancellation in isolated processes and joins handle closure. This one-line bridge
 is removed when the pinned Pi includes
 [upstream PR #12025](https://github.com/earendil-works/pi/pull/12025); upstream owns the
-alternative signal-free stream with reader-owned cancellation. The previous
-`pi-coding-agent-1.5.1-tron.1.tgz` is retained as the rollback artifact; its complete pin and
+alternative signal-free stream with reader-owned cancellation.
+
+`createAgentSession` and `createAgentSessionFromServices` accept a host `preamble` that replaces
+Pi's generic identity without suppressing tool snippets, tool guidelines or docs; a custom system
+prompt then renders as a separate `role` section. The Gateway supplies its common core this way.
+`system-prompt-updates.test.ts` proves the retained preamble across requests and the separate role.
+The bridge is removed when upstream offers an equivalent host identity option. The previous
+`pi-coding-agent-1.5.1-tron.2.tgz` is retained as the rollback artifact; its complete pin and
 patch inputs are available in the parent main tree. No installed runtime is changed by
-rebuilding or selecting `pi-coding-agent-1.5.1-tron.2.tgz` in a worktree.
+rebuilding or selecting `pi-coding-agent-1.5.1-tron.3.tgz` in a worktree. The reproducer's
+`--write` mode alone may build an artifact that does not yet exist; every other check requires it.
 
 Pi activates newly registered declarable extension tools on a resumed branch, and the
 Gateway reapplies the transcript's explicit loadout over them. When that narrows the
@@ -203,7 +210,10 @@ prompt-keyword handler is not part of that pin.
   `managed-subagents.transform.integration.test.ts` (fresh build, no Gateway-thread transform),
   `managed-subagents.integration.test.ts` (npm offline, TCP denied, a real child),
   `npm run test:pi-subagents-rollback` (previous → candidate → previous with resume; original
-  JSONL prefixes unchanged; `TRON_SUBAGENTS_ROLLBACK_ROOT` keeps the home; join failures go to
+  JSONL prefixes unchanged; each provider runs with its own Gateway source, the previous one
+  exported from the commit that pinned it (the updater names its Gateway repository through
+  `TRON_SUBAGENTS_SOURCE_GATEWAY`), because a rollback moves Gateway and provider together; every
+  leg requires all extensions to load; `TRON_SUBAGENTS_ROLLBACK_ROOT` keeps the home; join failures go to
   `TRON_TEST_PROCESS_OWNER_FAILURE`) and
   `src/kernel/delegation/managed-subagents.payload.integration.test.ts` (stages a `dist` it emits
   from this commit, never the checkout's build). Reports in `test-results/`.

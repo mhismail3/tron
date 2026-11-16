@@ -30,7 +30,6 @@ describe("codemode nested Jev and subagent tools", () => {
     const sdkUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
     let activeJevRequests = 0;
     let maximumConcurrentJevRequests = 0;
-    const workspaceMarker = join(root, "tron", "workspace");
     const handoffPath = join(root, "handoff.txt");
     const subagentExtension = `import { rename, writeFile } from "node:fs/promises";
 export default function(pi) {
@@ -108,8 +107,7 @@ export default function(pi) {
     expect(maximumConcurrentJevRequests).toBe(2);
     expect(jevRequests.map((item) => (item.state as { id: string }).id).sort()).toEqual(["admitted-a", "admitted-b"]);
     expect(jevRequests.every((item) => item.model === "jev-latest")).toBe(true);
-    expect(handedTask).toContain("[Tron workspace handoff]");
-    expect(handedTask).toContain(workspaceMarker);
+    expect(handedTask).toBe("inspect delegated task");
     expect(slot.snapshot().toolExecutions.map((tool) => tool.toolCallId)).toEqual(["delegation-parent"]);
 
     const process = slot.snapshot().processActivities?.find((item) => item.kind === "subagent");
@@ -132,6 +130,6 @@ export default function(pi) {
 
     const artifactPath = join(globalThis.process.cwd(), "test-results", "pi-sdk-099-nested-delegation.json");
     await mkdir(dirname(artifactPath), { recursive: true });
-    await writeFile(artifactPath, `${JSON.stringify({ jev: { requests: jevRequests.map((item) => (item.state as { id: string }).id), rejectedBeforeDispatch: ["over-limit-a", "over-limit-b"], maximumConcurrentRequests: maximumConcurrentJevRequests }, subagent: { handoffIncluded: true, workspaceMarker, stoppedThroughForegroundOperation: true, processId: process!.processId } }, null, 2)}\n`);
+    await writeFile(artifactPath, `${JSON.stringify({ jev: { requests: jevRequests.map((item) => (item.state as { id: string }).id), rejectedBeforeDispatch: ["over-limit-a", "over-limit-b"], maximumConcurrentRequests: maximumConcurrentJevRequests }, subagent: { taskUnchanged: true, stoppedThroughForegroundOperation: true, processId: process!.processId } }, null, 2)}\n`);
   });
 });

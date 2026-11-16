@@ -1,53 +1,42 @@
 import { Type } from "../kernel/pi/ai.js";
 import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
 import type { ResourceRoot, TronWorkspaceDescriptor } from "../kernel/resources/resource-root.js";
+import { tronCore, tronHandoff } from "../kernel/host/tron-context.js";
 import type { JevDecisionClient } from "../providers/jev-client.js";
 import { createJevExtension } from "../providers/jev-extension.js";
 import type { ConnectionAccess } from "../modules/integrations/contract.js";
 
-export const APPROVAL_RULE = "Ask only for spend, sends, installs, irreversible or destructive effects, trust or authority changes, privacy expansion, credentials only the user knows, or 2FA on their device.";
-
 const CONNECTIONS_TOOL_PARAMETERS = Type.Object({ action: Type.Literal("list") }, { additionalProperties: false });
-
-const WORKSPACE_FILES_GUIDANCE = "Use tmp/<taskId>/ for task scratch; create directories lazily. Before finishing, retain useful results and delete your remaining scratch; scratch untouched for over 14 days may be removed without asking after checking it is not in use. Put finished reports, plans, screenshots and exports in files/<topic>-<date>/ with one line per deliverable in files/INDEX.md, never scratch. Put living data read and refreshed over time in state/<name>/, owned by one skill or capability with a short README explaining how to read/refresh it; no Gateway code owner is required. Never delete from files/ or state/ without maintainer approval. Use the owning tools for Gateway-managed stores (including Profile, episodic memory and apps), never arbitrary file edits.";
 
 export function tronContext(workspace: TronWorkspaceDescriptor, cwd: string, tools: readonly string[]): string {
   const lines = [
-    "## Tron operating context",
-    "You are Tron, the user's private agent operating on the Mac. Tron for iPhone is the usual interaction surface; the user may be away from the Mac. Do not assume they can see a Mac window or terminal.",
     `Current execution working directory: ${JSON.stringify(cwd)}. Relative task paths and project instructions belong to this directory; do not change it to use the internal workspace.`,
     `Tron internal workspace: ${JSON.stringify(workspace.root)} (${workspace.available ? "available" : "unavailable"}). This separate, per-installation root is for deliberately retained cross-session information, not a copy of projects or sessions.`,
-    workspace.available
-      ? WORKSPACE_FILES_GUIDANCE
-      : "Do not recreate or substitute for the unavailable internal workspace. Explain the limitation and continue unrelated work in the current directory when safe.",
-    "Keep canonical sessions, settings, credentials, installed resources, and existing extension stores with their current owners. Do not store secrets here, automatically collect project contents, or load the internal workspace as global instructions. It is not a sandbox or extra authorization.",
-    "Perform authorized routine Mac work with available tools, and communicate results in chat. Explicit authorization and existing safety restrictions still apply. Rebuilds, restarts, updates, rollbacks, promotions, and deployments of the Gateway hosting this session, or of any Stable or production Gateway, remain manual user actions; never initiate them yourself. A repository's own instructions may permit managing an isolated development Gateway.",
-    APPROVAL_RULE,
   ];
   if (tools.includes("display")) lines.push("Use display for useful visual/document results. source.kind=internal_file resolves relative to the internal workspace's files/ directory; source.kind=path remains relative to this session directory.");
   if (tools.includes("computer") || tools.includes("agent_browser")) lines.push(`Do on-screen work yourself, by default and liberally: web flows (consoles, dashboards, OAuth consent, forms)${tools.includes("computer") ? ", macOS permission prompts and dialogs, app windows, and storing secrets in Keychain without echoing them to chat, logs or files" : ""}. Use whichever available computer or browser tool does each step fastest and most accurately, and verify each effect by re-observing. Unblock yourself this way before asking; never hand the user on-screen steps. Before consenting or approving, confirm the signed-in account, app and requested scopes or permission match the authorized task. When no tool can do a step, say exactly what failed, file the gap on Tron issue #2476 and fix it robustly, not with a one-off workaround.`);
   if (tools.includes("agent_browser")) lines.push("Use agent_browser for browser work; prefer it to browser shell commands or one-off workarounds.");
   if (tools.includes("ask_user")) lines.push("Use ask_user for a necessary bounded decision after gathering context, not for questions you can resolve yourself.");
   if (tools.includes("notify")) lines.push("Use notify for useful attention requests; queued delivery is not proof the user received it.");
-  if (tools.includes("subagent")) lines.push("Delegated runners do not inherit Gateway-only extensions. Direct model subagent task/resume calls receive an advisory workspace handoff, not authorization. Write a workflow script to a git-ignored file under the request cwd (for example .pi/<name>.js) and pass workflow: './<path>.js' relative to that cwd; absolute paths such as /tmp fail. Use another string only to name an existing resource when one fits. Never use workflow: true, which runs a script written in the reply and prints it in chat; agent excludes workflow. For workflows and slash/RPC delegation, explicitly include this internal workspace path, availability, lifecycle guidance (tmp/files/state, task-end cleanup, index, owner README and deletion approval), and store ownership rules in every child task (including resume stages); do not rewrite existing workflow programs to inject it. Never assume children have parent presentation tools or grant them broader authority.");
   return lines.join("\n");
 }
 
-const HANDOFF_START = "[Tron workspace handoff]\n";
-const HANDOFF_END = "\n[/Tron workspace handoff]\n\n";
-
-function withWorkspaceHandoff(task: string, workspace: TronWorkspaceDescriptor): string {
-  if (task.startsWith(HANDOFF_START)) {
-    const end = task.indexOf(HANDOFF_END);
-    if (end >= 0) task = task.slice(end + HANDOFF_END.length);
-  }
-  const handoff = `${HANDOFF_START}You are a delegated worker for Tron. Keep the working directory supplied by your launcher. Tron's separate internal workspace is ${JSON.stringify(workspace.root)} (${workspace.available ? "available" : "unavailable; do not recreate or substitute for it"}). ${workspace.available ? WORKSPACE_FILES_GUIDANCE : "Do not write to the unavailable workspace."} Do not copy projects, sessions, settings, credentials, or existing extension stores here. Read-only tasks remain read-only. Use only tools actually supplied; report to your parent rather than assuming iOS presentation tools. Pass these workspace facts to any further delegated tasks. Lifecycle transitions of the hosting or any Stable/production Gateway remain manual user actions; follow repository instructions for an isolated development Gateway. ${APPROVAL_RULE}${HANDOFF_END}`;
-  if (Buffer.byteLength(handoff, "utf8") > 2_048) throw new Error("Tron workspace handoff exceeds its 2 KiB bound; supply explicit child context instead");
-  return handoff + task;
-}
-
-export function createTronCoreExtension(workspace: Pick<ResourceRoot, "describe">, jev?: JevDecisionClient, connections?: Pick<ConnectionAccess, "snapshot">): ExtensionFactory {
-  return (pi) => {
+export function createTronCoreExtension(workspace: Pick<ResourceRoot, "describe">, jev?: JevDecisionClient, connections?: Pick<ConnectionAccess, "snapshot">,
+  registerChildContext?: (taskPrefix: string) => Promise<{ dispose(): void }>): ExtensionFactory {
+  return async (pi) => {
+    let childContext: { dispose(): void } | undefined;
+    const publishChildContext = async () => {
+      const descriptor = await workspace.describe();
+      if (registerChildContext) {
+        childContext?.dispose();
+        childContext = undefined;
+        childContext = await registerChildContext(tronHandoff(descriptor));
+      }
+      return descriptor;
+    };
+    await publishChildContext();
+    pi.on("session_start", async () => { await publishChildContext(); });
+    pi.on("session_shutdown", () => { childContext?.dispose(); });
     if (jev) createJevExtension(jev)(pi);
     if (connections) {
       pi.registerTool({
@@ -65,20 +54,9 @@ export function createTronCoreExtension(workspace: Pick<ResourceRoot, "describe"
       });
     }
     pi.on("before_agent_start", async (event, ctx) => {
-      event.systemPromptOptions.sections.tron = tronContext(await workspace.describe(), ctx.cwd, pi.getActiveTools());
-    });
-    pi.on("tool_call", async (event) => {
-      if (event.toolName !== "subagent") return;
-      const input = event.input;
-      if (input.workflow !== undefined) return;
-      const field = input.action === undefined && typeof input.agent === "string"
-        ? "task" : input.action === "resume" && typeof input.message === "string" ? "message" : undefined;
-      if (!field || (input[field] !== undefined && typeof input[field] !== "string")) return;
-      try {
-        input[field] = withWorkspaceHandoff(input[field] as string | undefined ?? "", await workspace.describe());
-      } catch (error) {
-        return { block: true, reason: error instanceof Error ? error.message : "Tron workspace handoff unavailable" };
-      }
+      const descriptor = await publishChildContext();
+      event.systemPromptOptions.preamble = tronCore(descriptor);
+      event.systemPromptOptions.sections.tron = tronContext(descriptor, ctx.cwd, pi.getActiveTools());
     });
   };
 }

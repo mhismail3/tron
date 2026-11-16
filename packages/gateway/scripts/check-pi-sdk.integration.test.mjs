@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { WAIT_HANG_BOUND_MS } from "../test-support/wait-for.ts";
-import { PATCH_PIN_FILE } from "./check-pi-sdk.mjs";
+import { PATCH_PIN_FILE, readPiCodingAgentPatch } from "./check-pi-sdk.mjs";
 import { runUpdate } from "./update-pi-sdk.mjs";
 
 const gatewayDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -98,6 +98,11 @@ test("accepts the declared tarball and refuses every single fault", (t) => {
   const accepted = check(fixture(t));
   assert.equal(accepted.status, 0, accepted.output);
   assert.match(accepted.output, /pi-coding-agent from third_party\/pi-coding-agent\//u);
+  const unbuilt = fixture(t);
+  const patchPin = json(join(unbuilt, PATCH_PIN_FILE));
+  rmSync(join(unbuilt, patchPin.artifact.path));
+  assert.match(readPiCodingAgentPatch(unbuilt).issues.join("\n"), /missing or not a bounded regular file/u);
+  assert.deepEqual(readPiCodingAgentPatch(unbuilt, { requireSources: true, requireArtifact: false }).issues, []);
 
   const root = fixture(t);
   const probe = join(root, "integrity-probe.mjs");

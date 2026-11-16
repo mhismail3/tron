@@ -74,7 +74,7 @@ const WORKER_EXTENSIONS = [
   "<inline:tron-invocation-settlement> | on turn_start×1,message_end×1",
   "<inline:tron-context-window> | on session_start×1,session_tree×1,model_select×1,before_agent_start×1,turn_start×1",
   "<inline:tron-compaction-policy> | on message_end×1,session_start×1,session_before_compact×1",
-  "<inline:tron-core> | tools jev | on before_agent_start×1,tool_call×1",
+  "<inline:tron-core> | tools jev | on session_start×1,session_shutdown×1,before_agent_start×1",
   "<inline:tron-web-research> | tools web_search | on session_start×1,session_shutdown×1",
   "<inline:tron-settings> | tools settings",
   "<inline:tron-projects> | tools projects",

@@ -1172,6 +1172,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         delegatedWorker: () => Boolean(this.ownedTurns.worker),
         ...(profile.managedSubagents && this.dependencies.managedSubagents ? {
           requireChildExtensions: this.dependencies.managedSubagents.requireChildExtensions.bind(this.dependencies.managedSubagents),
+          requireChildTaskContext: this.dependencies.managedSubagents.requireChildTaskContext.bind(this.dependencies.managedSubagents),
         } : {}),
         title: () => this.notificationTitle(),
         presented: () => this.dependencies.isSessionPresented(this.id),
@@ -1259,6 +1260,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       if (profileModel && profile.launchDefaults === "settings-home-recipe" && !selectedProfileModel) throw new GatewayError("conflict", "Home's configured profile model is unavailable or virtual");
       const launchThinking = launchDefaults?.keys.find(row => row.key === "model.thinking[role=chat]")?.value as ThinkingLevel | undefined;
       const created = await createAgentSessionFromServices({
+        preamble: this.dependencies.modules.policy("commonCore")!(await this.dependencies.workspace.describe()),
         services,
         sessionManager,
         ...(initialModel ? { model: initialModel } : {}),
