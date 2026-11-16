@@ -378,7 +378,9 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
   await registry.initialize();
   const privateService = new MacTerminalService({ root: join(tronHome, "state/mac-terminal"), launchAgentDirectory: join(root, "agents") });
   const macTerminalKeys = new MacTerminalKeys(privateService.root);
-  const mcpAdmin = new McpAdminService(agentDir, join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js"));
+  const keychain: string[] = [];
+  const mcpAdmin = new McpAdminService(agentDir, join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js"),
+    { store: async (...args: string[]) => { keychain.push(args.at(-1)!); return `tron-mcp-${args.at(-2)}`; } } as never);
   const modelConfig = new ModelConfigService(agentDir);
   const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: privateService, mcpAdmin, modelConfig }));
   const record = new SettingsChangeRecord(tronHome, options.segmentEntries);
@@ -436,7 +438,7 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
     }
     return false;
   };
-  return { root, tronHome, agentDir, trust, macTerminalKeys, registry, service, record, settingsModel, settingsChanges, broadcasts, pushes, published, outside, change, agentChange, history, macDocument, faux, modelRuntime };
+  return { root, tronHome, agentDir, trust, macTerminalKeys, registry, service, record, settingsModel, settingsChanges, broadcasts, pushes, published, outside, change, agentChange, history, macDocument, faux, modelRuntime, keychain };
 }
 
 async function gitProject(root: string, name: string) {
@@ -1217,6 +1219,42 @@ describe("outside changes to MCP servers and custom models", () => {
     expect(applied).toEqual(expect.objectContaining({ status: "applied", qualifiers: { server: "home-docs" } }));
     await maintainerChange(f.service, client(), "settings.undo", { commandId: commandId(), changeId: applied!.changeId });
     expect(JSON.parse(await readFile(join(f.agentDir, "mcp.json"), "utf8")).mcpServers["home-docs"]).toBeUndefined();
+  });
+
+  caseIt("the app manages a bearer-token MCP server only through settings.change, holding a Keychain reference and never the token", async owner => {
+    const f = await fixture(owner);
+    const token = "b1-bearer-never-stored";
+    const stored = await f.service.invoke(client(), "mcp.token.set", { commandId: commandId(), server: "bearer-docs", token }) as Record<string, unknown>;
+    const reference = { source: "keychain", service: "tron.mcp", account: "tron-mcp-bearer-docs", format: "bearer" };
+    expect(stored).toEqual({ server: "bearer-docs", reference });
+    expect(f.keychain).toEqual([token]);
+    const server = (value: Record<string, unknown>) => [{ key: "tools.mcp.server", qualifiers: { server: "bearer-docs" }, layer: "global", op: "set", value }];
+    const added = { url: "https://docs.example.test/mcp", description: "Product docs", headers: { Authorization: reference } };
+    const preview = await f.change({ kind: "global" }, server(added), { dryRun: true });
+    expect(preview).toMatchObject({ status: "applied", review: { requiresTap: true } });
+    expect(preview.review!.items[0]!.exact).toContain("tron-mcp-bearer-docs");
+    expect(await f.change({ kind: "global" }, server(added), { confirmationDigest: preview.review!.digest })).toMatchObject({ status: "applied" });
+    const mcpPath = join(f.agentDir, "mcp.json");
+    expect(JSON.parse(await readFile(mcpPath, "utf8")).mcpServers["bearer-docs"]).toEqual(added);
+    expect(f.broadcasts).toContainEqual({ topic: "mcp.changed", payload: { scope: "global" } });
+    const disabled = { ...added, enabled: false };
+    expect((await f.change({ kind: "global" }, server(disabled), { dryRun: true })).review).toMatchObject({ requiresTap: false });
+    await f.change({ kind: "global" }, server(disabled));
+    const listed = await f.service.invoke(client(), "mcp.list", { scope: "global" }) as { servers: Array<Record<string, unknown>> };
+    expect(listed.servers).toEqual([expect.objectContaining({ name: "bearer-docs", enabled: false, value: disabled })]);
+    expect((await f.change({ kind: "global" }, server(added), { dryRun: true })).review).toMatchObject({ requiresTap: true });
+    for (const foreign of [{ ...reference, account: "tron-mcp-other" }, { ...reference, service: "login" }, `Bearer ${token}`]) {
+      await expect(f.change({ kind: "global" }, server({ ...disabled, headers: { Authorization: foreign } })))
+        .rejects.toMatchObject({ code: "invalid_request" });
+    }
+    await f.change({ kind: "global" }, [{ key: "tools.mcp.server", qualifiers: { server: "bearer-docs" }, layer: "global", op: "unset" }]);
+    expect(JSON.parse(await readFile(mcpPath, "utf8")).mcpServers).toEqual({});
+    for (const method of ["mcp.add", "mcp.remove", "mcp.update"]) {
+      await expect(f.service.invoke(client(), method, { commandId: commandId(), scope: "global", server: "bearer-docs", transport: "http", url: added.url, enabled: true }))
+        .rejects.toMatchObject({ code: "not_found", message: `Unknown gateway method: ${method}` });
+    }
+    expect(JSON.parse(await readFile(mcpPath, "utf8")).mcpServers).toEqual({});
+    expect(JSON.stringify([await f.history(), await readFile(mcpPath, "utf8"), f.broadcasts, stored])).not.toContain(token);
   });
 
   caseIt("records Project mcp.json edits from a late .pi watch, a Git pull, and the Project MCP owner under the Project root", async owner => {
