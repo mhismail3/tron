@@ -34,7 +34,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:83645bcf4b39905c7247ed22dcca3220fccc561f5546edf8733a56c88eafe65f",
+        "promptHash": "sha256:c18af85f85dde4ee1fc02b426f7149f131e65f74fcf0b39a18024f7e4bca75b5",
         "messages": [
           {
             "role": "user",
@@ -82,7 +82,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:83645bcf4b39905c7247ed22dcca3220fccc561f5546edf8733a56c88eafe65f",
+        "promptHash": "sha256:c18af85f85dde4ee1fc02b426f7149f131e65f74fcf0b39a18024f7e4bca75b5",
         "messages": [
           {
             "role": "user",
@@ -142,7 +142,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:83645bcf4b39905c7247ed22dcca3220fccc561f5546edf8733a56c88eafe65f",
+        "promptHash": "sha256:c18af85f85dde4ee1fc02b426f7149f131e65f74fcf0b39a18024f7e4bca75b5",
         "messages": [
           {
             "role": "user",
@@ -189,11 +189,11 @@
         "messages": [
           {
             "role": "user",
-            "text": "[from: tron-home; kind: brief; authority: task]\nSummarize notes.txt in the lock project.\n\nWorker choice: model tron-lock-home-activation-wake/faux-1 (same as Home); thinking off (same as Home).\n\nWorker at start: tron-lock-home-activation-wake/faux-1; thinking off."
+            "text": "[from: tron-home; kind: brief; authority: task]\nSummarize notes.txt in the lock project."
           },
           {
             "role": "user",
-            "text": "<turn-frame>\nDate: <date>.\nModel: tron-lock-home-activation-wake/faux-1. Thinking: off.\nActivation: task.\n</turn-frame>"
+            "text": "<turn-frame>\nDate: <date>.\nModel: tron-lock-home-activation-wake/faux-1. Thinking: off.\nActivation: task.\nWorker choice: tron-lock-home-activation-wake/faux-1. Thinking: off. Source: model same as Home; thinking same as Home.\n</turn-frame>"
           }
         ]
       }

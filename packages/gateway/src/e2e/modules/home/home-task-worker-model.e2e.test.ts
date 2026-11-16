@@ -65,11 +65,16 @@ async function delegateThroughHome(f: Awaited<ReturnType<typeof fixture>>, deleg
   const refusals: string[] = [];
   const homeContexts: string[] = [];
   const workerContexts: string[] = [];
+  const workerFrames: string[] = [];
+  const workerSystems: string[] = [];
   f.faux.setResponses(Array.from({ length: 4 }, () => {
     const respond = scriptedHome(delegate, observed, refusals);
     return (context, options, state, model) => {
-      if (isWorkerTurn(context)) workerContexts.push(context.messages.filter(message => message.role === "user").map(textOf).join("\n"));
-      else homeContexts.push(JSON.stringify(context));
+      if (isWorkerTurn(context)) {
+        workerContexts.push(withoutTurnFrame(context.messages).filter(message => message.role === "user").map(textOf).join("\n"));
+        workerFrames.push(textOf(context.messages.at(-1)!));
+        workerSystems.push(context.messages.filter(message => message.role === "system").map(getSystemMessageText).join("\n"));
+      } else homeContexts.push(JSON.stringify(context));
       return respond(context, options, state, model);
     };
   }));
@@ -77,7 +82,7 @@ async function delegateThroughHome(f: Awaited<ReturnType<typeof fixture>>, deleg
   const home = await f.registry.acquire(f.home.sessionId);
   await home.prompt("Delegate the finite work");
   await waitFor(() => home.snapshot().configurationBlocker === null, "Home delegation turn");
-  return { observed, refusals, homeContexts, workerContexts };
+  return { observed, refusals, homeContexts, workerContexts, workerFrames, workerSystems };
 }
 
 const taskIsTerminal = (f: Awaited<ReturnType<typeof fixture>>, taskId: string) =>
@@ -157,19 +162,20 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     const chosen = `${f.model.provider}/${TASK_REASONING_MODEL_ID}`;
     await setModelQueue(queueOwners(f), "subagent", [first, chosen]);
     const intent = explicit ? `Use ${chosen} for subagents; do not select the first queue model.` : "Use subagents for the finite lookup.";
-    const { workerContexts, refusals } = await delegateThroughHome(f, { taskId: "brief-model", intent, target: f.cwd });
+    const { workerContexts, workerFrames, workerSystems, refusals } = await delegateThroughHome(f, { taskId: "brief-model", intent, target: f.cwd });
     expect(refusals).toEqual([]);
     await taskIsTerminal(f, "brief-model");
     const task = await homeOwnerOf(f.registry).taskStatus("brief-model");
     briefEvidence.push({ explicit, intent: task.intent.text, providerContext: workerContexts[0] });
     expect(workerContexts).toHaveLength(1);
     const prompt = workerContexts[0]!;
+    const system = workerSystems[0]!;
     expect(prompt).toContain(intent);
-    expect(prompt).toContain(`${first} (available), ${chosen} (available)`);
-    expect(prompt).toContain("Explicit eligible subagent model choices in this brief take precedence over the default queue");
-    expect(prompt).toContain("Otherwise, launch subagents with model tron/subagent");
-    expect(prompt).toContain("disclose the reason and the chosen fallback");
-    expect(prompt).not.toMatch(/\. Launch subagents with model tron\/subagent/u);
+    expect(workerFrames[0]).toContain(`\nSubagent models: ${first} (available), ${chosen} (available).\n`);
+    expect(system).toContain("Explicit eligible subagent model choices in your brief take precedence over the default queue");
+    expect(system).toContain("Otherwise, launch subagents with model tron/subagent");
+    expect(system).toContain("disclose the reason and the chosen fallback");
+    expect(system).not.toMatch(/\. Launch subagents with model tron\/subagent/u);
   });
 
   it("gives the worker its choice and live subagent models in the turn frame and the launch guidance as a system section", async () => {
@@ -210,13 +216,14 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     const f = await fixture();
     const settings = installSettings(f);
     await writeFile(settings.profilePath, JSON.stringify({ modelQueue: { worker: [`${f.model.provider}/${TASK_REASONING_MODEL_ID}`] }, thinking: { worker: "max" } }));
-    const { observed } = await delegateThroughHome(f, { taskId: "profile-model", intent: "Finite work", target: f.cwd });
+    const { observed, workerFrames } = await delegateThroughHome(f, { taskId: "profile-model", intent: "Finite work", target: f.cwd });
     await taskIsTerminal(f, "profile-model");
     expect(observed).toEqual([{ model: TASK_REASONING_MODEL_ID, reasoning: "high" }]);
     const task = await homeOwnerOf(f.registry).taskStatus("profile-model");
-    expect(task.intent.text).toContain("Worker choice: model");
-    expect(task.intent.text).toContain("worker queue");
-    expect(task.intent.text).toContain("max clamped to high");
+    expect(task.intent.text).toBe("Finite work");
+    expect(workerFrames[0]).toContain("\nWorker choice: ");
+    expect(workerFrames[0]).toContain("worker queue");
+    expect(workerFrames[0]).toContain("max clamped to high");
     const home = await f.registry.acquire(f.home.sessionId);
     const admission = home.canonicalSessionEntries().flatMap(entry => entry.type === "message" && entry.message.role === "toolResult"
       && entry.message.toolName === "delegate" ? [entry.message] : [])[0];
@@ -247,14 +254,15 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     const home = await f.registry.acquire(f.home.sessionId);
     await home.setModel(f.model.provider, TASK_REASONING_MODEL_ID);
     await home.setThinking("high");
-    const { observed, refusals } = await delegateThroughHome(f, { taskId: "explicit-clamp", intent: "Finite work", target: f.cwd,
+    const { observed, refusals, workerFrames } = await delegateThroughHome(f, { taskId: "explicit-clamp", intent: "Finite work", target: f.cwd,
       model: { provider: f.model.provider, id: f.model.id }, reason: "A lookup needs no reasoning" });
     expect(refusals).toEqual([]);
     await taskIsTerminal(f, "explicit-clamp");
     expect(observed).toEqual([{ model: f.model.id, reasoning: undefined }]);
     const task = await homeOwnerOf(f.registry).taskStatus("explicit-clamp");
-    expect(task.intent.text).toContain("Worker choice: model");
-    expect(task.intent.text).toContain("high clamped to off");
+    expect(task.intent.text).toBe("Finite work");
+    expect(workerFrames[0]).toContain("\nWorker choice: ");
+    expect(workerFrames[0]).toContain("high clamped to off");
     const evidence = await f.registry.readTaskEvidence(task.sessionId!);
     expect(readSessionFixedSettings(evidence)["model.thinking[role=chat]"]).toMatchObject({ from: "delegate", value: "off" });
     const settings = evidence.findLast(entry => entry.type === "custom" && entry.customType === SESSION_SETTINGS_ENTRY)!;
@@ -273,12 +281,13 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     const f = await fixture(false, false, undefined, false, usage, { providerUsage: { read } });
     const settings = installSettings(f);
     await writeFile(settings.profilePath, JSON.stringify({ modelQueue: { worker: [`${f.model.provider}/removed-model`, "usage-full/full", `${f.model.provider}/${f.model.id}`] } }));
-    const { observed } = await delegateThroughHome(f, { taskId: "queue-skips", intent: "Finite work", target: f.cwd });
+    const { observed, workerFrames } = await delegateThroughHome(f, { taskId: "queue-skips", intent: "Finite work", target: f.cwd });
     await taskIsTerminal(f, "queue-skips");
     expect(observed).toEqual([{ model: f.model.id, reasoning: undefined }]);
     const task = await homeOwnerOf(f.registry).taskStatus("queue-skips");
-    expect(task.intent.text).toContain(`${f.model.provider}/removed-model skipped: not registered`);
-    expect(task.intent.text).toContain("usage-full/full skipped: Weekly usage 97%");
+    expect(task.intent.text).toBe("Finite work");
+    expect(workerFrames[0]).toContain(`${f.model.provider}/removed-model skipped: not registered`);
+    expect(workerFrames[0]).toContain("usage-full/full skipped: Weekly usage 97%");
     const home = await f.registry.acquire(f.home.sessionId);
     const admission = home.canonicalSessionEntries().flatMap(entry => entry.type === "message" && entry.message.role === "toolResult"
       && entry.message.toolName === "delegate" ? [entry.message] : [])[0];

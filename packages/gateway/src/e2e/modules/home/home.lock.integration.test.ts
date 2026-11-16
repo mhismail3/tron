@@ -84,7 +84,7 @@ const WORKER_EXTENSIONS = [
   "<inline:tron-swift-apps> | tools swift_app",
   "<inline:tron-computer> | tools computer | on session_shutdown×1,before_agent_start×1",
   "<inline:tron-notify> | tools notify",
-  "<inline:tron-model-queue> | on session_start×3,agent_before_settle×2,session_shutdown×1,tool_call×1",
+  "<inline:tron-model-queue> | on session_start×3,agent_before_settle×2,before_agent_start×1,session_shutdown×1,tool_call×1",
   "<inline:tron-home-task-worker> | on before_agent_start×1,tool_call×1",
 ];
 
@@ -239,7 +239,7 @@ describe("gateway/home scenario lock", () => {
       sessionPresent: true, taskRecovery: { available: true }, waitingForUser: false, workers: { running: 0 } } });
     expect(answers[8], "the prompt's admission names Home's logical session").toEqual({ error: null, ok: true,
       result: { bindingRevision: 1, homeId: "<id>", logicalSessionId: "home", operationId: "<id>", sessionId: "<id>" } });
-    const INTENT = `Summarize notes.txt in the lock project.\n\nWorker choice: model ${MODEL} (same as Home); thinking off (same as Home).`;
+    const INTENT = "Summarize notes.txt in the lock project.";
     const SPEND = { cacheReadTokens: 0, cacheWriteTokens: "<size>", inputTokens: 0, outputTokens: "<size>", sourceDigest: "<base64:64>" };
     const EVENT_ID = "task-result-d7f1ec6b5d880e396a4f3a69702854c5c99bb2cf41b996fac1975b340ada6091";
     const TERMINAL = { entryIds: ["<entry>"], outcome: "final", reason: "explicit-report", sessionId: "<id>" };
@@ -392,7 +392,7 @@ describe("gateway/home scenario lock", () => {
       { ...ASSISTANT, stopReason: "stop", content: [{ text: "Delegated the lock task.", type: "text" }] },
       { ...ASSISTANT, stopReason: "stop", content: [{ text: "The lock task reported: lock notes.", type: "text" }] },
     ]);
-    const WORKER_PROMPT = `[from: tron-home; kind: brief; authority: task]\n${INTENT}\n\nWorker at start: ${MODEL}; thinking off.`;
+    const WORKER_PROMPT = `[from: tron-home; kind: brief; authority: task]\n${INTENT}`;
     const REPORT = { evidence: ["read notes.txt"], outcome: "final", resultId: "lock-result", text: "The notes say: lock notes." };
     expect(workerSessionJsonl.flatMap(message), "the worker's persisted messages").toEqual([
       { content: [{ text: WORKER_PROMPT, type: "text" }], role: "user" },

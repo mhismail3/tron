@@ -1740,7 +1740,7 @@
               "grantRef": null,
               "homeId": "<id>",
               "intent": {
-                "text": "Summarize notes.txt in the lock project.\n\nWorker choice: model tron-lock-home-contention-restart/faux-1 (same as Home); thinking off (same as Home)."
+                "text": "Summarize notes.txt in the lock project."
               },
               "intentDigest": "<base64:64>",
               "lifecycle": "active",
@@ -1903,7 +1903,7 @@
               "grantRef": null,
               "homeId": "<id>",
               "intent": {
-                "text": "Summarize notes.txt in the lock project.\n\nWorker choice: model tron-lock-home-contention-restart/faux-1 (same as Home); thinking off (same as Home)."
+                "text": "Summarize notes.txt in the lock project."
               },
               "intentDigest": "<base64:64>",
               "lifecycle": "terminal",
@@ -3156,7 +3156,7 @@
         "grantRef": null,
         "homeId": "<id>",
         "intent": {
-          "text": "Summarize notes.txt in the lock project.\n\nWorker choice: model tron-lock-home-contention-restart/faux-1 (same as Home); thinking off (same as Home)."
+          "text": "Summarize notes.txt in the lock project."
         },
         "intentDigest": "<base64:64>",
         "lifecycle": "active",
@@ -3187,7 +3187,7 @@
         "grantRef": null,
         "homeId": "<id>",
         "intent": {
-          "text": "Summarize notes.txt in the lock project.\n\nWorker choice: model tron-lock-home-contention-restart/faux-1 (same as Home); thinking off (same as Home)."
+          "text": "Summarize notes.txt in the lock project."
         },
         "intentDigest": "<base64:64>",
         "lifecycle": "terminal",
