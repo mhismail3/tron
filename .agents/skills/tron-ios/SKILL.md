@@ -1,6 +1,6 @@
 ---
 name: tron-ios
-description: Build, test, install, inspect, or release-validate Tron iOS artifacts safely. Use for simulator, physical-device, signing, push-environment, scheme, configuration, and archive work.
+description: "Build, test, install, inspect or release-validate Tron iOS: simulators, devices, signing, push, schemes, configurations and archives."
 ---
 
 Run from the repository root. `packages/ios-app/project.yml` is canonical;

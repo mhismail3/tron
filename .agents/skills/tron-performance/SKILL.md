@@ -1,6 +1,6 @@
 ---
 name: tron-performance
-description: Profile a real Tron bottleneck or compare implementations with controlled measurements and independent correctness checks. Use for latency, throughput, CPU, memory, I/O, and frame-performance work, not speculative tuning.
+description: Measure real Tron latency, throughput, CPU, memory, I/O or frame bottlenecks with controlled comparisons and correctness checks; no speculative tuning.
 ---
 
 # Performance

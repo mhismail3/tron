@@ -1,6 +1,6 @@
 ---
 name: tron-code-health
-description: Audit, simplify, and harden Tron code by tracing real ownership and removing unnecessary mechanisms. Use for architecture reviews, exhaustive investigations, cleanup, and root-cause fixes.
+description: Audit, simplify or harden Tron architecture and ownership; trace exhaustive investigations, cleanup and root-cause fixes.
 ---
 
 # Code health
