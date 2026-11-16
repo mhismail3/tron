@@ -48,8 +48,8 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   when saved; canonical Gateway values, scope rules and writers are unchanged. Other Compaction
   values appear only while retained values need inspection or Revert. More Settings groups
   retained values; Global embeds those groups directly. There is no Advanced section.
-  Trusted Projects and the server's Mac Terminal section consume their declared groups
-  without duplicating them in More Settings.
+  Trusted Projects consumes its declared group without duplicating it in More Settings; the
+  `connections` group (Mac Terminal key and private SSH service) is owned by the Mac Terminal sheet.
   Notifications and Changes sit in the toolbar; no Value & Source sheet. Dashboard Settings
   exposes only Global: editable keys plus explicit read-only values with Reset and Project inspection.
   Trusted Projects owns the default trust policy and per-project trust; Add Project records the
@@ -162,9 +162,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   update, promote, rollback and **Rebuild from Source** need the focused profile (**Use This
   Server** first). Rebuild is user-initiated only: agents never press it or submit its RPC. Status
   polling is command-bound and stops at terminal state, reconnect or disappearance. Maintenance
-  action containers inherit the sheet theme; Forget Server keeps semantic red. The selected
-  server shows its Gateway-declared Mac Terminal key using the standard renderer;
-  other servers require Use This Server before exposing this control-plane setting.
+  action containers inherit the sheet theme; Forget Server keeps semantic red.
 - **Logs.** Gateway records are fetched only while Logs is presented, merged with the iOS client
   ring, refreshed every 15 s while visible, and exported through Export Diagnostics.
 - **Reloads.** Visible reads include `foregroundReconciliationGeneration` in their task identity,
