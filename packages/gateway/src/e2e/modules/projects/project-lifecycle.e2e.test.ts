@@ -9,7 +9,7 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, write
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { fauxAssistantMessage, fauxToolCall, type AssistantMessage, type TranscriptContext } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, getCurrentTools, type AssistantMessage, type TranscriptContext } from "@earendil-works/pi-ai";
 import { disposeFixtures, fixture as homeFixture, reportCall } from "../../../../test-support/home-task-fixture.js";
 import { displayOwnerOf, homeOwnerOf, projectsOwnerOf } from "../../../../test-support/gateway-registry.js";
 import { setHomeMemoryModels } from "../../../../test-support/settings-dependencies.js";
@@ -59,6 +59,12 @@ async function fixture() {
   const text = (message: { content: unknown }) => typeof message.content === "string" ? message.content : (message.content as Array<{ text?: string }>).map(part => part.text ?? "").join("");
   const responder = (context: TranscriptContext): AssistantMessage => {
     const last = droppingAnyTurnFrame(context.messages).at(-1)!;
+    const projectsCall = (key: string) => getCurrentTools(context.messages).some(tool => tool.name === "projects")
+      ? fauxAssistantMessage([fauxToolCall("projects", calls.get(key)!)], { stopReason: "toolUse" })
+      : fauxAssistantMessage([fauxToolCall("tool_search", { query: "projects" })], { stopReason: "toolUse" });
+    if (last.role === "toolResult" && last.toolName === "tool_search") {
+      return projectsCall([...calls.keys()].findLast(key => context.messages.some(message => message.role === "user" && text(message) === key))!);
+    }
     if (last.role === "toolResult") {
       const key = [...calls.keys()].findLast(key => context.messages.some(message => message.role === "user" && text(message) === key));
       if (key) results.set(key, { isError: last.isError === true, details: last.details as ChangeResult, text: text(last) });
@@ -67,7 +73,7 @@ async function fixture() {
     if (context.messages.some(message => message.role === "user" && text(message).includes("Report ready"))) return fauxAssistantMessage([reportCall("project-ready", "Trusted project admitted")], { stopReason: "toolUse" });
     const turn = context.messages.slice(context.messages.findLastIndex(message => message.role === "assistant") + 1);
     const key = turn.map(text).find(key => calls.has(key));
-    return key ? fauxAssistantMessage([fauxToolCall("projects", calls.get(key)!)], { stopReason: "toolUse" }) : fauxAssistantMessage("Outcome noted");
+    return key ? projectsCall(key) : fauxAssistantMessage("Outcome noted");
   };
   f.faux.setResponses(Array.from({ length: 100 }, () => responder as never));
   const settled = () => waitFor(() => !home.isBusy && home.snapshot().configurationBlocker === null && home.snapshot().phase === "idle" || undefined, "Home idle");
@@ -400,6 +406,27 @@ exec ${JSON.stringify(realGit)} "$@"
     }
     expect(await readdir(f.workspace)).toEqual([]);
     expect((await f.changes.record.page({ limit: 50 })).entries.filter(entry => entry.key === "project.lifecycle")).toEqual([]);
+  });
+
+  it("Home finds the deferred projects tool with tool_search, then calls it", async () => {
+    const f = await fixture();
+    const home = await f.registry.acquire(f.home.sessionId);
+    const declared: string[][] = [];
+    let result: { toolName?: string; isError?: boolean; content?: unknown } | undefined;
+    f.faux.setResponses([
+      context => { declared.push(getCurrentTools(context.messages).map(tool => tool.name)); return fauxAssistantMessage([fauxToolCall("tool_search", { query: "projects" })], { stopReason: "toolUse" }); },
+      context => { declared.push(getCurrentTools(context.messages).map(tool => tool.name)); return fauxAssistantMessage([fauxToolCall("projects", { name: "../escape", reason: "Deferred tool proof" })], { stopReason: "toolUse" }); },
+      context => { result = droppingAnyTurnFrame(context.messages).at(-1) as typeof result; return fauxAssistantMessage("Done"); },
+    ]);
+    await f.settled();
+    await home.prompt("Find the project tool and use it");
+    await waitFor(() => result, "the projects result");
+    await f.settled();
+    expect(declared[0]).toContain("tool_search");
+    expect(declared[0]).not.toContain("projects");
+    expect(declared[1]).toContain("projects");
+    expect(result).toMatchObject({ role: "toolResult", toolName: "projects", isError: true });
+    expect(JSON.stringify(result!.content)).not.toMatch(/not found|unknown tool|not available/iu);
   });
 
   it("Home creates an untrusted main repository, approval grants trust and the real delegate owner immediately admits work", async () => {

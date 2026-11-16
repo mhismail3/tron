@@ -21,7 +21,7 @@ export function tronContext(workspace: TronWorkspaceDescriptor, cwd: string, too
   return lines.join("\n");
 }
 
-export function createTronCoreExtension(workspace: Pick<ResourceRoot, "describe">, jev?: JevDecisionClient, connections?: Pick<ConnectionAccess, "snapshot">,
+export function createTronCoreExtension(workspace: Pick<ResourceRoot, "describe">, jev?: { client: JevDecisionClient; deferred: boolean }, connections?: Pick<ConnectionAccess, "snapshot">,
   registerChildContext?: (taskPrefix: string) => Promise<{ dispose(): void }>): ExtensionFactory {
   return async (pi) => {
     let childContext: { dispose(): void } | undefined;
@@ -37,7 +37,7 @@ export function createTronCoreExtension(workspace: Pick<ResourceRoot, "describe"
     await publishChildContext();
     pi.on("session_start", async () => { await publishChildContext(); });
     pi.on("session_shutdown", () => { childContext?.dispose(); });
-    if (jev) createJevExtension(jev)(pi);
+    if (jev) createJevExtension(jev.client, jev.deferred)(pi);
     if (connections) {
       pi.registerTool({
         name: "connections",

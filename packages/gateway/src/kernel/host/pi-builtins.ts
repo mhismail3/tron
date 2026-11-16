@@ -41,13 +41,25 @@ export function managedBrowserExtensions(agentDir: string, settings: Parameters<
   return managedBrowserEnabled(settings) ? [{ name: "agent-browser", factory: browserExtension(agentDir), builtin: true, replaceable: false }] : [];
 }
 
+export function toolSearchExtension(active: boolean): { name: string; factory: ExtensionFactory; builtin: true; replaceable: true } {
+  const register = createToolSearchExtension();
+  return { name: "tool-search", builtin: true, replaceable: true, factory: active ? (pi) => {
+    register(pi);
+    pi.on("session_start", () => {
+      const tools = pi.getActiveTools();
+      if (!tools.includes("tool_search")) pi.setActiveTools([...tools, "tool_search"]);
+    });
+  } : register };
+}
+
 export function piBuiltinExtensions(
   agentDir: string,
   openMcpUrl?: (url: string) => void,
+  activeToolSearch = false,
 ): Array<{ name: string; factory: ExtensionFactory; builtin: true; replaceable: true }> {
   return [
     { name: "codemode", factory: createCodemodeExtension(), builtin: true, replaceable: true },
-    { name: "tool-search", factory: createToolSearchExtension(), builtin: true, replaceable: true },
+    toolSearchExtension(activeToolSearch),
     {
       name: "mcp",
       factory: createMcpExtension({
