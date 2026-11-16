@@ -232,9 +232,11 @@ service, real-Gateway journey, physical haptic, APNs or device behavior.
   window layer trees (at most 16 windows, 4,096 layers, depth 64, 128 animations, 16 per layer)
   with each animation's key, key path and timing/repeat/visibility metadata, and the class chain
   of the layer's owning view and up to 11 superviews, never pixels, view text or surface identities.
-  It also keeps the ledger XCTest's animation-idle wait counts: `UIViewAnimationState` animations
-  that started and never stopped (`unstoppedViewAnimations`: start/stop totals and up to 16
-  outstanding animations with key path, layer owner chain and the symbolized stack that added them). Its at-most-16 weak coordinator references read aggregate mounted/activity
+  In every hosted simulator launch (never on device) it also keeps the ledger XCTest's
+  animation-idle wait counts: `UIViewAnimationState` animations that started and never stopped
+  (`unstoppedViewAnimations`: start/stop totals, at most 256 outstanding with an explicit
+  `outstandingTruncated`, and the newest 16 with key path, layer owner chain and the symbolized
+  stack that added them). It holds animations and layers only weakly. Its at-most-16 weak coordinator references read aggregate mounted/activity
   counts directly from `PresentationActivityCoordinator`; activity counting is omitted and marked
   truncated above 64 mounted surfaces. These reads are not a second surface graph.
   Limits/truncation are explicit. Three fixed cache files hold readiness, the supervisor request and the latest snapshot;

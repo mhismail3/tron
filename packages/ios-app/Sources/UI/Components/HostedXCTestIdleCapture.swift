@@ -24,7 +24,9 @@ extension HostedPresentationProbe {
         }
         source = signalSource
         signalSource.resume()
+        #if targetEnvironment(simulator)
         HostedViewAnimationLedger.install()
+        #endif
         write(["pid": getpid(), "launch": launch, "process_birth": birth], name: "ready.json")
     }
 
@@ -134,22 +136,33 @@ extension HostedPresentationProbe {
     }
 }
 private enum HostedViewAnimationLedger {
-    private struct Added {
+    private final class Added {
+        weak var animation: CAAnimation?
         weak var layer: CALayer?
         let key: String
         let frames: [NSNumber]
+        init(animation: CAAnimation, layer: CALayer, key: String, frames: [NSNumber]) {
+            self.animation = animation
+            self.layer = layer
+            self.key = key
+            self.frames = frames
+        }
     }
 
     private struct Outstanding {
-        let animation: CAAnimation
-        let added: Added?
         let order: Int
+        let type: String
+        let keyPath: String
+        let duration: Double
+        let repeatCount: Double
+        let added: Added?
     }
 
     private static let lock = NSLock()
-    nonisolated(unsafe) private static var added: [ObjectIdentifier: (CAAnimation, Added)] = [:]
+    nonisolated(unsafe) private static var added: [ObjectIdentifier: Added] = [:]
     nonisolated(unsafe) private static var addedOrder: [ObjectIdentifier] = []
     nonisolated(unsafe) private static var outstanding: [ObjectIdentifier: Outstanding] = [:]
+    nonisolated(unsafe) private static var outstandingTruncated = false
     nonisolated(unsafe) private static var starts = 0
     nonisolated(unsafe) private static var stops = 0
 
@@ -163,10 +176,11 @@ private enum HostedViewAnimationLedger {
             add(layer, addSelector, animation, key)
             guard let delegate = animation.delegate, type(of: delegate) == state,
                   let stored = layer.animation(forKey: key as String? ?? "") else { return }
-            let record = Added(layer: layer, key: key as String? ?? "", frames: Array(Thread.callStackReturnAddresses.prefix(48)))
+            let record = Added(animation: stored, layer: layer, key: key as String? ?? "",
+                               frames: Array(Thread.callStackReturnAddresses.prefix(48)))
             lock.withLock {
                 let id = ObjectIdentifier(stored)
-                added[id] = (stored, record)
+                added[id] = record
                 addedOrder.append(id)
                 if addedOrder.count > 2048 { added.removeValue(forKey: addedOrder.removeFirst()) }
             }
@@ -177,10 +191,19 @@ private enum HostedViewAnimationLedger {
         guard let startMethod = class_getInstanceMethod(state, startSelector) else { return }
         let start = unsafeBitCast(method_getImplementation(startMethod), to: Start.self)
         let startBlock: @convention(block) (AnyObject, CAAnimation) -> Void = { receiver, animation in
+            let id = ObjectIdentifier(animation)
+            let type = NSStringFromClass(Swift.type(of: animation))
+            let keyPath = (animation as? CAPropertyAnimation)?.keyPath ?? ""
+            let repeatCount = animation.repeatCount.isFinite ? Double(animation.repeatCount) : -1
             lock.withLock {
                 starts += 1
-                let id = ObjectIdentifier(animation)
-                if outstanding.count < 256 { outstanding[id] = Outstanding(animation: animation, added: added[id]?.1, order: starts) }
+                let record = added[id].flatMap { $0.animation === animation ? $0 : nil }
+                if outstanding.count < 256 {
+                    outstanding[id] = Outstanding(order: starts, type: type, keyPath: keyPath, duration: animation.duration,
+                                                  repeatCount: repeatCount, added: record)
+                } else {
+                    outstandingTruncated = true
+                }
             }
             start(receiver, startSelector, animation)
         }
@@ -200,16 +223,16 @@ private enum HostedViewAnimationLedger {
     }
 
     @MainActor static func unstopped(owners: (CALayer) -> [String]) -> [String: Any] {
-        let (open, started, stopped) = lock.withLock { (outstanding.values.sorted { $0.order < $1.order }, starts, stops) }
+        let (open, started, stopped, truncated) = lock.withLock {
+            (outstanding.values.sorted { $0.order < $1.order }, starts, stops, outstandingTruncated)
+        }
         return [
-            "starts": started, "stops": stopped, "outstandingCount": open.count,
+            "starts": started, "stops": stopped, "outstandingCount": open.count, "outstandingTruncated": truncated,
             "animations": open.suffix(16).map { entry -> [String: Any] in
                 let layer = entry.added?.layer
                 return [
-                    "order": entry.order, "type": NSStringFromClass(type(of: entry.animation)),
-                    "key": entry.added?.key ?? "", "keyPath": (entry.animation as? CAPropertyAnimation)?.keyPath ?? "",
-                    "duration": entry.animation.duration,
-                    "repeatCount": entry.animation.repeatCount.isFinite ? Double(entry.animation.repeatCount) : -1,
+                    "order": entry.order, "type": entry.type, "key": entry.added?.key ?? "", "keyPath": entry.keyPath,
+                    "duration": entry.duration, "repeatCount": entry.repeatCount,
                     "layerAlive": layer != nil,
                     "stillAttached": entry.added.map { layer?.animationKeys()?.contains($0.key) ?? false } ?? false,
                     "inWindow": (layer?.delegate as? UIView)?.window != nil,
@@ -219,7 +242,6 @@ private enum HostedViewAnimationLedger {
             },
         ]
     }
-
     private static func symbol(_ address: NSNumber) -> String? {
         var info = Dl_info()
         guard dladdr(UnsafeRawPointer(bitPattern: address.uintValue), &info) != 0 else { return nil }
