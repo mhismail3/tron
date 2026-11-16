@@ -112,7 +112,7 @@ agent directory's AGENTS file, flagged `global` by the loader) and user-scope `s
 `cwd` and extension sections. `system-prompt.test.ts` proves two projects share the prefix up to
 `project_context`. A host `renderSkills` option renders both skill sections in place; the Gateway
 passes the context index renderer, so Pi's skills block remains only for hosts that pass none.
-These bridges are listed in `removeWhen`. Earlier tarballs are not kept: git history restores
+Tools activated during a run are declared after the earlier tools, and their prompt sections are applied at the next run, so the system text is not rewritten inside a run. These bridges are listed in `removeWhen`. Earlier tarballs are not kept: git history restores
 them, and the SDK rollback check uses the registry release in `pi-sdk-baseline.json`. No installed
 runtime is changed by rebuilding or selecting `pi-coding-agent-1.5.1-tron.5.tgz` in a worktree. The reproducer's
 `--write` mode alone may build an artifact that does not yet exist; every other check requires it.

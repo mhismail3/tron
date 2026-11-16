@@ -79,7 +79,7 @@ export async function render() {
   const { tronCore, tronHandoff } = await jiti.import(resolve(root, "packages/gateway/src/kernel/host/tron-context.ts"));
   const { homeSystemPrompt } = await jiti.import(resolve(root, "packages/gateway/src/modules/home/tron-home-extension.ts"));
   const { createHomeTaskWorkerExtension } = await jiti.import(resolve(root, "packages/gateway/src/kernel/delegation/task-worker-extension.ts"));
-  const home = await homeSystemPrompt("", () => undefined, { model: { provider: "fixture", id: "fixture" }, thinking: "medium" }, "user");
+  const home = await homeSystemPrompt("", () => undefined, "user");
   let worker = "";
   createHomeTaskWorkerExtension({})({ on(name, handler) {
     if (name === "before_agent_start") worker = handler({ systemPrompt: "" }).systemPrompt;

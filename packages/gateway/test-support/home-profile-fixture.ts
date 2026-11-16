@@ -270,8 +270,8 @@ export async function readProfilePage(f: Fixture, path = "inferred", cursor?: st
 export function profileSection(request: { systemPrompt: string; messages: ReadonlyArray<Record<string, unknown>> }): string {
   const start = request.systemPrompt.indexOf(PROFILE_HEADING);
   const turn = request.messages.flatMap(message => Array.isArray(message.content) ? message.content as Array<{ text?: unknown }> : [])
-    .map(block => block.text).find((text): text is string => typeof text === "string" && text.startsWith("<turn-state>"));
-  if (start < 0 || turn === undefined) throw new Error("the Home request carries no profile section and turn state");
+    .map(block => block.text).find((text): text is string => typeof text === "string" && text.startsWith("<turn-frame>"));
+  if (start < 0 || turn === undefined) throw new Error("the Home request carries no profile section and turn frame");
   return `${request.systemPrompt.slice(start)}\n${turn}`;
 }
 

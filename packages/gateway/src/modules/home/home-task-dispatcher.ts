@@ -541,8 +541,7 @@ export class HomeTaskDispatcher {
         ? await this.stage("create-worker", taskId, signal, () => dispatch.resumeWorker(resume.sessionId, reports, resume.exceptWorkToken), late => dispatch.abandonWorker(late, reports))
         : await this.stage("create-worker", taskId, signal, () => dispatch.createWorker(task.target, reports), late => dispatch.abandonWorker(late, reports));
       const { slot } = lease;
-      const appliedChoice = resume ? "" : await (async () => {
-      const configured = await this.stage("configure-worker", taskId, signal, async () => {
+      if (!resume) await this.stage("configure-worker", taskId, signal, async () => {
       if (title) await slot.rename(title);
       await slot.setHomeTaskModelQueues(input.modelQueues ?? await this.policy.modelQueues());
       const fixedAt = (value: unknown, field: "model" | "thinking"): FixedSetting => ({ value,
@@ -558,14 +557,7 @@ export class HomeTaskDispatcher {
         if (clamped) source.reason = [source.reason, clamped].filter(Boolean).join("; ");
         await slot.setThinking(thinking, undefined, undefined, source);
       }
-      return { model, clamped };
       });
-      const { model, clamped } = configured;
-      const appliedChoice = input.provenance
-        ? `\n\nWorker at start: ${model ? `${model.provider}/${model.id}` : "worker default"}; thinking ${slot.snapshot().thinkingLevel}${clamped ? `; ${clamped}` : ""}.`
-        : "";
-      return appliedChoice;
-      })();
       task = { ...task, revision: task.revision + 1, lifecycle: "active", sessionId: slot.id, operationId,
         grantRef: authority.kind === "one-use-grant" ? authority.grantId : null,
         scopeRef: authority.kind === "standing-scope" ? authority.scopeId : null };
@@ -583,7 +575,7 @@ export class HomeTaskDispatcher {
       deadline = dispatch.armDeadline();
       const bounded = dispatch.enforceDeadline({ operationId, completion: terminal, cancel: cancellation }, deadline);
       work.transition("foreground-agent-operation", slot.id);
-      const originalText = `${task.intent.text}${appliedChoice}`;
+      const originalText = task.intent.text;
       const admitted = slot.prompt(injectedText(originalText, "tron-home", "brief", "task"), launch.resume?.images ?? [], undefined, undefined, undefined,
         { operationId, originalText, signal: reports.signal, origin: { kind: "gateway", ownerId: task.taskId, title: "Home task", confidence: "boundary" }, onTerminal: resolve });
       void admitted.catch(async () => {

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
 import { expectRequestShapes, expectSystemShapes } from "../../../test-support/lock-projections.js";
 import { projectRootTrustScenario } from "../../../test-support/lock-scenarios.js";
+import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
 
 const gateways: LockGateway[] = [];
 afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
@@ -69,7 +70,7 @@ describe("gateway/session-catalog project-root lock", () => {
     expect(Object.fromEntries(["root-lock-skill", "nested-lock-skill", "ROOT-INSTRUCTIONS", "NESTED-INSTRUCTIONS"].map((marker) => [marker, systemPrompt().includes(marker)])))
       .toEqual({ "root-lock-skill": true, "nested-lock-skill": false, "ROOT-INSTRUCTIONS": true, "NESTED-INSTRUCTIONS": true });
     const probe = `cwd=${tmp(nested)} projectDir=${tmp(project)}`;
-    expect(recorded.providerRequests.map((request) => request.messages.map((message) => {
+    expect(recorded.providerRequests.map((request) => withoutTurnFrame(request.messages).map((message) => {
       const { role, text, toolCalls, toolName } = message as { role: string; text?: string; toolCalls?: string[]; toolName?: string };
       return `${role}:${text ?? ""}${toolCalls ? `[${toolCalls.join(",")}]` : ""}${toolName ? `(${toolName})` : ""}`;
     }))).toEqual([

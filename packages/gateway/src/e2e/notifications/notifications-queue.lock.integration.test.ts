@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockClient, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
 import { expectRequestShapes } from "../../../test-support/lock-projections.js";
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
+import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
 import { NotificationGrantStore } from "../../notifications/grant-store.js";
 import { NotificationService } from "../../notifications/notification-service.js";
 import { PushRelayClient } from "../../notifications/relay-client.js";
@@ -220,7 +221,7 @@ describe("gateway/notifications delivery locks", () => {
       { role: "assistant", text: "The background run is under way." }, { role: "user", text: "is it still running" },
       { role: "assistant", text: "Still waiting on the background run." }, { role: "user", text: "and now" },
     ];
-    expect(providerRequests.map((request) => request.messages), "the scripted turns' messages").toEqual([1, 3, 5, 7].map((count) => conversation.slice(0, count)));
+    expect(providerRequests.map((request) => withoutTurnFrame(request.messages)), "the scripted turns' messages").toEqual([1, 3, 5, 7].map((count) => conversation.slice(0, count)));
   }, 60_000);
 
   it("overlapping terminal admissions send one waiting push per live background episode", async () => {

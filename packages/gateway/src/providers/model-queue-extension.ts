@@ -79,6 +79,13 @@ const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as 
 
 interface QueueOptions {
   virtualModel?: boolean;
+  guidance?: () => boolean;
+}
+
+export const SUBAGENT_MODELS_GUIDANCE = `Explicit eligible subagent model choices in your brief take precedence over the default queue: pass the chosen provider/model to the subagent launch. Otherwise, launch subagents with model ${SUBAGENT_QUEUE_MODEL.provider}/${SUBAGENT_QUEUE_MODEL.id}: it runs the first available one of the turn frame's Subagent models and moves along that queue on a usage-limit error. If an explicit choice is unavailable or hits a usage limit, disclose the reason and the chosen fallback; do not silently substitute the queue default.`;
+
+export function subagentModelsText(models: readonly QueueModelState[]): string {
+  return models.map(entry => entry.available ? `${entry.model} (available)` : `${entry.model} (skipped: ${entry.reason ?? "unavailable"})`).join(", ");
 }
 
 type Registry = { find(provider: string, id: string): unknown };
@@ -93,6 +100,7 @@ export function createModelQueueExtension(role: ModelQueueRole, source: ModelQue
     const isQueueModel = (model: { provider: string; id: string } | undefined) =>
       model?.provider === SUBAGENT_QUEUE_MODEL.provider && model.id === SUBAGENT_QUEUE_MODEL.id;
     pi.on("session_start", (_event, ctx) => { registry = ctx.modelRegistry; });
+    if (options.guidance) pi.on("before_agent_start", event => { if (options.guidance!()) event.systemPromptOptions.sections.subagent_models = SUBAGENT_MODELS_GUIDANCE; });
 
     if (options.virtualModel) {
       pi.registerVirtualModel({

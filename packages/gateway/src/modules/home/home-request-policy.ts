@@ -278,7 +278,7 @@ export class HomeRequestPolicy {
     activation.cancellation.signal.throwIfAborted();
     signal?.throwIfAborted();
     const projection = session.sessionManager.buildSessionProjection();
-    const cut = this.cut(projection, this.boundaryIndex(projection, activation), activation, view, "");
+    const cut = this.cut(projection, this.boundaryIndex(projection, activation), activation, view);
     const window = session.model?.contextWindow ?? 0;
     const memory = estimateTokens(cut.memory);
     const other = cut.tail.reduce((total, item) => total + estimateTokens(item.message), 0) + estimateTokens(systemMessage(systemPrompt, { toolsAdded: session.agent.state.tools, timestamp: 0 }));
@@ -310,7 +310,7 @@ export class HomeRequestPolicy {
           activation,
         );
       }
-      const rewritten = this.cut(projection, boundaryIndex, activation, memoryView, system.turn);
+      const rewritten = this.cut(projection, boundaryIndex, activation, memoryView);
       const model = update?.model ?? request.model;
       const estimated = requestSections(system, rewritten, memoryView, activation.kind);
       const scale = this.calibration.factors(modelKey(model));
@@ -429,6 +429,11 @@ export class HomeRequestPolicy {
     step.effectiveTokens = providerTokens;
   }
 
+  turnFrame(): { kind: HomeActivationKind; facts: Promise<string> | undefined } | undefined {
+    const activation = this.activation;
+    return activation && { kind: activation.kind, facts: activation.system?.then(system => system.turn) };
+  }
+
   private requireActivation(): ActivationState {
     const activation = this.activation;
     if (!activation) {
@@ -544,7 +549,6 @@ export class HomeRequestPolicy {
     boundaryIndex: number,
     activation: ActivationState,
     memoryView: HomeActivationView,
-    turn: string,
   ): RewrittenContext {
     const systems: AgentMessage[] = [];
     const tail: TailMessage[] = [];
@@ -565,7 +569,6 @@ export class HomeRequestPolicy {
       customType: HOME_MEMORY_CUSTOM_TYPE,
       content: [
         ...memoryView.pieces.map((text) => ({ type: "text" as const, text })),
-        { type: "text" as const, text: turn },
         { type: "text" as const, text: `${HOME_NONCE_MARKER}${activation.nonce}` },
       ],
       display: false,
@@ -632,7 +635,7 @@ function requestSections(system: HomeSystemPrompt, cut: RewrittenContext, view: 
   return [
     { id: "instructions", tokens: estimateTokens(systemMessage(system.instructions, getCurrentSystemMessage(cut.messages as never))) },
     { id: "profile", tokens: estimateTokens(systemMessage(`${system.profile}\n${system.turn}`)), count: system.profileNotes },
-    { id: "memory", tokens: estimateTokens(cut.memory) - estimateTokens(systemMessage(system.turn)), count: summaries },
+    { id: "memory", tokens: estimateTokens(cut.memory), count: summaries },
     { id: "chapter", tokens: chapterTokens, count: chapterEntries.size },
     { id: "results", tokens: resultTokens, count: results },
     { id: "input", tokens: inputTokens },
@@ -687,7 +690,7 @@ export function markHomeMemoryCache(payload: unknown): unknown {
   });
   if (index < 0) return payload;
   const blocks = (messages[index] as { content: unknown[] }).content;
-  let mark = blocks.length - 4;
+  let mark = blocks.length - 3;
   if (mark < 0) return payload;
   const lines = viewGroupLines(blocks[mark]);
   if (lines !== undefined && lines < VIEW_BLOCK_LINES) mark -= 1;

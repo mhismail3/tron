@@ -190,8 +190,7 @@ describe("Home task authorization RPC", () => {
     expect(modelRefusal).toMatchObject({ isError: true });
     expect(JSON.stringify(modelRefusal)).toContain("declined this task grant");
     const modelTask = await homeOwnerOf(f.registry).taskResult("model-grant-request");
-    expect(modelTask.intent.text).toContain("Finite work");
-    expect(modelTask.intent.text).toContain("Worker choice: model");
+    expect(modelTask.intent.text).toBe("Finite work");
     expect(modelTask).toMatchObject({ grantRef: null, sessionId: null });
     const modelRequest = (await list()).requests.find((pending: any) => pending.request.intentDigest === modelTask.intentDigest);
     expect(modelRequest).toBeDefined();

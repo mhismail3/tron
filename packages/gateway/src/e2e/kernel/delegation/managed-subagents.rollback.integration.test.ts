@@ -136,7 +136,7 @@ async function runLeg(): Promise<void> {
         if (bytes.length > 2 * 1024 * 1024) { response.writeHead(413).end(); return; }
       }
       const messages = JSON.parse(bytes).messages as Array<{ role: string; content: unknown }>;
-      const last = messages.at(-1);
+      const last = messages.findLast((message, index) => index < messages.length - 1 || !(message.role === "user" && JSON.stringify(message.content).includes("<turn-frame>")));
       const input = typeof last?.content === "string" ? last.content : JSON.stringify(last?.content);
       let scripted: string | { id: string; args: Record<string, unknown> } | undefined;
       if (last?.role === "tool") scripted = "PARENT_COMPLETE";

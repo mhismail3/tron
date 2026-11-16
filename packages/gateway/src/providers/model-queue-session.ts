@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import type { ModelRuntimePolicy, SessionContext } from "../kernel/host/module-host.js";
 import { GatewayError } from "../errors.js";
 import type { ModelQueueOwner } from "./model-queue.js";
-import { createModelQueueExtension } from "./model-queue-extension.js";
+import { createModelQueueExtension, subagentModelsText } from "./model-queue-extension.js";
 
 const MODEL_QUEUE_CHILD_EXTENSION = fileURLToPath(new URL(`./model-queue-extension${extname(fileURLToPath(import.meta.url))}`, import.meta.url));
 
@@ -19,9 +19,19 @@ export function modelQueueSessionExtensions(queue: ModelQueueOwner | undefined, 
   };
   const source = queue.source(selection);
   const worker = session.delegatedWorker();
+  if (worker) session.turnFacts(async () => {
+    const fixed = session.fixedSettings();
+    const model = fixed["model.ref[role=chat]"], thinking = fixed["model.thinking[role=chat]"];
+    const ref = model?.value as { provider?: string; id?: string } | undefined;
+    const subagents = selection("subagent") === undefined ? [] : await source.availability("subagent");
+    return [
+      ...(ref?.provider && ref.id ? [`Worker choice: ${ref.provider}/${ref.id}. Thinking: ${String(thinking?.value ?? "default")}. Source: model ${model?.reason ?? "unrecorded"}; thinking ${thinking?.reason ?? "unrecorded"}.`] : []),
+      ...(subagents.length ? [`Subagent models: ${subagentModelsText(subagents)}.`] : []),
+    ].join("\n") || undefined;
+  });
   return [{ name: "tron-model-queue", factory: (pi) => {
     if (worker) createModelQueueExtension("worker", source)(pi);
-    createModelQueueExtension("subagent", source, { virtualModel: true })(pi);
+    createModelQueueExtension("subagent", source, { virtualModel: true, ...(worker ? { guidance: () => Boolean(selection("subagent")?.length) } : {}) })(pi);
     let registration: { dispose(): void } | undefined;
     const registerChildPolicy = async (sessionId: string) => {
       registration?.dispose();

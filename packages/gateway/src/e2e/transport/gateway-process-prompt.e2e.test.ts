@@ -4,6 +4,7 @@ import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../../test-support/gateway-process.js";
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
+import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
 
 const gateways: GatewayProcess[] = [];
 afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
@@ -114,7 +115,7 @@ describe("prompt journeys across the real Gateway process", () => {
       console.info("normal Gateway process restart ms", performance.now() - normalRestartStarted);
       expectExactlyOnce(await freshSnapshot(gateway, sessionId));
       expect(gateway.provider.requests).toHaveLength(1);
-      expect(gateway.provider.requests[0]!.messages.filter((message) => message.role === "user")).toHaveLength(1);
+      expect(withoutTurnFrame(gateway.provider.requests[0]!.messages).filter((message) => message.role === "user")).toHaveLength(1);
       expect(gateway.provider.errors).toEqual([]);
 
       const bin = join(gateway.root, "bin");

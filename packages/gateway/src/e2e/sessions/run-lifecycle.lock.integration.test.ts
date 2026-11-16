@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockClient, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
 import { expectRequestShapes, expectSystemShapes } from "../../../test-support/lock-projections.js";
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
+import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
 
 const gateways: LockGateway[] = [];
 const previousSupervised = process.env.TRON_GATEWAY_SUPERVISED;
@@ -132,7 +133,7 @@ describe("gateway/run lifecycle RPC lock", () => {
     expect(receipts).toEqual([...turn, ...turn]);
     expectSystemShapes(canonicalJsonl, ["chat#0"]);
     const recorded = gateway.record();
-    expect(recorded.providerRequests.map((request) => request.messages.map((message) => {
+    expect(recorded.providerRequests.map((request) => withoutTurnFrame(request.messages).map((message) => {
       const { role, text } = message as { role: string; text?: string };
       return `${role}:${text ?? ""}`;
     }))).toEqual([
