@@ -24,6 +24,7 @@ import { changeReview } from "../../kernel/settings/settings-types.js";
 import { SettingsChangeRecord } from "../../kernel/settings/settings-record.js";
 import { SettingsChangePath } from "../../kernel/settings/settings-change.js";
 import type { RuntimeSlot } from "../../kernel/run/runtime-slot.js";
+import { droppingAnyTurnFrame } from "../../../test-support/turn-frame.js";
 
 afterEach(disposeFixtures);
 const phone = { id: "phone", identity: "device:phone", isLocal: false, isSubscribed: () => true,
@@ -44,7 +45,7 @@ async function settledWorker(f: Awaited<ReturnType<typeof fixture>>) {
     if (context.messages.some(message => message.role === "system" && getSystemMessageText(message).includes("This is a finite Home task"))) {
       return fauxAssistantMessage([reportCall("diff-worker")], { stopReason: "toolUse" });
     }
-    const last = context.messages.at(-1);
+    const last = droppingAnyTurnFrame(context.messages).at(-1);
     return last?.role === "user" && JSON.stringify(last.content).includes("Create diff worker")
       ? fauxAssistantMessage([fauxToolCall("delegate", { taskId: "diff-worker", title: "Review diff worker", intent: "Report at once", target: f.cwd })], { stopReason: "toolUse" })
       : fauxAssistantMessage("Noted");
