@@ -388,7 +388,7 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
       "Profile unavailable: Profile is not available on this Gateway. No item is applied in this instruction, and the profile is not known to be empty."]);
     expect(turnStateOf(last!).endsWith("\n</turn-state>")).toBe(true);
     expect(JSON.stringify(last!.body.system)).not.toMatch(/Current Home chat model|Sorting offer:|active \/ \d+ total|capacity: \d|Profile unavailable/iu);
-    expect(JSON.stringify(last!.body.system)).toContain("- Unsorted (inferred): profile read path=inferred");
+    expect(JSON.stringify(last!.body.system)).toContain("- inferred: Unsorted candidate notes. | profile read path=inferred");
     expect(JSON.stringify(last!.body).split(HOME_NONCE_MARKER).length - 1).toBe(1);
     const previousBlocks = wireBlocks(previous!), lastBlocks = wireBlocks(last!);
     const previousMark = previousBlocks.findIndex((block) => block.path === viewMarks(previous!).at(-1));

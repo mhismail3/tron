@@ -27,6 +27,14 @@ the canonical resource owner supplies the trust decision used by sessions.
 calculation. Native evidence reads and Episodic defaults consume its one derived
 default budget; the upload producer consumes the same attachment limits.
 
+`context-index.ts` is the one index renderer for advertised resources:
+`<index name open kind>` with one `- id: description | locator` row per item, id-sorted,
+whitespace collapsed and escaped. A source description over 160 characters or an index over its
+byte budget is rendered in full and returned as a diagnostic; nothing is truncated, omitted or
+paraphrased. `skillsIndex` renders each skill section through the SDK's `renderSkills` host option
+(`<index name="skills" open="read" kind="procedure">`, 10,000 bytes), and the session resources
+view lists its diagnostics as skill warnings.
+
 ## Contract
 
 `projectRoot(cwd)` returns the real worktree root, or the caller’s cwd when Git

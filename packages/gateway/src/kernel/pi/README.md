@@ -37,7 +37,8 @@ One file per Pi package, each an explicit export list of the names the Gateway u
 - **Patch-removal checklist.** A `// patch N` note marks a name the Gateway uses through
   an API of Tron's patched `pi-coding-agent` tarball (`pi-coding-agent-patch.json`
   `removeWhen`, items 1-5: `projectDir`, idle `systemPrompt` sections, revocable run start,
-  serialized `ModelRuntime` config reads, explicitly requested pending tool names). When a release ships them, the
+  serialized `ModelRuntime` config reads, explicitly requested pending tool names; also the host
+  `preamble`, stability section order and `renderSkills`). When a release ships them, the
   noted names are where the Gateway's use is rechecked
   ([Pi SDK maintenance](../../../docs/pi-sdk-maintenance.md#tron-patched-pi-coding-agent)).
 - **The list is the usage.** A name the Gateway stops using leaves its file; a new use
