@@ -73,7 +73,8 @@ it("moves a lesson from Profile notes into the global rules through the exact ca
   const card = JSON.stringify(first.interaction);
   expect(card).toContain("Lesson move");
   expect(card).toContain("Applying changes the instructions every chat and worker reads.");
-  for (const note of notes) expect(card).toContain(note.text);
+  expect((first.interaction.review as { items: Array<{ after: string }> }).items[0]!.after).toBe(
+    'global AGENTS.md: - Run the changed module\'s owning test before any suite.; retires 3 notes: "Run the owning test first."; "Owning test before the suite."; "Start with the owning test."');
   const moved = `# Global rules\n\n- Keep work scoped.\n- Run the changed module's owning test before any suite.\n`;
   expect(await readFile(rules, "utf8")).toBe(moved);
   expect(await statuses(notes)).toEqual(["retired", "retired", "retired"]);

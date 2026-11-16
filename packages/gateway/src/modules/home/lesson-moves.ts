@@ -122,14 +122,17 @@ export class LessonMoves {
     await durableAtomicWriteText(moved.path, moved.before, moved.mode);
     try {
       await profile.restore(moved.notes.map(note => ({ id: note.id, value: note.prior })), MAINTAINER, `${commandId}:restore`);
-      delete state[lesson];
-      await durableAtomicWriteJson(this.statePath(), state);
+      const { [lesson]: _undone, ...rest } = state;
+      await durableAtomicWriteJson(this.statePath(), rest);
     } catch (error) {
-      await durableAtomicWriteText(moved.path, edited(moved.before, moved.value), moved.mode);
-      await profile.restore(moved.notes.map(note => ({ id: note.id, value: note.moved })), MAINTAINER, `${commandId}:rollback`);
-      const current = await profile.values(moved.notes.map(note => note.id));
-      moved.notes = moved.notes.map(note => ({ ...note, moved: current.get(note.id) ?? null }));
-      await durableAtomicWriteJson(this.statePath(), state);
+      try {
+        await durableAtomicWriteText(moved.path, edited(moved.before, moved.value), moved.mode);
+      } finally {
+        await profile.restore(moved.notes.map(note => ({ id: note.id, value: note.moved })), MAINTAINER, `${commandId}:rollback`);
+        const current = await profile.values(moved.notes.map(note => note.id));
+        moved.notes = moved.notes.map(note => ({ ...note, moved: current.get(note.id) ?? null }));
+        await durableAtomicWriteJson(this.statePath(), state);
+      }
       throw error;
     }
   }
