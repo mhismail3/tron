@@ -37,7 +37,7 @@ WIDENING_LAYERS = {"L0", "L1", "L2"}
 WIDENING_MODULES = {"gateway/package", "gateway/test-support", "gateway/pi-sdk"}
 NAMED_LOCKS = {f"{GATEWAY}/src/e2e/sessions/sdk-behavior-trace.integration.test.ts",
                f"{GATEWAY}/src/e2e/sessions/pi-persisted-state-corpus.integration.test.ts"}
-SKIPPABLE = ("ios", "mac", "relay", "python-here", "mac-terminal")
+SKIPPABLE = ("ios", "mac", "relay", "python-here")
 IOS = "packages/ios-app"
 IOS_TARGETS = {"UITests": "TronMobileUITests", "SwiftAppUITests": "TronSwiftAppUITests"}
 IOS_HARNESSED = {"RealGatewayPairAndChatUITests": "scripts/ios-gateway-e2e-test",

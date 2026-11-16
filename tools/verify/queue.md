@@ -10,14 +10,15 @@ For each first-parent commit of `main` after the ledger's last landing, oldest f
 clone, installs the Gateway and relay dependencies when their inputs changed, and runs
 
 ```bash
-python3 tools/verify/verify.py --full --base <first parent> --gateway-host local --skip ios,python-here,mac-terminal
+python3 tools/verify/verify.py --full --base <first parent> --gateway-host local --skip ios,mac,python-here
 ```
 
 `--full` selects every test file in every runner group and runs every group even after a red, so one red never hides
 another tier. The static steps check the landing's own diff. The report's steps map to tiers: every step that is not a
-test step is Tier 0; `gateway`, `python`, `node` and `relay` are Tier 1; `gateway-nested`, `node-gateway`, `shell` and
-`mac` are Tier 2. The skipped groups are not covered: the iOS groups are Tier 3, and `python-here` and `mac-terminal`
-need this Mac's session store and SSH service.
+test step is Tier 0; `gateway`, `python`, `node` and `relay` are Tier 1; `gateway-nested`, `node-gateway` and `shell`
+are Tier 2. The skipped groups are not covered: the iOS groups are Tier 3; the Mac integration tests (`mac`, Tier 2)
+need a "Mac Development" signing identity, which the mini does not hold; `mac-terminal` and `python-here` need this
+Mac's SSH service and session store.
 
 ## Where
 

@@ -22,7 +22,7 @@ scripts/tron verify ... --gateway-host mini --ios-host mini # Tron heavy checks:
 scripts/tron test ios checkpoint --only-testing TronMobileUITests/<Class>/<method> # mini by default, build then selected tests
 scripts/tron verify ... --ios-jobs 3             # more simulator lanes (1|2|3; default 1), only when the brief permits
 scripts/tron verify ... --skip ios,mac,relay    # accept, explicitly, selections this run will not run
-scripts/tron verify ... --skip python-here,mac-terminal # only those host-bound groups (mac and python still run)
+scripts/tron verify ... --skip python-here           # only that host-bound group (python still runs)
 scripts/tron verify ... --gateway-host local    # override the test-host pool: run the Gateway Vitest lanes here
 ```
 

@@ -27,7 +27,7 @@ JOB_LOCK = Path.home() / "tron-ci/jobs/gateway.lock"
 TEST_LEDGER = Path.home() / ".tron-maintenance/test-ledger/results.sqlite3"
 PLIST = Path.home() / "Library/LaunchAgents" / f"{LABEL}.plist"
 INTERVAL = 300
-SKIP = "ios,python-here,mac-terminal"
+SKIP = "ios,mac,python-here"
 TIER1 = {"tests: gateway", "tests: python", "tests: python-here", "tests: node", "tests: relay"}
 KEEP = ["/test-results/queue", "/packages/gateway/node_modules", "/packages/push-relay/node_modules", "/packages/mac-app/build"]
 INSTALLS = {"packages/gateway": ("package.json", "package-lock.json", "third_party"), "packages/push-relay": ("package.json", "package-lock.json")}
@@ -243,7 +243,7 @@ def show(mini: bool) -> int:
     else:
         rows = entries(LEDGER.read_text().splitlines() if LEDGER.is_file() else [])
     claimed = {row["landing"]: row for row in rows if row["kind"] == "claim"}
-    runs = [row for row in rows if row["kind"] == "run"]
+    runs = sorted((row for row in rows if row["kind"] == "run"), key=lambda row: row["landedAt"])
     print(f"{'LANDED':16}  {'LANDING':9}  {'VERDICT':9}  {'SECONDS':>7}  {'TIER 0':13}  {'TIER 1':13}  {'TIER 2':13}  CLAIM")
     for row in runs:
         cells = [f"{row['tiers'][tier]['verdict']} {round(row['tiers'][tier]['seconds'])}" if tier in row["tiers"] else "-" for tier in "012"]
