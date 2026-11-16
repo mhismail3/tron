@@ -24,7 +24,7 @@ it("prepares a cold-readable, idempotent Home audit without applying domain writ
   expect(await changes.prepareSubjectAudit(writes, context, replayAt)).toEqual(ref);
   expect(await changes.readPreparedSubjectAudit(ref)).toEqual({ writes, context, replayAt });
   expect([...await profile.values(writes.map(write => write.id))]).toEqual(before);
-  expect((await changes.history({ key: "home.profile.item" })).entries.map(entry => entry.status)).toEqual(["started", "started"]);
+  expect((await changes.history({ key: "home.profile.item" }, { kind: "ui", id: "maintainer" })).entries.map(entry => entry.status)).toEqual(["started", "started"]);
   await expect(changes.prepareSubjectAudit([{ ...writes[0]!, direction: "narrow" }], context, replayAt)).rejects.toMatchObject({ code: "invalid_request" });
   await expect(changes.prepareSubjectAudit([{ ...writes[0]!, after: { text: "Conflicting" } }, writes[1]!], context, replayAt))
     .rejects.toMatchObject({ code: "conflict" });
@@ -36,12 +36,12 @@ it("prepares a cold-readable, idempotent Home audit without applying domain writ
   expect(await coldChanges.readPreparedSubjectAudit(ref)).toEqual({ writes, context, replayAt });
   const published = await coldChanges.publishSubjectAudit(writes, context, replayAt);
   expect(published.status).toBe("applied");
-  expect((await coldChanges.history({ key: "home.profile.item" })).entries.filter(entry => entry.status === "applied")).toHaveLength(2);
+  expect((await coldChanges.history({ key: "home.profile.item" }, { kind: "ui", id: "maintainer" })).entries.filter(entry => entry.status === "applied")).toHaveLength(2);
   expect(await coldChanges.prepareSubjectAudit(writes, context, replayAt)).toEqual(ref);
   const retained = [];
   let cursor: string | undefined;
   do {
-    const page = await coldChanges.history({ key: "home.profile.item", ...(cursor ? { cursor } : {}) });
+    const page = await coldChanges.history({ key: "home.profile.item", ...(cursor ? { cursor } : {}) }, { kind: "ui", id: "maintainer" });
     retained.push(...page.entries); cursor = page.nextCursor;
   } while (cursor);
   expect(retained.filter(entry => entry.status === "started")).toHaveLength(2);

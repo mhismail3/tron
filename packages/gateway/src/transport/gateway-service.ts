@@ -6,7 +6,7 @@ import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
 import { contextWindowLimits } from "../providers/context-window-policy.js";
 import { ModelReleaseDateCatalog } from "../providers/model-release-date-catalog.js";
 import type { GatewayConfig } from "../config.js";
-import { GatewayError, isUncertainOutcome } from "../errors.js";
+import { asUncertainOutcome, GatewayError, isUncertainOutcome } from "../errors.js";
 import { runtimeIdentity } from "./runtime-identity.js";
 import { HOME_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY, HOME_MEMORY_VIEW_CAPABILITY, HOME_PROFILE_LIST_CAPABILITY, HOME_PROFILE_EDIT_CAPABILITY } from "../protocol/capabilities.js";
 import type { CommandDetail, GatewayRestartResponse, HomeTaskStatusResult, JsonValue, ModelPage, ModelRef, SessionCommands, SessionListPage, TronModuleList } from "../protocol/types.js";
@@ -50,6 +50,7 @@ import type { GlobalProviderResources } from "../admin/global-provider-resources
 import type { AuthBroker } from "../admin/auth-broker.js";
 import { withMcpAuthInteraction } from "../kernel/host/extension-adapters.js";
 import type { McpAdminService, McpScope } from "../admin/mcp-admin-service.js";
+import { MCP_EXPOSURES } from "../kernel/settings/mcp-server-value.js";
 import { MAC_REPLACE_CAPABILITY, MacReplaceService } from "../admin/mac-replace-service.js";
 import { GatewayUpdateService, validateGatewayUpdateRequest } from "../admin/gateway-update-service.js";
 import {
@@ -277,7 +278,7 @@ export interface GatewayServiceDependencies {
   packages: PackageService;
   hookResources: HookResources;
   auth: AuthBroker;
-  globalProviderResources: Pick<GlobalProviderResources, "requestReload" | "withStableSnapshot">;
+  globalProviderResources: Pick<GlobalProviderResources, "requestReload" | "withStableSnapshot" | "refreshModels">;
   updateService?: GatewayUpdateService;
   iosDeviceInstallService?: IosDeviceInstallService;
   logger: GatewayLogger;
@@ -392,7 +393,6 @@ export class GatewayService {
       }
       if (group.some(entry => entry.key === "accounts.models.provider")) {
         this.dependencies.globalProviderResources.requestReload();
-        this.dependencies.broadcast("models.customChanged", {});
       }
     }
   }
@@ -660,7 +660,7 @@ export class GatewayService {
           let args: string[];
           if (method === "mcp.add") {
             const transport = oneOf(params.transport, "transport", ["stdio", "http"] as const);
-            const exposure = params.exposure === undefined ? undefined : oneOf(params.exposure, "exposure", ["codemode", "codemode-deferred", "deferred", "direct", "hidden"] as const);
+            const exposure = params.exposure === undefined ? undefined : oneOf(params.exposure, "exposure", MCP_EXPOSURES);
             if (transport === "http") {
               const url = string(params.url, "url", { min: 1, max: 4_096 });
               let parsed: URL; try { parsed = new URL(url); } catch { throw new GatewayError("invalid_request", "MCP URL is invalid"); }
@@ -682,9 +682,9 @@ export class GatewayService {
           const server = string(params.server, "server", { min: 1, max: 128 });
           rejectUnknownFields(params, ["commandId", "scope", "cwd", "server", "enabled", "exposure"], method);
           if (!/^[A-Za-z0-9._-]+$/.test(server)) throw new GatewayError("invalid_request", "MCP server name is invalid");
-          const patch: { enabled?: boolean; exposure?: import("../admin/mcp-admin-service.js").McpExposure } = {};
+          const patch: { enabled?: boolean; exposure?: import("../kernel/settings/mcp-server-value.js").McpExposure } = {};
           if (params.enabled !== undefined) patch.enabled = boolean(params.enabled, "enabled");
-          if (params.exposure !== undefined) patch.exposure = oneOf(params.exposure, "exposure", ["codemode", "codemode-deferred", "deferred", "direct", "hidden"] as const);
+          if (params.exposure !== undefined) patch.exposure = oneOf(params.exposure, "exposure", MCP_EXPOSURES);
           if (Object.keys(patch).length === 0) throw new GatewayError("invalid_request", "MCP update requires enabled or exposure");
           const updated = await this.asTronWrite(this.mcpStores(scope), () => this.requireMcpAdmin().update(scope, server, patch));
           this.mcpChanged(scope);
@@ -1881,7 +1881,7 @@ export class GatewayService {
           ...(params.limit === undefined ? {} : { limit: integer(params.limit, "limit", 1, 200) }),
           ...(params.key === undefined ? {} : { key: string(params.key, "key", { max: 200 }) }),
           ...(params.status === undefined ? {} : { status: string(params.status, "status", { max: 40 }) }),
-        });
+        }, { kind: "ui", id: client.identity });
         return safeJson({ ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
           entries: page.entries.map(entry => presentHistoryEntry(this.dependencies.settingsModel.schema, entry)) });
       }
@@ -1925,12 +1925,6 @@ export class GatewayService {
         });
       case "models.custom.get":
         return safeJson(await this.dependencies.modelConfig.get());
-      case "models.custom.put":
-        return this.mutation(client, method, params, async () => {
-          const result = await this.asTronWrite([{ kind: "models" }], () => this.dependencies.modelConfig.put(params.document));
-          this.dependencies.broadcast("models.customChanged", {});
-          return safeJson(result);
-        });
       case "models.refresh": {
         const controller = new AbortController();
         const work = this.workRegistry?.begin({
@@ -2126,7 +2120,7 @@ export class GatewayService {
       }
     }
     for (const change of changes) {
-      const key = this.dependencies.settingsModel.schema.KEYS.find(candidate => candidate.id === change.key);
+      const key = this.dependencies.settingsModel.schema.recordKey(change.key) ?? this.dependencies.settingsModel.schema.KEYS.find(candidate => candidate.id === change.key);
       if (!key) continue;
       if (key.effect === "reload") {
         this.dependencies.sessions.freshness.stale(change.key === "permissions.projectTrust" ? {}
@@ -2138,6 +2132,11 @@ export class GatewayService {
         this.dependencies.sessions.refreshCompactionPolicies(change.layer === "global" ? "global" : "project", projectDir ?? this.dependencies.config.tronHome);
       }
     }
+    if (changes.some(change => change.key === "accounts.models.provider")) {
+      await this.dependencies.globalProviderResources.refreshModels().catch(error => {
+        throw asUncertainOutcome(error, "Settings applied but the custom model catalog did not refresh");
+      });
+    }
     this.dependencies.broadcast("settings.changed", safeJson({
       changeIds: changes.map(change => change.changeId), keys: [...new Set(changes.map(change => change.key))],
       layer: changes[0]!.layer, target,
@@ -2145,6 +2144,7 @@ export class GatewayService {
     for (const change of changes) {
       if (change.key === "permissions.projectTrust" && change.result !== undefined) this.dependencies.broadcast("trust.changed", safeJson(change.result));
     }
+    if (changes.some(change => change.key === "tools.mcp.server")) this.mcpChanged({ scope: "global" });
   }
 
   private configurationExpectation(params: Record<string, unknown>) {

@@ -123,8 +123,8 @@ and writes only a `!command` reference; token values are never returned or logge
 
 Every change to an `mcp.json`, by these writers or outside Tron, broadcasts
 `mcp.changed` (`{ scope: "global" }` or `{ scope: "project", projectDir }`). An outside
-change is also a settings record entry with a push; Tron's own writes (and
-`models.custom.put`) are adopted as observed, never recorded as outside changes
+change is also a settings record entry with a push; Tron's own writes are
+adopted as observed, never recorded as outside changes
 ([settings contract](settings-contract.md#outside-changes)).
 
 ## Sign-in relay

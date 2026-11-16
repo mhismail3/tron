@@ -1,12 +1,21 @@
+import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { PackageService } from "./package-service.js";
 import { TrustService } from "../kernel/resources/trust-service.js";
 import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "../kernel/delegation/managed-subagents.js";
+import { SettingsChangePath } from "../kernel/settings/settings-change.js";
+import { SettingsChangeRecord } from "../kernel/settings/settings-record.js";
+import type { ChangeReview } from "../protocol/types.js";
+import { gitDaemonRepository, publishedNpmRegistry } from "../../test-support/package-source-fixtures.js";
+
+const execFileAsync = promisify(execFile);
 
 const client: ClientContext = {
   id: "dashboard", identity: "device:dashboard", isLocal: false, signal: undefined,
@@ -114,3 +123,380 @@ describe("packages.list projects each package's engines.node against the Gateway
     expect(bySource.get(sources.invalid)?.provides.skills).toEqual(["invalid-node"]);
   });
 });
+
+describe("settings package update installs one exact version through the owner", () => {
+  it("applies exact npm, pinned and ranged npm and git SHA updates behind cards that show every configured pin change", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-package-update-"));
+    roots.push(root);
+    const agentDir = join(root, "agent"), cwd = join(root, "workspace"), tronHome = join(root, "tron");
+    await mkdir(agentDir, { recursive: true });
+    await mkdir(cwd, { recursive: true });
+    const name = `tron-update-fixture-${randomUUID().slice(0, 8)}`, pinnedName = `tron-update-pin-${randomUUID().slice(0, 8)}`, rangedName = `tron-update-range-${randomUUID().slice(0, 8)}`;
+    const registry = await publishedNpmRegistry(root, [
+      { name, versions: ["1.0.0", "1.2.0", "1.3.0"], latest: "1.0.0" },
+      { name: pinnedName, versions: ["1.0.0", "1.1.0"], latest: "1.0.0" },
+      { name: rangedName, versions: ["1.0.0", "1.1.0", "1.2.0"], latest: "1.2.0" },
+    ]);
+    const saved = { registry: process.env.npm_config_registry, cache: process.env.npm_config_cache };
+    process.env.npm_config_registry = registry.base;
+    process.env.npm_config_cache = join(root, "npm-cache");
+    try {
+      const source = `npm:${name}`, pinned = `npm:${pinnedName}@1.0.0`, rangedSource = `npm:${rangedName}@^1.0.0`;
+      const local = await fixturePackage(root, "local-update-refusal");
+      const ranged = { source: rangedSource, skills: [] };
+      const settingsPath = join(agentDir, "settings.json");
+      await writeFile(settingsPath, JSON.stringify({ packages: [source, local, pinned, ranged] }));
+      const records = new SettingsChangeRecord(tronHome);
+      const changes = new SettingsChangePath({} as never, records, { setTrust: async () => undefined });
+      let reloads = 0;
+      const packages = new PackageService(agentDir, new TrustService(agentDir), () => {});
+      packages.register(changes, () => { reloads += 1; });
+      const requester = { kind: "home" as const, id: "home-session" };
+      const installedPathOf = async (configured: string) => (await packages.list(cwd)).packages.find(row => row.source === configured)?.installedPath;
+      const installedVersion = async (configured: string) => {
+        const installedPath = await installedPathOf(configured);
+        return installedPath ? JSON.parse(await readFile(join(installedPath, "package.json"), "utf8")).version as string : undefined;
+      };
+      const configured = async () => JSON.parse(await readFile(settingsPath, "utf8")).packages;
+
+      await packages.mutate("update", source, cwd, false);
+      await packages.mutate("update", pinned, cwd, false);
+      await packages.mutate("update", rangedSource, cwd, false);
+      expect(await installedVersion(source)).toBe("1.0.0");
+      expect(await installedVersion(rangedSource)).toBe("1.2.0");
+
+      let reviewed: ChangeReview | undefined;
+      const applied = await packages.updatePackage({ cwd, source, version: "1.2.0", reason: "Home requested the fixture update" }, requester, async (review, apply) => {
+        reviewed = review;
+        registry.state.latest[name] = "1.3.0";
+        return apply({ deviceId: "ios-device", commandId: "command-1" });
+      });
+      expect(reviewed?.title).toContain(name);
+      expect(reviewed?.title).toContain("1.2.0");
+      expect(reviewed?.items).toEqual([
+        expect.objectContaining({ label: expect.stringContaining(name), before: "1.0.0", after: "1.2.0" }),
+        { label: "Configured source", before: source, after: `npm:${name}@1.2.0`, detail: "sources.packages (global) pin", exact: expect.any(String) },
+      ]);
+      expect(applied).toMatchObject({ status: "applied", changes: [expect.objectContaining({ key: "package.update", undoable: false })] });
+      expect(await installedVersion(`npm:${name}@1.2.0`)).toBe("1.2.0");
+      expect(await configured()).toEqual([`npm:${name}@1.2.0`, local, pinned, ranged]);
+      expect(reloads).toBe(1);
+
+      const pinnedReview = await packages.updatePackage({ cwd, source: pinned, version: "1.1.0", reason: "Pinned fixture" }, requester);
+      expect(pinnedReview).toMatchObject({ status: "review", review: { items: [
+        expect.objectContaining({ before: "1.0.0", after: "1.1.0" }),
+        expect.objectContaining({ label: "Configured source", before: pinned, after: `npm:${pinnedName}@1.1.0` }),
+      ] } });
+      await packages.updatePackage({ cwd, source: pinned, version: "1.1.0", reason: "Pinned fixture" }, requester, async (_review, apply) => apply({ deviceId: "ios-device", commandId: "command-pin" }));
+      expect(await installedVersion(`npm:${pinnedName}@1.1.0`)).toBe("1.1.0");
+      expect(await configured()).toEqual([`npm:${name}@1.2.0`, local, `npm:${pinnedName}@1.1.0`, ranged]);
+
+      await packages.updatePackage({ cwd, source: rangedSource, version: "1.1.0", reason: "Ranged fixture" }, requester, async (_review, apply) => apply({ deviceId: "ios-device", commandId: "command-range" }));
+      expect(await installedVersion(`npm:${rangedName}@1.1.0`)).toBe("1.1.0");
+      expect(await configured()).toEqual([`npm:${name}@1.2.0`, local, `npm:${pinnedName}@1.1.0`, { source: `npm:${rangedName}@1.1.0`, skills: [] }]);
+      expect(reloads).toBe(3);
+
+      const audited = (await records.page({ filter: entry => entry.key === "package.update" })).entries;
+      expect(audited.filter(entry => entry.status === "applied")).toHaveLength(3);
+      expect(audited.every(entry => entry.action === true && entry.reason)).toBe(true);
+      expect((await records.page({ filter: entry => entry.key === "sources.packages" })).entries).toEqual([]);
+      const startedChange = audited.find(entry => entry.status === "started" && entry.reason === "Home requested the fixture update")!;
+      await expect(changes.undo(startedChange.changeId, { actor: { kind: "ui", id: "ios-device" }, reason: "try undo" }))
+        .rejects.toMatchObject({ code: "conflict", message: "This change is not undoable; inspect it with its owner" });
+
+      await expect(packages.updatePackage({ cwd, source: `npm:${name}@1.2.0`, version: "1.3.0", reason: "Declined" }, requester, async () => undefined))
+        .resolves.toEqual({ status: "declined", changes: [] });
+      await expect(packages.updatePackage({ cwd, source: `npm:${name}@1.2.0`, version: "1.3.0", reason: "Drift" }, requester, async (_review, apply) => {
+        const installedPath = await installedPathOf(`npm:${name}@1.2.0`);
+        await writeFile(join(installedPath!, "package.json"), JSON.stringify({ name, version: "1.2.1" }));
+        return apply({ deviceId: "ios-device", commandId: "command-2" });
+      })).rejects.toMatchObject({ code: "conflict" });
+      expect(await installedVersion(`npm:${name}@1.2.0`)).toBe("1.2.1");
+      await writeFile(join(await installedPathOf(`npm:${name}@1.2.0`) as string, "package.json"), JSON.stringify({ name, version: "1.2.0" }));
+
+      await expect(packages.updatePackage({ cwd, source: `npm:${name}@1.2.0`, version: "1.3.0", reason: "Review only" }, requester)).resolves.toMatchObject({ status: "review" });
+      expect(await installedVersion(`npm:${name}@1.2.0`)).toBe("1.2.0");
+
+      await expect(packages.updatePackage({ cwd, source: local, version: "1.3.0", reason: "Local" }, requester, async () => undefined))
+        .rejects.toMatchObject({ code: "invalid_request", message: expect.stringContaining("Local package sources have no update source") });
+      await expect(packages.updatePackage({ cwd, source: `npm:${name}-missing`, version: "1.3.0", reason: "Missing" }, requester, async () => undefined))
+        .rejects.toMatchObject({ code: "not_found" });
+      await expect(packages.updatePackage({ cwd, source: `npm:${name}@1.2.0`, version: "latest", reason: "Tag" }, requester, async () => undefined))
+        .rejects.toMatchObject({ code: "invalid_request", message: expect.stringContaining("exact npm version") });
+      await expect(packages.updatePackage({ cwd, source: `npm:${name}@1.2.0`, version: "1.2.0", reason: "Same" }, requester, async () => undefined))
+        .rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("already") });
+      await expect(packages.updatePackage({ cwd, source: `npm:${name}@1.2.0`, version: "1.3.0", reason: "Chat" }, { kind: "agent", id: "ordinary-chat" }, async () => undefined))
+        .rejects.toMatchObject({ code: "invalid_request", message: expect.stringContaining("Tron Home") });
+      await expect(packages.updatePackage({ cwd, source: `npm:${name}@1.2.0`, version: "1.3.0", reason: "Worker" }, { kind: "worker", id: "worker" }, async () => undefined))
+        .rejects.toMatchObject({ code: "invalid_request", message: expect.stringContaining("Tron Home") });
+      await expect(packages.updatePackage({ cwd, source: `https://user:secret@example.invalid/tool.git`, version: "1.3.0", reason: "Creds" }, requester, async () => undefined))
+        .rejects.toMatchObject({ code: "invalid_request", message: expect.stringContaining("credentials") });
+      expect(await installedVersion(`npm:${name}@1.2.0`)).toBe("1.2.0");
+      expect(reloads).toBe(3);
+
+    } finally {
+      await registry.close();
+      process.env.npm_config_registry = saved.registry;
+      process.env.npm_config_cache = saved.cache;
+    }
+  });
+
+  it("updates an installed git checkout to one exact commit, refuses edits, and keeps the installed bits at that commit", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-package-update-git-"));
+    roots.push(root);
+    const agentDir = join(root, "agent"), cwd = join(root, "workspace"), tronHome = join(root, "tron");
+    await mkdir(agentDir, { recursive: true });
+    await mkdir(cwd, { recursive: true });
+    const repo = await gitDaemonRepository(root, "tool");
+    const source = repo.source;
+    const restoreGitConfig = repo.activate();
+    try {
+      const settingsPath = join(agentDir, "settings.json");
+      await writeFile(settingsPath, JSON.stringify({ packages: [source] }));
+      const first = await repo.commit("a\n", "a");
+      const records = new SettingsChangeRecord(tronHome);
+      const changes = new SettingsChangePath({} as never, records, { setTrust: async () => undefined });
+      let reloads = 0;
+      const packages = new PackageService(agentDir, new TrustService(agentDir), () => {});
+      packages.register(changes, () => { reloads += 1; });
+      const requester = { kind: "home" as const, id: "home-session" };
+      const installedPathOf = async (configured: string) => (await packages.list(cwd)).packages.find(row => row.source === configured)?.installedPath as string;
+
+      await packages.mutate("update", source, cwd, false);
+      const installedPath = await installedPathOf(source);
+      expect(await gitHead(installedPath)).toBe(first);
+      const second = await repo.commit("b\n", "b");
+      const third = await repo.commit("c\n", "c");
+
+      let reviewed: ChangeReview | undefined;
+      await expect(packages.updatePackage({ cwd, source: source, version: second, reason: "Exact git" }, requester, async (review, apply) => {
+        reviewed = review;
+        await repo.commit("d\n", "d");
+        return apply({ deviceId: "ios-device", commandId: "git-1" });
+      })).resolves.toMatchObject({ status: "applied", changes: [expect.objectContaining({ undoable: false })] });
+      expect(reviewed?.items).toEqual([
+        expect.objectContaining({ before: first, after: second }),
+        { label: "Configured source", before: source, after: `${source}@${second}`, detail: "sources.packages (global) pin", exact: expect.any(String) },
+      ]);
+      expect(reviewed?.title).toContain(second);
+      expect(await gitHead(installedPath)).toBe(second);
+      expect(JSON.parse(await readFile(settingsPath, "utf8")).packages).toEqual([`${source}@${second}`]);
+      expect(await installedPathOf(`${source}@${second}`)).toBe(installedPath);
+
+      await writeFile(join(installedPath, "index.txt"), "local edit\n");
+      await expect(packages.updatePackage({ cwd, source: `${source}@${second}`, version: third, reason: "Dirty" }, requester, async (_review, apply) => apply({ deviceId: "ios-device", commandId: "git-dirty" })))
+        .rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("local edits") });
+      expect(await readFile(join(installedPath, "index.txt"), "utf8")).toBe("local edit\n");
+      expect(await gitHead(installedPath)).toBe(second);
+      await execFileAsync("git", ["-C", installedPath, "checkout", "--", "index.txt"]);
+
+      const pinnedReview = await packages.updatePackage({ cwd, source: `${source}@${second}`, version: third, reason: "Pin move" }, requester);
+      expect(pinnedReview).toMatchObject({ status: "review", review: { items: [
+        expect.objectContaining({ before: second, after: third }),
+        expect.objectContaining({ label: "Configured source", before: `${source}@${second}`, after: `${source}@${third}` }),
+      ] } });
+      await packages.updatePackage({ cwd, source: `${source}@${second}`, version: third, reason: "Pin move" }, requester, async (_review, apply) => apply({ deviceId: "ios-device", commandId: "git-2" }));
+      expect(await gitHead(installedPath)).toBe(third);
+      expect(JSON.parse(await readFile(settingsPath, "utf8")).packages).toEqual([`${source}@${third}`]);
+
+      await expect(packages.updatePackage({ cwd, source: `${source}@${third}`, version: third.slice(0, 12), reason: "Short" }, requester, async () => undefined))
+        .rejects.toMatchObject({ code: "invalid_request", message: expect.stringContaining("40-character") });
+      await expect(packages.updatePackage({ cwd, source: `${source}@${third}`, version: third, reason: "Same" }, requester, async () => undefined))
+        .rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("already") });
+      expect(reloads).toBe(2);
+      expect((await records.page({ filter: entry => entry.key === "sources.packages" })).entries).toEqual([]);
+    } finally {
+      restoreGitConfig();
+      await repo.close();
+    }
+  });
+
+  it("plans a git update without running a configured fsmonitor or clean filter in the installed checkout before the tap", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-package-update-plan-"));
+    roots.push(root);
+    const agentDir = join(root, "agent"), cwd = join(root, "workspace"), tronHome = join(root, "tron");
+    await mkdir(agentDir, { recursive: true });
+    await mkdir(cwd, { recursive: true });
+    const repo = await gitDaemonRepository(root, "tool");
+    const source = repo.source;
+    const restoreGitConfig = repo.activate();
+    try {
+      await writeFile(join(agentDir, "settings.json"), JSON.stringify({ packages: [source] }));
+      const first = await repo.commit("a\n", "a");
+      const changes = new SettingsChangePath({} as never, new SettingsChangeRecord(tronHome), { setTrust: async () => undefined });
+      const packages = new PackageService(agentDir, new TrustService(agentDir), () => {});
+      packages.register(changes, () => {});
+      await packages.mutate("update", source, cwd, false);
+      const installedPath = (await packages.list(cwd)).packages.find(row => row.source === source)?.installedPath as string;
+      expect(await gitHead(installedPath)).toBe(first);
+      const second = await repo.commit("b\n", "b");
+
+      const fsmonitorMarker = join(root, "fsmonitor-ran"), filterMarker = join(root, "filter-ran");
+      await execFileAsync("git", ["-C", installedPath, "config", "core.fsmonitor", `touch '${fsmonitorMarker}'`]);
+      await execFileAsync("git", ["-C", installedPath, "config", "filter.marker.clean", `touch '${filterMarker}' && cat`]);
+      await writeFile(join(installedPath, ".git", "info", "attributes"), "index.txt filter=marker\n");
+
+      const review = await packages.updatePackage({ cwd, source, version: second, reason: "Plan only" }, { kind: "home", id: "home-session" });
+      expect(review).toMatchObject({ status: "review", review: { items: [
+        expect.objectContaining({ before: first, after: second }),
+        expect.objectContaining({ label: "Configured source", before: source, after: `${source}@${second}` }),
+      ] } });
+      await expect(readFile(fsmonitorMarker)).rejects.toThrow();
+      await expect(readFile(filterMarker)).rejects.toThrow();
+      expect(await gitHead(installedPath)).toBe(first);
+    } finally {
+      restoreGitConfig();
+      await repo.close();
+    }
+  });
+
+  it("plans a npm update without running a configured npmCommand for an unrelated source with no managed install, and refuses an apply whose installer changed after review", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-package-update-npm-plan-"));
+    roots.push(root);
+    const agentDir = join(root, "agent"), cwd = join(root, "workspace"), tronHome = join(root, "tron");
+    await mkdir(agentDir, { recursive: true });
+    await mkdir(cwd, { recursive: true });
+    const name = `tron-update-plan-${Date.now()}`;
+    const unrelated = "npm:tron-plan-unrelated-missing";
+    const registry = await publishedNpmRegistry(root, [{ name, versions: ["1.0.0", "1.2.0"], latest: "1.0.0" }]);
+    const saved = { registry: process.env.npm_config_registry, cache: process.env.npm_config_cache };
+    process.env.npm_config_registry = registry.base;
+    process.env.npm_config_cache = join(root, "npm-cache");
+    try {
+      const source = `npm:${name}`;
+      const settingsPath = join(agentDir, "settings.json");
+      await writeFile(settingsPath, JSON.stringify({ packages: [source] }));
+      const changes = new SettingsChangePath({} as never, new SettingsChangeRecord(tronHome), { setTrust: async () => undefined });
+      const packages = new PackageService(agentDir, new TrustService(agentDir), () => {});
+      packages.register(changes, () => {});
+      const requester = { kind: "home" as const, id: "home-session" };
+      await packages.mutate("update", source, cwd, false);
+      const installedPath = (await packages.list(cwd)).packages.find(row => row.source === source)?.installedPath as string;
+      const installedVersion = async () => JSON.parse(await readFile(join(installedPath, "package.json"), "utf8")).version as string;
+      expect(await installedVersion()).toBe("1.0.0");
+
+      const marker = join(root, "npm-command-ran"), replacedMarker = join(root, "replaced-npm-command-ran");
+      await writeFile(settingsPath, JSON.stringify({ packages: [source, unrelated], npmCommand: ["sh", "-c", `touch '${marker}'; exit 1`] }));
+      const review = await packages.updatePackage({ cwd, source, version: "1.2.0", reason: "Plan only" }, requester);
+      expect(review).toMatchObject({ status: "review", review: { title: `Update ${name} to exactly 1.2.0`, items: [
+        expect.objectContaining({ label: `Package ${name}`, before: "1.0.0", after: "1.2.0" }),
+        expect.objectContaining({ label: "Configured source", before: source, after: `npm:${name}@1.2.0` }),
+      ] } });
+      await expect(readFile(marker)).rejects.toThrow();
+      expect(await installedVersion()).toBe("1.0.0");
+      await expect(packages.updatePackage({ cwd, source: unrelated, version: "1.0.0", reason: "Missing managed install" }, requester))
+        .rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("is not installed") });
+      await expect(readFile(marker)).rejects.toThrow();
+
+      await expect(packages.updatePackage({ cwd, source, version: "1.2.0", reason: "Installer changed" }, requester, async (_review, apply) => {
+        await writeFile(settingsPath, JSON.stringify({ packages: [source, unrelated], npmCommand: ["sh", "-c", `touch '${replacedMarker}'; exit 1`] }));
+        return apply({ deviceId: "ios-device", commandId: "npm-installer-changed" });
+      })).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("changed since review") });
+      await expect(readFile(replacedMarker)).rejects.toThrow();
+      expect(await installedVersion()).toBe("1.0.0");
+      expect((await changes.record.page({ filter: entry => entry.key === "package.update" })).entries).toEqual([]);
+    } finally {
+      await registry.close();
+      process.env.npm_config_registry = saved.registry;
+      process.env.npm_config_cache = saved.cache;
+    }
+  });
+});
+
+describe("settings package update binds the effective installer of a trusted project", () => {
+  async function trustedProjectUpdate(name: string, recordFor: (tronHome: string) => SettingsChangeRecord = tronHome => new SettingsChangeRecord(tronHome)) {
+    const root = await mkdtemp(join(tmpdir(), "tron-package-update-project-"));
+    roots.push(root);
+    const agentDir = join(root, "agent"), cwd = join(root, "workspace"), tronHome = join(root, "tron");
+    await mkdir(agentDir, { recursive: true });
+    await mkdir(join(cwd, ".pi"), { recursive: true });
+    const registry = await publishedNpmRegistry(root, [{ name, versions: ["1.0.0", "1.2.0"], latest: "1.0.0" }]);
+    const saved = { registry: process.env.npm_config_registry, cache: process.env.npm_config_cache };
+    process.env.npm_config_registry = registry.base;
+    process.env.npm_config_cache = join(root, "npm-cache");
+    const source = `npm:${name}`;
+    const globalSettings = join(agentDir, "settings.json"), projectSettings = join(cwd, ".pi", "settings.json");
+    await writeFile(globalSettings, JSON.stringify({ packages: [source] }));
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const changes = new SettingsChangePath({} as never, recordFor(tronHome), { setTrust: async () => undefined });
+    const packages = new PackageService(agentDir, trust, () => {});
+    packages.register(changes, () => {});
+    const requester = { kind: "home" as const, id: "home-session" };
+    await packages.mutate("update", source, cwd, false);
+    const installedPath = (await packages.list(cwd)).packages.find(row => row.source === source)?.installedPath as string;
+    const installedVersion = async () => JSON.parse(await readFile(join(installedPath, "package.json"), "utf8")).version as string;
+    expect(await installedVersion()).toBe("1.0.0");
+    return { root, cwd, source, projectSettings, changes, packages, requester, installedVersion, close: async () => {
+      await registry.close();
+      process.env.npm_config_registry = saved.registry;
+      process.env.npm_config_cache = saved.cache;
+    } };
+  }
+
+  it("shows a trusted project's npmCommand in the review before any command runs, without emitting its secret argument", async () => {
+    const fixture = await trustedProjectUpdate(`tron-update-project-review-${Date.now()}`);
+    try {
+      const marker = join(fixture.root, "project-installer-ran"), secret = "hunter2hunter2";
+      await writeFile(fixture.projectSettings, JSON.stringify({ npmCommand: ["sh", "-c", `touch '${marker}'; exit 1`, "--password", secret] }));
+      const review = await fixture.packages.updatePackage({ cwd: fixture.cwd, source: fixture.source, version: "1.2.0", reason: "Trusted installer" }, fixture.requester);
+      expect(review).toMatchObject({ status: "review", review: { items: [
+        expect.objectContaining({ label: expect.stringMatching(/^Package /), detail: expect.stringContaining("Installer: sh with 4 argument(s); sha256 ") }),
+        expect.objectContaining({ label: "Configured source" }),
+      ] } });
+      expect(JSON.stringify(review)).not.toContain(secret);
+      await expect(readFile(marker)).rejects.toThrow();
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("refuses an apply whose trusted-project installer changed after review, before any command runs or is recorded", async () => {
+    const fixture = await trustedProjectUpdate(`tron-update-project-stale-${Date.now()}`);
+    try {
+      const replacedMarker = join(fixture.root, "replaced-project-installer-ran");
+      await expect(fixture.packages.updatePackage({ cwd: fixture.cwd, source: fixture.source, version: "1.2.0", reason: "Changed after review" }, fixture.requester, async (_review, apply) => {
+        await writeFile(fixture.projectSettings, JSON.stringify({ npmCommand: ["sh", "-c", `touch '${replacedMarker}'; exit 1`] }));
+        return apply({ deviceId: "ios-device", commandId: "project-installer-changed" });
+      })).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("changed since review") });
+      await expect(readFile(replacedMarker)).rejects.toThrow();
+      expect(await fixture.installedVersion()).toBe("1.0.0");
+      expect((await fixture.changes.record.page({ filter: entry => entry.key === "package.update" })).entries).toEqual([]);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("installs the reviewed installer when the trusted project's settings change after the started record", async () => {
+    const hook: { run?: () => Promise<void> } = {};
+    const fixture = await trustedProjectUpdate(`tron-update-project-gap-${Date.now()}`, tronHome => new class extends SettingsChangeRecord {
+      override async append(entries: Parameters<SettingsChangeRecord["append"]>[0]): Promise<void> {
+        await super.append(entries);
+        if (hook.run && entries.some(entry => entry.status === "started")) {
+          const run = hook.run;
+          hook.run = undefined;
+          await run();
+        }
+      }
+    }(tronHome));
+    try {
+      const installer = (marker: string) => ({ npmCommand: ["sh", "-c", `touch '${marker}'; exec npm "$@"`, "tron-npm"] });
+      const reviewed = join(fixture.root, "reviewed-installer-ran"), replaced = join(fixture.root, "replaced-installer-ran");
+      await writeFile(fixture.projectSettings, JSON.stringify(installer(reviewed)));
+      hook.run = () => writeFile(fixture.projectSettings, JSON.stringify(installer(replaced)));
+      await expect(fixture.packages.updatePackage({ cwd: fixture.cwd, source: fixture.source, version: "1.2.0", reason: "Installer changes in the gap" }, fixture.requester, async (_review, apply) => apply({ deviceId: "ios-device", commandId: "effective-gap" })))
+        .resolves.toMatchObject({ status: "applied" });
+      expect(hook.run).toBeUndefined();
+      await readFile(reviewed);
+      await expect(readFile(replaced)).rejects.toThrow();
+      expect(await fixture.installedVersion()).toBe("1.2.0");
+      expect((await fixture.changes.record.page({ filter: entry => entry.key === "package.update" })).entries.map(entry => entry.status).sort()).toEqual(["applied", "started"]);
+    } finally {
+      await fixture.close();
+    }
+  });
+});
+
+async function gitHead(cwd: string): Promise<string> {
+  return (await execFileAsync("git", ["-C", cwd, "rev-parse", "HEAD"])).stdout.trim();
+}

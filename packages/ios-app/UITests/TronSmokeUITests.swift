@@ -686,15 +686,15 @@ final class TronSmokeUITests: XCTestCase {
         app.buttons["settings-link-Model Providers"].tap()
         expandSettingsSheet(app, title: "Providers")
         XCTAssertTrue(app.staticTexts["3 models currently available"].waitForExistence(timeout: 10))
-        XCTAssertTrue(waitForLabel(operations, containing: "refresh:0 custom-read:0 custom-write:0 credentials:0", timeout: 5))
+        XCTAssertTrue(waitForLabel(operations, containing: "refresh:0 custom-read:0 credentials:0", timeout: 5))
         app.buttons["Refresh"].tap()
-        XCTAssertTrue(waitForLabel(operations, containing: "refresh:1 custom-read:0 custom-write:0 credentials:0", timeout: 5),
+        XCTAssertTrue(waitForLabel(operations, containing: "refresh:1 custom-read:0 credentials:0", timeout: 5),
                       "Refresh must dispatch only the owned global catalog command")
         XCTAssertFalse(app.buttons["settings-link-Custom Models"].exists, "Routine definitions use agent source configuration, not a second native editor")
         XCTAssertFalse(app.navigationBars.staticTexts["Custom Models"].exists, "Refresh must not navigate to the editor")
         app.buttons["Details for Fixture Provider"].tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Fixture Provider"].waitForExistence(timeout: 5))
-        XCTAssertTrue(waitForLabel(operations, containing: "refresh:1 custom-read:0 custom-write:0 credentials:0", timeout: 5),
+        XCTAssertTrue(waitForLabel(operations, containing: "refresh:1 custom-read:0 credentials:0", timeout: 5),
                       "Provider setup navigation must neither refresh the catalog nor edit custom definitions/credentials")
         closeTopSheet(app)
         XCTAssertTrue(app.navigationBars.staticTexts["Providers"].waitForExistence(timeout: 5))
@@ -2765,7 +2765,7 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    func testSettingsRendererSecretAndListEditors() {
+    func testSettingsRendererListEditor() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-tron-settings-renderer-fixture"]
@@ -2773,24 +2773,6 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
         let any = app.descendants(matching: .any)
         openRendererSection(app, "lab")
-        let password = any["settings-row-lab.password"]
-        reveal(password, in: app)
-        tapScrolling(settingEditor(password), in: app)
-        let field = app.secureTextFields["New value"]
-        XCTAssertTrue(field.waitForExistence(timeout: 5))
-        expandSettingsSheet(app, title: "Password")
-        keepScreenshot(named: "settings-renderer-secret-empty")
-        field.tap()
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "The real secure field must gain keyboard focus before typing")
-        field.typeText("fixture-replacement")
-        app.buttons["Save"].tap()
-        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
-        XCTAssertFalse(showsText("fixture-replacement", in: app), "A submitted secret never appears in the row")
-        tapScrolling(settingEditor(password), in: app)
-        XCTAssertTrue(field.waitForExistence(timeout: 5))
-        XCTAssertEqual(field.value as? String, "New value", "Reopening never pre-fills a secret")
-        closeTopSheet(app)
-
         let paths = any["settings-row-lab.paths"]
         tapScrolling(settingEditor(paths), in: app)
         XCTAssertTrue(app.buttons["Remove alpha"].waitForExistence(timeout: 5))
@@ -2802,7 +2784,7 @@ final class TronSmokeUITests: XCTestCase {
         app.textFields["Value"].typeText("gamma")
         app.buttons["Add"].tap()
         app.buttons["Save"].tap()
-        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:2", timeout: 5))
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
         XCTAssertTrue(paths.buttons.matching(NSPredicate(format: "value == %@", "beta, gamma")).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
         tapScrolling(settingEditor(paths), in: app)
         XCTAssertTrue(app.buttons["Remove gamma"].waitForExistence(timeout: 5))
@@ -2814,7 +2796,7 @@ final class TronSmokeUITests: XCTestCase {
         reveal(weights, in: app)
         XCTAssertFalse(weights.buttons["Weights"].exists)
         XCTAssertFalse(weights.buttons["settings-row-lab.weights-reset"].exists)
-        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:2", timeout: 5), "Read-only map inspection must not mutate")
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5), "Read-only map inspection must not mutate")
         keepScreenshot(named: "settings-renderer-number-map-readonly")
     }
 

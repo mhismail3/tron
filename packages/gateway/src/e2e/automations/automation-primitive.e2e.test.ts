@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import { fauxAssistantMessage, getSystemMessageText, fauxToolCall } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, getSystemMessageText } from "@earendil-works/pi-ai";
 import { startLockGateway, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
 import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
 import { waitFor } from "../../../test-support/wait-for.js";
@@ -39,18 +39,44 @@ async function fixture() {
 const create = { action: "create", name: "Authorized work", target: "home", at: "2099-01-01T00:00:00.000Z", activate: true, prompt: "Inspect authorized work; no approval authority." };
 it("real Home uses the standard schedule lifecycle without confirmation and retains a maintainer pause", async () => {
   const { gateway, phone, call } = await fixture();
-  const created = await call({ ...create, expiresAt: new Date(Date.now() + 3_600_000).toISOString() });
+  const expiresAt = new Date(Date.now() + 3_600_000).toISOString();
+  const created = await call({ ...create, expiresAt });
   expect(created.isError, JSON.stringify(created)).not.toBe(true);
   const automation = created.details;
+  expect(automation.provenance.expiresAt).toBe(expiresAt);
   expect(gateway.record().providerRequests[0].tools).toContain("schedule");
   expect(gateway.record().providerRequests[0].tools).not.toContain("monitor");
   const paused = await phone.request("automation.pause", { commandId: gateway.commandId(), automationId: automation.id, expectedRevision: automation.revision });
   expect(paused.ok).toBe(true);
   expect((await call({ action: "list" })).details.automations).toEqual(expect.arrayContaining([expect.objectContaining({ id: automation.id, activation: "paused" })]));
   expect((await phone.request("automation.get", { automationId: automation.id })).result.activation).toBe("paused");
-  const resumed = await call({ action: "enable", automationId: automation.id, expectedRevision: paused.result.revision });
+  const updated = await call({ action: "update", automationId: automation.id, expectedRevision: paused.result.revision,
+    name: "Updated authorized work", at: "2099-02-01T00:00:00.000Z", prompt: "Inspect the updated authorized work." });
+  expect(updated.isError, JSON.stringify(updated)).not.toBe(true);
+  expect(updated.details).toMatchObject({ name: "Updated authorized work", activation: "paused", target: automation.target,
+    trigger: { kind: "once", at: "2099-02-01T00:00:00.000Z" }, action: { kind: "sessionPrompt", text: "Inspect the updated authorized work." },
+    provenance: automation.provenance, revision: paused.result.revision + 1 });
+  const stale = await call({ action: "update", automationId: automation.id, expectedRevision: paused.result.revision, name: "Stale overwrite" });
+  expect(stale.isError).toBe(true);
+  expect((await phone.request("automation.get", { automationId: automation.id })).result).toMatchObject({ name: "Updated authorized work", revision: updated.details.revision });
+  for (const forbidden of [{ activate: true }, { expiresAt: new Date(Date.now() + 7_200_000).toISOString() }]) {
+    const refused = await call({ action: "update", automationId: automation.id, expectedRevision: updated.details.revision, ...forbidden });
+    expect(refused.isError, JSON.stringify(refused)).toBe(true);
+    expect(JSON.stringify(refused.content)).toContain("Update preserves activation and expiry");
+    expect((await phone.request("automation.get", { automationId: automation.id })).result)
+      .toMatchObject({ revision: updated.details.revision, activation: "paused", provenance: automation.provenance });
+  }
+  const resumed = await call({ action: "enable", automationId: automation.id, expectedRevision: updated.details.revision });
   expect(resumed.isError).not.toBe(true);
   expect((await call({ action: "delete", automationId: automation.id, expectedRevision: resumed.details.revision })).isError).not.toBe(true);
+  const lapsed = await call({ ...create, name: "Lapsed work", expiresAt: new Date(Date.now() - 1_000).toISOString() });
+  expect(lapsed.isError, JSON.stringify(lapsed)).not.toBe(true);
+  const lapsedUpdate = await call({ action: "update", automationId: lapsed.details.id, expectedRevision: lapsed.details.revision, name: "Lapsed renamed", at: "2099-03-01T00:00:00.000Z", prompt: "Still lapsed." });
+  expect(lapsedUpdate.isError, JSON.stringify(lapsedUpdate)).not.toBe(true);
+  expect(lapsedUpdate.details).toMatchObject({ name: "Lapsed renamed", activation: "expired", provenance: { expiresAt: lapsed.details.provenance.expiresAt } });
+  expect(lapsedUpdate.details.nextOccurrenceAt).toBeUndefined();
+  expect((await call({ action: "enable", automationId: lapsed.details.id, expectedRevision: lapsedUpdate.details.revision })).isError).toBe(true);
+  expect((await call({ action: "delete", automationId: lapsed.details.id, expectedRevision: lapsedUpdate.details.revision })).isError).not.toBe(true);
   expect((await phone.request("automation.list", {})).result.items).toHaveLength(0);
 });
 it("real Home automation-triggered turns cannot mutate automations", async () => {
@@ -72,11 +98,12 @@ it("real Home automation-triggered turns cannot mutate automations", async () =>
 it("real delegated workers cannot mutate standard automations", async () => {
   const { gateway, phone, sessionId } = await fixture();
   let homeCalls = 0; let workerCalls = 0;
+  let workerRefusal: { isError?: boolean; content?: unknown } | undefined;
   const step = (context: any) => {
     if (context.messages.some((message: any) => message.role === "system" && getSystemMessageText(message).includes("This is a finite Home task"))) {
-      return workerCalls++ === 0
-        ? fauxAssistantMessage([fauxToolCall("schedule", create)], { stopReason: "toolUse" })
-        : fauxAssistantMessage([fauxToolCall("report", { resultId: "worker-authority", outcome: "final", text: "Mutation was refused.", evidence: ["Observed schedule refusal"] })], { stopReason: "toolUse" });
+      if (workerCalls++ === 0) return fauxAssistantMessage([fauxToolCall("schedule", create)], { stopReason: "toolUse" });
+      workerRefusal = context.messages.findLast((message: any) => message.role === "toolResult" && message.toolName === "schedule");
+      return fauxAssistantMessage([fauxToolCall("report", { resultId: "worker-authority", outcome: "final", text: "Observed the schedule tool response.", evidence: ["Observed schedule tool response"] })], { stopReason: "toolUse" });
     }
     return homeCalls++ === 0
       ? fauxAssistantMessage([fauxToolCall("delegate", { taskId: "worker-authority", title: "Worker authority", intent: "Attempt schedule once, then report.", target: gateway.cwd })], { stopReason: "toolUse" })
@@ -87,6 +114,8 @@ it("real delegated workers cannot mutate standard automations", async () => {
   await waitFor(async () => (await homeOwnerOf(gateway.registry).taskResult("worker-authority").catch(() => undefined))?.wake?.state === "acknowledged", "worker report");
   await gateway.settled(sessionId);
   expect(workerCalls).toBeGreaterThanOrEqual(2);
+  expect(workerRefusal?.isError).toBe(true);
+  expect(JSON.stringify(workerRefusal?.content)).toContain("Home tasks can't schedule work, launch or attach a mission, subscribe to a wake, control a run the task did not start, or use an unverified producer; do the work directly or report back.");
   expect((await phone.request("automation.list", {})).result.items).toHaveLength(0);
 });
 it("real interactive schedule mutations still require and obey confirmation", async () => {

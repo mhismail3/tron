@@ -1026,7 +1026,7 @@
             "name": "computer"
           },
           {
-            "description": "Create and manage durable Gateway-owned automations for this Tron session. Create accepts exactly one trigger: at, everyMinutes, or timezone + localTime + weekdays; optional expiresAt is an ISO expiry timestamp. Provide either prompt or notificationMessage, not both. Prompt automations may target the current session, create a new session in its workspace per run, or send an attributed message to Home. Home messages never grant maintainer authority and wake at most once per automation per 60 seconds. show with automationId and runId reads that run’s original prompt or notification text in UTF-8 byte pages: offset defaults to 0, limit to 4096 (maximum 4096), and nextOffset is null at the end.",
+            "description": "Create and manage durable Gateway-owned automations for this Tron session. Update requires automationId and expectedRevision, changes only supplied definition fields, and preserves activation and expiry. Create accepts exactly one trigger: at, everyMinutes, or timezone + localTime + weekdays; optional expiresAt is an ISO expiry timestamp. Provide either prompt or notificationMessage, not both. Prompt automations may target the current session, create a new session in its workspace per run, or send an attributed message to Home. Home messages never grant maintainer authority and wake at most once per automation per 60 seconds. show with automationId and runId reads that run’s original prompt or notification text in UTF-8 byte pages: offset defaults to 0, limit to 4096 (maximum 4096), and nextOffset is null at the end.",
             "name": "schedule",
             "parameters": {
               "additionalProperties": false,
@@ -1036,6 +1036,7 @@
                     "list",
                     "show",
                     "create",
+                    "update",
                     "enable",
                     "pause",
                     "delete",
@@ -1461,14 +1462,14 @@
           ],
           "details": {
             "artifacts": {
-              "dir": "<tmp>/sessions/subagent-artifacts",
+              "dir": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts",
               "files": [
                 {
-                  "inputPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_input.md",
-                  "jsonlPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0.jsonl",
-                  "metadataPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_meta.json",
-                  "outputPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_output.md",
-                  "transcriptPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_transcript.jsonl"
+                  "inputPath": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts/<id>_task-child_0_input.md",
+                  "jsonlPath": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts/<id>_task-child_0.jsonl",
+                  "metadataPath": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts/<id>_task-child_0_meta.json",
+                  "outputPath": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts/<id>_task-child_0_output.md",
+                  "transcriptPath": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts/<id>_task-child_0_transcript.jsonl"
                 }
               ]
             },
@@ -1529,12 +1530,12 @@
               "artifacts": [
                 {
                   "kind": "output",
-                  "path": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_output.md"
+                  "path": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts/<id>_task-child_0_output.md"
                 },
                 {
                   "description": "Child transcript",
                   "kind": "other",
-                  "path": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_transcript.jsonl"
+                  "path": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts/<id>_task-child_0_transcript.jsonl"
                 }
               ],
               "createdAt": "<timestamp>",
@@ -1542,7 +1543,7 @@
               "decisions": [],
               "id": "<id>",
               "objective": "[prompt redacted]",
-              "ownerSessionId": "<tmp>/sessions/<timestamp>_<id>.jsonl",
+              "ownerSessionId": "<tmp>/agent/sessions/<session-cwd>/<timestamp>_<id>.jsonl",
               "receipts": [],
               "runs": [
                 {
@@ -1620,11 +1621,11 @@
                 },
                 "agent": "task-child",
                 "artifactPaths": {
-                  "inputPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_input.md",
-                  "jsonlPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0.jsonl",
-                  "metadataPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_meta.json",
-                  "outputPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_output.md",
-                  "transcriptPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_transcript.jsonl"
+                  "inputPath": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts/<id>_task-child_0_input.md",
+                  "jsonlPath": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts/<id>_task-child_0.jsonl",
+                  "metadataPath": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts/<id>_task-child_0_meta.json",
+                  "outputPath": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts/<id>_task-child_0_output.md",
+                  "transcriptPath": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts/<id>_task-child_0_transcript.jsonl"
                 },
                 "context": "fresh",
                 "exitCode": 0,
@@ -1665,11 +1666,11 @@
                   "toolCount": 0
                 },
                 "requestedModel": "task-child/child",
-                "sessionFile": "<tmp>/sessions/<timestamp>_<id>/<id>/run-0/session.jsonl",
+                "sessionFile": "<tmp>/agent/sessions/<session-cwd>/<timestamp>_<id>/<id>/run-0/session.jsonl",
                 "sessionName": "task-child: Lock child task",
                 "sessionOwnerId": "<id>",
                 "task": "[prompt redacted]",
-                "transcriptPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_transcript.jsonl",
+                "transcriptPath": "<tmp>/agent/sessions/<session-cwd>/subagent-artifacts/<id>_task-child_0_transcript.jsonl",
                 "usage": {
                   "cacheRead": "<value>",
                   "cacheWrite": "<value>",

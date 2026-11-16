@@ -6,7 +6,7 @@ import { RequestSpanLane } from "../../util/request-span.js";
 import { type ConfirmChange, type ChangeRequest, type SettingsSignal, type ChangeOutcome, type ChangeResult, type ChangeStatus, type GitResult, type FixedSetting, type SettingsTarget, type Direction, type LayerId, type Qualifiers } from "./tool-contract.js";
 import type { Actor, ActorKind, ChangeEntry, SettingsChangeRecord } from "./settings-record.js";
 import { composedBelow, readBinding, resolveSettings } from "./settings-resolver.js";
-import { HOME_PROFILE_SUBJECT, keyDefault, hasSessionSettingsApplier, keyForHome, type Binding, type KeyDeclaration } from "./settings-schema.js";
+import { HOME_PROFILE_SUBJECT, hasSessionSettingsApplier, keyForHome, recordSubject, type Binding, type KeyDeclaration, type SettingsSchema } from "./settings-schema.js";
 import { changeReview, formatStoredSetting, LAYER_LABELS, type ModelRefValue, type SettingsStores, type PlannedWrite } from "./settings-types.js";
 import { canonicalSettingsTarget, scopeAdmitted, storeForScope } from "./scope-resolution.js";
 import { SettingsModel, declaredKey, deepEqual, setPath, unsetPath, qualifiedWrite, type SessionSettingsSource, type SettingsReadOwner } from "./settings-model.js";
@@ -43,8 +43,8 @@ export interface ChangeContext {
   applyAgainOf?: string;
 }
 
-function outcomeValues(redacted: boolean | undefined, before: unknown, after: unknown): Pick<ChangeOutcome, "before" | "after" | "redacted"> {
-  return redacted ? { redacted: true } : { before: before ?? null, after: after ?? null };
+function outcomeValues(before: unknown, after: unknown): Pick<ChangeOutcome, "before" | "after"> {
+  return { before: before ?? null, after: after ?? null };
 }
 
 export interface SettingsWriters {
@@ -72,6 +72,7 @@ interface SettingsChangeOwner extends SettingsReadOwner {
   observedWrites(planned: readonly Planned[], projectRoot: string | undefined): PlannedWrite[];
   readonly outsideChanges: { begin(writes: readonly PlannedWrite[]): Promise<void>; end(writes: readonly PlannedWrite[], landed: ReadonlyMap<string, { git?: GitResult; changeId: string }>): Promise<void> } | undefined;
   applyStore(target: SettingsTarget, stores: SettingsStores, plan: Planned, value: unknown, context: ChangeContext, writers: Pick<SettingsWriters, "setTrust">): Promise<StoreApplyResult>;
+  recordValue(subject: string, instance: string): Promise<unknown>;
 }
 
 export interface Planned {
@@ -92,10 +93,23 @@ const adoptsHomeRuntime = (plan: Planned) => plan.request.layer === "session" &&
   && (plan.key.layers.session?.store === "session" || plan.key.layers.session?.store === "session-settings");
 
 const STORE_ORDER: Record<Binding["store"], number> = {
-  "pi": 0, "pi-model-ref": 0, "trust": 1, "mac-terminal": 1, "mac-terminal-service": 1, "home": 3, "gateway": 4, "session": 5, "session-settings": 5, "session-launch": 5,
+  "pi": 0, "pi-model-ref": 0, "trust": 1, "mac-terminal": 1, "mac-terminal-service": 1, "mcp": 1, "models": 1, "home": 3, "gateway": 4, "session": 5, "session-settings": 5, "session-launch": 5,
 };
 
 type StoreApplyResult = { revision?: number; git?: GitResult; result?: unknown };
+
+export function historyVisible(viewer: Actor, entry: ChangeEntry): boolean {
+  if (viewer.kind === "home" || viewer.kind === "ui") return true;
+  return entry.target.kind === "session" && entry.target.sessionId === viewer.sessionId
+    || viewer.sessionId !== undefined && entry.actor.sessionId === viewer.sessionId;
+}
+
+export function publicHistoryEntry(schema: SettingsSchema, entry: ChangeEntry): ChangeEntry {
+  if (entry.action || entry.key === HOME_PROFILE_SUBJECT.id) return entry;
+  if (!entry.redacted && schema.auditSubject(entry.key) !== undefined) return entry;
+  const { before: _before, after: _after, fixedAt: _fixedAt, ...hidden } = entry;
+  return { ...hidden, changed: true, redacted: true };
+}
 
 export class SettingsChangePath {
   private readonly stripes = Array.from({ length: 32 }, () => new RequestSpanLane("settings.target-stripe"));
@@ -134,15 +148,19 @@ export class SettingsChangePath {
     if (!requests.length || requests.length > 50) throw new GatewayError("invalid_request", "A settings change holds 1 to 50 changes");
     if (context.actor.kind !== "ui" && !context.reason?.trim()) throw new GatewayError("invalid_request", "A reason is required for an agent change");
     if (context.confirmationDigest && context.actor.kind !== "ui") throw new GatewayError("invalid_request", "Only a paired native answer confirms a reviewed change");
-    const result = await this.withTarget(target, () => this.changeInStripe(target, requests, context));
+    const exact = structuredClone(requests);
+    return this.withConfirmation(context, current => this.withTarget(target, () => this.changeInStripe(target, exact, current)));
+  }
+
+  private async withConfirmation(context: ChangeContext, operation: (current: ChangeContext) => Promise<ChangeResult>): Promise<ChangeResult> {
+    const result = await operation(context);
     if (result.status !== "review" || !context.confirm || context.dryRun) return result;
     const review = result.review!;
-    const exact = structuredClone(requests);
-    return await context.confirm(review, acceptance => this.withTarget(target, () => {
+    return await context.confirm(review, acceptance => {
       const { confirm: _confirm, ...current } = context;
-      return this.changeInStripe(target, exact, { ...current, actor: { kind: "ui", id: acceptance.deviceId },
+      return operation({ ...current, actor: { kind: "ui", id: acceptance.deviceId },
         commandId: acceptance.commandId, confirmationDigest: review.digest });
-    })) ?? { status: "declined", changes: [] };
+    }) ?? { status: "declined", changes: [] };
   }
 
   private async changeInStripe(target: SettingsTarget, requests: readonly ChangeRequest[], context: ChangeContext): Promise<ChangeResult> {
@@ -162,10 +180,10 @@ export class SettingsChangePath {
     const review = changeReview({ target, undoOf: context.undoOf, applyAgainOf: context.applyAgainOf, planned: planned.map(plan => ({
       key: plan.key.id, layer: plan.request.layer, qualifiers: plan.qualifiers, op: plan.request.op, before: plan.before ?? null, after: plan.after ?? null })) },
       { title: planned.map(plan => plan.key.label).join(", "), requiresTap, ...(context.reason ? { reason: context.reason } : {}),
-        items: planned.map(plan => ({ label: plan.key.label, before: plan.key.redacted ? "Hidden" : formatStoredSetting(plan.key.type, plan.before),
-          after: plan.key.redacted ? "Hidden" : formatStoredSetting(plan.key.type, plan.after),
+        items: planned.map(plan => ({ label: plan.key.label, before: formatStoredSetting(plan.key.type, plan.before),
+          after: formatStoredSetting(plan.key.type, plan.after),
           detail: [LAYER_LABELS[plan.request.layer] + " stored value", target.kind === "session" ? target.sessionId : target.kind === "project" ? target.cwd : target.kind, plan.key.confirm].filter(Boolean).join("\n"),
-          ...(plan.key.redacted ? {} : { exact: JSON.stringify({ target, key: plan.key.id, layer: plan.request.layer, qualifiers: plan.qualifiers, op: plan.request.op, before: plan.before ?? null, after: plan.after ?? null }) }) })) });
+          exact: JSON.stringify({ target, key: plan.key.id, layer: plan.request.layer, qualifiers: plan.qualifiers, op: plan.request.op, before: plan.before ?? null, after: plan.after ?? null }) })) });
     if (context.confirmationDigest && context.confirmationDigest !== review.digest) throw new GatewayError("conflict", "The reviewed change is stale; nothing was applied");
     if (context.dryRun) {
       let next = 0;
@@ -175,13 +193,13 @@ export class SettingsChangePath {
           if (error) return { changeId: "", key: request.key, layer: request.layer, status: "failed", error: { code: error.code, message: error.message } };
           const plan = planned[next++]!;
           return { changeId: "", key: plan.key.id, ...(Object.keys(plan.qualifiers).length ? { qualifiers: plan.qualifiers } : {}), layer: request.layer,
-            status: "applied", ...outcomeValues(plan.key.redacted, plan.before, plan.after) };
+            status: "applied", ...outcomeValues(plan.before, plan.after) };
         }) };
     }
     if (requiresTap && context.actor.kind !== "ui") return { status: "review", review, changes: [] };
-    const applied = await this.applyAll(target, stores, planned, context, entry => entry);
-    const changes = this.outcomes(applied.filter(done => !done.plan.target), "applied");
-    const adopted = this.outcomes(applied.filter(done => done.plan.target), "applied");
+    const applied = await this.applyAll(target, stores, planned, context);
+    const changes = this.outcomes(applied.filter(done => !done.plan.target));
+    const adopted = this.outcomes(applied.filter(done => done.plan.target));
     let signal: SettingsSignal | undefined;
     try {
       await this.observer?.applied(target, changes, { actor: context.actor, ...(context.reason ? { reason: context.reason } : {}) });
@@ -311,23 +329,26 @@ export class SettingsChangePath {
   async undo(changeId: string, context: Omit<ChangeContext, "undoOf">, session?: ChangeContext["session"]): Promise<ChangeResult> {
     const found = await this.record.entry(changeId);
     if (!found) throw new GatewayError("not_found", "No such settings change");
+    if (!historyVisible(context.actor, found.entry)) {
+      throw new GatewayError("invalid_request", "An agent can undo only settings changes made by or in its own session");
+    }
     if (found.entry.key === HOME_PROFILE_SUBJECT.id) {
       if (!this.writers.undoSubject) throw new GatewayError("unsupported", "Knowledge is not available on this Gateway");
       return this.writers.undoSubject(found.entry, context);
     }
-    const result = await this.withTarget(found.entry.target, async () => {
-      const current = await this.record.entry(changeId);
-      if (!current || current.undone) throw new GatewayError("conflict", "This change has already been undone");
-      const { entry } = current;
-      if (entry.action || entry.redacted) throw new GatewayError("conflict", "This change is not undoable; inspect it with its owner");
-      if (entry.status !== "applied") throw new GatewayError("conflict", "Only an applied change can be undone");
-      return this.changeInStripe(entry.target, [{
-        key: entry.key, ...(entry.qualifiers ? { qualifiers: entry.qualifiers } : {}), layer: entry.layer,
-        op: entry.before === undefined ? "unset" : "set", ...(entry.before === undefined ? {} : { value: entry.before }),
-        expected: entry.after ?? null,
-      }], { ...context, undoOf: changeId, ...(session ? { session } : {}) });
-    });
-    return result;
+    return this.withConfirmation({ ...context, undoOf: changeId, ...(session ? { session } : {}) }, currentContext =>
+      this.withTarget(found.entry.target, async () => {
+        const current = await this.record.entry(changeId);
+        if (!current || current.undone) throw new GatewayError("conflict", "This change has already been undone");
+        const { entry } = current;
+        if (entry.action || entry.redacted) throw new GatewayError("conflict", "This change is not undoable; inspect it with its owner");
+        if (entry.status !== "applied") throw new GatewayError("conflict", "Only an applied change can be undone");
+        return this.changeInStripe(entry.target, [{
+          key: entry.key, ...(entry.qualifiers ? { qualifiers: entry.qualifiers } : {}), layer: entry.layer,
+          op: entry.before === undefined ? "unset" : "set", ...(entry.before === undefined ? {} : { value: entry.before }),
+          expected: entry.after ?? null,
+        }], currentContext);
+      }));
   }
 
   async applyAgain(changeId: string, context: Omit<ChangeContext, "applyAgainOf" | "undoOf">, session?: ChangeContext["session"]) {
@@ -344,14 +365,15 @@ export class SettingsChangePath {
     }], { ...context, applyAgainOf: changeId, ...(session ? { session } : {}) });
   }
 
-  history(input: { cursor?: string; limit?: number; key?: string; status?: string; actor?: ActorKind | "agents"; layer?: LayerId; section?: string }) {
-    return this.record.page({
+  async history(input: { cursor?: string; limit?: number; key?: string; status?: string; actor?: ActorKind | "agents"; layer?: LayerId; section?: string }, viewer: Actor) {
+    const page = await this.record.page({
       ...(input.cursor ? { cursor: input.cursor } : {}), ...(input.limit ? { limit: input.limit } : {}),
-      filter: entry => (!input.key || entry.key === input.key) && (!input.status || entry.status === input.status)
+      filter: entry => historyVisible(viewer, entry) && (!input.key || entry.key === input.key) && (!input.status || entry.status === input.status)
         && (!input.actor || (input.actor === "agents" ? entry.actor.kind !== "ui" : entry.actor.kind === input.actor))
         && (!input.layer || entry.layer === input.layer)
         && (!input.section || this.model.schema.auditSubject(entry.key)?.group === input.section),
     });
+    return { ...page, entries: page.entries.map(entry => publicHistoryEntry(this.model.schema, entry)) };
   }
 
   private async announce(changes: readonly ChangeOutcome[], context: ChangeContext): Promise<SettingsSignal | undefined> {
@@ -364,12 +386,12 @@ export class SettingsChangePath {
         const key = this.model.schema.schemaKey(change.key);
         const shown = (value: unknown) => value === null || value === undefined ? "the default" : formatStoredSetting(key.type, value);
         return { changeId: change.changeId, label: key.label, effect: key.effect,
-          ...(change.redacted ? {} : { before: shown(change.before), after: shown(change.after) }) };
+          before: shown(change.before), after: shown(change.after) };
       }),
     });
   }
 
-  private async applyAll(target: SettingsTarget, stores: SettingsStores, planned: readonly Planned[], context: ChangeContext, shape: (entry: ChangeEntry) => ChangeEntry) {
+  private async applyAll(target: SettingsTarget, stores: SettingsStores, planned: readonly Planned[], context: ChangeContext) {
     const apply = async (appliers?: SessionAppliers) => {
       const adoptions = await this.homeChapterAdoptions(stores, planned, context, context.session?.modelRuntime ?? this.model.owner.modelRuntime, appliers);
       const ordered = [...planned, ...adoptions].sort((a, b) => STORE_ORDER[a.binding.store] - STORE_ORDER[b.binding.store]);
@@ -378,7 +400,7 @@ export class SettingsChangePath {
       const landed = new Map<string, { git?: GitResult; changeId: string }>();
       await outside?.begin(writes);
       try {
-        const result = await this.applyBracketed(target, stores, ordered, context, shape);
+        const result = await this.applyBracketed(target, stores, ordered, context);
         for (const done of result.filter(done => !done.plan.target)) landed.set(done.plan.changeId, { ...(done.git ? { git: done.git } : {}), changeId: done.plan.changeId });
         return result;
       } finally {
@@ -389,7 +411,7 @@ export class SettingsChangePath {
     if (target.kind !== "home" || !context.homeChapter || !planned.some(adoptsHomeRuntime)) return apply();
     return context.homeChapter.mutate(async admission => {
       if ("error" in admission) {
-        await this.record.append(planned.map(plan => shape(this.entry(target, plan, context, "failed", admission.error.message))));
+        await this.record.append(planned.map(plan => this.entry(target, plan, context, "failed", admission.error.message)));
         throw admission.error;
       }
       return apply(admission.appliers);
@@ -428,7 +450,7 @@ export class SettingsChangePath {
     return adoptions;
   }
 
-  private async applyBracketed(target: SettingsTarget, stores: SettingsStores, ordered: readonly Planned[], context: ChangeContext, shape: (entry: ChangeEntry) => ChangeEntry) {
+  private async applyBracketed(target: SettingsTarget, stores: SettingsStores, ordered: readonly Planned[], context: ChangeContext) {
     const applied: Array<{ plan: Planned; revision?: number; git?: GitResult; result?: unknown }> = [];
     let failure: { plan: Planned; error: GatewayError } | undefined;
     for (const plan of ordered) {
@@ -447,30 +469,32 @@ export class SettingsChangePath {
           unrestored.set(done.plan.changeId, `Not rolled back: the ${done.plan.binding.store} store refused its compensating write (${error instanceof Error ? error.message : String(error)}); it may still hold the new value`);
         });
       }
-      await this.record.append(ordered.filter(plan => !plan.target).map(plan => shape(this.entry(target, plan, context, "failed",
+      await this.record.append(ordered.filter(plan => !plan.target).map(plan => this.entry(target, plan, context, "failed",
         plan.changeId === failure!.plan.changeId ? failure!.error.message
-          : unrestored.get(plan.changeId) ?? "Rolled back: another change in the same request failed"))))
+          : unrestored.get(plan.changeId) ?? "Rolled back: another change in the same request failed")))
         .catch(error => { throw asUncertainOutcome(error, "Settings failed after effects and its audit could not be published"); });
       throw applied.length ? asUncertainOutcome(failure.error, "Settings effects required compensation; inspect before retrying") : failure.error;
     }
-    const entries = applied.filter(done => !done.plan.target).map(done => shape(this.entry(target, done.plan, context, "applied", undefined, done.git)));
+    const entries = applied.filter(done => !done.plan.target).map(done => this.entry(target, done.plan, context, "applied", undefined, done.git));
     await this.record.append(entries).catch(error => {
       throw asUncertainOutcome(error, "Settings applied but history publication failed");
     });
     return applied.map(done => ({ ...done, changeId: entries.find(entry => entry.changeId === done.plan.changeId || entry.refersTo === done.plan.changeId)!.changeId }));
   }
 
-  private outcomes(applied: ReadonlyArray<{ plan: Planned; changeId: string; revision?: number; git?: GitResult; result?: unknown }>, status: ChangeStatus): ChangeOutcome[] {
+  private outcomes(applied: ReadonlyArray<{ plan: Planned; changeId: string; revision?: number; git?: GitResult; result?: unknown }>): ChangeOutcome[] {
     return applied.map(({ plan, changeId, revision, git, result }) => ({
       changeId, key: plan.key.id, ...(Object.keys(plan.qualifiers).length ? { qualifiers: plan.qualifiers } : {}),
-      layer: plan.request.layer, status, ...outcomeValues(plan.key.redacted, plan.before, plan.after),
+      layer: plan.request.layer, status: "applied", ...outcomeValues(plan.before, plan.after),
       ...(revision === undefined ? {} : { revision }), ...(git ? { git } : {}),
       ...(result === undefined ? {} : { result }),
     }));
   }
 
   private async plan(target: SettingsTarget, stores: SettingsStores, request: ChangeRequest, context: ChangeContext, runtime: ModelRuntime): Promise<Planned> {
-    const key = keyForHome(declaredKey(this.model.schema, request.key), stores.layers.includes("home"));
+    const subject = recordSubject(request.key);
+    const record = subject?.write ? this.model.schema.recordKey(request.key) : undefined;
+    const key = record ?? keyForHome(declaredKey(this.model.schema, request.key), stores.layers.includes("home"));
     if (request.layer === "project") {
       throw new GatewayError("invalid_request", "Project settings are read-only; edit the repository");
     }
@@ -480,6 +504,10 @@ export class SettingsChangePath {
     if (!stores.layers.includes(store)) throw new GatewayError("invalid_request", `This target has no ${LAYER_LABELS[request.layer]} layer`);
     const writer = context.actor.kind === "outside" ? undefined : context.actor.kind;
     if (!writer || !key.writers.includes(writer)) throw new GatewayError("invalid_request", `${key.label} cannot be changed by ${context.actor.kind}`);
+    if (subject && (!request.qualifiers || Object.keys(request.qualifiers).some(name => name !== subject.qualifier)
+      || !subject.pattern.test(request.qualifiers[subject.qualifier] ?? ""))) {
+      throw new GatewayError("invalid_request", `${key.label} changes one ${subject.qualifier} named by its ${subject.qualifier} qualifier`);
+    }
     for (const [name, value] of Object.entries(key.fixed ?? {})) {
       const named = request.qualifiers?.[name as keyof Qualifiers];
       if (named !== undefined && named !== value) throw new GatewayError("invalid_request", `${key.id} is the ${name}=${value} instance; ${name}=${named} is a different setting`);
@@ -549,7 +577,8 @@ export class SettingsChangePath {
       fixedAt = { value: after, from: row?.layer ?? "global", at: this.now().toISOString(), ref: randomUUID(), ...(row?.qualifiers ? { qualifiers: row.qualifiers } : {}) };
       request = { ...request, op: "set", value: after };
     }
-    const before = binding.store === "trust" ? stores.trust[qualifiers.project!]
+    const before = record && subject ? await this.model.owner.recordValue(subject.id, qualifiers[subject.qualifier]!)
+      : binding.store === "trust" ? stores.trust[qualifiers.project!]
       : readBinding(stores, store, binding, qualifiers, qualifiedWrite(binding, qualifiers), key.id);
     if (request.expected !== undefined && !deepEqual(request.expected, before ?? null)) {
       throw new GatewayError("conflict", `${key.label} changed since it was read; refresh and try again`, false, {
@@ -559,7 +588,7 @@ export class SettingsChangePath {
         } } : {}),
       });
     }
-    const defaultValue = keyDefault(key, qualifiers);
+    const defaultValue = key.defaultValue;
     const below = key.type.compose ? composedBelow(stores, key, qualifiers, store) : defaultValue;
     const selects = (value: unknown) => value === undefined ? below : key.type.compose ? key.type.compose(below, value) : value;
     const direction = key.direction ? key.direction(selects(before), selects(after)) : "widen";
@@ -576,8 +605,7 @@ export class SettingsChangePath {
       ...(context.commandId ? { commandId: context.commandId } : {}), key: plan.key.id, layer: plan.request.layer, op: plan.request.op,
       ...(Object.keys(plan.qualifiers).length ? { qualifiers: plan.qualifiers } : {}),
       ...(plan.fixedAt ? { fixedAt: plan.fixedAt } : {}),
-      ...(plan.key.redacted ? { changed: true as const, redacted: true as const } : {
-        ...(plan.before === undefined ? {} : { before: plan.before }), ...(plan.after === undefined ? {} : { after: plan.after }) }),
+      ...(plan.before === undefined ? {} : { before: plan.before }), ...(plan.after === undefined ? {} : { after: plan.after }),
       ...(context.reason ? { reason: context.reason } : {}), status,
       ...(failure ? { failure } : {}), ...(git ? { git } : {}),
       ...(context.undoOf ? { undoOf: context.undoOf } : {}), ...(context.applyAgainOf ? { applyAgainOf: context.applyAgainOf } : {}) };

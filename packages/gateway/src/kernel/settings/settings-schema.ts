@@ -3,21 +3,23 @@ import { boolean, integer, object, string, arrayOfStrings } from "../../util/val
 import { type Control, type Effect, type Timing, type ValueType, type Writer, DEFAULT_TOOL_NAMES, modelQueueType, objectType, sameAsHomeChoice, toolSelectionType, types } from "./settings-types.js";
 import { MODEL_QUEUE_ROLES, modelQueueKey, type QualifierName, type Direction } from "./tool-contract.js";
 import type { StoreLayer } from "./settings-types.js";
+import { mcpServerDirection, mcpServerType } from "./mcp-server-value.js";
+import { modelProviderDirection, modelProviderType } from "./model-provider-value.js";
 
-interface SectionDeclaration { id: string; title: string; description: string; order: number; harness: boolean; note?: string; chatInline?: boolean }
+interface SectionDeclaration { id: string; title: string; description: string; order: number; note?: string; chatInline?: boolean }
 
 export const SECTIONS: readonly SectionDeclaration[] = [
-  { id: "model", title: "Model", description: "Model and thinking", order: 10, harness: true, chatInline: true },
-  { id: "workers", title: "Workers & delegation", description: "Task budget and retained overrides", order: 15, harness: true, chatInline: true },
-  { id: "context", title: "Compaction", description: "Automatic summaries and retained context", order: 20, harness: true },
-  { id: "tools", title: "Tools", description: "Available tools, code mode, and shell", order: 30, harness: true },
-  { id: "run", title: "Connection", description: "Proxy and retained overrides", order: 50, harness: true },
-  { id: "trust", title: "Trusted Projects", description: "Project trust decisions and default policy", order: 55, harness: true },
-  { id: "connections", title: "Mac Terminal", description: "This iPhone's key on the connected Mac", order: 58, harness: false },
-  { id: "accounts", title: "Accounts", description: "Providers, custom models, and services", order: 60, harness: false },
-  { id: "sources", title: "Sources", description: "Packages and how they install", order: 70, harness: false },
-  { id: "setup", title: "Storage", description: "Import, session storage, and telemetry", order: 80, harness: false },
-  { id: "iphone", title: "This iPhone", description: "Appearance and sessions", order: 90, harness: false, note: "Stored on this iPhone. It never changes what the agent does." },
+  { id: "model", title: "Model", description: "Model and thinking", order: 10, chatInline: true },
+  { id: "workers", title: "Workers & delegation", description: "Task budget and retained overrides", order: 15, chatInline: true },
+  { id: "context", title: "Compaction", description: "Automatic summaries and retained context", order: 20 },
+  { id: "tools", title: "Tools", description: "Available tools, code mode, and shell", order: 30 },
+  { id: "run", title: "Connection", description: "Proxy and retained overrides", order: 50 },
+  { id: "trust", title: "Trusted Projects", description: "Project trust decisions and default policy", order: 55 },
+  { id: "connections", title: "Mac Terminal", description: "This iPhone's key on the connected Mac", order: 58 },
+  { id: "accounts", title: "Accounts", description: "Providers, custom models, and services", order: 60 },
+  { id: "sources", title: "Sources", description: "Packages and how they install", order: 70 },
+  { id: "setup", title: "Storage", description: "Import, session storage, and telemetry", order: 80 },
+  { id: "iphone", title: "This iPhone", description: "Appearance and sessions", order: 90, note: "Stored on this iPhone. It never changes what the agent does." },
 ];
 
 export type Binding =
@@ -30,7 +32,9 @@ export type Binding =
   | { store: "trust" }
   | { store: "mac-terminal" }
   | { store: "mac-terminal-service" }
-  | { store: "gateway"; path: readonly string[] };
+  | { store: "gateway"; path: readonly string[] }
+  | { store: "mcp" }
+  | { store: "models" };
 
 export type TimingDeclaration = Timing | { widen: Timing; narrow: Timing };
 
@@ -47,19 +51,16 @@ export interface KeyDeclaration {
   layers: Partial<Record<Exclude<StoreLayer, "default">, Binding>>;
   home?: { layers: readonly Exclude<StoreLayer, "default">[]; defaultValue?: unknown };
   defaultValue?: unknown;
-  defaultValueFor?: (qualifiers: Partial<Record<QualifierName, string>>) => unknown;
   timing: TimingDeclaration;
   effect: Effect;
   tap?: "trust" | "privacy" | "spend" | "install" | "irreversible";
   direction?: (before: unknown, after: unknown) => Direction;
   writers: readonly Writer[];
-  redacted?: boolean;
   label: string;
   help: string;
   order: number;
   importance: "essential" | "advanced";
   control?: Control;
-  fallback?: Control;
   confirm?: string;
   entry?: EntryGuidance;
 }
@@ -176,7 +177,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       optionsSource: { name: "catalog.models", dependsOn: [] },
       layers: { session: { store: "session", field: "model" }, home: { store: "home", path: ["model", "chat"] }, ...both({ store: "pi-model-ref" }) },
       timing: "fixed", effect: "next-turn", writers: ANY_ACTOR,
-      label: "Model", help: "The model this chat runs.", order: 10, importance: "essential", control: "catalog", fallback: "readOnly",
+      label: "Model", help: "The model this chat runs.", order: 10, importance: "essential", control: "catalog",
     },
     {
       id: "model.thinking[role=chat]", sessionOverridable: true, projectSettable: true, group: "model", fixed: { role: "chat" }, qualifier: "model", type: thinkingType,
@@ -217,7 +218,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
         home: { store: "home", path: ["modelQueue", role] }, global: { store: "gateway", path: ["modelQueues", role] } },
       timing: "live", effect: role === "worker" ? "delegate" : role === "subagent" ? "next-request" : "next-memory-pass",
       writers: ["ui", "home"], label: MODEL_QUEUE_LABELS[role].label, help: MODEL_QUEUE_LABELS[role].help,
-      order: 40 + index * 2, importance: "essential", control: "list", fallback: "readOnly",
+      order: 40 + index * 2, importance: "essential", control: "list",
       optionsSource: { name: "catalog.models", dependsOn: [] },
     })),
     {
@@ -341,7 +342,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
         { value: "never", label: "Never trust", detail: "Never loads a project's extensions or hooks" },
       ]),
       layers: { global: pi("defaultProjectTrust") }, defaultValue: "ask", timing: "live", effect: "next-change",
-      direction: (_b, a) => a === "always" ? "widen" : "narrow", writers: ["ui"],
+      direction: (_b, a) => a === "always" ? "widen" : "narrow", writers: ["ui", "home"],
       label: "Default trust policy", help: "What happens with a project that has no trust decision.", order: 20, importance: "advanced",
       control: "choice", confirm: "Always trust loads every new project's extensions and hooks without asking.",
     },
@@ -424,11 +425,6 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       label: "WebSocket connect timeout", help: "How long a WebSocket connection may take to open.", order: 110, importance: "advanced",
     },
     {
-      id: "run.httpProxy", sessionOverridable: false, projectSettable: false, group: "run", subgroup: "Connection", type: types.text(4_096), redacted: true,
-      layers: { global: pi("httpProxy") }, timing: "live", effect: "restart", writers: ["ui"],
-      label: "HTTP proxy", help: "Proxy for model requests. Applies after a restart.", order: 120, importance: "advanced", control: "secret",
-    },
-    {
       tap: "spend", id: "run.cacheWarming", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "run", subgroup: "Connection",
       type: types.choice([
         { value: "off", label: "Off", detail: "Prompt caches are never kept warm" },
@@ -460,12 +456,6 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       entry: { hint: "One word per value: the program first (npm, pnpm or bun), then any arguments.", example: "pnpm" },
     },
     {
-      id: "setup.sessionDir", sessionOverridable: false, projectSettable: false, group: "setup", type: types.text(4_096), layers: { global: pi("sessionDir") }, timing: "live", effect: "restart",
-      writers: [], label: "Session folder", help: "Where chats are stored. Applies after a restart.",
-      order: 10, importance: "advanced", control: "text",
-      entry: { hint: "A folder path on the Mac. Start with ~ or /.", example: "~/Documents/Tron Sessions" },
-    },
-    {
       tap: "irreversible", id: "setup.installTelemetry", sessionOverridable: false, projectSettable: false, group: "setup", type: types.boolean(), layers: { global: pi("enableInstallTelemetry") }, defaultValue: true,
       timing: "live", effect: "next-request", writers: ["ui"], label: "Install telemetry",
       help: "Send pi's anonymous install attribution header.", order: 20, importance: "advanced", control: "toggle",
@@ -485,7 +475,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
     return KEYS.find(key => key.id === id) ?? recordSubject(id);
   }
 
-  return { KEYS, RECORD_SUBJECTS, schemaKey, auditSubject } as const;
+  return { KEYS, RECORD_SUBJECTS, schemaKey, auditSubject, recordKey } as const;
 }
 
 export type SettingsSchema = ReturnType<typeof createSettingsSchema>;
@@ -504,9 +494,6 @@ export function keyForHome(key: KeyDeclaration, home: boolean): KeyDeclaration {
   return { ...key, type, layers, ...(key.home && Object.hasOwn(key.home, "defaultValue") ? { defaultValue: key.home.defaultValue } : {}) };
 }
 
-export function keyDefault(key: KeyDeclaration, qualifiers: Partial<Record<QualifierName, string>>): unknown {
-  return key.defaultValueFor ? key.defaultValueFor(qualifiers) : key.defaultValue;
-}
 
 export function hasRuntimeRequestApplier(key: KeyDeclaration): boolean {
   return key.layers.session?.store === "session-settings" && (key.timing === "fixed" || (key.timing === "live" && ["next-turn", "next-request"].includes(key.effect))
@@ -521,21 +508,52 @@ export function hasSessionSettingsApplier(key: KeyDeclaration): boolean {
   return hasRuntimeRequestApplier(key) || hasCompactionApplier(key);
 }
 
+export interface RecordWrite {
+  store: "mcp" | "models";
+  writers: readonly Writer[];
+  tap: NonNullable<KeyDeclaration["tap"]>;
+  type: ValueType;
+  direction: NonNullable<KeyDeclaration["direction"]>;
+  effect: Effect;
+  timing: Timing;
+  help: string;
+  confirm: string;
+}
+
 export interface RecordSubject {
   id: string;
   label: string;
   group: string;
   container: string;
   qualifier: QualifierName;
+  pattern: RegExp;
+  write?: RecordWrite;
 }
 
-export const RECORD_SUBJECTS: readonly RecordSubject[] = [
-  { id: "tools.mcp.server", label: "MCP server", group: "tools", container: "mcpServers", qualifier: "server", },
-  { id: "accounts.models.provider", label: "Custom model provider", group: "accounts", container: "providers", qualifier: "provider", },
+const RECORD_SUBJECTS: readonly RecordSubject[] = [
+  { id: "tools.mcp.server", label: "MCP server", group: "tools", container: "mcpServers", qualifier: "server", pattern: /^[A-Za-z0-9_-]{1,128}$/u,
+    write: { store: "mcp", writers: ["ui", "home"], tap: "trust", type: mcpServerType, direction: mcpServerDirection, effect: "reload", timing: "live",
+      help: "An MCP server Tron starts on this Mac. Its command runs with this Mac's permissions.",
+      confirm: "Adding or enabling a server, or changing its command or address, runs it on this Mac." } },
+  { id: "accounts.models.provider", label: "Custom model provider", group: "accounts", container: "providers", qualifier: "provider", pattern: /^[a-z0-9][a-z0-9._-]{0,119}$/iu,
+    write: { store: "models", writers: ["ui", "home"], tap: "privacy", type: modelProviderType, direction: modelProviderDirection, effect: "next-request", timing: "live",
+      help: "A custom model endpoint. Its address receives the prompts of every chat that uses one of its models.",
+      confirm: "Adding a provider or changing its address or API sends your conversations to that address." } },
 ];
 
 export function recordSubject(id: string): RecordSubject | undefined {
   return RECORD_SUBJECTS.find(subject => subject.id === id);
+}
+
+function recordKey(id: string): KeyDeclaration | undefined {
+  const subject = recordSubject(id);
+  if (!subject?.write) return undefined;
+  const write = subject.write;
+  return {
+    id, group: subject.group, qualifier: subject.qualifier, type: write.type, sessionOverridable: false, projectSettable: false,
+    layers: { global: { store: write.store } }, timing: write.timing, effect: write.effect, tap: write.tap, direction: write.direction,
+    writers: write.writers, label: subject.label, help: write.help, confirm: write.confirm, order: 0, importance: "advanced",
+  };
 }
 
 export const HOME_PROFILE_SUBJECT = { id: "home.profile.item", label: "Profile item", group: "context", qualifier: "note" as const, };

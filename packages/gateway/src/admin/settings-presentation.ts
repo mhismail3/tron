@@ -11,7 +11,6 @@ function negotiateControl(key: KeyDeclaration, clientControls: readonly string[]
   if (key.control === "readOnly") return { control: "readOnly" };
   const supports = (control: Control) => clientControls?.includes(control) === true;
   if (supports(key.control)) return { control: key.control };
-  if (key.fallback !== undefined && key.fallback !== "readOnly" && supports(key.fallback)) return { control: key.fallback };
   return { control: "readOnly", note: UPDATE_TRON_NOTE };
 }
 
@@ -27,7 +26,6 @@ export interface KeyPresentation {
   range?: NonNullable<ValueType["range"]>;
   optionsSource?: { name: string; dependsOn: readonly string[] };
   confirm?: string;
-  redacted?: true;
   entry?: EntryGuidance;
   sessionOverridable: boolean;
   projectSettable: boolean;
@@ -56,7 +54,6 @@ function presentKey(key: KeyDeclaration, clientControls: readonly string[] | und
     ...(control && key.type.range ? { range: key.type.range } : {}),
     ...(control && key.optionsSource ? { optionsSource: key.optionsSource } : {}),
     ...(key.confirm ? { confirm: key.confirm } : {}),
-    ...(key.redacted ? { redacted: true as const } : {}),
     ...(key.entry ? { entry: key.entry } : {}),
   };
 }
@@ -83,11 +80,8 @@ interface PresentationInput {
 }
 
 function requesterLabel(actor: Actor): string {
-  return actor.kind === "worker" && actor.taskId ? `Home task ${actor.taskId}` : actorLabel(actor);
-}
-
-function actorLabel(actor: Actor): string {
-  return actor.kind === "home" ? "Home" : actor.kind === "worker" ? "A Home task worker" : actor.kind === "agent" ? "A chat's agent" : actor.kind === "outside" ? "Outside Tron" : "You";
+  return actor.kind === "worker" && actor.taskId ? `Home task ${actor.taskId}`
+    : actor.kind === "home" ? "Home" : actor.kind === "worker" ? "A Home task worker" : actor.kind === "agent" ? "A chat's agent" : actor.kind === "outside" ? "Outside Tron" : "You";
 }
 
 const KIND_LABELS = {
@@ -120,15 +114,13 @@ export function presentHistoryEntry(schema: SettingsSchema, entry: ChangeEntry) 
   }
   const key = schema.KEYS.find(key => key.id === entry.key);
   const subject = key ? undefined : recordSubject(entry.key);
-  const redacted = entry.redacted || key?.redacted;
-  const { before, after, fixedAt: _fixedAt, ...redactedEntry } = entry;
   const format = (value: unknown): string => formatStoredSetting(key?.type, value);
   const name = subject ? entry.qualifiers?.[subject.qualifier] : undefined;
   const display = subject ? entry.op === "unset" ? { before: "Configured", after: "Removed" }
     : entry.added ? { before: "Not configured", after: "Added" } : { before: "Configured", after: "Changed" }
-    : redacted ? { before: "Hidden", after: "Changed" } : { before: format(before), after: format(after) };
+    : entry.redacted ? { before: "Hidden", after: "Changed" } : { before: format(entry.before), after: format(entry.after) };
   return {
-    ...(redacted ? { ...redactedEntry, changed: true as const, redacted: true as const } : entry),
+    ...entry,
     presentation: {
       label: key?.label ?? (subject ? `${subject.label}${name ? ` ${name}` : ""}` : entry.key),
       ...(key ? { section: key.group } : subject ? { section: subject.group } : {}),

@@ -18,7 +18,7 @@ custom models, Gateway updates, iOS installs, Mac replacement and diagnostics.
 | The agents' `settings` tool and web mark | `tron-settings-extension.ts` |
 | Provider auth and model catalog | `auth-broker.ts`, `model-config-service.ts`, `global-provider-resources.ts` |
 | Packages, extensions, hooks, tools | `package-service.ts`, `package-provides.ts`, `session-free-extensions.ts`, `hook-resources.ts`, `tool-catalog.ts` |
-| MCP administration | `mcp-admin-service.ts` |
+| MCP administration | `mcp-admin-service.ts`: the one owner of `mcp.json` writes (every edit runs under its one lock and size bound; `setServer` refuses records it cannot carry) and the CLI bridge. Gateway composition builds one instance and passes it to `SettingsStoreAdapter` (`mcpAdmin`) and `GatewayService`; a fixture without it gets `unsupported` for MCP record writes only |
 | Install and lifecycle projections | `gateway-update-service.ts`, `ios-device-install-service.ts`, `ios-device-install-helper.ts`, `mac-replace-service.ts`, `diagnose.ts` |
 | Shared admission | `document-admission.ts` (`COMMAND_ID`, `admitTronSourceRoot`); [host control](host-control.md) |
 
@@ -60,7 +60,7 @@ defines scoped permissions and runtime admission.
 In short:
 
 - **One key, declared once on the Gateway** (F1). The schema holds type,
-  group, allowed layers, timing, effect point, native-tap classification, writers, redaction and
+  group, allowed layers, timing, effect point, native-tap classification, writers and
   display. iOS renders keys generically; a new key needs no iOS release.
 - **Three scopes** (F4): **Project > Session/Home override > Global**, gated by
   registry grants. Home has no Project or separate chapter override. Private store
@@ -73,11 +73,10 @@ In short:
 
 RPCs (shapes in the [Gateway README](../../README.md)): `settings.resolve`,
 `settings.options`, `settings.change` (with `dryRun`), `settings.undo`,
-`settings.applyAgain`, `settings.history`, plus `home.profileChange` for learned-profile notes.
-Broadcasts: `settings.changed`, `trust.changed`, `mcp.changed`,
-`models.customChanged`. Agents reach the same path through the `settings` tool
-(a thin client of resolve and change); Home's tool may target a delegated
-worker by `taskId`.
+`settings.applyAgain`, `settings.history` (the maintainer's full view), plus `home.profileChange` for learned-profile notes.
+Broadcasts: `settings.changed`, `trust.changed`, `mcp.changed`. Agents reach the same path through the `settings` tool
+(a thin client of resolve, change, history, undo, inventory and Home-only package update, each carrying the calling chat's actor; history and undo are
+scoped by that actor as the kernel contract defines). `inventory` is read-only: it projects the hook registrations (by extension and by event), configured packages, Tron modules and configured MCP servers (`configured` or `disabled`; never probed) for the chat's directory. Hooks and packages come from `HookResources` and `PackageService`, which load extension definitions for a trusted project as the existing `hooks.list`/`packages.list` RPCs do (code loading, a residual risk; not a probe). MCP comes from `McpAdminService.configured` through the SDK's public, non-executing `loadMcpConfig` owner, with explicit agent directory, project trust and a 256 KiB per-file read limit. The SDK alone validates and merges global/project entries and restricted overrides; invalid entries contribute only an error count, never raw diagnostics. Inventory never runs `pi mcp` (which connects servers and resolves `!command` credentials), so no MCP server is started and no credential is resolved. Only name, effective scope, enabled state, exposure and transport kind are projected; commands, headers, URLs and paths are excluded. Every string is sanitized through credential redaction. An undecided project fails with `trust_required`. Home's tool may target a delegated worker by `taskId`.
 
 Ports in: `gateway-main.ts` wires kernel `SettingsModel`/`SettingsChangePath`,
 admin `SettingsStoreAdapter`,
@@ -93,7 +92,11 @@ are installed; schema access never evaluates their late-bound service getter.
 ## Invariants
 
 - Every write of a declared key or record subject goes through
-  `SettingsChangePath`; there are no per-key setters and no second store.
+  `SettingsChangePath`; there are no per-key setters and no second store. A
+  Tron-made `mcp.json` or `models.json` write runs inside the outside-change bracket, so it is
+  audited once by the change path and never as a hand edit. `ModelConfigService` is the only writer of
+  `models.json` providers; a provider change refreshes the shared runtime through
+  `GlobalProviderResources.refreshModels` before the change returns.
 - A value at a layer the key does not allow is ignored and reported, never
   applied. A repository never grants itself trust; an untrusted `.pi/` is
   present but not applied and never written.
@@ -101,7 +104,11 @@ are installed; schema access never evaluates their late-bound service getter.
   atomically within one store and rolls back across stores; requests
   serialize per target.
 - The record is append-only and kept forever; credentials and redacted values
-  never appear in it. It is never read to compute a value.
+  never appear in it. It is never read to compute a value. Reads (RPC and agent tool) return
+  the kernel's public entries: values of a flagged, retired or unknown key are never returned.
+- An agent's history page and Undo reach only its own chat's changes; the scope
+  filter runs inside the history owner's page, never after the page returns. Tron Home
+  and the maintainer see and undo all changes, each Undo logged with before and after.
 - Native review binds the exact diff. Acceptance rechecks actual target state
   under its stripe; generic forms and local RPC cannot grant effects. Corrupt
   indexed audit/groups refuse rather than restoring partial state.

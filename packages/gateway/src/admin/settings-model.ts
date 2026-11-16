@@ -1,4 +1,4 @@
-import { type Resolution, type SettingsTarget, type Qualifiers, type GitResult } from "../kernel/settings/tool-contract.js";
+import { type Resolution, type SettingsTarget, type Qualifiers, type GitResult, type ChangeResult, type ConfirmChange } from "../kernel/settings/tool-contract.js";
 import type { MacTerminalService } from "../security/mac-terminal-service.js";
 import { setPath, unsetPath, qualifiedWrite, fillPath, type SessionSettingsSource, type SettingsOptionsRequest, type SettingsOptionsResult } from "../kernel/settings/settings-model.js";
 import type { ChangeContext, SettingsWriters, Planned } from "../kernel/settings/settings-change.js";
@@ -15,11 +15,17 @@ import { isVirtualModel } from "../providers/virtual-model.js";
 import { updateJsonLocked } from "../foundation/json.js";
 import { gitHeadState, projectGitState, readProjectDocument } from "./project-settings-writer.js";
 import { observedInstance, projectStores, type ObservedReaders, type OutsideChanges } from "./settings-outside.js";
+import type { McpAdminService } from "./mcp-admin-service.js";
+import type { McpServerValue } from "../kernel/settings/mcp-server-value.js";
+import type { ModelProviderValue } from "../kernel/settings/model-provider-value.js";
+import type { ModelConfigService } from "./model-config-service.js";
 import type { TrustService } from "../kernel/resources/trust-service.js";
 import { targetLayers } from "../kernel/settings/settings-resolver.js";
 import type { SettingsSchema } from "../kernel/settings/settings-schema.js";
 import { type FormatContext, type ModelRefValue, type OptionSources, type SettingsStores, type ResolveOptions, type ObservedStore, type PlannedWrite } from "../kernel/settings/settings-types.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
+import type { PackageUpdateRequest } from "./package-service.js";
+import type { Actor } from "../kernel/settings/settings-record.js";
 
 interface SettingsModelDependencies {
   schema: SettingsSchema;
@@ -28,7 +34,10 @@ interface SettingsModelDependencies {
   trust: Pick<TrustService, "inspect" | "canonicalDirectory">;
   modelRuntime: ModelRuntime;
   toolCatalog?: (target: SettingsTarget) => Promise<readonly ToolCatalogEntry[]>;
+  updatePackage?: (request: PackageUpdateRequest, requester: Actor, confirm?: ConfirmChange) => Promise<ChangeResult>;
   macTerminalKeys?: Pick<MacTerminalService, "read" | "set" | "enabled" | "setEnabled">;
+  mcpAdmin?: McpAdminService;
+  modelConfig?: ModelConfigService;
 }
 
 export interface ToolCatalogEntry { name: string; description?: string; resource: Record<string, unknown> }
@@ -38,6 +47,29 @@ export class SettingsStoreAdapter {
   private outside: OutsideChanges | undefined;
 
   constructor(private readonly dependencies: SettingsModelDependencies) {}
+
+  private mcp(): McpAdminService {
+    if (!this.dependencies.mcpAdmin) throw new GatewayError("unsupported", "This Gateway has no MCP configuration owner");
+    return this.dependencies.mcpAdmin;
+  }
+
+  private modelConfig(): ModelConfigService {
+    if (!this.dependencies.modelConfig) throw new GatewayError("unsupported", "This Gateway has no custom model configuration owner");
+    return this.dependencies.modelConfig;
+  }
+
+  recordValue(subject: string, instance: string): Promise<unknown> {
+    switch (subject) {
+      case "tools.mcp.server": return this.mcp().server(instance);
+      case "accounts.models.provider": return this.modelConfig().provider(instance);
+      default: throw new GatewayError("unsupported", `${subject} has no record owner`);
+    }
+  }
+
+  updatePackage(request: PackageUpdateRequest, requester: Actor, confirm?: ConfirmChange): Promise<ChangeResult> {
+    if (!this.dependencies.updatePackage) throw new GatewayError("unsupported", "Package updates are not available");
+    return this.dependencies.updatePackage(request, requester, confirm);
+  }
 
   async projectRoot(path: string): Promise<string> {
     return (await this.dependencies.trust.inspect(path)).projectDir;
@@ -254,6 +286,12 @@ export class SettingsStoreAdapter {
         await keys.set(qualifiers.device!, unset ? null : value as string);
         return {};
       }
+      case "mcp":
+        await this.mcp().setServer(qualifiers.server!, unset ? undefined : value as McpServerValue);
+        return {};
+      case "models":
+        await this.modelConfig().setProvider(qualifiers.provider!, unset ? undefined : value as ModelProviderValue);
+        return {};
       case "trust":
         return { result: await writers.setTrust(qualifiers.project!, unset ? null : value as boolean) };
       case "gateway":

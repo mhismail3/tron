@@ -13,13 +13,14 @@ import { RuntimeRegistry } from "../src/kernel/session/runtime-registry.js";
 import { ManagedSubagents } from "../src/kernel/delegation/managed-subagents.js";
 import { delegatedArtifactRoot, ensureDelegatedArtifactRoot } from "../src/kernel/delegation/delegated-provider.js";
 import { settingsDependencies } from "./settings-dependencies.js";
+import { PackageService } from "../src/admin/package-service.js";
 import type { ProfileStore } from "../src/modules/home/profile-store.js";
 import { MODEL_QUEUE_PROJECTION_ENV } from "../src/providers/model-queue-extension.js";
 import { modelQueueProjectionPath, type ModelQueueRecord } from "../src/providers/model-queue.js";
 import type { ProviderUsageOwner } from "../src/providers/provider-usage.js";
 import { HOOK_HANG_BOUND_MS, waitFor } from "./wait-for.js";
 
-const fixtures: Array<{ registry: RuntimeRegistry; root: string }> = [];
+const fixtures: Array<{ registry: RuntimeRegistry; root: string; gateway: ModelRuntime }> = [];
 export async function disposeFixtures(): Promise<void> {
   const failures: unknown[] = [];
   try {
@@ -27,6 +28,7 @@ export async function disposeFixtures(): Promise<void> {
       try {
         await fixture.registry.dispose();
         await fixture.registry.administrativeWorkRegistry.waitUntilSettled();
+        await fixture.gateway.settleCredentialWrites();
         const outlived = await awaitRunnersExited(fixture.root).then(() => undefined, (error: unknown) => error);
         await rm(fixture.root, { recursive: true, force: true });
         if (outlived) throw outlived;
@@ -96,7 +98,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   gateway.registerVirtualModel({ provider: model.provider, id: TASK_VIRTUAL_MODEL_ID, name: "Fixture router",
     route: () => ({ model: gateway.getModel(model.provider, model.id)!, thinkingLevel: "off" }) });
   await gateway.refresh({ allowNetwork: false });
-  const sdkSettings: Record<string, unknown> = { sessionDir: join(root, "sessions"), defaultProvider: model.provider, defaultModel: model.id };
+  const sdkSettings: Record<string, unknown> = { defaultProvider: model.provider, defaultModel: model.id };
   if (contextWindow) sdkSettings.compaction = { enabled: false, reserveTokens: 1024, keepRecentTokens: 0 };
   if (codemode) {
     sdkSettings.defaultTools = ["+codemode"];
@@ -164,11 +166,12 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
     ...(options.providerUsage ? { providerUsage: options.providerUsage } : {}),
   });
   const registry = await createRegistry();
-  settings = settingsDependencies({ agentDir, tronHome, trust, modelRuntime: gateway, sessions: registry, registry,
+  const packages = new PackageService(agentDir, trust, () => {});
+  settings = settingsDependencies({ agentDir, tronHome, trust, modelRuntime: gateway, sessions: registry, registry, packages,
     home: () => homeOwnerOf(registry), knowledge,
     ...(options.settingsNow ? { now: options.settingsNow } : {}) });
   await settings.settingsChanges.start();
-  const owned = { registry, root };
+  const owned = { registry, root, gateway };
   fixtures.push(owned);
   await bringUpToReadiness(registry);
   await homeOwnerOf(registry).recoverTasks();
@@ -186,7 +189,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
     await bringUpToReadiness(owned.registry);
     return owned.registry;
   };
-  return { root, registry, get settings() { return settings!; }, faux, model, gateway, cwd, tronHome, home, signals, notifications, events, queueDiagnostics, agentDir, trust, restartToReadiness,
+  return { root, registry, get settings() { return settings!; }, packages, faux, model, gateway, cwd, tronHome, home, signals, notifications, events, queueDiagnostics, agentDir, trust, restartToReadiness,
     restart: async () => {
       const cold = await restartToReadiness();
       await homeOwnerOf(cold).recoverTasks();

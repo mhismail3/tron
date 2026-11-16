@@ -3,15 +3,17 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import lockfile from "proper-lockfile";
+import { loadMcpConfig } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import { durableAtomicWriteText } from "../foundation/durable-json.js";
+import { MCP_EXPOSURES, mcpServerOnDisk, type McpExposure, type McpServerValue } from "../kernel/settings/mcp-server-value.js";
 
 const MAX_CONFIG_BYTES = 256 * 1_024;
 const MAX_OUTPUT_BYTES = 1_048_576;
 const CLI_TIMEOUT_MS = 30_000;
-const EXPOSURES = ["codemode", "codemode-deferred", "deferred", "direct", "hidden"] as const;
-export type McpExposure = typeof EXPOSURES[number];
 export type McpScope = { scope: "global" } | { scope: "project"; cwd: string; trusted: true };
+export interface McpServerStatus { name: string; state: string; scope: "global" | "project"; enabled: boolean; exposure: string; transport: string; tools: string[]; error?: string }
+export interface McpListing { servers: McpServerStatus[]; errors: number }
 
 export interface McpCredentialOwner {
   store(scope: McpScope, server: string, token: string): Promise<string>;
@@ -44,7 +46,7 @@ export class MacKeychainMcpCredentialOwner implements McpCredentialOwner {
   }
   async remove(scope: McpScope, server: string): Promise<void> {
     const account = this.account(scope, server);
-    await runProcess("/usr/bin/security", ["delete-generic-password", "-s", "tron.mcp", "-a", account], { cwd: process.cwd(), timeoutMs: CLI_TIMEOUT_MS, allowFailure: true });
+    await runProcess("/usr/bin/security", ["delete-generic-password", "-s", "tron.mcp", "-a", account], { cwd: process.cwd(), timeoutMs: CLI_TIMEOUT_MS });
   }
 }
 
@@ -74,7 +76,7 @@ function signalGroup(pgid: number, signal: NodeJS.Signals): void {
   if (ownGroup.status === 0 && Number(ownGroup.stdout.trim()) === pgid) return;
   try { process.kill(-pgid, signal); } catch {}
 }
-async function runProcess(command: string, args: string[], options: { cwd: string; timeoutMs: number; allowFailure?: boolean; input?: string; env?: NodeJS.ProcessEnv }): Promise<ProcessResult> {
+async function runProcess(command: string, args: string[], options: { cwd: string; timeoutMs: number; input?: string; env?: NodeJS.ProcessEnv }): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd: options.cwd, env: options.env ?? process.env, detached: process.platform !== "win32", stdio: [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"] });
     const killTree = () => {
@@ -116,7 +118,6 @@ async function runProcess(command: string, args: string[], options: { cwd: strin
         await timeoutChildCleanup;
       }
       if (oversized) { reject(new GatewayError("conflict", "MCP command output exceeded its bound")); return; }
-      if (code !== 0 && !options.allowFailure) { resolve({ code: code ?? -1, stdout: stdout.toString("utf8"), stderr: stderr.toString("utf8") }); return; }
       resolve({ code: code ?? -1, stdout: stdout.toString("utf8"), stderr: stderr.toString("utf8") });
     });
   });
@@ -128,6 +129,12 @@ function parseConfig(text: string): Record<string, unknown> {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new GatewayError("conflict", "MCP configuration must be a JSON object");
   return parsed as Record<string, unknown>;
 }
+
+export interface McpConfiguredServer {
+  name: string; scope: "global" | "project"; state: "configured" | "disabled";
+  enabled: boolean; exposure: McpExposure; transport: "stdio" | "http";
+}
+export interface McpConfiguration { servers: McpConfiguredServer[]; errors: number }
 
 type McpAdminLog = (level: "warning", message: string, event: string, fields: Record<string, string>) => void;
 
@@ -146,7 +153,7 @@ export class McpAdminService {
   private cliEnvironment(): NodeJS.ProcessEnv {
     return { ...process.env, PI_CODING_AGENT_DIR: this.agentDir };
   }
-  async list(scope: McpScope): Promise<unknown> {
+  async list(scope: McpScope): Promise<McpListing> {
     const result = await runProcess(process.execPath, this.cliArgs(scope, ["list", "--json"]), { cwd: scope.scope === "project" ? scope.cwd : this.agentDir, timeoutMs: this.cliTimeoutMs, env: this.cliEnvironment() });
     if (result.code !== 0 && result.code !== 1) {
       this.log("warning", "Bundled MCP status listing failed", "mcp.startup.problem", { reason: "cli-failure", scope: scope.scope });
@@ -167,18 +174,37 @@ export class McpAdminService {
     }
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new GatewayError("conflict", "Bundled MCP CLI returned invalid JSON");
     const raw = parsed as { servers?: unknown; errors?: unknown };
-    const servers = Array.isArray(raw.servers) ? raw.servers.slice(0, 128).flatMap((item) => {
+    const servers = Array.isArray(raw.servers) ? raw.servers.slice(0, 128).flatMap((item): McpServerStatus[] => {
       if (!item || typeof item !== "object" || Array.isArray(item)) return [];
       const row = item as Record<string, unknown>;
       if (typeof row.name !== "string" || !/^[A-Za-z0-9._-]{1,128}$/.test(row.name)) return [];
       const strings = (value: unknown, limit: number): string[] => Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string").slice(0, limit).map(entry => entry.slice(0, 256)) : [];
-      const exposure = (EXPOSURES as readonly string[]).includes(row.exposure as string) ? row.exposure as string : "codemode";
+      const exposure = (MCP_EXPOSURES as readonly string[]).includes(row.exposure as string) ? row.exposure as string : "codemode";
       const error = typeof row.error === "string" && row.error.length > 0
         ? row.error.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "").slice(0, 2_048) : undefined;
       return [{ name: row.name, state: typeof row.state === "string" ? row.state.slice(0, 64) : "unknown", scope: row.scope === "project" ? "project" : "global", enabled: row.enabled !== false, exposure, transport: typeof row.transport === "string" ? row.transport.slice(0, 256) : "unknown", tools: strings(row.tools, 128), ...(error ? { error } : {}) }];
     }) : [];
     const errors = Array.isArray(raw.errors) ? raw.errors.length : 0;
     return { servers, errors };
+  }
+  async configured(project?: Extract<McpScope, { scope: "project" }>): Promise<McpConfiguration> {
+    const configured = loadMcpConfig({
+      agentDir: this.agentDir,
+      cwd: project?.cwd ?? this.agentDir,
+      projectTrusted: project?.trusted ?? false,
+      maxConfigBytes: MAX_CONFIG_BYTES,
+    });
+    return {
+      servers: configured.servers.map<McpConfiguredServer>(({ name, config, scope, override }) => ({
+        name,
+        scope: scope === "project" || override !== undefined ? "project" : "global",
+        state: config.enabled === false ? "disabled" : "configured",
+        enabled: config.enabled !== false,
+        exposure: config.exposure ?? "codemode",
+        transport: "url" in config ? "http" : "stdio",
+      })),
+      errors: configured.errors.length,
+    };
   }
   async mutate(scope: McpScope, operation: "add" | "remove" | "logout", args: string[], server?: string): Promise<unknown> {
     const result = await runProcess(process.execPath, this.cliArgs(scope, [operation, ...args]), { cwd: scope.scope === "project" ? scope.cwd : this.agentDir, timeoutMs: this.cliTimeoutMs, env: this.cliEnvironment() });
@@ -187,43 +213,50 @@ export class McpAdminService {
     return { reloadRequired: operation !== "logout", servers: server ? [server] : [] };
   }
   async update(scope: McpScope, server: string, patch: { enabled?: boolean; exposure?: McpExposure }): Promise<unknown> {
-    const path = this.configPath(scope);
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, '{"mcpServers":{}}\n', { flag: "wx", mode: 0o600 }).catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== "EEXIST") throw error;
-    });
-    const release = await lockfile.lock(path, { realpath: false, retries: { retries: 6, minTimeout: 20, maxTimeout: 150 } }).catch(() => undefined);
-    if (!release) throw new GatewayError("busy", "MCP configuration is being updated", true);
-    try {
-      const bytes = await readFile(path);
-      if (bytes.length > MAX_CONFIG_BYTES) throw new GatewayError("conflict", "MCP configuration exceeds its size limit");
-      const config = parseConfig(bytes.toString("utf8"));
+    await this.editConfig(scope, config => {
       const servers = config.mcpServers;
       if (!servers || typeof servers !== "object" || Array.isArray(servers)) throw new GatewayError("conflict", "MCP configuration has no valid mcpServers object");
       const entry = (servers as Record<string, unknown>)[server];
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new GatewayError("not_found", `MCP server ${server} was not found`);
-      if (patch.exposure !== undefined && !(EXPOSURES as readonly string[]).includes(patch.exposure)) throw new GatewayError("invalid_request", "MCP exposure is invalid");
+      if (patch.exposure !== undefined && !(MCP_EXPOSURES as readonly string[]).includes(patch.exposure)) throw new GatewayError("invalid_request", "MCP exposure is invalid");
       Object.assign(entry, patch);
-      const output = `${JSON.stringify(config, null, 2)}\n`;
-      if (Buffer.byteLength(output) > MAX_CONFIG_BYTES) throw new GatewayError("conflict", "Updated MCP configuration exceeds its size limit");
-      await durableAtomicWriteText(path, output);
-      return { server, reloadRequired: true, changed: Object.keys(patch) };
-    } finally { await release(); }
+      return true;
+    });
+    return { server, reloadRequired: true, changed: Object.keys(patch) };
+  }
+  async server(server: string): Promise<McpServerValue | undefined> {
+    const path = this.configPath({ scope: "global" });
+    const text = await readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return undefined;
+      throw error;
+    });
+    if (text === undefined) return undefined;
+    if (Buffer.byteLength(text) > MAX_CONFIG_BYTES) throw new GatewayError("conflict", "MCP configuration exceeds its size limit");
+    const servers = parseConfig(text).mcpServers;
+    if (servers === undefined) return undefined;
+    if (!servers || typeof servers !== "object" || Array.isArray(servers)) throw new GatewayError("conflict", "MCP configuration has no valid mcpServers object");
+    const entry = (servers as Record<string, unknown>)[server];
+    return entry === undefined ? undefined : mcpServerOnDisk(server, entry);
+  }
+  async setServer(server: string, value: McpServerValue | undefined): Promise<void> {
+    await this.editConfig({ scope: "global" }, config => {
+      const servers = config.mcpServers ?? {};
+      if (!servers || typeof servers !== "object" || Array.isArray(servers)) throw new GatewayError("conflict", "MCP configuration has no valid mcpServers object");
+      const table = servers as Record<string, unknown>;
+      const existing = table[server];
+      if (existing !== undefined) mcpServerOnDisk(server, existing);
+      if (value === undefined) {
+        if (existing === undefined) return false;
+        delete table[server];
+      } else table[server] = value;
+      config.mcpServers = table;
+      return true;
+    });
   }
   async storeBearer(scope: McpScope, server: string, token: string): Promise<unknown> {
     if (!this.credentials) throw new GatewayError("unsupported", "MCP credential storage is unavailable");
     const account = await this.credentials.store(scope, server, token);
-    const path = this.configPath(scope);
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, '{"mcpServers":{}}\n', { flag: "wx", mode: 0o600 }).catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== "EEXIST") throw error;
-    });
-    const release = await lockfile.lock(path, { realpath: false, retries: { retries: 6, minTimeout: 20, maxTimeout: 150 } }).catch(() => undefined);
-    if (!release) throw new GatewayError("busy", "MCP configuration is being updated", true);
-    try {
-      const bytes = await readFile(path);
-      if (bytes.length > MAX_CONFIG_BYTES) throw new GatewayError("conflict", "MCP configuration exceeds its size limit");
-      const config = parseConfig(bytes.toString("utf8"));
+    await this.editConfig(scope, config => {
       const servers = config.mcpServers as Record<string, unknown> | undefined;
       const entry = servers?.[server];
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new GatewayError("not_found", `MCP server ${server} was not found`);
@@ -231,10 +264,27 @@ export class McpAdminService {
       const headers = definition.headers && typeof definition.headers === "object" && !Array.isArray(definition.headers) ? definition.headers as Record<string, unknown> : {};
       headers.Authorization = `!/usr/bin/security find-generic-password -s tron.mcp -a ${account} -w | /usr/bin/sed 's/^/Bearer /'`;
       definition.headers = headers;
+      return true;
+    });
+    return { server, stored: true };
+  }
+
+  private async editConfig(scope: McpScope, edit: (config: Record<string, unknown>) => boolean): Promise<void> {
+    const path = this.configPath(scope);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, '{"mcpServers":{}}\n', { flag: "wx", mode: 0o600 }).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== "EEXIST") throw error;
+    });
+    const release = await lockfile.lock(path, { realpath: false, retries: { retries: 6, minTimeout: 20, maxTimeout: 150 } }).catch(() => undefined);
+    if (!release) throw new GatewayError("busy", "MCP configuration is being updated", true);
+    try {
+      const bytes = await readFile(path);
+      if (bytes.length > MAX_CONFIG_BYTES) throw new GatewayError("conflict", "MCP configuration exceeds its size limit");
+      const config = parseConfig(bytes.toString("utf8"));
+      if (!edit(config)) return;
       const output = `${JSON.stringify(config, null, 2)}\n`;
       if (Buffer.byteLength(output) > MAX_CONFIG_BYTES) throw new GatewayError("conflict", "Updated MCP configuration exceeds its size limit");
       await durableAtomicWriteText(path, output);
     } finally { await release(); }
-    return { server, stored: true };
   }
 }

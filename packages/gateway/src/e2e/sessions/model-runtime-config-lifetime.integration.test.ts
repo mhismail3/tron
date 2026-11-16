@@ -47,3 +47,54 @@ it("keeps real Gateway readiness behind an older registration config read before
   const ready = await pendingFixture;
   expect((await ready.registry.acquire(ready.home.sessionId)).snapshot().configurationBlocker).toBeNull();
 });
+
+it("settles a registration refresh still in flight before the fixture root is removed", async () => {
+  const ready = await fixture();
+  const entered = Promise.withResolvers<void>();
+  const held = Promise.withResolvers<void>();
+  const actualRm = fsPromises.rm;
+  const inFlight = new Set<Promise<unknown>>();
+  const refresh = ready.gateway.refresh;
+  let armed = true;
+  ready.gateway.refresh = function (this: typeof ready.gateway, ...args: Parameters<typeof refresh>) {
+    const gated = armed;
+    armed = false;
+    if (gated) entered.resolve();
+    const running = (gated ? held.promise : Promise.resolve()).then(() => Reflect.apply(refresh, this, args) as ReturnType<typeof refresh>);
+    inFlight.add(running);
+    void running.finally(() => inFlight.delete(running)).catch(() => {});
+    return running;
+  };
+  const settle = ready.gateway.settleCredentialWrites;
+  ready.gateway.settleCredentialWrites = function (this: typeof ready.gateway) {
+    const settling = Reflect.apply(settle, this, []) as Promise<void>;
+    void Promise.race([settling.then(() => "settled"), new Promise(resolve => setImmediate(() => resolve("waiting")))])
+      .then(state => { if (state === "waiting") held.resolve(); });
+    return settling;
+  };
+  let pendingAtRemoval: number | undefined;
+  fsPromises.rm = (async (...args: Parameters<typeof actualRm>) => {
+    if (String(args[0]) === ready.root) {
+      pendingAtRemoval = inFlight.size;
+      held.resolve();
+    }
+    return await actualRm(...args);
+  }) as typeof fsPromises.rm;
+  syncBuiltinESMExports();
+  const registry = ready.registry as unknown as { slots: Map<string, unknown>; retireIdleRuntime(input: unknown): Promise<boolean> };
+  for (const [sessionId, slot] of [...registry.slots]) {
+    expect(await registry.retireIdleRuntime({ sessionId, slot, reason: "idle", eligible: () => true })).toBe(true);
+  }
+  expect(registry.slots.size).toBe(0);
+  try {
+    ready.gateway.registerVirtualModel({ provider: ready.model.provider, id: "late-registration", name: "Late registration",
+      route: () => ({ model: ready.model, thinkingLevel: "off" }) });
+    await entered.promise;
+    await disposeFixtures();
+  } finally {
+    held.resolve();
+    fsPromises.rm = actualRm;
+    syncBuiltinESMExports();
+  }
+  expect(pendingAtRemoval).toBe(0);
+});

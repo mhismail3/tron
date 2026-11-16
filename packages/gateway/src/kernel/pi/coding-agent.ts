@@ -21,6 +21,7 @@ export {
   getShellConfig,
   hasTrustRequiringProjectResources,
   initTheme,
+  loadMcpConfig,
   loadProjectContextFiles,
   loadSkills,
   ModelRuntime,

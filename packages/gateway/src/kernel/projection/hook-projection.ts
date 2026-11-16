@@ -25,8 +25,13 @@ const MAX_HOOK_STRING_CHARACTERS = 16 * 1_024;
 const MAX_HOOK_PROJECTION_BYTES = 256 * 1_024;
 const GENERIC_RESOURCE_ARRAY_LIMIT = 1_000;
 
+export interface HookExtensionRow {
+  name: string; path: string; resolvedPath: string; scope: string; source: string; origin: string;
+  tools: string[]; commands: string[]; handlers: Array<{ event: string; count: number }>;
+}
+
 export interface HookRegistrationProjection {
-  extensions: Array<Record<string, unknown>>;
+  extensions: HookExtensionRow[];
   extensionLoadErrors: Array<{ path: string; error: string }>;
   extensionLoadWarnings: Array<{ path: string; warning: string }>;
   hookInventory: {
@@ -45,8 +50,7 @@ export function projectHookRegistrations(
   loadErrors: readonly HookProjectionLoadError[],
   warnings: readonly HookProjectionWarning[] = [],
 ): HookRegistrationProjection {
-  type Row = { name: string; path: string; resolvedPath: string; scope: string; source: string; origin: string;
-    tools: string[]; commands: string[]; handlers: Array<{ event: string; count: number }> };
+  type Row = HookExtensionRow;
   const admitted: Array<{ source: HookProjectionExtension; row: Row }> = [];
   const extensionLoadErrors: Array<{ path: string; error: string }> = [];
   const bytes = (value: unknown): number => Buffer.byteLength(JSON.stringify(value));
