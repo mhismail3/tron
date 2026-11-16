@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { DefaultResourceLoader, SettingsManager, type Extension } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import type { TrustService } from "../kernel/resources/trust-service.js";
-import { piBuiltinExtensions } from "../kernel/host/pi-builtins.js";
+import { piBuiltinExtensions, managedBrowserExtensions } from "../kernel/host/pi-builtins.js";
 
 export interface SessionFreeExtensionLoad {
   extensions: Extension[];
@@ -35,7 +35,7 @@ export async function loadSessionFreeExtensions(
     settingsManager: settings,
     ...(managedOptions ?? {}),
     extensionsOverride: (base) => attributeExtensions(base, undefined, managedSubagents ? { managedSubagents } : {}),
-    extensionFactories: [...(managedOptions?.extensionFactories ?? []), ...piBuiltinExtensions(agentDir)],
+    extensionFactories: [...(managedOptions?.extensionFactories ?? []), ...piBuiltinExtensions(agentDir), ...managedBrowserExtensions(agentDir, settings)],
   });
   await loader.reload({
     resolveProjectTrust: async () => inspection === undefined

@@ -33,6 +33,7 @@ Approvals list. Neither is applied automatically.
 | Fork | Pin | Current patch form |
 | --- | --- | --- |
 | `pi-coding-agent` | `pi-coding-agent-patch.json` (`removeWhen`) | one numbered `third_party/pi-coding-agent/tron.patch`; queue form at its next bump |
+| `pi-agent-browser-native` | `pi-agent-browser-native-patch.json` | ownership admission over the exact native commit; no separate fork or loader |
 | `pi-subagents` | `pi-subagents-pin.json` | fork commits on v0.76.1, each with tests and a drop condition in TRON-PATCHES.md in the fork; queue form at its next bump |
 
 ## Version authority and checks
@@ -125,7 +126,7 @@ tarball, the patched pack the committed SHA-512; `--upstream <path>`, `--write` 
 deliberate change). A patch that changes the upstream root `package-lock.json` is reinstalled
 from it before the patched build. When a release ships the APIs (`removeWhen`), remove in one change: restore
 the exact release version, delete the declaration, `third_party/pi-coding-agent/`,
-`packages/gateway/scripts/build-pi-coding-agent-patch.mjs` and its script, drop it from
+its SDK reproduction script (retain the shared builder while the native browser pin uses it), drop the SDK pin/artifact from
 `packages/mac-app/scripts/stage-gateway-app.sh` and `BUILD_INPUT_FILES` in
 `scripts/gateway-install-inputs.mjs`, then `npm install` and `update:pi-sdk`.
 
@@ -136,6 +137,42 @@ use that same assembler. `agent-instructions.integration.test.ts` proves preserv
 input-wording stability through the real slot. The pinned browser package already registers
 its guidance as an unconditional `agent_browser` section; the old installed package's
 prompt-keyword handler is not part of that pin.
+
+## Managed native browser artifact
+
+`pi-agent-browser-native-patch.json` binds the native commit, patch SHA-256, exact
+Node/npm toolchain and packed SHA-512. The production file dependency and all Gateway
+browser journeys consume that artifact; no upstream-only fixture is provisioned.
+The existing builder also reproduces this carrier:
+
+```bash
+scripts/tron-node exec node packages/gateway/scripts/build-pi-coding-agent-patch.mjs \\
+  --pin pi-agent-browser-native-patch.json
+```
+
+`--upstream <checkout>` selects a local source, not a different revision; `--write`
+is only for an intentional pin update. Zero-context native patches avoid treating
+patch context as source whitespace; application still requires the exact pinned base.
+Mac payload staging carries both patch pins and their confined artifacts. The native
+engine dependency is pinned to 0.42.0 and resolved from the managed package, never PATH.
+
+The nonreplaceable `builtin:agent-browser` registration supplies the owned persistent
+profile and engine executable. Native alone owns launch/restore/CDP admission and
+checks listener PID, process birth, profile argv and issued launch nonce. Generic
+`connect` accepts recorded native Electron and isolated external-producer launches;
+`owned-launch prepare|record|cleanup` gives those producers receipts without a second
+launcher. Personal profiles, state imports and cookie/profile copying are unavailable;
+existing personal-Chrome logins do not transfer. New owned-profile logins persist across browser
+and Gateway restarts: the owned browser always launches under its profile-bound root session with
+native restore, saving cookie and storage state under the private browser HOME
+(`<agent dir>/browser/home/.agent-browser/sessions/`, below 0700 directories). Trade-off: session
+cookies now outlive browser close, so a session-only login lasts until the site expires it or the
+saved state is removed, rather than ending when the browser quits.
+Only a user-scope declaration of `pi-agent-browser-native` (npm or its GitHub fork source)
+enables the browser: `managedBrowserEnabled` then registers the managed builtin for ordinary
+sessions, Home (`builtin:agent-browser`) and the admin catalog. The declared source itself is
+never loaded and cannot register the reserved browser tool names. Without the declaration no
+session registers `agent_browser`, and the builtin's artifact checks never run.
 
 ## Signals
 

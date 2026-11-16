@@ -7,19 +7,9 @@ import { pngSize, run } from "./process.mjs";
 
 const BINARY = process.env.COMPUTER_BENCH_AGENT_BROWSER ?? join(homedir(), ".tron/agent/bin/agent-browser");
 
-class OwnerConsentRequiredError extends Error {
-  constructor() {
-    super("needs owner consent: owner consent required for each new connection; prompt visibility not observed");
-    this.name = "OwnerConsentRequiredError";
-    this.code = "owner_consent_required";
-  }
-}
-
-export function agentBrowser({ chromeCdp, reps = 1 } = {}) {
+export function agentBrowser() {
   const session = `cb2476-${process.pid}`;
   const profileSession = `${session}-profile`;
-  const attachedSession = `${session}-attach`;
-  let attached = false;
   let profile;
 
   async function call(args, { sessionName = session, timeoutMs = 30_000, global = [] } = {}) {
@@ -48,7 +38,6 @@ export function agentBrowser({ chromeCdp, reps = 1 } = {}) {
     async teardown() {
       await call(["close"]).catch(() => {});
       await call(["close"], { sessionName: profileSession }).catch(() => {});
-      if (attached) await call(["close"], { sessionName: attachedSession });
     },
     tasks: {
       async navigate(ctx) { await openForm(ctx); const title = await value(["get", "title"]); return { ok: title === "Bench Form", detail: title }; },
@@ -125,62 +114,6 @@ export function agentBrowser({ chromeCdp, reps = 1 } = {}) {
         await call(["wait", "--url", "**/callback*"]);
         const text = await value(["get", "text", "#result"]);
         return { ok: text === `code=bench-code state=${state}`, detail: text };
-      },
-      async "signed-in-chrome"(ctx) {
-        if (!chromeCdp) return { ok: false, detail: "consent_required: pass --chrome-cdp with the explicitly consented loopback browser endpoint; no attach attempted" };
-        let endpoint;
-        try { endpoint = new URL(chromeCdp); } catch { throw new Error("invalid Chrome CDP endpoint"); }
-        if (endpoint.href !== chromeCdp || endpoint.protocol !== "ws:" || !["127.0.0.1", "[::1]"].includes(endpoint.hostname)
-          || !endpoint.port || endpoint.username || endpoint.password || endpoint.search || endpoint.hash
-          || !/^\/devtools\/browser(?:\/[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12})?$/iu.test(endpoint.pathname)) throw new Error("Chrome CDP endpoint must be an exact loopback browser endpoint without credentials");
-        const options = { sessionName: attachedSession };
-        const started = performance.now();
-        if (endpoint.pathname === "/devtools/browser") {
-          const response = await fetch(`http://${endpoint.host}/json/version`, { redirect: "error", signal: AbortSignal.timeout(2_000) });
-          await response.body?.cancel();
-          if (response.status === 404) throw new OwnerConsentRequiredError();
-        }
-        attached = true;
-        let attachMs;
-        let verifiedEndpoint = false;
-        let outcome;
-        const errors = [];
-        const fixtureURLs = ["login", "fact"].map(path => `${ctx.site.origin}${ctx.site.authPath}/${path}`);
-        try {
-          await call(["connect", chromeCdp], { ...options, timeoutMs: 2_000 });
-          attachMs = Math.round(performance.now() - started);
-          const connection = await call(["get", "cdp-url"], options);
-          if (connection.cdpUrl !== chromeCdp) throw new Error("Attached browser endpoint changed; refusing fixture operation");
-          verifiedEndpoint = true;
-          const opened = await call(["tab", "new", fixtureURLs[ctx.rep === 0 ? 0 : 1]], options);
-          if (typeof opened.tabId !== "string" || !opened.tabId.length) throw new Error("Fixture tab identity unavailable; open outcome uncertain");
-          const title = await value(["get", "title"], options);
-          const fact = title === "Bench Authenticated" ? await value(["get", "text", "#authenticated-fact"], options) : "";
-          const authenticated = title === "Bench Authenticated" && fact === ctx.site.authNonce;
-          outcome = { ok: authenticated && attachMs <= 2_000, attachMs,
-            detail: `fixture authentication=${authenticated ? "verified" : "failed"}; session=${authenticated ? (ctx.rep === 0 ? "seeded" : "retained across detach") : "unverified"}; attach=${attachMs}ms` };
-        } catch (error) { errors.push(error); }
-        if (verifiedEndpoint) {
-          try {
-            const listed = await call(["tab", "list"], options);
-            const tabs = Object.values(listed).find(Array.isArray);
-            if (!tabs) throw new Error("Fixture cleanup tab enumeration unavailable");
-            for (const tab of tabs.filter(tab => fixtureURLs.includes(tab.url))) {
-              const id = tab.tabId ?? tab.id;
-              if (typeof id !== "string" || !id.length) { errors.push(new Error("Fixture cleanup tab identity unavailable")); continue; }
-              try { await call(["tab", "close", id], options); } catch (error) { errors.push(error); }
-            }
-          } catch (error) { errors.push(error); }
-          if (ctx.rep === reps - 1 || errors.length || !outcome?.ok) {
-            try {
-              await call(["cookies", "set", "bench_attach", "", "--domain", new URL(ctx.site.origin).hostname,
-                "--path", `${ctx.site.authPath}/`, "--httpOnly", "--sameSite", "Strict", "--expires", "1"], options);
-            } catch (error) { errors.push(error); }
-          }
-        }
-        try { await call(["close"], options); attached = false; } catch (error) { errors.push(error); }
-        if (errors.length) throw new AggregateError(errors, errors.map(error => error.message).join("; "));
-        return { ...outcome, detail: `${outcome.detail}; fixture tab cleanup and detach completed` };
       },
     },
   };
