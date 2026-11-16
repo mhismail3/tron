@@ -223,7 +223,8 @@ def claims(runs: list[dict], known: set[str]) -> list[dict]:
                 data = max(reports[commit], key=lambda report: report.get("endedAt") or "")
                 found.append({"kind": "claim", "landing": entry["landing"], "commit": commit, "verdict": data["verdict"],
                               "message": data.get("message", "")[:400], "report": data["path"],
-                              "failedSteps": [item["name"] for item in data.get("steps", []) if item["status"] == "failed"]})
+                              "failedSteps": [item["name"] for item in data.get("steps", []) if item["status"] == "failed"],
+                              "failedTests": [test for item in data.get("steps", []) for test in item.get("failedTests", [])]})
                 break
     return found
 
@@ -260,6 +261,9 @@ def show(mini: bool) -> int:
                 print(f"    red: {name}")
             for test in row["failedTests"]:
                 print(f"    failed: {test}")
+        if claim and claim["verdict"] != "passed":
+            for test in claim["failedTests"] or claim["failedSteps"]:
+                print(f"    claim red: {test}")
     days: dict[str, list[int]] = {}
     for row in runs:
         days.setdefault(row["landedAt"][:10], []).append(row["verdict"] == "failed")

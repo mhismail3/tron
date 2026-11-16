@@ -43,7 +43,7 @@ One JSON object per line, never rewritten.
   `verdict` (`passed`, `failed` or `no result`), `reason`, `tiers` (`"0"`, `"1"`, `"2"`: `verdict`, `seconds`,
   `failedSteps`, `skippedSteps`) and `failedTests` (`lane: test` from the mini's per-test ledger for that commit and run).
 - `claim`: the landing's own `verify --changed` report, found in this Mac's checkouts for a commit of the landed branch
-  (`landing^1..landing^2`, newest first): `commit`, `verdict`, `message`, `failedSteps`, `report`.
+  (`landing^1..landing^2`, newest first): `commit`, `verdict`, `message`, `failedSteps`, `failedTests`, `report`.
 
 ```bash
 scripts/tron queue ledger --mini   # this Mac: record new claims on the mini's ledger, then print it
