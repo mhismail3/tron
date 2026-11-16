@@ -1,6 +1,6 @@
 ---
 name: tron-workspace-housekeeping
-description: Audit and safely clean up merged or obsolete Tron branches, inactive worktrees, and stale Git metadata. Preserve active work, unmerged commits, and owner-managed resources.
+description: Audit or clean merged branches, inactive worktrees and stale Git metadata; preserve active work, unmerged commits and owned resources.
 ---
 
 # Tron workspace housekeeping

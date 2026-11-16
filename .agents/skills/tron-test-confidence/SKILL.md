@@ -1,6 +1,6 @@
 ---
 name: tron-test-confidence
-description: Judge whether an integration or E2E test proves its behavior, clean up tests that cannot fail for the right reason, and diagnose timing or lifecycle flakes at real boundaries. Use for test cleanup, flaky runs, and coverage claims.
+description: Assess E2E/integration coverage, groom tests and diagnose timing or lifecycle flakes at real boundaries; require tests to fail for the right reason.
 ---
 
 # Test confidence
