@@ -37,7 +37,7 @@ WIDENING_LAYERS = {"L0", "L1", "L2"}
 WIDENING_MODULES = {"gateway/package", "gateway/test-support", "gateway/pi-sdk"}
 NAMED_LOCKS = {f"{GATEWAY}/src/e2e/sessions/sdk-behavior-trace.integration.test.ts",
                f"{GATEWAY}/src/e2e/sessions/pi-persisted-state-corpus.integration.test.ts"}
-SKIPPABLE = ("ios", "mac", "relay")
+SKIPPABLE = ("ios", "mac", "relay", "python-here")
 IOS = "packages/ios-app"
 IOS_TARGETS = {"UITests": "TronMobileUITests", "SwiftAppUITests": "TronSwiftAppUITests"}
 IOS_HARNESSED = {"RealGatewayPairAndChatUITests": "scripts/ios-gateway-e2e-test",
@@ -818,7 +818,11 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
     batch_tests: set[str] = set()
     deferred: set[str] = set()
     full_reasons: list[str] = []
-    if mode == "all":
+    if mode == "full":
+        selected |= set(tests)
+        reasons.append(f"--full: every test file ({len(tests)} files)")
+        touched, chosen, declared = ["(all)"], set(modules), set(modules)
+    elif mode == "all":
         selected |= set(locks)
         reasons.append(f"--all: every lock ({len(locks)} files)")
         touched, chosen = ["(all)"], set()
@@ -953,8 +957,8 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
             for command in module.get("verify", []):
                 batch_tests |= declared_files(command, tracked)
     docs_only = mode == "changed" and len(docs) == len(touched)
-    doc_inputs = mode == "all" or any(is_doc(path) or path.endswith(".module.json") for path in touched)
-    tier = "none" if docs_only else "full" if mode == "all" or full_reasons else "partial"
+    doc_inputs = mode in ("all", "full") or any(is_doc(path) or path.endswith(".module.json") for path in touched)
+    tier = "none" if docs_only else "full" if mode in ("all", "full") or full_reasons else "partial"
     return {"mode": mode, "base": base, "modules": sorted(chosen), "touched": len(touched), "paths": touched,
             "tier": tier, "fullReasons": full_reasons, "batchTests": sorted(batch_tests), "deferredTests": sorted(deferred), "reasons": reasons,
             "tests": sorted(selected), "docsOnly": docs_only, "docInputs": doc_inputs}
@@ -1303,6 +1307,7 @@ def main(argv: list[str]) -> int:
     mode.add_argument("--changed", action="store_true")
     mode.add_argument("--module", metavar="ID")
     mode.add_argument("--all", action="store_true")
+    mode.add_argument("--full", action="store_true", help="every test file in every group: the shadow queue's suite")
     mode.add_argument("--hunt", action="store_true", help="repeat mini suites on unchanged origin/main; --hunt --help for bounds")
     mode.add_argument("--update-locks", metavar="ID")
     parser.add_argument("--base", default="origin/main")
@@ -1327,7 +1332,7 @@ def main(argv: list[str]) -> int:
     skip = {item for item in args.skip.split(",") if item}
     if skip - set(SKIPPABLE):
         parser.error(f"--skip accepts only {', '.join(SKIPPABLE)}")
-    name = "all" if args.all else "module" if args.module else "update-locks" if args.update_locks else "changed"
+    name = "all" if args.all else "full" if args.full else "module" if args.module else "update-locks" if args.update_locks else "changed"
     try:
         if not args.plan and git("status", "--porcelain", "--untracked-files=normal").strip():
             raise VerifyError("the worktree has uncommitted or untracked changes; verify reads the committed state, commit first")
@@ -1364,7 +1369,8 @@ def main(argv: list[str]) -> int:
     except VerifyError as error:
         print(f"verify: {error}", file=sys.stderr)
         return 2
-    skipped_group = lambda group: group.split("-")[0] in skip  # noqa: E731  (--skip ios covers ios-lanes)
+    def skipped_group(group: str) -> bool:
+        return group in skip or group.split("-")[0] in skip
     ios_lane = "ios" not in skip and ((name == "all" and any(key.startswith("ios-app/") for key in modules)) or "ios" in groups or any(group in owner_jobs for group in groups) or (
         name == "changed" and any(key.startswith("ios-app/") and key != "ios-app/e2e-tests" for key in selection["modules"])))
     host_bound = sorted(group for group in ("python-here", "mac-terminal") if group in groups and not skipped_group(group))
@@ -1391,7 +1397,7 @@ def main(argv: list[str]) -> int:
     print(f"verify --{name}{' ' + (args.module or args.update_locks) if args.module or args.update_locks else ''} at {sha[:12]}"
           f" (base {base[:12]}): {len(selection['tests'])} test file(s) selected", flush=True)
     print(f"  tier: {selection['tier']} — affected checks now" + (
-        "; full coverage deferred to explicit verify --batch after landing" if selection["tier"] == "full" and name != "all" else ""), flush=True)
+        "; full coverage deferred to explicit verify --batch after landing" if selection["tier"] == "full" and name not in ("all", "full") else ""), flush=True)
     for reason in selection["reasons"]:
         print(f"  why: {reason}", flush=True)
     if change:
@@ -1578,7 +1584,7 @@ def main(argv: list[str]) -> int:
                 continue
             label = f"tests: {group}"
             if skipped_group(group):
-                run.skipped(label, f"{len(files)} file(s) skipped by --skip {group.split('-')[0]}")
+                run.skipped(label, f"{len(files)} file(s) skipped by --skip {group if group in skip else group.split('-')[0]}")
                 continue
             if group in NOT_DRIVEN:
                 not_run.append(group)

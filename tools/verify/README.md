@@ -3,7 +3,7 @@
 `scripts/tron verify` runs the fast affected checks before merge; `verify --batch` runs full
 coverage asynchronously on landed main and causally reverts a proven culprit. The manifests (owners, `verify`
 declarations and `dynamicEdges`) are the selection authority. No merge queue, landing gate or hosted
-CI is involved ([principles P2](../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-batch-signal-not-a-commit-gate)). A previous test pass never substitutes for
+CI is involved; the [shadow queue](queue.md) records `--full` on every landing and gates nothing ([principles P2](../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-batch-signal-not-a-commit-gate)). A previous test pass never substitutes for
 this change's affected checks; only stamped build products are reused. See the
 [oracle policy](test-oracles.md).
 
@@ -13,6 +13,7 @@ scripts/tron verify --plan                     # tier, paths, reasons and exact 
 scripts/tron verify --changed [--base <ref>]   # explicit diff selection, also used by mutation sampling
 scripts/tron verify --module <id>               # scoped baseline: owner tests + declarations + launching UI locks
 scripts/tron verify --all                       # all locks + serial files deferred by this base..HEAD diff
+scripts/tron verify --full --base <ref>         # every test file in every group: the shadow queue's suite
 scripts/tron verify --batch --base <main-anchor> # initialize coverage in a clean linked worktree (git worktree add --detach <path> origin/main)
 scripts/tron verify --batch [--repeat] [--plan] # next pinned batch, or rerun every lane at the green HEAD
 scripts/tron verify --batch --review <culprit> --decision ACCEPT|BLOCK --reviewer <id> --binding <digest>
@@ -21,6 +22,7 @@ scripts/tron verify ... --gateway-host mini --ios-host mini # Tron heavy checks:
 scripts/tron test ios checkpoint --only-testing TronMobileUITests/<Class>/<method> # mini by default, build then selected tests
 scripts/tron verify ... --ios-jobs 3             # more simulator lanes (1|2|3; default 1), only when the brief permits
 scripts/tron verify ... --skip ios,mac,relay    # accept, explicitly, selections this run will not run
+scripts/tron verify ... --skip python-here           # only that host-bound group (python still runs)
 scripts/tron verify ... --gateway-host local    # override the test-host pool: run the Gateway Vitest lanes here
 ```
 
