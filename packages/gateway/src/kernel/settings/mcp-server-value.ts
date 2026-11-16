@@ -7,16 +7,24 @@ import type { ValueType } from "./settings-types.js";
 export const MCP_EXPOSURES = ["codemode", "codemode-deferred", "deferred", "direct", "hidden"] as const;
 export type McpExposure = typeof MCP_EXPOSURES[number];
 
+export interface McpBearerReference { source: "keychain"; service: "tron.mcp"; account: string; format: "bearer" }
+
 export interface McpServerValue {
   command?: string;
   args?: string[];
   url?: string;
+  description?: string;
+  headers?: { Authorization: McpBearerReference };
   enabled?: boolean;
   exposure?: McpExposure;
 }
 
-const FIELDS = ["command", "args", "url", "enabled", "exposure"] as const;
-const MCP_HINT = "MCP secrets are set in mcp.json or the app, never through settings";
+export function mcpBearerReference(server: string): McpBearerReference {
+  return { source: "keychain", service: "tron.mcp", account: `tron-mcp-${server}`, format: "bearer" };
+}
+
+const FIELDS = ["command", "args", "url", "description", "headers", "enabled", "exposure"] as const;
+const MCP_HINT = "MCP secrets are set in mcp.json, or as a bearer token stored in the Keychain by the app, never through settings";
 
 function secretFreeText(text: string, label: string, what: string): string {
   return checkedText(text, label, what, MCP_HINT);
@@ -33,11 +41,22 @@ function secretFreeUrl(value: string, label: string): string {
   return checkedUrl(value, label, MCP_HINT);
 }
 
-function validateMcpServerValue(value: unknown, label: string): McpServerValue {
+function bearerHeaders(raw: unknown, label: string, server: string | undefined): NonNullable<McpServerValue["headers"]> {
+  const headers = object(raw, `${label}.headers`);
+  const reference = headers.Authorization;
+  const expected = mcpBearerReference(server ?? "");
+  if (Object.keys(headers).length !== 1 || !reference || typeof reference !== "object" || Array.isArray(reference)
+    || JSON.stringify(Object.entries(reference).sort()) !== JSON.stringify(Object.entries(expected).sort())) {
+    refuse(label, `headers hold only this server's Keychain bearer reference; ${MCP_HINT}`);
+  }
+  return { Authorization: expected };
+}
+
+function validateMcpServerValue(value: unknown, label: string, server?: string): McpServerValue {
   const raw = object(value, label);
   for (const name of Object.keys(raw)) {
     if (!(FIELDS as readonly string[]).includes(name)) {
-      refuse(label, `field ${name} is not an MCP setting here; secrets (env, headers, oauth, tokens) and other fields are set in mcp.json or the app`);
+      refuse(label, `field ${name} is not an MCP setting here; secrets (env, oauth) and other fields are set in mcp.json`);
     }
   }
   const hasCommand = raw.command !== undefined;
@@ -52,7 +71,10 @@ function validateMcpServerValue(value: unknown, label: string): McpServerValue {
   } else {
     if (raw.args !== undefined) refuse(label, "args apply only to a command");
     result.url = secretFreeUrl(string(raw.url, `${label}.url`, { min: 1, max: 4_096 }), label);
+    if (raw.headers !== undefined) result.headers = bearerHeaders(raw.headers, label, server);
   }
+  if (raw.headers !== undefined && result.headers === undefined) refuse(label, "headers apply only to a url");
+  if (raw.description !== undefined) result.description = secretFreeText(string(raw.description, `${label}.description`, { min: 1, max: 1_024 }), label, "description");
   if (raw.enabled !== undefined) result.enabled = boolean(raw.enabled, `${label}.enabled`);
   if (raw.exposure !== undefined) result.exposure = oneOf(raw.exposure, `${label}.exposure`, MCP_EXPOSURES);
   return result;
@@ -60,10 +82,10 @@ function validateMcpServerValue(value: unknown, label: string): McpServerValue {
 
 export function mcpServerOnDisk(server: string, raw: unknown): McpServerValue {
   try {
-    return validateMcpServerValue(raw, `MCP server ${server}`);
+    return validateMcpServerValue(raw, `MCP server ${server}`, server);
   } catch (error) {
     const reason = error instanceof Error ? error.message.replace(/^MCP server \S+ /u, "") : "cannot be read";
-    throw new GatewayError("conflict", `MCP server ${server} cannot be changed here: its configuration ${reason}; edit mcp.json or use the app`);
+    throw new GatewayError("conflict", `MCP server ${server} cannot be changed here: its configuration ${reason}; edit mcp.json`);
   }
 }
 
@@ -79,16 +101,17 @@ export function mcpServerDirection(before: unknown, after: unknown): Direction {
   const was = before as McpServerValue;
   const now = after as McpServerValue;
   if (JSON.stringify([was.command, was.args ?? [], was.url]) !== JSON.stringify([now.command, now.args ?? [], now.url])) return "widen";
+  if (now.headers && !was.headers) return "widen";
   return visibility(now) > visibility(was) ? "widen" : "narrow";
 }
 
 export const mcpServerType: ValueType = {
   kind: "mcpServer",
-  validate: validateMcpServerValue,
+  validate: (value, label, context) => validateMcpServerValue(value, label, context?.instance),
   format: value => {
     const server = value as McpServerValue;
     const launch = server.command !== undefined ? [server.command, ...(server.args ?? [])].join(" ") : server.url!;
-    return [launch, server.enabled === false ? "disabled" : undefined, server.exposure ? `exposure ${server.exposure}` : undefined]
+    return [launch, server.headers ? "Keychain bearer token" : undefined, server.enabled === false ? "disabled" : undefined, server.exposure ? `exposure ${server.exposure}` : undefined]
       .filter(Boolean).join(", ");
   },
 };

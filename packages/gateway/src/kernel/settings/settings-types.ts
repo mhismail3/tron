@@ -102,6 +102,7 @@ export interface FormatContext {
 
 export interface ValidateContext {
   admitModel(ref: ModelRefValue, options?: { physical?: boolean }): Promise<void>;
+  instance?: string;
 }
 
 export interface ValueType {

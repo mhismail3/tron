@@ -10,11 +10,15 @@ trust decision for that root admits it. Its stdio servers start in the root. Ses
 `mcp`, `codemode`, and `tool-search` factories from the same Gateway-owned list.
 MCP logs remain under the Pi agent directory; OAuth credentials are managed by
 Pi's built-in credential store. Static bearer tokens entered through Tron are
-stored by the Mac Keychain owner, with only a `!command` lookup reference in
-`mcp.json`; their values never enter RPC results. The command resolves the
-complete `Bearer <token>` header value. This design has an accepted local-user
-residual risk: any process running as the macOS user can invoke `/usr/bin/security`
-to read a stored bearer token without a prompt. Keychain storage protects the
+stored by the Mac Keychain owner (service `tron.mcp`, account `tron-mcp-<server>`),
+with only Pi's Keychain credential reference
+(`{"source":"keychain","service":"tron.mcp","account":"tron-mcp-<server>","format":"bearer"}`)
+as the server's `Authorization` header in `mcp.json`; Pi resolves it with direct
+`/usr/bin/security` arguments at connection, and the value never enters RPC results,
+settings or audit. Removing a server keeps its Keychain item, so Undo restores a
+working server; adding the same name again reuses or replaces it. This design has an
+accepted local-user residual risk: any process running as the macOS user can invoke
+`/usr/bin/security` to read a stored bearer token without a prompt. Keychain storage protects the
 secret from files and projections, not from other processes running as that user.
 Each loaded runtime maintains its own MCP connections, including one stdio server process per configured
 active stdio server in that runtime; this is not a process shared across session
@@ -75,18 +79,17 @@ accepts Pi's valid JSON output for CLI exit codes 0 and 1 (the latter reports un
 wire shape: at most 128 servers, each with `name`, `state`, `scope`, `enabled`,
 `exposure`, `transport`, at most 128 tool names, and an optional bounded `error`.
 Each string is capped at 256 characters (except `state`, capped at 64); `error`
-is stripped of control bytes and capped at 2,048 characters. Filesystem `source`
-paths are not exposed. Every bundled-CLI run the admin service makes (status, add, remove) binds
+is stripped of control bytes and capped at 2,048 characters. A global row also carries
+`value`, the server's `tools.mcp.server` settings value, when the change path can carry
+its configuration. Filesystem `source`
+paths are not exposed. Every bundled-CLI run the admin service makes (status, sign-out) binds
 `PI_CODING_AGENT_DIR` to the Gateway's agent directory at spawn, so the ambient process environment
 never selects which `mcp.json` or trust store a status read or mutation touches. Top-level `errors` is a count, not a copy of Pi diagnostic
 objects. The captured pinned CLI payload fixture and startup/config behavior are
-covered by `src/admin/mcp-admin-service.integration.test.ts`, which proves the `!command`
-header reference through Pi's own CLI against a loopback server that records the
-`Authorization` it receives. Scoped removal also runs the bundled CLI against real
-global/project configuration files and a private filesystem credential backend:
-only the selected server and credential retire, while the other scope and
-neighboring servers remain unchanged. This does not access or qualify the host
-Keychain parser; its quoting contract remains separately guarded. Sign-in relay outcomes and callback safety are
+covered by `src/admin/mcp-admin-service.integration.test.ts`, which proves Pi's own
+loader accepts the written Keychain reference. It does not access the host Keychain;
+Keychain resolution is proven by the pinned SDK's credential-reference tests, and the
+store command's quoting contract is guarded separately. Sign-in relay outcomes and callback safety are
 covered by `src/admin/auth-broker.integration.test.ts`, and the local OAuth fixture in
 `src/e2e/admin/mcp-auth-session.integration.test.ts` drives Pi's own PKCE S256
 challenge, dynamic client registration, loopback callback relay, token
@@ -112,16 +115,19 @@ while any server is unhealthy and its JSON is still projected. Rows are
 `{ name, state, scope, enabled, exposure, transport, tools, error? }` with Pi's
 `state` values; Pi's `source` path stays on the Mac and `error` is bounded to 2 KiB.
 
-`mcp.add`, `mcp.remove`, `mcp.logout`, `mcp.update` and `mcp.token.set` take a
-`commandId` and use the command receipt store. Add and remove need `/reload` or a new
-session; sign-out and new credentials apply at a running session's next turn.
-`mcp.update` patches only `enabled` and `exposure` in the scope's `mcp.json` under a
-file lock, keeping every other key and failing closed on malformed or oversized
-files. Project scope is the Project root (`TrustInspection.projectDir`), not the
-chat's subdirectory. `mcp.token.set` stores the bearer through the host Keychain owner
-and writes only a `!command` reference; token values are never returned or logged.
+Servers are added, changed and removed only through `settings.change` on
+`tools.mcp.server` at the Global layer ([settings contract](settings-contract.md));
+the app previews the change and shows the shared change card when it taps (adding,
+enabling, a new command, address or bearer reference, or wider visibility).
+Repository `.pi/mcp.json` is read-only. `mcp.logout { server }` and
+`mcp.token.set { server, token }` take a `commandId` and use the command receipt store;
+sign-out applies at a running session's next turn. `mcp.token.set` stores the token
+through the Keychain owner, writes no configuration and returns `{ server, reference }`;
+the app then sets that reference through `settings.change`. Rotating the token of a
+server that already holds its reference needs no settings change. Token values are
+never returned or logged.
 
-Every change to an `mcp.json`, by these writers or outside Tron, broadcasts
+Every change to an `mcp.json`, through `settings.change` or outside Tron, broadcasts
 `mcp.changed` (`{ scope: "global" }` or `{ scope: "project", projectDir }`). An outside
 change is also a settings record entry with a push; Tron's own writes are
 adopted as observed, never recorded as outside changes

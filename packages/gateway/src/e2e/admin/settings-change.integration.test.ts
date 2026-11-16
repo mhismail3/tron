@@ -498,14 +498,14 @@ describe("settings.change", () => {
     await mkdir(pkg);
     await writeFile(join(pkg, "package.json"), JSON.stringify({ name: "inventory-package", version: "1.0.0" }));
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), packages: [pkg] }));
-    await f.service.invoke(client(), "mcp.add", { commandId: commandId(), scope: "global", server: "inventory-http", transport: "http", url: "http://user:inventory-secret@127.0.0.1:1/mcp?token=inventory-query-secret" });
     const markers = join(f.root, "inventory-markers");
     await mkdir(markers);
     const launched = join(markers, "stdio-launched");
     const disabledLaunched = join(markers, "disabled-launched");
     const resolved = join(markers, "credential-resolved");
     const mcpPath = join(f.agentDir, "mcp.json");
-    const mcpDocument = JSON.parse(await readFile(mcpPath, "utf8")) as { mcpServers: Record<string, unknown> };
+    const mcpDocument = { mcpServers: {} as Record<string, unknown> };
+    mcpDocument.mcpServers["inventory-http"] = { url: "http://user:inventory-secret@127.0.0.1:1/mcp?token=inventory-query-secret" };
     mcpDocument.mcpServers["inventory-stdio"] = { command: "/bin/sh", args: ["-c", `touch ${launched}`] };
     mcpDocument.mcpServers["inventory-disabled"] = { command: "/bin/sh", args: ["-c", `touch ${disabledLaunched}`], enabled: false };
     mcpDocument.mcpServers["inventory-credential"] = { url: "http://127.0.0.1:1/credential", headers: { Authorization: `!touch ${resolved}; printf secret` } };
@@ -1156,7 +1156,7 @@ describe("outside changes to MCP servers and custom models", () => {
     await f.service.invoke(client(), "settings.resolve", { target: { kind: "global" }, keys: ["run.transport"] });
     const baseline = (await outsideEntries(f)).length;
 
-    await f.service.invoke(client(), "mcp.add", { commandId: commandId(), scope: "global", server: "tron-added", transport: "http", url: "http://127.0.0.1:1/tron" });
+    await f.change({ kind: "global" }, [{ key: "tools.mcp.server", qualifiers: { server: "tron-added" }, layer: "global", op: "set", value: { url: "http://127.0.0.1:1/tron" } }]);
     expect(f.broadcasts).toContainEqual({ topic: "mcp.changed", payload: { scope: "global" } });
     await f.service.invoke(client(), "settings.resolve", { target: { kind: "global" }, keys: ["run.transport"] });
     expect((await outsideEntries(f)).length).toBe(baseline);
@@ -1188,7 +1188,7 @@ describe("outside changes to MCP servers and custom models", () => {
 
     const beforeTron = JSON.parse(await readFile(globalMcp, "utf8")) as { mcpServers: Record<string, unknown> };
     await writeJson(globalMcp, { ...beforeTron, mcpServers: { ...beforeTron.mcpServers, "edited-before-tron": { url: "http://127.0.0.1:1/before" } } });
-    await f.service.invoke(client(), "mcp.add", { commandId: commandId(), scope: "global", server: "tron-second", transport: "http", url: "http://127.0.0.1:1/second" });
+    await f.change({ kind: "global" }, [{ key: "tools.mcp.server", qualifiers: { server: "tron-second" }, layer: "global", op: "set", value: { url: "http://127.0.0.1:1/second" } }]);
     await f.service.invoke(client(), "settings.resolve", { target: { kind: "global" }, keys: ["run.transport"] });
     const aroundTron = await outsideEntries(f);
     expect(aroundTron.filter(entry => entry.qualifiers?.server === "edited-before-tron").map(entry => entry.op)).toEqual(["set"]);
@@ -1281,8 +1281,6 @@ describe("outside changes to MCP servers and custom models", () => {
     const chat = await f.registry.create(subdirectory);
     expect(chat.cwd).toBe(await realpath(subdirectory));
     expect(chat.projectDir).toBe(await realpath(project));
-    await expect(f.service.invoke(client(), "mcp.add", { commandId: commandId(), scope: "project", cwd: subdirectory, server: "project-tron", transport: "http", url: "http://127.0.0.1:1/project" }))
-      .rejects.toMatchObject({ code: "invalid_request" });
     await writeJson(join(project, ".pi", "mcp.json"), { mcpServers: { "project-tron": { url: "http://127.0.0.1:1/project" } } });
     await until("publication: MCP server project-tron", () => f.published("tools.mcp.server", ["server", "project-tron"]));
     await expect(readFile(join(subdirectory, ".pi", "mcp.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });

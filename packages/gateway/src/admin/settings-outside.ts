@@ -307,57 +307,6 @@ export class OutsideChanges {
     if (entries.length) await this.observer?.outside(entries);
   }
 
-  async adopt<T>(stores: readonly ObservedStore[], write: () => Promise<T>): Promise<T> {
-    const entries: ChangeEntry[] = [];
-    await this.mutex.run(async () => {
-      const document = await this.load();
-      for (const store of stores) {
-        if ((this.writing.get(storeId(store)) ?? 0) === 0) entries.push(...await this.compare(document, store));
-      }
-      if (entries.length) await this.record.append(entries);
-      await this.save(document);
-      for (const id of new Set(stores.map(storeId))) this.writing.set(id, (this.writing.get(id) ?? 0) + 1);
-    });
-    if (entries.length) await this.observer?.outside(entries);
-    try {
-      return await write();
-    } finally {
-      await this.mutex.run(async () => {
-        try {
-          const document = await this.load();
-          for (const store of stores) await this.rebaseline(document, store);
-          await this.save(document);
-        } finally {
-          for (const id of new Set(stores.map(storeId))) {
-            const count = (this.writing.get(id) ?? 1) - 1;
-            if (count > 0) this.writing.set(id, count); else this.writing.delete(id);
-          }
-        }
-      });
-    }
-  }
-
-  private async rebaseline(document: ObservedDocument, store: ObservedStore): Promise<void> {
-    const text = await this.raw(store);
-    const current = await this.values(store, text);
-    if (!current) return;
-    const id = storeId(store);
-    const state = document.stores[id];
-    const values = Object.fromEntries(current);
-    const git = isProjectStore(store) ? await gitHeadState(store.root) : undefined;
-    if (!state) {
-      document.stores[id] = { digest: digestOf(text), values, tron: {}, outside: {}, ...(git ? { head: git.head, staged: [] } : {}) };
-      return;
-    }
-    this.pruneUndeclared(state);
-    for (const instance of Object.keys(state.outside)) {
-      if (fingerprint(state.values[instance]) !== fingerprint(values[instance])) delete state.outside[instance];
-    }
-    state.values = values;
-    state.digest = digestOf(text);
-    if (git) state.head = git.head;
-  }
-
   private async load(): Promise<ObservedDocument> {
     if (this.document) return this.document;
     const stored = await readJsonDocument(this.path, value => {

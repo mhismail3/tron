@@ -1,23 +1,21 @@
 import { spawn, spawnSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { createHash } from "node:crypto";
 import lockfile from "proper-lockfile";
 import { loadMcpConfig } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import { durableAtomicWriteText } from "../foundation/durable-json.js";
-import { MCP_EXPOSURES, mcpServerOnDisk, type McpExposure, type McpServerValue } from "../kernel/settings/mcp-server-value.js";
+import { MCP_EXPOSURES, mcpBearerReference, mcpServerOnDisk, type McpBearerReference, type McpExposure, type McpServerValue } from "../kernel/settings/mcp-server-value.js";
 
 const MAX_CONFIG_BYTES = 256 * 1_024;
 const MAX_OUTPUT_BYTES = 1_048_576;
 const CLI_TIMEOUT_MS = 30_000;
 export type McpScope = { scope: "global" } | { scope: "project"; cwd: string; trusted: true };
-export interface McpServerStatus { name: string; state: string; scope: "global" | "project"; enabled: boolean; exposure: string; transport: string; tools: string[]; error?: string }
+export interface McpServerStatus { name: string; state: string; scope: "global" | "project"; enabled: boolean; exposure: string; transport: string; tools: string[]; error?: string; value?: McpServerValue }
 export interface McpListing { servers: McpServerStatus[]; errors: number }
 
 export interface McpCredentialOwner {
-  store(scope: McpScope, server: string, token: string): Promise<string>;
-  remove(scope: McpScope, server: string): Promise<void>;
+  store(account: string, token: string): Promise<void>;
 }
 
 function quoteSecurityArgument(value: string): string {
@@ -27,26 +25,16 @@ function quoteSecurityArgument(value: string): string {
 export class MacKeychainMcpCredentialOwner implements McpCredentialOwner {
   constructor(private readonly run: typeof runProcess = runProcess) {}
 
-  private account(scope: McpScope, server: string): string {
-    const identity = scope.scope === "global" ? "global" : createHash("sha256").update(scope.cwd).digest("hex").slice(0, 24);
-    return `tron-mcp-${identity}-${server}`;
-  }
-  async store(scope: McpScope, server: string, token: string): Promise<string> {
-    if (!/^[A-Za-z0-9._-]{1,128}$/.test(server) || !token || Buffer.byteLength(token) > 16_384 || /[\r\n\0]/u.test(token)) {
-      throw new GatewayError("invalid_request", "MCP server or bearer token is invalid");
+  async store(account: string, token: string): Promise<void> {
+    if (!token || Buffer.byteLength(token) > 16_384 || /[\r\n\0]/u.test(token)) {
+      throw new GatewayError("invalid_request", "MCP bearer token is invalid");
     }
-    const account = this.account(scope, server);
     const command = ["add-generic-password", "-U", "-s", "tron.mcp", "-a", account, "-w", token]
       .map(quoteSecurityArgument).join(" ");
     const result = await this.run("/usr/bin/security", ["-i"], {
       cwd: process.cwd(), timeoutMs: CLI_TIMEOUT_MS, input: `${command}\n`,
     });
     if (result.code !== 0) throw new GatewayError("internal", "Could not store the MCP bearer token in Keychain");
-    return account;
-  }
-  async remove(scope: McpScope, server: string): Promise<void> {
-    const account = this.account(scope, server);
-    await runProcess("/usr/bin/security", ["delete-generic-password", "-s", "tron.mcp", "-a", account], { cwd: process.cwd(), timeoutMs: CLI_TIMEOUT_MS });
   }
 }
 
@@ -142,19 +130,17 @@ export class McpAdminService {
   constructor(private readonly agentDir: string, private readonly cliPath: string, private readonly credentials?: McpCredentialOwner,
     private readonly log: McpAdminLog = () => {}, private readonly cliTimeoutMs = CLI_TIMEOUT_MS) {}
 
-  private configPath(scope: McpScope): string {
-    return scope.scope === "global" ? join(this.agentDir, "mcp.json") : join(scope.cwd, ".pi", "mcp.json");
+  private get configPath(): string {
+    return join(this.agentDir, "mcp.json");
   }
-  private cliArgs(scope: McpScope, args: string[]): string[] {
-    const command = args[0];
-    return [this.cliPath, "mcp", ...(command ? [command] : []),
-      ...(scope.scope === "project" && command !== "list" ? ["-l"] : []), ...args.slice(1)];
+  private cliArgs(args: string[]): string[] {
+    return [this.cliPath, "mcp", ...args];
   }
   private cliEnvironment(): NodeJS.ProcessEnv {
     return { ...process.env, PI_CODING_AGENT_DIR: this.agentDir };
   }
   async list(scope: McpScope): Promise<McpListing> {
-    const result = await runProcess(process.execPath, this.cliArgs(scope, ["list", "--json"]), { cwd: scope.scope === "project" ? scope.cwd : this.agentDir, timeoutMs: this.cliTimeoutMs, env: this.cliEnvironment() });
+    const result = await runProcess(process.execPath, this.cliArgs(["list", "--json"]), { cwd: scope.scope === "project" ? scope.cwd : this.agentDir, timeoutMs: this.cliTimeoutMs, env: this.cliEnvironment() });
     if (result.code !== 0 && result.code !== 1) {
       this.log("warning", "Bundled MCP status listing failed", "mcp.startup.problem", { reason: "cli-failure", scope: scope.scope });
       throw new GatewayError("conflict", "MCP listing failed; inspect the MCP log for server diagnostics");
@@ -185,7 +171,12 @@ export class McpAdminService {
       return [{ name: row.name, state: typeof row.state === "string" ? row.state.slice(0, 64) : "unknown", scope: row.scope === "project" ? "project" : "global", enabled: row.enabled !== false, exposure, transport: typeof row.transport === "string" ? row.transport.slice(0, 256) : "unknown", tools: strings(row.tools, 128), ...(error ? { error } : {}) }];
     }) : [];
     const errors = Array.isArray(raw.errors) ? raw.errors.length : 0;
-    return { servers, errors };
+    if (scope.scope === "project") return { servers, errors };
+    const table = await this.globalServers();
+    return { servers: servers.map(row => {
+      if (row.scope !== "global" || table?.[row.name] === undefined) return row;
+      try { return { ...row, value: mcpServerOnDisk(row.name, table[row.name]) }; } catch { return row; }
+    }), errors };
   }
   async configured(project?: Extract<McpScope, { scope: "project" }>): Promise<McpConfiguration> {
     const configured = loadMcpConfig({
@@ -206,27 +197,12 @@ export class McpAdminService {
       errors: configured.errors.length,
     };
   }
-  async mutate(scope: McpScope, operation: "add" | "remove" | "logout", args: string[], server?: string): Promise<unknown> {
-    const result = await runProcess(process.execPath, this.cliArgs(scope, [operation, ...args]), { cwd: scope.scope === "project" ? scope.cwd : this.agentDir, timeoutMs: this.cliTimeoutMs, env: this.cliEnvironment() });
-    if (result.code !== 0) throw new GatewayError("conflict", `MCP ${operation} failed: ${result.stderr.slice(0, 2_000)}`);
-    if (operation === "remove" && server) await this.credentials?.remove(scope, server);
-    return { reloadRequired: operation !== "logout", servers: server ? [server] : [] };
+  async logout(server: string): Promise<void> {
+    const result = await runProcess(process.execPath, this.cliArgs(["logout", server]), { cwd: this.agentDir, timeoutMs: this.cliTimeoutMs, env: this.cliEnvironment() });
+    if (result.code !== 0) throw new GatewayError("conflict", `MCP logout failed: ${result.stderr.slice(0, 2_000)}`);
   }
-  async update(scope: McpScope, server: string, patch: { enabled?: boolean; exposure?: McpExposure }): Promise<unknown> {
-    await this.editConfig(scope, config => {
-      const servers = config.mcpServers;
-      if (!servers || typeof servers !== "object" || Array.isArray(servers)) throw new GatewayError("conflict", "MCP configuration has no valid mcpServers object");
-      const entry = (servers as Record<string, unknown>)[server];
-      if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new GatewayError("not_found", `MCP server ${server} was not found`);
-      if (patch.exposure !== undefined && !(MCP_EXPOSURES as readonly string[]).includes(patch.exposure)) throw new GatewayError("invalid_request", "MCP exposure is invalid");
-      Object.assign(entry, patch);
-      return true;
-    });
-    return { server, reloadRequired: true, changed: Object.keys(patch) };
-  }
-  async server(server: string): Promise<McpServerValue | undefined> {
-    const path = this.configPath({ scope: "global" });
-    const text = await readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => {
+  private async globalServers(): Promise<Record<string, unknown> | undefined> {
+    const text = await readFile(this.configPath, "utf8").catch((error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT") return undefined;
       throw error;
     });
@@ -235,11 +211,14 @@ export class McpAdminService {
     const servers = parseConfig(text).mcpServers;
     if (servers === undefined) return undefined;
     if (!servers || typeof servers !== "object" || Array.isArray(servers)) throw new GatewayError("conflict", "MCP configuration has no valid mcpServers object");
-    const entry = (servers as Record<string, unknown>)[server];
+    return servers as Record<string, unknown>;
+  }
+  async server(server: string): Promise<McpServerValue | undefined> {
+    const entry = (await this.globalServers())?.[server];
     return entry === undefined ? undefined : mcpServerOnDisk(server, entry);
   }
   async setServer(server: string, value: McpServerValue | undefined): Promise<void> {
-    await this.editConfig({ scope: "global" }, config => {
+    await this.editConfig(config => {
       const servers = config.mcpServers ?? {};
       if (!servers || typeof servers !== "object" || Array.isArray(servers)) throw new GatewayError("conflict", "MCP configuration has no valid mcpServers object");
       const table = servers as Record<string, unknown>;
@@ -253,24 +232,15 @@ export class McpAdminService {
       return true;
     });
   }
-  async storeBearer(scope: McpScope, server: string, token: string): Promise<unknown> {
+  async storeBearer(server: string, token: string): Promise<McpBearerReference> {
     if (!this.credentials) throw new GatewayError("unsupported", "MCP credential storage is unavailable");
-    const account = await this.credentials.store(scope, server, token);
-    await this.editConfig(scope, config => {
-      const servers = config.mcpServers as Record<string, unknown> | undefined;
-      const entry = servers?.[server];
-      if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new GatewayError("not_found", `MCP server ${server} was not found`);
-      const definition = entry as Record<string, unknown>;
-      const headers = definition.headers && typeof definition.headers === "object" && !Array.isArray(definition.headers) ? definition.headers as Record<string, unknown> : {};
-      headers.Authorization = `!/usr/bin/security find-generic-password -s tron.mcp -a ${account} -w | /usr/bin/sed 's/^/Bearer /'`;
-      definition.headers = headers;
-      return true;
-    });
-    return { server, stored: true };
+    const reference = mcpBearerReference(server);
+    await this.credentials.store(reference.account, token);
+    return reference;
   }
 
-  private async editConfig(scope: McpScope, edit: (config: Record<string, unknown>) => boolean): Promise<void> {
-    const path = this.configPath(scope);
+  private async editConfig(edit: (config: Record<string, unknown>) => boolean): Promise<void> {
+    const path = this.configPath;
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, '{"mcpServers":{}}\n', { flag: "wx", mode: 0o600 }).catch((error: NodeJS.ErrnoException) => {
       if (error.code !== "EEXIST") throw error;
