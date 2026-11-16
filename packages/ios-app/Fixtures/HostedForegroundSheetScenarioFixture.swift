@@ -4,11 +4,11 @@ import TronMobileCore
 
 struct HostedForegroundSheetScenario {
     private var connections = 0
-    var queueEnabled: Bool { ProcessInfo.processInfo.arguments.contains("-foreground-queued-editor") }
+    var queueEnabled: Bool { HostedLaunch.arguments.contains("-foreground-queued-editor") }
     var queueRevision: Int { queueEnabled ? connections : 0 }
     var queuedItems: [SessionSnapshot.QueuedMessage] {
         guard queueEnabled else { return [] }
-        if connections > 1, ProcessInfo.processInfo.arguments.contains("-foreground-queued-removed") { return [] }
+        if connections > 1, HostedLaunch.arguments.contains("-foreground-queued-removed") { return [] }
         if let kind = attachmentKind {
             let photo = kind == "photo"
             return [.init(id: "foreground-queued-message", behavior: .steer, text: "", attachmentCount: 1,
@@ -17,21 +17,21 @@ struct HostedForegroundSheetScenario {
                     mimeType: photo ? "image/png" : "text/plain", size: 128)])]
         }
         return [.init(id: "foreground-queued-message",
-                      behavior: ProcessInfo.processInfo.arguments.contains("-foreground-queued-steer") ? .steer : .followUp,
+                      behavior: HostedLaunch.arguments.contains("-foreground-queued-steer") ? .steer : .followUp,
                       text: queuedText, attachmentCount: 0)]
     }
 
     private var attachmentKind: String? {
-        if ProcessInfo.processInfo.arguments.contains("-foreground-queued-photo") { return "photo" }
-        if ProcessInfo.processInfo.arguments.contains("-foreground-queued-file") { return "file" }
+        if HostedLaunch.arguments.contains("-foreground-queued-photo") { return "photo" }
+        if HostedLaunch.arguments.contains("-foreground-queued-file") { return "file" }
         return nil
     }
 
     private var queuedText: String {
-        if ProcessInfo.processInfo.arguments.contains("-foreground-queued-long") {
+        if HostedLaunch.arguments.contains("-foreground-queued-long") {
             return (1...80).map { "Long steer line \($0) keeps going." }.joined(separator: "\n")
         }
-        guard ProcessInfo.processInfo.arguments.contains("-foreground-queued-annotation") else {
+        guard HostedLaunch.arguments.contains("-foreground-queued-annotation") else {
             return "Queued message 1607"
         }
         return ChatAnnotationEnvelope.compose(annotations: [ChatAnnotation(
@@ -46,7 +46,7 @@ struct HostedForegroundSheetScenario {
     }
 
     var devices: JSONValue {
-        let changed = connections > 1 && ProcessInfo.processInfo.arguments.contains("-foreground-device-change")
+        let changed = connections > 1 && HostedLaunch.arguments.contains("-foreground-device-change")
         return .object(["devices": .array(changed ? [.object([
             "id": .string("foreground-device"), "name": .string("Foreground device"),
             "createdAt": .string("2026-01-01T00:00:00Z"),
@@ -54,7 +54,7 @@ struct HostedForegroundSheetScenario {
     }
 
     func providers(_ response: JSONValue) -> JSONValue {
-        guard connections > 1, ProcessInfo.processInfo.arguments.contains("-foreground-provider-change"),
+        guard connections > 1, HostedLaunch.arguments.contains("-foreground-provider-change"),
               var object = response.objectValue, let rows = object["providers"]?.arrayValue else { return response }
         object["providers"] = .array(rows.map { value in
             guard var provider = value.objectValue, let name = provider["name"]?.stringValue else { return value }

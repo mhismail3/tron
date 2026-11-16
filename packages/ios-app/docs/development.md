@@ -107,13 +107,15 @@ What iOS records: [observability](../../gateway/docs/observability.md); export i
 
 ## Efficient focused tests
 
-Native UI validation is integration/end-to-end; the charter permits four separate bounded logic groups,
-but no hosted logic-test target is introduced here. Build once, run
-only the owning journeys, and rebuild after an edit (stale products are refused):
+Native UI validation is integration/end-to-end. Claims a rendered view can show (accessibility tree,
+layout frames, colours) go to the in-process [view tests](../ViewTests/README.md), which share the
+UIValidation build and run without relaunching the app. Build once, run
+only the owning tests, and rebuild after an edit (stale products are refused):
 
 ```bash
 scripts/tron-ios-test build
 scripts/tron-ios-test run --only-testing TronMobileUITests/<Class>/<method>
+scripts/tron-ios-test run --only-testing TronMobileViewTests
 scripts/tron-ios-test run          # the smoke set (SMOKE_ONLY_TESTING in scripts/tron-ios-test)
 scripts/tron-ios-test checkpoint   # build, then the smoke set
 python3 scripts/test-ios-test-infrastructure.py

@@ -375,7 +375,7 @@ without executable evidence still fails; a tier never turns missing evidence int
 `--plan` prints `selection.tier`, paths, reasons, immediate tests, `batchTests`, and
 commands/cwds, `deferredTests` and their exact commands. A successful **full-tier** ordinary run proves affected checks only;
 it does not claim the full batch passed. Locks are `*.lock.integration.test.ts`, the
-Pi trace/persisted-state corpus and `UITests/Locks/`. `ios-app/ui-tests` declares
+Pi trace/persisted-state corpus and `UITests/Locks/` and `ViewTests/Locks/`. `ios-app/ui-tests` declares
 `spawn` edges to the hosted app modules, selecting their affected UI locks.
 
 Runners are the existing ones:

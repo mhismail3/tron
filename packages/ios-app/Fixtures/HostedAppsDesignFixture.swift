@@ -4,7 +4,7 @@ import TronMobileCore
 
 struct HostedAppsDesignFixture: View {
     @State private var presented = false
-    private var dark: Bool { ProcessInfo.processInfo.arguments.contains("-apps-design-dark") }
+    private var dark: Bool { HostedLaunch.arguments.contains("-apps-design-dark") }
 
     var body: some View {
         TronPresentationSurface(id: "hosted-apps-design") {
@@ -25,7 +25,7 @@ struct HostedAppsDesignFixture: View {
 
 private enum AppsDesignReview {
     static var detent: PresentationDetent {
-        ProcessInfo.processInfo.arguments.contains("-apps-design-expanded") ? .large : .medium
+        HostedLaunch.arguments.contains("-apps-design-expanded") ? .large : .medium
     }
 }
 

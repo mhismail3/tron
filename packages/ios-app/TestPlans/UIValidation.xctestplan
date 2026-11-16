@@ -42,6 +42,13 @@
         "identifier": "BF20B26EEF7E9E690BE36438",
         "name": "TronSwiftAppUITests"
       }
+    },
+    {
+      "target": {
+        "containerPath": "container:TronMobile.xcodeproj",
+        "identifier": "4622A6A46539DAFC45E7814C",
+        "name": "TronMobileViewTests"
+      }
     }
   ],
   "version": 1

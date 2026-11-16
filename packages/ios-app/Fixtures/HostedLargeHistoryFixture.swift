@@ -3,7 +3,7 @@ import Foundation
 import TronMobileCore
 
 enum HostedLargeHistory {
-    static let enabled = ProcessInfo.processInfo.arguments.contains("-history-large")
+    static var enabled: Bool { HostedLaunch.arguments.contains("-history-large") }
     static let total = 6_733
     static let pageSize = 100
     nonisolated(unsafe) static var reads = 0

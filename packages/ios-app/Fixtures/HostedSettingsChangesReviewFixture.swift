@@ -3,7 +3,7 @@ import Foundation
 import TronMobileCore
 
 enum HostedSettingsChangesReview {
-    static let enabled = ProcessInfo.processInfo.arguments.contains("-settings-changes-review")
+    static var enabled: Bool { HostedLaunch.arguments.contains("-settings-changes-review") }
     static let pageSize = 50
 
     static var lastLook: String? {

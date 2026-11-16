@@ -15,7 +15,7 @@ struct HostedComposerUploadFixture: View {
     private let profile = GatewayProfile(id: "composer-upload", label: "Upload fixture", host: "upload.example.test", port: 9847, machineId: "upload-machine")
 
     init() {
-        let args = ProcessInfo.processInfo.arguments
+        let args = HostedLaunch.arguments
         let scenario = args.drop(while: { $0 != "-composer-upload-scenario" }).dropFirst().first ?? "reconnect"
         let gateway = ComposerUploadGateway(losesStagingInBackground: scenario == "lost-staging")
         self.gateway = gateway

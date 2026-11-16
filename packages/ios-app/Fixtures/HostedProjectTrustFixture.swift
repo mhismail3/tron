@@ -16,7 +16,7 @@ struct HostedProjectTrustFixture: View {
     private let replacement = GatewayProfile(id: "trust-replacement", label: "Replacement fixture", host: "replacement.example.test", port: 9847, machineId: "trust-replacement-machine")
 
     init() {
-        let arguments = ProcessInfo.processInfo.arguments
+        let arguments = HostedLaunch.arguments
         let scenario = arguments.drop(while: { $0 != "-project-trust-scenario" }).dropFirst().first ?? "held"
         let gateway = ProjectTrustFixtureGateway(scenario: scenario, initialDecision: nil)
         let successor = ProjectTrustFixtureGateway(scenario: "ordered", initialDecision: false)

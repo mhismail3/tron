@@ -59,7 +59,7 @@ struct HostedAskUserFixtureView: View {
                             .accessibilityIdentifier("ask-user-mutation-count")
                         Text(receipt.summary)
                             .accessibilityIdentifier("ask-user-receipt")
-                        if ProcessInfo.processInfo.arguments.contains("-tron-ask-user-tool-row") {
+                        if HostedLaunch.arguments.contains("-tron-ask-user-tool-row") {
                             ToolCard(data: fixture.pendingFormTool)
                                 .environment(\.canonicalResourceSessionID, sessionID)
                                 .environment(\.pendingExtensionInteractionPresenter, { value in interaction = value })
@@ -212,10 +212,10 @@ private struct HostedAskUserFixture {
     init() {
         let receipt = HostedAskUserFixtureReceipt()
         self.receipt = receipt
-        let allowCancel = !ProcessInfo.processInfo.arguments.contains("-tron-ask-user-no-cancel")
-        let styled = ProcessInfo.processInfo.arguments.contains("-tron-ask-user-styled")
-        let copyable = ProcessInfo.processInfo.arguments.contains("-tron-ask-user-copyable")
-        let long = ProcessInfo.processInfo.arguments.contains("-tron-ask-user-long")
+        let allowCancel = !HostedLaunch.arguments.contains("-tron-ask-user-no-cancel")
+        let styled = HostedLaunch.arguments.contains("-tron-ask-user-styled")
+        let copyable = HostedLaunch.arguments.contains("-tron-ask-user-copyable")
+        let long = HostedLaunch.arguments.contains("-tron-ask-user-long")
         let optionA = ExtensionFormOption(id: "environment-a", label: "Staging", description: styled ? "A pre-release environment for validation." : nil)
         let optionB = ExtensionFormOption(id: "environment-b", label: "Production", description: styled ? "The live environment used by customers." : nil)
         let form = ExtensionFormDescriptor(
@@ -234,7 +234,7 @@ private struct HostedAskUserFixture {
                 options: [optionA, optionB],
                 multiSelect: !styled,
                 allowOther: true
-            )] + (ProcessInfo.processInfo.arguments.contains("-tron-ask-user-multiple") ? [
+            )] + (HostedLaunch.arguments.contains("-tron-ask-user-multiple") ? [
                 ExtensionFormQuestion(
                     id: "timing", question: "When should the change happen?",
                     options: [ExtensionFormOption(id: "now", label: "Now", description: nil),
@@ -245,7 +245,7 @@ private struct HostedAskUserFixture {
             allowCancel: allowCancel
         )
         self.form = form
-        let nativeChange = ProcessInfo.processInfo.arguments.contains("-tron-native-change-fixture")
+        let nativeChange = HostedLaunch.arguments.contains("-tron-native-change-fixture")
         let review: ChangeReview? = nativeChange ? try! JSONValue.object([
             "digest": .string(String(repeating: "a", count: 64)),
             "title": .string("Allow shell command"),
@@ -295,7 +295,7 @@ private struct HostedAskUserFixture {
         let profiles = GatewayProfileStore(metadata: metadata, tokens: tokens)
         let root = FileManager.default.temporaryDirectory.appending(path: "tron-hosted-ask-user-\(UUID().uuidString)")
         let draftDefaults = UserDefaults(suiteName: UUID().uuidString)!
-        if ProcessInfo.processInfo.arguments.contains("-tron-ask-user-stored-drafts") {
+        if HostedLaunch.arguments.contains("-tron-ask-user-stored-drafts") {
             Self.storeDraftsBesideBadRecords(form: form, interaction: interaction, in: draftDefaults)
         }
         self.model = AppModel(

@@ -12,7 +12,7 @@ struct HostedSessionRowClockFixture: View {
     @State private var probeWidth: CGFloat = 0
 
     var body: some View {
-        if ProcessInfo.processInfo.arguments.contains("-dashboard-row-typography") {
+        if HostedLaunch.arguments.contains("-dashboard-row-typography") {
             typographyRows
         } else {
             clockRows

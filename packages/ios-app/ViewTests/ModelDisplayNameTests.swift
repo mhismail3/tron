@@ -1,7 +1,7 @@
 @testable import TronMobileCore
 import XCTest
 
-final class ModelDisplayNameTests: XCTestCase {
+final class ModelDisplayNameTests: ShuffledTestCase {
     func testModelIDsReadAsVersionedNames() {
         let names = [
             "claude-fable-5-2": "Claude Fable 5.2",

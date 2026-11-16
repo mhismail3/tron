@@ -13,7 +13,7 @@ struct HostedNotificationInboxFixture: View {
     private let profile = GatewayProfile(id: "inbox-studio", label: "Studio Mac", host: "studio.example.test", port: 9847, machineId: "inbox-studio-machine")
 
     init() {
-        let args = ProcessInfo.processInfo.arguments
+        let args = HostedLaunch.arguments
         let scenario = args.drop(while: { $0 != "-notification-inbox-scenario" }).dropFirst().first ?? "mixed"
         let gateway = NotificationInboxGateway(seeded: scenario != "empty")
         self.gateway = gateway
@@ -165,7 +165,7 @@ private actor NotificationInboxGateway {
     func handle(_ method: String, params: [String: JSONValue]) async -> Result<JSONValue, GatewayFailure>? {
         switch method {
         case "notification.inbox.list":
-            if ProcessInfo.processInfo.arguments.contains("-notification-inbox-list-latency") {
+            if HostedLaunch.arguments.contains("-notification-inbox-list-latency") {
                 try? await Task.sleep(for: .milliseconds(800))
             }
             let unreadOnly = params["filter"]?.stringValue == "unread"

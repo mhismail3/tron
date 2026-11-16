@@ -11,7 +11,7 @@ struct HostedMacTerminalFixture: View {
                                          port: 9847, machineId: "mac-terminal-machine", deviceId: "fixture-iphone")
 
     init() {
-        let arguments = ProcessInfo.processInfo.arguments
+        let arguments = HostedLaunch.arguments
         let scenario = arguments.drop(while: { $0 != "-mac-terminal-scenario" }).dropFirst().first ?? "enroll"
         let configuration = ProcessInfo.processInfo.environment["TRON_MAC_TERMINAL_FIXTURE"]
             .flatMap { try? Data(contentsOf: URL(fileURLWithPath: $0)) }
@@ -47,8 +47,8 @@ struct HostedMacTerminalFixture: View {
         .environment(model)
         .tronPresentation()
         .tronSettingsLayout()
-        .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-mac-terminal-light") ? .light : .dark)
-        .environment(\.colorScheme, ProcessInfo.processInfo.arguments.contains("-mac-terminal-light") ? .light : .dark)
+        .preferredColorScheme(HostedLaunch.arguments.contains("-mac-terminal-light") ? .light : .dark)
+        .environment(\.colorScheme, HostedLaunch.arguments.contains("-mac-terminal-light") ? .light : .dark)
         .task {
             let gateway = gateway
             DarwinTrigger.observe("com.tron.mobile.fixture.mac-terminal.stop-gateway") { Task { await gateway.stop() } }

@@ -76,7 +76,7 @@ enum HostedSettingsReviewSchema {
             + sheetThemeKeys.filter { $0.objectValue?["key"]?.stringValue == "permissions.floor" }
     }
 
-    static let scopeReview = ProcessInfo.processInfo.arguments.contains("-settings-scope-review")
+    static var scopeReview: Bool { HostedLaunch.arguments.contains("-settings-scope-review") }
 
     static let tools = ["ask_user", "display", "notify", "read", "bash", "edit", "write", "web_search", "fetch_content", "knowledge", "computer", "schedule", "connections", "settings", "zoom"]
     static let additionalKeys: [JSONValue] = [

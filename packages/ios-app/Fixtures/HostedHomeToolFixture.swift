@@ -17,7 +17,7 @@ struct HostedProfileItem: Codable, Equatable, Sendable {
 enum HostedHomeToolFixture {
     static var transcript: [TranscriptItem] {
         let items = try! JSONDecoder.gateway.decode([TranscriptItem].self, from: Data(transcriptJSON.utf8))
-        guard ProcessInfo.processInfo.arguments.contains("-home-tool-paged-transcript") else { return items }
+        guard HostedLaunch.arguments.contains("-home-tool-paged-transcript") else { return items }
         let historical = #"""
         [
           {"id":"routing-list-call","presentationId":"routing-list-call","timestamp":"2026-10-13T21:59:00Z","kind":"message","role":"assistant","content":[{"id":"routing-list-part","ordinal":0,"type":"toolCall","toolCallId":"routing-list","name":"task","arguments":{"action":"list"}}]},
@@ -33,7 +33,7 @@ enum HostedHomeToolFixture {
     static var profileItems: [HostedProfileItem] {
         struct List: Decodable { let items: [HostedProfileItem] }
         let items = try! JSONDecoder.gateway.decode(List.self, from: Data(profileJSON.utf8)).items
-        return ProcessInfo.processInfo.arguments.contains("-home-profile-hierarchy")
+        return HostedLaunch.arguments.contains("-home-profile-hierarchy")
             ? items + HostedProfileHierarchyFixture.additionalItems : items
     }
 

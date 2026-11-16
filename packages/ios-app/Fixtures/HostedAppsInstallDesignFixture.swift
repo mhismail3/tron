@@ -6,9 +6,9 @@ import TronMobileCore
 struct HostedAppsInstallDesignFixture: View {
     @PresentationState private var launch: SwiftAppLaunch?
     @PresentationState private var review = false
-    private var dark: Bool { ProcessInfo.processInfo.arguments.contains("-apps-design-dark") }
+    private var dark: Bool { HostedLaunch.arguments.contains("-apps-design-dark") }
     private var source: String { ProcessInfo.processInfo.environment["TRON_APPS_DESIGN_SOURCE"] ?? "" }
-    private var before: Bool { ProcessInfo.processInfo.arguments.contains("-apps-design-before") }
+    private var before: Bool { HostedLaunch.arguments.contains("-apps-design-before") }
 
     var body: some View {
         TronPresentationSurface(id: "hosted-apps-install-design") {
@@ -37,7 +37,7 @@ struct HostedAppsInstallDesignFixture: View {
 
 private struct AppsInstallDesignReview: View {
     let source: String
-    private var expanded: Bool { ProcessInfo.processInfo.arguments.contains("-apps-design-expanded") }
+    private var expanded: Bool { HostedLaunch.arguments.contains("-apps-design-expanded") }
     private var digest: String { SHA256.hash(data: Data(source.utf8)).map { String(format: "%02x", $0) }.joined() }
 
     var body: some View {

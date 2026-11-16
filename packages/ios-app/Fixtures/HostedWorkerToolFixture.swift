@@ -44,7 +44,7 @@ struct HostedWorkerToolFixture: View {
     }
 
     static var reportForReview: ChatToolPresentation {
-        let args = ProcessInfo.processInfo.arguments
+        let args = HostedLaunch.arguments
         guard let index = args.firstIndex(of: "-worker-report-outcome"), args.indices.contains(index + 1) else { return report }
         var request = report.request!.objectValue!
         request["outcome"] = .string(args[index + 1])
