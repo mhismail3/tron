@@ -34,7 +34,10 @@ INSTALLS = {"packages/gateway": ("package.json", "package-lock.json", "third_par
 
 
 def git(*args: str, cwd: Path = CLONE) -> str:
-    return subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True, text=True).stdout.strip()
+    done = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True)
+    if done.returncode:
+        raise RuntimeError(f"git {' '.join(args)}: {done.stderr.strip()}")
+    return done.stdout.strip()
 
 
 def now() -> str:
@@ -62,19 +65,20 @@ def step(command: list[str], env: dict, log, cwd: Path = CLONE) -> int:
             raise
 
 
-def prepare(commit: str, env: dict, log) -> str | None:
-    """Check out `commit` cleanly and install changed dependencies; the reason it could not, or None."""
+def prepare(commit: str, log) -> dict:
+    """Check out `commit` cleanly, install its changed dependencies and return its environment; RuntimeError if it cannot."""
     git("checkout", "--quiet", "--detach", "--force", commit)
     git("clean", "-ffdxq", *[word for path in KEEP for word in ("-e", path)])
+    env = environment()
     for package, inputs in INSTALLS.items():
         stamp = CLONE / package / "node_modules/.tron-queue-install"
         key = git("rev-parse", *(f"HEAD:{package}/{name}" for name in inputs)) + env["PATH"]
         if stamp.is_file() and stamp.read_text() == key:
             continue
         if step([str(CLONE / "scripts/tron-node"), "exec", "npm", "--prefix", package, "ci", "--include=dev"], env, log):
-            return f"npm ci in {package} failed"
+            raise RuntimeError(f"npm ci in {package} failed")
         stamp.write_text(key)
-    return None
+    return env
 
 
 def tiers(report: dict) -> dict:
@@ -115,12 +119,11 @@ def shadow(landing: str, commit: str) -> dict:
              "startedAt": started}
     with open(directory / "verify.log", "w") as log:
         try:
-            env = environment()
-            reason = prepare(commit, env, log)
-        except (RuntimeError, subprocess.CalledProcessError) as error:
-            reason = str(error)
-        code = None if reason else step(["/usr/bin/python3", "tools/verify/verify.py", "--full", "--base", parents[0],
-                                         "--gateway-host", "local", "--skip", SKIP], env, log)
+            env = prepare(commit, log)
+            code, reason = step(["/usr/bin/python3", "tools/verify/verify.py", "--full", "--base", parents[0],
+                                 "--gateway-host", "local", "--skip", SKIP], env, log), None
+        except RuntimeError as error:
+            code, reason = None, str(error)
     report_path = CLONE / "test-results/verify" / f"{commit}.json"
     report = json.loads(report_path.read_text()) if code is not None and report_path.is_file() else {}
     for source in (report_path, report_path.with_suffix("")):
@@ -208,7 +211,7 @@ def claims(runs: list[dict], known: set[str]) -> list[dict]:
             continue
         try:
             commits = git("rev-list", f"{entry['parents'][0]}..{entry['parents'][1]}", cwd=root).split()
-        except subprocess.CalledProcessError:
+        except RuntimeError:
             continue
         for commit in commits:
             if commit in reports:
