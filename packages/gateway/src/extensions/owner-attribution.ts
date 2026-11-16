@@ -57,8 +57,8 @@ function extensionOwnerFor(extension: Extension): ExtensionOwner {
   return producerIdentity(source, extension.resolvedPath, isManagedSubagentExtension(extension) ? "Subagents" : humanizedDisplayName(extension), source === MANAGED_SUBAGENTS_SOURCE ? "subagent" : "extension");
 }
 
-function assertAdmissibleToolName(extension: Extension, name: string, requireTronAskUser: boolean, requireManagedSubagents: boolean): void {
-  if ((name === "agent_browser" || name.startsWith("agent_browser_")) && extension.path !== "builtin:agent-browser") {
+function assertAdmissibleToolName(extension: Extension, name: string, requireTronAskUser: boolean, requireManagedSubagents: boolean, requireManagedBrowser: boolean): void {
+  if ((name === "agent_browser" || name.startsWith("agent_browser_")) && requireManagedBrowser && extension.path !== "builtin:agent-browser") {
     throw new GatewayError("conflict", "Browser tools are reserved by the Tron-managed native owner");
   }
   if (name === "subagent" && requireManagedSubagents && !isManagedSubagentExtension(extension)) {
@@ -112,9 +112,10 @@ export function attributeExtensions(base: LoadExtensionsResult, browserLiveView?
   validateReservedCapabilities(base, options);
   const requireTronAskUser = options?.requireTronAskUser === true;
   const requireManagedSubagents = options?.managedSubagents !== undefined;
+  const requireManagedBrowser = base.extensions.some(extension => extension.path === "builtin:agent-browser");
   for (const extension of base.extensions) installExtensionRegistration(extension,
     () => extensionOwnerFor(extension),
-    name => assertAdmissibleToolName(extension, name, requireTronAskUser, requireManagedSubagents),
+    name => assertAdmissibleToolName(extension, name, requireTronAskUser, requireManagedSubagents, requireManagedBrowser),
     browserLiveView);
   return base;
 }
