@@ -3,6 +3,17 @@ import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+export const BROWSER_DECLARATION_MESSAGE = "This declaration enables Tron's managed agent-browser from its pinned artifact; the declared source itself is not loaded.";
+export function isUserBrowserPackage(pkg: string | { source: string }): boolean {
+  const source = typeof pkg === "string" ? pkg : pkg.source;
+  return /^npm:pi-agent-browser-native(?:@|$)/u.test(source)
+    || /^(?:git:)?(?:https:\/\/github\.com\/|github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)fitchmultz\/pi-agent-browser-native(?:\.git)?(?:@|$)/u.test(source);
+}
+
+export function managedBrowserEnabled(settings: { getGlobalSettings(): { packages?: Array<string | { source: string }> } }): boolean {
+  return (settings.getGlobalSettings().packages ?? []).some(isUserBrowserPackage);
+}
+
 const PACKAGE_JSON_MAX_BYTES = 64 * 1024;
 
 export function piCodingAgentDirectory(nodeModulesRoot: string): string {

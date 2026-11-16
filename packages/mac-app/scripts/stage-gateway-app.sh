@@ -22,15 +22,16 @@ stage_child cp -R "$GATEWAY_DIR/dist" "$APP_DIR/dist"
 stage_child cp "$GATEWAY_DIR/package.json" "$GATEWAY_DIR/package-lock.json" "$APP_DIR/"
 stage_child cp "$REPO_ROOT/config/PushService.xcconfig" "$APP_DIR/"
 stage_child cp "$REPO_ROOT/scripts/gateway-payload-deploy.mjs" "$APP_DIR/scripts/"
-stage_child cp "$GATEWAY_DIR/pi-coding-agent-patch.json" "$APP_DIR/"
+stage_child cp "$GATEWAY_DIR/pi-coding-agent-patch.json" "$GATEWAY_DIR/pi-agent-browser-native-patch.json" "$APP_DIR/"
 stage_child python3 - "$GATEWAY_DIR" "$APP_DIR" <<'PY'
 import json, pathlib, shutil, sys
 source, target = map(pathlib.Path, sys.argv[1:])
-relative = pathlib.PurePosixPath(json.loads((target / 'pi-coding-agent-patch.json').read_text())['artifact']['path'])
-if relative.is_absolute() or '..' in relative.parts or relative.parts[:2] != ('third_party', 'pi-coding-agent') or len(relative.parts) != 3:
-    raise SystemExit('pi-coding-agent artifact path must be third_party/pi-coding-agent/<file>')
-(target / relative).parent.mkdir(parents=True, exist_ok=True)
-shutil.copyfile(source / relative, target / relative)
+for package in ('pi-coding-agent', 'pi-agent-browser-native'):
+    relative = pathlib.PurePosixPath(json.loads((target / f'{package}-patch.json').read_text())['artifact']['path'])
+    if relative.is_absolute() or '..' in relative.parts or relative.parts[:2] != ('third_party', package) or len(relative.parts) != 3:
+        raise SystemExit(f'{package} artifact path must be third_party/{package}/<file>')
+    (target / relative).parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source / relative, target / relative)
 PY
 stage_child cp "$GATEWAY_DIR/pi-subagents-pin.json" "$APP_DIR/"
 stage_child cp "$GATEWAY_DIR/scripts/check-pi-subagents.mjs" "$GATEWAY_DIR/scripts/install-pi-subagents.mjs" "$APP_DIR/scripts/"
