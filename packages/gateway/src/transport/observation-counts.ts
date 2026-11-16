@@ -22,10 +22,10 @@ export class ObservationCounts {
   private current: DayCounts | undefined;
   private readonly lastRequest = new Map<string, number>();
 
-  constructor(private readonly directory: string, private readonly now: () => Date = () => new Date()) {}
+  constructor(private readonly directory: string) {}
 
   request(record: { sessionId: string; kind: string; skillIndex: boolean }): void {
-    const at = this.now();
+    const at = new Date();
     const previous = this.lastRequest.get(record.sessionId);
     this.lastRequest.set(record.sessionId, at.getTime());
     this.update(at, record.kind, counts => {
@@ -36,7 +36,7 @@ export class ObservationCounts {
   }
 
   call(aggregate: { name: string; kind: string; status: string; skill?: string }): void {
-    this.update(this.now(), aggregate.kind, counts => {
+    this.update(new Date(), aggregate.kind, counts => {
       counts.calls[aggregate.name] = (counts.calls[aggregate.name] ?? 0) + 1;
       if (aggregate.skill && aggregate.status === "ok") counts.skillOpens[aggregate.skill] = (counts.skillOpens[aggregate.skill] ?? 0) + 1;
     });
@@ -58,7 +58,7 @@ export class ObservationCounts {
 
   private open(day: string, at: Date): DayCounts {
     mkdirSync(this.directory, { recursive: true, mode: 0o700 });
-    const days = readdirSync(this.directory).filter(name => /^\d{4}-\d{2}-\d{2}\.json$/u.test(name)).sort();
+    const days = readdirSync(this.directory).filter(name => /^\d{4}-\d{2}-\d{2}\.json$/u.test(name) && name !== `${day}.json`).sort();
     for (const name of days.slice(0, Math.max(0, days.length - RETAINED_DAYS + 1))) unlinkSync(join(this.directory, name));
     try {
       return JSON.parse(readFileSync(join(this.directory, `${day}.json`), "utf8")) as DayCounts;
