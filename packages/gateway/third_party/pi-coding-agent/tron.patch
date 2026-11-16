@@ -865,9 +865,38 @@ index 6d75b001e7c9e796484c1d09d59a5c81816397b3..8f6e2dbe9ca115eaba1fa1f985ff0813
  
  type ConfigValueReference = { type: "command"; config: string } | { type: "template"; parts: TemplatePart[] };
 diff --git a/packages/coding-agent/src/core/resource-loader.ts b/packages/coding-agent/src/core/resource-loader.ts
-index bb0740e49675be6a28a537fc1d8ae92d06fbb924..397c4afa1f82fa3b098c8c74df06714d71aa38ab 100644
+index bb0740e49675be6a28a537fc1d8ae92d06fbb924..a1bd3d3390812a4c56b1c05c453db35bb4e306e4 100644
 --- a/packages/coding-agent/src/core/resource-loader.ts
 +++ b/packages/coding-agent/src/core/resource-loader.ts
+@@ -183,7 +183,7 @@ export interface ResourceLoader {
+ 	getSkills(): { skills: Skill[]; diagnostics: ResourceDiagnostic[] };
+ 	getPrompts(): { prompts: PromptTemplate[]; diagnostics: ResourceDiagnostic[] };
+ 	getThemes(): { themes: Theme[]; diagnostics: ResourceDiagnostic[] };
+-	getAgentsFiles(): { agentsFiles: Array<{ path: string; content: string }> };
++	getAgentsFiles(): { agentsFiles: Array<{ path: string; content: string; global?: boolean }> };
+ 	getSystemPrompt(): string | undefined;
+ 	getSystemPromptSource(): { path: string } | undefined;
+ 	getAppendSystemPrompt(): string[];
+@@ -260,16 +260,16 @@ function findShadowedContextFile(cwd: string): string | undefined {
+ export function loadProjectContextFiles(options: {
+ 	cwd: string;
+ 	agentDir: string;
+-}): Array<{ path: string; content: string }> {
++}): Array<{ path: string; content: string; global?: boolean }> {
+ 	const resolvedCwd = resolvePath(options.cwd);
+ 	const resolvedAgentDir = resolvePath(options.agentDir);
+ 
+-	const contextFiles: Array<{ path: string; content: string }> = [];
++	const contextFiles: Array<{ path: string; content: string; global?: boolean }> = [];
+ 	const seenPaths = new Set<string>();
+ 
+ 	const globalContext = loadContextFileFromDir(resolvedAgentDir);
+ 	if (globalContext) {
+-		contextFiles.push(globalContext);
++		contextFiles.push({ ...globalContext, global: true });
+ 		seenPaths.add(globalContext.path);
+ 	}
+ 
 @@ -302,7 +302,13 @@ export function loadProjectContextFiles(options: {
  }
  
@@ -882,6 +911,17 @@ index bb0740e49675be6a28a537fc1d8ae92d06fbb924..397c4afa1f82fa3b098c8c74df06714d
  	agentDir: string;
  	settingsManager?: SettingsManager;
  	eventBus?: EventBus;
+@@ -333,8 +339,8 @@ export interface DefaultResourceLoaderOptions {
+ 		themes: Theme[];
+ 		diagnostics: ResourceDiagnostic[];
+ 	};
+-	agentsFilesOverride?: (base: { agentsFiles: Array<{ path: string; content: string }> }) => {
+-		agentsFiles: Array<{ path: string; content: string }>;
++	agentsFilesOverride?: (base: { agentsFiles: Array<{ path: string; content: string; global?: boolean }> }) => {
++		agentsFiles: Array<{ path: string; content: string; global?: boolean }>;
+ 	};
+ 	systemPromptOverride?: (base: string | undefined) => string | undefined;
+ 	appendSystemPromptOverride?: (base: string[]) => string[];
 @@ -342,6 +348,7 @@ export interface DefaultResourceLoaderOptions {
  
  export class DefaultResourceLoader implements ResourceLoader {
@@ -890,6 +930,26 @@ index bb0740e49675be6a28a537fc1d8ae92d06fbb924..397c4afa1f82fa3b098c8c74df06714d
  	private agentDir: string;
  	private settingsManager: SettingsManager;
  	private eventBus: EventBus;
+@@ -373,8 +380,8 @@ export class DefaultResourceLoader implements ResourceLoader {
+ 		themes: Theme[];
+ 		diagnostics: ResourceDiagnostic[];
+ 	};
+-	private agentsFilesOverride?: (base: { agentsFiles: Array<{ path: string; content: string }> }) => {
+-		agentsFiles: Array<{ path: string; content: string }>;
++	private agentsFilesOverride?: (base: { agentsFiles: Array<{ path: string; content: string; global?: boolean }> }) => {
++		agentsFiles: Array<{ path: string; content: string; global?: boolean }>;
+ 	};
+ 	private systemPromptOverride?: (base: string | undefined) => string | undefined;
+ 	private appendSystemPromptOverride?: (base: string[]) => string[];
+@@ -386,7 +393,7 @@ export class DefaultResourceLoader implements ResourceLoader {
+ 	private promptDiagnostics: ResourceDiagnostic[];
+ 	private themes: Theme[];
+ 	private themeDiagnostics: ResourceDiagnostic[];
+-	private agentsFiles: Array<{ path: string; content: string }>;
++	private agentsFiles: Array<{ path: string; content: string; global?: boolean }>;
+ 	private systemPrompt?: string;
+ 	private systemPromptSourcePath?: string;
+ 	private appendSystemPrompt: string[];
 @@ -402,14 +409,16 @@ export class DefaultResourceLoader implements ResourceLoader {
  
  	constructor(options: DefaultResourceLoaderOptions) {
@@ -908,6 +968,15 @@ index bb0740e49675be6a28a537fc1d8ae92d06fbb924..397c4afa1f82fa3b098c8c74df06714d
  			agentDir: this.agentDir,
  			settingsManager: this.settingsManager,
  			builtinExtensions: [...this.builtinExtensions.keys()],
+@@ -470,7 +479,7 @@ export class DefaultResourceLoader implements ResourceLoader {
+ 		return { themes: this.themes, diagnostics: this.themeDiagnostics };
+ 	}
+ 
+-	getAgentsFiles(): { agentsFiles: Array<{ path: string; content: string }> } {
++	getAgentsFiles(): { agentsFiles: Array<{ path: string; content: string; global?: boolean }> } {
+ 		return { agentsFiles: this.agentsFiles };
+ 	}
+ 
 @@ -883,7 +892,7 @@ export class DefaultResourceLoader implements ResourceLoader {
  			skillsResult = { skills: [], diagnostics: [] };
  		} else {
@@ -1620,8 +1689,55 @@ index 99bbeade0d212549375da990199797a8afdce3d6..6ce98846b0af2831fd36ebe9b0abdcb3
  		this.save();
  	}
  
+diff --git a/packages/coding-agent/src/core/skills.ts b/packages/coding-agent/src/core/skills.ts
+index 48df4536b9a62642855fdeed2ab44a6202968a96..62157b3ea1798b463bde54fa061ea7184aa7fc68 100644
+--- a/packages/coding-agent/src/core/skills.ts
++++ b/packages/coding-agent/src/core/skills.ts
+@@ -355,24 +355,30 @@ function loadSkillFromFile(
+  * `fileReadTool` names the tool that loads skill files; `indirect` names none, for a reader that
+  * is reachable only through another tool.
+  */
+-export function formatSkillsForPrompt(skills: Skill[], fileReadTool: "read" | "bash" | "indirect" = "read"): string {
++export function formatSkillsForPrompt(
++	skills: Skill[],
++	fileReadTool: "read" | "bash" | "indirect" = "read",
++	instructions = true,
++): string {
+ 	const visibleSkills = skills.filter((s) => !s.disableModelInvocation);
+ 
+ 	if (visibleSkills.length === 0) {
+ 		return "";
+ 	}
+ 
+-	const lines = [
+-		"\n\nThe following skills provide specialized instructions for specific tasks.",
+-		fileReadTool === "read"
+-			? "Use the read tool to load a skill's file when the task matches its description."
+-			: fileReadTool === "bash"
+-				? "Use bash to load a skill's file when the task matches its description."
+-				: "Load a skill's file when the task matches its description.",
+-		"Resolve relative paths against the skill's directory (parent of SKILL.md). Use absolute paths in tool calls.",
+-		"",
+-		"<available_skills>",
+-	];
++	const lines = instructions
++		? [
++				"\n\nThe following skills provide specialized instructions for specific tasks.",
++				fileReadTool === "read"
++					? "Use the read tool to load a skill's file when the task matches its description."
++					: fileReadTool === "bash"
++						? "Use bash to load a skill's file when the task matches its description."
++						: "Load a skill's file when the task matches its description.",
++				"Resolve relative paths against the skill's directory (parent of SKILL.md). Use absolute paths in tool calls.",
++				"",
++				"<available_skills>",
++			]
++		: ["<available_skills>"];
+ 
+ 	for (const skill of visibleSkills) {
+ 		lines.push("  <skill>");
 diff --git a/packages/coding-agent/src/core/system-prompt.ts b/packages/coding-agent/src/core/system-prompt.ts
-index e51e14fe4065d73c3a85947000eff04402fa7a52..bcc456f92146b557d6f65df3a07954a7dd4fb1e1 100644
+index e51e14fe4065d73c3a85947000eff04402fa7a52..eefecae79daa8ad2ee25221770bf215e6dce512e 100644
 --- a/packages/coding-agent/src/core/system-prompt.ts
 +++ b/packages/coding-agent/src/core/system-prompt.ts
 @@ -7,6 +7,7 @@ import { getDocsPath, getExamplesPath, getReadmePath } from "../config.ts";
@@ -1632,6 +1748,26 @@ index e51e14fe4065d73c3a85947000eff04402fa7a52..bcc456f92146b557d6f65df3a07954a7
  	/** Custom system prompt (replaces the default prefix). */
  	customPrompt?: string;
  	/** Exact full prompt replacement set by a before_agent_start handler. */
+@@ -30,8 +31,8 @@ export interface BuildSystemPromptOptions {
+ 	sections?: Record<string, string>;
+ 	/** Working directory. */
+ 	cwd: string;
+-	/** Pre-loaded context files. */
+-	contextFiles?: Array<{ path: string; content: string }>;
++	/** Pre-loaded context files; `global` marks the agent directory's file, rendered before project files. */
++	contextFiles?: Array<{ path: string; content: string; global?: boolean }>;
+ 	/** Pre-loaded skills. */
+ 	skills?: Skill[];
+ }
+@@ -44,7 +45,7 @@ export type NormalizedBuildSystemPromptOptions = BuildSystemPromptOptions & {
+ 	promptGuidelines: string[];
+ 	appendSystemPrompt: string;
+ 	sections: Record<string, string>;
+-	contextFiles: Array<{ path: string; content: string }>;
++	contextFiles: Array<{ path: string; content: string; global?: boolean }>;
+ 	skills: Skill[];
+ };
+ 
 @@ -59,6 +60,7 @@ const SYSTEM_PROMPT_SECTION_NAME = /^[a-z][a-z0-9_-]*$/;
  /** Normalize prompt input into the mutable, collection-complete shape exposed to extensions. */
  export function normalizeBuildSystemPromptOptions(input: BuildSystemPromptOptions): NormalizedBuildSystemPromptOptions {
@@ -1640,7 +1776,25 @@ index e51e14fe4065d73c3a85947000eff04402fa7a52..bcc456f92146b557d6f65df3a07954a7
  		customPrompt: input.customPrompt,
  		forceSystemPrompt: input.forceSystemPrompt,
  		selectedTools: [...(input.selectedTools ?? ["read", "bash", "edit", "write"])],
-@@ -128,6 +130,7 @@ function buildRules(
+@@ -76,13 +78,10 @@ export function normalizeBuildSystemPromptOptions(input: BuildSystemPromptOption
+ 	};
+ }
+ 
+-function renderProjectContext(contextFiles: Array<{ path: string; content: string }>): string {
+-	return [
+-		"Project-specific instructions and guidelines:",
+-		...contextFiles.map(
+-			({ path, content }) => `<project_instructions path="${path}">\n${content}\n</project_instructions>`,
+-		),
+-	].join("\n\n");
++function renderContextFiles(contextFiles: Array<{ path: string; content: string }>): string {
++	return contextFiles
++		.map(({ path, content }) => `<project_instructions path="${path}">\n${content}\n</project_instructions>`)
++		.join("\n\n");
+ }
+ 
+ function buildRules(
+@@ -128,6 +127,7 @@ function buildRules(
  export function buildSystemPromptSections(input: BuildSystemPromptOptions): SystemPromptSections {
  	const options = normalizeBuildSystemPromptOptions(input);
  	const {
@@ -1648,7 +1802,7 @@ index e51e14fe4065d73c3a85947000eff04402fa7a52..bcc456f92146b557d6f65df3a07954a7
  		customPrompt,
  		selectedTools,
  		hiddenTools,
-@@ -149,11 +152,10 @@ export function buildSystemPromptSections(input: BuildSystemPromptOptions): Syst
+@@ -149,11 +149,10 @@ export function buildSystemPromptSections(input: BuildSystemPromptOptions): Syst
  
  	const declaredTools = selectedTools.filter((name) => !hiddenTools.includes(name));
  	const promptSections: Record<string, string> = {};
@@ -1664,7 +1818,37 @@ index e51e14fe4065d73c3a85947000eff04402fa7a52..bcc456f92146b557d6f65df3a07954a7
  		const visibleTools = declaredTools.filter((name) => !!toolSnippets[name]);
  		const tools =
  			visibleTools.length > 0 ? visibleTools.map((name) => `- ${name}: ${toolSnippets[name]}`).join("\n") : "(none)";
-@@ -199,7 +201,13 @@ export function buildSystemPromptState(input: BuildSystemPromptOptions): {
+@@ -169,16 +168,26 @@ export function buildSystemPromptSections(input: BuildSystemPromptOptions): Syst
+ 	}
+ 
+ 	if (appendSystemPrompt) promptSections.addendum = appendSystemPrompt;
+-	if (contextFiles.length > 0) promptSections.project_context = renderProjectContext(contextFiles);
++	const globalFiles = contextFiles.filter((file) => file.global);
++	const projectFiles = contextFiles.filter((file) => !file.global);
++	if (globalFiles.length > 0) promptSections.global_context = renderContextFiles(globalFiles);
+ 	// A hidden reader is still reachable through another tool, so skills stay but the hint names no tool.
+ 	const readers = ["read", "bash"] as const;
+ 	const skillFileReadTool =
+ 		readers.find((tool) => declaredTools.includes(tool)) ??
+ 		(readers.some((tool) => selectedTools.includes(tool)) ? "indirect" : undefined);
+-	if (skillFileReadTool && skills.length > 0) {
+-		const skillsPrompt = formatSkillsForPrompt(skills, skillFileReadTool).trim();
++	const projectSkills = skills.filter((skill) => skill.sourceInfo.scope === "project");
++	if (skillFileReadTool) {
++		const skillsPrompt = formatSkillsForPrompt(skills.filter((skill) => skill.sourceInfo.scope !== "project"), skillFileReadTool).trim();
+ 		if (skillsPrompt) promptSections.skills = skillsPrompt;
+ 	}
++	if (projectFiles.length > 0) {
++		promptSections.project_context = ["Project-specific instructions and guidelines:", renderContextFiles(projectFiles)].join("\n\n");
++	}
++	if (skillFileReadTool) {
++		const projectSkillsPrompt = formatSkillsForPrompt(projectSkills, skillFileReadTool, !promptSections.skills).trim();
++		if (projectSkillsPrompt) promptSections.project_skills = projectSkillsPrompt;
++	}
+ 	promptSections.cwd = cwd.replace(/\\/g, "/");
+ 	for (const [name, content] of Object.entries(customSections)) {
+ 		if (content) promptSections[name] = content;
+@@ -199,7 +208,13 @@ export function buildSystemPromptState(input: BuildSystemPromptOptions): {
  	content: string;
  	sections?: SystemPromptSections;
  } {
@@ -1679,12 +1863,12 @@ index e51e14fe4065d73c3a85947000eff04402fa7a52..bcc456f92146b557d6f65df3a07954a7
  	return { content: "", sections: buildSystemPromptSections(input) };
  }
  
-@@ -208,6 +216,27 @@ export function buildSystemPrompt(input: BuildSystemPromptOptions): string {
+@@ -208,6 +223,27 @@ export function buildSystemPrompt(input: BuildSystemPromptOptions): string {
  	return getSystemMessageText({ role: "system", ...buildSystemPromptState(input), timestamp: 0 });
  }
  
 +/** Sections Pi renders from its own options; every other section was set through `sections`. */
-+const BUILT_IN_SECTIONS = new Set(["preamble", "tools", "rules", "docs", "addendum", "project_context", "skills", "cwd"]);
++const BUILT_IN_SECTIONS = new Set(["preamble", "role", "tools", "rules", "docs", "addendum", "global_context", "skills", "project_context", "project_skills", "cwd"]);
 +
 +/**
 + * The system prompt between runs. `before_agent_start` handlers set `sections` for each run, and
@@ -3330,6 +3514,53 @@ index bbe5fb9f0b12cc1cf38c4f1a3a51fce6aef3b8d5..77774c6ef6a58f07f2a42d02276cff9a
  	test("setActiveTools emits prompt sections and tool changes before the next request", async () => {
  		const extension: ExtensionFactory = (pi) => {
  			for (const name of ["first", "second"]) {
+diff --git a/packages/coding-agent/test/system-prompt.test.ts b/packages/coding-agent/test/system-prompt.test.ts
+index 86d2c69944598055cf891b67c8d0fdbd3cbeafc3..f352b7586a5464cd2368cdbc1806ef271d8973a1 100644
+--- a/packages/coding-agent/test/system-prompt.test.ts
++++ b/packages/coding-agent/test/system-prompt.test.ts
+@@ -74,6 +74,42 @@ describe("buildSystemPrompt", () => {
+ 			);
+ 			expect(prompt).toContain("<cwd>\n/tmp\n</cwd>");
+ 		});
++
++		test("renders global rules and skills before every project and cwd section", () => {
++			const projectSkill: Skill = {
++				...testSkill,
++				name: "project-skill",
++				filePath: "/repo/.pi/skills/project-skill/SKILL.md",
++				sourceInfo: createSyntheticSourceInfo("/repo/.pi/skills/project-skill/SKILL.md", { source: "local", scope: "project" }),
++			};
++			const build = (project: string) =>
++				buildSystemPrompt({
++					preamble: "Host.",
++					appendSystemPrompt: "Additional instructions.",
++					contextFiles: [
++						{ path: "/agent/AGENTS.md", content: "Global rules.", global: true },
++						{ path: `/${project}/AGENTS.md`, content: `${project} rules.` },
++					],
++					selectedTools: ["read"],
++					skills: [{ ...projectSkill, filePath: `/${project}/.pi/skills/project-skill/SKILL.md` }, testSkill],
++					sections: { tron: `${project} facts` },
++					cwd: `/${project}`,
++				});
++			const first = build("alpha");
++			const second = build("beta");
++			const boundary = first.indexOf("\n\n<project_context>");
++			expect(boundary).toBeGreaterThan(0);
++			expect(second.slice(0, boundary)).toBe(first.slice(0, boundary));
++			expect(first.slice(0, boundary)).toContain(
++				'<global_context>\n<project_instructions path="/agent/AGENTS.md">\nGlobal rules.\n</project_instructions>\n</global_context>',
++			);
++			expect(first.slice(0, boundary)).toContain("<name>test-skill</name>");
++			expect(first.slice(0, boundary)).not.toContain("alpha");
++			const order = ["<addendum>", "<global_context>", "<skills>", "<project_context>", "<project_skills>", "<cwd>", "<tron>"];
++			expect(order.map((tag) => first.indexOf(tag))).toEqual(order.map((tag) => first.indexOf(tag)).toSorted((a, b) => a - b));
++			expect(first).toContain("<project_skills>\n<available_skills>\n  <skill>\n    <name>project-skill</name>");
++			expect(first.match(/The following skills provide specialized instructions/g)).toHaveLength(1);
++		});
+ 	});
+ 
+ 	describe("default tools", () => {
 diff --git a/packages/coding-agent/test/trigger-compact-extension.test.ts b/packages/coding-agent/test/trigger-compact-extension.test.ts
 index 930769f378e26f1b458ea36ccddbcc685c60f811..3e6cf0ea5e99ccaffa90369c6a17e52d4d0820e1 100644
 --- a/packages/coding-agent/test/trigger-compact-extension.test.ts

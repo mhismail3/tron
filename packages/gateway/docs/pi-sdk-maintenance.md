@@ -110,10 +110,16 @@ alternative signal-free stream with reader-owned cancellation.
 Pi's generic identity without suppressing tool snippets, tool guidelines or docs; a custom system
 prompt then renders as a separate `role` section. The Gateway supplies its common core this way.
 `system-prompt-updates.test.ts` proves the retained preamble across requests and the separate role.
-The bridge is removed when upstream offers an equivalent host identity option. The previous
-`pi-coding-agent-1.5.1-tron.3.tgz` is retained as the rollback artifact; its complete pin and
+The bridge is removed when upstream offers an equivalent host identity option.
+
+Sections render by stability: preamble, role, tools, rules, docs, addendum, `global_context` (the
+agent directory's AGENTS file, flagged `global` by the loader) and user-scope `skills`, then
+`project_context`, `project_skills` (list only when global skills already carry the instructions),
+`cwd` and extension sections. `system-prompt.test.ts` proves two projects share the prefix up to
+`project_context`. The bridge is removed with the preamble bridge. The previous
+`pi-coding-agent-1.5.1-tron.4.tgz` is retained as the rollback artifact; its complete pin and
 patch inputs are available in the parent main tree. No installed runtime is changed by
-rebuilding or selecting `pi-coding-agent-1.5.1-tron.4.tgz` in a worktree. The reproducer's
+rebuilding or selecting `pi-coding-agent-1.5.1-tron.5.tgz` in a worktree. The reproducer's
 `--write` mode alone may build an artifact that does not yet exist; every other check requires it.
 
 Pi activates newly registered declarable extension tools on a resumed branch, and the

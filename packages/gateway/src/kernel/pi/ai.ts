@@ -5,6 +5,7 @@ export {
   getCurrentSystemMessage,
   getCurrentTools,
   getSupportedThinkingLevels,
+  getSystemMessageText,
   isRetryableAssistantError,
   lazyStream,
   normalizeContext,
