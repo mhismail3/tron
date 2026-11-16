@@ -28,8 +28,8 @@ TEST_LEDGER = Path.home() / ".tron-maintenance/test-ledger/results.sqlite3"
 PLIST = Path.home() / "Library/LaunchAgents" / f"{LABEL}.plist"
 INTERVAL = 300
 SKIP = "ios,mac,python-here"
-TIER1 = {"tests: gateway", "tests: python", "tests: python-here", "tests: node", "tests: relay"}
-KEEP = ["/test-results/queue", "/packages/gateway/node_modules", "/packages/push-relay/node_modules", "/packages/mac-app/build"]
+TIER1 = {"tests: gateway", "tests: python", "tests: node", "tests: relay"}
+KEEP = ["/test-results/queue", "/packages/gateway/node_modules", "/packages/push-relay/node_modules"]
 INSTALLS = {"packages/gateway": ("package.json", "package-lock.json", "third_party"), "packages/push-relay": ("package.json", "package-lock.json")}
 
 
@@ -91,15 +91,15 @@ def tiers(report: dict) -> dict:
     for item in report.get("steps", []):
         name = item["name"]
         tier = "0" if not name.startswith("tests:") else "1" if name in TIER1 else "2"
-        entry = result.setdefault(tier, {"verdict": "passed", "seconds": 0.0, "failedSteps": [], "skippedSteps": []})
+        if item["status"] == "skipped":
+            continue
+        entry = result.setdefault(tier, {"verdict": "passed", "seconds": 0.0, "failedSteps": []})
         entry["seconds"] = round(entry["seconds"] + (item.get("seconds") or 0), 1)
         if item["status"] == "failed":
             entry["verdict"] = "failed"
             entry["failedSteps"].append(name)
         elif item["status"] in ("no result", "interrupted", "running") and entry["verdict"] != "failed":
             entry["verdict"] = "no result"
-        elif item["status"] == "skipped":
-            entry["skippedSteps"].append(name)
     return result
 
 
@@ -112,24 +112,24 @@ def failed_tests(commit: str, since: str) -> list[str]:
     return [f"{lane}: {test}" for lane, test in rows]
 
 
-def shadow(landing: str, commit: str) -> dict:
-    """Run the full suite at `commit` for the landing `landing` and return its ledger entry."""
+def shadow(landing: str) -> dict:
+    """Run the full suite at the landing `landing` and return its ledger entry."""
     landing, *parents = git("rev-list", "--parents", "-n", "1", landing).split()
     directory = RESULTS / landing
     shutil.rmtree(directory, ignore_errors=True)
     directory.mkdir(parents=True)
     started, clock = now(), time.monotonic()
     entry = {"kind": "run", "landing": landing, "parents": parents, "subject": git("log", "-1", "--format=%s", landing),
-             "landedAt": git("log", "-1", "--format=%cI", landing), "tested": commit, "host": os.uname().nodename,
+             "landedAt": git("log", "-1", "--format=%cI", landing), "host": os.uname().nodename,
              "startedAt": started}
     with open(directory / "verify.log", "w") as log:
         try:
-            env = prepare(commit, log)
+            env = prepare(landing, log)
             code, reason = step(["/usr/bin/python3", "tools/verify/verify.py", "--full", "--base", parents[0],
                                  "--gateway-host", "local", "--skip", SKIP], env, log), None
         except RuntimeError as error:
             code, reason = None, str(error)
-    report_path = CLONE / "test-results/verify" / f"{commit}.json"
+    report_path = CLONE / "test-results/verify" / f"{landing}.json"
     report = json.loads(report_path.read_text()) if code is not None and report_path.is_file() else {}
     for source in (report_path, report_path.with_suffix("")):
         if source.exists():
@@ -138,7 +138,7 @@ def shadow(landing: str, commit: str) -> dict:
     entry.update(seconds=round(time.monotonic() - clock), endedAt=now(),
                  verdict="passed" if verdict == "passed" else "failed" if verdict == "failed" else "no result",
                  reason=reason or report.get("message") or f"verify exited {code} without a report",
-                 tiers=tiers(report), failedTests=failed_tests(commit, started))
+                 tiers=tiers(report), failedTests=failed_tests(landing, started))
     return entry
 
 
@@ -163,14 +163,14 @@ def run(since: str | None) -> int:
         done = [entry["landing"] for entry in entries(LEDGER.read_text().splitlines() if LEDGER.is_file() else []) if entry["kind"] == "run"]
         start = since or (done[-1] if done else None)
         pending = git("rev-list", "--first-parent", "--reverse", f"{start}..origin/main").split() if start else [git("rev-parse", "origin/main")]
-        for landing in pending:
-            if landing in done:
-                continue
-            print(f"{now()} queue: {landing[:12]} started", flush=True)
-            entry = shadow(landing, landing)
-            with open(LEDGER, "a") as ledger:
-                ledger.write(json.dumps(entry, sort_keys=True) + "\n")
-            print(f"{now()} queue: {landing[:12]} {entry['verdict']} in {entry['seconds']}s", flush=True)
+        landing = next((commit for commit in pending if commit not in done), None)
+        if landing is None:
+            return 0
+        print(f"{now()} queue: {landing[:12]} started, {len(pending) - 1} more waiting", flush=True)
+        entry = shadow(landing)
+        with open(LEDGER, "a") as ledger:
+            ledger.write(json.dumps(entry, sort_keys=True) + "\n")
+        print(f"{now()} queue: {landing[:12]} {entry['verdict']} in {entry['seconds']}s", flush=True)
     return 0
 
 
@@ -278,7 +278,7 @@ def show(mini: bool) -> int:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="scripts/tron queue")
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("run", help="run every landing after the ledger's last (or --since) on this mini").add_argument("--since")
+    commands.add_parser("run", help="run the next landing after the ledger's last (or --since) on this mini").add_argument("--since")
     commands.add_parser("install", help=f"copy this runner to {QUEUE} and load the {LABEL} LaunchAgent")
     commands.add_parser("uninstall", help="unload and remove the LaunchAgent; keep the ledger")
     commands.add_parser("ledger", help="print the ledger").add_argument("--mini", action="store_true")

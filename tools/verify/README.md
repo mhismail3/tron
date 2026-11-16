@@ -13,7 +13,7 @@ scripts/tron verify --plan                     # tier, paths, reasons and exact 
 scripts/tron verify --changed [--base <ref>]   # explicit diff selection, also used by mutation sampling
 scripts/tron verify --module <id>               # scoped baseline: owner tests + declarations + launching UI locks
 scripts/tron verify --all                       # all locks + serial files deferred by this base..HEAD diff
-scripts/tron verify --full --base <ref>         # every test file, every group even after a red: the shadow queue's suite
+scripts/tron verify --full --base <ref>         # every test file in every group: the shadow queue's suite
 scripts/tron verify --batch --base <main-anchor> # initialize coverage in a clean linked worktree (git worktree add --detach <path> origin/main)
 scripts/tron verify --batch [--repeat] [--plan] # next pinned batch, or rerun every lane at the green HEAD
 scripts/tron verify --batch --review <culprit> --decision ACCEPT|BLOCK --reviewer <id> --binding <digest>

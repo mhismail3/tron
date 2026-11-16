@@ -73,8 +73,8 @@ Commands:
                                     Live logs and partial test-results/verify/<sha>.json;
                                     no empty test passes, queue or landing gate.
   verify --full [--base <ref>] [--skip ...]
-                                    Every test file in every group, even after a red:
-                                    the shadow queue's suite (tools/verify/queue.md)
+                                    Every test file in every group: the shadow
+                                    queue's suite (tools/verify/queue.md)
   queue run [--since <sha>] | install | uninstall | ledger [--mini]
                                     Shadow landing queue on the Mac mini: verify --full on
                                     every landing on main into an append-only ledger; gates nothing

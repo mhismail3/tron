@@ -1307,7 +1307,7 @@ def main(argv: list[str]) -> int:
     mode.add_argument("--changed", action="store_true")
     mode.add_argument("--module", metavar="ID")
     mode.add_argument("--all", action="store_true")
-    mode.add_argument("--full", action="store_true", help="every test file in every group, even after a red: the shadow queue's suite")
+    mode.add_argument("--full", action="store_true", help="every test file in every group: the shadow queue's suite")
     mode.add_argument("--hunt", action="store_true", help="repeat mini suites on unchanged origin/main; --hunt --help for bounds")
     mode.add_argument("--update-locks", metavar="ID")
     parser.add_argument("--base", default="origin/main")
@@ -1578,7 +1578,7 @@ def main(argv: list[str]) -> int:
                     reds.append("layers ios failed")
                 continue
             files = groups[group]
-            if group in expensive_groups and reds and name != "full":
+            if group in expensive_groups and reds:
                 for label in test_step_names(group, shards, skipped_group(group)):
                     run.skipped(label, "ios build failed" if ios_broken else "earlier tier did not pass")
                 continue

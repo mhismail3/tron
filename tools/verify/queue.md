@@ -6,15 +6,15 @@ depends on it.
 
 ## What it runs
 
-For each first-parent commit of `main` after the ledger's last landing, oldest first, it checks the commit out in its own
-clone, installs the Gateway and relay dependencies when their inputs changed, and runs
+Each start takes the oldest first-parent commit of `main` after the ledger's last landing that the ledger does not
+hold yet, checks it out in its own clone, installs the Gateway and relay dependencies when their inputs changed, and runs
 
 ```bash
 python3 tools/verify/verify.py --full --base <first parent> --gateway-host local --skip ios,mac,python-here
 ```
 
-`--full` selects every test file in every runner group and runs every group even after a red, so one red never hides
-another tier. The static steps check the landing's own diff. The report's steps map to tiers: every step that is not a
+`--full` selects every test file in every runner group; the groups the queue runs all sit in verify's cheap tier,
+which runs every group even after a red, so one red never hides another. The static steps check the landing's own diff. The report's steps map to tiers: every step that is not a
 test step is Tier 0; `gateway`, `python`, `node` and `relay` are Tier 1; `gateway-nested`, `node-gateway` and `shell`
 are Tier 2. The skipped groups are not covered: the iOS groups are Tier 3; the Mac integration tests (`mac`, Tier 2)
 need a "Mac Development" signing identity, which the mini does not hold; `mac-terminal` and `python-here` need this
@@ -31,17 +31,20 @@ Mac's SSH service and session store.
 | `~/tron-ci/queue/queue.log` | The runner's own start and verdict lines |
 | `~/Library/LaunchAgents/com.tron.shadow-queue.plist` | Starts `landing_queue.py run` at load and every 300 s |
 
-A run holds the mini job lock (`~/tron-ci/jobs/gateway.lock`) for all the landings it takes, so a `mini.py` job never
-runs beside it; a run that finds the lock held exits and the next interval retries. A run stopped before a landing's
-entry is written records nothing, and the next run repeats that landing.
+A start runs one landing under the mini job lock (`~/tron-ci/jobs/gateway.lock`), so a `mini.py` job never runs beside
+it, and releases the lock between landings, so a waiting `mini.py` job takes it before the next start. A start that
+finds the lock held exits; the next interval retries. A run stopped before its entry is written records nothing, and
+the next start repeats that landing.
 
 ## Ledger
 
 One JSON object per line, never rewritten.
 
-- `run`: `landing`, `parents`, `subject`, `landedAt`, `tested`, `host`, `startedAt`, `endedAt`, `seconds`,
+- `run`: `landing`, `parents`, `subject`, `landedAt`, `host`, `startedAt`, `endedAt`, `seconds`,
   `verdict` (`passed`, `failed` or `no result`), `reason`, `tiers` (`"0"`, `"1"`, `"2"`: `verdict`, `seconds`,
-  `failedSteps`, `skippedSteps`) and `failedTests` (`lane: test` from the mini's per-test ledger for that commit and run).
+  `failedSteps`; a tier whose steps were all skipped is absent) and `failedTests` (`lane: test` from the mini's per-test
+  ledger for that commit and run). The first five entries, run before this runner was on `main`, also carry `tested`:
+  the landing with this runner's commits applied, which is what ran.
 - `claim`: the landing's own `verify --changed` report, found in this Mac's checkouts for a commit of the landed branch
   (`landing^1..landing^2`, newest first): `commit`, `verdict`, `message`, `failedSteps`, `failedTests`, `report`.
 
