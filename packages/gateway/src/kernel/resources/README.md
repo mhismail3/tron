@@ -35,6 +35,12 @@ paraphrased. `skillsIndex` renders each skill section through the SDK's `renderS
 (`<index name="skills" open="read" kind="procedure">`, 10,000 bytes), and the session resources
 view lists its diagnostics as skill warnings.
 
+`context-rules.ts` admits context files for every non-Home runtime: the global `AGENTS.md` unless
+`context.rules.global` is off, project and ancestor `AGENTS.md` files only for a trusted project and
+unless `context.rules.project` is off. `SYSTEM.md` and `APPEND_SYSTEM.md` are never read. Home keeps its
+own override, which reads only the global rules file. `settings-three-layer.e2e.test.ts` proves the
+switches, the trust gate and the ignored files on real requests.
+
 ## Contract
 
 `projectRoot(cwd)` returns the real worktree root, or the caller’s cwd when Git

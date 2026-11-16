@@ -3,9 +3,10 @@ import { RequestSpan, runInRequestSpan } from "../../util/request-span.js";
 import { chmod, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { fauxAssistantMessage, fauxToolCall, getSystemMessageText, type TranscriptContext } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt, getSystemMessageText, type TranscriptContext } from "@earendil-works/pi-ai";
 import { disposeFixtures, fixture, reportCall, TASK_REASONING_MODEL_ID } from "../../../test-support/home-task-fixture.js";
 import { setModelQueue } from "../../../test-support/settings-dependencies.js";
+import { droppingAnyTurnFrame } from "../../../test-support/turn-frame.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
@@ -92,6 +93,52 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     await waitFor(() => slot.runtime.session.settingsManager.getImageAutoResize() === true, "explicit Session snapshot reapplied during SDK reload");
     expect((await f.resolve(slot, ["context.images.autoResize"])).keys[0]!.value).toBe(true);
     evidence.push({ case: "snapshot-reload-shell-prefix", sessionId: slot.id, output });
+  });
+  it("switches global and project AGENTS.md per Session, loads project rules only when trusted, and never reads SYSTEM.md or APPEND_SYSTEM.md", async () => {
+    const f = await setup();
+    await writeFile(join(f.agentDir, "AGENTS.md"), "Global rule marker.");
+    await writeFile(join(f.cwd, "AGENTS.md"), "Project rule marker.");
+    for (const directory of [f.agentDir, join(f.cwd, ".pi")]) {
+      await writeFile(join(directory, "SYSTEM.md"), "System file marker.");
+      await writeFile(join(directory, "APPEND_SYSTEM.md"), "Append file marker.");
+    }
+    const sent = async (slot: Awaited<ReturnType<typeof f.create>>) => {
+      let system = "";
+      f.faux.setResponses([context => { system = getCurrentSystemPrompt(context.messages); return fauxAssistantMessage("ok"); }]);
+      await slot.prompt("Show the rules");
+      await waitFor(() => system !== "" && slot.snapshot().configurationBlocker === null, "the request settled");
+      return system;
+    };
+    const rules = (slot: Awaited<ReturnType<typeof f.create>>, scope: "global" | "project", value: boolean) => f.service.invoke(f.client, "settings.change", {
+      commandId: randomUUID(), target: { kind: "session", sessionId: slot.id },
+      fence: { runtimeGeneration: slot.snapshot().runtimeGeneration, model: slot.snapshot().model },
+      changes: [{ key: `context.rules.${scope}`, layer: "session", op: "set", value }] });
+    const slot = await f.create();
+    const both = await sent(slot);
+    expect(both).toContain("Global rule marker.");
+    expect(both).toContain("Project rule marker.");
+    for (const marker of ["System file marker.", "Append file marker."]) expect(both).not.toContain(marker);
+    const block = (text: string, name: string) => new RegExp(`\\n\\n<${name}>\\n[^]*?\\n</${name}>`, "u").exec(text)![0];
+
+    await rules(slot, "project", false);
+    await waitFor(() => !slot.runtime.session.systemPrompt.includes("Project rule marker.") && slot.snapshot().configurationBlocker === null, "project rules switched off");
+    const globalOnly = await sent(slot);
+    expect(globalOnly).toBe(both.replace(block(both, "project_context"), ""));
+
+    const other = await f.create();
+    await rules(other, "global", false);
+    await waitFor(() => !other.runtime.session.systemPrompt.includes("Global rule marker.") && other.snapshot().configurationBlocker === null, "global rules switched off");
+    const projectOnly = await sent(other);
+    expect(projectOnly).toBe(both.replace(block(both, "global_context"), ""));
+    const cold = await f.restart();
+    expect(await sent(await cold.acquire(slot.id))).toBe(globalOnly);
+    expect(await sent(await cold.acquire(other.id))).toBe(projectOnly);
+
+    await f.trust.set(f.cwd, false);
+    const untrusted = await sent(await cold.create(f.cwd));
+    expect(untrusted).toContain("Global rule marker.");
+    expect(untrusted).not.toContain("Project rule marker.");
+    evidence.push({ case: "context-rule-switches-and-trust", sessionId: slot.id });
   });
   it("applies, logs and undoes through receipts, refusing a second command and allowing Undo of Undo", async () => {
     const f = await setup();
@@ -415,7 +462,8 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
         observed.push(model.id);
         return fauxAssistantMessage([reportCall("three-layer-worker")], { stopReason: "toolUse" });
       }
-      const current = context.messages.slice(context.messages.findLastIndex(message => message.role === "user"));
+      const messages = droppingAnyTurnFrame(context.messages);
+      const current = messages.slice(messages.findLastIndex(message => message.role === "user"));
       return current.some(message => message.role === "toolResult" && message.toolName === "delegate")
         ? fauxAssistantMessage("Delegation accepted")
         : fauxAssistantMessage([fauxToolCall("delegate", {

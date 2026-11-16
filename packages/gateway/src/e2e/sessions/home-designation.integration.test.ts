@@ -407,7 +407,7 @@ describe("Tron Home designation", () => {
     expect(home.snapshot().compactionPolicy?.currentBudgets).toMatchObject({ enabled: false });
   });
 
-  homeCase("excludes the agent directory's SYSTEM.md and APPEND_SYSTEM.md from Home", async () => {
+  homeCase("excludes the agent directory's SYSTEM.md and APPEND_SYSTEM.md from ordinary chats and Home", async () => {
     const f = await fixture("systemprompt");
     await writeFile(join(f.agentDir, "SYSTEM.md"), `${SYSTEM_SENTINEL}\n`);
     await writeFile(join(f.agentDir, "APPEND_SYSTEM.md"), `${APPEND_SENTINEL}\n`);
@@ -415,8 +415,8 @@ describe("Tron Home designation", () => {
     const ordinary = await f.registry.create(f.cwd);
     await ordinary.setModel(PROVIDER, MODEL_ID);
     const ordinaryContext = await contextOf(ordinary);
-    expect(ordinaryContext.instructions.text).toContain(SYSTEM_SENTINEL);
-    expect(ordinaryContext.instructions.text).toContain(APPEND_SENTINEL);
+    expect(ordinaryContext.instructions.text).not.toContain(SYSTEM_SENTINEL);
+    expect(ordinaryContext.instructions.text).not.toContain(APPEND_SENTINEL);
 
     const designation = await designate(f, "home-designate-systemprompt");
     const homeContext = await contextOf(await f.registry.acquire(designation.sessionId));
