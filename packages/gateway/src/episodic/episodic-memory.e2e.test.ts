@@ -17,7 +17,7 @@ import { resolveLimits, type EpisodicLimits, type EpisodicMemoryStatus, type Epi
 import { EpisodicMemory } from "./episodic-memory.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
-import { singleChapterSource } from "../../test-support/episodic-chapter-source.js";
+import { homeChapterSource, singleChapterSource } from "../../test-support/episodic-chapter-source.js";
 const GATEWAY_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const REPORT_PATH = join(GATEWAY_ROOT, "test-results/episodic-memory/report.json");
 const IMAGE_BASE64 = `iVBORw0KGgoAAAANSUhEUg${"QUJD".repeat(120)}`;
@@ -1206,3 +1206,134 @@ function catalogLevelZeroTexts(fx: Fixture): string[] {
     .map(record => `${record.kind as string}: ${record.text as string}`.replace(/\s+/gu, " ").trim())
     .filter(line => Buffer.byteLength(line, "utf8") > fx.limits.nodeBytes);
 }
+
+describe("frozen view", () => {
+  const FROZEN_LIMITS = { nodeBytes: 128, viewBytes: 2_560, jobs: 8, retryMs: 0 };
+  const CAP = FROZEN_LIMITS.viewBytes + FROZEN_LIMITS.viewBytes / 8;
+  const FOLD_TARGET = FROZEN_LIMITS.viewBytes - FROZEN_LIMITS.viewBytes / 8;
+  const frozenSummary: EpisodicSummarizer = async (request) => {
+    const prompt = request.turns.map(turn => turn.text).join("\n");
+    const spans = [...(/<stretch>\n([\s\S]*)\n<\/stretch>/u.exec(prompt)?.[1] ?? "").matchAll(/\bS(\d+)\b/gu)].map(match => Number(match[1]));
+    const span = spans.reduce((total, value) => total + value, 0) || 1;
+    return fauxAssistantMessage(`S${span} ${sha(prompt)} `.padEnd(span >= 64 ? 128 : 70, "s"));
+  };
+
+  interface FrozenFixture { root: string; home: string; homeId: string; storeRoot: string; workspace: TronWorkspace; chapters: Array<{ sessionId: string; path: string; sealed: boolean; manager: SessionManager }> }
+
+  async function frozenFixture(label: string): Promise<FrozenFixture> {
+    const root = await mkdtemp(join(tmpdir(), `tron-episodic-frozen-${label}-`));
+    roots.push(root);
+    const home = join(root, "home");
+    const workspace = new TronWorkspace(home);
+    owners.push(workspace);
+    const fx: FrozenFixture = { root, home, homeId: `home-${label}`, storeRoot: join(home, "workspace", "state", "episodic", `home-${label}`), workspace, chapters: [] };
+    await addChapter(fx);
+    return fx;
+  }
+
+  async function addChapter(fx: FrozenFixture): Promise<void> {
+    const cwd = join(fx.root, "project");
+    await mkdir(cwd, { recursive: true });
+    const manager = SessionManager.create(cwd, join(fx.root, "sessions"));
+    manager.appendMessage(userMessage(`chapter ${fx.chapters.length} opens`));
+    const last = fx.chapters.at(-1);
+    if (last) last.sealed = true;
+    fx.chapters.push({ sessionId: manager.getSessionId(), path: manager.getSessionFile()!, sealed: false, manager });
+  }
+
+  function append(fx: FrozenFixture, count: number): void {
+    const manager = fx.chapters.at(-1)!.manager;
+    for (let index = 0; index < count; index += 1) manager.appendMessage(userMessage(`message ${index} ${"m".repeat(150)}`));
+  }
+
+  function openFrozen(fx: FrozenFixture): Promise<EpisodicMemory> {
+    return EpisodicMemory.open({
+      workspace: fx.workspace, sessionId: fx.homeId, summarizer: frozenSummary, limits: FROZEN_LIMITS,
+      sessionSource: homeChapterSource(() => ({ homeId: fx.homeId, ledgerRevision: fx.chapters.length,
+        chapters: fx.chapters.map(({ sessionId, path, sealed }) => ({ sessionId, path, sealed })) })),
+    });
+  }
+
+  async function switchToFrozen(fx: FrozenFixture): Promise<void> {
+    await writeFile(join(fx.storeRoot, "layout.json"), `${JSON.stringify({ lines: [] })}\n`, { mode: 0o600, flag: "wx" });
+  }
+
+  function viewLines(memory: EpisodicMemory): string[] {
+    return memory.renderView(memory.status().messages).text.split("\n");
+  }
+
+  function settledPrefix(lines: readonly string[]): string[] {
+    const settled: string[] = [];
+    for (const line of lines) {
+      if (Number(/^\d+\+(\d+)\|/u.exec(line)![1]) < 64) break;
+      settled.push(line);
+    }
+    return settled;
+  }
+
+  async function commit(fx: FrozenFixture, memory: EpisodicMemory): Promise<void> {
+    await memory.entriesCommitted(fx.homeId);
+    await memory.whenReady(memory.status().messages);
+  }
+
+  it("keeps settled lines byte-identical until the hard cap or a chapter rollover, writes no layout for an unmigrated store, and reopens the same view", async () => {
+    const fx = await frozenFixture("cap");
+    const unmigrated = await openFrozen(fx);
+    try { await commit(fx, unmigrated); } finally { await unmigrated.dispose(); }
+    await expect(readFile(join(fx.storeRoot, "layout.json"))).rejects.toMatchObject({ code: "ENOENT" });
+    await switchToFrozen(fx);
+
+    const memory = await openFrozen(fx);
+    let reopenedView: string;
+    try {
+      append(fx, 1_100);
+      await commit(fx, memory);
+      let previous = viewLines(memory);
+      let previousBytes = memory.status().view.bytes;
+      let frozenOverBudget = 0;
+      let folds = 0;
+      for (let step = 0; step < 30; step += 1) {
+        append(fx, 12);
+        await commit(fx, memory);
+        const status = memory.status();
+        const current = viewLines(memory);
+        const settled = settledPrefix(previous);
+        expect(status.view.unbuilt).toBe(0);
+        expect(status.view.bytes).toBeLessThanOrEqual(CAP);
+        if (current.slice(0, settled.length).join("\n") === settled.join("\n")) {
+          if (previousBytes > FROZEN_LIMITS.viewBytes) frozenOverBudget += 1;
+        } else {
+          folds += 1;
+          expect(previousBytes + 12 * 70, "settled lines merge only when the view would pass the cap").toBeGreaterThan(CAP);
+          expect(status.view.bytes).toBeLessThanOrEqual(FROZEN_LIMITS.viewBytes);
+        }
+        previous = current;
+        previousBytes = status.view.bytes;
+      }
+      expect(frozenOverBudget, "settled lines stay byte-identical while the view is over its budget and under the cap").toBeGreaterThan(2);
+      expect(folds, "a planned fold happens when the cap is passed").toBeGreaterThan(0);
+      expect(folds).toBeLessThan(frozenOverBudget);
+      reopenedView = memory.renderView(memory.status().messages).text;
+    } finally { await memory.dispose(); }
+
+    const reopened = await openFrozen(fx);
+    try {
+      expect(reopened.renderView(reopened.status().messages).text, "a restart reloads the saved layout instead of re-folding").toBe(reopenedView);
+      for (let step = 0; step < 200 && reopened.status().view.bytes <= FROZEN_LIMITS.viewBytes; step += 1) {
+        append(fx, 2);
+        await commit(fx, reopened);
+      }
+      expect(reopened.status().view.bytes).toBeGreaterThan(FROZEN_LIMITS.viewBytes);
+      const before = settledPrefix(viewLines(reopened));
+      await addChapter(fx);
+      await commit(fx, reopened);
+      const after = viewLines(reopened);
+      expect(after.slice(0, before.length).join("\n"), "a chapter rollover is a planned moment to merge settled lines").not.toBe(before.join("\n"));
+      expect(reopened.status().view.bytes).toBeLessThanOrEqual(FOLD_TARGET);
+      append(fx, 2);
+      await commit(fx, reopened);
+      const settled = settledPrefix(after);
+      expect(viewLines(reopened).slice(0, settled.length)).toEqual(settled);
+    } finally { await reopened.dispose(); }
+  }, 300_000);
+});
