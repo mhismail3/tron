@@ -7,15 +7,21 @@ export interface ContextIndex {
 }
 
 const collapse = (text: string) => text.replace(/\s+/gu, " ").trim();
-const escape = (text: string) => collapse(text).replace(/&/gu, "&amp;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;").replace(/"/gu, "&quot;");
+export const escapeIndexValue = (text: string) => collapse(text).replace(/&/gu, "&amp;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;").replace(/"/gu, "&quot;");
 
-export function renderIndex(index: ContextIndex): string {
+export function renderIndex(index: ContextIndex): { text: string; diagnostics: string[] } {
+  const diagnostics: string[] = [];
   const rows = [...index.items].sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0).map(item => {
-    const description = escape(item.description);
-    if (description.length > 160) throw new Error(`${index.name}/${item.id}: description exceeds 160 characters`);
-    return `- ${escape(item.id)}: ${description} | ${escape(item.locator)}`;
+    const description = escapeIndexValue(item.description);
+    if (description.length > 160) diagnostics.push(`${index.name}/${item.id}: description exceeds 160 characters`);
+    return `- ${escapeIndexValue(item.id)}: ${description} | ${escapeIndexValue(item.locator)}`;
   });
-  const text = [`<index name="${escape(index.name)}" open="${escape(index.open)}" kind="${index.kind}">`, ...rows, "</index>"].join("\n");
-  if (Buffer.byteLength(text) > index.budget) throw new Error(`${index.name}: index exceeds ${index.budget} bytes`);
-  return text;
+  const text = [`<index name="${escapeIndexValue(index.name)}" open="${escapeIndexValue(index.open)}" kind="${index.kind}">`, ...rows, "</index>"].join("\n");
+  if (Buffer.byteLength(text) > index.budget) diagnostics.push(`${index.name}: index exceeds ${index.budget} bytes`);
+  return { text, diagnostics };
+}
+
+export function skillsIndex(skills: ReadonlyArray<{ name: string; description: string; filePath: string; disableModelInvocation: boolean }>, open: string) {
+  const items = skills.filter(skill => !skill.disableModelInvocation).map(skill => ({ id: skill.name, description: skill.description, locator: skill.filePath }));
+  return items.length === 0 ? { text: "", diagnostics: [] } : renderIndex({ name: "skills", open, kind: "procedure", budget: 10_000, items });
 }

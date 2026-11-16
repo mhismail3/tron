@@ -1,4 +1,5 @@
 import { basename } from "node:path";
+import { escapeIndexValue } from "../kernel/host/context-index.js";
 
 type InstructionSource =
   | { kind: "pi" }
@@ -156,7 +157,7 @@ function sectionEntries(
     case "skills":
     case "project_skills":
       return input.skills
-        .filter((skill) => !skill.disableModelInvocation && body.includes(`<location>${escapeXml(skill.filePath)}</location>`))
+        .filter((skill) => !skill.disableModelInvocation && body.includes(`- ${escapeIndexValue(skill.name)}: `) && body.includes(` | ${escapeIndexValue(skill.filePath)}\n`))
         .map((skill) => ({ name: skill.name, path: skill.filePath, text: skill.description, source: sourceOf(skill.sourceInfo) }));
     default:
       return undefined;
@@ -204,6 +205,3 @@ function packageName(source: string): string {
   return source.startsWith("npm:") ? name : basename(name.replace(/\.git$/, ""));
 }
 
-function escapeXml(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
-}

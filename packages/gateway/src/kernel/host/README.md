@@ -111,8 +111,10 @@ semantic form adapters, including their exact audited package admission.
   the SDK host `preamble` at creation. `context-index.ts` is the one index renderer:
   `<index name open kind>` with one `- id: description | locator` row per item, id-sorted,
   whitespace collapsed and escaped. A rendered description over 160 characters or an index over its
-  byte budget throws; nothing is truncated or paraphrased. Overflow listing arrives with the
-  first caller whose items can exceed their budget.
+  byte budget is rendered in full and returned as a diagnostic; nothing is truncated, omitted or
+  paraphrased. `skillsIndex` renders each skill section through the SDK's `renderSkills` host option
+  (`<index name="skills" open="read" kind="procedure">`, 10,000 bytes), and the session resources
+  view lists its diagnostics as skill warnings.
 - **Hooks (D6).** A `policy` hook has one implementer; `observers` hooks run every
   implementer in composition order. Dispatch reads each module's `hooks` at the
   call, never a copy taken at start. Notification hooks resolve optional owner

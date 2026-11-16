@@ -64,7 +64,7 @@ const PROFILE_INDEX_DESCRIPTIONS: Record<(typeof AREA_NAMES)[number], string> = 
 export const PROFILE_AREAS_SECTION = `${PROFILE_SECTION_HEADING}\n${renderIndex({
   name: "profile", open: "profile", kind: "data", budget: 2_048,
   items: AREA_NAMES.map(path => ({ id: path, description: PROFILE_INDEX_DESCRIPTIONS[path], locator: `profile read path=${path}` })),
-})}`;
+}).text}`;
 
 export function profileTurnState(read: IndexRead, activation: "user" | "wake"): string {
   const facts = indexFacts(read, activation);
