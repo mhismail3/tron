@@ -31,7 +31,7 @@ export function modelQueueSessionExtensions(queue: ModelQueueOwner | undefined, 
   });
   return [{ name: "tron-model-queue", factory: (pi) => {
     if (worker) createModelQueueExtension("worker", source)(pi);
-    createModelQueueExtension("subagent", source, { virtualModel: true, ...(worker ? { guidance: () => selection("subagent") !== undefined } : {}) })(pi);
+    createModelQueueExtension("subagent", source, { virtualModel: true, ...(worker ? { guidance: () => Boolean(selection("subagent")?.length) } : {}) })(pi);
     let registration: { dispose(): void } | undefined;
     const registerChildPolicy = async (sessionId: string) => {
       registration?.dispose();
