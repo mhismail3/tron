@@ -503,7 +503,7 @@ describe("resuming a stopped Home worker in place", () => {
     let images = 0;
     f.faux.setResponses([holding(entered), (context: Context) => {
       seen.push(lastUser(context));
-      const content = context.messages.findLast(message => message.role === "user")?.content;
+      const content = withoutTurnFrame(context.messages).findLast(message => message.role === "user")?.content;
       images = Array.isArray(content) ? content.filter(part => part.type === "image").length : 0;
       return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" });
     }]);

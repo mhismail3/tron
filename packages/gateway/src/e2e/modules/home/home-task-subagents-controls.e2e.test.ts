@@ -10,6 +10,7 @@ import { HOME_TASK_SUBAGENT_STOP_JOIN_MS } from "../../../kernel/delegation/task
 import { waitFor } from "../../../../test-support/wait-for.js";
 import { closeSubagentFixtures, bound, childModel, captureTimer, captureDeadline, launchResults, asyncState, holdingWorkflowLaunch, workflowChildRunId, holdingAsyncLaunch, waitBetweenTurns, toolResultText, launchedAsyncDir, type FauxContext } from "../../../../test-support/home-task-subagents-support.js";
 import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
+import { withoutTurnFrame } from "../../../../test-support/turn-frame.js";
 
 afterEach(closeSubagentFixtures);
 
@@ -90,7 +91,7 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
     const child = await childModel(f);
     const turns: string[] = [];
     const lastUser = (context: FauxContext) => {
-      const content = context.messages.findLast(message => message.role === "user")?.content;
+      const content = withoutTurnFrame(context.messages).findLast(message => message.role === "user")?.content;
       return typeof content === "string" ? content : (content ?? []).map((part: { type: string; text?: string }) => part.text ?? "").join("");
     };
     f.faux.setResponses([

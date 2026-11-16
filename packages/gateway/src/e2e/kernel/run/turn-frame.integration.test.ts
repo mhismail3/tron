@@ -15,7 +15,8 @@ afterEach(async () => {
   vi.unstubAllEnvs();
 });
 
-type Body = { system: Array<{ text: string }>; tools: Array<{ name: string }>; messages: Array<{ role: string; content: Array<{ type: string; text?: string }> | string }> };
+type Block = { type: string; text?: string; cache_control?: unknown };
+type Body = { system: Array<{ text: string }>; tools: Array<{ name: string }>; messages: Array<{ role: string; content: Block[] | string }> };
 
 const sse = (model: string, toolCall?: string) => [
   { type: "message_start", message: { id: "msg_frame", type: "message", role: "assistant", model, content: [], stop_reason: null,
@@ -102,4 +103,10 @@ it("announces a tool enabled mid-run in the next turn frame without rewriting th
   expect(frameOf(first)).not.toContain("Tools enabled:");
   expect(frameOf(second)).toContain("Tools enabled: late_tool.");
   expect(frameOf(second)).toContain(`Model: ${model.provider}/${model.id}.`);
+  for (const body of bodies) {
+    const blocks = body.messages.flatMap(message => Array.isArray(message.content) ? message.content : []);
+    expect(blocks.at(-1)).toMatchObject({ type: "text", text: frameOf(body) });
+    expect(blocks.at(-1)!.cache_control).toBeUndefined();
+    expect(blocks.at(-2)!.cache_control).toBeDefined();
+  }
 }, 30_000);

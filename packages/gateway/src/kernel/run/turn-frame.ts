@@ -1,9 +1,11 @@
 import type { StreamFn } from "../pi/agent-core.js";
 import { getCurrentSystemMessage, getCurrentTools } from "../pi/ai.js";
+import { escapeIndexValue } from "../resources/context-index.js";
 
-export type TurnActivation = "user" | "wake" | "automation" | "task";
+export type TurnActivation = "user" | "wake" | "automation" | "task" | "subagent";
 
 export interface TurnFrameSource {
+  turn(): boolean;
   activation(): TurnActivation;
   facts(): Promise<string | undefined>;
 }
@@ -29,8 +31,8 @@ function changedLayers(previous: Record<string, string | null>, current: Record<
     if (previous[name] === current[name]) continue;
     if (name === "project_context") {
       const before = projectFiles(previous[name]), after = projectFiles(current[name]);
-      for (const path of new Set([...before.keys(), ...after.keys()])) if (before.get(path) !== after.get(path)) changed.add(`project-rules:${path}`);
-    } else changed.add(LAYERS[name] ?? name);
+      for (const path of new Set([...before.keys(), ...after.keys()])) if (before.get(path) !== after.get(path)) changed.add(`project-rules:${escapeIndexValue(path)}`);
+    } else if (LAYERS[name]) changed.add(LAYERS[name]);
   }
   return [...changed];
 }
@@ -39,7 +41,7 @@ export function turnFrameStream(source: TurnFrameSource, stream: StreamFn): Stre
   let previous: { tools: Set<string>; sections: Record<string, string | null> } | undefined;
   return async (model, context, options) => {
     const last = context.messages.findLast(message => message.role !== "system");
-    if (last?.role !== "user" && last?.role !== "toolResult") return stream(model, context, options);
+    if (!source.turn() || (last?.role !== "user" && last?.role !== "toolResult")) return stream(model, context, options);
     const tools = new Set(getCurrentTools(context.messages).map(tool => tool.name));
     const sections = getCurrentSystemMessage(context.messages)?.sections ?? {};
     const enabled = previous ? [...tools].filter(name => !previous!.tools.has(name)) : [];
@@ -50,19 +52,13 @@ export function turnFrameStream(source: TurnFrameSource, stream: StreamFn): Stre
       `Activation: ${source.activation()}.`, ...(enabled.length ? [`Tools enabled: ${enabled.join(", ")}.`] : []),
       ...(changed.length ? [`Context changed: ${changed.join(", ")}.`] : []), ...(facts ? [facts] : []), "</turn-frame>"].join("\n");
     const framed = { ...context, messages: [...context.messages, { role: "user" as const, content: [{ type: "text" as const, text: frame }], timestamp: Date.now() }] };
-    return stream(model, framed, model.api !== "anthropic-messages" ? options : {
-      ...options,
-      onPayload: async (payload, requestModel) => {
-        const next = await options?.onPayload?.(payload, requestModel);
-        return unmarkFrame(next === undefined ? payload : next);
-      },
-    });
+    return stream(model, framed, options);
   };
 }
 
 type Block = Record<string, unknown>;
 
-function unmarkFrame(payload: unknown): unknown {
+export function unmarkTurnFrame(payload: unknown): unknown {
   const messages = (payload as { messages?: Array<{ content?: unknown }> }).messages;
   if (!Array.isArray(messages)) return payload;
   const blocks = messages.flatMap(message => Array.isArray(message.content) ? message.content as Block[] : []);
@@ -70,9 +66,8 @@ function unmarkFrame(payload: unknown): unknown {
   if (typeof frame?.text !== "string" || !frame.text.startsWith("<turn-frame>") || frame.cache_control === undefined) return payload;
   const next = structuredClone(payload) as { messages: Array<{ content: Block[] }> };
   const all = next.messages.flatMap(message => Array.isArray(message.content) ? message.content : []);
-  const { cache_control: control, ...rest } = all.at(-1)!;
-  Object.keys(all.at(-1)!).forEach(key => delete all.at(-1)![key]);
-  Object.assign(all.at(-1)!, rest);
+  const control = all.at(-1)!.cache_control;
+  delete all.at(-1)!.cache_control;
   if (all.length > 1) all.at(-2)!.cache_control = control;
   return next;
 }

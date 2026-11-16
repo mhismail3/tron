@@ -8,6 +8,7 @@ import { SESSION_SETTINGS_ENTRY, readSessionFixedSettings } from "../../../sessi
 import { disposeFixtures, fixture, reportCall, TASK_REASONING_MODEL_ID, TASK_VIRTUAL_MODEL_ID } from "../../../../test-support/home-task-fixture.js";
 import { waitFor } from "../../../../test-support/wait-for.js";
 import { homeOwnerOf, queueOwnerOf } from "../../../../test-support/gateway-registry.js";
+import { withoutTurnFrame } from "../../../../test-support/turn-frame.js";
 
 import { ProfileStore } from "../../../modules/home/profile-store.js";
 import { workspaceModule } from "../../../workspace/workspace-module.js";
@@ -47,7 +48,8 @@ function scriptedHome(delegate: Record<string, unknown>, observed: ObservedReque
       observed.push({ model: model.id, reasoning: options?.reasoning });
       return fauxAssistantMessage([reportCall("model-thinking")], { stopReason: "toolUse" });
     }
-    const current = context.messages.slice(context.messages.findLastIndex(message => message.role === "user"));
+    const messages = withoutTurnFrame(context.messages);
+    const current = messages.slice(messages.findLastIndex(message => message.role === "user"));
     const result = current.find(message => message.role === "toolResult" && message.toolName === "delegate");
     if (result?.role === "toolResult" && result.isError) {
       refusals.push(textOf(result));

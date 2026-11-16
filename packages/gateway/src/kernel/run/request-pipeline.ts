@@ -5,7 +5,7 @@ import { installAgentPipeline, wrapModelRuntimeStream, type AgentPipelineStages 
 import { getSystemMessageText, lazyStream, type AssistantMessageEvent, type AssistantMessageEventStream, type Context } from "../pi/ai.js";
 import { recordingStream, type RequestOutcome } from "./request-record.js";
 import { projectInjectedMessages } from "../host/injected-text.js";
-import { turnFrameStream, type TurnFrameSource } from "./turn-frame.js";
+import { turnFrameStream, unmarkTurnFrame, type TurnFrameSource } from "./turn-frame.js";
 
 async function* abortAwareEvents(
   source: AssistantMessageEventStream,
@@ -61,15 +61,15 @@ function markSharedPrefix(payload: unknown, prefix: string): unknown {
     { ...rest, text: (block.text as string).slice(prefix.length + 2) }, ...system.slice(at + 1)] };
 }
 
-function sharedPrefixStream(stream: StreamFn): StreamFn {
+function anthropicMarksStream(stream: StreamFn): StreamFn {
   return (model, context, options) => {
-    const prefix = model.api === "anthropic-messages" ? sharedPrefix(context) : undefined;
-    if (prefix === undefined) return stream(model, context, options);
+    if (model.api !== "anthropic-messages") return stream(model, context, options);
+    const prefix = sharedPrefix(context);
     return stream(model, context, {
       ...options,
       onPayload: async (payload, requestModel) => {
-        const next = await options?.onPayload?.(payload, requestModel);
-        return markSharedPrefix(next === undefined ? payload : next, prefix);
+        const next = unmarkTurnFrame(await options?.onPayload?.(payload, requestModel) ?? payload);
+        return prefix === undefined ? next : markSharedPrefix(next, prefix);
       },
     });
   };
@@ -134,7 +134,7 @@ export class RunRequestPipeline {
         };
         const framed = turnFrameStream(options.frame, baseStream);
         const sent = abortAwareStream(options.policyStream ? options.policyStream(framed) : framed);
-        return options.compactionStream(sharedPrefixStream(options.record ? recordingStream(sent, options.record) : sent));
+        return options.compactionStream(anthropicMarksStream(options.record ? recordingStream(sent, options.record) : sent));
       },
       ...(options.outer ? { outer: options.outer } : {}),
       ...(options.finishTurn ? { finishTurn: options.finishTurn } : {}),
