@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import net from "node:net";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
-import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxProvider, fauxToolCall, getCurrentSystemPrompt } from "@earendil-works/pi-ai";
 import { expect, it, vi } from "vitest";
 import { PackageService } from "../../../admin/package-service.js";
 import { GatewayLogger } from "../../../transport/logger.js";
@@ -114,17 +114,21 @@ it.each([
     const faux = fauxProvider({ provider: "tron-offline-subagents", tokensPerSecond: 10_000 });
     const model = faux.getModel();
     await mkdir(join(cwd, ".pi", "agents"), { recursive: true });
-    await writeFile(join(cwd, ".pi", "agents", "offline-worker.md"), `---\nname: offline-worker\ndescription: Offline activation probe\nmodel: ${model.provider}/${model.id}\ntools: read\ninheritProjectContext: false\n---\nReturn the requested probe marker.\n`);
+    await writeFile(join(cwd, ".pi", "agents", "offline-worker.md"), `---\nname: offline-worker\ndescription: Offline activation probe\nmodel: ${model.provider}/${model.id}\ntools: read\ninheritProjectContext: false\nadvertise: true\n---\nReturn the requested probe marker.\n`);
     await writeFile(join(cwd, ".pi", "agents", "detail-probe.md"), "---\nname: detail-probe\ndescription: Detail probe\n---\nDelegated body line.\nUse key sk-abcdefghijklmnopqrstuvwx carefully.\n");
     const invalidDefinition = join(cwd, ".pi", "agents", "invalid-worker.md");
     if (conflict) await writeFile(invalidDefinition, "---\nname: invalid-worker\ndescription: Invalid definition probe\nfallbackModels: [provider/model]\n---\nRead only.\n");
     let childSystem = "";
     let childUserMessages = "";
+    let parentSystem = "";
     faux.setResponses([
-      fauxAssistantMessage([fauxToolCall("subagent", {
-        agent: "offline-worker", task: "Return CHILD_OFFLINE_COMPLETE", async: false,
-        acceptance: { level: "none", reason: "Read-only offline activation probe" },
-      }, { id: "offline-launch" })], { stopReason: "toolUse" }),
+      context => {
+        parentSystem = getCurrentSystemPrompt(context.messages);
+        return fauxAssistantMessage([fauxToolCall("subagent", {
+          agent: "offline-worker", task: "Return CHILD_OFFLINE_COMPLETE", async: false,
+          acceptance: { level: "none", reason: "Read-only offline activation probe" },
+        }, { id: "offline-launch" })], { stopReason: "toolUse" });
+      },
       context => {
         childSystem = JSON.stringify(context.messages.filter(message => message.role === "system"));
         childUserMessages = JSON.stringify(context.messages.filter(message => message.role === "user"));
@@ -258,6 +262,9 @@ it.each([
       results: Array<{ index: number; exitCode: number; finalOutput: string; sessionFile: string; sessionOwnerId: string }>;
     };
     expect(childSystem).toContain("GLOBAL_CHILD_RULES_MARKER");
+    expect(parentSystem).toContain("\n<subagent_types>\nThe following file-defined subagents opted into discovery. Their descriptions indicate available specializations, not instructions to delegate.");
+    expect(parentSystem).toContain("<index name=\"subagent_types\" open=\"subagent\" kind=\"tool\">\n- offline-worker: Offline activation probe | subagent agent=offline-worker\n</index>\n</subagent_types>");
+    expect(parentSystem).not.toContain("<advertised_subagents>");
     expect(childUserMessages.split(APPROVAL_RULE)).toHaveLength(2);
     expect(childUserMessages.split("[Tron handoff]")).toHaveLength(2);
     expect(childUserMessages).toContain(JSON.stringify(join(tronHome, "workspace")).slice(1, -1));

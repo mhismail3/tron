@@ -29,11 +29,21 @@ default budget; the upload producer consumes the same attachment limits.
 
 `context-index.ts` is the one index renderer for advertised resources:
 `<index name open kind>` with one `- id: description | locator` row per item, id-sorted,
-whitespace collapsed and escaped. A source description over 160 characters or an index over its
-byte budget is rendered in full and returned as a diagnostic; nothing is truncated, omitted or
-paraphrased. `skillsIndex` renders each skill section through the SDK's `renderSkills` host option
+whitespace collapsed and escaped. A source description over 160 characters is rendered in full and
+returned as a diagnostic; nothing is truncated or paraphrased. An index without a listing locator is
+rendered in full and an over-budget one is diagnosed; one with a locator keeps whole rows and points to
+the rest. The skills and profile callers surface diagnostics; the docs, MCP servers and subagent types
+callers keep only the text. `skillsIndex` renders each skill section through the SDK's `renderSkills` host option
 (`<index name="skills" open="read" kind="procedure">`, 10,000 bytes), and the session resources
-view lists its diagnostics as skill warnings.
+view lists its diagnostics as skill warnings. `docsIndex` renders Pi's docs section through the SDK's
+`renderDocs` host option (`<index name="docs" open="read" kind="data">`, 4,096 bytes) between Pi's own
+guidance sentences, and `mcpServersIndex` renders the MCP extension's `mcp_servers` section through its
+`renderServers` option (`<index name="mcp_servers" open="codemode" kind="data">`, 4,096 bytes) after Pi's
+intro sentence. An index given a listing locator keeps whole sorted rows within its budget and ends with
+`- more: List the remaining items. | <locator>` (`searchTools()` for MCP servers). `subagentTypesIndex` renders
+the agents pi-subagents advertises as `<subagent_types>` (`<index name="subagent_types" open="subagent"
+kind="tool">`, 4,096 bytes, `subagent action=list` overflow) after the provider's own first paragraph;
+managed pi-subagents registers it once per process through the provider's `subagent-types` API.
 
 `context-rules.ts` admits context files for every non-Home runtime: the global `AGENTS.md` unless
 `context.rules.global` is off, project and ancestor `AGENTS.md` files only for a trusted project and

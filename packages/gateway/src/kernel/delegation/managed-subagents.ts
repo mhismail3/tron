@@ -14,7 +14,10 @@ import { managedProducerAPI, type ManagedInternalWake } from "./managed-producer
 import { loadSubagentCatalog } from "./subagent-catalog.js";
 import { producerIdentity } from "../host/extension-registration.js";
 import { withExtensionOwner } from "../host/extension-execution-context.js";
+import { subagentTypesIndex } from "../resources/context-index.js";
 import { tronHomePath } from "../../foundation/tron-home-layout.js";
+
+let subagentTypes: Promise<void> | undefined;
 
 const gatewayRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const pin = JSON.parse(readFileSync(join(gatewayRoot, "pi-subagents-pin.json"), "utf8")) as {
@@ -392,6 +395,7 @@ export class ManagedSubagents {
           this.verify();
           const owner = producerIdentity(MANAGED_SUBAGENTS_SOURCE, path, "Subagents", "subagent");
           await withExtensionOwner(owner, async () => {
+            await this.registerSubagentTypes();
             const factory = await this.loadFactory(path);
             await factory(managedProducerAPI(pi, owner, internalWake));
           });
@@ -420,6 +424,14 @@ export class ManagedSubagents {
     entry.groups.set(key, [...extensions]);
     try { publish(); } catch (error) { entry.groups.delete(key); publish(); throw error; }
     return { dispose: () => { if (entry!.groups.delete(key)) publish(); } };
+  }
+  private registerSubagentTypes(): Promise<void> {
+    subagentTypes ??= (this.loadModule(join(this.verify(), "src", "api", "subagent-types.ts")) as Promise<{
+      registerSubagentTypesRenderer(render: typeof subagentTypesIndex): { dispose(): void };
+      subagentTypesRenderer(): unknown;
+    }>).then(api => { if (!api.subagentTypesRenderer()) api.registerSubagentTypesRenderer(subagentTypesIndex); },
+      (error: unknown) => { subagentTypes = undefined; throw error; });
+    return subagentTypes;
   }
   async requireChildTaskContext(sessionId: string, taskPrefix: string): Promise<{ dispose(): void }> {
     this.requireBoundArtifactRoot(this.tronHome);

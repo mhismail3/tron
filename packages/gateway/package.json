@@ -43,7 +43,7 @@
   "dependencies": {
     "@earendil-works/pi-agent-core": "1.5.1",
     "@earendil-works/pi-ai": "1.5.1",
-    "@earendil-works/pi-coding-agent": "file:third_party/pi-coding-agent/pi-coding-agent-1.5.1-tron.7.tgz",
+    "@earendil-works/pi-coding-agent": "file:third_party/pi-coding-agent/pi-coding-agent-1.5.1-tron.8.tgz",
     "@earendil-works/pi-tui": "1.5.1",
     "@types/semver": "7.8.0",
     "pi-agent-browser-native": "file:third_party/pi-agent-browser-native/pi-agent-browser-native-0.9.19-tron.1.tgz",

@@ -182,7 +182,7 @@ describe("Agent Instructions projection through the pinned runtime", () => {
       expect(projection.text, phase).toBe(received);
       const mcp = projection.sections.find(section => section.id === "mcp_servers");
       expect(mcp).toMatchObject({ timing: "session", source: { kind: "pi" } });
-      expect(mcp!.text).toContain("mcp__example");
+      expect(mcp!.text).toBe("MCP servers whose tools are not declared to you. Call the tools of `codemode` servers from codemode scripts.\n<index name=\"mcp_servers\" open=\"codemode\" kind=\"data\">\n- mcp__example: | codemode\n</index>");
       expect(received).toContain(`<mcp_servers>\n${mcp!.text}\n</mcp_servers>`);
       expect(received.match(/\n<mcp_servers>\n/g)).toHaveLength(1);
     }
@@ -248,6 +248,10 @@ describe("Agent Instructions projection through the pinned runtime", () => {
       source: { kind: "local", scope: "user", path: join(f.agentDir, "skills", "fixture-skill", "SKILL.md") },
     }]);
     expect(byId.get("tron")!.source).toEqual({ kind: "module", name: "tron-core" });
+    const docs = byId.get("docs")!.text.split("\n");
+    expect([docs[0], docs[1], docs.at(-3), docs.at(-2), docs.at(-1)]).toEqual(["Pi documentation (read only when the user asks about the harness itself, its SDK, extensions, themes, skills, or TUI):",
+      "<index name=\"docs\" open=\"read\" kind=\"data\">", "</index>", "When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory", "Before implementing harness changes, read the relevant docs and examples in full, following related cross-references."]);
+    expect(docs.filter(line => /^- readme: Main documentation \| \/\S+\/README\.md$/u.test(line))).toHaveLength(1);
   }, 20_000);
 
   it("does not promote a one-run prompt section into future prompt options", async () => {

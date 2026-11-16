@@ -8,8 +8,10 @@ import {
   createCodemodeExtension,
   createMcpExtension,
   createToolSearchExtension,
+  serversSectionIntro,
   type ExtensionFactory,
 } from "../pi/coding-agent.js";
+import { mcpServersIndex } from "../resources/context-index.js";
 import { managedBrowserEnabled } from "../pi/packages.js";
 
 function browserExtension(agentDir: string): ExtensionFactory {
@@ -51,6 +53,7 @@ export function piBuiltinExtensions(
       factory: createMcpExtension({
         logPath: join(agentDir, "mcp.log"),
         openUrl: openMcpUrl ?? (() => { throw new Error("MCP sign-in requires an active Tron authorization operation"); }),
+        renderServers: servers => mcpServersIndex(servers, serversSectionIntro(new Set(servers.map(server => server.reach)))),
       }),
       builtin: true,
       replaceable: true,
