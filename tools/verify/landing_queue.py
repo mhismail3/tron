@@ -166,7 +166,7 @@ def run(since: str | None) -> int:
         landing = next((commit for commit in pending if commit not in done), None)
         if landing is None:
             return 0
-        print(f"{now()} queue: {landing[:12]} started, {len(pending) - 1} more waiting", flush=True)
+        print(f"{now()} queue: {landing[:12]} started, {len(set(pending) - set(done)) - 1} more waiting", flush=True)
         entry = shadow(landing)
         with open(LEDGER, "a") as ledger:
             ledger.write(json.dumps(entry, sort_keys=True) + "\n")
@@ -183,7 +183,7 @@ def install() -> int:
     runner.write_bytes(Path(__file__).read_bytes())
     PLIST.parent.mkdir(parents=True, exist_ok=True)
     PLIST.write_bytes(plistlib.dumps({"Label": LABEL, "ProgramArguments": ["/usr/bin/python3", str(runner), "run"],
-                                      "StartInterval": INTERVAL, "RunAtLoad": True, "ProcessType": "Background",
+                                      "StartInterval": INTERVAL, "RunAtLoad": True, "ProcessType": "Standard",
                                       "StandardOutPath": str(QUEUE / "queue.log"), "StandardErrorPath": str(QUEUE / "queue.log")}))
     domain = f"gui/{os.getuid()}"
     subprocess.run(["launchctl", "bootout", f"{domain}/{LABEL}"], capture_output=True)

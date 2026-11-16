@@ -29,7 +29,7 @@ Mac's SSH service and session store.
 | `~/tron-ci/queue/tron/test-results/queue/ledger.jsonl` | The append-only ledger |
 | `~/tron-ci/queue/tron/test-results/queue/<landing>/` | `verify.log`, `verify.json` and the step logs of that landing |
 | `~/tron-ci/queue/queue.log` | The runner's own start and verdict lines |
-| `~/Library/LaunchAgents/com.tron.shadow-queue.plist` | Starts `landing_queue.py run` at load and every 300 s |
+| `~/Library/LaunchAgents/com.tron.shadow-queue.plist` | Starts `landing_queue.py run` at load and every 300 s, at standard priority: a background job is throttled, which would inflate its seconds |
 
 A start runs one landing under the mini job lock (`~/tron-ci/jobs/gateway.lock`), so a `mini.py` job never runs beside
 it, and releases the lock between landings, so a waiting `mini.py` job takes it before the next start. A start that
@@ -43,8 +43,7 @@ One JSON object per line, never rewritten.
 - `run`: `landing`, `parents`, `subject`, `landedAt`, `host`, `startedAt`, `endedAt`, `seconds`,
   `verdict` (`passed`, `failed` or `no result`), `reason`, `tiers` (`"0"`, `"1"`, `"2"`: `verdict`, `seconds`,
   `failedSteps`; a tier whose steps were all skipped is absent) and `failedTests` (`lane: test` from the mini's per-test
-  ledger for that commit and run). The first five entries, run before this runner was on `main`, also carry `tested`:
-  the landing with this runner's commits applied, which is what ran.
+  ledger for that commit and run). An entry may also carry `tested`, the commit that ran when it differs from `landing`.
 - `claim`: the landing's own `verify --changed` report, found in this Mac's checkouts for a commit of the landed branch
   (`landing^1..landing^2`, newest first): `commit`, `verdict`, `message`, `failedSteps`, `failedTests`, `report`.
 
