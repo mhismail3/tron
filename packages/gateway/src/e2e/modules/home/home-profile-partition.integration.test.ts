@@ -34,7 +34,7 @@ async function setup(mode: "v2" | "prior" = "v2") {
   return { f, resource, currentResource: () => resource, profile, originals, context, request, cold };
 }
 async function applied(changes: SettingsChangePath) {
-  return (await changes.history({ key: "home.profile.item", status: "applied" })).entries;
+  return (await changes.history({ key: "home.profile.item", status: "applied" }, { kind: "ui", id: "maintainer" })).entries;
 }
 
 it("reversible organization applies without a tap, logs exact provenance and undoes without changing standing authority", async () => {

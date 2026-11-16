@@ -1,5 +1,10 @@
 import { MANAGED_SUBAGENTS_SOURCE, managedProviderSettingsView, type ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import {
   DefaultPackageManager,
   SettingsManager,
@@ -11,15 +16,97 @@ import type { TrustService } from "../kernel/resources/trust-service.js";
 import { loadPackageProvides, type InstalledPackage } from "./package-provides.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { type OutsideChanges } from "./settings-outside.js";
-import type { PlannedWrite } from "../kernel/settings/settings-types.js";
+import { changeReview, type PlannedWrite } from "../kernel/settings/settings-types.js";
 import { instanceId } from "../kernel/settings/scope-resolution.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
+import type { SettingsChangePath } from "../kernel/settings/settings-change.js";
+import type { Actor } from "../kernel/settings/settings-record.js";
+import type { ChangeResult, ConfirmChange } from "../kernel/settings/tool-contract.js";
+import type { ChangeReview, NativeChangeAcceptance } from "../protocol/types.js";
 
 const MAXIMUM_PACKAGES = 256;
 const MAXIMUM_RESOURCE_ITEMS = 1_000;
 const MAXIMUM_PACKAGE_UPDATES = 256;
 const MAXIMUM_PACKAGE_STRING_BYTES = 8_192;
 const MAXIMUM_PACKAGE_RESPONSE_BYTES = 768 * 1_024;
+const PACKAGE_UPDATE_ACTION = "package.update";
+const execFileAsync = promisify(execFile);
+const EXACT_NPM_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+
+export interface PackageUpdateRequest { cwd: string; source: string; version: string; reason: string }
+
+type UpdateKind = "npm" | "git";
+
+type ConfiguredPackages = Parameters<SettingsManager["setPackages"]>[0];
+
+interface PackageUpdatePlan {
+  kind: UpdateKind; source: string; target: string; name: string; from: string; version: string; reason: string;
+  installer: Installer | null; installedPath: string | undefined; packages: ConfiguredPackages; review: ChangeReview;
+}
+
+function configuredEntries(settings: SettingsManager): Array<{ source: string; scope: "user" | "project" }> {
+  const sourceOf = (pkg: ConfiguredPackages[number]) => typeof pkg === "string" ? pkg : pkg.source;
+  return [
+    ...(settings.getGlobalSettings().packages ?? []).map(pkg => ({ source: sourceOf(pkg), scope: "user" as const })),
+    ...(settings.getProjectSettings().packages ?? []).map(pkg => ({ source: sourceOf(pkg), scope: "project" as const })),
+  ];
+}
+
+interface Installer { digest: string; summary: string }
+
+interface PackageContext { manager: DefaultPackageManager; settings: SettingsManager; project: { cwd: string; projectDir: string } }
+
+function installerOf(argv: readonly string[] | undefined): Installer | null {
+  if (!argv || argv.length === 0) return null;
+  const digest = createHash("sha256").update(JSON.stringify(argv)).digest("hex");
+  const name = (argv[0] ?? "").split(/[\\/]/u).pop() ?? "";
+  const command = /^[A-Za-z0-9._-]{1,64}$/u.test(name) ? name : "custom command";
+  return { digest, summary: `${command} with ${argv.length - 1} argument(s); sha256 ${digest.slice(0, 12)}` };
+}
+
+function hostNpmPlanningView(settings: SettingsManager): SettingsManager {
+  return new Proxy(settings, {
+    get(target, key) {
+      if (key === "getNpmCommand") return () => undefined;
+      const value = Reflect.get(target, key, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+function sourceKind(source: string): UpdateKind | "local" {
+  if (source.startsWith("npm:")) return "npm";
+  return /^(git:|https?:\/\/|ssh:\/\/|git@)/.test(source) ? "git" : "local";
+}
+
+function gitRepository(source: string): string {
+  const at = source.lastIndexOf("@");
+  return at > Math.max(source.lastIndexOf("/"), source.lastIndexOf(":")) ? source.slice(0, at) : source;
+}
+
+function normalizedGitLocator(locator: string): string {
+  return locator.replace(/^git:/, "").replace(/^https:\/\//, "").replace(/\.git$/, "");
+}
+
+async function gitRead(cwd: string, args: string[]): Promise<string> {
+  const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
+  for (const key of Object.keys(env)) if (key.startsWith("GIT_") && key !== "GIT_TERMINAL_PROMPT") delete env[key];
+  try {
+    return (await execFileAsync("git", ["--no-pager", "--no-optional-locks", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", ...args], { cwd, env, timeout: 30_000, maxBuffer: 1024 * 1024 })).stdout.trim();
+  } catch {
+    throw new GatewayError("conflict", "Git could not inspect the installed checkout; inspect it before retrying");
+  }
+}
+
+async function installedVersion(installedPath: string | undefined): Promise<string | undefined> {
+  if (!installedPath) return undefined;
+  try {
+    const manifest = JSON.parse(await readFile(join(installedPath, "package.json"), "utf8")) as { version?: unknown };
+    return typeof manifest.version === "string" ? manifest.version : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 function boundedString(value: string): boolean {
   return Buffer.byteLength(value) <= MAXIMUM_PACKAGE_STRING_BYTES;
@@ -79,6 +166,8 @@ function validatePackageUpdates(updates: Awaited<ReturnType<DefaultPackageManage
 
 export class PackageService {
   private readonly mutex = new AsyncMutex();
+  private changes?: SettingsChangePath;
+  private reload?: () => void;
 
   constructor(
     private readonly agentDir: string,
@@ -88,6 +177,13 @@ export class PackageService {
     private readonly managedSubagents?: ManagedSubagents,
     private readonly outside?: OutsideChanges,
   ) {}
+
+  register(changes: SettingsChangePath, reload: () => void): void {
+    if (this.changes === changes) return;
+    if (this.changes) throw new Error("Package service already has a settings owner");
+    this.changes = changes;
+    this.reload = reload;
+  }
 
   private async manager(cwdInput: string, requireProjectTrust: boolean): Promise<{
     manager: DefaultPackageManager; settings: SettingsManager; project: { cwd: string; projectDir: string };
@@ -165,6 +261,130 @@ export class PackageService {
       validatePackageUpdates(updates);
       return { updates } satisfies PackageUpdates;
     }));
+  }
+
+  async updatePackage(request: PackageUpdateRequest, requester: Actor, confirm?: ConfirmChange): Promise<ChangeResult> {
+    if (!this.changes) throw new GatewayError("busy", "Package updates are not available");
+    if (!request.reason.trim()) throw new GatewayError("invalid_request", "A reason is required for a package update");
+    const plan = await this.trackAdministrative(() => this.mutex.run(async () => this.planUpdate(request, requester, await this.manager(request.cwd, false))));
+    if (!confirm) return { status: "review", review: plan.review, changes: [] };
+    return (await confirm(plan.review, accepted => this.applyUpdate(request, plan.review.digest, requester, accepted))) ?? { status: "declined", changes: [] };
+  }
+
+  private async planUpdate(request: PackageUpdateRequest, requester: Actor, context: PackageContext): Promise<PackageUpdatePlan> {
+    if (requester.kind !== "home") throw new GatewayError("invalid_request", "Package updates are available only in Tron Home");
+    if (request.source === MANAGED_SUBAGENTS_SOURCE) {
+      throw new GatewayError("conflict", "Tron manages pi-subagents; package commands cannot change its bundled payload");
+    }
+    const kind = sourceKind(request.source);
+    if (kind === "local") throw new GatewayError("invalid_request", "Local package sources have no update source; edit or replace the path yourself");
+    if (/^[a-z][a-z0-9+.-]*:\/\/[^/@]*@/i.test(request.source)) {
+      throw new GatewayError("invalid_request", "Package sources with credentials in their URL are refused; keep credentials in their owned store");
+    }
+    const { settings, project } = context;
+    const configured = configuredEntries(settings);
+    if (!configured.some(entry => entry.scope === "user" && entry.source === request.source)) {
+      if (configured.some(entry => entry.source === request.source)) {
+        throw new GatewayError("invalid_request", "Repository packages are read-only in the app; edit the repository configuration");
+      }
+      throw new GatewayError("not_found", "The requested package is not configured in that scope");
+    }
+    const installedPath = new DefaultPackageManager({ cwd: project.cwd, projectDir: project.projectDir, agentDir: this.agentDir, settingsManager: hostNpmPlanningView(settings) })
+      .getInstalledPath(request.source, "user");
+    const installer = installerOf(settings.getSettings().npmCommand);
+    const packagesAfter = (target: string): ConfiguredPackages => (settings.getGlobalSettings().packages ?? []).map(entry => {
+      if (typeof entry === "string") return entry === request.source ? target : entry;
+      return entry.source === request.source ? { ...entry, source: target } : entry;
+    });
+    if (kind === "npm") {
+      const spec = request.source.slice("npm:".length);
+      const at = spec.lastIndexOf("@");
+      const name = at > 0 ? spec.slice(0, at) : spec;
+      if (!/^(?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/.test(name)) {
+        throw new GatewayError("invalid_request", "The npm package name is not valid");
+      }
+      if (!EXACT_NPM_VERSION.test(request.version) || request.version.length > 64) {
+        throw new GatewayError("invalid_request", "A package update requires an exact npm version such as 1.2.3; tags and ranges are refused");
+      }
+      const from = await installedVersion(installedPath);
+      if (!from) throw new GatewayError("conflict", "The package is not installed; install it before updating");
+      if (from === request.version) throw new GatewayError("conflict", `${name} is already at ${from}; nothing to update`);
+      const target = `npm:${name}@${request.version}`;
+      return this.planned({ kind, source: request.source, target, name, from, version: request.version, reason: request.reason, installer, installedPath, packages: packagesAfter(target) });
+    }
+    if (!/^[0-9a-f]{40}$/.test(request.version)) {
+      throw new GatewayError("invalid_request", "A git package update requires a full 40-character commit SHA");
+    }
+    if (!installedPath || !existsSync(join(installedPath, ".git"))) {
+      throw new GatewayError("conflict", "The package is not installed as a git checkout; install it before updating");
+    }
+    const repo = gitRepository(request.source);
+    const origin = await gitRead(installedPath, ["remote", "get-url", "origin"]);
+    if (normalizedGitLocator(origin) !== normalizedGitLocator(repo)) {
+      throw new GatewayError("conflict", "The installed checkout's origin does not match the configured repository; refusing to replace it");
+    }
+    const from = await gitRead(installedPath, ["rev-parse", "HEAD"]);
+    if (from === request.version) throw new GatewayError("conflict", `${repo} is already at ${from}; nothing to update`);
+    const target = `${repo}@${request.version}`;
+    return this.planned({ kind, source: request.source, target, name: repo, from, version: request.version, reason: request.reason, installer, installedPath, packages: packagesAfter(target) });
+  }
+
+  private planned(input: Omit<PackageUpdatePlan, "review">): PackageUpdatePlan {
+    const identity = { operation: PACKAGE_UPDATE_ACTION, kind: input.kind, source: input.source, target: input.target, name: input.name, from: input.from, version: input.version, installer: input.installer?.digest ?? null };
+    const items = [{ label: `Package ${input.name}`, before: input.from, after: input.version, detail: `${input.source}\nUser package (global)${input.installer ? `\nInstaller: ${input.installer.summary}` : ""}`, exact: JSON.stringify(identity) }];
+    if (input.target !== input.source) {
+      items.push({ label: "Configured source", before: input.source, after: input.target, detail: "sources.packages (global) pin", exact: JSON.stringify({ source: input.source, target: input.target }) });
+    }
+    const review = changeReview(identity, { title: input.kind === "npm"
+      ? `Update ${input.name} to exactly ${input.version}`
+      : `Update ${input.name} to commit ${input.version}`, requiresTap: true, reason: input.reason, items });
+    return { ...input, review };
+  }
+
+  private applyUpdate(request: PackageUpdateRequest, digest: string, requester: Actor, accepted: NativeChangeAcceptance): Promise<ChangeResult> {
+    const changes = this.changes!;
+    return changes.withTarget({ kind: "global" }, () => this.trackAdministrative(work => this.mutex.run(async () => {
+      const context = await this.manager(request.cwd, false);
+      const plan = await this.planUpdate(request, requester, context);
+      if (plan.review.digest !== digest) throw new GatewayError("conflict", "The package changed since review; nothing was applied");
+      if (plan.kind === "git" && await gitRead(plan.installedPath!, ["status", "--porcelain", "--untracked-files=no"]) !== "") {
+        throw new GatewayError("conflict", "The installed checkout has local edits to tracked files; refusing to replace them");
+      }
+      await changes.record.recover();
+      const changeId = randomUUID();
+      const entry = { commandId: accepted.commandId, actor: { kind: "ui" as const, id: accepted.deviceId }, target: { kind: "global" as const },
+        layer: "global" as const, key: PACKAGE_UPDATE_ACTION, op: "set" as const,
+        after: { ...plan.review, requester: { kind: requester.kind, id: requester.id } }, reason: request.reason, action: true as const };
+      await changes.record.append([{ ...entry, changeId, at: new Date().toISOString(), status: "started" }]);
+      const { manager, settings } = context;
+      const writes: PlannedWrite[] = [{ store: { kind: "global" }, instance: instanceId("sources.packages", {}), changeId, value: plan.packages }];
+      await this.outside?.begin(writes);
+      manager.setProgressCallback(event => { work?.progress(); this.broadcast("packages.progress", { operationId: changeId, event } as unknown as JsonValue); });
+      try {
+        settings.setPackages(plan.packages);
+        await this.flushSettings(settings);
+        await manager.install(plan.target, { local: false });
+        const after = plan.kind === "npm"
+          ? await installedVersion(manager.getInstalledPath(plan.source, "user"))
+          : await gitRead(plan.installedPath!, ["rev-parse", "HEAD"]);
+        if (after !== plan.version) throw new Error(`Installed ${after ?? "nothing"} instead of exact ${plan.version}`);
+      } catch (error) {
+        this.reload?.();
+        await changes.record.append([{ ...entry, changeId: randomUUID(), refersTo: changeId, at: new Date().toISOString(), status: "failed",
+          failure: "Package update did not complete cleanly; inspect the configured source and installed package before retrying" }])
+          .catch(publication => { throw asUncertainOutcome(publication, "Package update failed and its audit could not be published; inspect before retrying"); });
+        throw asUncertainOutcome(error, "Package update may have occurred; inspect the configured source and installed package before retrying");
+      } finally {
+        manager.setProgressCallback(undefined);
+        await this.outside?.end(writes, new Map([[changeId, { changeId }]]));
+      }
+      await changes.record.append([{ ...entry, changeId: randomUUID(), refersTo: changeId, at: new Date().toISOString(), status: "applied" }])
+        .catch(error => { throw asUncertainOutcome(error, "Package applied but history publication failed"); });
+      this.broadcast("packages.changed", { cwd: request.cwd });
+      this.reload?.();
+      return { status: "applied", review: plan.review, changes: [{ changeId, key: PACKAGE_UPDATE_ACTION, layer: "global",
+        status: "applied", undoable: false, result: { source: plan.source, target: plan.target, from: plan.from, version: plan.version } }] };
+    })));
   }
 
   async mutate(action: "remove" | "update", source: string | undefined, cwd: string, local: boolean): Promise<{ operationId: string }> {

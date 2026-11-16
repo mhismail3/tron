@@ -89,8 +89,8 @@ through the registry.
     supervisor; runtime memory never survives replacement.
 11. The Gateway is the sole mutable runtime owner. Terminal and mobile surfaces attach
     to it; a second Pi process on the same JSONL is unsupported (no cross-process
-    lock). A process lock is held per agent directory and external session directory,
-    and `sessionDir` changes need a restart.
+    lock). A process lock is held per agent directory; canonical session files live
+    under its `sessions` directory.
 
 **Capacity.** Live parent runtimes default to 128 (`TRON_GATEWAY_MAX_LIVE_RUNTIMES`,
 1–1024), reservations included. At capacity the oldest reloadable idle runtimes are

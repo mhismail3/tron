@@ -19,7 +19,6 @@ import {
   SessionManager,
   type FileEntry,
   type SessionEntry,
-  SettingsManager,
 } from "../pi/coding-agent.js";
 import { GatewayError } from "../../errors.js";
 import type {
@@ -435,7 +434,7 @@ export class RuntimeRegistry implements SessionOperations {
   private readonly blobs: BlobStore;
   private readonly exports: BlobStore;
   private readonly workspace: ResourceRoot;
-  private settingsOwners: Readonly<{ model: import("../settings/settings-model.js").SettingsModel; changes: import("../settings/settings-change.js").SettingsChangePath }> | undefined;
+  private settingsOwners: Readonly<{ model: import("../settings/settings-model.js").SettingsModel; changes: import("../settings/settings-change.js").SettingsChangePath; inventory: import("../settings/tool-contract.js").SettingsInventorySource }> | undefined;
   private readonly homeMaterializations = new Map<string, Promise<RuntimeSlot>>();
   private searchInvalidator: ((sessionID: string, nextSessionID?: string) => void) | undefined;
   private readonly markers: RunMarkerStore;
@@ -446,7 +445,6 @@ export class RuntimeRegistry implements SessionOperations {
   private readonly presentationPresence = new SessionPresentationPresenceRegistry();
   private readonly catalogMetadataIndex: CatalogMetadataIndex;
   private readonly sessionCatalog: SessionCatalog;
-  private readonly configuredSessionDir: string | undefined;
   private interrupted = new Set<string>();
   private readonly subscribers = new Map<string, Set<string>>();
   private readonly idleEvictions = new Map<string, IdleEviction>();
@@ -574,11 +572,6 @@ export class RuntimeRegistry implements SessionOperations {
       limitBytes: getHeapStatistics().heap_size_limit,
     }));
     this.drainId = `idle-${createHash("sha256").update(this.workRegistry.runtimeEpoch).digest("hex").slice(0, 16)}`;
-    this.configuredSessionDir = SettingsManager.create(
-      process.cwd(),
-      options.agentDir,
-      { projectTrusted: false },
-    ).getSessionDir();
     for (const [name, value] of Object.entries(this.catalogDiscoveryLimits())) {
       if (!Number.isSafeInteger(value) || value < 1) throw new Error(`Invalid session catalog ${name} bound`);
     }
@@ -599,9 +592,9 @@ export class RuntimeRegistry implements SessionOperations {
     this.searchInvalidator = invalidator;
   }
 
-  setSettings(model: import("../settings/settings-model.js").SettingsModel, changes: import("../settings/settings-change.js").SettingsChangePath): void {
+  setSettings(model: import("../settings/settings-model.js").SettingsModel, changes: import("../settings/settings-change.js").SettingsChangePath, inventory: import("../settings/tool-contract.js").SettingsInventorySource): void {
     if (this.settingsOwners && this.settingsOwners.changes !== changes) throw new Error("Settings are already installed");
-    this.settingsOwners = { model, changes };
+    this.settingsOwners = { model, changes, inventory };
   }
 
   get administrativeWorkRegistry(): GatewayWorkRegistry { return this.workRegistry; }
@@ -1273,6 +1266,7 @@ export class RuntimeRegistry implements SessionOperations {
         const target = await this.taskLedger().settingsTarget(sessionId, taskId, purpose);
         return { ...target, slot: await this.acquire(target.sessionId) };
       },
+      settingsTargetSlot: (sessionId: string) => this.acquire(sessionId),
       validateTaskMarker: (sessionId: string, marker: unknown) => this.taskLedger().validateMarker(sessionId, marker),
       ...(this.options.homeTaskDiagnostic ? { homeTaskDiagnostic: this.options.homeTaskDiagnostic } : {}),
       resolveForkBoundary: (manager: SessionManager) => this.resolveForkBoundary(manager),
@@ -1280,19 +1274,13 @@ export class RuntimeRegistry implements SessionOperations {
     };
   }
 
-  private configuredSessionDirectory(): string | undefined {
-    return this.configuredSessionDir;
-  }
-
   sessionDirectory(cwd: string): string {
-    const configured = this.configuredSessionDirectory();
-    if (configured) return configured;
     const safePath = `--${resolve(cwd).replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
     return join(this.options.agentDir, "sessions", safePath);
   }
 
   private catalogDirectory(): string {
-    return this.configuredSessionDirectory() ?? join(this.options.agentDir, "sessions");
+    return join(this.options.agentDir, "sessions");
   }
 
   private catalogDiscoveryLimits() {
@@ -2318,9 +2306,8 @@ export class RuntimeRegistry implements SessionOperations {
       canonical = await realpath(input);
     } catch { return undefined; }
     if (canonical !== input) return undefined;
-    const roots = await Promise.all([join(this.options.agentDir, "sessions"), this.catalogDirectory()]
-      .map(async (root) => realpath(root).catch(() => resolve(root))));
-    if (!roots.some((root) => canonical === root || canonical.startsWith(root + sep))) return undefined;
+    const root = await realpath(this.catalogDirectory()).catch(() => resolve(this.catalogDirectory()));
+    if (canonical !== root && !canonical.startsWith(root + sep)) return undefined;
     let parentCanonical: string;
     try { parentCanonical = await realpath(expectedParentPath); }
     catch { return undefined; }

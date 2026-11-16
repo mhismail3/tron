@@ -102,14 +102,12 @@ struct EnvironmentSetup: Sendable {
     }
 
     func resolvedStartupMode(
-        command: MacCommandLineMode = .current,
         underTests: Bool = TronMacRuntime.isRunningUnderTests(),
         onboardedOverride: Bool? = nil
     ) -> MacStartupMode {
         MacStartupMode.resolve(
             variant: runtimeVariant,
             onboarded: onboardedOverride ?? onboardedSentinelExists(),
-            command: command,
             underTests: underTests
         )
     }

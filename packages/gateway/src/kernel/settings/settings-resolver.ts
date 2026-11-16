@@ -1,6 +1,6 @@
 import { type SettingsTarget, type Badge, type LayerValue, type ResolvedKey, type Resolution, type Qualifiers } from "./tool-contract.js";
 import { dirname, join } from "node:path";
-import { keyForHome, keyDefault, type SettingsSchema, type Binding, type KeyDeclaration } from "./settings-schema.js";
+import { keyForHome, type SettingsSchema, type Binding, type KeyDeclaration } from "./settings-schema.js";
 import { LAYER_LABELS, type FormatContext, type StoreLayer, type SettingsStores, type ResolveOptions } from "./settings-types.js";
 import { canonicalSettingsTarget, scopeAdmitted, scopeForStore, instanceId } from "./scope-resolution.js";
 import { projectSettingPath, projectSettingsDiagnostics } from "./settings-project-diagnostics.js";
@@ -92,7 +92,7 @@ const STORED_LAYER = { Global: "global", Home: "home", Session: "session", Proje
 const NO_VALUE: Opt = { $: "None" };
 
 function precedenceFacts(stores: SettingsStores, key: KeyDeclaration, qualifiers: Qualifiers) {
-  const values: unknown[] = [keyDefault(key, qualifiers)];
+  const values: unknown[] = [key.defaultValue];
   const entry = (layer: StoredLayer, index: number): Entry => {
     const binding = key.layers[layer];
     const inTarget = stores.layers.includes(layer);
@@ -180,8 +180,7 @@ function resolveInstance(
   options: ResolveOptions,
   dependencyValue: (id: string) => unknown,
 ): ResolvedKey {
-  const format = (value: unknown) => key.redacted ? (value === undefined || value === "" ? "Not set" : "Set")
-    : value === undefined ? "Not set" : key.type.format(value, options.format);
+  const format = (value: unknown) => value === undefined ? "Not set" : key.type.format(value, options.format);
   const layerValues: LayerValue[] = [];
   const facts = precedenceFacts(stores, key, qualifiers);
   const resolution = precedence.Resolve(facts.key, facts.layers);
@@ -195,8 +194,7 @@ function resolveInstance(
   const notApplied = shown.find(entry => entry.layer === unapplied);
 
   for (const layerId of [...BOTTOM_UP].reverse()) {
-    if (!stores.layers.includes(layerId) && layerId !== "default") continue;
-    if (layerId === "default") continue;
+    if (layerId === "default" || !stores.layers.includes(layerId)) continue;
     if (!key.layers[layerId] || !scopeAdmitted(key, layerId)) continue;
     const entry = shown.find(candidate => candidate.layer === layerId);
     layerValues.push(entry
@@ -224,7 +222,6 @@ function resolveInstance(
       }
     }
   }
-  if (key.redacted) badges.push({ kind: "state", label: "Not undoable" });
   const candidate = stores.session?.fixed?.[key.id] ?? stores.session?.requestPins?.[key.id];
   const fixedAt = layer === "session" && candidate && JSON.stringify(candidate.value) === JSON.stringify(value)
     && (!candidate.qualifiers?.model || candidate.qualifiers.model === qualifiers.model) ? candidate : undefined;
@@ -250,7 +247,7 @@ function resolveInstance(
     ...(Object.keys(qualifiers).length ? { qualifiers } : {}),
     group: key.group,
     ...(key.subgroup ? { subgroup: key.subgroup } : {}),
-    value: key.redacted ? undefined : value,
+    value,
     display: value !== undefined && key.type.summary ? key.type.summary(value) : format(value),
     layer: scopeForStore(layer),
     applied: !notApplied,
@@ -259,7 +256,7 @@ function resolveInstance(
     ...(fixedAt ? { fixedAt } : {}),
     overridden: localValue !== undefined,
     ...(projectValue && projectPath && stores.project ? { projectSetting: { file: join(stores.project.root, ".pi", "settings.json"), path: projectPath } } : {}),
-    layers: key.redacted ? layerValues.map(({ value: _value, ...rest }) => rest) : layerValues,
+    layers: layerValues,
   };
 }
 

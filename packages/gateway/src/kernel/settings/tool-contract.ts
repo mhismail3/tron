@@ -114,7 +114,6 @@ export interface ChangeOutcome {
   error?: { code: string; message: string };
   before?: unknown;
   after?: unknown;
-  redacted?: true;
   undoable?: false;
 }
 
@@ -125,7 +124,6 @@ export interface ChangeResult {
   review?: ChangeReview;
   signal?: SettingsSignal;
   summary?: string;
-  failure?: string;
 }
 
 export type ConfirmChange = <T>(review: ChangeReview, apply: (acceptance: NativeChangeAcceptance) => Promise<T>) => Promise<T | undefined>;
@@ -144,7 +142,32 @@ export interface TaskWorkerSettingsView extends TaskWorkerSettingsState {
   resolvedFrom?: string;
 }
 
+export interface SettingsHistoryQuery {
+  key?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface SettingsInventory {
+  hooks: {
+    extensions: Array<{ name: string; scope: string; source: string; handlers: Array<{ event: string; count: number }> }>;
+    events: Array<{ event: string; count: number; extensions: string[] }>;
+    loadErrors: number;
+  };
+  packages: Array<{ source: string; scope: string; filtered: boolean; provides?: Record<string, string[]>; conflict?: string; nodeRequirement?: string }>;
+  modules: Array<{ name: string; purpose: string; tools: string[]; commands: string[] }>;
+  mcp: { servers: Array<{ name: string; scope: "global" | "project"; state: "configured" | "disabled"; enabled: boolean; exposure: string; transport: "stdio" | "http" }>; errors: number };
+}
+
+export interface SettingsInventorySource {
+  read(cwd: string): Promise<SettingsInventory>;
+}
+
 export interface SettingsToolAccess {
+  inventory(): Promise<SettingsInventory>;
+  history(input: SettingsHistoryQuery, toolCallId: string): Promise<{ entries: unknown[]; nextCursor?: string }>;
+  undo(changeId: string, input: { reason: string; toolCallId: string; confirm?: ConfirmChange }): Promise<ChangeResult>;
+  updatePackage(input: { source: string; version: string; reason: string; toolCallId: string; confirm?: ConfirmChange }): Promise<ChangeResult>;
   resolve(keys?: string[], taskId?: string): Promise<Resolution & { worker?: TaskWorkerSettingsView }>;
   change(changes: ChangeRequest[], input: { reason: string; dryRun?: boolean; toolCallId: string; taskId?: string; confirm?: ConfirmChange }): Promise<ChangeResult & { worker?: TaskWorkerSettingsView }>;
 }

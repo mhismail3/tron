@@ -7,8 +7,8 @@ Owner: `gateway/session-catalog` (`session-catalog.ts`, `catalog-jsonl.ts`,
 
 ## Canonical identity
 
-- Pi's `sessionDir` (or its per-workspace folders under `agentDir/sessions`) is
-  authoritative; Tron never moves or mirrors it. `session.list` lists user sessions;
+- Canonical Pi JSONL lives in per-workspace folders under `agentDir/sessions`;
+  Tron never moves or mirrors it. `session.list` lists user sessions;
   `scope: "all"` adds delegated children. A delegated file is exactly
   `<parent-stem>/forks/<fork>.jsonl` or `<parent-stem>/<producer>/run-N/session.jsonl`,
   even if the parent is gone; a header may bind `parentSessionId` only to that derived

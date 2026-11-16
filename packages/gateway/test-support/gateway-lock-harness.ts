@@ -1,3 +1,6 @@
+import { settingsInventorySource } from "./settings-dependencies.js";
+import { piCliBundle } from "../src/kernel/pi/packages.js";
+import { McpAdminService } from "../src/admin/mcp-admin-service.js";
 import { TEST_SETTINGS_SCHEMA } from "./settings-schema.js";
 import { createTestRegistry, homeOwnerOf, displayOwnerOf } from "./gateway-registry.js";
 import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
@@ -149,7 +152,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
     for (const extension of options.extensions) await writeFile(join(agentDir, "extensions", extension.name), extension.source);
   }
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({
-    sessionDir: join(root, "sessions"), defaultProvider: model.provider, defaultModel: model.id,
+    defaultProvider: model.provider, defaultModel: model.id,
     compaction: { enabled: false, reserveTokens: 2_048, keepRecentTokens: 120 },
     ...options.settings,
   }));
@@ -221,7 +224,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
       async (inspection) => { await registry.abortProjectReload(inspection.projectDir); }),
   });
   settingsAccess = { model: settingsModel, changes: settingsChanges };
-  registry.setSettings(settingsModel, settingsChanges);
+  registry.setSettings(settingsModel, settingsChanges, settingsInventorySource({ agentDir, trust, modules: registry.moduleHost, mcp: new McpAdminService(agentDir, piCliBundle()) }));
 
   const notifications: TraceValue[] = [];
   const receipts = new CommandReceiptStore(tronHome);

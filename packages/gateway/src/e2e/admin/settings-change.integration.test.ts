@@ -10,7 +10,7 @@ import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { fauxProvider } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../../kernel/resources/trust-service.js";
@@ -21,11 +21,16 @@ import { SettingsChangeRecord, type ChangeEntry } from "../../kernel/settings/se
 import { maintainerChange } from "../../../test-support/native-change.js";
 import { OutsideChanges } from "../../admin/settings-outside.js";
 import { McpAdminService } from "../../admin/mcp-admin-service.js";
+import { createTronSettingsExtension } from "../../admin/tron-settings-extension.js";
+import { settingsInventorySource } from "../../../test-support/settings-dependencies.js";
 import { ModelConfigService } from "../../admin/model-config-service.js";
+import { AuthBroker } from "../../admin/auth-broker.js";
+import { GlobalProviderResources } from "../../admin/global-provider-resources.js";
 import { type SettingsStores } from "../../kernel/settings/settings-types.js";
 import { composedBelow, readBinding } from "../../kernel/settings/settings-resolver.js";
-import { type Resolution } from "../../kernel/settings/tool-contract.js";
+import { type Resolution, type SettingsInventory } from "../../kernel/settings/tool-contract.js";
 import { type KeyDeclaration } from "../../kernel/settings/settings-schema.js";
+import { instanceId } from "../../kernel/settings/scope-resolution.js";
 const { KEYS } = TEST_SETTINGS_SCHEMA;
 import type { PresentedResolution } from "../../admin/settings-presentation.js";
 import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
@@ -356,16 +361,15 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
   owner.roots.push(root);
   const tronHome = join(root, "tron");
   const agentDir = join(tronHome, "agent");
-  const sessionDir = join(root, "sessions");
-  await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true })]);
+  await mkdir(agentDir, { recursive: true });
   const faux = fauxProvider({ provider: "tron-settings-change", tokensPerSecond: 10_000, models: [{ id: "first", reasoning: true }, { id: "second", reasoning: true }] });
   const runtimeFactory = async () => {
-    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    const runtime = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json"), refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
     return runtime;
   };
   const modelRuntime = await runtimeFactory();
-  await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, retry: { maxRetries: 4 } }));
+  await writeFile(join(agentDir, "settings.json"), JSON.stringify({ retry: { maxRetries: 4 } }));
   const trust = new TrustService(agentDir);
   const registry = await createTestRegistry({ agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: runtimeFactory, trust,
     broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
@@ -374,7 +378,9 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
   await registry.initialize();
   const privateService = new MacTerminalService({ root: join(tronHome, "state/mac-terminal"), launchAgentDirectory: join(root, "agents") });
   const macTerminalKeys = new MacTerminalKeys(privateService.root);
-  const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: privateService }));
+  const mcpAdmin = new McpAdminService(agentDir, join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js"));
+  const modelConfig = new ModelConfigService(agentDir);
+  const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: privateService, mcpAdmin, modelConfig }));
   const record = new SettingsChangeRecord(tronHome, options.segmentEntries);
   const outside = new OutsideChanges(TEST_SETTINGS_SCHEMA, tronHome, agentDir, record, settingsModel.owner.observedReaders);
   settingsModel.owner.observeOutside(outside);
@@ -387,17 +393,18 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
         async inspection => { await registry.abortProjectReload(inspection.projectDir); });
     },
   });
-  registry.setSettings(settingsModel, settingsChanges);
+  registry.setSettings(settingsModel, settingsChanges, settingsInventorySource({ agentDir, trust, modules: registry.moduleHost, mcp: mcpAdmin }));
   const broadcasts: Array<{ topic: string; payload: unknown }> = [];
   const pushes: Array<{ sourceId: string; title: string; message: string }> = [];
   const notifications = { enqueue: async (push: { sourceId: string; title: string; message: string }) => { pushes.push(push); } };
+  const globalProviderResources = await GlobalProviderResources.create({ cwd: root, agentDir, modelRuntime, auth: new AuthBroker(modelRuntime, () => {}), log: () => {}, broadcast: () => {} });
   const service = new GatewayService({ display: displayOwnerOf(registry),
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },
     modelRuntime, trust, settingsModel, settingsChanges, sessions: registry, receipts: new CommandReceiptStore(tronHome), notifications,
     broadcast: (topic: string, payload: unknown) => broadcasts.push({ topic, payload }),
-    globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
-    mcpAdmin: new McpAdminService(agentDir, join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js")),
-    modelConfig: new ModelConfigService(agentDir),
+    globalProviderResources,
+    mcpAdmin,
+    modelConfig,
   } as unknown as GatewayServiceDependencies);
   const change = (target: Record<string, unknown>, changes: unknown[], extra: Record<string, unknown> = {}, c = client()) =>
     maintainerChange(service, c, "settings.change", { commandId: commandId(), target, changes, ...extra });
@@ -429,7 +436,7 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
     }
     return false;
   };
-  return { root, tronHome, agentDir, trust, macTerminalKeys, registry, service, record, settingsModel, settingsChanges, broadcasts, pushes, published, outside, change, agentChange, history, macDocument, faux };
+  return { root, tronHome, agentDir, trust, macTerminalKeys, registry, service, record, settingsModel, settingsChanges, broadcasts, pushes, published, outside, change, agentChange, history, macDocument, faux, modelRuntime };
 }
 
 async function gitProject(root: string, name: string) {
@@ -464,8 +471,8 @@ describe("settings.change", () => {
     const actor = { actor: { kind: "home" as const, id: "home-fixture" }, reason: "Change the declared setting" };
     await expect(f.settingsChanges.change({ kind: "global" }, [
       { key: "run.retry.maxRetries", layer: "global", op: "set", value: 8 },
-      { key: "run.httpProxy", layer: "global", op: "set", value: "http://private-fixture.invalid:3128" },
-    ], actor)).rejects.toMatchObject({ code: "invalid_request", message: "HTTP proxy cannot be changed by home" });
+      { key: "setup.installTelemetry", layer: "global", op: "set", value: false },
+    ], actor)).rejects.toMatchObject({ code: "invalid_request", message: "Install telemetry cannot be changed by home" });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
     expect(await f.history()).toEqual([]);
     const preview = await f.settingsChanges.change({ kind: "global" }, [
@@ -478,7 +485,225 @@ describe("settings.change", () => {
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
   });
 
-  caseIt("records every change once with actor and diff, undoes it, refuses a stale undo, and never undoes a redacted key", async owner => {
+  caseIt("an agent reads its chat's inventory of hooks, packages and MCP status with credentials masked", async owner => {
+    const f = await fixture(owner);
+    const cwd = join(f.root, "inventory-chat");
+    await mkdir(cwd);
+    const slot = await f.registry.create(cwd);
+    const model = f.faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    const pkg = join(f.root, "inventory-package");
+    await mkdir(pkg);
+    await writeFile(join(pkg, "package.json"), JSON.stringify({ name: "inventory-package", version: "1.0.0" }));
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), packages: [pkg] }));
+    await f.service.invoke(client(), "mcp.add", { commandId: commandId(), scope: "global", server: "inventory-http", transport: "http", url: "http://user:inventory-secret@127.0.0.1:1/mcp?token=inventory-query-secret" });
+    const markers = join(f.root, "inventory-markers");
+    await mkdir(markers);
+    const launched = join(markers, "stdio-launched");
+    const disabledLaunched = join(markers, "disabled-launched");
+    const resolved = join(markers, "credential-resolved");
+    const mcpPath = join(f.agentDir, "mcp.json");
+    const mcpDocument = JSON.parse(await readFile(mcpPath, "utf8")) as { mcpServers: Record<string, unknown> };
+    mcpDocument.mcpServers["inventory-stdio"] = { command: "/bin/sh", args: ["-c", `touch ${launched}`] };
+    mcpDocument.mcpServers["inventory-disabled"] = { command: "/bin/sh", args: ["-c", `touch ${disabledLaunched}`], enabled: false };
+    mcpDocument.mcpServers["inventory-credential"] = { url: "http://127.0.0.1:1/credential", headers: { Authorization: `!touch ${resolved}; printf secret` } };
+    mcpDocument.mcpServers["inventory-slash-userinfo"] = { url: "https://user:pa/ss@127.0.0.1:1/mcp" };
+    await writeFile(mcpPath, JSON.stringify(mcpDocument, null, 2));
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("settings", { action: "inventory" }, { id: "inventory-tool" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage("Done"),
+    ]);
+    await slot.prompt("Read the settings inventory");
+    await waitFor(() => !slot.isBusy && !slot.hasActiveAgentRun || undefined, "settings inventory tool turn settled");
+    const result = slot.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === "inventory-tool");
+    if (result?.type !== "message" || result.message.role !== "toolResult") throw new Error("No canonical settings tool result");
+    expect(result.message.isError).not.toBe(true);
+    const inventory = result.message.details as SettingsInventory;
+    expect(inventory.hooks.extensions.find(extension => extension.name === "builtin:mcp")?.handlers).toContainEqual({ event: "session_start", count: 1 });
+    expect(inventory.packages).toContainEqual(expect.objectContaining({ source: pkg, scope: "user" }));
+    expect(existsSync(launched)).toBe(false);
+    expect(existsSync(disabledLaunched)).toBe(false);
+    expect(existsSync(resolved)).toBe(false);
+    expect(inventory.mcp.servers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "inventory-http", scope: "global", state: "configured", transport: "http" }),
+      expect.objectContaining({ name: "inventory-stdio", scope: "global", state: "configured", transport: "stdio" }),
+      expect.objectContaining({ name: "inventory-disabled", scope: "global", state: "disabled", enabled: false }),
+      expect.objectContaining({ name: "inventory-credential", state: "configured", transport: "http" }),
+    ]));
+    expect(inventory.mcp.servers).not.toContainEqual(expect.objectContaining({ name: "inventory-slash-userinfo" }));
+    expect(inventory.mcp.errors).toBe(1);
+    expect(JSON.stringify(inventory)).not.toMatch(/inventory-secret|inventory-query-secret|pa\/ss|user:|127\.0\.0\.1|secret/);
+  });
+
+  caseIt("an agent pages only its own settings history, never another chat's or the maintainer's rows", async owner => {
+    const f = await fixture(owner);
+    const cwd = join(f.root, "history-chat");
+    await mkdir(cwd);
+    const slot = await f.registry.create(cwd);
+    const other = await f.registry.create(cwd);
+    const model = f.faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await other.setModel(model.provider, model.id);
+    let calls = 0;
+    const turn = async (chat: typeof slot, input: Record<string, unknown>) => {
+      const id = `history-tool-${++calls}`;
+      f.faux.setResponses([
+        fauxAssistantMessage([fauxToolCall("settings", input, { id })], { stopReason: "toolUse" }),
+        fauxAssistantMessage("Done"),
+      ]);
+      await chat.prompt("Use the requested settings action");
+      await waitFor(() => !chat.isBusy && !chat.hasActiveAgentRun || undefined, "settings history tool turn settled");
+      const result = chat.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === id);
+      if (result?.type !== "message" || result.message.role !== "toolResult") throw new Error("No canonical settings tool result");
+      return result.message;
+    };
+    const entriesOf = (message: { details?: unknown }) => (message.details as { entries: ChangeEntry[]; nextCursor?: string }).entries;
+    const changeIdOf = (message: { details?: unknown }) => (message.details as { changes: Array<{ changeId: string }> }).changes[0]!.changeId;
+    const ownRetry = await turn(slot, { action: "change", reason: "Reduce retry attempts", changes: [
+      { key: "run.retry.maxRetries", layer: "global", op: "set", value: 3 },
+    ] });
+    expect(ownRetry.isError).not.toBe(true);
+    const ownId = changeIdOf(ownRetry);
+    const otherSession = await turn(other, { action: "change", reason: "Another chat's session retries", changes: [
+      { key: "run.retry.maxRetries", layer: "session", op: "set", value: 8 },
+    ] });
+    expect(otherSession.isError).not.toBe(true);
+    const otherSessionId = changeIdOf(otherSession);
+    const otherGlobal = await turn(other, { action: "change", reason: "Another chat's private backoff", changes: [
+      { key: "run.retry.baseDelayMs", layer: "global", op: "set", value: 1_500 },
+    ] });
+    expect(otherGlobal.isError).not.toBe(true);
+    const otherGlobalId = changeIdOf(otherGlobal);
+    const maintainer = await f.change({ kind: "global" }, [{ key: "tools.shell.path", layer: "global", op: "set", value: "/bin/sh" }]);
+    const maintainerId = maintainer.changes[0]!.changeId;
+    const page = await turn(slot, { action: "history", key: "run.retry.maxRetries", limit: 1 });
+    expect(page.isError).not.toBe(true);
+    expect(entriesOf(page)).toHaveLength(1);
+    expect(entriesOf(page)[0]).toMatchObject({ changeId: ownId, actor: { kind: "agent", sessionId: slot.id }, before: 4, after: 3 });
+    const undone = await turn(slot, { action: "undo", changeId: ownId, reason: "Restore retry attempts" });
+    expect(undone.isError).not.toBe(true);
+    const undoId = changeIdOf(undone);
+    expect((await f.macDocument()).retry).toEqual({ maxRetries: 4, baseDelayMs: 1_500 });
+    expect((await f.history({ key: "run.retry.maxRetries" })).find(entry => entry.undoOf === ownId)).toMatchObject({ changeId: undoId, actor: { kind: "agent", sessionId: slot.id }, status: "applied", before: 3, after: 4 });
+    expect(entriesOf(await turn(slot, { action: "history", key: "run.retry.maxRetries" })).map(entry => entry.changeId)).toEqual([undoId, ownId]);
+    const latest = (await turn(slot, { action: "history", key: "run.retry.maxRetries", limit: 1 })).details as { entries: ChangeEntry[]; nextCursor: string };
+    expect(latest.entries.map(entry => entry.changeId)).toEqual([undoId]);
+    expect(latest.nextCursor).toBeTypeOf("string");
+    const previous = await turn(slot, { action: "history", key: "run.retry.maxRetries", cursor: latest.nextCursor, limit: 1 });
+    expect(entriesOf(previous).map(entry => entry.changeId)).toEqual([ownId]);
+    expect((await turn(slot, { action: "history", reason: "Not a history parameter" })).isError).toBe(true);
+    const everything = entriesOf(await turn(slot, { action: "history", limit: 200 }));
+    const ids = everything.map(entry => entry.changeId);
+    expect(ids).toContain(ownId);
+    for (const foreign of [otherSessionId, otherGlobalId, maintainerId]) expect(ids).not.toContain(foreign);
+    expect(everything.every(entry => entry.actor.sessionId === slot.id || entry.target.kind === "session" && entry.target.sessionId === slot.id)).toBe(true);
+    expect(JSON.stringify(everything)).not.toContain("Another chat");
+    const agentActor = { kind: "agent" as const, id: "history-agent", sessionId: slot.id };
+    const retiredSecret = { changeId: "retired-private-entry", at: new Date().toISOString(), actor: agentActor, target: { kind: "session" as const, sessionId: slot.id },
+      layer: "session" as const, key: "retired.apiToken", op: "set" as const, before: "sk-retired-old-secret", after: "sk-retired-new-secret", status: "applied" as const };
+    const flaggedSecret = { changeId: "flagged-private-entry", at: new Date().toISOString(), actor: agentActor, target: { kind: "session" as const, sessionId: slot.id },
+      layer: "session" as const, key: "run.retry.maxRetries", op: "set" as const, before: "sk-flagged-old-secret", after: "sk-flagged-new-secret", status: "applied" as const, redacted: true as const };
+    await f.record.append([retiredSecret, flaggedSecret]);
+    const privateView = JSON.stringify(entriesOf(await turn(slot, { action: "history", limit: 200 })));
+    expect(privateView).not.toContain("sk-retired");
+    expect(privateView).not.toContain("sk-flagged");
+    expect(privateView).toContain("retired-private-entry");
+    expect(JSON.stringify(await f.history({ key: "retired.apiToken" }))).not.toContain("sk-retired");
+    expect(JSON.stringify(await f.history({ key: "run.retry.maxRetries" }))).not.toContain("sk-flagged");
+    const otherView = entriesOf(await turn(other, { action: "history", limit: 200 })).map(entry => entry.changeId);
+    expect(otherView).toEqual([otherGlobalId, otherSessionId]);
+  });
+
+  caseIt("an agent undoes only its own settings changes and refuses another chat's session change with the exact message", async owner => {
+    const f = await fixture(owner);
+    const cwd = join(f.root, "undo-chat");
+    await mkdir(cwd);
+    const slot = await f.registry.create(cwd);
+    const other = await f.registry.create(cwd);
+    const model = f.faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await other.setModel(model.provider, model.id);
+    let calls = 0;
+    const turn = async (chat: typeof slot, input: Record<string, unknown>) => {
+      const id = `undo-tool-${++calls}`;
+      f.faux.setResponses([
+        fauxAssistantMessage([fauxToolCall("settings", input, { id })], { stopReason: "toolUse" }),
+        fauxAssistantMessage("Done"),
+      ]);
+      await chat.prompt("Use the requested settings action");
+      await waitFor(() => !chat.isBusy && !chat.hasActiveAgentRun || undefined, "settings undo tool turn settled");
+      const result = chat.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === id);
+      if (result?.type !== "message" || result.message.role !== "toolResult") throw new Error("No canonical settings tool result");
+      return result.message;
+    };
+    const changeIdOf = (message: { details?: unknown }) => (message.details as { changes: Array<{ changeId: string }> }).changes[0]!.changeId;
+    const text = (message: { content: Array<{ type: string; text?: string }> }) => message.content.map(part => part.type === "text" ? part.text : "").join("");
+    const refusal = "An agent can undo only settings changes made by or in its own session";
+    const ownRetry = await turn(slot, { action: "change", reason: "Reduce retry attempts", changes: [
+      { key: "run.retry.maxRetries", layer: "global", op: "set", value: 3 },
+    ] });
+    const otherSession = await turn(other, { action: "change", reason: "Another chat's session retries", changes: [
+      { key: "run.retry.maxRetries", layer: "session", op: "set", value: 8 },
+    ] });
+    const refusedSession = await turn(slot, { action: "undo", changeId: changeIdOf(otherSession), reason: "Attempt cross-session undo" });
+    expect(refusedSession.isError).toBe(true);
+    expect(text(refusedSession)).toBe(refusal);
+    expect((await f.service.invoke(client([other.id]), "settings.resolve", { target: { kind: "session", sessionId: other.id }, keys: ["run.retry.maxRetries"] }) as unknown as Resolution).keys[0]!.value).toBe(8);
+    expect((await f.macDocument()).retry).toEqual({ maxRetries: 3 });
+    const undone = await turn(slot, { action: "undo", changeId: changeIdOf(ownRetry), reason: "Restore retry attempts" });
+    expect(undone.isError).not.toBe(true);
+    expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
+    const selfUndo = await turn(other, { action: "undo", changeId: changeIdOf(otherSession), reason: "Restore the other chat's retries" });
+    expect(selfUndo.isError).not.toBe(true);
+    expect((await f.service.invoke(client([other.id]), "settings.resolve", { target: { kind: "session", sessionId: other.id }, keys: ["run.retry.maxRetries"] }) as unknown as Resolution).keys[0]!.value).not.toBe(8);
+  });
+
+  caseIt("an agent refuses to undo another chat's Global change or the maintainer's, and its own Global change stays undoable", async owner => {
+    const f = await fixture(owner);
+    const cwd = join(f.root, "global-undo-chat");
+    await mkdir(cwd);
+    const slot = await f.registry.create(cwd);
+    const other = await f.registry.create(cwd);
+    const model = f.faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await other.setModel(model.provider, model.id);
+    let calls = 0;
+    const turn = async (chat: typeof slot, input: Record<string, unknown>) => {
+      const id = `global-undo-tool-${++calls}`;
+      f.faux.setResponses([
+        fauxAssistantMessage([fauxToolCall("settings", input, { id })], { stopReason: "toolUse" }),
+        fauxAssistantMessage("Done"),
+      ]);
+      await chat.prompt("Use the requested settings action");
+      await waitFor(() => !chat.isBusy && !chat.hasActiveAgentRun || undefined, "settings global undo tool turn settled");
+      const result = chat.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === id);
+      if (result?.type !== "message" || result.message.role !== "toolResult") throw new Error("No canonical settings tool result");
+      return result.message;
+    };
+    const changeIdOf = (message: { details?: unknown }) => (message.details as { changes: Array<{ changeId: string }> }).changes[0]!.changeId;
+    const text = (message: { content: Array<{ type: string; text?: string }> }) => message.content.map(part => part.type === "text" ? part.text : "").join("");
+    const refusal = "An agent can undo only settings changes made by or in its own session";
+    const otherGlobal = await turn(other, { action: "change", reason: "Another chat's private backoff", changes: [
+      { key: "run.retry.baseDelayMs", layer: "global", op: "set", value: 1_500 },
+    ] });
+    const ownGlobal = await turn(slot, { action: "change", reason: "This chat's retries", changes: [
+      { key: "run.retry.maxRetries", layer: "global", op: "set", value: 3 },
+    ] });
+    const maintainer = await f.change({ kind: "global" }, [{ key: "tools.shell.path", layer: "global", op: "set", value: "/bin/sh" }]);
+    const refusedGlobal = await turn(slot, { action: "undo", changeId: changeIdOf(otherGlobal), reason: "Attempt another chat's global undo" });
+    expect(refusedGlobal.isError).toBe(true);
+    expect(text(refusedGlobal)).toBe(refusal);
+    expect((await f.service.invoke(client(), "settings.resolve", { target: { kind: "global" }, keys: ["run.retry.baseDelayMs"] }) as unknown as Resolution).keys[0]!.value).toBe(1_500);
+    const refusedMaintainer = await turn(slot, { action: "undo", changeId: maintainer.changes[0]!.changeId, reason: "Attempt maintainer undo" });
+    expect(refusedMaintainer.isError).toBe(true);
+    expect(text(refusedMaintainer)).toBe(refusal);
+    expect((await f.macDocument()).retry).toEqual({ maxRetries: 3, baseDelayMs: 1_500 });
+    const undone = await turn(slot, { action: "undo", changeId: changeIdOf(ownGlobal), reason: "Restore this chat's retries" });
+    expect(undone.isError).not.toBe(true);
+    expect((await f.macDocument()).retry).toEqual({ maxRetries: 4, baseDelayMs: 1_500 });
+  });
+
+  caseIt("records every change once with actor and diff, undoes it, and refuses a stale undo", async owner => {
     const f = await fixture(owner);
     const applied = await f.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 6, expected: 4 }]);
     expect(applied.status).toBe("applied");
@@ -504,22 +729,10 @@ describe("settings.change", () => {
         display: { current: "10 retries", after: "8 retries" } } });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 10 });
 
-    const proxy = await f.change({ kind: "global" }, [{ key: "run.httpProxy", layer: "global", op: "set", value: "http://proxy.invalid:3128" }]);
-    expect(proxy.changes[0]).toMatchObject({ redacted: true });
-    expect(proxy.changes[0]).not.toHaveProperty("after");
-    expect(JSON.stringify(proxy)).not.toContain("proxy.invalid");
-    const proxyEntry = (await f.history({ key: "run.httpProxy" }))[0]!;
-    expect(proxyEntry).toMatchObject({ changed: true, redacted: true,
-      presentation: { label: "HTTP proxy", display: { before: "Hidden", after: "Changed" } } });
-    expect(JSON.stringify(await f.history())).not.toContain("proxy.invalid");
-    await expect(maintainerChange(f.service, client(), "settings.undo", { commandId: commandId(), changeId: proxy.changes[0]!.changeId }))
-      .rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("not undoable") });
-
     await expect(f.change({ kind: "global" }, [{ key: "setup.sessionDir", layer: "global", op: "set", value: "/elsewhere" }])).rejects.toMatchObject({ code: "invalid_request" });
     await f.record.append([{ ...entry!, changeId: "retired-key-entry", key: "retired.setting", actor: { kind: "outside", id: "fixture" }, before: "old", after: "new" }]);
-    expect((await f.history({ key: "retired.setting" }))[0]).toMatchObject({
-      presentation: { label: "retired.setting", actor: "Outside Tron", display: { before: '"old"', after: '"new"' } },
-    });
+    expect((await f.history({ key: "retired.setting" }))[0]).toMatchObject({ changed: true, redacted: true, presentation: { label: "retired.setting", actor: "Outside Tron", display: { before: "Hidden", after: "Changed" } } });
+    expect(JSON.stringify(await f.history({ key: "retired.setting" }))).not.toContain("\"old\"");
     expect((await f.record.entry(entry!.changeId))?.entry).not.toHaveProperty("presentation");
     transcript.push({ case: "record, undo and redaction", detail: await f.history() });
   });
@@ -779,13 +992,34 @@ describe("outside changes", () => {
     expect((await row(f, { kind: "global" }, "run.retry.maxRetries")).value).toBe(2);
     expect((await outsideEntries(f)).filter(entry => entry.key === "run.retry.maxRetries").map(entry => entry.after)).toEqual([2, 9]);
 
-    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), httpProxy: "http://user:secret@proxy.invalid" }));
-    await row(f, { kind: "global" }, "run.httpProxy");
-    const proxy = (await outsideEntries(f)).find(entry => entry.key === "run.httpProxy")!;
-    expect(proxy).toMatchObject({ redacted: true, changed: true });
-    expect(JSON.stringify(proxy)).not.toContain("secret");
-    expect(await readFile(f.outside.path, "utf8")).not.toContain("secret");
     transcript.push({ case: "outside mac", detail: await outsideEntries(f) });
+  });
+
+  caseIt("an observed state persisted before a key was retired records no outside entry or mark for it", async owner => {
+    const f = await fixture(owner);
+    const retired = (key: string) => instanceId(key, {});
+    const baseline = (await f.macDocument()).retry as { maxRetries: number };
+    await mkdir(dirname(f.outside.path), { recursive: true });
+    await writeFile(f.outside.path, JSON.stringify({ version: 1, stores: { global: {
+      digest: "stale",
+      values: {
+        [instanceId("run.retry.maxRetries", {})]: { key: "run.retry.maxRetries", value: baseline.maxRetries },
+        [retired("run.httpProxy")]: { key: "run.httpProxy", hash: "a".repeat(64) },
+        [retired("setup.sessionDir")]: { key: "setup.sessionDir", value: "/elsewhere" },
+      },
+      tron: { [retired("setup.sessionDir")]: "old-change" },
+      outside: { [retired("run.httpProxy")]: { changeId: "old-outside", applyAgain: false, before: "Set", after: "Not set" } },
+    } } }));
+    await row(f, { kind: "global" }, "run.retry.maxRetries");
+    await f.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 6 }]);
+    expect(await outsideEntries(f)).toEqual([]);
+
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), retry: { maxRetries: 9 } }));
+    expect((await row(f, { kind: "global" }, "run.retry.maxRetries")).value).toBe(9);
+    expect((await outsideEntries(f)).map(entry => entry.key)).toEqual(["run.retry.maxRetries"]);
+    const stored = JSON.parse(await readFile(f.outside.path, "utf8")).stores.global;
+    expect([...Object.keys(stored.values), ...Object.keys(stored.outside), ...Object.keys(stored.tron)]
+      .filter(instance => instance.startsWith("run.httpProxy") || instance.startsWith("setup.sessionDir"))).toEqual([]);
   });
 
   caseIt("a file event alone records and broadcasts each change without a tier push", async owner => {
@@ -937,6 +1171,10 @@ describe("outside changes to MCP servers and custom models", () => {
     expect(f.pushes).toEqual([]);
     expect(f.broadcasts.filter(event => event.topic === "mcp.changed").length).toBe(2);
     expect(JSON.stringify(await f.history())).not.toContain("outside-secret");
+    await expect(f.service.invoke(client(), "settings.undo", { commandId: commandId(), changeId: added.changeId }))
+      .rejects.toMatchObject({ code: "conflict", message: "This change is not undoable; inspect it with its owner" });
+    await expect(f.service.invoke(client(), "settings.applyAgain", { commandId: commandId(), changeId: added.changeId }))
+      .rejects.toMatchObject({ code: "conflict", message: "A hidden value cannot be applied again: it was never recorded" });
     expect(await readFile(f.outside.path, "utf8")).not.toContain("outside-secret");
     expect(await servers(f, { scope: "global" })).toEqual(["global:hand-added", "global:tron-added"]);
     const afterAdd = JSON.parse(await readFile(globalMcp, "utf8")) as { mcpServers: Record<string, unknown> };
@@ -955,6 +1193,30 @@ describe("outside changes to MCP servers and custom models", () => {
     expect(aroundTron.some(entry => entry.qualifiers?.server === "tron-second")).toBe(false);
     expect((await f.history({ section: "tools" })).some(entry => entry.key === "tools.mcp.server")).toBe(true);
     transcript.push({ case: "outside mcp and models", detail: await outsideEntries(f) });
+  });
+
+  caseIt("broadcasts one mcp.changed when Home's settings tool proposes an MCP server and the native card approves it", async owner => {
+    const f = await stagedFixture(owner);
+    const tools: Array<{ execute: (...args: unknown[]) => Promise<{ details: { status: string } }> }> = [];
+    const settingsExtension = createTronSettingsExtension(() => ({
+      resolve: async () => { throw new Error("resolve is not used in this proof"); },
+      change: (changes, input) => f.settingsChanges.change({ kind: "global" }, changes, {
+        actor: { kind: "home", id: "home-session", sessionId: "home-session", toolCallId: input.toolCallId },
+        reason: input.reason, ...(input.confirm ? { confirm: input.confirm } : {}),
+      }),
+    }), async ({ apply }) => apply({ deviceId: "device:phone", commandId: "command-mcp-tool" }));
+    settingsExtension({ registerTool: tool => { tools.push(tool as never); } } as never);
+    const [tool] = tools;
+    const requests = [{ key: "tools.mcp.server", qualifiers: { server: "home-docs" }, layer: "global", op: "set", value: { command: "npx", args: ["-y", "@acme/docs-mcp"] } }];
+    const result = await tool!.execute("call-mcp", { action: "change", changes: requests, reason: "Maintainer asked for the docs server" },
+      new AbortController().signal, () => {}, { hasUI: true });
+    expect(result.details).toMatchObject({ status: "applied" });
+    expect(f.broadcasts.filter(event => event.topic === "mcp.changed")).toEqual([{ topic: "mcp.changed", payload: { scope: "global" } }]);
+    expect(JSON.parse(await readFile(join(f.agentDir, "mcp.json"), "utf8")).mcpServers["home-docs"]).toEqual({ command: "npx", args: ["-y", "@acme/docs-mcp"] });
+    const [applied] = await f.history({ key: "tools.mcp.server" });
+    expect(applied).toEqual(expect.objectContaining({ status: "applied", qualifiers: { server: "home-docs" } }));
+    await maintainerChange(f.service, client(), "settings.undo", { commandId: commandId(), changeId: applied!.changeId });
+    expect(JSON.parse(await readFile(join(f.agentDir, "mcp.json"), "utf8")).mcpServers["home-docs"]).toBeUndefined();
   });
 
   caseIt("records Project mcp.json edits from a late .pi watch, a Git pull, and the Project MCP owner under the Project root", async owner => {
@@ -1009,25 +1271,72 @@ describe("outside changes to MCP servers and custom models", () => {
     transcript.push({ case: "outside mcp and models", detail: await outsideEntries(f) });
   });
 
-  caseIt("records custom model provider edits by digest and pushes, and never records Tron's own save", async owner => {
+  caseIt("writes custom model providers through the change path, refreshes the catalog, and never records, previews or echoes a credential", async owner => {
     const f = await stagedFixture(owner);
-    const document = { providers: { "tron-provider": { baseUrl: "https://tron-models.invalid/v1", api: "openai-completions", apiKey: "tron-key", models: [{ id: "m" }] } } };
-    await f.service.invoke(client(), "models.custom.put", { commandId: commandId(), document });
-    expect(f.broadcasts.at(-1)).toEqual({ topic: "models.customChanged", payload: {} });
-    await f.service.invoke(client(), "settings.resolve", { target: { kind: "global" }, keys: ["run.transport"] });
-    const beforeModels = (await outsideEntries(f)).length;
+    const global = { kind: "global" as const };
     const modelsPath = join(f.agentDir, "models.json");
-    const saved = JSON.parse(await readFile(modelsPath, "utf8")) as { providers: Record<string, unknown> };
-    await writeJson(modelsPath, { providers: { ...saved.providers, "hand-provider": { baseUrl: "https://hand-models.invalid/v1", api: "openai-completions", apiKey: "outside-model-secret", models: [{ id: "h" }] } } });
+    const provider = { baseUrl: "https://tron-models.invalid/v1", api: "openai-completions", models: [{ id: "m" }] };
+    const set = (id: string, value: unknown) => ({ key: "accounts.models.provider", qualifiers: { provider: id }, layer: "global" as const, op: "set" as const, value });
+    const providers = async () => (JSON.parse(await readFile(modelsPath, "utf8")) as { providers: Record<string, unknown> }).providers;
+    const home = { actor: { kind: "home" as const, id: "home" }, reason: "Add the custom model endpoint" };
+    await expect(f.settingsChanges.change(global, [set("tron-provider", provider)], { actor: { kind: "agent", id: "chat" }, reason: "Try" }))
+      .rejects.toMatchObject({ code: "invalid_request" });
+    const review = await f.settingsChanges.change(global, [set("tron-provider", provider)], home);
+    expect(review).toMatchObject({ status: "review", review: { requiresTap: true } });
+    expect(review.review!.items[0]!.exact).toContain("https://tron-models.invalid/v1");
+    expect(await readFile(modelsPath, "utf8").catch(() => undefined)).toBeUndefined();
+    expect(await f.settingsChanges.change(global, [set("tron-provider", provider)], { ...home, actor: { kind: "ui", id: "device:phone" }, confirmationDigest: review.review!.digest }))
+      .toMatchObject({ status: "applied" });
+    expect(await providers()).toEqual({ "tron-provider": provider });
+    expect(f.modelRuntime.getModel("tron-provider", "m")).toBeDefined();
+    await f.settingsModel.resolve(global);
+    expect((await outsideEntries(f)).filter(entry => entry.qualifiers?.provider === "tron-provider")).toEqual([]);
+    const secret = "sk-provider-never-echoed";
+    const ui = { actor: { kind: "ui" as const, id: "device:phone" }, reason: "Edit the custom model endpoint" };
+    for (const value of [{ ...provider, apiKey: secret }, { ...provider, headers: { Authorization: `Bearer ${secret}` } }, { ...provider, baseUrl: `https://user:${secret}@tron-models.invalid/v1` }]) {
+      const error = await f.settingsChanges.change(global, [set("new-provider", value)], ui).catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ code: "invalid_request" });
+      expect(String((error as Error).message)).not.toContain(secret);
+    }
+    expect(await providers()).toEqual({ "tron-provider": provider });
+    const saved = await providers();
+    const beforeModels = (await outsideEntries(f)).length;
+    await writeJson(modelsPath, { providers: { ...saved, "hand-provider": { ...provider, baseUrl: "https://hand-models.invalid/v1", apiKey: secret } } });
+    await f.settingsModel.resolve(global);
     await until("publication: custom model provider hand-provider", () => f.published("accounts.models.provider", ["provider", "hand-provider"]));
     expect((await outsideEntries(f)).length).toBe(beforeModels + 1);
     expect((await outsideEntries(f))[0]).toMatchObject({ key: "accounts.models.provider", qualifiers: { provider: "hand-provider" }, added: true,
       presentation: { label: "Custom model provider hand-provider", section: "accounts" } });
-    expect(f.broadcasts).toContainEqual({ topic: "models.customChanged", payload: {} });
-    expect(JSON.stringify(await f.history())).not.toContain("outside-model-secret");
+    const handBytes = await readFile(modelsPath, "utf8");
+    for (const request of [set("hand-provider", { ...provider, baseUrl: "https://elsewhere.invalid/v1" }), { key: "accounts.models.provider", qualifiers: { provider: "hand-provider" }, layer: "global" as const, op: "unset" as const }]) {
+      const error = await f.settingsChanges.change(global, [request], ui).catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ code: "conflict" });
+      expect(String((error as Error).message)).not.toContain(secret);
+    }
+    expect(await readFile(modelsPath, "utf8")).toBe(handBytes);
+    expect(JSON.stringify(await f.history())).not.toContain(secret);
+    const created = (await f.history()).find(entry => entry.key === "accounts.models.provider" && entry.qualifiers?.provider === "tron-provider" && entry.status === "applied")!;
+    expect(await f.settingsChanges.undo(created.changeId, { actor: { kind: "home", id: "home" }, reason: "Undo the endpoint" })).toMatchObject({ status: "applied" });
+    expect(await providers()).toEqual({ "hand-provider": { ...provider, baseUrl: "https://hand-models.invalid/v1", apiKey: secret } });
     const served = await f.service.invoke(client(), "models.custom.get", {}) as { document: { providers: Record<string, unknown> } };
-    expect(Object.keys(served.document.providers).sort()).toEqual(["hand-provider", "tron-provider"]);
+    expect(Object.keys(served.document.providers)).toEqual(["hand-provider"]);
+    expect(JSON.stringify(served)).not.toContain(secret);
     transcript.push({ case: "outside mcp and models", detail: await outsideEntries(f) });
+  });
+  caseIt("refuses a provider write while models.json holds an unrelated invalid entry, and never persists or reports it applied", async owner => {
+    const f = await fixture(owner);
+    const global = { kind: "global" as const };
+    const modelsPath = join(f.agentDir, "models.json");
+    const broken = `${JSON.stringify({ providers: { broken: { baseUrl: 5, api: "openai-completions", models: [{ id: "x" }] } } }, null, 2)}\n`;
+    await writeFile(modelsPath, broken);
+    const set = { key: "accounts.models.provider", qualifiers: { provider: "tron-provider" }, layer: "global" as const, op: "set" as const,
+      value: { baseUrl: "https://tron-models.invalid/v1", api: "openai-completions", models: [{ id: "m" }] } };
+    const home = { actor: { kind: "home" as const, id: "home" }, reason: "Add the custom model endpoint" };
+    const review = await f.settingsChanges.change(global, [set], home);
+    const error = await f.settingsChanges.change(global, [set], { ...home, actor: { kind: "ui" as const, id: "device:phone" }, confirmationDigest: review.review!.digest }).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: "invalid_request", message: expect.stringContaining("Invalid models.json schema") });
+    expect(await readFile(modelsPath, "utf8")).toBe(broken);
+    expect(f.modelRuntime.getModel("tron-provider", "m")).toBeUndefined();
   });
 });
 
@@ -1130,19 +1439,14 @@ describe("every key at every allowed layer", () => {
         }
         expect(applied.status, `${key.id}@${layer}`).toBe("applied");
         const after = await resolve(layer, key.id);
-        const expectedValue = key.redacted ? undefined : value;
         expect(after!.layer, `${key.id}@${layer} source`).toBe(scope);
-        if (!key.redacted) expect(after!.value, `${key.id}@${layer} value`).toEqual(expectedValue);
+        expect(after!.value, `${key.id}@${layer} value`).toEqual(value);
         expect(await stored(key, layer, after!.qualifiers ?? row.qualifiers ?? {}), `${key.id}@${layer} store`).toEqual(value);
         const undo = maintainerChange(f.service, client([slot.id]), "settings.undo", { commandId: commandId(), changeId: applied.changes[0]!.changeId, ...(layer === "session" ? { fence: fence() } : {}) });
-        if (key.redacted) {
-          await expect(undo).rejects.toMatchObject({ code: "conflict" });
-          await f.change(targets[layer]!, [{ key: key.id, layer: scope, op: "unset", ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) }], extra, client([slot.id]));
-          expect(await stored(key, layer, row.qualifiers ?? {}), `${key.id}@${layer} unset`).toBeUndefined();
-        } else await undo;
+        await undo;
         const undone = await resolve(layer, key.id);
-        if (!key.redacted) expect(undone!.value, `${key.id}@${layer} undo`).toEqual(row.value);
-        report.push({ ...instance, result: "round-trip", value: key.redacted ? "redacted" : value });
+        expect(undone!.value, `${key.id}@${layer} undo`).toEqual(row.value);
+        report.push({ ...instance, result: "round-trip", value });
       }
     }
     transcript.push({ case: `every key: ${only}`, detail: report.filter(entry => entry.layer === only) });

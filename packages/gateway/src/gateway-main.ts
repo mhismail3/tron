@@ -20,6 +20,7 @@ import { SettingsChangeRecord } from "./kernel/settings/settings-record.js";
 import { OutsideChanges } from "./admin/settings-outside.js";
 import { ModelConfigService } from "./admin/model-config-service.js";
 import { PackageService } from "./admin/package-service.js";
+import { SettingsInventoryReader } from "./admin/settings-inventory.js";
 import { ScopeToolCatalog } from "./admin/tool-catalog.js";
 import { HookResources } from "./admin/hook-resources.js";
 import { AuthBroker } from "./admin/auth-broker.js";
@@ -29,7 +30,7 @@ import { RuntimeRegistry } from "./kernel/session/runtime-registry.js";
 import { startGatewayModules } from "./main/modules.js";
 import { GatewayWorkRegistry } from "./kernel/run/gateway-work-registry.js";
 import { DRAIN_WAIT_LOG_INTERVAL_MS, logDrainBlockers, logUnresolvedDrainOwners, RestartDrainProgress, waitForStopDrain } from "./sessions/restart-drain.js";
-import { acquireAgentRuntimeLocks } from "./sessions/agent-runtime-lock.js";
+import { acquireAgentRuntimeLock } from "./sessions/agent-runtime-lock.js";
 import type { JsonValue } from "./protocol/types.js";
 import { GatewayLogger } from "./transport/logger.js";
 import { ObservationCounts } from "./transport/observation-counts.js";
@@ -87,11 +88,7 @@ const moduleGraphLoadedAt = performance.now();
 const tronHome = resolveTronHome();
 const agentDir = resolveAgentDir(tronHome);
 await assertHomeLayout(tronHome);
-const configuredSessionDir = SettingsManager.create(process.cwd(), agentDir, { projectTrusted: false }).getSessionDir();
-const releaseRuntimeLock = await acquireAgentRuntimeLocks([
-  agentDir,
-  ...(configuredSessionDir ? [configuredSessionDir] : []),
-]);
+const releaseRuntimeLock = await acquireAgentRuntimeLock(agentDir);
 try {
 const config = await loadConfig();
 const delegatedRoot = delegatedArtifactRoot(config.tronHome);
@@ -174,13 +171,23 @@ await macTerminalKeys.restore().catch(error => {
   logger.log("warning", "Private SSH startup failed", { event: "mac-terminal.startup-failed", error: String(error) });
 });
 const settingsSchema = createGatewaySettingsSchema();
+const mcpAdmin = new McpAdminService(
+  config.agentDir,
+  piCliBundle(),
+  new MacKeychainMcpCredentialOwner(),
+  (level, message, event, fields) => logger.log(level, message, { event, source: "mcp", ...fields }),
+);
+const modelConfig = new ModelConfigService(config.agentDir);
 const settingsModel = new SettingsModel(new SettingsStoreAdapter({
   schema: settingsSchema,
   macTerminalKeys,
+  mcpAdmin,
+  modelConfig,
   agentDir: config.agentDir,
   tronHome: config.tronHome,
   trust,
   modelRuntime,
+  updatePackage: (request, requester, confirm) => packages.updatePackage(request, requester, confirm),
   toolCatalog: async (target) => target.kind === "session"
     ? sessions.liveToolCatalog(target.sessionId)
     : target.kind === "home" ? homeToolCatalog(sessions.runtimeEntries(), id => sessions.isLineageMember(id))
@@ -190,7 +197,6 @@ let settingsChanges: SettingsChangePath;
 const settingsRecord = new SettingsChangeRecord(config.tronHome);
 const outsideSettings = new OutsideChanges(settingsSchema, config.tronHome, config.agentDir, settingsRecord, settingsModel.owner.observedReaders);
 settingsModel.owner.observeOutside(outsideSettings);
-const modelConfig = new ModelConfigService(config.agentDir);
 const receipts = new CommandReceiptStore(config.tronHome);
 await receipts.prune();
 startupCheckpoint("command-receipts");
@@ -584,6 +590,7 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
     await shutdownStep("search-close", async () => { await sessionSearch?.close(); }, recordShutdownStep);
     await shutdownStep("sessions-dispose", () => sessions.dispose(), recordShutdownStep);
     await shutdownStep("modules-stop", () => modules.stop(), recordShutdownStep);
+    await shutdownStep("model-runtime-settle", () => modelRuntime.settleCredentialWrites(), recordShutdownStep);
     await shutdownStep("command-receipts-dispose", () => receipts.dispose(), recordShutdownStep);
     await shutdownStep("runtime-lock-release", () => releaseRuntimeLock(), recordShutdownStep);
     if (forced) clearTimeout(forced);
@@ -730,8 +737,9 @@ settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, {
   ),
   undoSubject: (entry, context) => new HomeProfileItems(() => knowledge).undo(settingsChanges, entry, context),
 });
-sessions.setSettings(settingsModel, settingsChanges);
+sessions.setSettings(settingsModel, settingsChanges, new SettingsInventoryReader(hookResources, packages, mcpAdmin, trust, modules));
 projects.register(settingsChanges);
+packages.register(settingsChanges, () => globalProviderResources.requestReload());
 
 const service = new GatewayService({
   config,
@@ -760,12 +768,7 @@ const service = new GatewayService({
   automations,
   knowledge,
   home: home(),
-  mcpAdmin: new McpAdminService(
-    config.agentDir,
-    piCliBundle(),
-    new MacKeychainMcpCredentialOwner(),
-    (level, message, event, fields) => logger.log(level, message, { event, source: "mcp", ...fields }),
-  ),
+  mcpAdmin,
 });
 outsideSettings.startWatching(error => logger.log("warning", "Outside settings comparison failed", {
   event: "settings.outside.failed", source: "settings", error: error instanceof Error ? error.message : String(error),
