@@ -32,6 +32,7 @@ import { DRAIN_WAIT_LOG_INTERVAL_MS, logDrainBlockers, logUnresolvedDrainOwners,
 import { acquireAgentRuntimeLocks } from "./sessions/agent-runtime-lock.js";
 import type { JsonValue } from "./protocol/types.js";
 import { GatewayLogger } from "./transport/logger.js";
+import { ObservationCounts } from "./transport/observation-counts.js";
 import { RotatingJsonl } from "./transport/rotating-jsonl.js";
 import { logHomeDiagnostic } from "./modules/home/home-diagnostic.js";
 import { homeToolCatalog } from "./modules/home/home-runtime-policy.js";
@@ -111,6 +112,7 @@ const logger = new GatewayLogger(gatewayLogPath, {
   payloadVersion: process.env.TRON_GATEWAY_PAYLOAD_VERSION,
 });
 const requestLog = new RotatingJsonl(tronHomePath(config.tronHome, "logs", "requests.jsonl"), 5 * 1_024 * 1_024, 16);
+const observations = new ObservationCounts(tronHomePath(config.tronHome, "logs", "observations"));
 const managedSubagents = ManagedSubagents.activateForStartup(config.tronHome, logger);
 {
   const identity = runtimeIdentity();
@@ -394,11 +396,11 @@ const sessions: RuntimeRegistry = new RuntimeRegistry({
     "Queued manual compaction adopted by an active compaction",
     { event: "session.compaction.manual-adopted", source: "session", ...diagnostic },
   ),
-  requestRecord: record => requestLog.append({ timestamp: new Date().toISOString(), ...record }),
-  capabilityDiagnostic: aggregate => logger.log("info", "Capability usage aggregate", {
+  requestRecord: record => { requestLog.append({ timestamp: new Date().toISOString(), ...record }); observations.request(record); },
+  capabilityDiagnostic: aggregate => { observations.call(aggregate); logger.log("info", "Capability usage aggregate", {
     event: "capability.usage", source: "runtime", step: aggregate.name, outcome: aggregate.status,
     stage: aggregate.latencyBucket, counts: { calls: aggregate.count },
-  }),
+  }); },
   codemodeDiagnostic: (diagnostic) => logger.log(
     diagnostic.outcome === "completed" ? "info" : "warning",
     `Codemode execution ${diagnostic.outcome}`,

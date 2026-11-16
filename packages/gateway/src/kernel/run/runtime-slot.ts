@@ -20,7 +20,7 @@ import { SESSION_SETTINGS_ENTRY, changeSessionSetting, readSessionSettings, read
 import { constants, existsSync, lstatSync, realpathSync, statSync } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { type ImageContent, type Model } from "../pi/ai.js";
 import { bindRuntimeSession, guardCanonicalAppend } from "../pi/adapters.js";
@@ -242,7 +242,7 @@ export interface RuntimeSlotDependencies {
   stopSteeringDiagnostic?: (diagnostic: { sessionId: string; queuedSteerCount: number; outcome: "started" | "completed" | "stopped" | "failed" | "unknown" }) => void;
   manualCompactionAdopted?: NonNullable<RunOperations<FixedSetting>["dependencies"]["manualCompactionAdopted"]>;
   requestRecord?: (record: RequestRecord) => void;
-  capabilityDiagnostic?: (aggregate: { name: string; count: 1; status: "ok" | "error" | "refused" | "unknown"; latencyBucket: "lt100ms" | "lt1s" | "lt10s" | "gte10s" | "unknown" }) => void;
+  capabilityDiagnostic?: (aggregate: { name: string; count: 1; kind: string; status: "ok" | "error" | "refused" | "unknown"; latencyBucket: "lt100ms" | "lt1s" | "lt10s" | "gte10s" | "unknown"; skill?: string }) => void;
   codemodeDiagnostic?: (diagnostic: { sessionId: string; outcome: "completed" | "failed" | "aborted" | "timeout"; durationMs: number; nestedCallCount: number; complete: boolean }) => void;
   resolveForkBoundary?: (manager: SessionManager) => Promise<ForkBoundaryAnchor | undefined>;
   beforeRunAdmission: (sessionId: string) => Promise<void>;
@@ -1330,7 +1330,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           facts: async () => (await Promise.all([homeRequestPolicy?.turnFrame()?.facts, ...turnFacts.map(provider => provider())]))
             .filter(Boolean).join("\n") || undefined,
         },
-        ...(this.dependencies.requestRecord ? { record: outcome => this.dependencies.requestRecord?.({ sessionId: this.id, kind: taskWorker ? "worker" : profile.name, ...outcome }) } : {}),
+        ...(this.dependencies.requestRecord ? { record: outcome => this.dependencies.requestRecord?.({ sessionId: this.id, kind: taskWorker ? "worker" : profile.name,
+          skillIndex: created.session.getActiveToolNames().includes("read") && this.advertisedSkills().length > 0, ...outcome }) } : {}),
         ...(homeRequestPolicy ? {
           policyStream: baseStream => homeRequestPolicy.wrapStreamFunction(baseStream),
           outer: {
@@ -2414,7 +2415,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
 
   public resetToolExecutionProjection(): void {
     for (const state of this.toolExecutions.values()) {
-      if (state.status === "running") this.recordCapabilityUsage(state.toolName, "unknown", undefined);
+      if (state.status === "running") this.recordCapabilityUsage(state.toolName, "unknown", undefined, state.arguments);
     }
     this.toolExecutions.clear();
     this.toolInvocationGroups.clear();
@@ -2422,13 +2423,21 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     this.nextToolOrder = 0;
   }
 
-  private recordCapabilityUsage(name: string, status: "ok" | "error" | "refused" | "unknown", duration: number | undefined): void {
+  private advertisedSkills() {
+    return this.runtime.session.resourceLoader.getSkills().skills.filter(skill => !skill.disableModelInvocation);
+  }
+
+  private recordCapabilityUsage(name: string, status: "ok" | "error" | "refused" | "unknown", duration: number | undefined, args: unknown): void {
     const registered = this.runtime.session.getAllTools().some(tool => tool.name === name);
+    const path = name === "read" && args && typeof args === "object" ? (args as { path?: unknown }).path : undefined;
+    const skill = typeof path === "string" ? this.advertisedSkills().find(entry => entry.filePath === resolve(this.cwd, path.replace(/^~(?=\/|$)/u, homedir())))?.name : undefined;
     this.dependencies.capabilityDiagnostic?.({
       name: registered && /^[A-Za-z][A-Za-z0-9_]{0,127}$/.test(name) ? name : "unknown", count: 1,
+      kind: this.ownedTurns.worker ? "worker" : this.liveProfile().name,
       status: registered ? status : "unknown",
       latencyBucket: duration === undefined || !Number.isFinite(duration) ? "unknown"
         : duration < 100 ? "lt100ms" : duration < 1_000 ? "lt1s" : duration < 10_000 ? "lt10s" : "gte10s",
+      ...(skill ? { skill } : {}),
     });
   }
 
@@ -2693,7 +2702,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         if (!this.hasActiveAgentRun) break;
         this.homeRequestPolicy?.responseTiming.tool(this.activeOperationId, event.toolCallId, false);
         const duration = event.durationMs;
-        this.recordCapabilityUsage(event.toolName, duration === undefined ? "refused" : event.isError ? "error" : "ok", duration);
+        this.recordCapabilityUsage(event.toolName, duration === undefined ? "refused" : event.isError ? "error" : "ok", duration, this.toolExecutions.get(event.toolCallId)?.arguments);
         if (!("parentToolCallId" in event && event.parentToolCallId) && event.toolName === "codemode") {
           const details = event.result && typeof event.result === "object" && "details" in event.result
             ? event.result.details as Record<string, unknown> | undefined : undefined;

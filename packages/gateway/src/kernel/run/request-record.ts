@@ -26,6 +26,7 @@ export interface RequestOutcome extends RequestLayers {
 export interface RequestRecord extends RequestOutcome {
   sessionId: string;
   kind: string;
+  skillIndex: boolean;
 }
 
 type Json = Record<string, unknown>;

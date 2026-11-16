@@ -455,7 +455,7 @@ describe("Tron Home activations end to end", () => {
     await waitUntil(() => !ordinary.isBusy);
     expect(f.capabilityRecords.map(record => record.status)).toEqual(["ok", "refused", "error", "unknown", "error"]);
     for (const record of f.capabilityRecords) {
-      expect(Object.keys(record).sort()).toEqual(["count", "latencyBucket", "name", "status"]);
+      expect(Object.keys(record).sort()).toEqual(["count", "kind", "latencyBucket", "name", "status"]);
       expect(record.count).toBe(1);
     }
     expect(JSON.stringify({ timings, capabilities: f.capabilityRecords })).not.toContain(secret);
