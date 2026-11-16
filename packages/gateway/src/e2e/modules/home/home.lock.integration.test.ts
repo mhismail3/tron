@@ -67,10 +67,11 @@ const HOME_EXTENSIONS = [
   "<inline:tron-home> | tools zoom,date,memory_search,profile,obligation,delegate,task | on tool_call×1,cache_warming_decision×1,before_provider_request×1",
   "<inline:tron-home-research> | tools session_search,session_read",
   "<inline:tron-web-research> | tools web_search | on session_start×1,session_shutdown×1",
+  "<inline:tron-tool-search> | tools tool_search",
 ];
 const WORKER_EXTENSIONS = [
   "builtin:codemode | tools codemode",
-  "builtin:tool-search | tools tool_search",
+  "builtin:tool-search | tools tool_search | on session_start×1",
   "builtin:mcp | on session_start×1,before_agent_start×1,tool_call×1,turn_start×1,mcp_servers_change×1,session_shutdown×1 | commands mcp",
   "<inline:tron-invocation-settlement> | on turn_start×1,message_end×1",
   "<inline:tron-context-window> | on session_start×1,session_tree×1,model_select×1,before_agent_start×1,turn_start×1",
@@ -435,8 +436,8 @@ describe("gateway/home scenario lock", () => {
     };
     const FIXED = { "context.images.autoResize": { value: true }, "model.contextWindow": { qualifiers: { model: MODEL }, value: 128000 } };
     const HOME_TOOLS = ["ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "profile", "obligation", "web_search", "session_search",
-      "session_read", "settings", "projects", "read", "write", "edit", "bash", "grep", "find", "ls", "computer"];
-    const WORKER_TOOLS = ["read", "bash", "edit", "write", "jev", "web_search", "settings", "projects", "ask_user", "display", "swift_app", "computer", "notify", "checkin", "report"];
+      "session_read", "settings", "tool_search", "read", "write", "edit", "bash", "grep", "find", "ls", "computer"];
+    const WORKER_TOOLS = ["read", "bash", "edit", "write", "web_search", "settings", "ask_user", "display", "computer", "notify", "checkin", "report", "tool_search"];
     expect(values(homeSessionJsonl), "Home's resolved settings").toEqual({ requestPins: { "context.images.block": false }, fixed: { ...FIXED,
       "model.ref[role=chat]": { qualifiers: { role: "chat" }, value: MODEL_REF },
       "model.thinking[role=chat]": { qualifiers: { model: MODEL, role: "chat" }, value: "off" }, "tools.active": { value: HOME_TOOLS } } });

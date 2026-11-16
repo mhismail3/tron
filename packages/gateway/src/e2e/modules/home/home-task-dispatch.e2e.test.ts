@@ -340,9 +340,29 @@ describe("Home task authorization RPC", () => {
   });
 });
 
+async function firstHomeRequestTokens(prompt: string): Promise<number> {
+  const f = await fixture(undefined, false, 1_000_000);
+  const model = f.faux.getModel();
+  await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
+  const home = await f.registry.acquire(f.home.sessionId);
+  let tokens = 0;
+  f.faux.setResponses([() => {
+    const status = homeOwnerOf(f.registry).contextStatus();
+    tokens = status.available && status.effectiveTokens !== undefined ? status.effectiveTokens : 0;
+    return fauxAssistantMessage("Measured");
+  }]);
+  await home.prompt(prompt);
+  await waitFor(() => tokens || undefined, "the measured first Home request");
+  return tokens;
+}
+
+const ONE_RESULT_MARGIN = 2_700;
+const REFERENCE_INBOX_MARGIN = 5_800;
+
 describe("Home task bounded backlogs", () => {
   it("delivers a backlog across bounded activations exactly once in order without context-overflow", async () => {
-    const f = await fixture(undefined, false, 20_000);
+    const window = await firstHomeRequestTokens("u".repeat(19000)) + ONE_RESULT_MARGIN;
+    const f = await fixture(undefined, false, window);
     const model = f.faux.getModel();
     await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     const tasks = [];
@@ -434,7 +454,8 @@ describe("Home task bounded backlogs", () => {
   });
 
   it("delivers a never-fit report by reference before its successor and reads immutable bounded pages", async () => {
-    const f = await fixture(undefined, false, 18_000); const model = f.faux.getModel();
+    const window = await firstHomeRequestTokens("Review") + REFERENCE_INBOX_MARGIN;
+    const f = await fixture(undefined, false, window); const model = f.faux.getModel();
     const owner = homeOwnerOf(f.registry);
     await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     await owner.pauseMemory();
@@ -465,7 +486,7 @@ describe("Home task bounded backlogs", () => {
     const report = JSON.parse(fullReport);
     const system = getCurrentSystemMessage(JSON.parse(request).messages);
     expect(system).toBeDefined();
-    expect(estimateTokens(system!) + estimateTokens({ role: "user", content: [{ type: "text", text: fullReport }], timestamp: 0 })).toBeGreaterThan(18_000);
+    expect(estimateTokens(system!) + estimateTokens({ role: "user", content: [{ type: "text", text: fullReport }], timestamp: 0 })).toBeGreaterThan(window);
     expect(report.text).toBe("🦊".repeat(16384));
     await expect(owner.taskTool(f.home.sessionId, { action: "report", taskId: large.taskId, offset: -1, limit: 1024 } as any)).rejects.toThrow(/page/);
     await expect(owner.taskTool(f.home.sessionId, { action: "report", taskId: large.taskId, offset: 0, limit: 1_000_000 } as any)).rejects.toThrow(/page/);

@@ -51,10 +51,12 @@ export function createTronSwiftAppExtension(input: {
   cwd: () => string;
   sessionId: () => string;
   internalFilesRoot: () => Promise<string>;
+  deferred: boolean;
 }): ExtensionFactory {
   return (pi) => {
     pi.registerTool({
       name: "swift_app",
+      ...(input.deferred ? { exposure: "deferred" as const } : {}),
       annotations: { openWorldHint: false },
       label: "Swift app",
       description: "Prepare and manage single-file SwiftUI apps. offer snapshots source with appId/name/icon and explicit feeds (only ios-builds); the offer itself displays the exact source for iPhone Install App or Update App review. Offering never installs. discardOffer removes an unused offer by artifactId in its own producing session. v2 app removal requires expectedInstanceId from list. list shows installed apps. New installs and source updates require the exact displayed offer and explicit iPhone review; there is no direct install action. state reads the app's stored key/value data and its revision. commit writes data: set [{key, value}] and remove [key] against expectedRevision (the revision state returned); a stale revision is refused. remove deletes the app and all its stored data permanently.",

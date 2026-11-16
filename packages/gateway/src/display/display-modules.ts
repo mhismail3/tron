@@ -127,7 +127,7 @@ export function createNativeCaptureModule(services: () => DisplayOwner): ModuleD
     tools: ["native_capture"], commands: [],
     start: () => ({ extension: session => {
       const views = services().liveViews;
-      return views ? createTronNativeCaptureExtension({ sessionId: session.sessionId, views }) : undefined;
+      return views ? createTronNativeCaptureExtension({ sessionId: session.sessionId, views, deferred: session.defersRareTools }) : undefined;
     } }),
   };
 }

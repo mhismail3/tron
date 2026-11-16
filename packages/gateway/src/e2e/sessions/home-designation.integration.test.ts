@@ -235,11 +235,11 @@ async function homeStatus(f: Fixture): Promise<HomeStatus> {
 }
 
 const HOME_EXTENSIONS = [
-  "tron-ask-user", "tron-compaction-policy", "tron-computer", "tron-context-window", "tron-display", "tron-home", "tron-home-research", "tron-notify", "tron-projects", "tron-settings", "tron-web-research",
+  "tron-ask-user", "tron-compaction-policy", "tron-computer", "tron-context-window", "tron-display", "tron-home", "tron-home-research", "tron-notify", "tron-projects", "tron-settings", "tron-tool-search", "tron-web-research",
 ];
 const HOME_TOOLS = [
   "ask_user", "bash", "computer", "date", "delegate", "display", "edit", "find", "grep", "ls", "memory_search", "notify", "obligation",
-  "profile", "projects", "read", "session_read", "session_search", "settings", "task", "web_search", "write", "zoom",
+  "profile", "read", "session_read", "session_search", "settings", "task", "tool_search", "web_search", "write", "zoom",
 ];
 
 describe("Tron Home designation", () => {
@@ -357,7 +357,7 @@ describe("Tron Home designation", () => {
     const homeContext = await contextOf(home);
     expect(home.cwd).toBe(await realpath(join(f.tronHome, "state", "home", "workspace")));
     expect(activeTools(homeContext)).toEqual(HOME_TOOLS);
-    expect(registeredTools(homeContext)).toEqual(HOME_TOOLS);
+    expect(registeredTools(homeContext)).toEqual([...HOME_TOOLS, "projects"].sort());
     expect(extensionNames(homeContext)).toEqual(HOME_EXTENSIONS);
     expect(homeContext.skills.skills).toEqual([]);
     expect(registeredTools(homeContext).some((name) => name.startsWith("mcp__"))).toBe(false);

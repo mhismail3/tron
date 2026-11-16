@@ -22,7 +22,7 @@ export function createCoreModule(services: () => CoreModuleServices): ModuleDesc
           { requireTronAskUser: true, ...(managedSubagents ? { managedSubagents } : {}) }),
       }, extension: session => {
         const owners = services();
-        return createTronCoreExtension(workspace, new JevDecisionClient(session.modelRuntime), owners.connections,
+        return createTronCoreExtension(workspace, { client: new JevDecisionClient(session.modelRuntime), deferred: session.defersRareTools }, owners.connections,
           session.requireChildTaskContext ? prefix => session.requireChildTaskContext!(session.sessionId(), prefix) : undefined);
       } };
     },
