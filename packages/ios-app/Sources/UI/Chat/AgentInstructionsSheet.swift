@@ -79,7 +79,7 @@ enum AgentInstructionsPresentation {
         switch section.id {
         case "preamble":
             SectionCopy(title: "Opening", icon: "text.quote",
-                        purpose: "Sets the agent's basic role. Pi writes it unless a SYSTEM.md file replaces it; a replacement also removes the Tools, Rules and Pi Documentation sections.")
+                        purpose: "Sets the agent's basic role. Pi writes it.")
         case "tools":
             SectionCopy(title: "Tools", icon: "wrench.and.screwdriver",
                         purpose: "A one-line summary of each tool the model can call right now. Pi builds this list from the active tools; each tool's full input schema is sent separately.")
@@ -89,9 +89,6 @@ enum AgentInstructionsPresentation {
         case "docs":
             SectionCopy(title: "Pi Documentation", icon: "book",
                         purpose: "Where the agent finds Pi's SDK documentation, used only when you ask about Pi itself.")
-        case "addendum":
-            SectionCopy(title: "Appended Instructions", icon: "text.append",
-                        purpose: "Text from an APPEND_SYSTEM.md file, added after Pi's own sections.")
         case "project_context":
             SectionCopy(title: "Project Instructions", icon: "doc.text",
                         purpose: "AGENTS.md or CLAUDE.md files, included in full. Pi reads the one in Tron's agent folder, then one per folder from the root down to the working directory.")
@@ -125,7 +122,7 @@ enum AgentInstructionsPresentation {
         case "rules":
             let fromTools = section.entries.filter { !$0.tools.isEmpty }.count
             return "\(count(section.entries.count, "rule")) · \(fromTools) from tools"
-        case "project_context", "addendum": return section.entries.compactMap { $0.name }.joined(separator: ", ")
+        case "project_context": return section.entries.compactMap { $0.name }.joined(separator: ", ")
         case "skills": return count(section.entries.count, "skill")
         case "cwd": return displayPath(section.text)
         default: return section.source.map(sourceDetail) ?? ""
@@ -426,7 +423,7 @@ private struct AgentInstructionsSectionSheet: View {
         }
     }
 
-    private var isFileSection: Bool { section.id == "project_context" || section.id == "addendum" }
+    private var isFileSection: Bool { section.id == "project_context" }
 
     private var entryGroupTitle: String {
         switch section.id {
