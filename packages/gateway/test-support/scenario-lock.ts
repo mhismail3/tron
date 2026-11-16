@@ -78,6 +78,7 @@ const STRUCTURE_MARKER = "<value>";
 
 const PACKAGE_PATH = /(?:[^\s"'`()[\]]*[/\\])?node_modules[/\\]((?:@[^/\\]+[/\\])?[^/\\]+)/g;
 const TEMP_PATH = /(?:[/\\]private)?[/\\](?:var[/\\]folders|tmp|private[/\\]tmp)[^\s"',;)]*/g;
+const TURN_FRAME_DATE = /Date: \d{4}-\d{2}-\d{2} \([^)\n]+\)\./gu;
 const ISO_TIMESTAMP = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?/g;
 const FILE_TIMESTAMP = /\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z/g;
 const DIGEST_SEGMENT = /([/\\])[0-9a-f]{64}(?=[/\\])/g;
@@ -119,6 +120,7 @@ function normalizeTraceString(value: string, normalization: TraceNormalization):
   text = text.replace(DATA_URL, (_match, mime: string) => `data:${mime};base64,<base64>`);
   text = text.replace(EPOCH_NUMBER, "<epoch>");
   text = text.replace(WALL_TIME_TEXT, "Wall time <duration>");
+  text = text.replace(TURN_FRAME_DATE, "Date: <date>.");
   return text;
 }
 
