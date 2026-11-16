@@ -163,8 +163,8 @@ Composition supplies the same late K6 settings, Profile and raw model owners.
   sum to it.
 - `home.context` breaks the last request into `instructions`, `profile`, `memory`, `chapter`,
   `results`, `input` (`profile` is the static areas section plus the turn state). For caching, tools and system text are byte-identical for user turns
-  and wakes: everything that varies by activation (chat model and thinking, profile counts, versions, sorting offer and diagnostics) is the
-  `<turn-state>` block that follows the view's footer and precedes the nonce, after the last one-hour mark. The view only grows between rebalances,
+  and wakes: everything that varies by activation (chat model and thinking, profile counts, versions, sorting offer and diagnostics) is in the
+  common turn frame (`kernel/run/turn-frame.ts`) after the newest input; the memory message ends with the view and the nonce. The view only grows between rebalances,
   goes in four-line blocks with one Anthropic mark on the last whole block and, when the view starts with whole blocks of settled lines
   (each line covers at least `VIEW_SETTLED_SPAN`, 64, messages), one on the last of those, so a merge among recent lines re-reads the settled
   prefix. Within Anthropic's four marks the last-tool mark yields first, then system marks before the last system block; if both view marks

@@ -852,6 +852,10 @@
         {
           "role": "user",
           "text": "[from: gateway; kind: reminder; authority: task]\nCall report now with the current outcome and partial evidence. Do not continue implementation or validation. Use progress for unfinished work or needs-input for a blocker; do not claim final success without acceptance evidence. If you cannot report, the task will settle with no report."
+        },
+        {
+          "role": "user",
+          "text": "<turn-frame>\nDate: <date>.\nModel: tron-lock-session-shape-worker/faux-1. Thinking: off.\nActivation: task.\n</turn-frame>"
         }
       ]
     },

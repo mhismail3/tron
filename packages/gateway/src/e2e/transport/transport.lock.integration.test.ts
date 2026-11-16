@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockClient, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
 import { expectRequestShapes, expectSystemShapes } from "../../../test-support/lock-projections.js";
 import { awaitsWithin } from "../../../test-support/wait-for.js";
+import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
 
 const gateways: LockGateway[] = [];
 afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
@@ -82,7 +83,7 @@ describe("gateway/transport kernel locks", () => {
       "assistant:stop |  | Answered after the reconnect."]);
 
     const recorded = gateway.record();
-    expect(recorded.providerRequests.map((request) => request.messages.map((message) => `${(message as { role: string }).role}:${(message as { text?: string }).text ?? ""}`)))
+    expect(recorded.providerRequests.map((request) => withoutTurnFrame(request.messages).map((message) => `${(message as { role: string }).role}:${(message as { text?: string }).text ?? ""}`)))
       .toEqual([["user:survive my disconnect"]]);
     expectRequestShapes(recorded.providerRequests, ["chat"]);
     expect(recorded.exchanges.map((exchange) => `${(exchange as { client: string }).client} ${(exchange as { method: string }).method}`)).toEqual([

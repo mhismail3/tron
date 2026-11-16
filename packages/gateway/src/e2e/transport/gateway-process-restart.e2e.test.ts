@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { RunMarkerStore } from "../../kernel/run/run-markers.js";
 import { startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../../test-support/gateway-process.js";
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
+import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
 
 const gateways: GatewayProcess[] = [];
 afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
@@ -94,7 +95,7 @@ describe("an accepted prompt across a real Gateway-process restart", () => {
     }, "the new prompt settled");
     expect(userTexts(done)).toEqual([prompt, "A new prompt."]);
     expect(gateway.provider.requests).toHaveLength(2);
-    expect(gateway.provider.requests[1]!.messages.filter((message) => message.role === "user")
+    expect(withoutTurnFrame(gateway.provider.requests[1]!.messages).filter((message) => message.role === "user")
       .map((message) => JSON.stringify(message.content)))
       .toEqual([JSON.stringify([{ type: "text", text: prompt }]), JSON.stringify([{ type: "text", text: "A new prompt." }])]);
     expect(gateway.provider.errors).toEqual([]);
