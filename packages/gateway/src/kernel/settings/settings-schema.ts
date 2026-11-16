@@ -4,6 +4,7 @@ import { type Control, type Effect, type Timing, type ValueType, type Writer, DE
 import { MODEL_QUEUE_ROLES, modelQueueKey, type QualifierName, type Direction } from "./tool-contract.js";
 import type { StoreLayer } from "./settings-types.js";
 import { mcpServerDirection, mcpServerType } from "./mcp-server-value.js";
+import { lessonMoveDirection, lessonMoveType } from "./lesson-move-value.js";
 import { modelProviderDirection, modelProviderType } from "./model-provider-value.js";
 
 interface SectionDeclaration { id: string; title: string; description: string; order: number; note?: string; chatInline?: boolean }
@@ -34,7 +35,8 @@ export type Binding =
   | { store: "mac-terminal-service" }
   | { store: "gateway"; path: readonly string[] }
   | { store: "mcp" }
-  | { store: "models" };
+  | { store: "models" }
+  | { store: "lesson" };
 
 export type TimingDeclaration = Timing | { widen: Timing; narrow: Timing };
 
@@ -521,7 +523,7 @@ export function hasSessionSettingsApplier(key: KeyDeclaration): boolean {
 }
 
 export interface RecordWrite {
-  store: "mcp" | "models";
+  store: "mcp" | "models" | "lesson";
   writers: readonly Writer[];
   tap: NonNullable<KeyDeclaration["tap"]>;
   type: ValueType;
@@ -551,6 +553,10 @@ const RECORD_SUBJECTS: readonly RecordSubject[] = [
     write: { store: "models", writers: ["ui", "home"], tap: "privacy", type: modelProviderType, direction: modelProviderDirection, effect: "next-request", timing: "live",
       help: "A custom model endpoint. Its address receives the prompts of every chat that uses one of its models.",
       confirm: "Adding a provider or changing its address or API sends your conversations to that address." } },
+  { id: "context.lesson", label: "Lesson move", group: "context", container: "lessons", qualifier: "lesson", pattern: /^[a-z0-9][a-z0-9-]{0,63}$/u,
+    write: { store: "lesson", writers: ["home", "ui"], tap: "trust", type: lessonMoveType, direction: lessonMoveDirection, effect: "reload", timing: "live",
+      help: "Moves a lesson from Profile notes into a global rule or skill description and retires the notes.",
+      confirm: "Applying changes the instructions every chat and worker reads. Undo restores the file and the notes." } },
 ];
 
 export function recordSubject(id: string): RecordSubject | undefined {
