@@ -45,7 +45,7 @@ import { type CommandReplacement } from "./run-invocations.js";
 import { RunOperations } from "./run-operations.js";
 import { successfulAssistantCompletion, type CanonicalAssistantCompletion, type SessionAttentionRebindDisposition } from "./completion-facts.js";
 import { RunRequestPipeline } from "./request-pipeline.js";
-import { skillsIndex } from "../host/context-index.js";
+import { skillsIndex } from "../resources/context-index.js";
 import type { RequestRecord } from "./request-record.js";
 import { boundToolCancellation } from "./bounded-tool-cancellation.js";
 import { CompactionOperationPolicy } from "./compaction-policy.js";

@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import { escapeIndexValue } from "../kernel/host/context-index.js";
+import { escapeIndexValue } from "../kernel/resources/context-index.js";
 
 type InstructionSource =
   | { kind: "pi" }
@@ -204,4 +204,3 @@ function packageName(source: string): string {
   const name = versionAt > 0 ? spec.slice(0, versionAt) : spec;
   return source.startsWith("npm:") ? name : basename(name.replace(/\.git$/, ""));
 }
-

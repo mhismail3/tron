@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { PROFILE_AREAS } from "./profile-placement.js";
 import type { HomeProfileIndexRead } from "./home-profile.js";
-import { renderIndex } from "../../kernel/host/context-index.js";
+import { renderIndex } from "../../kernel/resources/context-index.js";
 
 export const PROFILE_SECTION_HEADING = "## Learned profile";
 const AREA_NAMES = [...Object.keys(PROFILE_AREAS) as Array<keyof typeof PROFILE_AREAS>, "inferred", "prior"] as const;
