@@ -20,6 +20,7 @@ import type { HomeDiagnosticRecord } from "../../modules/home/home-diagnostic.js
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
 import { disposeFixtures, fixture as homeTaskFixture, reportCall, TASK_REASONING_MODEL_ID } from "../../../test-support/home-task-fixture.js";
 import type { AssistantMessage, TranscriptContext } from "@earendil-works/pi-ai";
+import { droppingAnyTurnFrame } from "../../../test-support/turn-frame.js";
 
 const ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../../test-results/settings-gate.json");
 const transcript: Array<{ case: string; steps: Array<Record<string, unknown>> }> = [];
@@ -857,7 +858,7 @@ describe("typed settings at real runtime boundaries", () => {
     const homeResults = new Map<string, { isError: boolean; text: string; details: unknown }>();
     let chatCall: Record<string, unknown> | undefined;
     const respond = async (context: TranscriptContext, options: { reasoning?: string } | undefined, _state: unknown, model: { id: string }): Promise<AssistantMessage> => {
-      const users = context.messages.filter(message => message.role === "user").map(textOf);
+      const users = droppingAnyTurnFrame(context.messages).filter(message => message.role === "user").map(textOf);
       if (isWorker(context)) {
         const index = workerRequests.push({ model: model.id, thinking: options?.reasoning,
           signals: users.filter(text => text.startsWith("[from: gateway; kind: settings; authority: none]\n[Tron settings]")) }) - 1;
@@ -867,7 +868,7 @@ describe("typed settings at real runtime boundaries", () => {
         }
         return fauxAssistantMessage([reportCall("live-worker")], { stopReason: "toolUse" });
       }
-      const last = context.messages.at(-1)!;
+      const last = droppingAnyTurnFrame(context.messages).at(-1)!;
       if (users.at(-1)?.startsWith("Ordinary chat")) {
         if (last.role === "toolResult") { homeResults.set("ordinary", { isError: last.isError === true, text: textOf(last), details: last.details }); return fauxAssistantMessage("Done."); }
         return fauxAssistantMessage([fauxToolCall("settings", chatCall!)], { stopReason: "toolUse" });

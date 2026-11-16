@@ -21,6 +21,7 @@ import { DEFAULT_MAX_UPLOAD_BYTES } from "../../../config.js";
 import type { ProjectChangeResult as ChangeResult } from "../../../modules/projects/project-lifecycle.js";
 import type { ExtensionInteraction } from "../../../protocol/types.js";
 import { maintainerChange } from "../../../../test-support/native-change.js";
+import { droppingAnyTurnFrame } from "../../../../test-support/turn-frame.js";
 
 const exec = promisify(execFile);
 const artifact = join(dirname(new URL(import.meta.url).pathname), "../../../../test-results/project-lifecycle/report.json");
@@ -57,7 +58,7 @@ async function fixture() {
   const results = new Map<string, { isError: boolean; details: ChangeResult; text: string }>();
   const text = (message: { content: unknown }) => typeof message.content === "string" ? message.content : (message.content as Array<{ text?: string }>).map(part => part.text ?? "").join("");
   const responder = (context: TranscriptContext): AssistantMessage => {
-    const last = context.messages.at(-1)!;
+    const last = droppingAnyTurnFrame(context.messages).at(-1)!;
     if (last.role === "toolResult") {
       const key = [...calls.keys()].findLast(key => context.messages.some(message => message.role === "user" && text(message) === key));
       if (key) results.set(key, { isError: last.isError === true, details: last.details as ChangeResult, text: text(last) });

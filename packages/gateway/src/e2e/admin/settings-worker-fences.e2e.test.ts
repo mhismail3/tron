@@ -10,6 +10,7 @@ import { UploadStore } from "../../machine/upload-store.js";
 import { DEFAULT_MAX_UPLOAD_BYTES } from "../../config.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
 import { displayOwnerOf, homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import { droppingAnyTurnFrame } from "../../../test-support/turn-frame.js";
 
 const ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../../test-results/settings-worker-fences.json");
 const transcript: Array<{ case: string; steps: Array<Record<string, unknown>> }> = [];
@@ -52,13 +53,13 @@ async function homeScript(f: Awaited<ReturnType<typeof gateway>>, settled: Settl
   let workerResult: { isError: boolean; text: string } | undefined;
   const respond = async (context: TranscriptContext): Promise<AssistantMessage> => {
     if (isWorker(context)) {
-      const last = context.messages.at(-1)!;
+      const last = droppingAnyTurnFrame(context.messages).at(-1)!;
       if (settled.call && last.role === "user") return fauxAssistantMessage([fauxToolCall(settled.call.name, settled.call.args as ToolArgs)], { stopReason: "toolUse" });
       if (settled.call && last.role === "toolResult" && last.toolName === settled.call.name) workerResult = { isError: last.isError === true, text: textOf(last) };
       return fauxAssistantMessage([reportCall(settled.taskId)], { stopReason: "toolUse" });
     }
-    const users = context.messages.filter(message => message.role === "user").map(textOf);
-    const last = context.messages.at(-1)!;
+    const users = droppingAnyTurnFrame(context.messages).filter(message => message.role === "user").map(textOf);
+    const last = droppingAnyTurnFrame(context.messages).at(-1)!;
     if (last.role === "toolResult") {
       if (homeCall && last.toolName === homeCall.name) homeResults.set(homeCall.prompt, { isError: last.isError === true, text: textOf(last), details: last.details });
       return fauxAssistantMessage("Done.");
