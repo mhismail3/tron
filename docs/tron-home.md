@@ -302,6 +302,29 @@ journal/snapshots and obtain exact owner-reviewed recovery rather than editing c
 substituting copies. Stale reclaim does not make a partly migrated home safe to start. Completion failures retain the specific
 metadata errors/refusals in the JSON `completion` field.
 
+## Memory freeze
+
+```sh
+scripts/tron home-layout freeze-memory --home /absolute/installation --dry-run
+scripts/tron home-layout freeze-memory --home /absolute/installation --apply --backup NEW_DIR
+```
+
+Switches Home's episodic store to the frozen layout ([episodic README](../packages/gateway/src/episodic/README.md)).
+Dry-run prints the store's file count and bytes. Apply holds the layout-v2 maintenance lock
+and the runtime lease, refuses unless the home is stopped (the same proof as migrate), and
+then: inventories the store (no-follow; symlinks, special files, foreign owners and group or
+world bits refuse; an existing `layout.json` refuses); copies every file into `NEW_DIR`
+(created, outside the home) with SHA-256 checks and a `manifest.json`; re-hashes the live
+store against the plan; creates an empty `layout.json` atomically; reads it back and re-hashes
+the v2 files. Interrupted before that create, v2 stays live and byte-identical; rerun with a
+new backup. The store's v2 files are never written, so the Gateway before the freeze still
+reads a migrated store. The first start after the switch rebuilds the layout from the
+existing summaries (no model spend) and saves it.
+
+Rollback: revert the code (the file is ignored); or, stopped, move `layout.json` into the
+backup; or restore the store directory from the backup and check it against the manifest.
+A store without `layout.json` keeps the unfrozen rule until #2568 removes that bridge.
+
 ## Rules
 
 - Register paths first. `scripts/tron home-layout check` validates Gateway/Mac/script/tool

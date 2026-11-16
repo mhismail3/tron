@@ -1,10 +1,12 @@
+import { createHash } from "node:crypto";
 import { GatewayError } from "../errors.js";
 import type { HomeMemoryEvidence, HomeMemoryView, HomeMemoryViewLine } from "../protocol/types.js";
 import { HOME_MEMORY_PAGE_BYTES, HOME_MEMORY_DISPLAY_BYTES, encodeHomeMemoryCursor, homeMemoryLine, homeMemoryRevisionChanged, type HomeMemoryViewRequest } from "./home-memory-browser.js";
 import type { AssistantMessage } from "../kernel/pi/ai.js";
 import { AsyncMutex } from "../util/async-mutex.js";
+import { isDurablePublicationUncertain } from "../foundation/durable-json.js";
 import { EpisodicMemoryError } from "../errors.js";
-import { EPISODIC_DEFAULTS, EPISODIC_INVALIDATION_CHUNK, EPISODIC_OMITTED_TEXT, EPISODIC_PLACEHOLDER, EPISODIC_SEARCH_HITS, EPISODIC_SEARCH_QUERY_CHARS, EPISODIC_SEARCH_SNIPPET_CHARS, EPISODIC_STATUS_PARTS, EPISODIC_STORE_VERSION, EPISODIC_TRIES, resolveLimits, type EpisodicBlocked, type EpisodicBlockedReason, type EpisodicCompactorRequest, type EpisodicDiagnostic, type EpisodicInvalidationRecord, type EpisodicLimits, type EpisodicMemoryDependencies, type EpisodicMemoryStatus, type EpisodicMessageRecord, type EpisodicNodeRecord, type EpisodicSourceCursor, type EpisodicStoreState, type EpisodicSummarizer, type EpisodicUsage, type EpisodicViewPartStatus } from "./episodic-contract.js";
+import { EPISODIC_DEFAULTS, EPISODIC_INVALIDATION_CHUNK, EPISODIC_OMITTED_TEXT, EPISODIC_PLACEHOLDER, EPISODIC_SEARCH_HITS, EPISODIC_SEARCH_QUERY_CHARS, EPISODIC_SEARCH_SNIPPET_CHARS, EPISODIC_STATUS_PARTS, EPISODIC_STORE_VERSION, EPISODIC_TRIES, resolveLimits, type EpisodicBlocked, type EpisodicBlockedReason, type EpisodicCompactorRequest, type EpisodicDiagnostic, type EpisodicInvalidationRecord, type EpisodicLayoutLine, type EpisodicLimits, type EpisodicMemoryDependencies, type EpisodicMemoryStatus, type EpisodicMessageRecord, type EpisodicNodeRecord, type EpisodicSourceCursor, type EpisodicStoreState, type EpisodicSummarizer, type EpisodicUsage, type EpisodicViewPartStatus } from "./episodic-contract.js";
 import {
   EPISODIC_COMPACT_PROMPT, boundedSummary, classifyReply, classifyThrown, compactorRequest,
   emptyReplyDetail, leafStep, mergeStep, sizeFeedback, summarizerText, usageTokens, withFeedback,
@@ -13,11 +15,13 @@ import { EpisodicSourceChangedError, episodicDigest } from "../kernel/session/ca
 import { type EpisodicSourceDelta } from "./episodic-projection.js";
 import { EpisodicStore, type EpisodicStoreSnapshot } from "./episodic-store.js";
 import {
-  EPISODIC_MAX_LEVEL, decodeContextRuns, encodeNodeCode, foldViewSliced, freeNodeText, mergedFreeText, nodeAddress, rebalanceView,
+  EPISODIC_MAX_LEVEL, decodeContextRuns, encodeNodeCode, foldViewSliced, freeNodeText, freezeView, mergedFreeText, nodeAddress, rebalanceView,
+  recentViewHigh, viewTotals,
   parseNodeAddress, placeholderBytes, snippetAround, utf8Bytes,
   type EpisodicViewPart,
 } from "./episodic-tree.js";
 import { tronWorkspacePath } from "../foundation/tron-home-layout.js";
+import { VIEW_SETTLED_SPAN } from "./cache-layout.js";
 
 class EpisodicBlockedSignal extends Error {
   constructor(readonly blocked: EpisodicBlocked) {
@@ -104,6 +108,10 @@ export class EpisodicMemory {
   private liveBytes = 0;
   private readonly building = new Set<string>();
   private view: EpisodicViewPart[] = [];
+  private frozen = false;
+  private foldPending = false;
+  private layoutWritten: string | undefined;
+  private readonly lineDigests = new Map<string, string>();
   private revision = 1;
   private committedRevision = 0;
   private generation = 0;
@@ -163,10 +171,17 @@ export class EpisodicMemory {
           counts: { bytes: snapshot.recoveredTornBytes },
         });
       }
-      memory.view = await foldViewSliced(memory.messages.size, limits.viewBytes, part => memory.partBytes(part), address => memory.nodes.has(address));
+      const layout = await memory.store.readLayout();
+      memory.frozen = layout !== undefined;
+      if (!memory.frozen) memory.view = await memory.foldView([], false);
       await memory.repairOrphanedDependencies();
       memory.assertConsistent();
       await memory.repairCatalogMismatch();
+      if (layout !== undefined) {
+        memory.view = await memory.loadLayout(layout);
+        memory.fit();
+        await memory.saveLayout();
+      }
       return memory;
     } catch (error) {
       EpisodicMemory.openStores.delete(storeKey);
@@ -486,6 +501,7 @@ export class EpisodicMemory {
     this.abort.abort();
     await this.mutex.run(async () => {});
     await this.draining?.catch(() => {});
+    await this.saveLayout();
     if (this.storeKey) EpisodicMemory.openStores.delete(this.storeKey);
     for (const waiter of this.waiters.splice(0)) {
       if (waiter.onAbort && waiter.signal) waiter.signal.removeEventListener("abort", waiter.onAbort);
@@ -520,10 +536,13 @@ export class EpisodicMemory {
       await this.block("source-unavailable", "Canonical source belongs to another memory owner");
       return;
     }
+    if (this.frozen && this.sourceCursor && cut.cursor.home.chapters.length > this.sourceCursor.home.chapters.length) this.foldPending = true;
     if (this.sourceCursor && cut.incremental
       && cut.cursor.completeBytes === this.sourceCursor.completeBytes && cut.cursor.leafEntryId === this.sourceCursor.leafEntryId) {
       this.sourceCursor = cut.cursor;
       await this.saveState();
+      if (this.foldPending) this.fit();
+      await this.saveLayout();
       return;
     }
 
@@ -581,6 +600,8 @@ export class EpisodicMemory {
     }
     this.sourceCursor = cut.cursor;
     await this.saveState();
+    if (this.foldPending) this.fit();
+    await this.saveLayout();
   }
 
   private async checkpointIfNeeded(): Promise<void> {
@@ -610,6 +631,9 @@ export class EpisodicMemory {
     if (previous) this.liveBytes -= Buffer.byteLength(`${JSON.stringify(previous)}\n`);
     this.messages.set(record.index, record);
     this.liveBytes += Buffer.byteLength(`${JSON.stringify(record)}\n`);
+    if (this.lineDigests.size > 0) {
+      for (let span = 1; span <= 2 ** EPISODIC_MAX_LEVEL; span *= 2) this.lineDigests.delete(`${record.index - record.index % span}+${span}`);
+    }
   }
 
   private attributedViewLine(start: number, span: number, text: string | undefined): string {
@@ -758,6 +782,7 @@ export class EpisodicMemory {
     this.draining = (async () => {
       try {
         await this.pump();
+        await this.saveLayout();
       } catch (error) {
         try {
           await this.block("permanent-failure", error instanceof Error ? error.message : String(error));
@@ -793,7 +818,9 @@ export class EpisodicMemory {
   private nextStartable(): { level: number; index: number } | undefined {
     const count = this.messages.size;
     const first = this.firstUnbuilt();
-    const needsMerge = this.view.reduce((bytes, part) => bytes + this.partBytes(part).bytes, 0) > this.limits.viewBytes;
+    const totals = viewTotals(this.view, part => this.partBytes(part));
+    const needsMerge = totals.total > this.limits.viewBytes;
+    const recentMerge = this.frozen && totals.recent > recentViewHigh(this.limits.viewBytes);
     for (let level = 0; 2 ** level <= count; level += 1) {
       const span = 2 ** level;
       for (let index = 0; (index + 1) * span <= count; index += 1) {
@@ -805,7 +832,8 @@ export class EpisodicMemory {
           const childA = this.nodes.get(nodeAddress(level - 1, index * 2));
           const childB = this.nodes.get(nodeAddress(level - 1, index * 2 + 1));
           if (!childA || !childB) continue;
-          if (!needsMerge && mergedFreeText(childA.text, childB.text, this.limits.nodeBytes) === undefined) continue;
+          const paid = needsMerge || (recentMerge && span <= VIEW_SETTLED_SPAN);
+          if (!paid && mergedFreeText(childA.text, childB.text, this.limits.nodeBytes) === undefined) continue;
         }
         return { level, index };
       }
@@ -989,8 +1017,104 @@ export class EpisodicMemory {
   }
 
   private fit(): void {
-    rebalanceView(this.view, this.messages.size, this.limits.viewBytes, part => this.partBytes(part), address => this.nodes.has(address));
+    if (this.frozen) {
+      const fitted = freezeView(this.view, this.messages.size, this.limits.viewBytes, part => this.partBytes(part), address => this.nodes.has(address), this.foldPending);
+      if (fitted.folded || fitted.total <= this.limits.viewBytes) this.foldPending = false;
+    } else rebalanceView(this.view, this.messages.size, this.limits.viewBytes, part => this.partBytes(part), address => this.nodes.has(address));
     this.settleWaiters();
+  }
+
+  private async foldView(parts: EpisodicViewPart[], frozen: boolean): Promise<EpisodicViewPart[]> {
+    const bytesOf = (part: EpisodicViewPart) => this.partBytes(part);
+    const isBuilt = (address: string) => this.nodes.has(address);
+    if (!frozen) {
+      let total = 0;
+      return foldViewSliced(parts, this.messages.size, (fold, count) => {
+        total += bytesOf(fold.at(-1)!).bytes;
+        total = rebalanceView(fold, count, this.limits.viewBytes, bytesOf, isBuilt, total);
+      });
+    }
+    let totals = viewTotals(parts, bytesOf);
+    return foldViewSliced(parts, this.messages.size, (fold, count) => {
+      const bytes = bytesOf(fold.at(-1)!).bytes;
+      totals = freezeView(fold, count, this.limits.viewBytes, bytesOf, isBuilt, false, { total: totals.total + bytes, recent: totals.recent + bytes });
+    });
+  }
+
+  private async loadLayout(layout: readonly EpisodicLayoutLine[] | "unreadable"): Promise<EpisodicViewPart[]> {
+    const count = this.messages.size;
+    if (layout === "unreadable" || layout.length === 0) {
+      if (layout === "unreadable") this.layoutRebuilt("unreadable", { kept: 0, split: 0, appended: count });
+      return this.foldView([], false);
+    }
+    const parts: EpisodicViewPart[] = [];
+    const halves = (part: EpisodicViewPart): EpisodicViewPart[] => [
+      { level: part.level - 1, index: part.index * 2, start: part.start, span: part.span / 2 },
+      { level: part.level - 1, index: part.index * 2 + 1, start: part.start + part.span / 2, span: part.span / 2 },
+    ];
+    const keepBuilt = (part: EpisodicViewPart): void => {
+      if (part.span === 1 || this.nodes.has(nodeAddress(part.level, part.index))) parts.push(part);
+      else halves(part).forEach(keepBuilt);
+    };
+    let cursor = 0;
+    let kept = 0;
+    let split = 0;
+    let reason: string | undefined;
+    for (const [start, span, digest] of layout) {
+      const level = Math.log2(span);
+      if (start !== cursor || !Number.isInteger(level) || level > EPISODIC_MAX_LEVEL || start % span !== 0 || start + span > count) {
+        reason = start + span > count && start === cursor ? "past-catalog" : "structure";
+        break;
+      }
+      const part: EpisodicViewPart = { level, index: start / span, start, span };
+      if (this.lineDigest(part) === digest) {
+        parts.push(part);
+        kept += 1;
+      } else {
+        split += 1;
+        reason ??= "content";
+        if (span === 1) parts.push(part); else halves(part).forEach(keepBuilt);
+      }
+      cursor = start + span;
+    }
+    const appended = count - cursor;
+    if (reason !== undefined) this.layoutRebuilt(reason, { kept, split, appended });
+    return this.foldView(parts, true);
+  }
+
+  private layoutRebuilt(reason: string, counts: Record<string, number>): void {
+    this.diagnostic({ event: "episodic.layout-rebuilt", level: "warning", message: "Episodic layout lines that history could not back were rebuilt", reason, counts });
+  }
+
+  private lineDigest(part: EpisodicViewPart): string {
+    const key = `${part.start}+${part.span}`;
+    const cached = this.lineDigests.get(key);
+    if (cached !== undefined) return cached;
+    const hash = createHash("sha256");
+    for (let index = part.start; index < part.start + part.span; index += 1) {
+      const message = this.messages.get(index);
+      hash.update(`${JSON.stringify(message ? [message.sessionId, message.entryId, message.kind, message.omitted, message.projectedDigest] : null)}\n`);
+    }
+    const digest = hash.digest("hex");
+    this.lineDigests.set(key, digest);
+    return digest;
+  }
+
+  private async saveLayout(): Promise<void> {
+    if (!this.frozen || this.messages.size === 0) return;
+    await this.enqueueAppend(async () => {
+      const text = `${JSON.stringify({ lines: this.view.map(part => [part.start, part.span, this.lineDigest(part)]) })}\n`;
+      if (text === this.layoutWritten) return;
+      try {
+        await this.store.saveLayout(text);
+        this.layoutWritten = text;
+      } catch (error) {
+        if (isDurablePublicationUncertain(error)) this.layoutWritten = undefined;
+        throw error;
+      }
+    }).catch((error: unknown) => {
+      this.diagnostic({ event: "episodic.layout-unsaved", level: "warning", message: "Episodic layout could not be saved; the last saved layout stays and is validated on open", reason: error instanceof Error ? error.message : String(error) });
+    });
   }
 
   private partBytes(part: EpisodicViewPart): { built: boolean; bytes: number } {
