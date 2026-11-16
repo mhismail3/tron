@@ -177,8 +177,9 @@ saved state is removed, rather than ending when the browser quits.
 Only a user-scope declaration of `pi-agent-browser-native` (npm or its GitHub fork source)
 enables the browser: `managedBrowserEnabled` then registers the managed builtin for ordinary
 sessions, Home (`builtin:agent-browser`) and the admin catalog. The declared source itself is
-never loaded and cannot register the reserved browser tool names. Without the declaration no
-session registers `agent_browser`, and the builtin's artifact checks never run.
+never loaded. While the builtin is loaded, `agent_browser*` tool names are reserved to it; without
+the declaration Tron registers no browser, reserves no browser names and never runs the builtin's
+artifact checks. Browser live views are admitted only from `builtin:agent-browser` either way.
 
 ## Signals
 
