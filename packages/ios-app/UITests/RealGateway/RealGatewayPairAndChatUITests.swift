@@ -938,7 +938,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["settings-section-run-detail"].waitForExistence(timeout: 30))
         dismissTopSheet(app)
         openSheet("settings-section-tools-open", "global-tools", section: "tools"); dismissTopSheet(app)
-        for (title, name) in [("MCP Servers", "mcp"), ("Extensions", "extensions"), ("Hooks", "hooks"),
+        for (title, name) in [("MCP Servers", "mcp"), ("Extensions", "extensions"),
                               ("Model Providers", "providers"), ("Setup", "setup")] {
             openSheet("settings-link-\(title)", name); dismissTopSheet(app)
         }

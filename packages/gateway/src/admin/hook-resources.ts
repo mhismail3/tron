@@ -6,8 +6,6 @@ import { AsyncMutex } from "../util/async-mutex.js";
 import { loadSessionFreeExtensions } from "./session-free-extensions.js";
 import type { TrustService } from "../kernel/resources/trust-service.js";
 
-export const HOOKS_CAPABILITY = "hooks.v1";
-
 export class HookResources {
   private readonly mutex = new AsyncMutex();
 

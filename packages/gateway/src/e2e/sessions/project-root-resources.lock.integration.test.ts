@@ -3,6 +3,8 @@ import { mkdir, realpath, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
+import { HookResources } from "../../admin/hook-resources.js";
+import { TrustService } from "../../kernel/resources/trust-service.js";
 
 const gateways: LockGateway[] = [];
 afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
@@ -37,7 +39,7 @@ async function localPackage(directory: string, name: string, tool: string): Prom
 }
 
 describe("gateway/session-catalog project-root resources lock", () => {
-  it("project-root-resources: packages and hooks listed for a subdirectory come from the project root", async () => {
+  it("project-root-resources: packages and hook inventory for a subdirectory come from the project root", async () => {
     const gateway = await startLockGateway("project-root-resources", { administrativeResources: true });
     gateways.push(gateway);
     const root = await realpath(gateway.root);
@@ -52,18 +54,19 @@ describe("gateway/session-catalog project-root resources lock", () => {
     git(project, "init", "-q");
 
     const phone = await gateway.connect("phone");
+    const hookList = async (cwd?: string) => ({ result: await new HookResources(gateway.agentDir, new TrustService(gateway.agentDir)).list(cwd) as any });
     const packagesUntrusted = await phone.request("packages.list", { cwd: nested });
-    const hooksUntrusted = await phone.request("hooks.list", { cwd: nested });
+    const hooksUntrusted = await hookList(nested);
     const decided = await phone.request("settings.change", {
       commandId: gateway.commandId(), target: { kind: "global" }, reason: "Trust the lock project",
       changes: [{ key: "permissions.projectTrust", layer: "global", op: "set", value: true, qualifiers: { project: nested } }],
     });
     expect(decided.ok, JSON.stringify(decided)).toBe(true);
     const packagesTrusted = await phone.request("packages.list", { cwd: nested });
-    const hooksTrusted = await phone.request("hooks.list", { cwd: nested });
-    const hooksGlobal = await phone.request("hooks.list", {});
+    const hooksTrusted = await hookList(nested);
+    const hooksGlobal = await hookList();
 
-    for (const response of [packagesUntrusted, hooksUntrusted, packagesTrusted, hooksTrusted, hooksGlobal]) {
+    for (const response of [packagesUntrusted, packagesTrusted]) {
       expect(response.ok, JSON.stringify(response)).toBe(true);
     }
     expect(packagesUntrusted.result).toMatchObject({ packages: [], resources: { extensions: [], prompts: [], skills: [], themes: [] } });

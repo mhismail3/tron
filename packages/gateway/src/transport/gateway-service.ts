@@ -77,7 +77,6 @@ import type { ProfileStore } from "../modules/home/profile-store.js";
 import { MODULES_CAPABILITY, tronModuleSummaries } from "../extensions/tron-modules.js";
 import type { HomeOwner } from "../modules/home/home-owner.js";
 import { isVirtualModel } from "../providers/virtual-model.js";
-import { HOOKS_CAPABILITY, type HookResources } from "../admin/hook-resources.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
 
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
@@ -280,7 +279,6 @@ export interface GatewayServiceDependencies {
   macTerminal?: Pick<MacTerminalService, "status">;
   modelConfig: ModelConfigService;
   packages: PackageService;
-  hookResources: HookResources;
   auth: AuthBroker;
   globalProviderResources: Pick<GlobalProviderResources, "requestReload" | "withStableSnapshot" | "refreshModels">;
   updateService?: GatewayUpdateService;
@@ -458,7 +456,6 @@ export class GatewayService {
         SETTINGS_MODEL_CAPABILITY,
         "packages.v1",
         MODULES_CAPABILITY,
-        HOOKS_CAPABILITY,
         "trust.v1",
         "filesystem.v1",
         "source-control.v1",
@@ -1848,9 +1845,6 @@ export class GatewayService {
         rejectUnknownFields(params, [], "Module listing");
         return safeJson({ modules: tronModuleSummaries(this.dependencies.sessions.moduleHost) } satisfies TronModuleList);
       }
-      case "hooks.list":
-        rejectUnknownFields(params, ["cwd"], "Hook listing");
-        return safeJson(await this.dependencies.hookResources.list(optionalString(params.cwd, "cwd", 4_096)));
       case "packages.checkUpdates":
         rejectUnknownFields(params, ["cwd"], "Package update check");
         return safeJson(await this.dependencies.packages.checkUpdates(optionalString(params.cwd, "cwd", 4_096) ?? process.cwd()));
