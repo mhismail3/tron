@@ -21,6 +21,7 @@ import type { RequestRecord } from "../../kernel/run/request-record.js";
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
+import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
 
 const PROVIDER = "local-anthropic";
 const MODEL_ID = "opus-local";
@@ -196,8 +197,8 @@ function blocks(message: WireMessage): Block[] {
 
 const memoryOf = (request: Captured) => blocks(messagesOf(request)[0]!);
 
-const viewBlocksOf = (request: Captured) => memoryOf(request).slice(0, -3).map((block) => block.text ?? "");
-const turnStateOf = (request: Captured) => memoryOf(request).at(-2)!.text ?? "";
+const viewBlocksOf = (request: Captured) => memoryOf(request).slice(0, -2).map((block) => block.text ?? "");
+const frameOf = (request: Captured) => blocks(messagesOf(request).at(-1)!).at(-1)!;
 
 function lifetimes(captured: Captured): string[] {
   return wireBlocks(captured).flatMap((block) => block.ttl === undefined ? [] : [block.ttl]);
@@ -340,7 +341,8 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     expect(JSON.stringify(activation)).not.toContain("responses input 1");
     expect(view(activation!).startsWith(view(prior!))).toBe(true);
     expect(view(activation!).length).toBeGreaterThan(view(prior!).length);
-    expect(text(memory(activation!))).toMatch(new RegExp(`</chat><turn-state>\\nCurrent Home chat model: ${PROVIDER}/${MODEL_ID}\\n[^]*</turn-state>${HOME_NONCE_MARKER.replace(".", "\\.")}[0-9a-f-]{36}$`, "u"));
+    expect(text(memory(activation!))).toMatch(new RegExp(`</chat>${HOME_NONCE_MARKER.replace(".", "\\.")}[0-9a-f-]{36}$`, "u"));
+    expect(text(input(activation!).at(-1)!)).toContain(`\nModel: ${PROVIDER}/${MODEL_ID}. Thinking: `);
     expect(memory(step!)).toEqual(memory(activation!));
     expect(input(step!).some((message) => message.type === "function_call_output")).toBe(true);
     expect(step!.tools).toEqual(activation!.tools);
@@ -378,15 +380,18 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     const summarizer = f.requests.filter((request) => request.kind === "summarizer");
     const [previous, last, toolStep] = homeRequests.slice(-3);
     const lastMemory = memoryOf(last!);
-    const viewPieces = lastMemory.slice(0, -2).map((block) => block.text ?? "");
+    const viewPieces = lastMemory.slice(0, -1).map((block) => block.text ?? "");
     const view = viewPieces.join("");
     const lastMarks = cacheMarks(last!);
 
     expect(lastMemory.length).toBeGreaterThanOrEqual(2);
     expect(lastMemory.at(-1)!.text).toMatch(new RegExp(`^${HOME_NONCE_MARKER.replace(".", "\\.")}[0-9a-f-]{36}$`, "u"));
-    expect(turnStateOf(last!).split("\n").slice(0, 4)).toEqual(["<turn-state>", `Current Home chat model: ${PROVIDER}/${MODEL_ID}`, "Current Home thinking level: off",
+    const frame = frameOf(last!);
+    expect((frame.text ?? "").split("\n").filter((_line, index) => index !== 1).slice(0, 4)).toEqual(["<turn-frame>", `Model: ${PROVIDER}/${MODEL_ID}. Thinking: off.`, "Activation: user.",
       "Profile unavailable: Profile is not available on this Gateway. No item is applied in this instruction, and the profile is not known to be empty."]);
-    expect(turnStateOf(last!).endsWith("\n</turn-state>")).toBe(true);
+    expect((frame.text ?? "").endsWith("\n</turn-frame>")).toBe(true);
+    expect(frame.cache_control).toBeUndefined();
+    expect(withoutTurnFrame(messagesOf(last!)).flatMap(blocks).at(-1)!.cache_control).toBeDefined();
     expect(JSON.stringify(last!.body.system)).not.toMatch(/Current Home chat model|Sorting offer:|active \/ \d+ total|capacity: \d|Profile unavailable/iu);
     expect(JSON.stringify(last!.body.system)).toContain("- inferred: Unsorted candidate notes. | profile read path=inferred");
     expect(JSON.stringify(last!.body).split(HOME_NONCE_MARKER).length - 1).toBe(1);
@@ -397,7 +402,7 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     expect(transition(previous!, last!)).toBe("extend");
     expect(view.length).toBeGreaterThan(50_000);
     expectViewLayout(viewPieces);
-    const lastGroup = lastMemory.length - 4;
+    const lastGroup = lastMemory.length - 3;
     const viewMarkAt = (lastMemory[lastGroup]!.text ?? "").split("\n").length - 1 === VIEW_BLOCK_LINES ? lastGroup : lastGroup - 1;
     expect(viewMarks(last!)).toEqual([`.messages[0].content[${viewMarkAt}]`]);
     expect(homeRequests.slice(0, 3).map(viewMarks)).toEqual([[".messages[0].content[0]"], [".messages[0].content[0]"], [".messages[0].content[1]"]]);
@@ -406,7 +411,7 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     prepended.messages[0]!.content.unshift({ type: "text", text: "provider prompt block", cache_control: { type: "ephemeral", ttl: "1h" } });
     const remarked = markHomeMemoryCache(prepended) as { messages: Array<{ content: Block[] }> };
     expect(remarked.messages[0]!.content.flatMap((block, index) => block.cache_control ? [index] : [])).toEqual([0, viewMarkAt + 1]);
-    const lastMessage = messagesOf(last!).length - 1;
+    const lastMessage = withoutTurnFrame(messagesOf(last!)).length - 1;
     expect(lastMarks).toContain(`.messages[${lastMessage}].content[${blocks(messagesOf(last!)[lastMessage]!).length - 1}]`);
     expect(lastMarks.length).toBeLessThanOrEqual(ANTHROPIC_MAX_CACHE_BREAKPOINTS);
     expect(lifetimes(last!)).toEqual(["1h", "1h", "1h", "5m"]);
@@ -415,7 +420,7 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     expect(JSON.stringify(previous!.body.tools)).toBe(JSON.stringify(last!.body.tools));
     expect(memoryOf(toolStep!).map((block) => block.text)).toEqual(lastMemory.map((block) => block.text));
     expect(messagesOf(toolStep!).length).toBeGreaterThan(messagesOf(last!).length);
-    const stepLast = messagesOf(toolStep!).length - 1;
+    const stepLast = withoutTurnFrame(messagesOf(toolStep!)).length - 1;
     expect(cacheMarks(toolStep!).length).toBeLessThanOrEqual(ANTHROPIC_MAX_CACHE_BREAKPOINTS);
     expect(viewMarks(toolStep!)).toEqual(viewMarks(last!));
     expect(cacheMarks(toolStep!)).toContain(`.messages[${stepLast}].content[${blocks(messagesOf(toolStep!)[stepLast]!).length - 1}]`);
@@ -453,7 +458,7 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     const plain = f.requests.filter((request) => request.kind === "ordinary").at(-1)!;
     const plainMarks = cacheMarks(plain);
     expect(plainMarks.every((path) => path.startsWith(".system") || path.startsWith(".tools")
-      || path.startsWith(`.messages[${messagesOf(plain).length - 1}]`))).toBe(true);
+      || path.startsWith(`.messages[${withoutTurnFrame(messagesOf(plain)).length - 1}]`))).toBe(true);
     expect(JSON.stringify(plain.body)).not.toContain(HOME_MEMORY_VIEW_MARKER);
     expect(new Set(lifetimes(plain))).toEqual(new Set(["5m"]));
 
@@ -526,7 +531,7 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     for (const step of rewrites) {
       expect(step.sharedBlocks, `rebalance at turn ${step.turn}`).toBeGreaterThanOrEqual(1 + Math.floor(step.sharedLines / VIEW_BLOCK_LINES));
     }
-    for (const request of turns.slice(-3)) expectViewLayout(memoryOf(request).slice(0, -2).map((block) => block.text ?? ""));
+    for (const request of turns.slice(-3)) expectViewLayout(memoryOf(request).slice(0, -1).map((block) => block.text ?? ""));
     report.cases.push({
       case: "past-budget", turns: turns.length, firstRewrite: firstRewrite!.turn, turnsPast: past.length,
       rewrites: rewrites.map((step) => ({ turn: step.turn, sharedBytes: step.shared, previousBytes: step.size, sharedBlocks: step.sharedBlocks, kind: step.kind })),
@@ -551,7 +556,7 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     const usages = f.records.flatMap((record) => record.event === "usage" ? [record] : []);
     expect(activations).toHaveLength(TURNS);
     expect(usages).toHaveLength(TURNS);
-    const firstOf = (turn: number) => requests.find((request) => JSON.stringify(messagesOf(request).at(-1)).includes(`input ${turn} `))!;
+    const firstOf = (turn: number) => requests.find((request) => JSON.stringify(withoutTurnFrame(messagesOf(request)).at(-1)).includes(`input ${turn} `))!;
     const error = (turn: number) => activations[turn]!.effectiveTokens / providerCount(firstOf(turn).body) - 1;
 
     expect(error(0)).toBeLessThan(-0.25);
@@ -574,7 +579,7 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     expect(under.length).toBeGreaterThan(0);
     await settledTurn(f, home, `input under ${under}`, "the under-window turn");
     const admitted = f.requests.filter((request) => request.kind === "home").at(-1)!;
-    expect(JSON.stringify(messagesOf(admitted).at(-1))).toContain("input under ");
+    expect(JSON.stringify(withoutTurnFrame(messagesOf(admitted)).at(-1))).toContain("input under ");
     expect(providerCount(admitted.body)).toBeGreaterThan(0.91 * (METERED_WINDOW - 1_024));
     expect(providerCount(admitted.body)).toBeLessThan(METERED_WINDOW - 1_024);
     expect(f.records.filter((record) => record.event === "refused")).toEqual([]);

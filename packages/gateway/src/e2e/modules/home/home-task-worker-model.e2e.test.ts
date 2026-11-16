@@ -8,7 +8,7 @@ import { SESSION_SETTINGS_ENTRY, readSessionFixedSettings } from "../../../sessi
 import { disposeFixtures, fixture, reportCall, TASK_REASONING_MODEL_ID, TASK_VIRTUAL_MODEL_ID } from "../../../../test-support/home-task-fixture.js";
 import { waitFor } from "../../../../test-support/wait-for.js";
 import { homeOwnerOf, queueOwnerOf } from "../../../../test-support/gateway-registry.js";
-import { withoutTurnFrame } from "../../../../test-support/turn-frame.js";
+import { droppingAnyTurnFrame } from "../../../../test-support/turn-frame.js";
 
 import { ProfileStore } from "../../../modules/home/profile-store.js";
 import { workspaceModule } from "../../../workspace/workspace-module.js";
@@ -48,7 +48,7 @@ function scriptedHome(delegate: Record<string, unknown>, observed: ObservedReque
       observed.push({ model: model.id, reasoning: options?.reasoning });
       return fauxAssistantMessage([reportCall("model-thinking")], { stopReason: "toolUse" });
     }
-    const messages = withoutTurnFrame(context.messages);
+    const messages = droppingAnyTurnFrame(context.messages);
     const current = messages.slice(messages.findLastIndex(message => message.role === "user"));
     const result = current.find(message => message.role === "toolResult" && message.toolName === "delegate");
     if (result?.role === "toolResult" && result.isError) {
@@ -317,8 +317,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     expect(observed).toEqual([{ model: TASK_REASONING_MODEL_ID, reasoning: "high" }]);
     expect((await homeOwnerOf(f.registry).taskStatus("default-model")).workerModel)
       .toEqual({ provider: f.model.provider, id: TASK_REASONING_MODEL_ID });
-    expect(homeContexts[0]).toContain(`Current Home chat model: ${f.model.provider}/${TASK_REASONING_MODEL_ID}`);
-    expect(homeContexts[0]).toContain("Current Home thinking level: high");
+    expect(homeContexts[0]).toContain(`\\nModel: ${f.model.provider}/${TASK_REASONING_MODEL_ID}. Thinking: high.\\n`);
   });
 
   it("adopts a Home model change queued behind a Home resource reload (#1672)", async () => {

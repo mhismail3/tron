@@ -6,6 +6,7 @@ import { normalizeTraceValue } from "../../../test-support/scenario-lock.js";
 import { expectRequestShapes, expectSystemShapes } from "../../../test-support/lock-projections.js";
 import { awaitsWithin } from "../../../test-support/wait-for.js";
 import { compactionScenario, EXTENSION_UI_OPTIONS, extensionUiScenario, gate, openLockSession, promptStreamScenario, type LockSession } from "../../../test-support/lock-scenarios.js";
+import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
 
 const gateways: LockGateway[] = [];
 afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
@@ -98,8 +99,8 @@ function receipts(trace: RunLockTrace, prompts: readonly string[]): string[] {
   return data.map((receipt) => `${receipt.receiptKind}:${receipt.lifecycle ?? ""}`);
 }
 
-function requestMessages(trace: RunLockTrace): string[][] {
-  return trace.providerRequests.map((request) => request.messages.map((message) => {
+function requestMessages(trace: RunLockTrace, summaries: readonly number[] = []): string[][] {
+  return trace.providerRequests.map((request, index) => withoutTurnFrame(request.messages, !summaries.includes(index)).map((message) => {
     const { role, text, toolCalls, toolName } = message as { role: string; text?: string; toolCalls?: string[]; toolName?: string };
     return `${role}:${text ?? ""}${toolCalls ? `[${toolCalls.join(",")}]` : ""}${toolName ? `(${toolName})` : ""}`;
   }));
@@ -271,8 +272,8 @@ describe("gateway/run kernel locks", () => {
     ]);
     expectRequestShapes(trace.providerRequests, ["chat", "chat", "compactionSummary", "compactionSummary"]);
     const long = "lock context ".repeat(80);
-    expect(requestMessages(trace).slice(0, 2)).toEqual([["user:first question"], ["user:first question", `assistant:First answer. ${long}`, "user:second question"]]);
-    const [summaryRequest, prefixRequest] = requestMessages(trace).slice(2);
+    expect(requestMessages(trace, [2, 3]).slice(0, 2)).toEqual([["user:first question"], ["user:first question", `assistant:First answer. ${long}`, "user:second question"]]);
+    const [summaryRequest, prefixRequest] = requestMessages(trace, [2, 3]).slice(2);
     expect(summaryRequest![0]).toMatch(/^user:<conversation>\n\[User\]: first question\n\n\[Assistant\]: First answer\. lock context/);
     expect(prefixRequest![0]).toMatch(/^user:# Conversation\n\[User\]: second question\n\n# Instructions\n/);
     expect(JSON.stringify(trace.providerRequests)).not.toContain("Unscripted lock response");

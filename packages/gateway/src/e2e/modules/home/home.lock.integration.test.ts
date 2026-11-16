@@ -9,7 +9,7 @@ import { NotificationGrantStore } from "../../../notifications/grant-store.js";
 import { NotificationService } from "../../../notifications/notification-service.js";
 import { PushRelayClient } from "../../../notifications/relay-client.js";
 import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
-import { withoutTurnFrame } from "../../../../test-support/turn-frame.js";
+import { droppingAnyTurnFrame } from "../../../../test-support/turn-frame.js";
 
 const MODULE = "gateway/e2e";
 const LOCK = "home-activation-wake";
@@ -96,7 +96,7 @@ function textOf(content: unknown): string {
 function callerOf(context: TranscriptContext): Caller {
   const messages = context.messages as Array<{ role: string; content?: unknown; toolName?: string }>;
   if (messages.some((message) => (message.role === "user" || message.role === "system") && textOf(message.content).includes(WORKER_MARKER))) return "worker";
-  const last = withoutTurnFrame(messages).at(-1);
+  const last = droppingAnyTurnFrame(messages).at(-1);
   if (last?.role === "toolResult" && last.toolName === "delegate") return "home-delegated";
   if (last?.role === "user" && textOf(last.content).includes("Delegate the lock work")) return "home-input";
   return "home-wake";

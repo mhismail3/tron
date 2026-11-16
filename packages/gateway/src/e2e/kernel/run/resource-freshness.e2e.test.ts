@@ -10,7 +10,7 @@ import { UploadStore } from "../../../machine/upload-store.js";
 import { CommandReceiptStore } from "../../../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../../transport/gateway-service.js";
 import { displayOwnerOf, homeOwnerOf } from "../../../../test-support/gateway-registry.js";
-import { withoutTurnFrame } from "../../../../test-support/turn-frame.js";
+import { droppingAnyTurnFrame } from "../../../../test-support/turn-frame.js";
 
 const homes: string[] = [];
 afterEach(async () => {
@@ -27,7 +27,7 @@ function globalResources(commands: readonly Command[]): string[] {
 }
 
 function lastUserText(messages: readonly { role: string; content?: unknown }[]): string {
-  const content = withoutTurnFrame(messages).filter(message => message.role === "user").at(-1)?.content;
+  const content = droppingAnyTurnFrame(messages).filter(message => message.role === "user").at(-1)?.content;
   return typeof content === "string" ? content
     : (content as Array<{ type: string; text?: string }>).filter(part => part.type === "text").map(part => part.text).join("");
 }

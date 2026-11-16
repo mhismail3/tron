@@ -5,6 +5,7 @@ import { startLockGateway, type LockGateway } from "../../../test-support/gatewa
 import { expectRequestShapes, expectSystemShapes } from "../../../test-support/lock-projections.js";
 import { normalizeTraceValue } from "../../../test-support/scenario-lock.js";
 import { automationOwnedRunScenario } from "../../../test-support/lock-scenarios.js";
+import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
 
 const gateways: LockGateway[] = [];
 afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
@@ -91,7 +92,7 @@ describe("gateway/automations owned-run lock", () => {
       "toolResult |  | assistant | lock notes\n", "assistant:stop |  | assistant | The scheduled check found: lock notes.",
     ]);
 
-    expect(recorded.providerRequests.map((request) => request.messages.map((message) => {
+    expect(recorded.providerRequests.map((request) => withoutTurnFrame(request.messages).map((message) => {
       const { role, text, toolCalls } = message as { role: string; text?: string; toolCalls?: string[] };
       return `${role}:${text ?? ""}${toolCalls ? `[${toolCalls.join(",")}]` : ""}`;
     }))).toEqual([

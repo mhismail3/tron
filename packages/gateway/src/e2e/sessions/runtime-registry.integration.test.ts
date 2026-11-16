@@ -50,6 +50,7 @@ import { imageDimensions } from "../../../test-fixtures/pi-sdk/computer-use-imag
 import { syntheticOversizedJpeg, syntheticPng } from "../../../test-fixtures/synthetic-image.js";
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 import { catalogOwner, createColdRegistryFixture, initializeRegistry, settleCatalog, temporaryRoot } from "../../../test-support/runtime-registry-fixture.js";
+import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
 
 const statusJsonReplace = vi.hoisted(() => ({
   armed: false,
@@ -6122,7 +6123,7 @@ export default function (pi) {
     await slot.prompt("follow-up");
     await waitFor(() => !slot.isBusy, "the slot to go idle");
     expect(contexts).toHaveLength(2);
-    expect(contexts[1]!.messages.filter(message => message.role === "user").map(message =>
+    expect(withoutTurnFrame(contexts[1]!.messages).filter(message => message.role === "user").map(message =>
       message.role === "user" ? contentText(message.content) : "")).toEqual([
       "replacement from turn_end", "follow-up",
     ]);

@@ -15,6 +15,7 @@ import type { RunMarkerStore } from "../../kernel/run/run-markers.js";
 import { settingsDependencies } from "../../../test-support/settings-dependencies.js";
 import { sessionSettingChange } from "../../../test-support/session-settings-change.js";
 import { waitFor } from "../../../test-support/wait-for.js";
+import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
 
 describe("compaction cancellation with the pinned runtime", { concurrent: false }, () => {
   it("settles one Stop during between-turn compaction without starting another summary", async () => {
@@ -1008,7 +1009,7 @@ describe("compaction operation admission and authoritative reconciliation", { co
     const requests: string[][] = [];
     item.faux.setResponses(Array.from({ length: 3 }, () => async (context: { messages: Array<{ role: string; content: unknown }> }) => {
       if (getCurrentSystemPrompt(context.messages as never).includes("User-configured summary focus:")) return fauxAssistantMessage("Preserved API contract.");
-      requests.push(context.messages.filter(message => message.role !== "system").slice(-2).map(message => `${message.role}:${JSON.stringify(message.content)}`));
+      requests.push(withoutTurnFrame(context.messages).filter(message => message.role !== "system").slice(-2).map(message => `${message.role}:${JSON.stringify(message.content)}`));
       return fauxAssistantMessage("Answered with the continuation");
     }) as never);
     await writeFile(join(item.root, "release-hook"), "release");

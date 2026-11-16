@@ -9,7 +9,7 @@ import { GatewayService, type ClientContext, type GatewayServiceDependencies } f
 import { disposeFixtures, fixture } from "../../../../test-support/home-task-fixture.js";
 import { waitFor } from "../../../../test-support/wait-for.js";
 import { displayOwnerOf, homeOwnerOf } from "../../../../test-support/gateway-registry.js";
-import { withoutTurnFrame } from "../../../../test-support/turn-frame.js";
+import { droppingAnyTurnFrame } from "../../../../test-support/turn-frame.js";
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -21,7 +21,7 @@ function systemTexts(messages: readonly { role: string; content?: unknown }[]): 
 }
 
 function lastUserText(messages: readonly { role: string; content?: unknown }[]): string {
-  const content = withoutTurnFrame(messages).filter(message => message.role === "user").at(-1)?.content;
+  const content = droppingAnyTurnFrame(messages).filter(message => message.role === "user").at(-1)?.content;
   return typeof content === "string" ? content
     : (content as Array<{ type: string; text?: string }>).filter(part => part.type === "text").map(part => part.text).join("");
 }
