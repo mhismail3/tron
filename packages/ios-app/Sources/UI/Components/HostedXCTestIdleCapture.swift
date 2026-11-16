@@ -186,11 +186,15 @@ private enum HostedViewAnimationLedger {
             }
         }
         method_setImplementation(addMethod, imp_implementationWithBlock(addBlock))
-        typealias Start = @convention(c) (AnyObject, Selector, CAAnimation) -> Void
+        typealias Start = @convention(c) (AnyObject, Selector, CAAnimation?) -> Void
         let startSelector = #selector(CAAnimationDelegate.animationDidStart(_:))
         guard let startMethod = class_getInstanceMethod(state, startSelector) else { return }
         let start = unsafeBitCast(method_getImplementation(startMethod), to: Start.self)
-        let startBlock: @convention(block) (AnyObject, CAAnimation) -> Void = { receiver, animation in
+        let startBlock: @convention(block) (AnyObject, CAAnimation?) -> Void = { receiver, animation in
+            guard let animation else {
+                lock.withLock { starts += 1 }
+                return start(receiver, startSelector, nil)
+            }
             let id = ObjectIdentifier(animation)
             let type = NSStringFromClass(Swift.type(of: animation))
             let keyPath = (animation as? CAPropertyAnimation)?.keyPath ?? ""
@@ -208,14 +212,14 @@ private enum HostedViewAnimationLedger {
             start(receiver, startSelector, animation)
         }
         method_setImplementation(startMethod, imp_implementationWithBlock(startBlock))
-        typealias Stop = @convention(c) (AnyObject, Selector, CAAnimation, Bool) -> Void
+        typealias Stop = @convention(c) (AnyObject, Selector, CAAnimation?, Bool) -> Void
         let stopSelector = #selector(CAAnimationDelegate.animationDidStop(_:finished:))
         guard let stopMethod = class_getInstanceMethod(state, stopSelector) else { return }
         let stop = unsafeBitCast(method_getImplementation(stopMethod), to: Stop.self)
-        let stopBlock: @convention(block) (AnyObject, CAAnimation, Bool) -> Void = { receiver, animation, finished in
+        let stopBlock: @convention(block) (AnyObject, CAAnimation?, Bool) -> Void = { receiver, animation, finished in
             lock.withLock {
                 stops += 1
-                outstanding.removeValue(forKey: ObjectIdentifier(animation))
+                if let animation { outstanding.removeValue(forKey: ObjectIdentifier(animation)) }
             }
             stop(receiver, stopSelector, animation, finished)
         }
