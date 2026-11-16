@@ -318,7 +318,7 @@ case "$cmd" in
     exec python3 "$ROOT/tools/verify/verify.py" "$@"
     ;;
   queue)
-    exec python3 "$ROOT/tools/verify/queue.py" "$@"
+    exec python3 "$ROOT/tools/verify/landing_queue.py" "$@"
     ;;
   mutate)
     exec python3 "$ROOT/tools/verify/mutate.py" "$@"

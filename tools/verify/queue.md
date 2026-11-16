@@ -1,6 +1,6 @@
 # Shadow landing queue
 
-`tools/verify/queue.py` runs the full suite of Tiers 0 to 2, as they exist today, on every landing on `main`, serially, on the
+`tools/verify/landing_queue.py` runs the full suite of Tiers 0 to 2, as they exist today, on every landing on `main`, serially, on the
 Mac mini, and appends each verdict and its seconds to a ledger. It gates nothing: no hook, ruleset or write to `main`
 depends on it.
 
@@ -23,12 +23,12 @@ need this Mac's session store and SSH service.
 
 | Path on the mini | Holds |
 |---|---|
-| `~/tron-ci/queue/queue.py` | The runner copy the LaunchAgent starts |
+| `~/tron-ci/queue/landing_queue.py` | The runner copy the LaunchAgent starts |
 | `~/tron-ci/queue/tron/` | Its clone of the public repository over anonymous HTTPS; no credential |
 | `~/tron-ci/queue/tron/test-results/queue/ledger.jsonl` | The append-only ledger |
 | `~/tron-ci/queue/tron/test-results/queue/<landing>/` | `verify.log`, `verify.json` and the step logs of that landing |
 | `~/tron-ci/queue/queue.log` | The runner's own start and verdict lines |
-| `~/Library/LaunchAgents/com.tron.shadow-queue.plist` | Starts `queue.py run` at load and every 300 s |
+| `~/Library/LaunchAgents/com.tron.shadow-queue.plist` | Starts `landing_queue.py run` at load and every 300 s |
 
 A run holds the mini job lock (`~/tron-ci/jobs/gateway.lock`) for all the landings it takes, so a `mini.py` job never
 runs beside it; a run that finds the lock held exits and the next interval retries. A run stopped before a landing's
@@ -58,14 +58,14 @@ Install once on the mini, from a clone at the commit to run:
 
 ```bash
 git clone https://github.com/<owner>/tron.git ~/tron-ci/queue/tron   # origin's repository, anonymous HTTPS
-cd ~/tron-ci/queue/tron && git checkout --detach <commit> && /usr/bin/python3 tools/verify/queue.py install
-/usr/bin/python3 ~/tron-ci/queue/queue.py run --since <landing>   # optional: start after an older landing
+cd ~/tron-ci/queue/tron && git checkout --detach <commit> && /usr/bin/python3 tools/verify/landing_queue.py install
+/usr/bin/python3 ~/tron-ci/queue/landing_queue.py run --since <landing>   # optional: start after an older landing
 ```
 
 `install` copies the runner, writes the LaunchAgent and loads it in the user's GUI domain; run it again from a newer
 commit to update the runner. The agent starts when the mini's user session starts. Undo:
 
 ```bash
-/usr/bin/python3 ~/tron-ci/queue/queue.py uninstall   # unload and remove the LaunchAgent; the ledger stays
+/usr/bin/python3 ~/tron-ci/queue/landing_queue.py uninstall   # unload and remove the LaunchAgent; the ledger stays
 rm -rf ~/tron-ci/queue                                # also remove the clone, the ledger and the logs
 ```

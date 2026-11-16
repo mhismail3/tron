@@ -171,7 +171,7 @@ def install() -> int:
         print(f"queue: clone the repository first: git clone https://github.com/<owner>/tron.git {CLONE}", file=sys.stderr)
         return 2
     QUEUE.mkdir(parents=True, exist_ok=True)
-    runner = QUEUE / "queue.py"
+    runner = QUEUE / "landing_queue.py"
     runner.write_bytes(Path(__file__).read_bytes())
     PLIST.parent.mkdir(parents=True, exist_ok=True)
     PLIST.write_bytes(plistlib.dumps({"Label": LABEL, "ProgramArguments": ["/usr/bin/python3", str(runner), "run"],
