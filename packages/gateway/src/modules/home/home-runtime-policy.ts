@@ -2,9 +2,11 @@ import type { RuntimeSlot } from "../../kernel/run/runtime-slot.js";
 
 export const HOME_TOOL_NAMES: readonly string[] = [
   "ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "schedule", "profile", "obligation",
-  "web_search", "session_search", "session_read", "settings", "projects",
+  "web_search", "session_search", "session_read", "settings", "projects", "tool_search",
   "read", "write", "edit", "bash", "grep", "find", "ls", "computer", "agent_browser",
 ];
+
+export const HOME_DEFAULT_TOOL_NAMES: readonly string[] = HOME_TOOL_NAMES.filter(name => name !== "projects");
 
 const MAINTAINER_TURN_TOOLS = new Set(["write", "edit", "bash", "computer", "agent_browser"]);
 

@@ -19,7 +19,7 @@ export function createAppsModule(display: () => DisplayOwner): ModuleDescriptor 
     const workspace = host.contract(workspaceModule);
     const store = new SwiftAppStore(workspace, display);
     return {
-      extension: (session) => createTronSwiftAppExtension({ store, artifacts: display().artifacts, cwd: () => session.cwd(), sessionId: () => session.sessionId(), internalFilesRoot: () => workspace.filesRoot() }),
+      extension: (session) => createTronSwiftAppExtension({ store, artifacts: display().artifacts, cwd: () => session.cwd(), sessionId: () => session.sessionId(), internalFilesRoot: () => workspace.filesRoot(), deferred: session.defersRareTools }),
       capabilities: [SWIFT_APPS_CAPABILITY],
       rpc: {
         "apps.list": { kind: "read", handle: async (params) => {

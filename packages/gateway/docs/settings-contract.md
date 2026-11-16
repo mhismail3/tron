@@ -108,6 +108,7 @@ Record subjects (`RECORD_SUBJECTS`), changed per instance through the same path:
 | --- | --- | --- |
 | `tools.mcp.server` | tools | server |
 | `accounts.models.provider` | accounts | provider |
+| `context.lesson` | context | lesson |
 <!-- /tron docs -->
 
 Other schema fields: `subgroup`, `type`, `options` or `optionsSource` (`catalog.models`,

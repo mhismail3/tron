@@ -10,10 +10,11 @@ const parameters = Type.Object({
 }, { additionalProperties: false });
 type JevToolParameters = Static<typeof parameters>;
 
-export function createJevExtension(client: JevDecisionClient): ExtensionFactory {
+export function createJevExtension(client: JevDecisionClient, deferred: boolean): ExtensionFactory {
   return (pi) => {
     pi.registerTool({
       name: "jev",
+      ...(deferred ? { exposure: "deferred" as const } : {}),
       annotations: { openWorldHint: false },
       label: "Jev Evaluate",
       description: "Evaluate explicitly supplied bounded JSON with Pi's TypeSafe classifier (choice, bool, or score questions). Bool answers use a probability; score answers include no legend or probability breakdown. Jev is a decision adapter, not chat completion; callers must supply their own rubric, disclosure, and budget authority.",

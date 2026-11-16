@@ -114,13 +114,16 @@ Composition supplies the same late K6 settings, Profile and raw model owners.
 - **Profile** (`home-session-profile.ts`) is fixed per runtime. An unrecorded new Home uses
   its creation recipe once; later runtimes read the record (enabled Home, otherwise ordinary).
   Only `tron-context-window`, `tron-compaction-policy`, `tron-settings`, `tron-projects`,
-  `tron-ask-user`, `tron-display`, `tron-notify`, `tron-schedule`, `tron-computer`, `tron-home`, `tron-home-research` and `tron-web-research` load,
+  `tron-ask-user`, `tron-display`, `tron-notify`, `tron-schedule`, `tron-computer`, `tron-home`, `tron-home-research`, `tron-web-research`
+  and `tron-tool-search` (Pi's `tool_search`) load,
   plus the already-installed, globally configured trusted browser package through its explicit local package path.
   Package metadata retains its existing browser-source attribution. Missing browser assets leave that tool unavailable;
   Home does not provision a second temporary checkout. Ambient extensions remain disabled.
   [Projects](../projects/README.md) owns tap-gated lifecycle actions. Shared Pi file/search/shell tools allow direct
   work; only canonical maintainer turns admit general writes, edits, shell execution, `computer` or `agent_browser`.
   Home's current recipe owns model, thinking and tools on creation/reconstruction and every request; chapter choices are records, never overrides.
+  `projects` is deferred: Home's default tools (`HOME_DEFAULT_TOOL_NAMES`) omit it and include `tool_search`, which loads it on
+  demand; per-request recipe application keeps deferred tools `tool_search` loaded, and a new runtime starts without them.
   Rollover carries only directional authorization ceilings (e.g. images blocked until approved) and the explicit chapter window.
   Settings counts enabled tools; every producer-owned input is a wake, on which `write`, `edit`, `bash`, `computer` and `agent_browser` stay declared and every call to them is refused.
   Only `HOME_TOOL_NAMES`; no MCP or subagent discovery
@@ -248,6 +251,30 @@ changes keep its store, cursors and spend.
   historical revisions refuse.
   Oversized references use `profile` exact revision reads and bounded `nextOffset`
   continuations; they never silently truncate or resolve through a retired tool.
+
+### Lesson moves
+
+`lesson-moves.ts` owns the `context.lesson` settings record (store `lesson`, qualifier `lesson`). Home
+proposes it; the maintainer's native card applies it under the trust tap. Moves and Undos run one at a
+time.
+
+**A move:**
+1. Refuses a note that is no longer the active revision and text Home read. The card lists each retired
+   note's text.
+2. Refuses a stale anchor or replaced text. A skill description must name its current value in
+   `replaces`, compared against Pi's parsed frontmatter.
+3. Edits the global `AGENTS.md` (after an exact anchor line, in place of exact text, or appended) or a global
+   skill's `description:` line. The description is written JSON-quoted and must round-trip through
+   `parseFrontmatter`.
+4. Retires the notes through `HomeProfileItems`.
+5. Records the file's prior bytes and the notes' prior and moved values in `state/home/lessons.json`.
+
+Any failure after the file write restores the file and any notes already retired.
+
+**Undo**, through `settings.undo`, refuses if the destination or a retired note changed since the move. It
+then restores the file bytes and the notes. If restoring the notes fails part-way, Undo puts back the moved
+file and re-retires the notes. `home-lesson-move.e2e.test.ts` proves propose, card, apply,
+stale refusal and Undo for both destinations.
 
 ### RPCs and clients
 

@@ -71,6 +71,7 @@ import { DisplayArtifactStore } from "./display/display-artifact-store.js";
 import { DisplayOwner } from "./display/display-modules.js";
 import { BrowserLiveViewRegistry } from "./display/browser-live-view.js";
 
+import { LessonMoves } from "./modules/home/lesson-moves.js";
 import { HomeProfileItems } from "./modules/home/home-profile.js";
 import { ProfileStore } from "./modules/home/profile-store.js";
 import { MODEL_QUEUE_PROJECTION_ENV } from "./providers/model-queue-extension.js";
@@ -183,6 +184,7 @@ const settingsModel = new SettingsModel(new SettingsStoreAdapter({
   macTerminalKeys,
   mcpAdmin,
   modelConfig,
+  lessonMoves: new LessonMoves(config.agentDir, config.tronHome, () => new HomeProfileItems(() => knowledge)),
   agentDir: config.agentDir,
   tronHome: config.tronHome,
   trust,

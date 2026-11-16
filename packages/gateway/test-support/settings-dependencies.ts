@@ -1,3 +1,4 @@
+import { LessonMoves } from "../src/modules/home/lesson-moves.js";
 import { TEST_SETTINGS_SCHEMA } from "./settings-schema.js";
 import { randomUUID } from "node:crypto";
 import { createQueueSummarizer } from "../src/episodic/episodic-compactor.js";
@@ -42,6 +43,7 @@ export function settingsDependencies(input: {
   const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA,
     agentDir: input.agentDir, tronHome: input.tronHome, trust: input.trust, modelRuntime: input.modelRuntime,
     mcpAdmin,
+    ...(input.knowledge ? { lessonMoves: new LessonMoves(input.agentDir, input.tronHome, () => new HomeProfileItems(() => input.knowledge?.())) } : {}),
     ...(input.toolCatalog ? { toolCatalog: input.toolCatalog } : {}),
     ...(input.packages ? { updatePackage: input.packages.updatePackage.bind(input.packages) } : {}),
   }));

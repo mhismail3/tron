@@ -19,7 +19,8 @@ lookup live in K3, not a second registry here.
 - **Pi built-ins.** `RuntimeSlot` composes Pi's `codemode`, `tool-search` and `mcp`
   extension factories (`piBuiltinExtensions`) for session runtimes, and session-free
   hook/package loads use the same composition; the SDK does not load them itself.
-  Scoped `-builtin:<name>` settings enable each. MCP can activate codemode or
+  Scoped `-builtin:<name>` settings enable each. A session that defers rare tools (Home and task workers,
+  `SessionContext.defersRareTools`) gets `tool_search` active; Home, which loads no built-ins, registers it inline. MCP can activate codemode or
   tool-search for its exposure even when neither is a `defaultTools` entry. Pi's MCP
   extension is the only MCP client ([MCP](../../docs/mcp.md)).
 - **Decision descriptor.** `ask-user-module.ts` owns `tron-ask-user` metadata and
