@@ -426,7 +426,7 @@ exec ${JSON.stringify(realGit)} "$@"
     expect(declared[0]).not.toContain("projects");
     expect(declared[1]).toContain("projects");
     expect(result).toMatchObject({ role: "toolResult", toolName: "projects", isError: true });
-    expect(JSON.stringify(result!.content)).not.toMatch(/not found|unknown tool|not available/iu);
+    expect(JSON.stringify(result!.content)).toContain("Project names must be 1 to 64 ASCII letters");
   });
 
   it("Home creates an untrusted main repository, approval grants trust and the real delegate owner immediately admits work", async () => {

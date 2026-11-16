@@ -102,7 +102,8 @@ dispatcher records pending intent, authorizes the snapshot, creates the worker t
   `model.thinking[role=worker]` (else Home's), clamped; an explicit choice needs a `reason`.
   Choices are fixed in the brief and reported (`worker`, `subagentModels`; subagents default to
   `tron/subagent`). A usage limit moves to the next worker model in place.
-- A worker has project tools plus `report` and a canonical `tron-home-task` marker checked
+- A worker has project tools plus `report` and `tool_search`; `jev`, `swift_app`, `native_capture` and `projects` are
+  deferred until `tool_search` loads them. A canonical `tron-home-task` marker is checked
   before cold construction. A sealed report ends the task at that turn boundary: a provider
   notice already queued into that turn is appended as context and starts no turn; Stop is
   terminal (`task-stopped-before-delivery` receipts for unconsumed steers);
