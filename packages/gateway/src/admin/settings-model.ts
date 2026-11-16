@@ -17,6 +17,7 @@ import { gitHeadState, projectGitState, readProjectDocument } from "./project-se
 import { observedInstance, projectStores, type ObservedReaders, type OutsideChanges } from "./settings-outside.js";
 import type { McpAdminService } from "./mcp-admin-service.js";
 import type { McpServerValue } from "../kernel/settings/mcp-server-value.js";
+import type { LessonMoveValue } from "../kernel/settings/lesson-move-value.js";
 import type { ModelProviderValue } from "../kernel/settings/model-provider-value.js";
 import type { ModelConfigService } from "./model-config-service.js";
 import type { TrustService } from "../kernel/resources/trust-service.js";
@@ -38,6 +39,12 @@ interface SettingsModelDependencies {
   macTerminalKeys?: Pick<MacTerminalService, "read" | "set" | "enabled" | "setEnabled">;
   mcpAdmin?: McpAdminService;
   modelConfig?: ModelConfigService;
+  lessonMoves?: LessonMoveStore;
+}
+
+export interface LessonMoveStore {
+  value(lesson: string): Promise<LessonMoveValue | undefined>;
+  set(lesson: string, value: LessonMoveValue | undefined, commandId: string): Promise<void>;
 }
 
 export interface ToolCatalogEntry { name: string; description?: string; resource: Record<string, unknown> }
@@ -53,6 +60,11 @@ export class SettingsStoreAdapter {
     return this.dependencies.mcpAdmin;
   }
 
+  private lessonMoves(): LessonMoveStore {
+    if (!this.dependencies.lessonMoves) throw new GatewayError("unsupported", "This Gateway has no lesson move owner");
+    return this.dependencies.lessonMoves;
+  }
+
   private modelConfig(): ModelConfigService {
     if (!this.dependencies.modelConfig) throw new GatewayError("unsupported", "This Gateway has no custom model configuration owner");
     return this.dependencies.modelConfig;
@@ -62,6 +74,7 @@ export class SettingsStoreAdapter {
     switch (subject) {
       case "tools.mcp.server": return this.mcp().server(instance);
       case "accounts.models.provider": return this.modelConfig().provider(instance);
+      case "context.lesson": return this.lessonMoves().value(instance);
       default: throw new GatewayError("unsupported", `${subject} has no record owner`);
     }
   }
@@ -291,6 +304,9 @@ export class SettingsStoreAdapter {
         return {};
       case "models":
         await this.modelConfig().setProvider(qualifiers.provider!, unset ? undefined : value as ModelProviderValue);
+        return {};
+      case "lesson":
+        await this.lessonMoves().set(qualifiers.lesson!, unset ? undefined : value as LessonMoveValue, plan.changeId);
         return {};
       case "trust":
         return { result: await writers.setTrust(qualifiers.project!, unset ? null : value as boolean) };

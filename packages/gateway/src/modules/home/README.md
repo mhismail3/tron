@@ -249,6 +249,20 @@ changes keep its store, cursors and spend.
   Oversized references use `profile` exact revision reads and bounded `nextOffset`
   continuations; they never silently truncate or resolve through a retired tool.
 
+### Lesson moves
+
+`lesson-moves.ts` owns the `context.lesson` settings record (store `lesson`, qualifier `lesson`; Home
+proposes, the maintainer's native card applies it under the trust tap). One move:
+1. Refuses a stale anchor, `replaces` text or note revision.
+2. Edits the global `AGENTS.md` (after an exact anchor line, in place of exact text, or appended) or a global
+   skill's `description:` line.
+3. Retires the named Profile notes through `HomeProfileItems`.
+4. Keeps the file's prior bytes and the notes' prior values in `state/home/lessons.json`.
+
+A failed retirement restores the file and any notes already retired. Undo, through `settings.undo`,
+refuses if the destination changed since the move, then restores the notes and the file bytes.
+`home-lesson-move.e2e.test.ts` proves propose → card → apply → stale refusal → Undo.
+
 ### RPCs and clients
 
 - Capabilities `home.v1`, `home-memory-view.v1`, `home-chapter-list.v1`, `home-profile-list.v1`,
