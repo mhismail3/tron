@@ -79,9 +79,7 @@ accepts Pi's valid JSON output for CLI exit codes 0 and 1 (the latter reports un
 wire shape: at most 128 servers, each with `name`, `state`, `scope`, `enabled`,
 `exposure`, `transport`, at most 128 tool names, and an optional bounded `error`.
 Each string is capped at 256 characters (except `state`, capped at 64); `error`
-is stripped of control bytes and capped at 2,048 characters. A global row also carries
-`value`, the server's `tools.mcp.server` settings value, when the change path can carry
-its configuration. Filesystem `source`
+is stripped of control bytes and capped at 2,048 characters. Filesystem `source`
 paths are not exposed. Every bundled-CLI run the admin service makes (status, sign-out) binds
 `PI_CODING_AGENT_DIR` to the Gateway's agent directory at spawn, so the ambient process environment
 never selects which `mcp.json` or trust store a status read or mutation touches. Top-level `errors` is a count, not a copy of Pi diagnostic
@@ -112,8 +110,10 @@ runtime cannot read is reported before an upgrade lands.
 `pi mcp list --json` out of process: `scope` `global` or `project` (project needs a
 canonical trusted `cwd`), output bounded to 1 MiB, 30-second timeout. The CLI exits 1
 while any server is unhealthy and its JSON is still projected. Rows are
-`{ name, state, scope, enabled, exposure, transport, tools, error? }` with Pi's
+`{ name, state, scope, enabled, exposure, transport, tools, error?, value? }` with Pi's
 `state` values; Pi's `source` path stays on the Mac and `error` is bounded to 2 KiB.
+`value` (global rows only) is the server's `tools.mcp.server` settings value, absent when
+the change path cannot carry its configuration; the app edits from it.
 
 Servers are added, changed and removed only through `settings.change` on
 `tools.mcp.server` at the Global layer ([settings contract](settings-contract.md));
