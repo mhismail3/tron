@@ -541,7 +541,7 @@ export class SettingsChangePath {
     let after: unknown;
     if (request.op === "set") {
       after = await key.type.validate(request.value, key.id, { admitModel: (ref, options) => this.model.owner.admitModel(runtime, ref,
-        { ...options, physical: options?.physical || stores.layers.includes("home") }) });
+        { ...options, physical: options?.physical || stores.layers.includes("home") }), ...(subject ? { instance: qualifiers[subject.qualifier] } : {}) });
       if (store === "home" && key.optionsSource?.name === "catalog.tools") {
         const names = key.home?.defaultValue;
         if (!Array.isArray(names) || !Array.isArray(after) || after.some(name => typeof name !== "string" || !names.includes(name))) {

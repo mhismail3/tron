@@ -1,7 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,7 +16,7 @@ import { SettingsChangePath } from "../kernel/settings/settings-change.js";
 import { SettingsChangeRecord } from "../kernel/settings/settings-record.js";
 import { SettingsStoreAdapter } from "./settings-model.js";
 import { OutsideChanges } from "./settings-outside.js";
-import { MacKeychainMcpCredentialOwner, McpAdminService, type McpCredentialOwner } from "./mcp-admin-service.js";
+import { MacKeychainMcpCredentialOwner, McpAdminService } from "./mcp-admin-service.js";
 
 function piCliPath(): string {
   let directory = dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")));
@@ -73,22 +72,15 @@ describe("McpAdminService", () => {
       return { code: 0, stdout: "", stderr: "" };
     });
     const token = 'space "quote" \\ slash';
-    await owner.store({ scope: "global" }, "fixture", token);
+    await owner.store("tron-mcp-fixture", token);
     expect(invocation).toEqual({
       command: "/usr/bin/security",
       args: ["-i"],
-      input: '"add-generic-password" "-U" "-s" "tron.mcp" "-a" "tron-mcp-global-fixture" "-w" "space \\"quote\\" \\\\ slash"\n',
+      input: '"add-generic-password" "-U" "-s" "tron.mcp" "-a" "tron-mcp-fixture" "-w" "space \\"quote\\" \\\\ slash"\n',
     });
     expect(JSON.stringify(invocation)).not.toContain(token);
-    const globalAccount = invocation?.input;
-    const projectScope = { scope: "project" as const, cwd: "/tmp/workspace-a", trusted: true as const };
-    await owner.store(projectScope, "fixture", token);
-    const projectAccount = invocation?.input;
-    expect(projectAccount).not.toBe(globalAccount);
-    await owner.store(projectScope, "fixture", token);
-    expect(invocation?.input).toBe(projectAccount);
-    await expect(owner.store({ scope: "global" }, "fixture", "line\nbreak")).rejects.toThrow(/invalid/u);
-    await expect(owner.store({ scope: "global" }, "fixture", "nul\0byte")).rejects.toThrow(/invalid/u);
+    await expect(owner.store("tron-mcp-fixture", "line\nbreak")).rejects.toThrow(/invalid/u);
+    await expect(owner.store("tron-mcp-fixture", "nul\0byte")).rejects.toThrow(/invalid/u);
   });
   it("uses the bundled CLI for explicit status reads and bounds the result to valid JSON", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-mcp-admin-"));
@@ -176,25 +168,6 @@ describe("McpAdminService", () => {
     }
   });
 
-  it("removes a server from the owner agent directory and leaves the ambient root's mcp.json byte-identical", async () => {
-    const owner = await mkdtemp(join(tmpdir(), "tron-mcp-owner-"));
-    const decoy = await mkdtemp(join(tmpdir(), "tron-mcp-decoy-"));
-    try {
-      await writeFile(join(owner, "mcp.json"), JSON.stringify({ mcpServers: { shared: { url: "https://owner.fixture.invalid/mcp", enabled: false } } }));
-      await writeFile(join(decoy, "mcp.json"), JSON.stringify({ mcpServers: { shared: { url: "https://decoy.fixture.invalid/mcp", enabled: false } } }));
-      const decoyBefore = await readFile(join(decoy, "mcp.json"));
-      const service = new McpAdminService(owner, cliPath);
-      await callWithAmbientAgentDir(decoy, () => service.mutate({ scope: "global" }, "remove", ["shared"], "shared"));
-      const ownerAfter = JSON.parse(await readFile(join(owner, "mcp.json"), "utf8"));
-      const decoyUnchanged = (await readFile(join(decoy, "mcp.json"))).equals(decoyBefore);
-      expect({ ownerServers: Object.keys(ownerAfter.mcpServers), decoyUnchanged })
-        .toEqual({ ownerServers: [], decoyUnchanged: true });
-    } finally {
-      await rm(owner, { recursive: true, force: true });
-      await rm(decoy, { recursive: true, force: true });
-    }
-  });
-
   it("projects the pinned Pi failed-list payload even when the CLI exits 1", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-mcp-list-payload-"));
     const fixture = fileURLToPath(new URL("./fixtures/mcp-list-failed-cli.json", import.meta.url));
@@ -264,7 +237,7 @@ describe("McpAdminService", () => {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
-  it("updates only requested fields, preserves neighboring config and fails closed on malformed files", async () => {
+  it("writes one server, preserves neighboring config and fails closed on malformed files", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-mcp-patch-"));
     try {
       const config = join(root, "mcp.json");
@@ -275,7 +248,7 @@ describe("McpAdminService", () => {
       await writeFile(config, JSON.stringify(original));
       const service = new McpAdminService(root, cliPath);
       drainDurableWriteStats();
-      await service.update({ scope: "global" }, "wanted", { enabled: false, exposure: "hidden" });
+      await service.setServer("wanted", { ...original.mcpServers.wanted, enabled: false, exposure: "hidden" });
       expect(drainDurableWriteStats().count).toBe(2);
       const text = await readFile(config, "utf8");
       const saved = JSON.parse(text);
@@ -284,119 +257,37 @@ describe("McpAdminService", () => {
       expect(saved.mcpServers.wanted).toEqual({ ...original.mcpServers.wanted, enabled: false, exposure: "hidden" });
       expect(saved.mcpServers.other).toEqual(original.mcpServers.other);
       expect(saved.extensionData).toEqual(original.extensionData);
-      await expect(service.update({ scope: "global" }, "missing", { enabled: true })).rejects.toThrow(/not found/u);
       await writeFile(config, "{broken");
-      await expect(service.update({ scope: "global" }, "wanted", { enabled: true })).rejects.toThrow(/cannot be parsed/u);
+      await expect(service.setServer("wanted", original.mcpServers.wanted)).rejects.toThrow(/cannot be parsed/u);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
-  it("maps a contended token configuration lock to a retryable busy error", async () => {
+  it("maps a contended configuration lock to a retryable busy error", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-mcp-token-lock-"));
     onTestFinished(() => rm(root, { recursive: true, force: true }));
     const config = join(root, "mcp.json");
     await writeFile(config, JSON.stringify({ mcpServers: { fixture: { url: "https://fixture.invalid/mcp" } } }));
-    const owner: McpCredentialOwner = { async store() { return "account"; }, async remove() {} };
     const release = await lockfile.lock(config, { realpath: false });
     try {
-      const service = new McpAdminService(root, cliPath, owner, undefined, 10_000);
-      await expect(service.storeBearer({ scope: "global" }, "fixture", "token"))
+      const service = new McpAdminService(root, cliPath);
+      await expect(service.setServer("fixture", { url: "https://fixture.invalid/mcp", enabled: false }))
         .rejects.toMatchObject({ code: "busy", retryable: true });
     } finally { await release(); }
   });
 
-  it("removes only the selected scope's config and credential through the bundled CLI", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-mcp-remove-scope-"));
-    onTestFinished(() => rm(root, { recursive: true, force: true }));
-    const project = join(root, "project");
-    const projectConfig = join(project, ".pi", "mcp.json");
-    const globalConfig = join(root, "mcp.json");
-    const globalCredential = join(root, "global-credential");
-    const projectCredential = join(root, "project-credential");
-    await mkdir(dirname(projectConfig), { recursive: true });
-    const config = { mcpServers: {
-      fixture: { url: "https://fixture.invalid/mcp", enabled: false },
-      retained: { url: "https://retained.invalid/mcp", enabled: false },
-    } };
-    const original = JSON.stringify(config);
-    await Promise.all([
-      writeFile(globalConfig, original), writeFile(projectConfig, original),
-      writeFile(globalCredential, "global fixture credential"), writeFile(projectCredential, "project fixture credential"),
-    ]);
-    const owner: McpCredentialOwner = {
-      async store() { throw new Error("Removal must not store a credential"); },
-      async remove(scope, server) {
-        expect(server).toBe("fixture");
-        if (scope.scope === "project") expect(scope.cwd).toBe(project);
-        await rm(scope.scope === "global" ? globalCredential : projectCredential);
-      },
-    };
-    const service = new McpAdminService(root, cliPath, owner, undefined, 10_000);
-    await service.mutate({ scope: "global" }, "remove", ["fixture"], "fixture");
-    expect(JSON.parse(await readFile(globalConfig, "utf8"))).toEqual({ mcpServers: { retained: config.mcpServers.retained } });
-    expect(await readFile(projectConfig, "utf8")).toBe(original);
-    await expect(readFile(globalCredential)).rejects.toMatchObject({ code: "ENOENT" });
-    expect(await readFile(projectCredential, "utf8")).toBe("project fixture credential");
-    const globalAfter = await readFile(globalConfig, "utf8");
-    await service.mutate({ scope: "project", cwd: project, trusted: true }, "remove", ["fixture"], "fixture");
-    expect(JSON.parse(await readFile(projectConfig, "utf8"))).toEqual({ mcpServers: { retained: config.mcpServers.retained } });
-    expect(await readFile(globalConfig, "utf8")).toBe(globalAfter);
-    await expect(readFile(projectCredential)).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
-  it("stores a token only through its credential owner and writes a !command reference Pi resolves", async () => {
+  it("stores a bearer only through its credential owner and writes this server's Keychain reference, which Pi's loader accepts", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-mcp-token-"));
-    const captured: string[] = [];
-    const owner: McpCredentialOwner = {
-      async store(scope, _server, token) { captured.push(`${scope.scope}:${token}`); return "tron-mcp-global-fixture"; },
-      async remove() {},
-    };
-    const received: Array<string | undefined> = [];
-    const fixture = createServer(async (req, res) => {
-      const chunks: Buffer[] = [];
-      for await (const chunk of req) chunks.push(Buffer.from(chunk));
-      received.push(req.headers.authorization);
-      const rpc = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}") as { id?: number; method?: string };
-      const answer = (body: unknown, status = 200) => {
-        res.writeHead(status, { "content-type": "application/json", "mcp-session-id": "fixture-session", "mcp-protocol-version": "2025-03-26" });
-        res.end(JSON.stringify(body));
-      };
-      if (rpc.method === "initialize") return answer({ jsonrpc: "2.0", id: rpc.id, result: { protocolVersion: "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: "fixture", version: "1" } } });
-      if (rpc.method === "notifications/initialized") { res.writeHead(202); res.end(); return; }
-      if (rpc.method === "tools/list") return answer({ jsonrpc: "2.0", id: rpc.id, result: { tools: [] } });
-      answer({});
-    });
-    try {
-      await new Promise<void>((resolve) => fixture.listen(0, "127.0.0.1", resolve));
-      const address = fixture.address();
-      if (!address || typeof address === "string") throw new Error("MCP fixture failed to bind loopback");
-      const origin = `http://127.0.0.1:${address.port}`;
-      await writeFile(join(root, "mcp.json"), JSON.stringify({ mcpServers: { fixture: { url: `${origin}/mcp` } } }));
-      const service = new McpAdminService(root, cliPath, owner, undefined, 10_000);
-      drainDurableWriteStats();
-      const response = await service.storeBearer({ scope: "global" }, "fixture", "never-projected-secret");
-      expect(drainDurableWriteStats().count).toBe(2);
-      const config = await readFile(join(root, "mcp.json"), "utf8");
-      const saved = JSON.parse(config) as { mcpServers: Record<string, { headers: { Authorization: string } }> };
-      expect(saved.mcpServers.fixture.headers.Authorization).toContain("Bearer ");
-      const tokenCommand = join(root, "token-command");
-      await writeFile(tokenCommand, "#!/bin/sh\nprintf 'token with spaces'\n");
-      await chmod(tokenCommand, 0o700);
-      const piCommand = saved.mcpServers.fixture.headers.Authorization.replace(
-        /\/usr\/bin\/security find-generic-password -s tron\.mcp -a [A-Za-z0-9._-]+ -w/u, tokenCommand,
-      );
-      await writeFile(join(root, "mcp.json"), JSON.stringify({ mcpServers: { fixture: { url: `${origin}/mcp`, headers: { Authorization: piCommand } } } }));
-      const listed = await service.list({ scope: "global" }) as { servers: Array<{ name: string; state: string }> };
-      expect(listed.servers).toEqual([expect.objectContaining({ name: "fixture", state: "connected" })]);
-      expect(received).toContain("Bearer token with spaces");
-      expect(captured).toEqual(["global:never-projected-secret"]);
-      expect(response).toEqual({ server: "fixture", stored: true });
-      expect(config).toContain("/usr/bin/security");
-      expect(saved.mcpServers.fixture.headers.Authorization).toMatch(/^!/u);
-      expect(config).not.toContain("never-projected-secret");
-    } finally {
-      await new Promise<void>((resolve) => fixture.close(() => resolve()));
-      await rm(root, { recursive: true, force: true });
-    }
+    onTestFinished(() => rm(root, { recursive: true, force: true }));
+    const captured: string[][] = [];
+    const service = new McpAdminService(root, cliPath, { async store(account, token) { captured.push([account, token]); } });
+    const reference = await service.storeBearer("fixture", "never-projected-secret");
+    expect(captured).toEqual([["tron-mcp-fixture", "never-projected-secret"]]);
+    await service.setServer("fixture", { url: "https://fixture.invalid/mcp", headers: { Authorization: reference } });
+    const config = await readFile(join(root, "mcp.json"), "utf8");
+    expect(JSON.parse(config).mcpServers.fixture.headers.Authorization)
+      .toEqual({ source: "keychain", service: "tron.mcp", account: "tron-mcp-fixture", format: "bearer" });
+    expect(config).not.toContain("never-projected-secret");
+    expect(await service.configured()).toEqual({ errors: 0, servers: [expect.objectContaining({ name: "fixture", transport: "http", state: "configured" })] });
   });
 
 });

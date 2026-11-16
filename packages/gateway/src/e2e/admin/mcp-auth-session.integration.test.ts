@@ -134,7 +134,7 @@ describe("MCP auth through a live Gateway session", () => {
       commandId: "mcp-token-invalid-1", scope: "global", server: "invalid/name", token: "secret", unexpected: true,
     })).rejects.toMatchObject({ code: "invalid_request" });
     await expect(service.invoke(client, "mcp.token.set", {
-      commandId: "mcp-token-invalid-2", scope: "global", server: "invalid/name", token: "secret",
+      commandId: "mcp-token-invalid-2", server: "invalid/name", token: "secret",
     })).rejects.toMatchObject({ code: "invalid_request" });
     const sessionId = slot.id;
     expect(slot.hasBuiltinMcpCommand()).toBe(true);
