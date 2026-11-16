@@ -21,7 +21,6 @@ import type { Actor, ChangeEntry } from "../kernel/settings/settings-record.js";
 import { SECTIONS, recordSubject } from "../kernel/settings/settings-schema.js";
 import { HOME_PROFILE_KINDS, HOME_PROFILE_MAINTAINER_ACTIONS, HomeProfileItems, type HomeProfileRequest } from "../modules/home/home-profile.js";
 import { profilePath } from "../modules/home/profile-placement.js";
-import type { ObservedStore } from "../kernel/settings/settings-types.js";
 import { presentHistoryEntry, presentResolution } from "../admin/settings-presentation.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, rejectUnknownFields, string, text as boundedText } from "../util/validation.js";
 import type { DeviceStore } from "../security/device-store.js";
@@ -50,7 +49,6 @@ import type { GlobalProviderResources } from "../admin/global-provider-resources
 import type { AuthBroker } from "../admin/auth-broker.js";
 import { withMcpAuthInteraction } from "../kernel/host/extension-adapters.js";
 import type { McpAdminService, McpScope } from "../admin/mcp-admin-service.js";
-import { MCP_EXPOSURES } from "../kernel/settings/mcp-server-value.js";
 import { MAC_REPLACE_CAPABILITY, MacReplaceService } from "../admin/mac-replace-service.js";
 import { GatewayUpdateService, validateGatewayUpdateRequest } from "../admin/gateway-update-service.js";
 import {
@@ -124,6 +122,12 @@ function mutationSessionId(params: Record<string, unknown>): string | undefined 
     return typeof sessionId === "string" ? sessionId : undefined;
   }
   return undefined;
+}
+
+function mcpServerName(params: Record<string, unknown>): string {
+  const server = string(params.server, "server", { min: 1, max: 128 });
+  if (!/^[A-Za-z0-9_-]+$/u.test(server)) throw new GatewayError("invalid_request", "MCP server name is invalid");
+  return server;
 }
 
 function settingsQualifiers(raw: unknown, label: string): Qualifiers {
@@ -397,19 +401,6 @@ export class GatewayService {
     }
   }
 
-  private async asTronWrite<T>(stores: readonly ObservedStore[], write: () => Promise<T>): Promise<T> {
-    const outside = this.dependencies.settingsModel?.owner.outsideChanges;
-    return outside ? outside.adopt(stores, write) : write();
-  }
-
-  private mcpStores(scope: McpScope): ObservedStore[] {
-    return scope.scope === "global" ? [{ kind: "mcp" }] : [{ kind: "project-mcp", root: scope.cwd }];
-  }
-
-  private mcpChanged(scope: McpScope): void {
-    this.dependencies.broadcast("mcp.changed", scope.scope === "global" ? { scope: "global" } : { scope: "project", projectDir: scope.cwd });
-  }
-
   startModelReleaseDateRefresh(): void {
     this.modelReleaseDates.start();
   }
@@ -650,56 +641,19 @@ export class GatewayService {
         try { return safeJson(await this.requireMcpAdmin().list(scope)); }
         finally { work?.settle(); }
       }
-      case "mcp.add":
-      case "mcp.remove":
       case "mcp.logout":
         return this.mutation(client, method, params, async () => {
-          const scope = await this.mcpScope(params, true);
-          const server = string(params.server, "server", { min: 1, max: 128 });
-          if (!/^[A-Za-z0-9._-]+$/.test(server)) throw new GatewayError("invalid_request", "MCP server name is invalid");
-          let args: string[];
-          if (method === "mcp.add") {
-            const transport = oneOf(params.transport, "transport", ["stdio", "http"] as const);
-            const exposure = params.exposure === undefined ? undefined : oneOf(params.exposure, "exposure", MCP_EXPOSURES);
-            if (transport === "http") {
-              const url = string(params.url, "url", { min: 1, max: 4_096 });
-              let parsed: URL; try { parsed = new URL(url); } catch { throw new GatewayError("invalid_request", "MCP URL is invalid"); }
-              if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new GatewayError("invalid_request", "MCP URL must use HTTP or HTTPS");
-              args = [server, "--url", url, ...(exposure ? ["--exposure", exposure] : [])];
-            } else {
-              const command = string(params.command, "command", { min: 1, max: 1_024 });
-              const argv = params.args === undefined ? [] : arrayOfStrings(params.args, "args", 64);
-              args = [server, ...(exposure ? ["--exposure", exposure] : []), "--", command, ...argv];
-            }
-          } else args = [server];
-          const result = await this.asTronWrite(this.mcpStores(scope), () => this.requireMcpAdmin().mutate(scope, method === "mcp.add" ? "add" : method === "mcp.remove" ? "remove" : "logout", args, server));
-          this.mcpChanged(scope);
-          return safeJson({ ...(result as object), reloadRequired: method !== "mcp.logout", reloadMessage: method === "mcp.logout" ? undefined : "Existing sessions load server configuration after /reload or a new session." });
-        });
-      case "mcp.update":
-        return this.mutation(client, method, params, async () => {
-          const scope = await this.mcpScope(params, true);
-          const server = string(params.server, "server", { min: 1, max: 128 });
-          rejectUnknownFields(params, ["commandId", "scope", "cwd", "server", "enabled", "exposure"], method);
-          if (!/^[A-Za-z0-9._-]+$/.test(server)) throw new GatewayError("invalid_request", "MCP server name is invalid");
-          const patch: { enabled?: boolean; exposure?: import("../kernel/settings/mcp-server-value.js").McpExposure } = {};
-          if (params.enabled !== undefined) patch.enabled = boolean(params.enabled, "enabled");
-          if (params.exposure !== undefined) patch.exposure = oneOf(params.exposure, "exposure", MCP_EXPOSURES);
-          if (Object.keys(patch).length === 0) throw new GatewayError("invalid_request", "MCP update requires enabled or exposure");
-          const updated = await this.asTronWrite(this.mcpStores(scope), () => this.requireMcpAdmin().update(scope, server, patch));
-          this.mcpChanged(scope);
-          return safeJson(updated);
+          rejectUnknownFields(params, ["commandId", "server"], method);
+          const server = mcpServerName(params);
+          await this.requireMcpAdmin().logout(server);
+          return safeJson({ servers: [server] });
         });
       case "mcp.token.set":
         return this.mutation(client, method, params, async () => {
-          rejectUnknownFields(params, ["commandId", "scope", "cwd", "server", "token"], method);
-          const scope = await this.mcpScope(params, true);
-          const server = string(params.server, "server", { min: 1, max: 128 });
-          if (!/^[A-Za-z0-9._-]+$/.test(server)) throw new GatewayError("invalid_request", "MCP server name is invalid");
-          const token = string(params.token, "token", { min: 1, max: 16_384 });
-          const stored = await this.asTronWrite(this.mcpStores(scope), () => this.requireMcpAdmin().storeBearer(scope, server, token));
-          this.mcpChanged(scope);
-          return safeJson(stored);
+          rejectUnknownFields(params, ["commandId", "server", "token"], method);
+          const server = mcpServerName(params);
+          const reference = await this.requireMcpAdmin().storeBearer(server, string(params.token, "token", { min: 1, max: 16_384 }));
+          return safeJson({ server, reference });
         });
       case "system.logs":
         return safeJson({ records: this.dependencies.logger.recent(integer(params.limit ?? 200, "limit", 1, 1_000)) });
@@ -2144,7 +2098,7 @@ export class GatewayService {
     for (const change of changes) {
       if (change.key === "permissions.projectTrust" && change.result !== undefined) this.dependencies.broadcast("trust.changed", safeJson(change.result));
     }
-    if (changes.some(change => change.key === "tools.mcp.server")) this.mcpChanged({ scope: "global" });
+    if (changes.some(change => change.key === "tools.mcp.server")) this.dependencies.broadcast("mcp.changed", { scope: "global" });
   }
 
   private configurationExpectation(params: Record<string, unknown>) {
@@ -2369,10 +2323,9 @@ export class GatewayService {
     return this.dependencies.mcpAdmin;
   }
 
-  private async mcpScope(params: Record<string, unknown>, writing = false): Promise<McpScope> {
+  private async mcpScope(params: Record<string, unknown>): Promise<McpScope> {
     const scope = params.scope === undefined ? "global" : oneOf(params.scope, "scope", ["global", "project"] as const);
     if (scope === "global") return { scope };
-    if (writing) throw new GatewayError("invalid_request", "Repository MCP configuration is read-only in the app; edit .pi/mcp.json");
     const cwd = optionalString(params.cwd, "cwd", 4_096);
     if (!cwd) throw new GatewayError("invalid_request", "Project MCP scope requires cwd");
     const resolved = await this.dependencies.trust.requireResolved(cwd);

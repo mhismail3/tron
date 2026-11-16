@@ -210,9 +210,17 @@ actor HostedIntegrationsGateway {
         if method == "mcp.auth.cancel" { authConsumed = true; return (.object(["cancelled": .bool(true)]), nil) }
         if method == "provider.list" { return (.object(["providers": .array([])]), nil) }
         if method == "model.list" { return (.object(["models": .array([])]), nil) }
-        if method == "mcp.add", let command = params["commandId"]?.stringValue {
-            mcpAddCount += 1; mcpServerName = params["server"]?.stringValue ?? ""
-            let result: JSONValue = .object(["added": .bool(true)])
+        if method == "settings.change", params["dryRun"]?.boolValue == true {
+            let review: JSONValue = .object(["digest": .string(String(repeating: "a", count: 64)), "title": .string("MCP server"),
+                "requiresTap": .bool(true), "items": .array([.object(["label": .string("MCP server"), "before": .string("Not set"), "after": .string("https://example.test/mcp")])])])
+            return (.object(["dryRun": .bool(true), "status": .string("applied"), "review": review, "changes": .array([.object(["status": .string("applied")])])]), nil)
+        }
+        if method == "settings.change", let command = params["commandId"]?.stringValue {
+            let change = params["changes"]?.arrayValue?.first?.objectValue
+            let account = change?["value"]?.objectValue?["headers"]?.objectValue?["Authorization"]?.objectValue?["account"]?.stringValue
+            mcpAddCount += 1
+            if change?["qualifiers"]?.objectValue?["server"]?.stringValue != mcpServerName || account != "tron-mcp-\(mcpServerName)" { mcpRetargets += 1 }
+            let result: JSONValue = .object(["status": .string("applied"), "changes": .array([.object(["status": .string("applied")])])])
             commands[command] = method; receipts[command] = result; publishMCPCounters()
             if scenario == "mcp-held-add" || scenario == "mcp-replace-mac" {
                 await withCheckedContinuation { mcpReply = $0 }
@@ -222,9 +230,12 @@ actor HostedIntegrationsGateway {
         }
         if method == "mcp.token.set" {
             mcpTokenCount += 1
-            if params["server"]?.stringValue != mcpServerName || params["token"]?.stringValue != "fixture-original-token" { mcpRetargets += 1 }
+            let server = params["server"]?.stringValue ?? ""
+            mcpServerName = server
+            if params["token"]?.stringValue != "fixture-original-token" { mcpRetargets += 1 }
             publishMCPCounters()
-            return (.object(["stored": .bool(true)]), nil)
+            return (.object(["server": .string(server), "reference": .object(["source": .string("keychain"), "service": .string("tron.mcp"),
+                "account": .string("tron-mcp-\(server)"), "format": .string("bearer")])]), nil)
         }
         if method == "command.status", let command = params["commandId"]?.stringValue {
             if let value = receipts[command] { return (.object(["status": .string("completed"), "result": value]), nil) }

@@ -150,8 +150,12 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   what it Provides; `conflict` and `nodeRequirement` (#243) show as statuses. Hooks reads
   `hooks.list` (`hooks.v1`) per scope; an untrusted project says its hooks are not loaded.
 - **MCP.** MCP Servers uses the Providers row layout and edits Pi's global `mcp.json`
-  only. Its add/auth drafts and accepted token follow-up retain the exact destination
-  and receipt owner. Jev is a provider credential, not a connection. Retired Connected
+  only, through `settings.change` on `tools.mcp.server` with each row's `mcp.list` `value`:
+  it previews the change and shows the shared `ChangeReviewSheet` when the preview taps
+  (add, enable, new address or bearer reference, wider visibility). A bearer token goes
+  only to `mcp.token.set`, whose Keychain reference the change then carries. A server whose
+  configuration the change path cannot carry offers sign-in and sign-out only; it is edited in `mcp.json` on the Mac. Add and auth
+  drafts and an approved change retain the exact destination and receipt owner. Jev is a provider credential, not a connection. Retired Connected
   Services, X OAuth/credits and Raindrop setup have no native route or consumer.
 - **Connections and devices.** Paired Macs then authorized devices, each opening its own detail
   sheet. Device rename (`device-label.v1`), source/install (`ios-device-install.v3`) and Gateway

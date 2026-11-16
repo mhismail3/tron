@@ -112,7 +112,7 @@ are installed; schema access never evaluates their late-bound service getter.
 - Native review binds the exact diff. Acceptance rechecks actual target state
   under its stripe; generic forms and local RPC cannot grant effects. Corrupt
   indexed audit/groups refuse rather than restoring partial state.
-- Tron's own writes are bracketed (`begin`/`end`, `adopt`) and never reported as
+- Tron's own writes are bracketed (`begin`/`end`) and never reported as
   outside changes; Tron never re-applies a value on its own.
 - Any agent-directory event prompts the existing coalesced four-store digest scan:
   native filenames may omit the changed settings file. Unchanged digests skip their
@@ -142,7 +142,7 @@ are installed; schema access never evaluates their late-bound service getter.
 - Resolve a target: `SettingsModel.resolve` / `options`.
 - Change/Undo: kernel `SettingsChangePath.change`, `undo`, `applyAgain`.
 - Learned profile: Home `HomeProfileItems.change` / `undo` under `SettingsChangePath.auditSubject`.
-- Outside detection: `OutsideChanges` (`reconcile`, `adopt`, `dispose`).
+- Outside detection: `OutsideChanges` (`reconcile`, `dispose`).
 - Agent tool and web mark: `tron-settings-extension.ts`.
 
 ## Signals
