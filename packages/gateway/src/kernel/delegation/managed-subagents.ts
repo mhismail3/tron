@@ -375,12 +375,6 @@ export class ManagedSubagents {
 
   async loaderOptions(settings: SettingsManager, internalWake?: ManagedInternalWake): Promise<ManagedLoaderOptions> {
     this.requireBoundArtifactRoot(this.tronHome);
-    subagentTypes ??= (this.loadModule(join(this.verify(), "src", "api", "subagent-types.ts")) as Promise<{
-      registerSubagentTypesRenderer(render: typeof subagentTypesIndex): { dispose(): void };
-      subagentTypesRenderer(): unknown;
-    }>).then(api => { if (!api.subagentTypesRenderer()) api.registerSubagentTypesRenderer(subagentTypesIndex); },
-      (error: unknown) => { subagentTypes = undefined; throw error; });
-    await subagentTypes;
     const resources = existsSync(this.root) ? await this.resources() : { extensions: [], skills: [], prompts: [], themes: [] };
     const paths = resources.extensions.filter(resource => resource.enabled).map(resource => resource.path);
     const sourceInfo = new Map<string, SourceInfo>([...resources.skills, ...resources.prompts].filter(resource => resource.enabled)
@@ -401,6 +395,7 @@ export class ManagedSubagents {
           this.verify();
           const owner = producerIdentity(MANAGED_SUBAGENTS_SOURCE, path, "Subagents", "subagent");
           await withExtensionOwner(owner, async () => {
+            await this.registerSubagentTypes();
             const factory = await this.loadFactory(path);
             await factory(managedProducerAPI(pi, owner, internalWake));
           });
@@ -429,6 +424,14 @@ export class ManagedSubagents {
     entry.groups.set(key, [...extensions]);
     try { publish(); } catch (error) { entry.groups.delete(key); publish(); throw error; }
     return { dispose: () => { if (entry!.groups.delete(key)) publish(); } };
+  }
+  private registerSubagentTypes(): Promise<void> {
+    subagentTypes ??= (this.loadModule(join(this.verify(), "src", "api", "subagent-types.ts")) as Promise<{
+      registerSubagentTypesRenderer(render: typeof subagentTypesIndex): { dispose(): void };
+      subagentTypesRenderer(): unknown;
+    }>).then(api => { if (!api.subagentTypesRenderer()) api.registerSubagentTypesRenderer(subagentTypesIndex); },
+      (error: unknown) => { subagentTypes = undefined; throw error; });
+    return subagentTypes;
   }
   async requireChildTaskContext(sessionId: string, taskPrefix: string): Promise<{ dispose(): void }> {
     this.requireBoundArtifactRoot(this.tronHome);

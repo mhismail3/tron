@@ -148,7 +148,7 @@ its SDK reproduction script (retain the shared builder while the native browser 
 
 Whole-prompt `before_agent_start` handlers see the prompt body without extension sections.
 The final assembler appends the run's sections once, including `mcp_servers` and
-`advertised_subagents`, even when a handler replaces the body. Forced provider projections
+the subagents section, even when a handler replaces the body. Forced provider projections
 use that same assembler. `agent-instructions.integration.test.ts` proves preservation and
 input-wording stability through the real slot. The pinned browser package already registers
 its guidance as an unconditional `agent_browser` section; the old installed package's

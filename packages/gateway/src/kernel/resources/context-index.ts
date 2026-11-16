@@ -46,6 +46,7 @@ export function docsIndex(paths: { readme: string; docs: string; examples: strin
   ];
   return ["Pi documentation (read only when the user asks about the harness itself, its SDK, extensions, themes, skills, or TUI):",
     renderIndex({ name: "docs", open: "read", kind: "data", budget: 4_096, items }).text,
+    "When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory",
     "Before implementing harness changes, read the relevant docs and examples in full, following related cross-references."].join("\n");
 }
 
