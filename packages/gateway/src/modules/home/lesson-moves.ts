@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { GatewayError } from "../../errors.js";
 import { durableAtomicWriteJson, durableAtomicWriteText } from "../../foundation/durable-json.js";
 import { tronHomePath } from "../../foundation/tron-home-layout.js";
+import { parseFrontmatter } from "../../kernel/pi/coding-agent.js";
 import type { LessonMoveValue } from "../../kernel/settings/lesson-move-value.js";
+import { AsyncMutex } from "../../util/async-mutex.js";
 import type { HomeProfileItems } from "./home-profile.js";
 
 type NoteValue = Awaited<ReturnType<HomeProfileItems["values"]>> extends Map<string, infer V> ? V : never;
@@ -15,7 +17,7 @@ interface MovedLesson {
   mode: number;
   before: string;
   after: string;
-  notes: Array<{ id: string; prior: NoteValue }>;
+  notes: Array<{ id: string; prior: NoteValue; moved: NoteValue }>;
 }
 
 const digest = (text: string) => createHash("sha256").update(text).digest("hex");
@@ -31,12 +33,21 @@ function once(text: string, needle: string, what: string): number {
   return at;
 }
 
+function description(text: string): unknown {
+  try { return parseFrontmatter<Record<string, unknown>>(text).frontmatter.description; }
+  catch { return undefined; }
+}
+
 function edited(before: string, value: LessonMoveValue): string {
   if (value.destination.kind === "global-skill-description") {
-    const line = /^description:[ \t]*(.*)$/mu.exec(before.split(/^---$/mu)[1] ?? "");
-    if (!line) stale("The skill has no description line");
-    if (value.replaces !== undefined && line[1] !== value.replaces) stale("The skill description changed; read it again");
-    return before.replace(line[0], `description: ${value.text}`);
+    if (description(before) !== value.replaces) stale("The skill description changed; read it again");
+    const block = /^---\r?\n([^]*?)\r?\n---/u.exec(before);
+    const line = block ? /^description:.*$/mu.exec(block[1]!) : null;
+    if (!block || !line) stale("The skill has no description line");
+    const at = block.index + block[0].indexOf(block[1]!) + line.index;
+    const after = `${before.slice(0, at)}description: ${JSON.stringify(value.text)}${before.slice(at + line[0].length)}`;
+    if (description(after) !== value.text) stale("The new description does not round-trip through the skill frontmatter");
+    return after;
   }
   if (value.replaces !== undefined) {
     const at = once(before, value.replaces, "replaced text");
@@ -54,28 +65,35 @@ function edited(before: string, value: LessonMoveValue): string {
 }
 
 export class LessonMoves {
+  private readonly mutex = new AsyncMutex();
+
   constructor(private readonly agentDir: string, private readonly tronHome: string,
     private readonly profile: () => Pick<HomeProfileItems, "apply" | "values" | "restore">) {}
 
   async value(lesson: string): Promise<LessonMoveValue | undefined> {
-    return (await this.load())[lesson]?.value;
+    const state = await this.load();
+    return Object.hasOwn(state, lesson) ? state[lesson]!.value : undefined;
   }
 
-  async set(lesson: string, value: LessonMoveValue | undefined, commandId: string): Promise<void> {
-    if (value) await this.move(lesson, value, commandId);
-    else await this.undo(lesson, commandId);
+  set(lesson: string, value: LessonMoveValue | undefined, commandId: string): Promise<void> {
+    return this.mutex.run(() => value ? this.move(lesson, value, commandId) : this.undo(lesson, commandId));
   }
 
   private async move(lesson: string, value: LessonMoveValue, commandId: string): Promise<void> {
     const state = await this.load();
-    if (state[lesson]) stale(`Lesson ${lesson} has already moved; undo it first`);
+    if (Object.hasOwn(state, lesson)) stale(`Lesson ${lesson} has already moved; undo it first`);
     const path = value.destination.kind === "global-rule" ? join(this.agentDir, "AGENTS.md") : join(this.agentDir, "skills", value.destination.skill, "SKILL.md");
-    const before = await readFile(path, "utf8");
-    const after = edited(before, value);
-    const mode = (await stat(path)).mode & 0o777;
     const profile = this.profile();
     const ids = value.retire.notes.map(note => note.id);
     const priors = await profile.values(ids);
+    for (const note of value.retire.notes) {
+      const prior = priors.get(note.id);
+      if (!prior || prior.revisionId !== note.revisionId || prior.state !== "active") stale(`Note ${note.id} is no longer the active revision you read; read it again`);
+    }
+    const before = await readFile(path, "utf8");
+    const after = edited(before, value);
+    const mode = (await stat(path)).mode & 0o777;
+    if (digest(await readFile(path, "utf8")) !== digest(before)) stale("The destination changed while the move was prepared; read it again");
     await durableAtomicWriteText(path, after, mode);
     const retired: string[] = [];
     try {
@@ -83,21 +101,25 @@ export class LessonMoves {
         await profile.apply({ action: "retire", id: note.id, expectedRevision: note.revisionId, reason: `Moved to lesson ${lesson}` }, MAINTAINER, `${commandId}:retire:${index}`);
         retired.push(note.id);
       }
+      const moved = await profile.values(ids);
+      state[lesson] = { value, path, mode, before, after: digest(after), notes: ids.map(id => ({ id, prior: priors.get(id) ?? null, moved: moved.get(id) ?? null })) };
+      await durableAtomicWriteJson(this.statePath(), state);
     } catch (error) {
       await durableAtomicWriteText(path, before, mode);
       if (retired.length) await profile.restore(retired.map(id => ({ id, value: priors.get(id) ?? null })), MAINTAINER, `${commandId}:rollback`);
       throw error;
     }
-    state[lesson] = { value, path, mode, before, after: digest(after), notes: ids.map(id => ({ id, prior: priors.get(id) ?? null })) };
-    await durableAtomicWriteJson(this.statePath(), state);
   }
 
   private async undo(lesson: string, commandId: string): Promise<void> {
     const state = await this.load();
-    const moved = state[lesson];
-    if (!moved) throw new GatewayError("not_found", `Lesson ${lesson} has not moved`);
+    if (!Object.hasOwn(state, lesson)) throw new GatewayError("not_found", `Lesson ${lesson} has not moved`);
+    const moved = state[lesson]!;
     if (digest(await readFile(moved.path, "utf8")) !== moved.after) stale("The destination changed since the move; restore it by hand or move again");
-    await this.profile().restore(moved.notes.map(note => ({ id: note.id, value: note.prior })), MAINTAINER, `${commandId}:restore`);
+    const profile = this.profile();
+    const current = await profile.values(moved.notes.map(note => note.id));
+    if (moved.notes.some(note => JSON.stringify(current.get(note.id) ?? null) !== JSON.stringify(note.moved))) stale("A retired note changed since the move; restore it by hand");
+    await profile.restore(moved.notes.map(note => ({ id: note.id, value: note.prior })), MAINTAINER, `${commandId}:restore`);
     await durableAtomicWriteText(moved.path, moved.before, moved.mode);
     delete state[lesson];
     await durableAtomicWriteJson(this.statePath(), state);

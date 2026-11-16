@@ -38,7 +38,11 @@ function validateLessonMove(raw: unknown, label: string): LessonMoveValue {
     target = { kind: "global-skill-description", skill };
   } else throw new GatewayError("invalid_request", `${label}.destination.kind must be global-rule or global-skill-description`);
   const moved = text(value.text, `${label}.text`, 2_000);
-  if (target.kind === "global-skill-description" && (moved.length > 160 || moved.includes("\n"))) throw new GatewayError("invalid_request", `${label}.text must be one line of at most 160 characters for a skill description`);
+  const replaces = value.replaces === undefined ? undefined : text(value.replaces, `${label}.replaces`, 2_000);
+  if (target.kind === "global-skill-description") {
+    if (moved.length > 160 || /[\r\n\u2028\u2029]/u.test(moved)) throw new GatewayError("invalid_request", `${label}.text must be one line of at most 160 characters for a skill description`);
+    if (replaces === undefined) throw new GatewayError("invalid_request", `${label}.replaces must name the current skill description`);
+  } else if (target.anchor !== undefined && replaces !== undefined) throw new GatewayError("invalid_request", `${label} takes an anchor or replaced text, not both`);
   const retire = object(value.retire, `${label}.retire`);
   only(retire, ["notes"], `${label}.retire`);
   if (!Array.isArray(retire.notes) || retire.notes.length === 0 || retire.notes.length > 32) throw new GatewayError("invalid_request", `${label}.retire.notes must name 1 to 32 notes`);
@@ -47,7 +51,7 @@ function validateLessonMove(raw: unknown, label: string): LessonMoveValue {
     only(entry, ["id", "revisionId"], `${label}.retire.notes[${index}]`);
     return { id: text(entry.id, `${label}.retire.notes[${index}].id`, 200), revisionId: text(entry.revisionId, `${label}.retire.notes[${index}].revisionId`, 200) };
   });
-  return { destination: target, text: moved, ...(value.replaces === undefined ? {} : { replaces: text(value.replaces, `${label}.replaces`, 2_000) }), retire: { notes } };
+  return { destination: target, text: moved, ...(replaces === undefined ? {} : { replaces }), retire: { notes } };
 }
 
 export const lessonMoveDirection = (): Direction => "widen";

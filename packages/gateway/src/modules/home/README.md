@@ -251,17 +251,25 @@ changes keep its store, cursors and spend.
 
 ### Lesson moves
 
-`lesson-moves.ts` owns the `context.lesson` settings record (store `lesson`, qualifier `lesson`; Home
-proposes, the maintainer's native card applies it under the trust tap). One move:
-1. Refuses a stale anchor, `replaces` text or note revision.
-2. Edits the global `AGENTS.md` (after an exact anchor line, in place of exact text, or appended) or a global
-   skill's `description:` line.
-3. Retires the named Profile notes through `HomeProfileItems`.
-4. Keeps the file's prior bytes and the notes' prior values in `state/home/lessons.json`.
+`lesson-moves.ts` owns the `context.lesson` settings record (store `lesson`, qualifier `lesson`). Home
+proposes it; the maintainer's native card applies it under the trust tap. Moves and Undos run one at a
+time.
 
-A failed retirement restores the file and any notes already retired. Undo, through `settings.undo`,
-refuses if the destination changed since the move, then restores the notes and the file bytes.
-`home-lesson-move.e2e.test.ts` proves propose → card → apply → stale refusal → Undo.
+**A move:**
+1. Refuses a note that is no longer the active revision Home read.
+2. Refuses a stale anchor or replaced text. A skill description must name its current value in
+   `replaces`, compared against Pi's parsed frontmatter.
+3. Edits the global `AGENTS.md` (after an exact anchor line, in place of exact text, or appended) or a global
+   skill's `description:` line. The description is written JSON-quoted and must round-trip through
+   `parseFrontmatter`.
+4. Retires the notes through `HomeProfileItems`.
+5. Records the file's prior bytes and the notes' prior and moved values in `state/home/lessons.json`.
+
+Any failure after the file write restores the file and any notes already retired.
+
+**Undo**, through `settings.undo`, refuses if the destination or a retired note changed since the move. It
+then restores the notes and the file bytes. `home-lesson-move.e2e.test.ts` proves propose, card, apply,
+stale refusal and Undo for both destinations.
 
 ### RPCs and clients
 

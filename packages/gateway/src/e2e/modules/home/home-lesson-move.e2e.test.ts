@@ -1,5 +1,6 @@
-import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { afterEach, expect, it } from "vitest";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { disposeFixtures, fixture } from "../../../../test-support/home-task-fixture.js";
@@ -63,7 +64,7 @@ it("moves a lesson from Profile notes into the global rules through the exact ca
   const entry = (await f.settings.settingsChanges.history({ key: "context.lesson" }, { kind: "ui", id: "maintainer" })).entries[0]!;
   expect(entry).toMatchObject({ key: "context.lesson", qualifiers: { lesson: "owning-test-first" }, status: "applied" });
 
-  expect((await propose("stale-notes", move(notes))).outcome).toMatchObject({ message: expect.stringMatching(/retired; only an active item can change/u) });
+  expect((await propose("stale-notes", move(notes))).outcome).toMatchObject({ message: expect.stringMatching(/no longer the active revision you read/u) });
   expect(await readFile(rules, "utf8")).toBe(moved);
   expect((await f.settings.settingsChanges.history({ key: "context.lesson" }, { kind: "ui", id: "maintainer" })).entries
     .filter(row => row.qualifiers?.lesson === "stale-notes" && row.status === "applied")).toEqual([]);
@@ -72,4 +73,18 @@ it("moves a lesson from Profile notes into the global rules through the exact ca
   expect(await readFile(rules, "utf8")).toBe(original);
   const restored = (await profile.read()).items.filter(item => notes.some(note => note.id === item.id));
   expect(restored.map(item => item.status)).toEqual(["active", "active", "active"]);
-}, 60_000);
+
+  const skill = join(f.agentDir, "skills", "lesson-skill", "SKILL.md");
+  await mkdir(dirname(skill), { recursive: true });
+  const skillBefore = "---\nname: lesson-skill\ndescription: \"Old: description\"\n---\nBody\n";
+  await writeFile(skill, skillBefore);
+  const { saved } = await profile.apply({ action: "learn", kind: "preference", text: "Skill lesson note." }, { kind: "maintainer" }, "lesson-skill-note");
+  const skillMove = { destination: { kind: "global-skill-description", skill: "lesson-skill" }, replaces: "Old: description",
+    text: "Before a suite: run the owning test $' first.", retire: { notes: [{ id: saved.id, revisionId: saved.revisionId! }] } };
+  expect((await propose("skill-description", skillMove)).outcome).toBeUndefined();
+  expect(parseFrontmatter<{ description: string }>(await readFile(skill, "utf8")).frontmatter.description).toBe(skillMove.text);
+  const skillEntry = (await f.settings.settingsChanges.history({ key: "context.lesson" }, { kind: "ui", id: "maintainer" })).entries
+    .find(row => row.qualifiers?.lesson === "skill-description" && row.status === "applied")!;
+  await maintainerChange(service, phone, "settings.undo", { commandId: "undo-skill-lesson", changeId: skillEntry.changeId });
+  expect(await readFile(skill, "utf8")).toBe(skillBefore);
+}, 90_000);
