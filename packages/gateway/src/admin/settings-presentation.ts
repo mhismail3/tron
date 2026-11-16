@@ -11,7 +11,6 @@ function negotiateControl(key: KeyDeclaration, clientControls: readonly string[]
   if (key.control === "readOnly") return { control: "readOnly" };
   const supports = (control: Control) => clientControls?.includes(control) === true;
   if (supports(key.control)) return { control: key.control };
-  if (key.fallback !== undefined && key.fallback !== "readOnly" && supports(key.fallback)) return { control: key.fallback };
   return { control: "readOnly", note: UPDATE_TRON_NOTE };
 }
 
@@ -81,11 +80,8 @@ interface PresentationInput {
 }
 
 function requesterLabel(actor: Actor): string {
-  return actor.kind === "worker" && actor.taskId ? `Home task ${actor.taskId}` : actorLabel(actor);
-}
-
-function actorLabel(actor: Actor): string {
-  return actor.kind === "home" ? "Home" : actor.kind === "worker" ? "A Home task worker" : actor.kind === "agent" ? "A chat's agent" : actor.kind === "outside" ? "Outside Tron" : "You";
+  return actor.kind === "worker" && actor.taskId ? `Home task ${actor.taskId}`
+    : actor.kind === "home" ? "Home" : actor.kind === "worker" ? "A Home task worker" : actor.kind === "agent" ? "A chat's agent" : actor.kind === "outside" ? "Outside Tron" : "You";
 }
 
 const KIND_LABELS = {

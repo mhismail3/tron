@@ -1,6 +1,6 @@
 import { type SettingsTarget, type Badge, type LayerValue, type ResolvedKey, type Resolution, type Qualifiers } from "./tool-contract.js";
 import { dirname, join } from "node:path";
-import { keyForHome, keyDefault, type SettingsSchema, type Binding, type KeyDeclaration } from "./settings-schema.js";
+import { keyForHome, type SettingsSchema, type Binding, type KeyDeclaration } from "./settings-schema.js";
 import { LAYER_LABELS, type FormatContext, type StoreLayer, type SettingsStores, type ResolveOptions } from "./settings-types.js";
 import { canonicalSettingsTarget, scopeAdmitted, scopeForStore, instanceId } from "./scope-resolution.js";
 import { projectSettingPath, projectSettingsDiagnostics } from "./settings-project-diagnostics.js";
@@ -92,7 +92,7 @@ const STORED_LAYER = { Global: "global", Home: "home", Session: "session", Proje
 const NO_VALUE: Opt = { $: "None" };
 
 function precedenceFacts(stores: SettingsStores, key: KeyDeclaration, qualifiers: Qualifiers) {
-  const values: unknown[] = [keyDefault(key, qualifiers)];
+  const values: unknown[] = [key.defaultValue];
   const entry = (layer: StoredLayer, index: number): Entry => {
     const binding = key.layers[layer];
     const inTarget = stores.layers.includes(layer);
@@ -194,8 +194,7 @@ function resolveInstance(
   const notApplied = shown.find(entry => entry.layer === unapplied);
 
   for (const layerId of [...BOTTOM_UP].reverse()) {
-    if (!stores.layers.includes(layerId) && layerId !== "default") continue;
-    if (layerId === "default") continue;
+    if (layerId === "default" || !stores.layers.includes(layerId)) continue;
     if (!key.layers[layerId] || !scopeAdmitted(key, layerId)) continue;
     const entry = shown.find(candidate => candidate.layer === layerId);
     layerValues.push(entry

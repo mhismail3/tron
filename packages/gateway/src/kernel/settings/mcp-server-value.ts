@@ -25,7 +25,7 @@ function secretFreeText(text: string, label: string, what: string): string {
 function secretFreeToken(token: string, label: string, what: string): string {
   secretFreeText(token, label, what);
   const name = token.replace(/^-{1,2}/u, "").split("=", 1)[0]!;
-  if (SECRET_NAME.test(name)) refuse(label, `${what} names a secret; MCP secrets are set in mcp.json or the app, never through settings`);
+  if (SECRET_NAME.test(name)) refuse(label, `${what} names a secret; ${MCP_HINT}`);
   return token;
 }
 
@@ -33,7 +33,7 @@ function secretFreeUrl(value: string, label: string): string {
   return checkedUrl(value, label, MCP_HINT);
 }
 
-export function validateMcpServerValue(value: unknown, label: string): McpServerValue {
+function validateMcpServerValue(value: unknown, label: string): McpServerValue {
   const raw = object(value, label);
   for (const name of Object.keys(raw)) {
     if (!(FIELDS as readonly string[]).includes(name)) {
@@ -67,7 +67,7 @@ export function mcpServerOnDisk(server: string, raw: unknown): McpServerValue {
   }
 }
 
-const VISIBILITY: Record<McpExposure | "codemode-deferred", number> = { hidden: 0, codemode: 1, "codemode-deferred": 1, deferred: 1, direct: 2 };
+const VISIBILITY: Record<McpExposure, number> = { hidden: 0, codemode: 1, "codemode-deferred": 1, deferred: 1, direct: 2 };
 
 function visibility(value: McpServerValue | undefined): number {
   return value === undefined || value.enabled === false ? 0 : VISIBILITY[value.exposure ?? "codemode"];
@@ -84,7 +84,7 @@ export function mcpServerDirection(before: unknown, after: unknown): Direction {
 
 export const mcpServerType: ValueType = {
   kind: "mcpServer",
-  validate: (value, label) => validateMcpServerValue(value, label),
+  validate: validateMcpServerValue,
   format: value => {
     const server = value as McpServerValue;
     const launch = server.command !== undefined ? [server.command, ...(server.args ?? [])].join(" ") : server.url!;

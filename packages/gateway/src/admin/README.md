@@ -18,7 +18,7 @@ custom models, Gateway updates, iOS installs, Mac replacement and diagnostics.
 | The agents' `settings` tool and web mark | `tron-settings-extension.ts` |
 | Provider auth and model catalog | `auth-broker.ts`, `model-config-service.ts`, `global-provider-resources.ts` |
 | Packages, extensions, hooks, tools | `package-service.ts`, `package-provides.ts`, `session-free-extensions.ts`, `hook-resources.ts`, `tool-catalog.ts` |
-| MCP administration | `mcp-admin-service.ts`: the one owner of `mcp.json` writes (`setServer` under its lock, refusing records it cannot carry) and the CLI bridge. Gateway composition builds one instance and passes it to `SettingsStoreAdapter` (`mcpAdmin`) and `GatewayService`; a fixture without it gets `unsupported` for MCP record writes only |
+| MCP administration | `mcp-admin-service.ts`: the one owner of `mcp.json` writes (every edit runs under its one lock and size bound; `setServer` refuses records it cannot carry) and the CLI bridge. Gateway composition builds one instance and passes it to `SettingsStoreAdapter` (`mcpAdmin`) and `GatewayService`; a fixture without it gets `unsupported` for MCP record writes only |
 | Install and lifecycle projections | `gateway-update-service.ts`, `ios-device-install-service.ts`, `ios-device-install-helper.ts`, `mac-replace-service.ts`, `diagnose.ts` |
 | Shared admission | `document-admission.ts` (`COMMAND_ID`, `admitTronSourceRoot`); [host control](host-control.md) |
 

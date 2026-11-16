@@ -124,7 +124,6 @@ export interface ChangeResult {
   review?: ChangeReview;
   signal?: SettingsSignal;
   summary?: string;
-  failure?: string;
 }
 
 export type ConfirmChange = <T>(review: ChangeReview, apply: (acceptance: NativeChangeAcceptance) => Promise<T>) => Promise<T | undefined>;

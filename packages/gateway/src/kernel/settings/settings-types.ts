@@ -86,7 +86,7 @@ export function changeReview(identity: unknown, input: Omit<ChangeReview, "diges
 
 export type Writer = "ui" | "home" | "worker" | "agent";
 export type Timing = "fixed" | "live";
-export type Effect = "next-turn" | "next-request" | "new-chat" | "reload" | "restart" | "next-memory-pass" | "next-compaction" | "next-change" | "delegate";
+export type Effect = "next-turn" | "next-request" | "new-chat" | "reload" | "next-memory-pass" | "next-compaction" | "next-change" | "delegate";
 export const CONTROLS = ["toggle", "choice", "text", "list", "checklist", "catalog", "readOnly"] as const;
 export type Control = typeof CONTROLS[number];
 export const RENDERER_CONTRACT_VERSION = 1;
@@ -131,7 +131,7 @@ export const types = {
       format: (value) => value ? labels[0] : labels[1],
     };
   },
-  integer(min: number, max: number, unit: "tokens" | "ms" | "retries" | "bytes" | "count" = "count", step?: number): ValueType {
+  integer(min: number, max: number, unit: "tokens" | "ms" | "retries" | "count" = "count"): ValueType {
     return {
       kind: "integer",
       validate: (value, label) => integer(value, label, min, max),
@@ -142,7 +142,7 @@ export const types = {
         if (unit === "retries") return n === 1 ? "1 retry" : `${n} retries`;
         return String(n);
       },
-      range: { min, max, ...(step ? { step } : {}), unit },
+      range: { min, max, unit },
     };
   },
   choice(values: readonly { value: string; label: string; detail?: string }[], ordered = false): ValueType {
@@ -164,15 +164,11 @@ export const types = {
       },
     };
   },
-  stringList(maxItems: number, pattern?: RegExp, patternMessage?: string): ValueType {
+  stringList(maxItems: number): ValueType {
     return {
       kind: "stringList",
       summary: value => `${(value as string[]).length} item${(value as string[]).length === 1 ? "" : "s"}`,
-      validate: (value, label) => {
-        const list = arrayOfStrings(value, label, maxItems);
-        if (pattern && list.some(item => !pattern.test(item))) throw new GatewayError("invalid_request", patternMessage ?? `${label} has an invalid entry`);
-        return list;
-      },
+      validate: (value, label) => arrayOfStrings(value, label, maxItems),
       format: (value) => {
         const list = value as string[];
         if (list.length === 0) return "None";

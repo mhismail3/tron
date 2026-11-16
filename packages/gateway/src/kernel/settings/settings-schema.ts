@@ -6,20 +6,20 @@ import type { StoreLayer } from "./settings-types.js";
 import { mcpServerDirection, mcpServerType } from "./mcp-server-value.js";
 import { modelProviderDirection, modelProviderType } from "./model-provider-value.js";
 
-interface SectionDeclaration { id: string; title: string; description: string; order: number; harness: boolean; note?: string; chatInline?: boolean }
+interface SectionDeclaration { id: string; title: string; description: string; order: number; note?: string; chatInline?: boolean }
 
 export const SECTIONS: readonly SectionDeclaration[] = [
-  { id: "model", title: "Model", description: "Model and thinking", order: 10, harness: true, chatInline: true },
-  { id: "workers", title: "Workers & delegation", description: "Task budget and retained overrides", order: 15, harness: true, chatInline: true },
-  { id: "context", title: "Compaction", description: "Automatic summaries and retained context", order: 20, harness: true },
-  { id: "tools", title: "Tools", description: "Available tools, code mode, and shell", order: 30, harness: true },
-  { id: "run", title: "Connection", description: "Proxy and retained overrides", order: 50, harness: true },
-  { id: "trust", title: "Trusted Projects", description: "Project trust decisions and default policy", order: 55, harness: true },
-  { id: "connections", title: "Mac Terminal", description: "This iPhone's key on the connected Mac", order: 58, harness: false },
-  { id: "accounts", title: "Accounts", description: "Providers, custom models, and services", order: 60, harness: false },
-  { id: "sources", title: "Sources", description: "Packages and how they install", order: 70, harness: false },
-  { id: "setup", title: "Storage", description: "Import, session storage, and telemetry", order: 80, harness: false },
-  { id: "iphone", title: "This iPhone", description: "Appearance and sessions", order: 90, harness: false, note: "Stored on this iPhone. It never changes what the agent does." },
+  { id: "model", title: "Model", description: "Model and thinking", order: 10, chatInline: true },
+  { id: "workers", title: "Workers & delegation", description: "Task budget and retained overrides", order: 15, chatInline: true },
+  { id: "context", title: "Compaction", description: "Automatic summaries and retained context", order: 20 },
+  { id: "tools", title: "Tools", description: "Available tools, code mode, and shell", order: 30 },
+  { id: "run", title: "Connection", description: "Proxy and retained overrides", order: 50 },
+  { id: "trust", title: "Trusted Projects", description: "Project trust decisions and default policy", order: 55 },
+  { id: "connections", title: "Mac Terminal", description: "This iPhone's key on the connected Mac", order: 58 },
+  { id: "accounts", title: "Accounts", description: "Providers, custom models, and services", order: 60 },
+  { id: "sources", title: "Sources", description: "Packages and how they install", order: 70 },
+  { id: "setup", title: "Storage", description: "Import, session storage, and telemetry", order: 80 },
+  { id: "iphone", title: "This iPhone", description: "Appearance and sessions", order: 90, note: "Stored on this iPhone. It never changes what the agent does." },
 ];
 
 export type Binding =
@@ -51,7 +51,6 @@ export interface KeyDeclaration {
   layers: Partial<Record<Exclude<StoreLayer, "default">, Binding>>;
   home?: { layers: readonly Exclude<StoreLayer, "default">[]; defaultValue?: unknown };
   defaultValue?: unknown;
-  defaultValueFor?: (qualifiers: Partial<Record<QualifierName, string>>) => unknown;
   timing: TimingDeclaration;
   effect: Effect;
   tap?: "trust" | "privacy" | "spend" | "install" | "irreversible";
@@ -62,7 +61,6 @@ export interface KeyDeclaration {
   order: number;
   importance: "essential" | "advanced";
   control?: Control;
-  fallback?: Control;
   confirm?: string;
   entry?: EntryGuidance;
 }
@@ -179,7 +177,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       optionsSource: { name: "catalog.models", dependsOn: [] },
       layers: { session: { store: "session", field: "model" }, home: { store: "home", path: ["model", "chat"] }, ...both({ store: "pi-model-ref" }) },
       timing: "fixed", effect: "next-turn", writers: ANY_ACTOR,
-      label: "Model", help: "The model this chat runs.", order: 10, importance: "essential", control: "catalog", fallback: "readOnly",
+      label: "Model", help: "The model this chat runs.", order: 10, importance: "essential", control: "catalog",
     },
     {
       id: "model.thinking[role=chat]", sessionOverridable: true, projectSettable: true, group: "model", fixed: { role: "chat" }, qualifier: "model", type: thinkingType,
@@ -220,7 +218,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
         home: { store: "home", path: ["modelQueue", role] }, global: { store: "gateway", path: ["modelQueues", role] } },
       timing: "live", effect: role === "worker" ? "delegate" : role === "subagent" ? "next-request" : "next-memory-pass",
       writers: ["ui", "home"], label: MODEL_QUEUE_LABELS[role].label, help: MODEL_QUEUE_LABELS[role].help,
-      order: 40 + index * 2, importance: "essential", control: "list", fallback: "readOnly",
+      order: 40 + index * 2, importance: "essential", control: "list",
       optionsSource: { name: "catalog.models", dependsOn: [] },
     })),
     {
@@ -477,7 +475,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
     return KEYS.find(key => key.id === id) ?? recordSubject(id);
   }
 
-  return { KEYS, RECORD_SUBJECTS, schemaKey, auditSubject, recordKey } as const;
+  return { KEYS, schemaKey, auditSubject, recordKey } as const;
 }
 
 export type SettingsSchema = ReturnType<typeof createSettingsSchema>;
@@ -496,9 +494,6 @@ export function keyForHome(key: KeyDeclaration, home: boolean): KeyDeclaration {
   return { ...key, type, layers, ...(key.home && Object.hasOwn(key.home, "defaultValue") ? { defaultValue: key.home.defaultValue } : {}) };
 }
 
-export function keyDefault(key: KeyDeclaration, qualifiers: Partial<Record<QualifierName, string>>): unknown {
-  return key.defaultValueFor ? key.defaultValueFor(qualifiers) : key.defaultValue;
-}
 
 export function hasRuntimeRequestApplier(key: KeyDeclaration): boolean {
   return key.layers.session?.store === "session-settings" && (key.timing === "fixed" || (key.timing === "live" && ["next-turn", "next-request"].includes(key.effect))
@@ -535,7 +530,7 @@ export interface RecordSubject {
   write?: RecordWrite;
 }
 
-export const RECORD_SUBJECTS: readonly RecordSubject[] = [
+const RECORD_SUBJECTS: readonly RecordSubject[] = [
   { id: "tools.mcp.server", label: "MCP server", group: "tools", container: "mcpServers", qualifier: "server", pattern: /^[A-Za-z0-9_-]{1,128}$/u,
     write: { store: "mcp", writers: ["ui", "home"], tap: "trust", type: mcpServerType, direction: mcpServerDirection, effect: "reload", timing: "live",
       help: "An MCP server Tron starts on this Mac. Its command runs with this Mac's permissions.",
@@ -550,7 +545,7 @@ export function recordSubject(id: string): RecordSubject | undefined {
   return RECORD_SUBJECTS.find(subject => subject.id === id);
 }
 
-export function recordKey(id: string): KeyDeclaration | undefined {
+function recordKey(id: string): KeyDeclaration | undefined {
   const subject = recordSubject(id);
   if (!subject?.write) return undefined;
   const write = subject.write;

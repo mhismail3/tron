@@ -6,6 +6,7 @@
     "test-fixtures/browser-live.jpg",
     "test-fixtures/browser-live.ts",
     "test-fixtures/mac-terminal-keys-process.mjs",
+    "test-fixtures/mcp-stdio-fixture.mjs",
     "test-fixtures/synthetic-image.ts",
     "test-fixtures/tron-corpus/**",
     "test-support.module.json",

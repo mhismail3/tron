@@ -38,11 +38,12 @@ export function settingsDependencies(input: {
   toolCatalog?: ConstructorParameters<typeof SettingsStoreAdapter>[0]["toolCatalog"];
   packages?: PackageService;
 }): { settingsModel: SettingsModel<SettingsStoreAdapter>; settingsChanges: SettingsChangePath } {
+  const mcpAdmin = new McpAdminService(input.agentDir, piCliBundle());
   const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA,
     agentDir: input.agentDir, tronHome: input.tronHome, trust: input.trust, modelRuntime: input.modelRuntime,
-    mcpAdmin: new McpAdminService(input.agentDir, piCliBundle()),
+    mcpAdmin,
     ...(input.toolCatalog ? { toolCatalog: input.toolCatalog } : {}),
-    ...(input.packages ? { updatePackage: (request, requester, confirm) => input.packages!.updatePackage(request, requester, confirm) } : {}),
+    ...(input.packages ? { updatePackage: input.packages.updatePackage.bind(input.packages) } : {}),
   }));
   const settingsChanges: SettingsChangePath = new SettingsChangePath(settingsModel, new SettingsChangeRecord(input.tronHome), {
     setTrust: async (project, decision) => {
@@ -55,7 +56,7 @@ export function settingsDependencies(input: {
   }, input.now);
   input.packages?.register(settingsChanges, () => {});
   if (input.registry) {
-    input.registry.setSettings(settingsModel, settingsChanges, settingsInventorySource({ agentDir: input.agentDir, trust: input.trust, modules: input.registry.moduleHost, mcp: new McpAdminService(input.agentDir, piCliBundle()) }));
+    input.registry.setSettings(settingsModel, settingsChanges, settingsInventorySource({ agentDir: input.agentDir, trust: input.trust, modules: input.registry.moduleHost, mcp: mcpAdmin }));
     projectsOwnerOf(input.registry)?.register(settingsChanges);
   }
   return { settingsModel, settingsChanges };

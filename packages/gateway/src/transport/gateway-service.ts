@@ -50,6 +50,7 @@ import type { GlobalProviderResources } from "../admin/global-provider-resources
 import type { AuthBroker } from "../admin/auth-broker.js";
 import { withMcpAuthInteraction } from "../kernel/host/extension-adapters.js";
 import type { McpAdminService, McpScope } from "../admin/mcp-admin-service.js";
+import { MCP_EXPOSURES } from "../kernel/settings/mcp-server-value.js";
 import { MAC_REPLACE_CAPABILITY, MacReplaceService } from "../admin/mac-replace-service.js";
 import { GatewayUpdateService, validateGatewayUpdateRequest } from "../admin/gateway-update-service.js";
 import {
@@ -659,7 +660,7 @@ export class GatewayService {
           let args: string[];
           if (method === "mcp.add") {
             const transport = oneOf(params.transport, "transport", ["stdio", "http"] as const);
-            const exposure = params.exposure === undefined ? undefined : oneOf(params.exposure, "exposure", ["codemode", "codemode-deferred", "deferred", "direct", "hidden"] as const);
+            const exposure = params.exposure === undefined ? undefined : oneOf(params.exposure, "exposure", MCP_EXPOSURES);
             if (transport === "http") {
               const url = string(params.url, "url", { min: 1, max: 4_096 });
               let parsed: URL; try { parsed = new URL(url); } catch { throw new GatewayError("invalid_request", "MCP URL is invalid"); }
@@ -683,7 +684,7 @@ export class GatewayService {
           if (!/^[A-Za-z0-9._-]+$/.test(server)) throw new GatewayError("invalid_request", "MCP server name is invalid");
           const patch: { enabled?: boolean; exposure?: import("../kernel/settings/mcp-server-value.js").McpExposure } = {};
           if (params.enabled !== undefined) patch.enabled = boolean(params.enabled, "enabled");
-          if (params.exposure !== undefined) patch.exposure = oneOf(params.exposure, "exposure", ["codemode", "codemode-deferred", "deferred", "direct", "hidden"] as const);
+          if (params.exposure !== undefined) patch.exposure = oneOf(params.exposure, "exposure", MCP_EXPOSURES);
           if (Object.keys(patch).length === 0) throw new GatewayError("invalid_request", "MCP update requires enabled or exposure");
           const updated = await this.asTronWrite(this.mcpStores(scope), () => this.requireMcpAdmin().update(scope, server, patch));
           this.mcpChanged(scope);

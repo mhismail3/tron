@@ -110,19 +110,19 @@ Record subjects (`RECORD_SUBJECTS`), changed per instance through the same path:
 
 Other schema fields: `subgroup`, `type`, `options` or `optionsSource` (`catalog.models`,
 `catalog.thinkingLevels(model)`, `catalog.tools`, ...), `defaultValue`, `direction`, `tap`, `writers`
-(`ui`, `home`, `worker`, `agent`: the list is the grant), `applier`, and display
-fields (`label`, `help`, `order`, `importance`, `control`/`fallback`, `unit`/`format`,
-`confirm`, `entry`). Record subjects compare by digest. `tools.mcp.server` is writable through this path at the Global layer only, with writers `ui` and `home` (agents other than Home are refused): its value is `{command, args?}` or `{url}` plus optional `enabled` and `exposure`; secret-bearing fields (env, headers, oauth, credentials in a URL or argument) are refused without echo; an existing record with fields outside that set is refused for change, and edited by hand. Command text, args and URLs are refused when they carry a credential shape (the shared `redactCredentials` detector) or a secret-named token. Adding or enabling a server, changing its command or address, or raising its visibility (hidden, then codemode or deferred, then direct, the order Pi uses for which tools the model is shown) taps; disabling, removing or lowering visibility applies. Absent exposure means codemode. Its effect is `reload`: the freshness owner marks live sessions stale and reloads them at idle. The MCP RPCs remain until the app retires them.
+(`ui`, `home`, `worker`, `agent`: the list is the grant), and display
+fields (`label`, `help`, `order`, `importance`, `control`,
+`confirm`, `entry`). Record subjects compare by digest. `tools.mcp.server` is writable through this path at the Global layer only, with writers `ui` and `home` (agents other than Home are refused): its value is `{command, args?}` or `{url}` plus optional `enabled` and `exposure`; secret-bearing fields (env, headers, oauth, credentials in a URL or argument) are refused without echo; an existing record with fields outside that set is refused for change, and edited by hand. Command text, args and URLs are refused when they carry a credential shape (the shared `redactCredentials` detector) or a secret-named token. Adding or enabling a server, changing its command or address, or raising its visibility (hidden, then codemode or deferred, then direct, the order Pi uses for which tools the model is shown) taps; disabling, removing or lowering visibility applies. Absent exposure means codemode. Its effect is `reload`: the freshness owner marks live sessions stale and reloads them at idle.
 `accounts.models.provider` is writable through this path at the Global layer only, with writers `ui` and `home`: its value is `{baseUrl, api, name?, models?}` and each model is `{id, name?, reasoning?, input?, contextWindow?, maxTokens?}`; credentials (`apiKey`, `headers`, `authHeader`), `oauth`, `compat` and `modelOverrides` are refused without echo, and so is an existing provider that carries any of them, which is edited in `models.json` or the app. Adding a provider or changing its address or API taps; other changes apply. Its effect is `next-request`: the shared runtime refreshes before the change returns, so the model list reflects it at once.
 
 ## Timing
 
-The effect point (`next-turn`, `next-request`, `new-chat`, `reload`, `restart`, ...) is shown
+The effect point (`next-turn`, `next-request`, `new-chat`, `reload`, ...) is shown
 when a change is not immediate; timing may differ by direction.
 
 - **Fixed** keys (model, thinking, context window, tools, resources, image resizing) are
-  captured at chat start as Session values with provenance `{ value, from, at, ref }` (`launch`,
-  `override`, `legacy-session`, `inherited`; history is never mined). **Use the current
+  captured at chat start as Session values with provenance `{ value, from, at, ref }` (`from` is
+  the layer it came from or `delegate`; history is never mined). **Use the current
   default** writes the lower layers' value through the change path.
 - **Live** keys are read at their effect point; Chat-bound Run keys resolve before each prompt
   and request onto the session's `SettingsManager` (Home too) and, for provider timeouts, at
@@ -156,8 +156,7 @@ action (optional key filter, cursor and limit 1–200; a page may be empty with 
 status, git result and `undoOf`/`applyAgainOf`. Scope: an agent's history and Undo cover only its own
 chat's changes, meaning those targeting its session and those its session initiated (including its Global
 changes); foreign rows are absent from its pages and its Undo of them is refused. Tron Home sees and undoes every
-change, applied to the target session's own store. Existing persisted facts remain readable;
-there is no pending-request folding or tier basis in new facts. **Undo** (`settings.undo`) writes
+change, applied to the target session's own store. **Undo** (`settings.undo`) writes
 `before` back, refused with `conflict` when the store moved; redacted entries are **Not
 undoable**. Consumption is derived from permanent history, checked with the current-after
 value under the same stripe. Grouped Undo requires every unique member with a consistent
@@ -169,11 +168,10 @@ A review binds target, operation identity (including Undo/Apply again), reason a
 every displayed item, alongside exact typed values. Controls, bidi and invisible
 format characters are disclosed; credential-bearing values remain redacted.
 A review is disposable presentation, not authority or a durable pending store.
-No settings tier, floor override, risk assessment, outcome outbox or decision RPC exists.
 Unanswered native change cards expire after 24 hours with no effects; an expired
 card is refused, not treated as a declined or retryable applied change.
 
-The model tool has resolve/change only and accepts no confirmation digest.
+The model tool accepts no confirmation digest; its changes and Undo reach the same native card.
 The built-in host presents `method: "change"` through its existing semantic
 interaction owner. The request port is passed only to Tron's built-in
 settings/profile/project/task-grant owners, never installed on extension UI.
@@ -255,7 +253,7 @@ Connection, Trusted Projects, Mac Terminal, Accounts, Sources, Storage) and badg
 (Layer, Source, Scope, Authority, State; unknown kinds render neutrally; actions go through
 `settings.change`). Controls: `toggle`, `choice`, `text`, `list`,
 `checklist`, `catalog`, `readOnly`; the client sends what it implements and gets the declared
-control, its `fallback`, or `readOnly` with "Update Tron to edit". Stopped-runtime settings with
+control or `readOnly` with "Update Tron to edit". Stopped-runtime settings with
 no writer are not Settings rows. A declaration without a `control` has no routine editing row:
 renderer responses retain only its explicit local values (read-only with independent Reset/Revert)
 and Project inspection. Their presentation omits `control`; this does not grant a writer or scope.

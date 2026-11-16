@@ -10,9 +10,9 @@ const MODEL_FIELDS = ["id", "name", "reasoning", "input", "contextWindow", "maxT
 const MODALITIES = ["text", "image"] as const;
 const MAX_MODELS = 500;
 
-export type ModelProviderModality = typeof MODALITIES[number];
+type ModelProviderModality = typeof MODALITIES[number];
 
-export interface ModelProviderModel {
+interface ModelProviderModel {
   id: string;
   name?: string;
   reasoning?: boolean;
@@ -52,7 +52,7 @@ function validateModel(raw: unknown, label: string): ModelProviderModel {
   return result;
 }
 
-export function validateModelProviderValue(value: unknown, label: string): ModelProviderValue {
+function validateModelProviderValue(value: unknown, label: string): ModelProviderValue {
   const raw = object(value, label);
   if (Object.keys(raw).some(name => !(FIELDS as readonly string[]).includes(name))) {
     refuse(label, `carries a field that is not a provider setting here; ${HINT}`);
@@ -90,7 +90,7 @@ export function modelProviderDirection(before: unknown, after: unknown): Directi
 
 export const modelProviderType: ValueType = {
   kind: "modelProvider",
-  validate: (value, label) => validateModelProviderValue(value, label),
+  validate: validateModelProviderValue,
   format: value => {
     const provider = value as ModelProviderValue;
     const models = provider.models ? `${provider.models.length} model${provider.models.length === 1 ? "" : "s"}` : undefined;

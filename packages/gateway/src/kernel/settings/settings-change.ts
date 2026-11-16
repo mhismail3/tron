@@ -6,7 +6,7 @@ import { RequestSpanLane } from "../../util/request-span.js";
 import { type ConfirmChange, type ChangeRequest, type SettingsSignal, type ChangeOutcome, type ChangeResult, type ChangeStatus, type GitResult, type FixedSetting, type SettingsTarget, type Direction, type LayerId, type Qualifiers } from "./tool-contract.js";
 import type { Actor, ActorKind, ChangeEntry, SettingsChangeRecord } from "./settings-record.js";
 import { composedBelow, readBinding, resolveSettings } from "./settings-resolver.js";
-import { HOME_PROFILE_SUBJECT, keyDefault, hasSessionSettingsApplier, keyForHome, recordSubject, type Binding, type KeyDeclaration, type SettingsSchema } from "./settings-schema.js";
+import { HOME_PROFILE_SUBJECT, hasSessionSettingsApplier, keyForHome, recordSubject, type Binding, type KeyDeclaration, type SettingsSchema } from "./settings-schema.js";
 import { changeReview, formatStoredSetting, LAYER_LABELS, type ModelRefValue, type SettingsStores, type PlannedWrite } from "./settings-types.js";
 import { canonicalSettingsTarget, scopeAdmitted, storeForScope } from "./scope-resolution.js";
 import { SettingsModel, declaredKey, deepEqual, setPath, unsetPath, qualifiedWrite, type SessionSettingsSource, type SettingsReadOwner } from "./settings-model.js";
@@ -197,9 +197,9 @@ export class SettingsChangePath {
         }) };
     }
     if (requiresTap && context.actor.kind !== "ui") return { status: "review", review, changes: [] };
-    const applied = await this.applyAll(target, stores, planned, context, entry => entry);
-    const changes = this.outcomes(applied.filter(done => !done.plan.target), "applied");
-    const adopted = this.outcomes(applied.filter(done => done.plan.target), "applied");
+    const applied = await this.applyAll(target, stores, planned, context);
+    const changes = this.outcomes(applied.filter(done => !done.plan.target));
+    const adopted = this.outcomes(applied.filter(done => done.plan.target));
     let signal: SettingsSignal | undefined;
     try {
       await this.observer?.applied(target, changes, { actor: context.actor, ...(context.reason ? { reason: context.reason } : {}) });
@@ -391,7 +391,7 @@ export class SettingsChangePath {
     });
   }
 
-  private async applyAll(target: SettingsTarget, stores: SettingsStores, planned: readonly Planned[], context: ChangeContext, shape: (entry: ChangeEntry) => ChangeEntry) {
+  private async applyAll(target: SettingsTarget, stores: SettingsStores, planned: readonly Planned[], context: ChangeContext) {
     const apply = async (appliers?: SessionAppliers) => {
       const adoptions = await this.homeChapterAdoptions(stores, planned, context, context.session?.modelRuntime ?? this.model.owner.modelRuntime, appliers);
       const ordered = [...planned, ...adoptions].sort((a, b) => STORE_ORDER[a.binding.store] - STORE_ORDER[b.binding.store]);
@@ -400,7 +400,7 @@ export class SettingsChangePath {
       const landed = new Map<string, { git?: GitResult; changeId: string }>();
       await outside?.begin(writes);
       try {
-        const result = await this.applyBracketed(target, stores, ordered, context, shape);
+        const result = await this.applyBracketed(target, stores, ordered, context);
         for (const done of result.filter(done => !done.plan.target)) landed.set(done.plan.changeId, { ...(done.git ? { git: done.git } : {}), changeId: done.plan.changeId });
         return result;
       } finally {
@@ -411,7 +411,7 @@ export class SettingsChangePath {
     if (target.kind !== "home" || !context.homeChapter || !planned.some(adoptsHomeRuntime)) return apply();
     return context.homeChapter.mutate(async admission => {
       if ("error" in admission) {
-        await this.record.append(planned.map(plan => shape(this.entry(target, plan, context, "failed", admission.error.message))));
+        await this.record.append(planned.map(plan => this.entry(target, plan, context, "failed", admission.error.message)));
         throw admission.error;
       }
       return apply(admission.appliers);
@@ -450,7 +450,7 @@ export class SettingsChangePath {
     return adoptions;
   }
 
-  private async applyBracketed(target: SettingsTarget, stores: SettingsStores, ordered: readonly Planned[], context: ChangeContext, shape: (entry: ChangeEntry) => ChangeEntry) {
+  private async applyBracketed(target: SettingsTarget, stores: SettingsStores, ordered: readonly Planned[], context: ChangeContext) {
     const applied: Array<{ plan: Planned; revision?: number; git?: GitResult; result?: unknown }> = [];
     let failure: { plan: Planned; error: GatewayError } | undefined;
     for (const plan of ordered) {
@@ -469,23 +469,23 @@ export class SettingsChangePath {
           unrestored.set(done.plan.changeId, `Not rolled back: the ${done.plan.binding.store} store refused its compensating write (${error instanceof Error ? error.message : String(error)}); it may still hold the new value`);
         });
       }
-      await this.record.append(ordered.filter(plan => !plan.target).map(plan => shape(this.entry(target, plan, context, "failed",
+      await this.record.append(ordered.filter(plan => !plan.target).map(plan => this.entry(target, plan, context, "failed",
         plan.changeId === failure!.plan.changeId ? failure!.error.message
-          : unrestored.get(plan.changeId) ?? "Rolled back: another change in the same request failed"))))
+          : unrestored.get(plan.changeId) ?? "Rolled back: another change in the same request failed")))
         .catch(error => { throw asUncertainOutcome(error, "Settings failed after effects and its audit could not be published"); });
       throw applied.length ? asUncertainOutcome(failure.error, "Settings effects required compensation; inspect before retrying") : failure.error;
     }
-    const entries = applied.filter(done => !done.plan.target).map(done => shape(this.entry(target, done.plan, context, "applied", undefined, done.git)));
+    const entries = applied.filter(done => !done.plan.target).map(done => this.entry(target, done.plan, context, "applied", undefined, done.git));
     await this.record.append(entries).catch(error => {
       throw asUncertainOutcome(error, "Settings applied but history publication failed");
     });
     return applied.map(done => ({ ...done, changeId: entries.find(entry => entry.changeId === done.plan.changeId || entry.refersTo === done.plan.changeId)!.changeId }));
   }
 
-  private outcomes(applied: ReadonlyArray<{ plan: Planned; changeId: string; revision?: number; git?: GitResult; result?: unknown }>, status: ChangeStatus): ChangeOutcome[] {
+  private outcomes(applied: ReadonlyArray<{ plan: Planned; changeId: string; revision?: number; git?: GitResult; result?: unknown }>): ChangeOutcome[] {
     return applied.map(({ plan, changeId, revision, git, result }) => ({
       changeId, key: plan.key.id, ...(Object.keys(plan.qualifiers).length ? { qualifiers: plan.qualifiers } : {}),
-      layer: plan.request.layer, status, ...outcomeValues(plan.before, plan.after),
+      layer: plan.request.layer, status: "applied", ...outcomeValues(plan.before, plan.after),
       ...(revision === undefined ? {} : { revision }), ...(git ? { git } : {}),
       ...(result === undefined ? {} : { result }),
     }));
@@ -588,7 +588,7 @@ export class SettingsChangePath {
         } } : {}),
       });
     }
-    const defaultValue = keyDefault(key, qualifiers);
+    const defaultValue = key.defaultValue;
     const below = key.type.compose ? composedBelow(stores, key, qualifiers, store) : defaultValue;
     const selects = (value: unknown) => value === undefined ? below : key.type.compose ? key.type.compose(below, value) : value;
     const direction = key.direction ? key.direction(selects(before), selects(after)) : "widen";
