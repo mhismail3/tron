@@ -180,11 +180,10 @@ struct MCPServersSettingsView: View {
                     Task { await addServer(submitted, destination: destination) }
                 }
             )
-            .tronManagedSheet(item: $pendingChange, identity: { $0.id.uuidString }) { review(for: $0, destination: destination) }
+            .tronManagedSheet(item: $pendingChange, identity: { "settings.mcp.add.review.\($0.id)" }) { review(for: $0, destination: destination) }
         }
-        .tronManagedSheet(item: Binding(get: { showingAdd ? nil : pendingChange }, set: { pendingChange = $0 }), identity: { $0.id.uuidString }) {
-            review(for: $0, destination: destination)
-        }
+        .tronManagedSheet(item: Binding(get: { showingAdd ? nil : pendingChange }, set: { pendingChange = $0 }),
+                          identity: { "settings.mcp.review.\($0.id)" }) { review(for: $0, destination: destination) }
         .tronManagedSheet(isPresented: Binding(get: { authOperationID != nil }, set: { if !$0 { authOperationID = nil } }), identity: "settings.mcp.auth") {
             if let operationID = authOperationID {
                 MCPAuthSheet(operationID: operationID) { authOperationID = nil }
