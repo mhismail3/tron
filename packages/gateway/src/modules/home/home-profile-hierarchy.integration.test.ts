@@ -191,7 +191,7 @@ it("new profile content is discoverable but never automatically inserted into Ho
   expect(notes[0]!.content.confirmed).toBe(false);
   const next = await homeActivation(f, "Plan unrelated work.", [say("ready")]);
   expect(homeHead(next.first)).not.toContain("the fixture service is named Cedar");
-  expect(next.first.systemPrompt).toContain("- Unsorted (inferred): profile read path=inferred");
+  expect(next.first.systemPrompt).toContain("- inferred: Unsorted candidate notes. | profile read path=inferred");
   expect(next.first.systemPrompt).not.toContain("1 active / 1 total");
   expect(JSON.stringify(next.first.messages)).toContain("- inferred: 1 active / 1 total");
   const read = await homeActivation(f, "Read Unsorted.", [profileCall({ action: "read", path: "inferred" }, "hierarchy-read"), say("read")]);
