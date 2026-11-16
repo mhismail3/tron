@@ -1,6 +1,6 @@
-import { APPROVAL_RULE } from "../../workspace/tron-core-extension.js";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { APPROVAL_RULE } from "../../kernel/host/tron-context.js";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { fauxAssistantMessage, fauxToolCall, getCurrentSystemMessage, getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai";
@@ -276,15 +276,11 @@ it("real Gateway: a settled task result wakes Home with every tool listed and ma
   } finally { release(); }
 });
 
-it("real Gateway: Home uses the installed browser on maintainer turns and refuses forged wake browser calls", async () => {
-  const installedFork = process.env.TRON_P99_17_BROWSER_FORK_COPY;
-  if (!installedFork) throw new Error("The pinned browser fork fixture is required");
-  const source = "git:github.com/fitchmultz/pi-agent-browser-native@6346982c0fec9e00b9f3ef6997cfb2d6f6893c6d";
-  const gateway = await startLockGateway("home-browser", { ...options, settings: { packages: [source] } });
+it("real Gateway: Home uses the packaged managed browser on maintainer turns and refuses forged wake browser calls", async () => {
+  const source = "builtin";
+  const declaration = "git:github.com/fitchmultz/pi-agent-browser-native@6346982c0fec9e00b9f3ef6997cfb2d6f6893c6d";
+  const gateway = await startLockGateway("home-browser", { ...options, settings: { packages: [declaration] } });
   owned.push(gateway);
-  const cache = join(gateway.agentDir, "git/github.com/fitchmultz/pi-agent-browser-native");
-  await mkdir(dirname(cache), { recursive: true });
-  await symlink(installedFork, cache, "dir");
   const ambientProbe = join(gateway.cwd, "ambient-browser-probe.txt");
   await mkdir(join(gateway.agentDir, "extensions"), { recursive: true });
   await writeFile(join(gateway.agentDir, "extensions", "ambient-browser-probe.mjs"),
@@ -325,7 +321,7 @@ it("real Gateway: Home uses the installed browser on maintainer turns and refuse
     const browser = slot.runtime.session.resourceLoader.getExtensions().extensions.filter(extension => extension.tools.has("agent_browser"));
     expect(browser).toHaveLength(1);
     expect(browser[0]!.sourceInfo.source).toBe(source);
-    expect(browser[0]!.sourceInfo.baseDir).toBe(cache);
+    expect(browser[0]!.sourceInfo.baseDir).toBeUndefined();
     await expect(readFile(ambientProbe, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     const entries = slot.canonicalSessionEntries();
     for (const id of ["home-browser-open", "home-browser-read", "home-browser-close"]) {

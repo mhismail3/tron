@@ -75,7 +75,8 @@ export async function render() {
   const require = createRequire(resolve(root, "packages/gateway/node_modules/@earendil-works/pi-coding-agent/package.json"));
   const { createJiti } = require("jiti");
   const jiti = createJiti(import.meta.url, { moduleCache: false, fsCache: false });
-  const { tronContext, createTronCoreExtension } = await jiti.import(resolve(root, "packages/gateway/src/workspace/tron-core-extension.ts"));
+  const { tronContext } = await jiti.import(resolve(root, "packages/gateway/src/workspace/tron-core-extension.ts"));
+  const { tronCore, tronHandoff } = await jiti.import(resolve(root, "packages/gateway/src/kernel/host/tron-context.ts"));
   const { homeSystemPrompt } = await jiti.import(resolve(root, "packages/gateway/src/modules/home/tron-home-extension.ts"));
   const { createHomeTaskWorkerExtension } = await jiti.import(resolve(root, "packages/gateway/src/kernel/delegation/task-worker-extension.ts"));
   const home = await homeSystemPrompt("", () => undefined, { model: { provider: "fixture", id: "fixture" }, thinking: "medium" }, "user");
@@ -83,21 +84,18 @@ export async function render() {
   createHomeTaskWorkerExtension({})({ on(name, handler) {
     if (name === "before_agent_start") worker = handler({ systemPrompt: "" }).systemPrompt;
   } });
-  let handoff;
-  createTronCoreExtension({ describe: async () => ({ root: "/workspace", available: true }) })({ on(name, handler) { if (name === "tool_call") handoff = handler; } });
-  const child = { toolName: "subagent", input: { agent: "worker", task: "" } };
-  await handoff(child);
+  const workspace = { root: "/workspace", available: true };
   const project = await readFile(resolve(root, "AGENTS.md"), "utf8");
-  const core = tronContext({ root: "/workspace", available: true }, "/project", ["computer", "subagent", "display", "ask_user"]);
+  const core = `${tronCore(workspace)}\n\n${tronContext(workspace, "/project", ["computer", "subagent", "display", "ask_user"])}`;
   const layers = [];
   for (const role of ["chat", "worker", "subagent", "home"]) {
-    layers.push({ role, name: "core", text: role === "home" ? home.instructions : role === "subagent" ? child.input.task : core, kind: "system", always: true });
+    layers.push({ role, name: "core", text: role === "home" ? `${tronCore(workspace)}\n\n${home.instructions}` : role === "subagent" ? tronHandoff(workspace) : core, kind: "system", always: true });
     if (["chat", "worker"].includes(role)) layers.push({ role, name: "project", text: project, kind: "rules", always: true });
     if (role === "worker") layers.push({ role, name: "worker-contract", text: worker, kind: "system", always: true });
   }
   const { HOME_TOOL_NAMES } = await jiti.import(resolve(root, "packages/gateway/src/modules/home/home-runtime-policy.ts"));
   layers.push({ role: "home", name: "profile-index", text: home.profile, kind: "index", always: true, tools: HOME_TOOL_NAMES });
-  const paths = ["packages/gateway/src/workspace/tron-core-extension.ts", "packages/gateway/src/modules/home/tron-home-extension.ts", "packages/gateway/src/modules/home/home-task-dispatcher.ts", "packages/gateway/src/kernel/delegation/task-worker-extension.ts", "packages/gateway/src/modules/home/home-request-policy.ts", "AGENTS.md"];
+  const paths = ["packages/gateway/src/kernel/host/tron-context.ts", "packages/gateway/src/workspace/tron-core-extension.ts", "packages/gateway/src/modules/home/tron-home-extension.ts", "packages/gateway/src/modules/home/home-task-dispatcher.ts", "packages/gateway/src/kernel/delegation/task-worker-extension.ts", "packages/gateway/src/modules/home/home-request-policy.ts", "AGENTS.md"];
   const sources = await Promise.all(paths.map(async name => ({ name, text: await readFile(resolve(root, name), "utf8") })));
   return { layers, sources };
 }

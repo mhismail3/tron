@@ -2,7 +2,7 @@
 
 Owner: `gateway/pi-sdk` (`packages/gateway/pi-sdk.module.json`). How the pinned Pi SDK family
 and the Tron-owned `pi-subagents` provider change and what proves a change. Both change only
-atomically through their updaters, and a Pi behavior delta stops for a maintainer decision. No
+atomically through their updaters, and a Pi behavior delta is recorded in the update's issue. No
 deployment, Gateway lifecycle command, Stable install or restart is part of this.
 
 ## Update rules
@@ -13,7 +13,7 @@ deployment, Gateway lifecycle command, Stable install or restart is part of this
 - **`pi-subagents`** (never a user npm dependency): `npm run update:pi-subagents -- --fork-repo <path-or-url> <full-fork-commit>`, then `npm run check:pi-subagents` and `npm run test:pi-subagents-scripts`.
 - **Stop on any meaningful behavior delta** (event order, canonical JSONL, compaction and
   retries, extension UI, projections, settings/auth/models, packaging, visible UI): compare with
-  the approved baseline and decide explicitly; compiling is not acceptance. Changing the
+  the approved baseline and record the decision in the update's issue; compiling is not acceptance. Changing the
   executable contract (`app/node_modules/.bin/pi`, alias `../../app/node_modules/.bin/pi`) needs
   the one-time manual Mac Release reinstall.
 - Provider IDs and credentials follow the Pi catalog; retired IDs are never migrated or aliased.
@@ -27,11 +27,13 @@ tag as a patch queue, one commit per patch, versioned `<upstream>-tron.<n>`, wit
 list naming each patch's reason, upstream PR or issue, drop condition and the test that fails
 without it. Each bump (#2181) rebases onto the newest tag, runs upstream suites, the patch
 tests and Tron's affected checks, and deletes patches the release contains; a rebase
-conflict or a persisted-data migration is a maintainer decision, never applied automatically.
+conflict is resolved and recorded in the bump's issue; a persisted-data migration is on the
+Approvals list. Neither is applied automatically.
 
 | Fork | Pin | Current patch form |
 | --- | --- | --- |
 | `pi-coding-agent` | `pi-coding-agent-patch.json` (`removeWhen`) | one numbered `third_party/pi-coding-agent/tron.patch`; queue form at its next bump |
+| `pi-agent-browser-native` | `pi-agent-browser-native-patch.json` | ownership admission over the exact native commit; no separate fork or loader |
 | `pi-subagents` | `pi-subagents-pin.json` | fork commits on v0.76.1, each with tests and a drop condition in TRON-PATCHES.md in the fork; queue form at its next bump |
 
 ## Version authority and checks
@@ -102,10 +104,17 @@ and ordinary errors still propagate. The existing SDK integration test runs stat
 mid-stream cancellation in isolated processes and joins handle closure. This one-line bridge
 is removed when the pinned Pi includes
 [upstream PR #12025](https://github.com/earendil-works/pi/pull/12025); upstream owns the
-alternative signal-free stream with reader-owned cancellation. The previous
-`pi-coding-agent-1.5.1-tron.2.tgz` is retained as the rollback artifact; its complete pin and
+alternative signal-free stream with reader-owned cancellation.
+
+`createAgentSession` and `createAgentSessionFromServices` accept a host `preamble` that replaces
+Pi's generic identity without suppressing tool snippets, tool guidelines or docs; a custom system
+prompt then renders as a separate `role` section. The Gateway supplies its common core this way.
+`system-prompt-updates.test.ts` proves the retained preamble across requests and the separate role.
+The bridge is removed when upstream offers an equivalent host identity option. The previous
+`pi-coding-agent-1.5.1-tron.3.tgz` is retained as the rollback artifact; its complete pin and
 patch inputs are available in the parent main tree. No installed runtime is changed by
-rebuilding or selecting `pi-coding-agent-1.5.1-tron.3.tgz` in a worktree.
+rebuilding or selecting `pi-coding-agent-1.5.1-tron.4.tgz` in a worktree. The reproducer's
+`--write` mode alone may build an artifact that does not yet exist; every other check requires it.
 
 Pi activates newly registered declarable extension tools on a resumed branch, and the
 Gateway reapplies the transcript's explicit loadout over them. When that narrows the
@@ -123,7 +132,7 @@ tarball, the patched pack the committed SHA-512; `--upstream <path>`, `--write` 
 deliberate change). A patch that changes the upstream root `package-lock.json` is reinstalled
 from it before the patched build. When a release ships the APIs (`removeWhen`), remove in one change: restore
 the exact release version, delete the declaration, `third_party/pi-coding-agent/`,
-`packages/gateway/scripts/build-pi-coding-agent-patch.mjs` and its script, drop it from
+its SDK reproduction script (retain the shared builder while the native browser pin uses it), drop the SDK pin/artifact from
 `packages/mac-app/scripts/stage-gateway-app.sh` and `BUILD_INPUT_FILES` in
 `scripts/gateway-install-inputs.mjs`, then `npm install` and `update:pi-sdk`.
 
@@ -134,6 +143,42 @@ use that same assembler. `agent-instructions.integration.test.ts` proves preserv
 input-wording stability through the real slot. The pinned browser package already registers
 its guidance as an unconditional `agent_browser` section; the old installed package's
 prompt-keyword handler is not part of that pin.
+
+## Managed native browser artifact
+
+`pi-agent-browser-native-patch.json` binds the native commit, patch SHA-256, exact
+Node/npm toolchain and packed SHA-512. The production file dependency and all Gateway
+browser journeys consume that artifact; no upstream-only fixture is provisioned.
+The existing builder also reproduces this carrier:
+
+```bash
+scripts/tron-node exec node packages/gateway/scripts/build-pi-coding-agent-patch.mjs \\
+  --pin pi-agent-browser-native-patch.json
+```
+
+`--upstream <checkout>` selects a local source, not a different revision; `--write`
+is only for an intentional pin update. Zero-context native patches avoid treating
+patch context as source whitespace; application still requires the exact pinned base.
+Mac payload staging carries both patch pins and their confined artifacts. The native
+engine dependency is pinned to 0.42.0 and resolved from the managed package, never PATH.
+
+The nonreplaceable `builtin:agent-browser` registration supplies the owned persistent
+profile and engine executable. Native alone owns launch/restore/CDP admission and
+checks listener PID, process birth, profile argv and issued launch nonce. Generic
+`connect` accepts recorded native Electron and isolated external-producer launches;
+`owned-launch prepare|record|cleanup` gives those producers receipts without a second
+launcher. Personal profiles, state imports and cookie/profile copying are unavailable;
+existing personal-Chrome logins do not transfer. New owned-profile logins persist across browser
+and Gateway restarts: the owned browser always launches under its profile-bound root session with
+native restore, saving cookie and storage state under the private browser HOME
+(`<agent dir>/browser/home/.agent-browser/sessions/`, below 0700 directories). Trade-off: session
+cookies now outlive browser close, so a session-only login lasts until the site expires it or the
+saved state is removed, rather than ending when the browser quits.
+Only a user-scope declaration of `pi-agent-browser-native` (npm or its GitHub fork source)
+enables the browser: `managedBrowserEnabled` then registers the managed builtin for ordinary
+sessions, Home (`builtin:agent-browser`) and the admin catalog. The declared source itself is
+never loaded and cannot register the reserved browser tool names. Without the declaration no
+session registers `agent_browser`, and the builtin's artifact checks never run.
 
 ## Signals
 
@@ -208,7 +253,10 @@ prompt-keyword handler is not part of that pin.
   `managed-subagents.transform.integration.test.ts` (fresh build, no Gateway-thread transform),
   `managed-subagents.integration.test.ts` (npm offline, TCP denied, a real child),
   `npm run test:pi-subagents-rollback` (previous → candidate → previous with resume; original
-  JSONL prefixes unchanged; `TRON_SUBAGENTS_ROLLBACK_ROOT` keeps the home; join failures go to
+  JSONL prefixes unchanged; each provider runs with its own Gateway source, the previous one
+  exported from the commit that pinned it (the updater names its Gateway repository through
+  `TRON_SUBAGENTS_SOURCE_GATEWAY`), because a rollback moves Gateway and provider together; every
+  leg requires all extensions to load; `TRON_SUBAGENTS_ROLLBACK_ROOT` keeps the home; join failures go to
   `TRON_TEST_PROCESS_OWNER_FAILURE`) and
   `src/kernel/delegation/managed-subagents.payload.integration.test.ts` (stages a `dist` it emits
   from this commit, never the checkout's build). Reports in `test-results/`.

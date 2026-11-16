@@ -60,6 +60,7 @@ async function fixture(extension?: string) {
   await slot.setModel(model.provider, model.id);
   return { root, agentDir, cwd, tronHome, registry, slot, faux, contexts, response };
 }
+const CORE_IDENTITY = "You are Tron, the user's private agent operating on the Mac.";
 async function settle(slot: { isBusy: boolean }) {
   await waitFor(() => !slot.isBusy, "the turn to settle");
 }
@@ -91,9 +92,10 @@ describe("Tron workspace through the pinned runtime", () => {
     } finally { generated.release(); }
     await settle(generated.slot);
     const agentContexts = f.contexts.map(context => getCurrentSystemPrompt(context.messages))
-      .filter(systemPrompt => systemPrompt.includes("## Tron operating context"));
+      .filter(systemPrompt => systemPrompt.includes(CORE_IDENTITY));
     for (const text of agentContexts) {
-      expect(text.match(/## Tron operating context/g)).toHaveLength(1);
+      expect(text.match(/You are Tron, the user's private agent/g)).toHaveLength(1);
+      expect(text).not.toContain("You are a coding assistant running inside pi");
       expect(text).toContain(JSON.stringify(f.cwd));
       expect(text).toContain(JSON.stringify(internal));
       expect(text).toContain("tmp/<taskId>/");
@@ -115,15 +117,16 @@ describe("Tron workspace through the pinned runtime", () => {
       if (entry.type === "compaction" && entry.systemMessage?.role === "system") return { ...entry, systemMessage: undefined };
       return entry;
     });
-    expect(JSON.stringify(outsideSystem)).not.toContain("## Tron operating context");
-    expect(messages.some(message => message.role === "system" && message.sections?.tron?.includes("## Tron operating context"))).toBe(true);
+    expect(JSON.stringify(outsideSystem)).not.toContain(CORE_IDENTITY);
+    expect(messages.some(message => message.role === "system" && message.sections?.preamble?.startsWith(CORE_IDENTITY)
+      && message.sections?.tron?.startsWith("<tron>\nCurrent execution working directory: "))).toBe(true);
     await rm(internal, { recursive: true });
     await resumed.prompt("unrelated work still works"); await settle(resumed);
     expect(getCurrentSystemPrompt(f.contexts.at(-1)!.messages)).toContain("(unavailable)");
     expect(resumed.cwd).toBe(f.cwd);
   }, 30_000);
 
-  it("passes actual direct delegated task arguments without broadening child tools", async () => {
+  it("passes direct delegated task arguments unchanged without broadening child tools", async () => {
     const f = await fixture(`export default function(pi) {
       pi.registerTool({name:"subagent", label:"Child", description:"fixture", parameters:{type:"object",properties:{agent:{type:"string"},task:{type:"string"}},required:["agent","task"]},
       execute: async (_id, args) => ({content:[{type:"text",text:args.task}],details:{received:args}})});
@@ -134,13 +137,7 @@ describe("Tron workspace through the pinned runtime", () => {
     ]);
     await f.slot.prompt("delegate"); await settle(f.slot);
     const tool = f.contexts[0]?.messages.find(message => message.role === "toolResult");
-    expect(JSON.stringify(tool)).toContain("Tron workspace handoff");
-    expect(JSON.stringify(tool)).toContain(join(f.tronHome, "workspace"));
-    expect(JSON.stringify(tool)).toContain("Read only");
-    expect(JSON.stringify(tool)).toContain("tmp/<taskId>/");
-    expect(JSON.stringify(tool)).toContain("files/<topic>-<date>/");
-    expect(JSON.stringify(tool)).toContain("state/<name>/");
-    expect(JSON.stringify(tool)).toContain("maintainer approval");
+    expect(tool?.role === "toolResult" && tool.details).toEqual({ received: { agent: "worker", task: "Read only" } });
     expect(f.slot.cwd).toBe(f.cwd);
   }, 15_000);
 

@@ -61,7 +61,7 @@ import { setPath, type SessionSettingsSource, type SettingsModel } from "../sett
 import { SETTINGS_OUTCOME_MESSAGE, CONTEXT_DELIVERY_RECEIPT_TYPE } from "../receipts/delivery-tags.js";
 import { type SettingsSignal, type SettingsInventorySource, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting, type LayerId } from "../settings/tool-contract.js";
 import type { Actor } from "../settings/settings-record.js";
-import { piBuiltinExtensions } from "../host/pi-builtins.js";
+import { piBuiltinExtensions, managedBrowserExtensions } from "../host/pi-builtins.js";
 import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../host/extension-adapters.js";
 import type {
   ChatOrigin,
@@ -1192,6 +1192,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         delegatedWorker: () => Boolean(this.ownedTurns.worker),
         ...(profile.managedSubagents && this.dependencies.managedSubagents ? {
           requireChildExtensions: this.dependencies.managedSubagents.requireChildExtensions.bind(this.dependencies.managedSubagents),
+          requireChildTaskContext: this.dependencies.managedSubagents.requireChildTaskContext.bind(this.dependencies.managedSubagents),
         } : {}),
         title: () => this.notificationTitle(),
         presented: () => this.dependencies.isSessionPresented(this.id),
@@ -1212,8 +1213,9 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       const managedLoaderOptions = await managedSubagents?.loaderOptions(settingsManager,
         (content, options, owner, messages) => this.admitSubagentWake(content, options, owner, messages));
       const extensionFactories = profile.extensions !== "ordinary"
-        ? this.dependencies.modules.registrations(profile.extensions, sessionContext)
+        ? [...this.dependencies.modules.registrations(profile.extensions, sessionContext), ...managedBrowserExtensions(this.dependencies.agentDir, settingsManager)]
         : [
+            ...managedBrowserExtensions(this.dependencies.agentDir, settingsManager),
             ...(managedLoaderOptions?.extensionFactories ?? []),
             ...piBuiltinExtensions(this.dependencies.agentDir, (url) => {
               const operationId = currentMcpAuthOperationId();
@@ -1279,6 +1281,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       if (profileModel && profile.launchDefaults === "settings-home-recipe" && !selectedProfileModel) throw new GatewayError("conflict", "Home's configured profile model is unavailable or virtual");
       const launchThinking = launchDefaults?.keys.find(row => row.key === "model.thinking[role=chat]")?.value as ThinkingLevel | undefined;
       const created = await createAgentSessionFromServices({
+        preamble: this.dependencies.modules.policy("commonCore")!(await this.dependencies.workspace.describe()),
         services,
         sessionManager,
         ...(initialModel ? { model: initialModel } : {}),
