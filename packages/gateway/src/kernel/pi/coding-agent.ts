@@ -14,6 +14,7 @@ export {
   createReadToolDefinition,
   createToolSearchExtension,
   createWriteToolDefinition,
+  serversSectionIntro,
   CredentialSynchronizationError,
   DefaultPackageManager,
   DefaultResourceLoader,

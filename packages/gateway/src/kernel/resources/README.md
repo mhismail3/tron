@@ -33,7 +33,12 @@ whitespace collapsed and escaped. A source description over 160 characters or an
 byte budget is rendered in full and returned as a diagnostic; nothing is truncated, omitted or
 paraphrased. `skillsIndex` renders each skill section through the SDK's `renderSkills` host option
 (`<index name="skills" open="read" kind="procedure">`, 10,000 bytes), and the session resources
-view lists its diagnostics as skill warnings.
+view lists its diagnostics as skill warnings. `docsIndex` renders Pi's docs section through the SDK's
+`renderDocs` host option (`<index name="docs" open="read" kind="data">`, 4,096 bytes) between Pi's own
+guidance sentences, and `mcpServersIndex` renders the MCP extension's `mcp_servers` section through its
+`renderServers` option (`<index name="mcp_servers" open="codemode" kind="data">`, 4,096 bytes) after Pi's
+intro sentence. An index given a listing locator keeps whole sorted rows within its budget and ends with
+`- more: List the remaining items. | <locator>` (`searchTools()` for MCP servers).
 
 `context-rules.ts` admits context files for every non-Home runtime: the global `AGENTS.md` unless
 `context.rules.global` is off, project and ancestor `AGENTS.md` files only for a trusted project and

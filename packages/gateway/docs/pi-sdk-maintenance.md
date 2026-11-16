@@ -117,10 +117,13 @@ agent directory's AGENTS file, flagged `global` by the loader) and user-scope `s
 `project_context`, `project_skills` (list only when global skills already carry the instructions),
 `cwd` and extension sections. `system-prompt.test.ts` proves two projects share the prefix up to
 `project_context`. A host `renderSkills` option renders both skill sections in place; the Gateway
-passes the context index renderer, so Pi's skills block remains only for hosts that pass none.
+passes the context index renderer, so Pi's skills block remains only for hosts that pass none. A host
+`renderDocs` option renders the docs section, and the MCP extension's `renderServers` option (with the
+exported `serversSectionIntro`) renders `mcp_servers`; the Gateway passes its index
+renderers for both.
 Tools activated during a run are declared after the earlier tools, and their prompt sections are applied at the next run, so the system text is not rewritten inside a run. These bridges are listed in `removeWhen`. Earlier tarballs are not kept: git history restores
 them, and the SDK rollback check uses the registry release in `pi-sdk-baseline.json`. No installed
-runtime is changed by rebuilding or selecting `pi-coding-agent-1.5.1-tron.7.tgz` in a worktree. The reproducer's
+runtime is changed by rebuilding or selecting `pi-coding-agent-1.5.1-tron.8.tgz` in a worktree. The reproducer's
 `--write` mode alone may build an artifact that does not yet exist; every other check requires it.
 
 Pi activates newly registered declarable extension tools on a resumed branch, and the
