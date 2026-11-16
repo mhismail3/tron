@@ -313,8 +313,9 @@ Switches Home's episodic store to the frozen layout ([episodic README](../packag
 Dry-run prints the store's file count and bytes. Apply holds the layout-v2 maintenance lock
 and the runtime lease, refuses unless the home is stopped (the same proof as migrate), and
 then: inventories the store (no-follow; symlinks, special files, foreign owners and group or
-world bits refuse; an existing `layout.json` refuses); copies every file into `NEW_DIR`
-(created, outside the home) with SHA-256 checks and a `manifest.json`; re-hashes the live
+world bits refuse; an existing `layout.json` or a missing `initialized.json` refuses); copies
+every file into `NEW_DIR` (created; it must resolve, through symlinks, outside the home) with
+SHA-256 checks and a `manifest.json`; re-hashes the live
 store against the plan; creates an empty `layout.json` atomically; reads it back and re-hashes
 the v2 files. Interrupted before that create, v2 stays live and byte-identical; rerun with a
 new backup. The store's v2 files are never written, so the Gateway before the freeze still
