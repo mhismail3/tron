@@ -147,7 +147,10 @@ actual K3 host; native frames do not select product modules or keep another list
   `RuntimeSlot` composes task-worker policy at this boundary: admitted workers request
   one-hour Anthropic cache retention, including cold-resumed tasks. Ordinary interactive
   sessions and subagent children retain Pi's default five-minute retention. Other providers
-  are unchanged; this policy does not enable cache warming.
+  are unchanged; this policy does not enable cache warming. For Anthropic the pipeline moves the system
+  cache mark to the end of the sections every project of a role shares (core through user-scope
+  skills) by splitting the marked system block there, so another project's first request
+  reads that prefix; the mark count is unchanged. `shared-prefix.integration.test.ts` proves it.
 - `request-record.ts`: one content-free record per provider request of a Gateway session,
   taken outside the abort-aware stream and after every Pi and Gateway payload hook, so its
   stop reason is the run's. The request is read as units in cache order: each `tools` item;
