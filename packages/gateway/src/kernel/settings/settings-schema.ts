@@ -475,7 +475,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
     return KEYS.find(key => key.id === id) ?? recordSubject(id);
   }
 
-  return { KEYS, schemaKey, auditSubject, recordKey } as const;
+  return { KEYS, RECORD_SUBJECTS, schemaKey, auditSubject, recordKey } as const;
 }
 
 export type SettingsSchema = ReturnType<typeof createSettingsSchema>;
