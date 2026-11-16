@@ -21,7 +21,7 @@ struct HostedHomeSummaryTypographyFixture: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.tronBackground)
-        .dynamicTypeSize(ProcessInfo.processInfo.arguments.contains("-home-stats-large-type") ? .xxxLarge : .large)
+        .dynamicTypeSize(HostedLaunch.arguments.contains("-home-stats-large-type") ? .xxxLarge : .large)
     }
 
     private static var reference: String {

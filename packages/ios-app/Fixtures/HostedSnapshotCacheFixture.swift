@@ -65,7 +65,7 @@ private final class SnapshotCacheFixtureDriver {
     var completion = "idle"
 
     init() {
-        let args = ProcessInfo.processInfo.arguments
+        let args = HostedLaunch.arguments
         func argument(_ key: String) -> String? { args.drop(while: { $0 != key }).dropFirst().first }
         let token = UUID(uuidString: argument("-snapshot-cache-token") ?? "") ?? UUID()
         mode = argument("-snapshot-cache-mode") ?? "live"

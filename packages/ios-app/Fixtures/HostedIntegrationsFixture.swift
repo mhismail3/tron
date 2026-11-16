@@ -20,7 +20,7 @@ struct HostedIntegrationsFixtureView: View {
     private let dark: Bool
 
     init() {
-        let arguments = ProcessInfo.processInfo.arguments
+        let arguments = HostedLaunch.arguments
         let scenario = arguments.drop(while: { $0 != "-integrations-scenario" }).dropFirst().first ?? "mcp-held-add"
         self.scenario = scenario
         dark = arguments.contains("-ui-dark-mode")
@@ -60,14 +60,14 @@ struct HostedIntegrationsFixtureView: View {
                                         credentialType: nil, authMethods: [], modelCount: 1
                                     ), target: .global
                                 )
-                                .environment(\.dynamicTypeSize, ProcessInfo.processInfo.arguments.contains("-fixture-large-type") ? .accessibility3 : .large)
+                                .environment(\.dynamicTypeSize, HostedLaunch.arguments.contains("-fixture-large-type") ? .accessibility3 : .large)
                             }
                     }
                     .environment(model)
                     .tronPresentation()
                     .tronSettingsLayout()
                     .tronSettingsVisualTheme(accent: .tronCyan)
-                    .environment(\.dynamicTypeSize, ProcessInfo.processInfo.arguments.contains("-fixture-large-type") ? .accessibility3 : .large)
+                    .environment(\.dynamicTypeSize, HostedLaunch.arguments.contains("-fixture-large-type") ? .accessibility3 : .large)
                 } else {
                     NavigationStack {
                         VStack {

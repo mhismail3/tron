@@ -29,7 +29,7 @@ struct HostedSubagentParityFixture: View {
         cacheRoot = FileManager.default.temporaryDirectory.appending(path: "subagent-parity-\(UUID().uuidString)")
         _model = State(initialValue: AppModel(client: GatewayClient(socketFactory: GatewaySocketFactory { _ in socket }),
             profiles: GatewayProfileStore(defaults: defaults), cache: SnapshotCache(root: cacheRoot)))
-        let historic = ProcessInfo.processInfo.arguments.contains("-historical")
+        let historic = HostedLaunch.arguments.contains("-historical")
         let owner: ExtensionOwner = try! JSONDecoder.gateway.decode(ExtensionOwner.self, from: Data("""
             {"id":"provider","title":"Subagents","source":"\(historic ? "npm:pi-subagents@0.59.0" : "tron:pi-subagents@fixture#build")","kind":"subagent"}
             """.utf8))
@@ -54,7 +54,7 @@ struct HostedSubagentParityFixture: View {
                     [{"id":"provider-frame","kind":"widget","placement":"aboveEditor","lifecycle":"retained","revision":1,"focused":false,"inputMode":"none","provenance":{"source":"tron:pi-subagents@fixture#build","kind":"subagent"},"frame":{"width":80,"height":1,"plainText":"PRIVATE PROVIDER FRAME","lines":[{"plainText":"PRIVATE PROVIDER FRAME","runs":[{"text":"PRIVATE PROVIDER FRAME","style":{}}]}]}}]
                     """#.utf8)), pendingInteractions: []), diagnostics: [])
         snapshot.transcript = try! JSONDecoder.gateway.decode([TranscriptItem].self, from: Self.transcript)
-        let arguments = ProcessInfo.processInfo.arguments
+        let arguments = HostedLaunch.arguments
         if arguments.contains("-pending-wake") || arguments.contains("-queued-wake") {
             let wake = snapshot.transcript.removeLast()
             let input: [String: JSONValue] = [
@@ -151,7 +151,7 @@ struct HostedSubagentParityFixture: View {
         let current = row(isResumed ? "resumed" : "worker", "Asynchronous worker", states[stage], settled: stage == 3)
         return [current, row("completed", "Completed worker", .completed)]
             + (isResumed ? [row("worker", "Paused execution", .paused, settled: true)] : [])
-            + (ProcessInfo.processInfo.arguments.contains("-history-long")
+            + (HostedLaunch.arguments.contains("-history-long")
                 ? (1...30).map { row("earlier-\($0)", "Earlier worker \($0)", .completed) } : [])
     }
 
@@ -161,7 +161,7 @@ struct HostedSubagentParityFixture: View {
         var next = snapshot
         next.revision = historySequence
         next.eventSequence = historySequence
-        let arguments = ProcessInfo.processInfo.arguments
+        let arguments = HostedLaunch.arguments
         let outcome: SessionProcessLifecycleState = arguments.contains("-history-failed") ? .failed
             : arguments.contains("-history-stopped") ? .stopped : .completed
         next.processActivities = Self.historyProcesses(sequence: historySequence, stage: stage, outcome: outcome,
@@ -238,10 +238,10 @@ struct HostedSubagentParityFixture: View {
     var body: some View {
         NavigationStack {
             if ready {
-                if ProcessInfo.processInfo.arguments.contains("-history-grouping") {
+                if HostedLaunch.arguments.contains("-history-grouping") {
                     Button("Subagent History") { showingHistory = true }
                 }
-                else if ProcessInfo.processInfo.arguments.contains("-resources") { ProjectResourcesView(sessionID: snapshot.sessionId) }
+                else if HostedLaunch.arguments.contains("-resources") { ProjectResourcesView(sessionID: snapshot.sessionId) }
                 else { ChatView(sessionID: snapshot.sessionId, hostedProbe: probe) }
             }
             else if let error { Text(error) }
@@ -250,7 +250,7 @@ struct HostedSubagentParityFixture: View {
             ProcessHistorySheet(sessionID: snapshot.sessionId)
                 .overlay(alignment: .bottom) {
                     HStack {
-                        if ProcessInfo.processInfo.arguments.contains("-history-lifecycle") {
+                        if HostedLaunch.arguments.contains("-history-lifecycle") {
                             Button("Advance lifecycle") { updateHistory(stage: min(historyStage + 1, 6)) }
                         } else {
                             Button("Finish worker") { updateHistory(stage: 6) }
@@ -260,8 +260,8 @@ struct HostedSubagentParityFixture: View {
                 }
         }
         .environment(model)
-        .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-light") ? .light : .dark)
-        .dynamicTypeSize(ProcessInfo.processInfo.arguments.contains("-accessibility-type") ? .accessibility1 : .large)
+        .preferredColorScheme(HostedLaunch.arguments.contains("-light") ? .light : .dark)
+        .dynamicTypeSize(HostedLaunch.arguments.contains("-accessibility-type") ? .accessibility1 : .large)
         .tronPresentation()
         .task {
             do {
@@ -302,12 +302,12 @@ private actor HostedSubagentParitySocket: GatewaySocketConnection {
             {"skills":{"skills":[{"name":"pi-subagents","description":"Technical guidance for operator-requested delegation","path":"/provider/skills/pi-subagents/SKILL.md","scope":"user","source":"tron:pi-subagents@fixture#build","distribution":"external"}],"diagnostics":[]},"prompts":{"prompts":[{"name":"council","description":"Run a bounded supervisor-mediated council of advisors and write a decision memo","argumentHint":"<question>","path":"/provider/prompts/council.md","scope":"user","source":"tron:pi-subagents@fixture#build","distribution":"external"}],"diagnostics":[]},"subagents":[{"name":"parity-worker","description":"Read-only parity child","model":"parity-child/child","source":"project","distribution":"local"}],"subagentDiagnostics":"1 invalid subagent definition(s): Agent 'parity-invalid.md' uses removed frontmatter field 'fallbackModels'. Configure one model instead.","commands":[]}
             """#.utf8))
         } else if method == "session.processHistory.list" {
-            if ProcessInfo.processInfo.arguments.contains("-history-long") {
+            if HostedLaunch.arguments.contains("-history-long") {
                 try await Task.sleep(for: .milliseconds(750))
             }
             result = .object([
                 "historyRevision": .string("fixture-history"),
-                "activities": ProcessInfo.processInfo.arguments.contains("-history-long")
+                "activities": HostedLaunch.arguments.contains("-history-long")
                     ? try JSONValue.encode(HostedSubagentParityFixture.historyProcesses(sequence: 1, stage: 1)) : .array([]),
                 "nextCursor": .null
             ])

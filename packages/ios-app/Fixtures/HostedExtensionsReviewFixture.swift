@@ -3,7 +3,7 @@ import Foundation
 import TronMobileCore
 
 enum HostedExtensionsReview {
-    static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("-settings-ui-extensions") }
+    static var enabled: Bool { HostedLaunch.arguments.contains("-settings-ui-extensions") }
 
     static let configured = ["npm:pi-web-access", "git:github.com/example/pi-agent-browser", "npm:@example/pi-goal",
                              "npm:@example/anthropic-auth", "npm:@example/anthropic-auth-tools"]
@@ -30,8 +30,8 @@ enum HostedExtensionsReview {
         }
     }
 
-    static var builtinOff: Bool { ProcessInfo.processInfo.arguments.contains("-settings-ui-builtin-off") }
-    static var project: Bool { ProcessInfo.processInfo.arguments.contains("-settings-ui-project-tools") }
+    static var builtinOff: Bool { HostedLaunch.arguments.contains("-settings-ui-builtin-off") }
+    static var project: Bool { HostedLaunch.arguments.contains("-settings-ui-project-tools") }
 
     static func layers(own: JSONValue?, global: JSONValue? = nil) -> [JSONValue] {
         func layer(_ id: String, _ value: JSONValue?) -> JSONValue {

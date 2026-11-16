@@ -13,7 +13,7 @@ struct HostedChatHapticsFixture: View {
     private let profile = GatewayProfile(id: "chat-haptics", label: "Haptics fixture", host: "haptics.example.test", port: 9847, machineId: "haptics-machine")
 
     init() {
-        let args = ProcessInfo.processInfo.arguments
+        let args = HostedLaunch.arguments
         let gateway = ChatHapticsGateway(history: args.contains("-chat-haptics-history"))
         self.gateway = gateway
         let store = AutomationFixtureProfileStore()
@@ -54,8 +54,8 @@ struct HostedChatHapticsFixture: View {
         }
         .environment(model)
         .tronPresentation()
-        .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-error-style-preview")
-            ? (ProcessInfo.processInfo.arguments.contains("-error-preview-dark") ? .dark : .light) : nil)
+        .preferredColorScheme(HostedLaunch.arguments.contains("-error-style-preview")
+            ? (HostedLaunch.arguments.contains("-error-preview-dark") ? .dark : .light) : nil)
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .background: model.enteredBackground()
@@ -66,7 +66,7 @@ struct HostedChatHapticsFixture: View {
         }
         .task { for await value in gateway.updates() { status = value } }
         .task {
-            let count = ProcessInfo.processInfo.arguments.drop(while: { $0 != "-chat-haptics-photos" }).dropFirst().first.flatMap(Int.init) ?? 4
+            let count = HostedLaunch.arguments.drop(while: { $0 != "-chat-haptics-photos" }).dropFirst().first.flatMap(Int.init) ?? 4
             UIPasteboard.general.setItems((0..<count).map { _ in [UTType.png.identifier: ChatHapticsGateway.photo] })
             do {
                 try await model.connectHostedGateway(profile: profile, token: "fixture-only-token")

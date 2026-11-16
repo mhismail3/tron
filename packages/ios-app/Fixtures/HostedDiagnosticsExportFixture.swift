@@ -27,7 +27,7 @@ struct HostedDiagnosticsExportFixture: View {
     private let replacement = GatewayProfile(id: "export-replacement", label: "Replacement fixture", host: "replacement.example.test", port: 9847, machineId: "export-replacement-machine")
 
     init() {
-        scenario = ProcessInfo.processInfo.arguments.drop(while: { $0 != "-diagnostics-export-scenario" }).dropFirst().first ?? "held"
+        scenario = HostedLaunch.arguments.drop(while: { $0 != "-diagnostics-export-scenario" }).dropFirst().first ?? "held"
         let first = DiagnosticsExportFixtureGateway(name: "original", fails: scenario == "failure" || scenario == "held-failure", holdsLogs: scenario == "logs-held")
         let second = DiagnosticsExportFixtureGateway(name: "replacement", fails: false)
         originalGateway = first; replacementGateway = second

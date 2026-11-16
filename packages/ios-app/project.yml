@@ -307,6 +307,31 @@ targets:
         SWIFT_PACKAGE_NAME: TronIOSApp
         TEST_RUNNER_WAIT_FOR_DEBUGGER: NO
 
+  # Tier 1: the app-hosted in-process bundle. It mounts views and fixtures in
+  # the running app and asserts on the accessibility tree, layout frames and
+  # sampled colours, without a second process (packages/ios-app/ViewTests).
+  TronMobileViewTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: ViewTests
+        createIntermediateGroups: true
+        excludes:
+          - "**/*.module.json"
+          - "**/README.md"
+    dependencies:
+      - target: TronMobile
+      - target: TronMobileCore
+        embed: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.testhost.viewtests
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/TronMobile.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TronMobile"
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_PACKAGE_NAME: TronIOSApp
+        TEST_RUNNER_WAIT_FOR_DEBUGGER: NO
+
   TronMobileUITests:
     type: bundle.ui-testing
     platform: iOS
@@ -399,6 +424,7 @@ schemes:
         TronShareExtension: all
         TronMobileUITests: [test]
         TronSwiftAppUITests: [test]
+        TronMobileViewTests: [test]
     run:
       config: Test
     test:

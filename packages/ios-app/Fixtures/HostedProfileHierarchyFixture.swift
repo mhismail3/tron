@@ -4,7 +4,7 @@ import SwiftUI
 
 enum HostedProfileHierarchyFixture {
     static var typeSize: DynamicTypeSize {
-        let arguments = ProcessInfo.processInfo.arguments
+        let arguments = HostedLaunch.arguments
         guard let key = arguments.firstIndex(of: "-UIPreferredContentSizeCategoryName"), key + 1 < arguments.count else { return .large }
         switch arguments[key + 1] {
         case "UICTContentSizeCategoryXXL": return .xxLarge

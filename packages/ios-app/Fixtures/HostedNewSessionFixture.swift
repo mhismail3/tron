@@ -18,7 +18,7 @@ struct HostedNewSessionFixture: View {
     private let replacement = GatewayProfile(id: "new-session-replacement", label: "Replacement fixture", host: "replacement.example.test", port: 9847, machineId: "new-session-replacement-machine")
 
     init() {
-        let args = ProcessInfo.processInfo.arguments
+        let args = HostedLaunch.arguments
         let scenario = args.drop(while: { $0 != "-new-session-scenario" }).dropFirst().first ?? "draft"
         self.scenario = scenario
         let gateway = NewSessionFixtureGateway(scenario: scenario); self.gateway = gateway
@@ -45,7 +45,7 @@ struct HostedNewSessionFixture: View {
         NavigationStack { fixtureStatus }
         .environment(model)
         .tronPresentation()
-        .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("dark") ? .dark : .light)
+        .preferredColorScheme(HostedLaunch.arguments.contains("dark") ? .dark : .light)
         .tronManagedSheet(isPresented: Binding(get: { ready && showing }, set: { showing = $0 }), identity: "fixture.new-session") {
             NewSessionSheet(initialDraftText: "Fixture original prompt") { route in
                 callbacks += 1; owned = model.ownsNavigationRoute(route)

@@ -5,7 +5,7 @@ import UIKit
 
 enum HostedCameraFixture {
     @MainActor static func model() -> CameraModel? {
-        let arguments = ProcessInfo.processInfo.arguments
+        let arguments = HostedLaunch.arguments
         guard arguments.contains("-tron-camera-fixture") else { return nil }
         func milliseconds(_ name: String) -> Int? {
             arguments.drop(while: { $0 != name }).dropFirst().first.flatMap(Int.init)

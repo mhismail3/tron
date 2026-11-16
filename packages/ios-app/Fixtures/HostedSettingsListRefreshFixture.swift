@@ -14,7 +14,7 @@ struct HostedSettingsListRefreshFixture: View {
     private let target = SettingsTarget.global.gatewayTarget
 
     init() {
-        let arguments = ProcessInfo.processInfo.arguments
+        let arguments = HostedLaunch.arguments
         let index = arguments.firstIndex(of: "-refresh-gate")!
         gate = URL(fileURLWithPath: arguments[index + 1])
         socket = SettingsListRefreshSocket(gate: gate)

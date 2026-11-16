@@ -3,7 +3,7 @@ import Foundation
 import XCTest
 
 @MainActor
-final class GatewayEventDeliveryContractTests: XCTestCase {
+final class GatewayEventDeliveryContractTests: ShuffledTestCase {
     private func profile(port: Int = 9847) -> GatewayProfile {
         GatewayProfile(id: "event-lock-\(port)", label: "Event contract", host: "127.0.0.1", port: port,
                        machineId: "fixture-machine", deviceId: "fixture-device")

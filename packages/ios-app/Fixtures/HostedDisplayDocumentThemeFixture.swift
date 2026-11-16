@@ -4,14 +4,14 @@ import TronMobileCore
 import WebKit
 
 enum HostedDisplayDocumentThemeFixture {
-    static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("-display-document-theme") }
-    static var home: Bool { ProcessInfo.processInfo.arguments.contains("-display-document-home") }
-    static var images: Bool { ProcessInfo.processInfo.arguments.contains("-display-document-images") }
+    static var enabled: Bool { HostedLaunch.arguments.contains("-display-document-theme") }
+    static var home: Bool { HostedLaunch.arguments.contains("-display-document-home") }
+    static var images: Bool { HostedLaunch.arguments.contains("-display-document-images") }
     static let imageID = "6ab02a1a-fd63-4196-a2e1-5fe9ebd6bc41"
-    static var scriptProbe: Bool { ProcessInfo.processInfo.arguments.contains("-display-document-html-probe") }
-    static var scriptProbeControl: Bool { ProcessInfo.processInfo.arguments.contains("-display-document-html-control") }
-    static var floating: Bool { ProcessInfo.processInfo.arguments.contains("-display-document-html-floating") }
-    static var authoredHTML: Bool { scriptProbe || ProcessInfo.processInfo.arguments.contains("-display-document-html") }
+    static var scriptProbe: Bool { HostedLaunch.arguments.contains("-display-document-html-probe") }
+    static var scriptProbeControl: Bool { HostedLaunch.arguments.contains("-display-document-html-control") }
+    static var floating: Bool { HostedLaunch.arguments.contains("-display-document-html-floating") }
+    static var authoredHTML: Bool { scriptProbe || HostedLaunch.arguments.contains("-display-document-html") }
     static let markdown = """
     # Home audit report
 

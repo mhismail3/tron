@@ -14,7 +14,7 @@ struct HostedAccessibilityFixtureView: View {
 
     var body: some View {
         Group {
-            if ProcessInfo.processInfo.arguments.contains("-fixture-dashboard") {
+            if HostedLaunch.arguments.contains("-fixture-dashboard") {
                 SessionShellView()
                     .overlay(alignment: .bottomLeading) {
                         HStack(spacing: 2) {
@@ -41,7 +41,7 @@ struct HostedAccessibilityFixtureView: View {
                     case .maintenance:
                         NavigationStack {
                             GatewayMaintenanceActions(
-                                lifecycle: (ProcessInfo.processInfo.arguments.contains("-fixture-lone-maintenance")
+                                lifecycle: (HostedLaunch.arguments.contains("-fixture-lone-maintenance")
                                     ? ["Rebuild from Source", "Restart", "Disable"]
                                     : ["Rebuild from Source", "Roll Back", "Restart", "Disable"]).map { title in
                                     GatewayMaintenanceAction(id: title, title: title) {}
@@ -78,8 +78,8 @@ struct HostedAccessibilityFixtureView: View {
         .environment(state.model)
         .environment(\.tronPresentationActivityCoordinator, state.presentation)
         .environment(\.scenePhase, .active)
-        .environment(\.dynamicTypeSize, ProcessInfo.processInfo.arguments.contains("-fixture-xxxl") ? .xxxLarge : ProcessInfo.processInfo.arguments.contains("-fixture-large-type") ? .accessibility3 : .large)
-        .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-fixture-light") ? .light : .dark)
+        .environment(\.dynamicTypeSize, HostedLaunch.arguments.contains("-fixture-xxxl") ? .xxxLarge : HostedLaunch.arguments.contains("-fixture-large-type") ? .accessibility3 : .large)
+        .preferredColorScheme(HostedLaunch.arguments.contains("-fixture-light") ? .light : .dark)
         .tronPresentation()
     }
 
@@ -180,7 +180,7 @@ private final class HostedAccessibilityFixtureState {
             ), diagnostics: []
         )
         snapshot.processActivities = [Self.process(completed: false, output: "Inspecting the source files.")]
-        if !ProcessInfo.processInfo.arguments.contains("-fixture-dashboard") {
+        if !HostedLaunch.arguments.contains("-fixture-dashboard") {
             model.installHostedAuthoritativeSnapshot(snapshot)
         }
         AutomationDashboardPreferences.save(AutomationDashboardViewPreferences())

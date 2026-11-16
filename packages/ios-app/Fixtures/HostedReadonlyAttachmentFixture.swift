@@ -26,7 +26,7 @@ struct HostedReadonlyAttachmentFixture: View {
     private let replacement = GatewayProfile(id: "readonly-replacement", label: "Replacement fixture", host: "replacement.example.test", port: 9847, machineId: "readonly-replacement-machine")
 
     init() {
-        let args = ProcessInfo.processInfo.arguments
+        let args = HostedLaunch.arguments
         let scenario = args.drop(while: { $0 != "-readonly-preview-scenario" }).dropFirst().first ?? "image"
         self.scenario = scenario
         let gateway = ReadonlyAttachmentGateway(scenario: scenario)

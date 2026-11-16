@@ -7,7 +7,7 @@ struct HostedToolSheetsPolishFixture: View {
     @State private var routes = ChatTranscriptSheetRouteOwner()
     @Environment(\.dismiss) private var dismiss
     private var scenario: String {
-        let args = ProcessInfo.processInfo.arguments
+        let args = HostedLaunch.arguments
         guard let index = args.firstIndex(of: "-polish-scenario"), args.indices.contains(index + 1) else { return "ask" }
         return args[index + 1]
     }
@@ -46,7 +46,7 @@ struct HostedToolSheetsPolishFixture: View {
         .environment(\.chatTranscriptSheetRoutes, routes)
         .modifier(ChatTranscriptSheetHost(routes: routes))
         .tronManagedSheet(isPresented: $showing, identity: "hosted.polish.\(scenario)") { destination }
-        .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-polish-dark") ? .dark : .light)
+        .preferredColorScheme(HostedLaunch.arguments.contains("-polish-dark") ? .dark : .light)
         .tronPresentation()
         .task { showing = !scenario.hasPrefix("picker") && scenario != "prompt" && scenario != "short-prompt" }
     }

@@ -67,9 +67,9 @@ struct HostedChatDisplayFixture: View {
     private let snapshot: SessionSnapshot
     private let socket: HostedChatDisplaySocket
     private let probe = ChatHostedProbe()
-    private static var inlineGroupLive: Bool { ProcessInfo.processInfo.arguments.contains("-chat-display-inline-group-live") }
+    private static var inlineGroupLive: Bool { HostedLaunch.arguments.contains("-chat-display-inline-group-live") }
     private static var inlineGroup: Bool {
-        inlineGroupLive || ProcessInfo.processInfo.arguments.contains("-chat-display-inline-group")
+        inlineGroupLive || HostedLaunch.arguments.contains("-chat-display-inline-group")
     }
 
     #if DEBUG
@@ -130,8 +130,8 @@ struct HostedChatDisplayFixture: View {
         } else if Self.inlineGroup {
             if !Self.inlineGroupLive { snapshot.transcript += Self.items([Self.inlineGroupCall()] + Self.inlineGroupResults()) }
         } else {
-            let fixtureTranscript = ProcessInfo.processInfo.arguments.contains("-chat-display-grouped") ? Self.groupedDisplayTranscriptData
-                : ProcessInfo.processInfo.arguments.contains("-chat-display-segment-continuation") ? Self.segmentContinuationTranscriptData : Self.imageTranscriptData
+            let fixtureTranscript = HostedLaunch.arguments.contains("-chat-display-grouped") ? Self.groupedDisplayTranscriptData
+                : HostedLaunch.arguments.contains("-chat-display-segment-continuation") ? Self.segmentContinuationTranscriptData : Self.imageTranscriptData
             snapshot.transcript += try! JSONDecoder.gateway.decode([TranscriptItem].self, from: fixtureTranscript)
         }
         snapshot.transcriptStart = 0
@@ -141,7 +141,7 @@ struct HostedChatDisplayFixture: View {
 
     var body: some View {
         NavigationStack {
-            if ProcessInfo.processInfo.arguments.contains("-display-document-updates") {
+            if HostedLaunch.arguments.contains("-display-document-updates") {
                 HostedDisplayDocumentThemeChanges()
             } else if let control = Self.htmlProbeControl {
                 control
@@ -152,7 +152,7 @@ struct HostedChatDisplayFixture: View {
             } else if let error { Text(error) }
         }
         .environment(model)
-        .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-polish-light") ? .light : .dark)
+        .preferredColorScheme(HostedLaunch.arguments.contains("-polish-light") ? .light : .dark)
         .tronPresentation()
         .task {
             do {
@@ -238,13 +238,13 @@ struct HostedHomeDashboardFixture: View {
     @State private var firstRevealAt: Date?
     @State private var deliveredNotifications = HostedDeliveredNotificationFixture()
     private let actionProbe = HostedHomeActionProbe()
-    private let arguments = ProcessInfo.processInfo.arguments
+    private let arguments = HostedLaunch.arguments
     private let profile = GatewayProfile(id: "home-shell-fixture", label: "Home fixture", host: "localhost", port: 9847, machineId: "home-shell-fixture")
     private let gateway: HostedHomeShellGateway
     private let homeActivity = PresentationActivityCoordinator()
 
     init() {
-        let arguments = ProcessInfo.processInfo.arguments
+        let arguments = HostedLaunch.arguments
         let capabilityEnabled = !arguments.contains("-home-capability-absent")
         let initialState = arguments.first(where: { $0.hasPrefix("-home-shell-") })?.replacingOccurrences(of: "-home-shell-", with: "") ?? "undesignated"
         let gateway = HostedHomeShellGateway(capabilityEnabled: capabilityEnabled, initialState: initialState,
@@ -478,7 +478,7 @@ private actor HostedHomeShellGateway {
     func changeDashboard() { dashboardRevision += 1 }
 
     private func dashboardPage(_ params: [String: JSONValue]) -> JSONValue {
-        let arguments = ProcessInfo.processInfo.arguments
+        let arguments = HostedLaunch.arguments
         let cursor = params["cursor"]?.stringValue ?? "0"
         dashboardCursors.append(cursor)
         let offset = Int(cursor) ?? 0
@@ -561,7 +561,7 @@ private actor HostedHomeShellGateway {
                 .object(["sessionId": .string("home-session"), "ordinal": .number(2), "state": .string("active"),
                          "createdAt": .string(isoAgo(3 * 86_400)), "activationStarted": .bool(true),
                          "sessionPresent": .bool(true),
-                         "bytes": .number(ProcessInfo.processInfo.arguments.contains("-memory-boundary-regression") ? 5_536_481 : 480), "entries": .number(12),
+                         "bytes": .number(HostedLaunch.arguments.contains("-memory-boundary-regression") ? 5_536_481 : 480), "entries": .number(12),
                          "contents": .object(["firstAt": .string(isoAgo(3 * 86_400)), "lastAt": .string(isoAgo(3 * 60)),
                              "userMessages": .number(6), "homeReplies": .number(6), "tasksDelegated": .number(1),
                              "topics": .array([.string("Garden redesign")])])]),
@@ -593,7 +593,7 @@ private actor HostedHomeShellGateway {
     private func profileChange(_ params: [String: JSONValue]) -> (JSONValue?, JSONValue?) {
         guard params["commandId"]?.stringValue != nil, case .array(let changes)? = params["changes"], !changes.isEmpty else { return taskRefusal() }
         profileChangeCount += 1
-        if ProcessInfo.processInfo.arguments.contains("-home-profile-conflict"), profileChangeCount == 1 {
+        if HostedLaunch.arguments.contains("-home-profile-conflict"), profileChangeCount == 1 {
             return (nil, .object(["code": .string("conflict"), "message": .string("This profile item changed since it was read; review it and try again"),
                 "retryable": .bool(false)]))
         }
@@ -677,7 +677,7 @@ private actor HostedHomeShellGateway {
             if let onHomeRead { await onHomeRead(homeReadSummary()) }
         }
         switch method {
-        case "session.list" where ProcessInfo.processInfo.arguments.contains("-home-dashboard-behavior"):
+        case "session.list" where HostedLaunch.arguments.contains("-home-dashboard-behavior"):
             return (dashboardPage(params), nil)
         case "session.list":
             let row = SessionSummary(id: "ordinary-session", name: "Ordinary session", cwd: "/workspace", parentSessionId: nil,
@@ -691,7 +691,7 @@ private actor HostedHomeShellGateway {
         case "provider.list" where sheetState == "dashboard-workers":
             return (foreground.providers(HostedHomeDashboardWorkers.providers), nil)
         case "provider.usage":
-            if ProcessInfo.processInfo.arguments.contains("-home-dashboard-usage-delay") {
+            if HostedLaunch.arguments.contains("-home-dashboard-usage-delay") {
                 try await Task.sleep(for: .seconds(6))
             }
             return (HostedHomeDashboardWorkers.usage, nil)
@@ -704,7 +704,7 @@ private actor HostedHomeShellGateway {
         case "model.recent": return (.object(["models": .array([])]), nil)
         case "settings.history":
             seedHomeProfileEntry()
-            let entries: [JSONValue] = ProcessInfo.processInfo.arguments.contains("-home-settings-history") ? [
+            let entries: [JSONValue] = HostedLaunch.arguments.contains("-home-settings-history") ? [
                 .object(["changeId": .string("worker-setting"), "at": .string("2026-10-11T12:00:00Z"),
                     "actor": .object(["kind": .string("worker"), "sessionId": .string("worker-session"), "taskId": .string("active")]),
                     "target": .object(["kind": .string("home")]), "layer": .string("session"), "key": .string("model.thinking[role=worker]"),
@@ -788,7 +788,7 @@ private actor HostedHomeShellGateway {
                 guard params["grantId"]?.stringValue == "grant-one" else { return taskRefusal() }; grantRevoked = true
             }
             controlCount += 1; return (.object(["accepted": .bool(true)]), nil)
-        case "home.profileList" where ProcessInfo.processInfo.arguments.contains("-home-profile-empty"):
+        case "home.profileList" where HostedLaunch.arguments.contains("-home-profile-empty"):
             return (.object(["items": .array([]), "unclassified": .number(0)]), nil)
         case "home.profileList":
             seedHomeProfileEntry()
@@ -838,7 +838,7 @@ private actor HostedHomeShellGateway {
             promptRoutes.append("session.prompt:\(params["sessionId"]?.stringValue ?? "none")")
             return (nil, .object(["code": .string("conflict"), "message": .string("Sealed chapter refused"), "retryable": .bool(false)]))
         case "home.status":
-            homeStatusCount += 1; if ProcessInfo.processInfo.arguments.contains("-home-status-cycle") { phase = homeStatusCount % 3 == 1 ? "ready" : "active" }
+            homeStatusCount += 1; if HostedLaunch.arguments.contains("-home-status-cycle") { phase = homeStatusCount % 3 == 1 ? "ready" : "active" }
             if sheetState == "navigation-refresh", homeStatusCount > 1 {
                 try await Task.sleep(for: .seconds(4))
             }
@@ -920,17 +920,17 @@ private actor HostedHomeShellGateway {
                     semanticState: .init(statuses: [:], working: .init(message: nil, visible: false), hiddenThinkingLabel: nil, widgets: [], title: nil, toolsExpanded: false, editorRevision: 0, editorText: ""),
                     surfaces: [], pendingInteractions: []), diagnostics: [])
             if sessionID.hasPrefix("home-") { applyHomeChatConfiguration(to: &snapshot) }
-            if sessionID == "home-session", ProcessInfo.processInfo.arguments.contains("-home-tool-transcript") {
+            if sessionID == "home-session", HostedLaunch.arguments.contains("-home-tool-transcript") {
                 let transcript = HostedHomeToolFixture.transcript
-                let start = ProcessInfo.processInfo.arguments.contains("-home-tool-paged-transcript") ? max(0, transcript.count - 8) : 0
+                let start = HostedLaunch.arguments.contains("-home-tool-paged-transcript") ? max(0, transcript.count - 8) : 0
                 snapshot.transcript = Array(transcript.dropFirst(start))
                 snapshot.transcriptStart = start
                 snapshot.transcriptTotal = transcript.count
             }
             if sessionID == "home-session" { memorySnapshot = snapshot }
             return (.object(["session": try! JSONValue.encode(snapshot), "syncToken": .string("fixture-sync"),
-                "subscriptionToken": .string("fixture-subscription"), "completionRevision": .number(ProcessInfo.processInfo.arguments.contains("-home-dashboard-behavior") ? 1 : 0)]), nil)
-        case "session.transcript" where ProcessInfo.processInfo.arguments.contains("-home-tool-paged-transcript"):
+                "subscriptionToken": .string("fixture-subscription"), "completionRevision": .number(HostedLaunch.arguments.contains("-home-dashboard-behavior") ? 1 : 0)]), nil)
+        case "session.transcript" where HostedLaunch.arguments.contains("-home-tool-paged-transcript"):
             let transcript = HostedHomeToolFixture.transcript
             let before = min(transcript.count, max(0, params["before"]?.intValue ?? 0))
             return (.object([
@@ -1073,7 +1073,7 @@ private actor HostedHomeShellGateway {
     }
     private func taskSummary(_ id: String) -> JSONValue {
         let terminal = id == "terminal"
-        let paddingReview = ProcessInfo.processInfo.arguments.contains("-home-task-padding-review")
+        let paddingReview = HostedLaunch.arguments.contains("-home-task-padding-review")
         let now = nowMilliseconds()
         let created = id == "active" ? now - 2 * 3_600_000 : now - 86_400_000
         let updated = id == "active" ? now - 6 * 60_000 : now - 3 * 3_600_000
@@ -1139,12 +1139,12 @@ private actor HostedHomeShellGateway {
         var scope: [String: JSONValue] = ["id": .string("scope-one"), "kind": .string("all-trusted-projects"),
             "active": .bool(!scopeRevoked), "restoreEpoch": .string("fixture-epoch"), "createdAt": .number(1000)]
         if scopeRevoked { scope["revokedAt"] = .number(2000) }
-        if ProcessInfo.processInfo.arguments.contains("-home-permissions-empty") {
+        if HostedLaunch.arguments.contains("-home-permissions-empty") {
             return .object(["revision": .number(1), "needsReconfirmation": .bool(false), "scopes": .array([.object(scope)]),
                             "requests": .array([]), "decisions": .array([]), "grants": .array([])])
         }
         return .object(["revision": .number(Double(controlCount + 1)), "scopes": .array([.object(scope)]),
-            "needsReconfirmation": .bool(ProcessInfo.processInfo.arguments.contains("-home-permissions-restored") && !scopeRevoked && controlCount == 0),
+            "needsReconfirmation": .bool(HostedLaunch.arguments.contains("-home-permissions-restored") && !scopeRevoked && controlCount == 0),
             "requests": .array(ids.map { .object(["id": .string($0), "request": binding]) }), "decisions": .array(decisions), "grants": .array([.object(grant)])])
     }
 
@@ -1206,7 +1206,7 @@ private actor HostedHomeShellGateway {
     ]
 
     private func memoryMessage(_ index: Int) -> (kind: String, text: String) {
-        guard ProcessInfo.processInfo.arguments.contains("-memory-redesign") else {
+        guard HostedLaunch.arguments.contains("-memory-redesign") else {
             return Self.memoryMessages[index % Self.memoryMessages.count]
         }
         switch index {
@@ -1221,7 +1221,7 @@ private actor HostedHomeShellGateway {
         let message = memoryMessage(index)
         let attribution = ["user": "user", "talk": "assistant", "echo": "tool", "event": "event"][message.kind]!
         let session = index < Self.memorySealedEnd ? "home-chapter-sealed" : "home-session"
-        let redesign = ProcessInfo.processInfo.arguments.contains("-memory-redesign")
+        let redesign = HostedLaunch.arguments.contains("-memory-redesign")
         let summaryText = redesign && [35, 37, 38].contains(index)
             ? "Reviewed the memory contract and preserved the canonical source identity." : message.kind + ": " + message.text
         let summary: JSONValue = !redesign && index % 6 == 1 ? .null : .object(["format": .string("memory-summary"),
@@ -1268,7 +1268,7 @@ private actor HostedHomeShellGateway {
 
     private func memoryView(_ params: [String: JSONValue], empty: Bool) -> JSONValue {
         let revision = JSONValue.string(String(repeating: memoryAdvanced ? "b" : "a", count: 64))
-        if ProcessInfo.processInfo.arguments.contains("-memory-position-regression") {
+        if HostedLaunch.arguments.contains("-memory-position-regression") {
             let scoped = params["sessionId"]?.stringValue == "home-chapter-sealed"
             let count = scoped ? 32 : 40
             let lines = (0..<count).reversed().map { memoryLine(start: 7424 + $0 * 8, span: 8) }
@@ -1283,7 +1283,7 @@ private actor HostedHomeShellGateway {
         }
         if let part = params["part"]?.objectValue, let start = part["start"]?.intValue, let span = part["span"]?.intValue {
             let result = view([memoryLine(start: start, span: span / 2), memoryLine(start: start + span / 2, span: span / 2)])
-            if ProcessInfo.processInfo.arguments.contains("-memory-boundary-regression"), !memoryAdvanced,
+            if HostedLaunch.arguments.contains("-memory-boundary-regression"), !memoryAdvanced,
                var snapshot = memorySnapshot {
                 memoryAdvanced = true
                 snapshot.revision += 1
@@ -1322,13 +1322,13 @@ private actor HostedHomeShellGateway {
     }
 
     private var hostPressure: JSONValue {
-        let args = ProcessInfo.processInfo.arguments
+        let args = HostedLaunch.arguments
         let level = args.contains("-host-critical") ? "critical" : args.contains("-host-elevated") ? "elevated" : "normal"
         return .object(["level": .string(level)])
     }
 
     private var workers: JSONValue {
-        let args = ProcessInfo.processInfo.arguments
+        let args = HostedLaunch.arguments
         return .object(["running": .number(args.contains("-host-critical") ? 7 : args.contains("-host-elevated") ? 1 : 0)])
     }
 
@@ -1364,7 +1364,7 @@ private actor HostedHomeShellGateway {
             "sessionId": sessionPresent ? .string("home-session") : .null,
             "openSessionId": sessionPresent ? .string("home-session") : .null,
             "generation": .number(1), "live": .bool(false), "sessionPresent": .bool(sessionPresent),
-            "waitingForUser": .bool(ProcessInfo.processInfo.arguments.contains("-home-waiting") || (ProcessInfo.processInfo.arguments.contains("-home-status-cycle") && homeStatusCount % 3 == 0)),
+            "waitingForUser": .bool(HostedLaunch.arguments.contains("-home-waiting") || (HostedLaunch.arguments.contains("-home-status-cycle") && homeStatusCount % 3 == 0)),
             "model": designated ? .object(["provider": .string("anthropic"), "id": .string("claude-opus-5-5")]) : .null,
             "chapter": designated ? .object(["count": .number(2), "currentBytes": .number(480),
                 "currentEntries": .number(12), "recoveryDecision": .string("none")]) : .null,
@@ -1415,7 +1415,7 @@ private actor HostedHomeShellSocket: GatewaySocketConnection {
                 "subscriptionToken": .string("fixture-subscription"), "payload": try JSONValue.encode(snapshot)
             ])))
         }
-        if method == "session.attention.read", ProcessInfo.processInfo.arguments.contains("-home-dashboard-behavior") {
+        if method == "session.attention.read", HostedLaunch.arguments.contains("-home-dashboard-behavior") {
             await deliver(try JSONEncoder.gateway.encode(JSONValue.object([
                 "type": .string("event"), "topic": .string("session.listChanged"), "payload": .object([:])
             ])))
@@ -1478,7 +1478,7 @@ enum HostedHomeDashboardWorkers {
             completionRevision: unread ? 1 : 0, isUnread: unread))
     }
 
-    static var sessions: [CatalogSession] { workersAndChats + (ProcessInfo.processInfo.arguments.contains("-home-dashboard-other-sessions") ? otherSessions : []) }
+    static var sessions: [CatalogSession] { workersAndChats + (HostedLaunch.arguments.contains("-home-dashboard-other-sessions") ? otherSessions : []) }
 
     private static let workersAndChats: [CatalogSession] = [
         worker("worker-running", "Home dashboard view prototype", cwd: "/work/tron", ago: 120, phase: .running),
@@ -1510,9 +1510,9 @@ enum HostedHomeDashboardWorkers {
 
     static let newWorker = worker("worker-new", "Freshly dispatched worker", cwd: "/work/tron", ago: 5, phase: .running)
 
-    private static var longName: Bool { ProcessInfo.processInfo.arguments.contains("-home-usage-long-name") }
-    private static var scopedWeekly: Bool { ProcessInfo.processInfo.arguments.contains("-home-usage-scoped-weekly") }
-    private static var openCodeGo: Bool { ProcessInfo.processInfo.arguments.contains("-home-usage-opencode-go") }
+    private static var longName: Bool { HostedLaunch.arguments.contains("-home-usage-long-name") }
+    private static var scopedWeekly: Bool { HostedLaunch.arguments.contains("-home-usage-scoped-weekly") }
+    private static var openCodeGo: Bool { HostedLaunch.arguments.contains("-home-usage-opencode-go") }
 
     static var providers: JSONValue {
         .object(["providers": .array([

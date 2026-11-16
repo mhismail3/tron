@@ -4,7 +4,7 @@ import TronMobileCore
 
 enum HostedHomeTaskHistoryFixture {
     private static let now = Date().timeIntervalSince1970
-    static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("-home-task-history-review") }
+    static var enabled: Bool { HostedLaunch.arguments.contains("-home-task-history-review") }
     static func checkin(_ index: Int) -> JSONValue {
         .object([
             "id": .string("history-checkin-\(index)"), "taskId": .string(index > 10 ? "active" : "terminal"),

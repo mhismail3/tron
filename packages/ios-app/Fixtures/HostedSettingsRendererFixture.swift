@@ -8,7 +8,7 @@ struct HostedSettingsRendererFixture: View {
     @State private var push = PushNotificationCoordinator(credentials: UIReviewPushStore(), notifications: .live, appAttest: .live, configuration: nil)
     @State private var ready = false
     @State private var activity = PresentationActivityCoordinator()
-    @State private var covering = ProcessInfo.processInfo.arguments.contains("-sheet-haptics-restored")
+    @State private var covering = HostedLaunch.arguments.contains("-sheet-haptics-restored")
     @State private var nestedSettings = false
     @State private var heldPreviews = 0
     @State private var error: String?
@@ -23,7 +23,7 @@ struct HostedSettingsRendererFixture: View {
     private let profile: GatewayProfile
 
     init() {
-        if let lastLook = HostedSettingsChangesReview.lastLook ?? (ProcessInfo.processInfo.arguments.contains("-settings-changes") ? "2026-10-10T00:00:00Z" : nil) {
+        if let lastLook = HostedSettingsChangesReview.lastLook ?? (HostedLaunch.arguments.contains("-settings-changes") ? "2026-10-10T00:00:00Z" : nil) {
             UserDefaults.standard.set(lastLook, forKey: "settings.changes.lastLookedAt.settings-renderer-fixture.all")
         }
         let store = AutomationFixtureProfileStore()
@@ -31,12 +31,12 @@ struct HostedSettingsRendererFixture: View {
         profile = GatewayProfile(id: "settings-renderer-fixture", label: "Fixture", host: "gateway.test", port: 9847,
             machineId: "fixture-machine", deviceId: "fixture-device")
         try! profiles.save(profile, token: "fixture-token")
-        if ProcessInfo.processInfo.arguments.contains("-settings-expanded-review") {
+        if HostedLaunch.arguments.contains("-settings-expanded-review") {
             try! profiles.save(GatewayProfile(id: "review-offline", label: "Workshop Mac", host: "offline.test", port: 9847,
                 machineId: "review-offline-machine",
-                machineGroupID: ProcessInfo.processInfo.arguments.contains("-settings-paired-offline") ? "workshop-host" : nil,
+                machineGroupID: HostedLaunch.arguments.contains("-settings-paired-offline") ? "workshop-host" : nil,
                 deviceId: "review-offline-device"), token: "fixture-token", selecting: false)
-            if ProcessInfo.processInfo.arguments.contains("-settings-paired-offline") {
+            if HostedLaunch.arguments.contains("-settings-paired-offline") {
                 try! profiles.save(GatewayProfile(id: "review-studio", label: "Studio Mac", host: "studio.test", port: 9847,
                     machineId: "review-studio-machine", machineGroupID: "studio-host", deviceId: "studio-device"),
                     token: "fixture-token", selecting: false)
@@ -112,36 +112,36 @@ struct HostedSettingsRendererFixture: View {
         NavigationStack {
             if ready {
                 Group {
-                    if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-project-lifecycle-preview"),
-                       ProcessInfo.processInfo.arguments.indices.contains(index + 1) {
-                        HostedProjectLifecyclePreview(surface: ProcessInfo.processInfo.arguments[index + 1])
-                    } else if ProcessInfo.processInfo.arguments.contains("-theme-icon-boundary") {
+                    if let index = HostedLaunch.arguments.firstIndex(of: "-project-lifecycle-preview"),
+                       HostedLaunch.arguments.indices.contains(index + 1) {
+                        HostedProjectLifecyclePreview(surface: HostedLaunch.arguments[index + 1])
+                    } else if HostedLaunch.arguments.contains("-theme-icon-boundary") {
                         HostedThemeIconFixture()
-                    } else if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-six-ui-surface"),
-                       ProcessInfo.processInfo.arguments.indices.contains(index + 1) {
-                        let surface = ProcessInfo.processInfo.arguments[index + 1]
+                    } else if let index = HostedLaunch.arguments.firstIndex(of: "-six-ui-surface"),
+                       HostedLaunch.arguments.indices.contains(index + 1) {
+                        let surface = HostedLaunch.arguments[index + 1]
                         if surface.hasPrefix("worker-") {
                             HostedWorkerToolFixture(surface: surface)
                         } else {
                             HostedSixSmallUIFixture(surface: surface)
                         }
-                    } else if ProcessInfo.processInfo.arguments.contains("-settings-controls-review") {
+                    } else if HostedLaunch.arguments.contains("-settings-controls-review") {
                         controlsReview
-                    } else if ProcessInfo.processInfo.arguments.contains("-settings-alignment-review") {
+                    } else if HostedLaunch.arguments.contains("-settings-alignment-review") {
                         SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global", presentation: .section("context"))
                     } else if HostedExtensionsReview.project {
                         SettingsRendererView(target: SettingsTarget.project(cwd: "/fixture/project").gatewayTarget, writeLayer: nil, presentation: .section("tools"))
-                    } else if ProcessInfo.processInfo.arguments.contains("-settings-ui-providers") {
+                    } else if HostedLaunch.arguments.contains("-settings-ui-providers") {
                         providerReview
-                    } else if ProcessInfo.processInfo.arguments.contains("-settings-ui-push") {
+                    } else if HostedLaunch.arguments.contains("-settings-ui-push") {
                         PushNotificationsSettingsView()
-                    } else if ProcessInfo.processInfo.arguments.contains("-settings-changes") {
-                        SettingsChangesView(scope: ProcessInfo.processInfo.arguments.contains("-settings-changes-session")
+                    } else if HostedLaunch.arguments.contains("-settings-changes") {
+                        SettingsChangesView(scope: HostedLaunch.arguments.contains("-settings-changes-session")
                             ? .session("fixture-chat", projectCWD: "/fixture/project") : .all,
                             onOpenSession: { openedRoute = $0 })
-                    } else if ProcessInfo.processInfo.arguments.contains("-settings-renderer-held-preview") || ProcessInfo.processInfo.arguments.contains("-settings-renderer-confirm") || ProcessInfo.processInfo.arguments.contains("-settings-renderer-haptics") {
+                    } else if HostedLaunch.arguments.contains("-settings-renderer-held-preview") || HostedLaunch.arguments.contains("-settings-renderer-confirm") || HostedLaunch.arguments.contains("-settings-renderer-haptics") {
                         SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global", presentation: .section("context"))
-                    } else if ProcessInfo.processInfo.arguments.contains("-settings-nested") {
+                    } else if HostedLaunch.arguments.contains("-settings-nested") {
                         Button("Open Settings") { nestedSettings = true }
                             .tronManagedSheet(isPresented: $nestedSettings, identity: "fixture.nested-settings") {
                                 SettingsView()
@@ -151,22 +151,22 @@ struct HostedSettingsRendererFixture: View {
                     }
                 }
                 .safeAreaInset(edge: .bottom) {
-                    if !ProcessInfo.processInfo.arguments.contains("-settings-alignment-review")
-                        && !ProcessInfo.processInfo.arguments.contains("-settings-controls-review")
-                        && !ProcessInfo.processInfo.arguments.contains("-six-ui-surface")
-                        && !ProcessInfo.processInfo.arguments.contains("-project-lifecycle-preview") {
+                    if !HostedLaunch.arguments.contains("-settings-alignment-review")
+                        && !HostedLaunch.arguments.contains("-settings-controls-review")
+                        && !HostedLaunch.arguments.contains("-six-ui-surface")
+                        && !HostedLaunch.arguments.contains("-project-lifecycle-preview") {
                     HStack {
                         Text("applied:\(applied)").accessibilityIdentifier("fixture.settings-renderer-applied")
                         Text("held:\(heldPreviews)").accessibilityIdentifier("fixture.settings-renderer-held")
-                        if ProcessInfo.processInfo.arguments.contains("-settings-renderer-held-preview") { Button("Cover renderer") { covering = true } }
+                        if HostedLaunch.arguments.contains("-settings-renderer-held-preview") { Button("Cover renderer") { covering = true } }
                         Text("haptics:\(TronHapticsProbe.shared.summary)").accessibilityIdentifier("fixture.haptics")
                         Text("thinking-options:\(thinkingOptions)").accessibilityIdentifier("fixture.settings-renderer-thinking-options")
                         Text("undos:\(undos)").accessibilityIdentifier("fixture.settings-changes-undos")
                         Text(decisions).accessibilityIdentifier("fixture.settings-changes-decisions")
-                        if ProcessInfo.processInfo.arguments.contains("-settings-ui-tools-write") {
+                        if HostedLaunch.arguments.contains("-settings-ui-tools-write") {
                             Text(toolWrite).accessibilityIdentifier("fixture.tools-write")
                         }
-                        if ProcessInfo.processInfo.arguments.contains("-settings-provider-actions") {
+                        if HostedLaunch.arguments.contains("-settings-provider-actions") {
                             Text(providerOperations).accessibilityIdentifier("fixture.provider-operations")
                         }
                         if let openedRoute {
@@ -187,7 +187,7 @@ struct HostedSettingsRendererFixture: View {
         }
         .environment(model)
         .environment(push)
-        .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-settings-renderer-dark") ? .dark : .light)
+        .preferredColorScheme(HostedLaunch.arguments.contains("-settings-renderer-dark") ? .dark : .light)
         .tronPresentation()
         .tronSettingsLayout()
         .task {
@@ -293,7 +293,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             result = .object(["path": params["path"] ?? .string("/fixture/projects"), "parent": .string("/fixture"), "entries": .array([
                 .object(["name": .string("Example"), "path": .string("/fixture/projects/Example"), "kind": .string("directory"), "hidden": .bool(false)])
             ])])
-        case "session.workspace.inspect" where ProcessInfo.processInfo.arguments.contains("-six-ui-surface"):
+        case "session.workspace.inspect" where HostedLaunch.arguments.contains("-six-ui-surface"):
             result = .object(["root": .string("/Users/fixture/Workspace/tron-worktrees/six-small-ui-fixes"), "revision": .string("preview"),
                 "repository": .object(["root": .string("/Users/fixture/Workspace/tron-worktrees/six-small-ui-fixes"),
                     "branch": .null, "head": .string("b8d31a1d12345678"), "detached": .bool(true), "unborn": .bool(false),
@@ -303,8 +303,8 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 "path": .string(""), "parent": .null, "revision": .string("preview"), "entries": .array([])])
         case "projects.list":
             projectReads += 1
-            if ProcessInfo.processInfo.arguments.contains("-projects-withhold-once"), projectReads == 1 { return }
-            if ProcessInfo.processInfo.arguments.contains("-projects-fail-once"), projectReads == 1 {
+            if HostedLaunch.arguments.contains("-projects-withhold-once"), projectReads == 1 { return }
+            if HostedLaunch.arguments.contains("-projects-fail-once"), projectReads == 1 {
                 try enqueue(.object(["type": .string("response"), "id": .string(id), "ok": .bool(false),
                     "error": .object(["code": .string("busy"), "message": .string("Project listing is unavailable. Try again."), "retryable": .bool(true)])]))
                 return
@@ -322,7 +322,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         case "settings.resolve": result = resolution()
         case "settings.options": result = try options(key: params["key"]?.stringValue ?? "", cursor: params["cursor"]?.stringValue)
         case "settings.change":
-            if ProcessInfo.processInfo.arguments.contains("-settings-renderer-held-preview"),
+            if HostedLaunch.arguments.contains("-settings-renderer-held-preview"),
                params["dryRun"]?.boolValue == true, previewsHeld == 0 {
                 previewsHeld += 1
                 await withCheckedContinuation { heldPreview = $0 }
@@ -331,14 +331,14 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         case "settings.history": result = HostedSettingsChangesReview.page(params) ?? historyPage(params)
         case "settings.undo":
             undos += 1
-            if ProcessInfo.processInfo.arguments.contains("-settings-undo-refused") {
+            if HostedLaunch.arguments.contains("-settings-undo-refused") {
                 let failure: JSONValue = .object(["code": .string("conflict"),
                     "message": .string("The setting changed since; undo would overwrite a newer value"),
                     "retryable": .bool(false), "details": .object([
                         "current": .number(8), "after": .number(6),
                         "display": .object(["current": .string("8 retries"), "after": .string("6 retries")])
                     ])])
-                if ProcessInfo.processInfo.arguments.contains("-settings-undo-outcome-refused") {
+                if HostedLaunch.arguments.contains("-settings-undo-outcome-refused") {
                     result = .object(["status": .string("applied"), "changes": .array([
                         .object(["key": .string("run.transport"), "status": .string("applied")]), .object([
                         "key": .string("run.retry.maxRetries"), "status": .string("failed"), "error": failure
@@ -362,7 +362,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             return .object(["entries": .array([]), "nextCursor": .string("fixture-next")])
         }
         var entries = [historyEntry()]
-        if ProcessInfo.processInfo.arguments.contains("-settings-changes-scope") {
+        if HostedLaunch.arguments.contains("-settings-changes-scope") {
             let base = historyEntry().objectValue!
             entries += [
                 .object(base.merging(["changeId": .string("project-change"), "layer": .string("project"),
@@ -394,7 +394,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     private let weights: [String: JSONValue] = ["red": .number(2)]
 
     private func historyEntry() -> JSONValue {
-        if ProcessInfo.processInfo.arguments.contains("-settings-changes-redacted") {
+        if HostedLaunch.arguments.contains("-settings-changes-redacted") {
             return .object([
                 "changeId": .string("fixture-change"), "at": .string("2026-10-11T12:00:00.000Z"),
                 "actor": .object(["kind": .string("agent"), "sessionId": .string("fixture-chat")]),
@@ -423,18 +423,18 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     }
 
     private func resolution() -> JSONValue {
-        if ProcessInfo.processInfo.arguments.contains("-settings-expanded-review") {
+        if HostedLaunch.arguments.contains("-settings-expanded-review") {
             let rows = [HostedSettingsReviewSchema.key("model.ref[role=chat]", "model", "Model", .object(["provider": .string("fixture"), "id": .string("pro")]), "Fixture Model", "catalog", essential: true)]
-                + (ProcessInfo.processInfo.arguments.contains("-agent-behavior-regression")
+                + (HostedLaunch.arguments.contains("-agent-behavior-regression")
                     ? HostedSettingsReviewSchema.agentBehaviorKeys : HostedSettingsReviewSchema.additionalKeys)
                     .filter { row in
-                        guard ProcessInfo.processInfo.arguments.contains("-served-agent-behavior") else { return true }
+                        guard HostedLaunch.arguments.contains("-served-agent-behavior") else { return true }
                         let key = row.objectValue?["key"]?.stringValue ?? ""
                         return key != "model.thinking[role=chat]" && !key.hasPrefix("context.")
                     }
-                + (ProcessInfo.processInfo.arguments.contains("-settings-sheet-theme-review") ? HostedSettingsReviewSchema.sheetThemeKeys : [])
+                + (HostedLaunch.arguments.contains("-settings-sheet-theme-review") ? HostedSettingsReviewSchema.sheetThemeKeys : [])
                 + [HostedSettingsReviewSchema.key("setup.installTelemetry", "setup", "Install telemetry", .bool(false), "Off", "toggle", order: 20)]
-            if ProcessInfo.processInfo.arguments.contains("-six-ui-surface") {
+            if HostedLaunch.arguments.contains("-six-ui-surface") {
                 return .object(["keys": .array(rows), "sections": .array(HostedSettingsReviewSchema.sections)])
             }
             let keys = rows.compactMap { value -> JSONValue? in
@@ -457,7 +457,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             return .object(["keys": .array(keys), "sections": .array(HostedSettingsReviewSchema.sections + [
                 .object(["id": .string("setup"), "title": .string("Setup"), "order": .number(80)])])])
         }
-        if ProcessInfo.processInfo.arguments.contains("-settings-alignment-review") {
+        if HostedLaunch.arguments.contains("-settings-alignment-review") {
             let keys = [("inherited", "Inherited value", "16,384 tokens", false),
                         ("short", "Short value", "—", false),
                         ("revert", "Owned value", "High", true),
@@ -591,7 +591,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         }
         var outcome: [String: JSONValue] = ["changeId": .string(dryRun ? "" : "change-\(applied)"), "key": .string(key),
             "layer": .string("global"), "status": .string("applied"), "tier": .string("quiet")]
-        let review: [String: JSONValue] = dryRun && key == "context.images.block" && ProcessInfo.processInfo.arguments.contains("-settings-renderer-confirm")
+        let review: [String: JSONValue] = dryRun && key == "context.images.block" && HostedLaunch.arguments.contains("-settings-renderer-confirm")
             ? ["review": .object(["digest": .string(String(repeating: "b", count: 64)), "title": .string("Change image delivery"),
                 "requiresTap": .bool(true), "reason": .string("Confirm changing image delivery."),
                 "items": .array([.object(["label": .string("Block images"), "before": .string("Off"), "after": .string("On")])])])]
@@ -606,7 +606,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         var object: [String: JSONValue] = [
             "key": .string(id), "group": .string(group), "display": .string(display), "layer": .string(layer), "applied": .bool(true),
             "overridden": .bool(set),
-            "layers": .array(ProcessInfo.processInfo.arguments.contains("-settings-ui-tools-write") && id == "tools.active"
+            "layers": .array(HostedLaunch.arguments.contains("-settings-ui-tools-write") && id == "tools.active"
                 ? HostedExtensionsReview.layers(own: value ?? .null) : [.object(["layer": .string("global")])]),
             "badges": .array(badges),
             "presentation": presentation,
@@ -642,9 +642,9 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         guard !closed else { throw CancellationError() }
         if hello {
             hello = false
-            let capabilities = ProcessInfo.processInfo.arguments.contains("-agent-behavior-regression")
+            let capabilities = HostedLaunch.arguments.contains("-agent-behavior-regression")
                 ? #"["sessions.v1","projects.lifecycle.v1"]"#
-                : ProcessInfo.processInfo.arguments.contains("-settings-sheet-theme-review")
+                : HostedLaunch.arguments.contains("-settings-sheet-theme-review")
                     ? #"["sessions.v1","gateway-update.v1","restart-supervised.v1","projects.lifecycle.v1"]"# : #"["sessions.v1"]"#
             return Data("""
                 {"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":8,"minProtocolVersion":8,"machineId":"fixture-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":\(capabilities)}

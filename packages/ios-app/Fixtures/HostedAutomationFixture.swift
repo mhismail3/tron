@@ -82,7 +82,7 @@ struct HostedAutomationFixtureView: View {
     @State private var activity = PresentationActivityCoordinator()
 
     init() {
-        let arguments = ProcessInfo.processInfo.arguments
+        let arguments = HostedLaunch.arguments
         let base = try! [
             AutomationPresentationFixture.record(),
             AutomationPresentationFixture.record(last: false, notification: true),
@@ -164,12 +164,12 @@ struct HostedAutomationFixtureView: View {
         .environment(model)
         .environment(\.tronPresentationActivityCoordinator, activity)
         .tronPresentation()
-        .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-automation-dark") ? .dark : .light)
+        .preferredColorScheme(HostedLaunch.arguments.contains("-automation-dark") ? .dark : .light)
         .task {
             do {
                 try await model.connectHostedGateway(profile: profile, token: "fixture-token")
                 ready = true
-                dateControlsPresented = ProcessInfo.processInfo.arguments.contains("-automation-date-controls")
+                dateControlsPresented = HostedLaunch.arguments.contains("-automation-date-controls")
             } catch { self.error = error.localizedDescription }
         }
     }

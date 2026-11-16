@@ -20,12 +20,12 @@ struct HostedChatAnnotationFixture: View {
     private let snapshot: SessionSnapshot
     private let socket = HostedChatAnnotationSocket()
     private let probe = ChatHostedProbe()
-    private let dark = !ProcessInfo.processInfo.arguments.contains("-annotation-light")
+    private let dark = !HostedLaunch.arguments.contains("-annotation-light")
 
     init() {
         let defaults = UserDefaults(suiteName: "chat-annotation-fixture")!
         defaults.removePersistentDomain(forName: "chat-annotation-fixture")
-        probe.reducesMotion = ProcessInfo.processInfo.arguments.contains("-annotation-reduce-motion")
+        probe.reducesMotion = HostedLaunch.arguments.contains("-annotation-reduce-motion")
         profile = GatewayProfile(id: "annotation-fixture", label: "Fixture", host: "gateway.test", port: 9847,
             machineId: "fixture-machine", deviceId: "fixture-device")
         defaults.set(try! JSONEncoder.gateway.encode(

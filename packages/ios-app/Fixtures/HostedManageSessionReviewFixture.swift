@@ -3,7 +3,7 @@ import Foundation
 import TronMobileCore
 
 enum HostedManageSessionReview {
-    static let enabled = ProcessInfo.processInfo.arguments.contains("-manage-session-review")
+    static var enabled: Bool { HostedLaunch.arguments.contains("-manage-session-review") }
 
     static var contextUsage: ContextUsage? {
         guard enabled else { return nil }

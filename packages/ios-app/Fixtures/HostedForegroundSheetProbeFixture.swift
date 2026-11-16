@@ -12,7 +12,7 @@ import UIKit
     private static var liveAnchors = Set<String>()
     private static var rpcCounts: [String: Int] = [:]
     private static var rpcTrace: [[String: Any]] = []
-    static let enabled = ProcessInfo.processInfo.arguments.contains("-foreground-sheet-probe")
+    static var enabled: Bool { HostedLaunch.arguments.contains("-foreground-sheet-probe") }
     private static let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("foreground-sheet-probe.jsonl")
 

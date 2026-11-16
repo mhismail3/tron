@@ -12,7 +12,7 @@ from pathlib import PurePosixPath
 
 KEYS = {"root", "scriptsTop", "frozen"}
 TEST_NAME = re.compile(r"(^test[-_].+\.(py|sh|js|mjs)$)|(\.test\.(ts|mjs|js)$)|(Tests?\.swift$)")
-SWIFT_TEST_DIRS = {"UITests", "E2ETests", "ProfilingTests", "SwiftAppUITests", "Tests"}
+SWIFT_TEST_DIRS = {"UITests", "E2ETests", "ProfilingTests", "SwiftAppUITests", "ViewTests", "Tests"}
 NO_TESTS = {"docs", "config", ".agents", ".github"}
 TOOLING_SUFFIXES = (".py", ".sh", ".mjs", ".js", ".ts")
 PURPOSE_LINES = 12
@@ -95,7 +95,7 @@ def problems(layout: dict, paths: list[str], modes: dict[str, str], read, base: 
                 out.append(f"layout: {path}: tests live beside the code they prove, never in {where}")
             if name.endswith(".swift") and not SWIFT_TEST_DIRS.intersection(PurePosixPath(path).parts[:-1]):
                 out.append(f"layout: {path}: Swift tests belong in a test target (UITests/, E2ETests/, ProfilingTests/, "
-                           "SwiftAppUITests/, Tests/), not app sources")
+                           "SwiftAppUITests/, ViewTests/, Tests/), not app sources")
 
     if base is not None and not schema(base):
         for key in ("root", "scriptsTop"):

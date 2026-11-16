@@ -5,9 +5,9 @@ import TronMobileCore
 struct HostedSessionArchiveFixture: View {
     private static let profileID = "fixture"
     private static let pagesOneArchivedSessionPerRead =
-        ProcessInfo.processInfo.arguments.contains("-tron-session-archive-paging-fixture")
+        HostedLaunch.arguments.contains("-tron-session-archive-paging-fixture")
     private static let revealFixture =
-        ProcessInfo.processInfo.arguments.contains("-tron-session-archive-reveal-fixture")
+        HostedLaunch.arguments.contains("-tron-session-archive-reveal-fixture")
     private static let gatedReadCount = pagesOneArchivedSessionPerRead || revealFixture ? 1 : 0
     private static let revealReadDelay = Duration.seconds(3)
     private static let revealLiveRowCount = 24

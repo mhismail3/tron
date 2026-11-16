@@ -9,7 +9,7 @@ struct HostedIdleControlFixture: View {
     @State private var coordinator = PresentationActivityCoordinator()
 
     private var kind: String {
-        let arguments = ProcessInfo.processInfo.arguments
+        let arguments = HostedLaunch.arguments
         let index = arguments.firstIndex(of: "-tron-idle-control")!
         return arguments[index + 1]
     }

@@ -72,7 +72,7 @@ struct HostedSessionConfigurationFixture: View {
                     .frame(width: 0, height: 0)
             }
         }
-        .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("dark") ? .dark : .light)
+        .preferredColorScheme(HostedLaunch.arguments.contains("dark") ? .dark : .light)
         .tronPresentation()
         .task {
             do {
@@ -123,7 +123,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
     private var modelRequests = 0
     private var modelDelivery: Task<Void, Error>?
     nonisolated static var gatesModelReceipts: Bool {
-        ProcessInfo.processInfo.arguments.contains { $0.hasPrefix("-model-ack-") }
+        HostedLaunch.arguments.contains { $0.hasPrefix("-model-ack-") }
     }
     private var modelReceiptGate: CheckedContinuation<Void, Never>?
     private var releasedModelReceipts = 0
@@ -238,7 +238,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
         case "session.context":
             result = .object(["activeTools": .array(HostedSettingsReviewSchema.tools.map(JSONValue.string))])
         case let method where HostedManageSessionReview.enabled && HostedManageSessionReview.handles(method):
-            if method == "session.workspace.inspect", ProcessInfo.processInfo.arguments.contains("-workspace-capture-delay") {
+            if method == "session.workspace.inspect", HostedLaunch.arguments.contains("-workspace-capture-delay") {
                 try await Task.sleep(for: .seconds(1))
             }
             result = HostedManageSessionReview.response(method, params: params)
@@ -274,7 +274,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                       params["fence"]?.objectValue?["model"] == (try JSONValue.encode(snapshot.model)) else {
                     throw GatewayFailure(code: "invalid_request", message: "Model change lacked its session fence", retryable: false, details: nil)
                 }
-                let scenario = ProcessInfo.processInfo.arguments.first { $0.hasPrefix("-model-ack-") } ?? "-model-ack-snapshot-first"
+                let scenario = HostedLaunch.arguments.first { $0.hasPrefix("-model-ack-") } ?? "-model-ack-snapshot-first"
                 modelDelivery = Task {
                     if Self.gatesModelReceipts {
                         await withTaskCancellationHandler { await self.awaitModelReceiptRelease() }
@@ -334,7 +334,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             snapshot.revision += 1
             pendingThinking = (id, snapshot.revision)
             return
-        case "session.processHistory.list" where ProcessInfo.processInfo.arguments.contains("-history-long"):
+        case "session.processHistory.list" where HostedLaunch.arguments.contains("-history-long"):
             try await Task.sleep(for: .milliseconds(750))
             result = .object(["historyRevision": .string("fixture-history"),
                             "activities": try JSONValue.encode(HostedSubagentParityFixture.historyProcesses(sequence: 1, stage: 6, resumed: false)),
@@ -343,7 +343,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             result = try HostedLargeHistory.page(params, runtime: snapshot.runtimeGeneration)
         case "session.history.entry" where HostedLargeHistory.enabled:
             result = try HostedLargeHistory.entry(params, runtime: snapshot.runtimeGeneration)
-        case "session.history.list" where ProcessInfo.processInfo.arguments.contains("-history-empty"):
+        case "session.history.list" where HostedLaunch.arguments.contains("-history-empty"):
             result = try JSONValue.encode(SessionHistoryPage(runtimeGeneration: snapshot.runtimeGeneration,
                 nodes: [], older: nil, newer: nil, totalEntries: 0))
         case "session.history.list":
