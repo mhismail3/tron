@@ -13,7 +13,6 @@ export interface McpServerValue {
   command?: string;
   args?: string[];
   url?: string;
-  description?: string;
   headers?: { Authorization: McpBearerReference };
   enabled?: boolean;
   exposure?: McpExposure;
@@ -23,7 +22,7 @@ export function mcpBearerReference(server: string): McpBearerReference {
   return { source: "keychain", service: "tron.mcp", account: `tron-mcp-${server}`, format: "bearer" };
 }
 
-const FIELDS = ["command", "args", "url", "description", "headers", "enabled", "exposure"] as const;
+const FIELDS = ["command", "args", "url", "headers", "enabled", "exposure"] as const;
 const MCP_HINT = "MCP secrets are set in mcp.json, or as a bearer token stored in the Keychain by the app, never through settings";
 
 function secretFreeText(text: string, label: string, what: string): string {
@@ -74,7 +73,6 @@ function validateMcpServerValue(value: unknown, label: string, server?: string):
     if (raw.headers !== undefined) result.headers = bearerHeaders(raw.headers, label, server);
   }
   if (raw.headers !== undefined && result.headers === undefined) refuse(label, "headers apply only to a url");
-  if (raw.description !== undefined) result.description = secretFreeText(string(raw.description, `${label}.description`, { min: 1, max: 1_024 }), label, "description");
   if (raw.enabled !== undefined) result.enabled = boolean(raw.enabled, `${label}.enabled`);
   if (raw.exposure !== undefined) result.exposure = oneOf(raw.exposure, `${label}.exposure`, MCP_EXPOSURES);
   return result;

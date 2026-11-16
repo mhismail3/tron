@@ -172,7 +172,7 @@ export class McpAdminService {
     }) : [];
     const errors = Array.isArray(raw.errors) ? raw.errors.length : 0;
     if (scope.scope === "project") return { servers, errors };
-    const table = await this.globalServers();
+    const table = await this.globalServers().catch(() => undefined);
     return { servers: servers.map(row => {
       if (row.scope !== "global" || table?.[row.name] === undefined) return row;
       try { return { ...row, value: mcpServerOnDisk(row.name, table[row.name]) }; } catch { return row; }

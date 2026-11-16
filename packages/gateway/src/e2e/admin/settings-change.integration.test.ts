@@ -380,7 +380,7 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
   const macTerminalKeys = new MacTerminalKeys(privateService.root);
   const keychain: string[] = [];
   const mcpAdmin = new McpAdminService(agentDir, join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js"),
-    { store: async (...args: string[]) => { keychain.push(args.at(-1)!); return `tron-mcp-${args.at(-2)}`; } } as never);
+    { async store(_account: string, token: string) { keychain.push(token); } });
   const modelConfig = new ModelConfigService(agentDir);
   const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: privateService, mcpAdmin, modelConfig }));
   const record = new SettingsChangeRecord(tronHome, options.segmentEntries);

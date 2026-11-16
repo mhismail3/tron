@@ -401,7 +401,6 @@ export class GatewayService {
     }
   }
 
-
   startModelReleaseDateRefresh(): void {
     this.modelReleaseDates.start();
   }

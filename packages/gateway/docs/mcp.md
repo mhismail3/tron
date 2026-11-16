@@ -130,7 +130,7 @@ never returned or logged.
 Every change to an `mcp.json`, through `settings.change` or outside Tron, broadcasts
 `mcp.changed` (`{ scope: "global" }` or `{ scope: "project", projectDir }`). An outside
 change is also a settings record entry with a push; Tron's own writes are
-adopted as observed, never recorded as outside changes
+bracketed by the change path, never recorded as outside changes
 ([settings contract](settings-contract.md#outside-changes)).
 
 ## Sign-in relay
