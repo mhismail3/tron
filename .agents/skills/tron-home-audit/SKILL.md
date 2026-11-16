@@ -1,6 +1,6 @@
 ---
 name: tron-home-audit
-description: Audit Home behavior, memory quality, orchestration, and provider cost over a bounded observation window; produce comparable evidence-linked reports and distinguish deployed behavior from repository fixes.
+description: Audit bounded Home behavior, memory, orchestration and provider cost with comparable evidence; distinguish source fixes from deployed behavior.
 ---
 
 # Home audit

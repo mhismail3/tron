@@ -37,7 +37,7 @@ export function audit(layers, sources = []) {
       const ids = items.filter(Boolean).map(item => item[1]);
       const opener = /open="([^" ]+)/.exec(attributes)?.[1];
       if (opener && !layer.tools?.includes(opener)) diagnostics.push({ rule: "index-opener", role: layer.role, layer: layer.name });
-      if (!/name="[^"]+"/.test(attributes) || !/open="[^"]+"/.test(attributes) || !/kind="(?:procedure|data|tool)"/.test(attributes) || items.some(item => !item) || ids.join("\n") !== [...ids].sort().join("\n") || new Set(ids).size !== ids.length || Buffer.byteLength(match[0]) > (layer.indexBudget ?? 8192)) {
+      if (!/name="[^"]+"/.test(attributes) || !/open="[^"]+"/.test(attributes) || !/kind="(?:procedure|data|tool)"/.test(attributes) || items.some(item => !item) || ids.join("\n") !== [...ids].sort().join("\n") || new Set(ids).size !== ids.length) {
         diagnostics.push({ rule: "index-format", role: layer.role, layer: layer.name });
       }
     }

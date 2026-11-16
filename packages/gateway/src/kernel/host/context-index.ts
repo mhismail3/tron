@@ -11,8 +11,9 @@ const escape = (text: string) => collapse(text).replace(/&/gu, "&amp;").replace(
 
 export function renderIndex(index: ContextIndex): string {
   const rows = [...index.items].sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0).map(item => {
-    if (collapse(item.description).length > 160) throw new Error(`${index.name}/${item.id}: description exceeds 160 characters`);
-    return `- ${escape(item.id)}: ${escape(item.description)} | ${escape(item.locator)}`;
+    const description = escape(item.description);
+    if (description.length > 160) throw new Error(`${index.name}/${item.id}: description exceeds 160 characters`);
+    return `- ${escape(item.id)}: ${description} | ${escape(item.locator)}`;
   });
   const text = [`<index name="${escape(index.name)}" open="${escape(index.open)}" kind="${index.kind}">`, ...rows, "</index>"].join("\n");
   if (Buffer.byteLength(text) > index.budget) throw new Error(`${index.name}: index exceeds ${index.budget} bytes`);
