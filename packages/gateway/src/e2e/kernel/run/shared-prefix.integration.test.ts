@@ -34,6 +34,9 @@ it("gives two projects of the same role and tools one request prefix up to the s
   await mkdir(join(agentDir, "skills", "global-skill"), { recursive: true });
   await writeFile(join(agentDir, "AGENTS.md"), "Global rule: shared by every project.");
   await writeFile(join(agentDir, "skills", "global-skill", "SKILL.md"), "---\nname: global-skill\ndescription: Shared skill\n---\nBody\n");
+  const longDescription = `Long ${"description ".repeat(15)}end.`;
+  await mkdir(join(agentDir, "skills", "long-skill"), { recursive: true });
+  await writeFile(join(agentDir, "skills", "long-skill", "SKILL.md"), `---\nname: long-skill\ndescription: ${longDescription}\n---\nBody\n`);
   const projects = ["alpha", "beta"].map(name => join(root, name));
   for (const project of projects) {
     await mkdir(join(project, ".pi", "skills", "project-skill"), { recursive: true });
@@ -72,8 +75,10 @@ it("gives two projects of the same role and tools one request prefix up to the s
   });
   cleanups.push(() => registry.dispose());
   await registry.initialize();
+  const slots = [];
   for (const project of projects) {
     const slot = await registry.create(project);
+    slots.push(slot);
     await slot.setModel(model.provider, model.id);
     await slot.prompt("hello");
     await waitFor(() => !slot.isBusy, `the ${project} turn`);
@@ -85,7 +90,8 @@ it("gives two projects of the same role and tools one request prefix up to the s
     expect(body.system[0]!.cache_control).toBeDefined();
     expect(body.system[1]!.cache_control).toBeUndefined();
     expect(body.system[0]!.text).toContain("Global rule: shared by every project.");
-    expect(body.system[0]!.text).toContain("<name>global-skill</name>");
+    expect(body.system[0]!.text).toContain(`<skills>\n<index name="skills" open="read" kind="procedure">\n- global-skill: Shared skill | ${join(agentDir, "skills", "global-skill", "SKILL.md")}\n- long-skill: ${longDescription} | ${join(agentDir, "skills", "long-skill", "SKILL.md")}\n</index>\n</skills>`);
+    expect(body.system[1]!.text).toContain("<project_skills>\n<index name=\"skills\" open=\"read\" kind=\"procedure\">\n- project-skill: Project skill | ");
     expect(body.system[1]!.text.startsWith("<project_context>")).toBe(true);
   }
   expect(bodies[1]!.system[0]!.text).toBe(bodies[0]!.system[0]!.text);
@@ -93,6 +99,8 @@ it("gives two projects of the same role and tools one request prefix up to the s
     expect(bodies[index]!.system[0]!.text).not.toContain(project);
     expect(bodies[index]!.system[1]!.text).toContain(project);
   }
+  const resources = await slots[0]!.resources() as unknown as { skills: { diagnostics: Array<{ type: string; message: string }> } };
+  expect(resources.skills.diagnostics).toContainEqual({ type: "warning", message: "skills/long-skill: description exceeds 160 characters" });
   const [first, second] = records;
   expect(first!.system).toHaveLength(2);
   expect(first!.marks.some(mark => mark.at === ".system[0]")).toBe(true);
