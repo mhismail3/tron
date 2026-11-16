@@ -68,7 +68,12 @@ def step(command: list[str], env: dict, log, cwd: Path = CLONE) -> int:
 def prepare(commit: str, log) -> dict:
     """Check out `commit` cleanly, install its changed dependencies and return its environment; RuntimeError if it cannot."""
     git("checkout", "--quiet", "--detach", "--force", commit)
-    git("clean", "-ffdxq", *[word for path in KEEP for word in ("-e", path)])
+    clean = ["clean", "-ffdxq", *[word for path in KEEP for word in ("-e", path)]]
+    try:
+        git(*clean)
+    except RuntimeError:
+        subprocess.run(["chmod", "-R", "u+w", str(CLONE)], check=True)
+        git(*clean)
     env = environment()
     for package, inputs in INSTALLS.items():
         stamp = CLONE / package / "node_modules/.tron-queue-install"
@@ -109,7 +114,7 @@ def failed_tests(commit: str, since: str) -> list[str]:
 
 def shadow(landing: str, commit: str) -> dict:
     """Run the full suite at `commit` for the landing `landing` and return its ledger entry."""
-    parents = git("rev-list", "--parents", "-n", "1", landing).split()[1:]
+    landing, *parents = git("rev-list", "--parents", "-n", "1", landing).split()
     directory = RESULTS / landing
     shutil.rmtree(directory, ignore_errors=True)
     directory.mkdir(parents=True)
