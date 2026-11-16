@@ -2,17 +2,17 @@ import { constants } from "node:fs";
 import { lstat, mkdir, open, readdir, rename, rm, writeFile, type FileHandle } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { readSecureJson } from "../foundation/secure-json.js";
-import { durableAtomicWriteJson, syncDurably, type DurableJsonFileSystem } from "../foundation/durable-json.js";
+import { durableAtomicWriteJson, durableAtomicWriteText, syncDurably, type DurableJsonFileSystem } from "../foundation/durable-json.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { EpisodicMemoryError } from "../errors.js";
-import { HOME_MAX_CHAPTERS, EPISODIC_STORE_VERSION, EPISODIC_HOME_CURSOR_MAX_BYTES, EPISODIC_STATE_MAX_BYTES, type EpisodicContextRun, type EpisodicMessageRecord, type EpisodicNodeLogRecord, type EpisodicNodeRecord, type EpisodicStoreState } from "./episodic-contract.js";
+import { HOME_MAX_CHAPTERS, EPISODIC_LAYOUT_MAX_BYTES, EPISODIC_STORE_VERSION, EPISODIC_HOME_CURSOR_MAX_BYTES, EPISODIC_STATE_MAX_BYTES, type EpisodicContextRun, type EpisodicLayoutLine, type EpisodicMessageRecord, type EpisodicNodeLogRecord, type EpisodicNodeRecord, type EpisodicStoreState } from "./episodic-contract.js";
 import { decodeNodeCode, nodeAddress } from "./episodic-tree.js";
 import { tronWorkspacePath } from "../foundation/tron-home-layout.js";
 
 const SESSION_ID = /^[A-Za-z0-9._-]{1,160}$/u;
 const BLOCKED_REASONS = new Set(["permanent-failure", "retries-exhausted", "usage-limit", "source-unavailable"]);
 
-interface EpisodicStoreFileSystem extends DurableJsonFileSystem {
+export interface EpisodicStoreFileSystem extends DurableJsonFileSystem {
   lstat: typeof lstat;
   readdir: typeof readdir;
   writeFile: typeof writeFile;
@@ -28,6 +28,7 @@ interface StorePaths {
   nodes: string;
   state: string;
   checkpointPointer: string;
+  layout: string;
 }
 
 export interface EpisodicStoreSnapshot {
@@ -52,7 +53,7 @@ export class EpisodicStore {
 
   private async paths(): Promise<StorePaths> {
     const root = join(await this.workspaceStateRoot(), "episodic", this.sessionId);
-    return { root, initialized: join(root, "initialized.json"), catalog: join(root, "catalog.jsonl"), nodes: join(root, "nodes.jsonl"), state: join(root, "state.json"), checkpointPointer: join(root, "checkpoint.current.json") };
+    return { root, initialized: join(root, "initialized.json"), catalog: join(root, "catalog.jsonl"), nodes: join(root, "nodes.jsonl"), state: join(root, "state.json"), checkpointPointer: join(root, "checkpoint.current.json"), layout: join(root, "layout.json") };
   }
 
   private async workspaceStateRoot(): Promise<string> {
@@ -108,6 +109,31 @@ export class EpisodicStore {
     await assertOwnerDirectory(paths.root);
     const pointer = await readCheckpointPointer(paths);
     await cleanupCheckpoints(paths, pointer?.directory ?? null, this.fileSystem);
+  }
+
+  async readLayout(): Promise<readonly EpisodicLayoutLine[] | "unreadable" | undefined> {
+    const paths = await this.paths();
+    if (!(await this.namespaceExists(paths))) return undefined;
+    const info = await lstat(paths.layout).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return undefined;
+      throw new EpisodicMemoryError("unsafe-store", "Episodic layout could not be inspected");
+    });
+    if (!info) return undefined;
+    if (!info.isFile() || info.uid !== process.getuid?.() || (info.mode & 0o077) !== 0) {
+      throw new EpisodicMemoryError("unsafe-store", "Episodic layout is not an owner-only regular file");
+    }
+    if (info.size > EPISODIC_LAYOUT_MAX_BYTES) return "unreadable";
+    const opened = await openOwnerFile(paths.layout, constants.O_RDONLY);
+    if (!opened) return "unreadable";
+    let text: string;
+    try { text = await opened.handle.readFile("utf8"); } finally { await opened.handle.close(); }
+    return parseLayout(text) ?? "unreadable";
+  }
+
+  async saveLayout(text: string): Promise<void> {
+    if (Buffer.byteLength(text, "utf8") > EPISODIC_LAYOUT_MAX_BYTES) throw new EpisodicMemoryError("invalid-store", "Episodic layout exceeds its byte limit");
+    const paths = await this.ensureRoot();
+    await durableAtomicWriteText(paths.layout, text, 0o600, this.fileSystem);
   }
 
   async appendCatalog(record: EpisodicMessageRecord): Promise<void> {
@@ -292,7 +318,7 @@ async function cleanupCheckpoints(paths: StorePaths, active: string | null, file
     if (name === active || name === "checkpoint.current.json" || name === "catalog.jsonl" || name === "nodes.jsonl" || name === "state.json" || name === "initialized.json") continue;
     const directory = name === ".checkpoint-staging" || /^checkpoint-[A-Za-z0-9.-]+$/u.test(name);
     const temporaryFile = /^\.checkpoint-log-[a-z0-9]+$/u.test(name)
-      || /^checkpoint\.current\.json\.[0-9]+\.[a-f0-9]{12}\.tmp$/u.test(name);
+      || /^(?:checkpoint\.current|layout)\.json\.[0-9]+\.[a-f0-9]{12}\.tmp$/u.test(name);
     if (!directory && !temporaryFile) continue;
     const path = join(paths.root, name);
     const info = await fileSystem.lstat(path);
@@ -313,6 +339,16 @@ async function removeOwnedTree(path: string, fileSystem: EpisodicStoreFileSystem
     for (const name of await fileSystem.readdir(path)) await removeOwnedTree(join(path, name), fileSystem);
   }
   await fileSystem.rm(path, { recursive: info.isDirectory(), force: false });
+}
+
+function parseLayout(text: string): EpisodicLayoutLine[] | undefined {
+  let value: unknown;
+  try { value = JSON.parse(text); } catch { return undefined; }
+  if (!value || typeof value !== "object" || Array.isArray(value) || !hasOnlyKeys(value as Record<string, unknown>, ["lines"])) return undefined;
+  const lines = (value as { lines?: unknown }).lines;
+  if (!Array.isArray(lines) || !lines.every(line => Array.isArray(line) && line.length === 3 && isRevision(line[0]) && isRevision(line[1])
+    && typeof line[2] === "string" && /^[a-f0-9]{64}$/u.test(line[2]))) return undefined;
+  return lines as EpisodicLayoutLine[];
 }
 
 function hasOnlyKeys(record: Record<string, unknown>, keys: readonly string[]): boolean {

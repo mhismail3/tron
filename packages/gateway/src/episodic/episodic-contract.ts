@@ -41,6 +41,10 @@ export const EPISODIC_STORE_VERSION = 2 as const;
 
 export const EPISODIC_INVALIDATION_CHUNK = 2_048;
 
+export const EPISODIC_LAYOUT_MAX_BYTES = 16 * 1_024 * 1_024;
+
+export type EpisodicLayoutLine = readonly [start: number, span: number, digest: string];
+
 export const EPISODIC_OMITTED_TEXT = "[omitted]";
 export const EPISODIC_PLACEHOLDER = "(not summarized yet: zoom it)";
 
@@ -171,7 +175,8 @@ export interface EpisodicCompactorRequest {
 export type EpisodicSummarizer = (request: EpisodicCompactorRequest) => Promise<AssistantMessage>;
 
 export interface EpisodicDiagnostic {
-  event: "episodic.source-invalidated" | "episodic.source-read-retried" | "episodic.node-blocked" | "episodic.store-refused" | "episodic.store-recovered";
+  event: "episodic.source-invalidated" | "episodic.source-read-retried" | "episodic.node-blocked" | "episodic.store-refused" | "episodic.store-recovered"
+    | "episodic.layout-rebuilt" | "episodic.layout-unsaved";
   level: "info" | "warning" | "error";
   message: string;
   counts?: Record<string, number>;

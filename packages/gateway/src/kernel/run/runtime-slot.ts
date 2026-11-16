@@ -45,6 +45,7 @@ import { type CommandReplacement } from "./run-invocations.js";
 import { RunOperations } from "./run-operations.js";
 import { successfulAssistantCompletion, type CanonicalAssistantCompletion, type SessionAttentionRebindDisposition } from "./completion-facts.js";
 import { RunRequestPipeline } from "./request-pipeline.js";
+import { skillsIndex } from "../resources/context-index.js";
 import type { RequestRecord } from "./request-record.js";
 import { boundToolCancellation } from "./bounded-tool-cancellation.js";
 import { CompactionOperationPolicy } from "./compaction-policy.js";
@@ -1282,6 +1283,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       const launchThinking = launchDefaults?.keys.find(row => row.key === "model.thinking[role=chat]")?.value as ThinkingLevel | undefined;
       const created = await createAgentSessionFromServices({
         preamble: this.dependencies.modules.policy("commonCore")!(await this.dependencies.workspace.describe()),
+        renderSkills: (skills, tool) => skillsIndex(skills, tool === "bash" ? "bash" : "read").text,
         services,
         sessionManager,
         ...(initialModel ? { model: initialModel } : {}),
@@ -3875,7 +3877,9 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
             disableModelInvocation: skill.disableModelInvocation,
           };
         }),
-        diagnostics: loader.getSkills().diagnostics,
+        diagnostics: [...loader.getSkills().diagnostics, ...[false, true].flatMap(project =>
+          skillsIndex(loader.getSkills().skills.filter(skill => (skill.sourceInfo.scope === "project") === project), "read").diagnostics
+            .map(message => ({ type: "warning" as const, message: project ? `project ${message}` : message })))],
       },
       prompts: {
         prompts: loader.getPrompts().prompts.map((prompt) => {
