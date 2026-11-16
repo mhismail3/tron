@@ -421,12 +421,13 @@ describe("gateway/home scenario lock", () => {
       `${GLOBAL_FIXED} model.ref[role=chat]<-global model.thinking[role=chat]<-global tools.active<-global pin:context.images.block`,
       `${GLOBAL_FIXED} model.ref[role=chat]<-session model.thinking[role=chat]<-global tools.active<-global pin:context.images.block`]);
     const LAUNCH = "model.queue[role=subagent]<-delegate/home-profile model.queue[role=worker]<-delegate/home-profile";
+    const WORKER_FIXED = "context.images.autoResize<-global context.rules.global<-global context.rules.project<-global model.contextWindow<-global";
     expect(provenance(workerSessionJsonl), "the worker's settings: resolved at launch from the Home profile, model and thinking same as Home").toEqual([
-      `${GLOBAL_FIXED} model.ref[role=chat]<-global model.thinking[role=chat]<-global tools.active<-global`,
-      `${GLOBAL_FIXED} model.ref[role=chat]<-global model.thinking[role=chat]<-global tools.active<-global pin:context.images.block`,
-      `${GLOBAL_FIXED} ${LAUNCH} model.ref[role=chat]<-global model.thinking[role=chat]<-global tools.active<-global pin:context.images.block`,
-      `${GLOBAL_FIXED} ${LAUNCH} model.ref[role=chat]<-delegate/home-profile:sameAs:home model.thinking[role=chat]<-global tools.active<-global pin:context.images.block`,
-      `${GLOBAL_FIXED} ${LAUNCH} model.ref[role=chat]<-delegate/home-profile:sameAs:home model.thinking[role=chat]<-delegate/home-profile:sameAs:home tools.active<-global pin:context.images.block`]);
+      `${WORKER_FIXED} model.ref[role=chat]<-global model.thinking[role=chat]<-global tools.active<-global`,
+      `${WORKER_FIXED} model.ref[role=chat]<-global model.thinking[role=chat]<-global tools.active<-global pin:context.images.block`,
+      `${WORKER_FIXED} ${LAUNCH} model.ref[role=chat]<-global model.thinking[role=chat]<-global tools.active<-global pin:context.images.block`,
+      `${WORKER_FIXED} ${LAUNCH} model.ref[role=chat]<-delegate/home-profile:sameAs:home model.thinking[role=chat]<-global tools.active<-global pin:context.images.block`,
+      `${WORKER_FIXED} ${LAUNCH} model.ref[role=chat]<-delegate/home-profile:sameAs:home model.thinking[role=chat]<-delegate/home-profile:sameAs:home tools.active<-global pin:context.images.block`]);
     const values = (jsonl: any[]) => {
       const { data } = custom(jsonl, "tron.settings.v1").at(-1)!;
       return { fixed: Object.fromEntries(Object.entries(data.fixed).map(([key, { at: _at, ref: _ref, from: _from, via: _via, ...rest }]: [string, any]) => [key, rest])),
@@ -441,6 +442,7 @@ describe("gateway/home scenario lock", () => {
       "model.thinking[role=chat]": { qualifiers: { model: MODEL, role: "chat" }, value: "off" }, "tools.active": { value: HOME_TOOLS } } });
     const RESOLVED = "Resolved at task launch; later Home profile changes do not retarget this worker";
     expect(values(workerSessionJsonl), "the worker's resolved settings").toEqual({ requestPins: { "context.images.block": false }, fixed: { ...FIXED,
+      "context.rules.global": { value: true }, "context.rules.project": { value: true },
       "model.queue[role=subagent]": { reason: RESOLVED, value: [] }, "model.queue[role=worker]": { reason: RESOLVED, value: [] },
       "model.ref[role=chat]": { reason: "same as Home", value: MODEL_REF }, "model.thinking[role=chat]": { reason: "same as Home", value: "off" },
       "tools.active": { value: WORKER_TOOLS } } });

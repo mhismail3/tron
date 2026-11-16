@@ -905,11 +905,10 @@
         "tools",
         "rules",
         "docs",
-        "project_context",
         "cwd",
         "tron"
       ],
-      "promptHash": "sha256:7e62040d1b8332bc53568a2e2a34f79e4be5981bb371a7f4d7c70957637f9ac4"
+      "promptHash": "sha256:4e4f919dcca12d22227d95bd8ac2074d0ae584f072349c3a1781dad670b43754"
     },
     "projectSubdirectorySystem": [
       {
@@ -988,6 +987,7 @@
       },
       {
         "sections": {
+          "project_context": null,
           "project_skills": null
         },
         "toolsAdded": null

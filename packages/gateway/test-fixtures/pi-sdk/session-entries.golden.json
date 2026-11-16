@@ -265,6 +265,18 @@
             "ref": "<id>",
             "value": true
           },
+          "context.rules.global": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
+          "context.rules.project": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
           "model.contextWindow": {
             "at": "<timestamp>",
             "from": "global",
@@ -343,6 +355,18 @@
             "ref": "<id>",
             "value": true
           },
+          "context.rules.global": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
+          "context.rules.project": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
           "model.contextWindow": {
             "at": "<timestamp>",
             "from": "global",
@@ -409,6 +433,18 @@
       "data": {
         "fixed": {
           "context.images.autoResize": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
+          "context.rules.global": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
+          "context.rules.project": {
             "at": "<timestamp>",
             "from": "global",
             "ref": "<id>",
@@ -491,6 +527,18 @@
             "ref": "<id>",
             "value": true
           },
+          "context.rules.global": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
+          "context.rules.project": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
           "model.contextWindow": {
             "at": "<timestamp>",
             "from": "global",
@@ -556,6 +604,18 @@
       "data": {
         "fixed": {
           "context.images.autoResize": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
+          "context.rules.global": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
+          "context.rules.project": {
             "at": "<timestamp>",
             "from": "global",
             "ref": "<id>",
@@ -639,6 +699,18 @@
             "ref": "<id>",
             "value": true
           },
+          "context.rules.global": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
+          "context.rules.project": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
           "model.contextWindow": {
             "at": "<timestamp>",
             "from": "global",
@@ -705,6 +777,18 @@
       "data": {
         "fixed": {
           "context.images.autoResize": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
+          "context.rules.global": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
+          "context.rules.project": {
             "at": "<timestamp>",
             "from": "global",
             "ref": "<id>",
@@ -788,6 +872,18 @@
             "ref": "<id>",
             "value": true
           },
+          "context.rules.global": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
+          "context.rules.project": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
           "model.contextWindow": {
             "at": "<timestamp>",
             "from": "global",
@@ -854,6 +950,18 @@
       "data": {
         "fixed": {
           "context.images.autoResize": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
+          "context.rules.global": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
+          "context.rules.project": {
             "at": "<timestamp>",
             "from": "global",
             "ref": "<id>",
@@ -932,6 +1040,18 @@
       "data": {
         "fixed": {
           "context.images.autoResize": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
+          "context.rules.global": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
+          "context.rules.project": {
             "at": "<timestamp>",
             "from": "global",
             "ref": "<id>",
