@@ -1213,7 +1213,12 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       };
       const managedSubagents = profile.managedSubagents ? this.dependencies.managedSubagents : undefined;
       const settingsManager = await createSettingsManager(this.dependencies.settingsSchema, trust.projectDir, this.dependencies.agentDir, profile.projectSettings && trust.trusted,
-        async manager => { if (this.runtime?.session.settingsManager === manager) await this.applyReloadSettings(manager); });
+        async manager => {
+          if (this.runtime?.session.settingsManager === manager) return this.applyReloadSettings(manager);
+          const branch = sessionManager.getBranch();
+          return this.applyReloadSettings(manager, sessionManager.getSessionId(), { cwd: trust.cwd, home: profile.chapter, modelRuntime,
+            session: { settings: readSessionSettings(branch), requestPins: readSessionRequestPins(branch), fixed: this.explicitReloadSettings(readSessionFixedSettings(branch)) } });
+        });
       const managedLoaderOptions = await managedSubagents?.loaderOptions(settingsManager,
         (content, options, owner, messages) => this.admitSubagentWake(content, options, owner, messages));
       const extensionFactories = profile.extensions !== "ordinary"
@@ -1399,18 +1404,17 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     await this.bindSession();
   }
 
-  async reloadSettingInputs(): Promise<Array<[string, unknown]>> {
+  async reloadSettingInputs(sessionId = this.id, source?: SessionSettingsSource): Promise<Array<[string, unknown]>> {
     const owners = this.dependencies.settings();
     if (!owners) return [];
     const keys = this.dependencies.settingsSchema.KEYS.filter(key => key.effect === "reload").map(key => key.id);
-    const source = this.reloadSettingsSource();
-    const resolved = await owners.model.resolve({ kind: "session", sessionId: this.id }, source, keys, { storeState: false });
+    const resolved = await owners.model.resolve({ kind: "session", sessionId }, source ?? this.reloadSettingsSource(), keys, { storeState: false });
     return resolved.keys.map(row => [row.key, row.value]);
   }
 
-  private async applyReloadSettings(manager: SettingsManager): Promise<void> {
+  private async applyReloadSettings(manager: SettingsManager, sessionId?: string, source?: SessionSettingsSource): Promise<void> {
     const overrides: Record<string, unknown> = {};
-    for (const [id, value] of await this.reloadSettingInputs()) {
+    for (const [id, value] of await this.reloadSettingInputs(sessionId, source)) {
       const key = this.dependencies.settingsSchema.schemaKey(id);
       const binding = key.layers.global;
       if (binding?.store === "pi" && value !== undefined) setPath(overrides, binding.path, value);
@@ -1420,9 +1424,12 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
 
   private reloadSettingsSource(): SessionSettingsSource {
     const session = this.readSettingsSessionLayer();
-    const fixed = Object.fromEntries(Object.entries(session.fixed ?? {}).filter(([key, value]) =>
+    return this.settingsSource({ ...session, fixed: this.explicitReloadSettings(session.fixed ?? {}) });
+  }
+
+  private explicitReloadSettings(fixed: Record<string, FixedSetting>): Record<string, FixedSetting> {
+    return Object.fromEntries(Object.entries(fixed).filter(([key, value]) =>
       this.dependencies.settingsSchema.schemaKey(key).effect !== "reload" || value.from === "session" || value.from === "delegate"));
-    return this.settingsSource({ ...session, fixed });
   }
 
   private async refreshReloadDefaults(): Promise<void> {

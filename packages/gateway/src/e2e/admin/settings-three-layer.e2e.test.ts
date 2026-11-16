@@ -130,9 +130,12 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     await waitFor(() => !other.runtime.session.systemPrompt.includes("Global rule marker.") && other.snapshot().configurationBlocker === null, "global rules switched off");
     const projectOnly = await sent(other);
     expect(projectOnly).toBe(both.replace(block(both, "global_context"), ""));
+    const cold = await f.restart();
+    expect(await sent(await cold.acquire(slot.id))).toBe(globalOnly);
+    expect(await sent(await cold.acquire(other.id))).toBe(projectOnly);
 
     await f.trust.set(f.cwd, false);
-    const untrusted = await sent(await f.create());
+    const untrusted = await sent(await cold.create(f.cwd));
     expect(untrusted).toContain("Global rule marker.");
     expect(untrusted).not.toContain("Project rule marker.");
     evidence.push({ case: "context-rule-switches-and-trust", sessionId: slot.id });
