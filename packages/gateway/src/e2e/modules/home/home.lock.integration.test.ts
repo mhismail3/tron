@@ -59,6 +59,7 @@ const HOME_EXTENSIONS = [
   "<inline:tron-context-window> | on session_start×1,session_tree×1,model_select×1,before_agent_start×1,turn_start×1",
   "<inline:tron-compaction-policy> | on message_end×1,session_start×1,session_before_compact×1",
   "<inline:tron-settings> | tools settings",
+  "<inline:tron-session-import> | tools session_import",
   "<inline:tron-projects> | tools projects",
   "<inline:tron-ask-user> | tools ask_user",
   "<inline:tron-display> | tools display | on tool_result×1,agent_end×1,session_shutdown×1",
@@ -79,6 +80,7 @@ const WORKER_EXTENSIONS = [
   "<inline:tron-core> | tools jev | on session_start×1,session_shutdown×1,before_agent_start×1",
   "<inline:tron-web-research> | tools web_search | on session_start×1,session_shutdown×1",
   "<inline:tron-settings> | tools settings",
+  "<inline:tron-session-import> | tools session_import",
   "<inline:tron-projects> | tools projects",
   "<inline:tron-ask-user> | tools ask_user",
   "<inline:tron-display> | tools display | on tool_result×1,agent_end×1,session_shutdown×1",
@@ -436,8 +438,8 @@ describe("gateway/home scenario lock", () => {
     };
     const FIXED = { "context.images.autoResize": { value: true }, "model.contextWindow": { qualifiers: { model: MODEL }, value: 128000 } };
     const HOME_TOOLS = ["ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "profile", "obligation", "web_search", "session_search",
-      "session_read", "settings", "tool_search", "read", "write", "edit", "bash", "grep", "find", "ls", "computer"];
-    const WORKER_TOOLS = ["read", "bash", "edit", "write", "web_search", "settings", "ask_user", "display", "computer", "notify", "checkin", "report", "tool_search"];
+      "session_read", "session_import", "settings", "tool_search", "read", "write", "edit", "bash", "grep", "find", "ls", "computer"];
+    const WORKER_TOOLS = ["read", "bash", "edit", "write", "web_search", "settings", "session_import", "ask_user", "display", "computer", "notify", "checkin", "report", "tool_search"];
     expect(values(homeSessionJsonl), "Home's resolved settings").toEqual({ requestPins: { "context.images.block": false }, fixed: { ...FIXED,
       "model.ref[role=chat]": { qualifiers: { role: "chat" }, value: MODEL_REF },
       "model.thinking[role=chat]": { qualifiers: { model: MODEL, role: "chat" }, value: "off" }, "tools.active": { value: HOME_TOOLS } } });
