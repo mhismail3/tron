@@ -53,10 +53,6 @@ struct SettingsView: View {
                         settingsLink("Extensions", summary: "Packages, built-ins, and themes", icon: "shippingbox") {
                             ExtensionsSettingsView(projectCWD: nil)
                         }
-                        TronSettingsDivider()
-                        settingsLink("Hooks", summary: "Event handlers extensions register", icon: "bolt.horizontal.circle") {
-                            HooksSettingsView(projectCWD: nil)
-                        }
                     }
                     let placed = SettingsGroupKind.placedSections
                     let unplaced = sections.filter { !placed.contains($0.id) }

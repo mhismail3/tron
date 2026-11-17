@@ -757,7 +757,6 @@ const service = new GatewayService({
   macTerminal: macTerminalKeys,
   modelConfig,
   packages,
-  hookResources,
   auth,
   globalProviderResources,
   logger,

@@ -634,18 +634,15 @@ struct ComposerResourcePicker: View {
 struct ComposerResourceBadges: View {
     let origin: CommandInfoResourceOrigin?
     let scope: CommandInfoResourceScope?
-    let hookProvenance: HookProvenance?
     let accent: Color
 
     init(
         origin: CommandInfoResourceOrigin? = nil,
         scope: CommandInfoResourceScope? = nil,
-        hookProvenance: HookProvenance? = nil,
         accent: Color
     ) {
         self.origin = origin
         self.scope = scope
-        self.hookProvenance = hookProvenance
         self.accent = accent
     }
 
@@ -655,7 +652,7 @@ struct ComposerResourceBadges: View {
     }
 
     var body: some View {
-        ForEach(hookProvenance.map { [$0.rawValue] } ?? Self.titles(origin: origin, scope: scope), id: \.self) { title in
+        ForEach(Self.titles(origin: origin, scope: scope), id: \.self) { title in
             ResourceTagLabel(title: title, accent: accent)
         }
     }
