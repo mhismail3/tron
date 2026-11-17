@@ -29,8 +29,8 @@ def git(*args: str, check: bool = True) -> subprocess.CompletedProcess:
 
 def scanned() -> list[str]:
     files = git("ls-files", "--cached", "--others", "--exclude-standard", "--", f"{GATEWAY}/src", f"{GATEWAY}/test-support", f"{GATEWAY}/test-fixtures").stdout.split()
-    return sorted(path for path in files if path.endswith(".ts")
-                  and (path.endswith(".test.ts") or path.startswith((f"{GATEWAY}/test-support/", f"{GATEWAY}/test-fixtures/"))))
+    return [path for path in files if path.endswith(".ts")
+            and (path.endswith(".test.ts") or path.startswith((f"{GATEWAY}/test-support/", f"{GATEWAY}/test-fixtures/")))]
 
 
 def measure() -> dict[str, dict[str, int]]:
@@ -39,7 +39,7 @@ def measure() -> dict[str, dict[str, int]]:
         text = (ROOT / path).read_text()
         counts = {rule: n for rule, pattern in RULES.items() if (n := len(pattern.findall(text)))}
         if counts:
-            found[path[len(GATEWAY) + 1:]] = dict(sorted(counts.items()))
+            found[path[len(GATEWAY) + 1:]] = counts
     return found
 
 
