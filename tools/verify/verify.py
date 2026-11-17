@@ -1429,7 +1429,7 @@ def main(argv: list[str]) -> int:
     ordered_groups = cheap_groups + expensive_groups
     plan_steps = ["ownership", "worktree residue", "documentation policy", "generated docs", "agent policy", "home layout", "privacy guard", "git diff --check",
                   "no new comments"] \
-        + (["gateway typecheck", "gateway lint", "layers gateway"] if gateway_touched else []) \
+        + (["gateway typecheck", "gateway lint", "layers gateway", "determinism"] if gateway_touched else []) \
         + (["ios source policy"] if ios_lane else []) \
         + [name for group in cheap_groups for name in test_step_names(group, shards, skipped_group(group))] \
         + (["ios build"] if ios_lane else []) + ["layers ios"] \
@@ -1457,11 +1457,12 @@ def main(argv: list[str]) -> int:
         plan_steps.insert(plan_steps.index("no new comments") + 1, "context audit")
     gateway_checks = [("gateway typecheck", node + ["npm", "run", "check"]),
                       ("gateway lint", node + ["npm", "run", "lint"]),
-                      ("layers gateway", [tron, "layers", "gateway", "--base", base])]
+                      ("layers gateway", [tron, "layers", "gateway", "--base", base]),
+                      ("determinism", [tron, "determinism", "--base", base])]
     if args.plan:
         commands = [{"name": label, "command": command, "cwd": ".", **options} for label, command, options in checks]
         if gateway_touched:
-            commands += [{"name": label, "command": command, "cwd": "." if label == "layers gateway" else GATEWAY}
+            commands += [{"name": label, "command": command, "cwd": "." if label in ("layers gateway", "determinism") else GATEWAY}
                          for label, command in gateway_checks]
         if ios_lane:
             commands.append({"name": "ios source policy", "command": ios_policy})
@@ -1546,7 +1547,7 @@ def main(argv: list[str]) -> int:
                 reds.append(f"{label} failed")
         if gateway_touched:
             for label, command in gateway_checks:
-                cwd = ROOT if label == "layers gateway" else ROOT / GATEWAY
+                cwd = ROOT if label in ("layers gateway", "determinism") else ROOT / GATEWAY
                 if run.step(label, command, cwd=cwd)["status"] == "failed":
                     reds.append(f"{label} failed")
         if ios_lane and run.step("ios source policy", ios_policy)["status"] == "failed":
