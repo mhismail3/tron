@@ -116,14 +116,8 @@ struct HostedSettingsRendererFixture: View {
                         }
                     } else if HostedLaunch.arguments.contains("-settings-controls-review") {
                         controlsReview
-                    } else if HostedLaunch.arguments.contains("-settings-alignment-review") {
-                        SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global", presentation: .section("context"))
-                    } else if HostedLaunch.arguments.contains("-settings-ui-tools") {
-                        SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global", presentation: .section("tools"))
                     } else if HostedLaunch.arguments.contains("-settings-ui-providers") {
                         providerReview
-                    } else if HostedLaunch.arguments.contains("-settings-renderer-held-preview") || HostedLaunch.arguments.contains("-settings-renderer-confirm") || HostedLaunch.arguments.contains("-settings-renderer-haptics") {
-                        SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global", presentation: .section("context"))
                     } else if HostedLaunch.arguments.contains("-settings-nested") {
                         Button("Open Settings") { nestedSettings = true }
                             .tronManagedSheet(isPresented: $nestedSettings, identity: "fixture.nested-settings") {
@@ -257,7 +251,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         case "git.inspect": result = .object(["isRepository": .bool(true), "branch": .null, "dirty": .bool(false), "branches": .array([]), "commits": .array([])])
         case "model.recent": result = .object(["models": .array([])])
         case "settings.resolve": result = resolution()
-        case "settings.options": result = try options(key: params["key"]?.stringValue ?? "", cursor: params["cursor"]?.stringValue)
         case "settings.change":
             if HostedLaunch.arguments.contains("-settings-renderer-held-preview"),
                params["dryRun"]?.boolValue == true, previewsHeld == 0 {
@@ -373,42 +366,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         return .object(["target": .object(["kind": .string("global")]), "layers": .array([.string("global")]),
                         "renderer": .object(["version": .number(1)]), "keys": .array(keys), "sections": .array(sections),
                         "diagnostics": .array([])])
-    }
-
-    private func options(key: String, cursor: String?) throws -> JSONValue {
-        switch key {
-        case "model.ref":
-            let entries = [("pro", "Fixture Pro"), ("lite", "Fixture Lite"), ("page", "Fixture Page Two")]
-            let offset = Int(cursor ?? "0") ?? 0
-            let page = Array(entries.dropFirst(offset).prefix(2))
-            var result: [String: JSONValue] = ["key": .string(key), "source": .string("fixture.catalog"), "dependsOn": .array([]),
-                "options": .array(page.map { id, label in
-                    .object(["value": .object(["provider": .string("fixture"), "id": .string(id)]), "label": .string(label), "detail": .string("fixture")])
-                })]
-            if offset + page.count < entries.count { result["nextCursor"] = .string(String(offset + page.count)) }
-            return .object(result)
-        case "tools.active":
-            let definitions: [(String, String, String, String)] = [
-                ("read", "Read", "Read file contents from a path.", "path"),
-                ("codemode", "Code mode", "Run TypeScript against available tools.", "code"),
-            ]
-            return .object(["key": .string(key), "source": .string("catalog.tools"), "dependsOn": .array([]), "options": .array(definitions.map { name, label, description, field in
-                .object(["value": .string(name), "label": .string(label), "detail": .string(description), "resource": .object([
-                    "name": .string(name), "label": .string(label), "description": .string(description),
-                    "distribution": .string(name == "read" ? "sdk" : "external"), "source": .string(name == "read" ? "builtin" : "npm:fixture"),
-                    "parameters": .object(["type": .string("object"), "properties": .object([field: .object(["type": .string("string"), "description": .string("Fixture \(field) input")])]), "required": .array([.string(field)])]),
-                ])])
-            } + activeTools.filter { name in !definitions.contains { $0.0 == name } }.map { name in
-                .object(["value": .string(name), "label": .string(name), "disabledReason": .string("Not available here")])
-            })])
-        case "model.thinking":
-            let levels = model == "pro" ? [("off", "Off"), ("low", "Low"), ("medium", "Medium"), ("high", "High")] : []
-            thinkingOptions = levels.count
-            return .object(["key": .string(key), "source": .string("catalog.thinkingLevels"), "dependsOn": .array([.string("model.ref")]),
-                            "options": .array(levels.map { choice($0.0, $0.1) })])
-        default:
-            throw GatewayFailure(code: "invalid_request", message: "Unknown setting \(key)", retryable: false, details: nil)
-        }
     }
 
     private func change(_ params: [String: JSONValue]) throws -> JSONValue {

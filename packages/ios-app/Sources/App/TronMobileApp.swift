@@ -142,8 +142,6 @@ struct HostedFixtureRoot: View {
                 HostedAgentInstructionsFixtureView()
             } else if HostedLaunch.arguments.contains("-tron-mac-terminal-fixture") {
                 HostedMacTerminalFixture()
-            } else if HostedLaunch.arguments.contains("-tron-settings-list-refresh-fixture") {
-                HostedSettingsListRefreshFixture()
             } else if HostedLaunch.arguments.contains("-tron-settings-renderer-fixture") {
                 HostedSettingsRendererFixture()
             } else {
