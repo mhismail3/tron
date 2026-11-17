@@ -77,7 +77,7 @@ function closeNative(agentDir: string, sockets: string | undefined): void {
 }
 
 describe("packaged agent-browser receipts", () => {
-  describe("packaged owned-browser qualification", { concurrent: false }, () => {
+  describe("packaged owned-browser qualification", { concurrent: false, shuffle: false }, () => {
     let root: string, agentDir: string, cwd: string, control: string, base: string, endpoint: string;
     let sockets: string;
     let registry: RuntimeRegistry, slot: Awaited<ReturnType<RuntimeRegistry["create"]>>;
