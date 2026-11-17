@@ -31,6 +31,7 @@
     "state/enrollment.json": {"owner": "gateway/security", "class": "rebuild", "credential": true},
     "state/devices.json": {"owner": "gateway/security", "credential": true},
     "state/notifications.json": {"owner": "gateway/notifications", "prune": {"maxBytes": 1048576, "when": "grant-store caps: 64 grants, 512 receipts"}},
+    "state/migrations": {"owner": "gateway/notifications", "subtree": true},
     "state/lan-endpoint": {"owner": "gateway/transport", "credential": true, "subtree": true},
     "cache/network.json": {"owner": "mac-app/server", "class": "rebuild"},
     "state/stop-completed.json": {"owner": "gateway/gateway-main", "class": "scratch"},

@@ -270,14 +270,14 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     const store = new NotificationGrantStore(root);
     let registry: RuntimeRegistry | undefined;
     let gateway: GatewayServer | undefined;
-    const notifications = new NotificationService(store, relay, Date.now,
+    const notifications = new NotificationService(store, relay, async () => ({ inputNeeded: true, finished: true, waiting: true }), Date.now,
       payload => gateway?.broadcast("notification.inbox.changed", payload), undefined, undefined,
       (sessionId) => (registry ? homeOwnerOf(registry) : undefined)?.chapterStateFor(sessionId).homeId !== undefined);
     cleanup.push(async () => notifications.dispose());
     await notifications.initialize();
     await notifications.upsertGrant({ deviceId: "device_abcdefgh", installationId: "install_abcdefgh",
       grantId: "grant_abcdefgh", secret: Buffer.alloc(32, 9).toString("base64url"), previewsEnabled,
-      relayOrigin: "https://push.example.test", notifyWhenAskPresented: true, notifyWhenFinished: true, notifyWhenWaiting: true });
+      relayOrigin: "https://push.example.test" });
     const value = await fixture([
       fauxAssistantMessage([fauxToolCall("notify", { message: "Ordinary update" }, { id: "ordinary-title-explicit" })], { stopReason: "toolUse" }),
       fauxAssistantMessage("The update was queued."),
@@ -453,7 +453,7 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
       await fetch(`http://127.0.0.1:${address.port}/v3/notifications`, init) as never);
     const signals: Array<{ kind: string; outcome: string; relayReason: string }> = [];
     const notifications = new NotificationService(
-      store, relay, Date.now, () => {}, () => {}, (signal) => {
+      store, relay, async () => ({ inputNeeded: true, finished: true, waiting: true }), Date.now, () => {}, () => {}, (signal) => {
         signals.push(signal);
         logger.log(signal.outcome === "failed" || signal.outcome === "refused" ? "warning" : "info", "Push notification delivery", {
           event: `notification.push.${signal.outcome.replaceAll("_", "-")}`,
@@ -466,8 +466,7 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     await notifications.upsertGrant({
       deviceId: "device_abcdefgh", installationId: "install_abcdefgh", grantId: "grant_abcdefgh",
       secret: Buffer.alloc(32, 9).toString("base64url"), previewsEnabled: true,
-      relayOrigin: "https://push.example.test", notifyWhenAskPresented: true,
-      notifyWhenFinished: true, notifyWhenWaiting: true,
+      relayOrigin: "https://push.example.test"
     });
     const childStarted = barrier();
     const releaseChild = barrier();

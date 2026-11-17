@@ -1376,15 +1376,16 @@ export interface ChangeReview {
   title: string;
   requiresTap: boolean;
   reason?: string;
+  intent?: string;
   items: ChangeReviewItemsItem[];
 }
 export function decodeChangeReview(v: unknown, p = "$"): ChangeReview {
   const o = obj(v, p);
-  only(o, p, ["digest","title","requiresTap","reason","items"]);
-  return { digest: str(own(o, "digest"), p + ".digest"), title: str(own(o, "title"), p + ".title"), requiresTap: bool(own(o, "requiresTap"), p + ".requiresTap"), ...(own(o, "reason") === undefined ? {} : { reason: str(own(o, "reason"), p + ".reason") }), items: seq(own(o, "items"), p + ".items", (x, q) => decodeChangeReviewItemsItem(x, q)) };
+  only(o, p, ["digest","title","requiresTap","reason","intent","items"]);
+  return { digest: str(own(o, "digest"), p + ".digest"), title: str(own(o, "title"), p + ".title"), requiresTap: bool(own(o, "requiresTap"), p + ".requiresTap"), ...(own(o, "reason") === undefined ? {} : { reason: str(own(o, "reason"), p + ".reason") }), ...(own(o, "intent") === undefined ? {} : { intent: str(own(o, "intent"), p + ".intent") }), items: seq(own(o, "items"), p + ".items", (x, q) => decodeChangeReviewItemsItem(x, q)) };
 }
 export function encodeChangeReview(v: ChangeReview): string {
-  return "{" + (',"digest":' + JSON.stringify(v.digest) + ',"title":' + JSON.stringify(v.title) + ',"requiresTap":' + JSON.stringify(v.requiresTap) + (v.reason === undefined ? "" : ',"reason":' + JSON.stringify(v.reason)) + ',"items":' + "[" + v.items.map((x) => encodeChangeReviewItemsItem(x)).join(",") + "]").slice(1) + "}";
+  return "{" + (',"digest":' + JSON.stringify(v.digest) + ',"title":' + JSON.stringify(v.title) + ',"requiresTap":' + JSON.stringify(v.requiresTap) + (v.reason === undefined ? "" : ',"reason":' + JSON.stringify(v.reason)) + (v.intent === undefined ? "" : ',"intent":' + JSON.stringify(v.intent)) + ',"items":' + "[" + v.items.map((x) => encodeChangeReviewItemsItem(x)).join(",") + "]").slice(1) + "}";
 }
 /** Server-owned context of an admitted paired-native response; never parsed from its value. */
 export interface NativeChangeAcceptance { deviceId: string; commandId: string }

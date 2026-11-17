@@ -23,7 +23,7 @@ async function fixture() {
   roots.push(root);
   const store = new NotificationGrantStore(root);
   await store.initialize();
-  const notifications = new NotificationService(store, { available: false } as PushRelayClient);
+  const notifications = new NotificationService(store, { available: false } as PushRelayClient, async () => ({ inputNeeded: true, finished: true, waiting: true }));
   const reads = vi.spyOn(notifications, "markSessionInboxRead");
   const registry = await createTestRegistry({
     agentDir: join(root, "agent"), tronHome: root, idleRuntimeMs: 60_000,

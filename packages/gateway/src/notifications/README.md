@@ -10,10 +10,18 @@ tool and explicit lifecycle result notifications.
 ## Owns
 
 `notification-service.ts` (`NotificationService`), `grant-store.ts`, `relay-client.ts`,
-`notify-module.ts` (optional-owner descriptor) and `tron-notify-extension.ts`. Store: `state/notifications.json`, one exact 1 MiB
+`notify-module.ts` (optional-owner descriptor), `tron-notify-extension.ts` and `push-policy-migration.ts`.
+The push policy move runs at Gateway start, under the agent-runtime lock, before the store opens: it copies the
+document and `state/settings/gateway.json` (mode 0600, fsynced) into `state/migrations/push-policy-v3`, commits
+a manifest last (temporary file, fsync, rename), then publishes settings before the document. A truncated,
+absent or invalid manifest is never trusted: its directory is kept as `push-policy-v3.incomplete-<stamp>` and the
+backup is taken again. Restore (`scripts/tron migrate push-policy --restore --tron-home <dir>`) is a rollback to a pre-v3 build: it takes the same agent-runtime lock as Gateway, refuses while it is held, validates the manifest against the two store paths and sha256 digests, and writes nothing unless every target matches its recorded before or after bytes. Starting this Gateway on a v2 store migrates it again, so restore only before running this build. An intact receipt whose recorded plan differs from this build's plan is a conflict: nothing is quarantined or re-backed-up, and the backup is left for the operator. Store: `state/notifications.json`, one exact 1 MiB
 owner-only document holding grants (at most 64 active devices), 256 pending intents,
 512 receipts, 192 revocation tombstones and the 512-row inbox. It never stores raw
-APNs tokens; secrets and message content stay out of RPC projections, logs and JSONL.
+APNs tokens; secrets and message content stay out of RPC projections, logs and JSONL. The
+three automatic-kind switches are Global settings (`notifications.push.inputNeeded|finished|waiting`,
+default on, live, agent-changeable), resolved through the settings owner at each admission; the
+document holds no policy.
 
 ## Contract
 
@@ -24,8 +32,7 @@ APNs tokens; secrets and message content stay out of RPC projections, logs and J
   `queued`, `suppressed`, `rate_limited` or `unavailable`; APNs acceptance is never
   called delivery. Capacity refusals create no intent or inbox row. Failure is
   diagnostic only and never fails canonical settlement.
-- **Automatic kinds** (all on by default, per-kind policy round-trips through
-  registration): `ask` (Time Sensitive, input needed), `agent_finished` (a neutral
+- **Automatic kinds** (each gated by its resolved Global setting, default on): `ask` (Time Sensitive, input needed), `agent_finished` (a neutral
   terminal category, sent only when no session-owned subagent or workflow is still
   live) and `waiting` (once per unchanged set of live background identities).
 - **Terminal alerts** fire only at Pi's final `agent_settled` at idle, never for
@@ -41,7 +48,15 @@ APNs tokens; secrets and message content stay out of RPC projections, logs and J
 - **Input required.** Every admitted semantic interaction (`select`, `confirm`, `input`,
   `editor`, form, including the `pi-ask-user` adapter's) emits one alert from
   `SemanticUIBroker` while pending, keyed by the interaction ID; it never delays the
-  interaction. `notifyWhenAskPresented` keeps its wire name but governs all of them.
+  interaction. `notifications.push.inputNeeded` governs all of them.
+- **Retry card.** `push_retry({reason})` asks for one exact native card (`intent: push-registration-retry`,
+  digest over session and tool call). The Gateway writes nothing: approval resolves the request with
+  `requested` and the approving iPhone alone rotates its rejected App Attest key and registers again, after
+  its own connection, device and generation fences. A duplicate approval is refused at the answer boundary and
+  never rotates. The App Attest key is per iPhone and its card names the other paired Macs. The result is
+  "requested", never "registered"; nothing is persisted, so an app death after acceptance is best effort.
+- **Automatic keys.** `notifications.push.inputNeeded|finished|waiting` are privacy-tapped: turning one on is
+  a widening that needs the native card, turning it off is routine.
 - **Presence.** A mobile subscription or local connection may publish
   `session.presentation.set` after sync: token-bound, revisioned, one per connection,
   visible leases expiring after 45 s. Visible at observation (latched before receipt
@@ -66,7 +81,7 @@ APNs tokens; secrets and message content stay out of RPC projections, logs and J
   the existing service for these two kernel calls; it adds no persistence or retry owner.
 - **Registration.** `push.registration.upsert|remove`. Upsert derives `deviceId`
   from the connection and takes an installation ID, endpoint-scoped grant ID/secret,
-  the issuing relay origin and preview/policy booleans (preview defaults off); an
+  the issuing relay origin and the preview boolean (preview defaults off); an
   identical registration writes nothing. `hello`/`system.info` carry
   `pushRegistrationRevision` so a phone re-registers after rotation. A grant from
   another origin or rejected by the relay is rotated by iOS through App Attest, never

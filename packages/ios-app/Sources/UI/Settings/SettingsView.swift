@@ -166,7 +166,7 @@ enum SettingsGroupKind {
         }
     }
 
-    static let placedSections: Set<String> = ["model", "workers", "context", "run", "trust", "connections", "tools", "sources", "setup"]
+    static let placedSections: Set<String> = ["model", "workers", "context", "run", "trust", "notifications", "connections", "tools", "sources", "setup"]
 
     static func icon(forSection id: String) -> String {
         switch id {

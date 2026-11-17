@@ -2929,17 +2929,15 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    func testPushReadinessAndRegistrationAreSeparateFromPolicyToggles() {
+    func testPushSheetShowsReadinessWithoutPolicyToggles() {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-ui-push"]
         app.launch(); defer { app.terminate() }
         let any = app.descendants(matching: .any)
-        let summary = any["push-registration-summary"], policy = any["push-alert-policy"]
+        let summary = any["push-registration-summary"]
         XCTAssertTrue(summary.waitForExistence(timeout: 10))
-        XCTAssertTrue(policy.exists)
-        XCTAssertLessThan(summary.frame.maxY, policy.frame.minY)
-        XCTAssertEqual(summary.switches.count, 0)
-        XCTAssertEqual(policy.switches.count, 3)
+        XCTAssertFalse(any["push-alert-policy"].exists, "push alert policy is Global settings the agent changes")
+        XCTAssertEqual(app.switches.count, 0)
         XCTAssertTrue(summary.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Complete")).firstMatch.exists)
         keepScreenshot(named: "1261-push-separate-summary")
     }
