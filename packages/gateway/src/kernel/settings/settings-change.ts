@@ -513,6 +513,9 @@ export class SettingsChangePath {
       if (named !== undefined && named !== value) throw new GatewayError("invalid_request", `${key.id} is the ${name}=${value} instance; ${name}=${named} is a different setting`);
     }
     const qualifiers: Qualifiers = { ...(request.qualifiers ?? {}), ...(key.fixed ?? {}) };
+    if (key.id === "permissions.macTerminalKey" && request.op === "set" && context.actor.kind === "ui" && qualifiers.device !== context.actor.id) {
+      throw new GatewayError("invalid_request", "Only the iPhone a Mac Terminal key names can accept its card");
+    }
     if (key.qualifier === "project" && target.kind !== "global" && stores.project) {
       if (request.qualifiers?.project !== undefined && request.qualifiers.project !== stores.project.root) {
         throw new GatewayError("invalid_request", `${key.label} for another project belongs to that project's target`);

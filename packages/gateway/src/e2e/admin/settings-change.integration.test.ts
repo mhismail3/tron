@@ -1237,6 +1237,20 @@ describe("outside changes to MCP servers and custom models", () => {
     expect(JSON.parse(await readFile(join(f.agentDir, "mcp.json"), "utf8")).mcpServers["home-docs"]).toBeUndefined();
   });
 
+  caseIt("an agent-requested Mac Terminal key applies only when the device it names accepts the card", async owner => {
+    const f = await fixture(owner);
+    const key = macTerminalSampleKey();
+    const request = [{ key: "permissions.macTerminalKey", qualifiers: { device: ENROLLED_IPHONE }, layer: "global", op: "set", value: key }] as const;
+    const accepted = (deviceId: string) => f.settingsChanges.change({ kind: "global" }, request, {
+      actor: { kind: "agent", id: "terminal-agent" }, reason: "Enroll the iPhone's Mac Terminal key",
+      confirm: async (_review, apply) => apply({ deviceId, commandId: commandId() }),
+    });
+    await expect(accepted("00000000-0000-4000-8000-000000000002")).rejects.toMatchObject({ code: "invalid_request", message: "Only the iPhone a Mac Terminal key names can accept its card" });
+    expect((await f.macTerminalKeys.read())[ENROLLED_IPHONE]).toBeUndefined();
+    await expect(accepted(ENROLLED_IPHONE)).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("private SSH service") });
+    expect((await f.macTerminalKeys.read())[ENROLLED_IPHONE]).toBeUndefined();
+  });
+
   caseIt("the app manages a bearer-token MCP server only through settings.change, holding a Keychain reference and never the token", async owner => {
     const f = await fixture(owner);
     const token = "b1-bearer-never-stored";
