@@ -945,8 +945,8 @@ export class HomeTaskDispatcher {
     }
   }
 
-  activeTargets(signal?: AbortSignal): Promise<string[]> {
-    return this.store.activeTargets(signal);
+  activeTargets(): Promise<string[]> {
+    return this.store.activeTargets();
   }
 
   private async readList(input: { limit?: number; cursor?: string; filter?: "all" | "open" | "finished" }, signal: AbortSignal): Promise<HomeTaskPage> {

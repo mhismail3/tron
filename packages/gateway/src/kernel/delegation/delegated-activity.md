@@ -224,7 +224,7 @@ releases its claims.
   the watched artifact. Result-shaped `runId`/`state` alone (a `schedule` runNow) is never
   live (#2256).
   `subagent_supervisor` receipts reference runs and never claim launches
-  (`managed-attribution.integration.test.ts`, `runtime-registry.integration.test.ts`).
+  (`managed-attribution.integration.test.ts`, `runtime-registry-activity.integration.test.ts`).
 
 ## Extension registration ownership
 

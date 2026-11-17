@@ -38,65 +38,6 @@ final class SettingsTrustCoordinator {
         self.uuidSource = uuidSource
     }
 
-    func listProjects() async throws -> ProjectLifecycleListing {
-        let admission = profileGeneration
-        var cursor: String?, rows: [ProjectLifecycleRow] = []
-        for _ in 0..<20 {
-            var params: [String: JSONValue] = ["limit": .number(50)]
-            if let cursor { params["after"] = .string(cursor) }
-            let value = try await client.requestValue("projects.list", JSONValue.object(params))
-            try requireProfile(admission)
-            try Task.checkCancellation()
-            let page = try value.decode(ProjectLifecycleListing.self)
-            rows.append(contentsOf: page.projects)
-            guard let next = page.nextCursor else {
-                return ProjectLifecycleListing(workspace: page.workspace, projects: rows, nextCursor: nil)
-            }
-            cursor = next
-        }
-        throw GatewayFailure(code: "invalid_response", message: "The project listing exceeded its bounded window.", retryable: false, details: nil)
-    }
-
-    func inspectProject(path: String) async throws -> ProjectLifecycleRow {
-        let admission = profileGeneration
-        let value = try await client.requestValue("projects.inspect", JSONValue.object(["cwd": .string(path)]))
-        try requireProfile(admission)
-        return try value.decode(ProjectLifecycleRow.self)
-    }
-
-    func reviewProject(_ operation: ProjectLifecycleOperation, name: String) async throws -> ProjectLifecycleReview {
-        let admission = profileGeneration
-        let params: [String: JSONValue] = ["action": .string(operation.rawValue), "name": .string(name),
-            "reason": .string("Requested \(operation.rawValue) from iPhone Trusted Projects")]
-        let value = try await projectChange(params)
-        try requireProfile(admission)
-        let planned = try value.decode(ProjectLifecycleReviewResult.self)
-        guard planned.status == "review", planned.review.requiresTap, !planned.review.digest.isEmpty else {
-            throw GatewayFailure(code: "invalid_response", message: "No exact project review was proven. Inspect the project and Changes before retrying.", retryable: false, details: nil)
-        }
-        return ProjectLifecycleReview(params: params, review: planned.review, intent: planned.intent)
-    }
-
-    func confirmProject(_ reviewed: ProjectLifecycleReview) async throws {
-        let admission = profileGeneration
-        var params = reviewed.params
-        params["confirmation"] = .object(["digest": .string(reviewed.review.digest), "intent": reviewed.intent])
-        let value = try await projectChange(params)
-        try requireProfile(admission)
-        noteSettingsChanged()
-        noteTrustChanged()
-        try value.decode(SettingsChangeResult.self).throwIfRefused()
-    }
-
-    private func projectChange(_ fields: [String: JSONValue]) async throws -> JSONValue {
-        let commandID = uuidSource.next().uuidString
-        var params = fields
-        params["commandId"] = .string(commandID)
-        return try await mutationExecutor.performValue(method: "projects.change", commandID: commandID) {
-            try await client.requestValue("projects.change", JSONValue.object(params))
-        }
-    }
-
     func inspectTrust(target: TrustTarget) async throws -> JSONValue {
         let admittedProfileGeneration = profileGeneration
         let value = try await client.requestValue(

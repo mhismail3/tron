@@ -282,7 +282,8 @@ flakes is not proof of absence, especially for partial hunts or always-failing c
    test file (`*.test.ts`, `test-support/`, `test-fixtures/`), real sleeps (`setTimeout(resolve, …)`), an `expect` on
    `Date.now()`/`performance.now()`, per-test timeout literals, literal `listen(<port>)`, `.skip`/`.only` and
    `retry:`; a count above `packages/gateway/determinism-baseline.json` fails, as does a baseline above the base's.
-   The baseline only shrinks: `--update` removes fixed sites and refuses new ones.
+   The baseline only shrinks: `--update` removes fixed sites and refuses new ones. A new file may take over sites only
+   from files deleted since the base (a split), never more per rule than those files held.
 7. Unlike the source-based static checks above, `scripts/tron layers ios` needs this
    commit's built Xcode index store (see the iOS lane below), so it runs at the build
    boundary after the cheap tier passes. A selection without the iOS lane runs it

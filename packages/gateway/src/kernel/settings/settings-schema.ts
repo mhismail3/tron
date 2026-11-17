@@ -98,6 +98,11 @@ const toolsDirection = (before: unknown, after: unknown): Direction => {
   const was = new Set(Array.isArray(before) ? before as string[] : []);
   return Array.isArray(after) && (after as string[]).some(name => !was.has(name)) ? "widen" : "narrow";
 };
+const sourcesDirection = (before: unknown, after: unknown): Direction => {
+  const kept = new Set(Array.isArray(after) ? after as string[] : []);
+  const excluded = (Array.isArray(before) ? before as string[] : []).filter(entry => entry.startsWith("-") || entry.startsWith("!"));
+  return excluded.some(entry => !kept.has(entry)) ? "widen" : toolsDirection(before, after);
+};
 
 function thinkingBudgetsType(): ValueType {
   const levels = ["minimal", "low", "medium", "high"] as const;
@@ -450,8 +455,8 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       label: "Cache warming", help: "Keep prompt caches warm between runs. Costs money.", order: 130, importance: "advanced",
     },
     ...(["extensions", "skills", "prompts", "themes"] as const).map((name, index): KeyDeclaration => ({
-      ...(name === "extensions" || name === "skills" ? { tap: "trust" as const } : {}), id: `sources.${name}`, sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "sources", subgroup: "Search paths", type: types.stringList(500),
-      layers: both(pi(name)), timing: "fixed", effect: "reload", direction: toolsDirection,
+      ...(name === "extensions" || name === "skills" ? { tap: "trust" as const } : {}), id: `sources.${name}`, sessionOverridable: false, projectSettable: true, group: "sources", subgroup: "Search paths", type: types.stringList(500),
+      layers: both(pi(name)), timing: "fixed", effect: "reload", direction: sourcesDirection,
       writers: ["ui", "home"], label: name[0]!.toUpperCase() + name.slice(1), help: `Paths searched for ${name}.`,
       order: 10 + index * 10, importance: "advanced",
       ...(name === "extensions" ? {
@@ -460,12 +465,12 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       } : {}),
     })),
     {
-      tap: "install", id: "sources.packages", sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "sources", type: packagesType(), layers: both(pi("packages")), timing: "fixed", effect: "reload",
+      tap: "install", id: "sources.packages", sessionOverridable: false, projectSettable: true, group: "sources", type: packagesType(), layers: both(pi("packages")), timing: "fixed", effect: "reload",
       direction: (b, a) => larger(Array.isArray(b) ? b.length : 0, Array.isArray(a) ? a.length : 0),
       writers: ["ui", "home"], label: "Packages", help: "Installed pi packages.", order: 50, importance: "essential", control: "readOnly",
     },
     {
-      tap: "trust", id: "sources.npmCommand", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "sources", type: types.stringList(20), layers: { global: pi("npmCommand") }, timing: "live", effect: "next-change",
+      tap: "trust", id: "sources.npmCommand", sessionOverridable: false, projectSettable: false, group: "sources", type: types.stringList(20), layers: { global: pi("npmCommand") }, timing: "live", effect: "next-change",
       writers: ["ui", "home"], label: "npm command", help: "The command used to install packages.", order: 60, importance: "advanced", control: "list",
       entry: { hint: "One word per value: the program first (npm, pnpm or bun), then any arguments.", example: "pnpm" },
     },
