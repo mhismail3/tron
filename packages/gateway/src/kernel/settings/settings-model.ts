@@ -14,25 +14,6 @@ export interface SessionSettingsSource {
   modelRuntime: ModelRuntime;
 }
 
-export interface SettingsOptionsRequest {
-  key: string;
-  qualifiers?: Qualifiers;
-  query?: string;
-  cursor?: string;
-  limit?: number;
-}
-
-export interface SettingsOption { value: unknown; label: string; detail?: string; disabledReason?: string; resource?: Record<string, unknown> }
-
-export interface SettingsOptionsResult {
-  key: string;
-  source: string;
-  dependsOn: string[];
-  options: SettingsOption[];
-  nextCursor?: string;
-}
-
-
 export interface SettingsReadOwner {
   updatePackage(request: { cwd: string; source: string; version: string; reason: string }, requester: Actor, confirm?: ConfirmChange): Promise<ChangeResult>;
   readonly schema: SettingsSchema;
@@ -40,7 +21,6 @@ export interface SettingsReadOwner {
   readonly admitModelChoice: (runtime: ModelRuntime, provider: string, id: string) => Promise<void>;
   stores(target: SettingsTarget, session?: SessionSettingsSource, options?: { storeState?: boolean; keys?: readonly string[] }): Promise<SettingsStores>;
   resolveOptions(runtime: ModelRuntime): Pick<ResolveOptions, "format" | "options">;
-  options(target: SettingsTarget, session: SessionSettingsSource | undefined, request: SettingsOptionsRequest, resolve: (keys: readonly string[]) => Promise<Resolution>): Promise<SettingsOptionsResult>;
 }
 
 export class SettingsModel<Owner extends SettingsReadOwner = SettingsReadOwner> {
@@ -76,10 +56,6 @@ export class SettingsModel<Owner extends SettingsReadOwner = SettingsReadOwner> 
       if (value !== undefined) setPath(settings, binding.path, await key.type.validate(value, key.id));
     }
     return { settings, requestPins, admission: resolved.keys.filter(row => row.key === "model.ref[role=chat]" || row.key === "model.thinking[role=chat]" || (session.home && row.key === "tools.active")) };
-  }
-
-  options(target: SettingsTarget, session: SessionSettingsSource | undefined, request: SettingsOptionsRequest): Promise<SettingsOptionsResult> {
-    return this.owner.options(target, session, request, keys => this.resolve(target, session, keys));
   }
 }
 

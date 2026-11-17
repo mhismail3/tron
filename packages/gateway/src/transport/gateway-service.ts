@@ -22,7 +22,7 @@ import type { Actor, ChangeEntry } from "../kernel/settings/settings-record.js";
 import { SECTIONS, recordSubject } from "../kernel/settings/settings-schema.js";
 import { HOME_PROFILE_KINDS, HOME_PROFILE_MAINTAINER_ACTIONS, HomeProfileItems, type HomeProfileRequest } from "../modules/home/home-profile.js";
 import { profilePath } from "../modules/home/profile-placement.js";
-import { presentHistoryEntry, presentResolution } from "../admin/settings-presentation.js";
+import { presentHistoryEntry } from "../admin/settings-presentation.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, rejectUnknownFields, string, text as boundedText } from "../util/validation.js";
 import type { DeviceStore } from "../security/device-store.js";
 import type { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
@@ -188,13 +188,6 @@ function settingsChangeRequest(raw: unknown, label: string): ChangeRequest {
     ...("value" in change ? { value: change.value } : {}),
     ...("expected" in change ? { expected: change.expected } : {}),
   };
-}
-
-function settingsRendererControls(raw: unknown): string[] {
-  const renderer = object(raw, "renderer");
-  rejectUnknownFields(renderer, ["version", "controls"], "renderer");
-  integer(renderer.version, "renderer.version", 1, Number.MAX_SAFE_INTEGER);
-  return arrayOfStrings(renderer.controls, "renderer.controls", 32);
 }
 
 function parseSessionSourceControl(value: unknown): SessionSourceControlRequest | undefined {
@@ -1725,24 +1718,12 @@ export class GatewayService {
         return safeJson(await this.dependencies.macTerminal.status(client.identity));
       }
       case "settings.resolve": {
-        rejectUnknownFields(params, ["target", "keys", "renderer"], method);
+        rejectUnknownFields(params, ["target", "keys"], method);
         const target = await stage("settings.resolve.target", () => this.canonicalSettingsTarget(params.target));
         const keys = params.keys === undefined ? undefined : arrayOfStrings(params.keys, "keys", 200);
-        const controls = params.renderer === undefined ? undefined : settingsRendererControls(params.renderer);
         const session = await stage("settings.resolve.session-source", () => this.readSettingsSession(client, target));
         const resolution = await stage("settings.resolve.read", () => this.dependencies.settingsModel.resolve(target, session, keys));
-        return stage("settings.resolve.projection", () => safeJson(presentResolution(this.dependencies.settingsModel.schema, resolution, controls ? { controls } : {})));
-      }
-      case "settings.options": {
-        rejectUnknownFields(params, ["target", "key", "qualifiers", "query", "cursor", "limit"], method);
-        const target = await this.canonicalSettingsTarget(params.target);
-        return safeJson(await this.dependencies.settingsModel.options(target, await this.readSettingsSession(client, target), {
-          key: string(params.key, "key", { max: 200 }),
-          ...(params.qualifiers === undefined ? {} : { qualifiers: settingsQualifiers(params.qualifiers, "qualifiers") }),
-          ...(params.query === undefined ? {} : { query: string(params.query, "query", { max: 200 }) }),
-          ...(params.cursor === undefined ? {} : { cursor: string(params.cursor, "cursor", { max: 40 }) }),
-          ...(params.limit === undefined ? {} : { limit: integer(params.limit, "limit", 1, 200) }),
-        }));
+        return stage("settings.resolve.projection", () => safeJson(resolution));
       }
       case "settings.change":
         return this.mutation(client, method, params, async (workToken) => {

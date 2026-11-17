@@ -1,6 +1,6 @@
-import { type Resolution, type SettingsTarget, type Qualifiers, type GitResult, type ChangeResult, type ConfirmChange } from "../kernel/settings/tool-contract.js";
+import { type SettingsTarget, type GitResult, type ChangeResult, type ConfirmChange } from "../kernel/settings/tool-contract.js";
 import type { MacTerminalService } from "../security/mac-terminal-service.js";
-import { setPath, unsetPath, qualifiedWrite, fillPath, type SessionSettingsSource, type SettingsOptionsRequest, type SettingsOptionsResult } from "../kernel/settings/settings-model.js";
+import { setPath, unsetPath, qualifiedWrite, fillPath, type SessionSettingsSource } from "../kernel/settings/settings-model.js";
 import type { ChangeContext, SettingsWriters, Planned } from "../kernel/settings/settings-change.js";
 import { stage } from "../util/request-span.js";
 import { readFile } from "node:fs/promises";
@@ -10,7 +10,7 @@ import { SettingsManager, type ModelRuntime } from "../kernel/pi/coding-agent.js
 import { asUncertainOutcome, GatewayError } from "../errors.js";
 import { validateProjectSettings } from "../kernel/settings/settings-sdk-manager.js";
 import { contextWindowLimits, parseContextModelKey, validateContextWindow } from "../providers/context-window-policy.js";
-import { assertNewModelChoice, openAIModelEligibility } from "../providers/openai-model-eligibility.js";
+import { assertNewModelChoice } from "../providers/openai-model-eligibility.js";
 import { isVirtualModel } from "../providers/virtual-model.js";
 import { updateJsonLocked } from "../foundation/json.js";
 import { gitHeadState, projectGitState, readProjectDocument } from "./project-settings-writer.js";
@@ -120,70 +120,6 @@ export class SettingsStoreAdapter {
 
   resolveOptions(runtime: ModelRuntime): Pick<ResolveOptions, "format" | "options"> {
     return { format: formatContext(runtime), options: optionSources(runtime) };
-  }
-
-  async options(target: SettingsTarget, session: SessionSettingsSource | undefined, request: SettingsOptionsRequest, resolve: (keys: readonly string[]) => Promise<Resolution>): Promise<SettingsOptionsResult> {
-    const key = this.schema.KEYS.find(candidate => candidate.id === request.key);
-    if (!key) throw new GatewayError("invalid_request", `Unknown setting ${request.key}`);
-    if (!key.control) throw new GatewayError("invalid_request", `${key.label} has no editor options`);
-    if (!key.optionsSource) {
-      if (!key.type.options) throw new GatewayError("invalid_request", `${key.label} has no options to choose from`);
-      return { key: key.id, source: "static", dependsOn: [], options: key.type.options.map(option => ({
-        value: option.value, label: option.label, ...(option.detail ? { detail: option.detail } : {}) })) };
-    }
-    const { name, dependsOn } = key.optionsSource;
-    const runtime = session?.modelRuntime ?? this.dependencies.modelRuntime;
-    const base = { key: key.id, source: name, dependsOn: [...dependsOn] };
-    switch (name) {
-      case "catalog.models":
-        return { ...base, ...await this.catalogModelOptions(runtime, request, key.type.kind === "stringList" || target.kind === "home" || session?.home === true) };
-      case "catalog.thinkingLevels": {
-        const model = await this.followedModel(runtime, request.qualifiers, resolve);
-        const supported = model ? getSupportedThinkingLevels(model) : [];
-        const levels = supported.length === 1 && supported[0] === "off" ? [] : supported;
-        const declared = new Map(this.schema.schemaKey("model.thinking[role=chat]").type.options!.map(option => [option.value, option]));
-        return { ...base, options: levels.map(level => ({ value: level, label: declared.get(level)?.label ?? level,
-          ...(declared.get(level)?.detail ? { detail: declared.get(level)!.detail } : {}) })) };
-      }
-      case "catalog.tools": {
-        if (!this.dependencies.toolCatalog) throw new GatewayError("unsupported", "This Gateway has no tool catalog");
-        const catalog = await this.dependencies.toolCatalog(target);
-        const chosen = (await resolve([key.id])).keys[0]?.value;
-        const names = new Set(catalog.map(tool => tool.name));
-        const missing = (Array.isArray(chosen) ? chosen as string[] : []).filter(name => !names.has(name));
-        return { ...base, options: [
-          ...catalog.map(tool => ({ value: tool.name, label: tool.name, ...(tool.description ? { detail: firstSentence(tool.description) } : {}), resource: tool.resource })),
-          ...missing.map(name => ({ value: name, label: name, disabledReason: "Not available here" })),
-        ] };
-      }
-      default:
-        throw new GatewayError("unsupported", `${name} is not a settings option source`);
-    }
-  }
-
-  private async followedModel(runtime: ModelRuntime, qualifiers: Qualifiers | undefined, resolve: (keys: readonly string[]) => Promise<Resolution>): Promise<Model<any> | undefined> {
-    if (qualifiers?.model !== undefined) {
-      const ref = parseContextModelKey(qualifiers.model);
-      return runtime.getModel(ref.provider, ref.id);
-    }
-    const resolution = await resolve(["model.ref[role=chat]"]);
-    const chat = resolution.keys.find(key => key.key === "model.ref[role=chat]")?.value as ModelRefValue | undefined;
-    return chat ? runtime.getModel(chat.provider, chat.id) : undefined;
-  }
-
-  private async catalogModelOptions(runtime: ModelRuntime, request: SettingsOptionsRequest, physicalOnly: boolean): Promise<Pick<SettingsOptionsResult, "options" | "nextCursor">> {
-    const models = (await catalogModelEntries(runtime)).filter(model => !physicalOnly || !model.virtual);
-    const query = request.query?.toLowerCase();
-    const matching = query ? models.filter(model => [model.name, model.id, model.provider].some(field => field.toLowerCase().includes(query))) : models;
-    const offset = request.cursor === undefined ? 0 : catalogCursorOffset(request.cursor);
-    const limit = request.limit ?? 50;
-    return {
-      options: matching.slice(offset, offset + limit).map(model => ({
-        value: { provider: model.provider, id: model.id }, label: model.name, detail: model.provider,
-        ...(model.available ? {} : { disabledReason: "Not available for this account" }),
-      })),
-      ...(offset + limit < matching.length ? { nextCursor: String(offset + limit) } : {}),
-    };
   }
 
   private async devicePreferenceSnapshot(target: SettingsTarget, keys: readonly string[] | undefined): Promise<DevicePreferenceSnapshot | undefined> {
@@ -454,33 +390,6 @@ async function readJsonObject(path: string): Promise<Record<string, unknown>> {
 
 function formatContext(runtime: ModelRuntime): FormatContext {
   return { modelName: (ref) => runtime.getModel(ref.provider, ref.id)?.name };
-}
-
-function firstSentence(text: string): string {
-  const line = text.trim().split("\n")[0]!;
-  const end = line.search(/[.!?](\s|$)/);
-  return end === -1 ? line : line.slice(0, end + 1);
-}
-
-async function catalogModelEntries(runtime: ModelRuntime): Promise<Array<{ provider: string; id: string; name: string; available: boolean; virtual: boolean }>> {
-  const eligibility = openAIModelEligibility(runtime);
-  await eligibility?.refresh();
-  const providerIds = new Set(runtime.getModels().map(model => model.provider));
-  const available = new Set((await Promise.all([...providerIds].map(async providerId => {
-    try { return await runtime.getAvailable(providerId); }
-    catch { return []; }
-  }))).flat().map(model => `${model.provider}\0${model.id}`));
-  const projected = runtime.getModels().map(model => ({
-    provider: model.provider, id: model.id, virtual: isVirtualModel(model),
-    name: eligibility?.displayName(model.provider, model.id) ?? model.name,
-    available: available.has(`${model.provider}\0${model.id}`) && (eligibility?.isEligibleInRuntime(runtime, model.provider, model.id) ?? true),
-  }));
-  return eligibility?.orderAccountModels(projected) ?? projected;
-}
-
-function catalogCursorOffset(cursor: string): number {
-  if (!/^(0|[1-9][0-9]{0,8})$/u.test(cursor)) throw new GatewayError("invalid_request", "Invalid settings options cursor");
-  return Number(cursor);
 }
 
 function optionSources(runtime: ModelRuntime): OptionSources {
