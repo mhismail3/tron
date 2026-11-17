@@ -72,15 +72,11 @@ struct ProjectSettingsSections: View {
     let cwd: String
     let profileID: String
     let showsWorkspace: Bool
-    var sessionSettings: AnyView? = nil
-    var sessionSettingsAfterTrust: AnyView? = nil
-    var sessionSettingsFooter: String? = nil
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @PresentationState private var trust: ProjectTrustSummary?
     @PresentationState private var git: GitInspection?
     @PresentationState private var error: String?
-    @PresentationState private var settingsError: String?
     @PresentationState private var generation = 0
     @PresentationState private var reload = 0
 
@@ -110,26 +106,16 @@ struct ProjectSettingsSections: View {
                     Task { await model.switchGateway(profile) }
                 }
             } else {
-                TronSettingsGroup(sessionSettings == nil ? "Project" : nil,
-                                  detail: sessionSettings == nil ? cwd : nil, accent: .tronPrimary) {
-                    if let sessionSettings {
-                        sessionSettings
-                        TronSettingsDivider()
-                    }
+                TronSettingsGroup("Project", detail: cwd, accent: .tronPrimary) {
                     TronProgressiveSheetLink(accessibilityLabel: "Project Trust", identity: "project.settings.trust.\(profileID).\(cwd)",
                                              destination: { TrustSettingsView(target: TrustTarget(cwd: cwd)) }) {
-                        TronSettingsRow(icon: trust?.stateIcon ?? "shield", title: sessionSettings == nil ? (trust?.stateTitle ?? "Trust") : "Project Trust",
+                        TronSettingsRow(icon: trust?.stateIcon ?? "shield", title: trust?.stateTitle ?? "Trust",
                                         subtitle: trust?.stateDetail ?? " ", subtitleColor: .tronTextSecondary) {
-                            if sessionSettings != nil { TronDynamicValue(text: trust?.stateTitle ?? "") }
                         }
                         .contentShape(Rectangle())
                     }
                     .accessibilityValue(trust?.stateTitle ?? "")
                     .accessibilityIdentifier("project-settings-trust")
-                    if let sessionSettingsAfterTrust {
-                        TronSettingsDivider()
-                        sessionSettingsAfterTrust
-                    }
                     if showsWorkspace {
                         TronSettingsDivider()
                         TronSettingsRow(icon: "arrow.triangle.branch", title: "Workspace",
@@ -140,49 +126,15 @@ struct ProjectSettingsSections: View {
                         }
                     }
                 }
-                if let sessionSettingsFooter {
-                    TronSettingsCaption(sessionSettingsFooter).containerValue(\.tronSettingsSection, false)
-                }
                 if let error {
                     TronSettingsNotice(message: error, retry: { reload &+= 1 })
                 }
-                let target = SettingsTarget.project(cwd: cwd).gatewayTarget
-                if let snapshot = model.settingsSnapshot(for: target) {
-                    SettingsProjectNotices(resolution: snapshot.resolution)
-                    if snapshot.resolution.keys.contains(where: SettingsKeySelection.projectValues.includes) {
-                        SettingsProjectGroups(target: target)
-                    } else {
-                        TronSettingsGroup("Repository Overrides") {
-                            TronSettingsRow(icon: "folder.badge.gearshape", title: "No repository overrides",
-                                            subtitle: "Sessions inherit Global settings.", subtitleColor: .tronTextSecondary)
-                        }
-                        .accessibilityElement(children: .contain)
-                        .accessibilityIdentifier("project-settings-no-overrides")
-                    }
-                    TronSettingsCaption("Read-only Project settings. Only allowed repository values are listed. Ask an agent to update them in the repo.").containerValue(\.tronSettingsSection, false)
-                } else if let settingsError {
-                    TronPlaceholderState(title: "Repository overrides unavailable", detail: settingsError,
-                                         icon: "folder.badge.gearshape", actionTitle: "Retry") { reload &+= 1 }
-                } else { TronSheetLoadingState(label: "Loading repository overrides…") }
             }
         }
         .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
             if !active { generation &+= 1 }
         }
         .onDisappear { generation &+= 1 }
-        .task(id: PresentationActivityTaskID(source: [model.settingsFreshness.invalidation, model.settingsFreshness.foreground, reload],
-                                             presentationActive: presentationActivity.allowsPresentationPublication)) {
-            guard presentationActivity.allowsPresentationPublication, model.selectedGatewayProfileID() == profileID else { return }
-            do {
-                try await model.refreshSettingsSnapshot(for: SettingsTarget.project(cwd: cwd).gatewayTarget)
-                guard !Task.isCancelled else { return }
-                settingsError = nil
-            } catch is CancellationError {
-            } catch {
-                guard !Task.isCancelled, presentationActivity.allowsPresentationPublication else { return }
-                settingsError = error.localizedDescription
-            }
-        }
         .task(id: PresentationActivityTaskID(source: readID,
                                            presentationActive: presentationActivity.allowsPresentationPublication)) {
             await load()
