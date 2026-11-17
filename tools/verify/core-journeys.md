@@ -50,8 +50,6 @@ canonical-message check; the Process/Native rows assert presence, not exactly-on
 | same file › decline or Stop before acceptance has no effect (both); an unanswered exact change card expires…; recovers the actual native response receipt after a fixture kill at pending/effects/completion | Registry | No file/history change; late tap refused | Kill-cut recovery without replaying effects |
 | `packages/gateway/src/e2e/modules/apps/apps-install.integration.test.ts` › … › offers without installing, reviews exact source/config, installs once… | Registry | Offer → `apps.list` empty; reviewed install creates once, same command idempotent | Stale install `conflict`; crash-cut cases without replay |
 | `TronMobileUITests/RealGatewayPairAndChatUITests/testPendingAppReviewInstallLight` | Native | Real `swift_app` offer → no app directory through review; explicit confirm tap creates `app.json`, pending row leaves | — |
-| `…/testTrustedProjectsListsAndAddsProjectsUntrusted` | Native | Trust changes only after the card's exact digest tap | — |
-| `…/testProjectLifecycleDenialRetainsUntrustedRepository` | Native | Deny → no repository or trust; denied trust keeps the repository untrusted | Denial path |
 
 **GAP #2232:** stale/wrong-digest/double-tap refusals are proven only through in-process
 `GatewayService.invoke`; no socket or native case for the shared change card.

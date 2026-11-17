@@ -35,7 +35,6 @@ struct SettingsKeyPresentation: Decodable, Equatable, Sendable {
 
 enum SettingsKeySelection: Equatable {
     case all
-    case allExcept(Set<String>)
     case editable(excluding: Set<String>)
     case sessionOverrides
     case sessionOverridesExcept(Set<String>)
@@ -46,7 +45,6 @@ enum SettingsKeySelection: Equatable {
               setting.key != "model.thinking[role=summarizer]" else { return false }
         switch self {
         case .all: return true
-        case .allExcept(let excluded): return !excluded.contains(setting.key)
         case .editable(let excluded):
             return !excluded.contains(setting.key) && setting.presentation.editable
         case .sessionOverrides:
