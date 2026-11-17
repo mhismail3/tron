@@ -148,6 +148,20 @@ final class TronHomeSheetsUITests: XCTestCase {
     @MainActor private func exerciseTaskReadingSubtext(_ name: String, arguments: [String]) {
         let app = launchPolishManage(arguments + ["-home-task-padding-review"])
         defer { app.terminate() }
+        let controls = element(app, "home-manage-controls")
+        for _ in 0..<8 where !controls.isHittable { app.swipeUp() }
+        let metadata = controls.staticTexts["Pause or resume memory, or disable Home"]
+        let controlsTitle = controls.staticTexts["Controls"]
+        XCTAssertTrue(metadata.exists && controlsTitle.exists)
+        let metadataLines = name == "ax-large" ? 2.0 : 1.0
+        if name == "ax-large" {
+            XCTAssertGreaterThan(metadata.frame.height, controlsTitle.frame.height, "The subtitle wraps at accessibility text")
+        }
+        let metadataHeight = metadata.frame.height / metadataLines
+        XCTAssertGreaterThan(metadataHeight, 0)
+        XCTAssertLessThan(metadataHeight, controlsTitle.frame.height,
+                          "Default shared-row callers keep their smaller metadata style")
+        shot("1771-default-metadata-\(name)")
         let tasks = element(app, "home-manage-tasks")
         for _ in 0..<8 where !tasks.isHittable { app.swipeDown() }
         open(app, tasks, ready: "home-task-terminal", name: "reading-subtext-tasks")
@@ -162,7 +176,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         XCTAssertTrue(title.exists)
         let lineHeight = title.frame.height
         XCTAssertGreaterThan(lineHeight, 0)
-        var geometry = ["readingLine=\(lineHeight)",
+        var geometry = ["metadataLine=\(metadataHeight)", "readingLine=\(lineHeight)",
                         app.staticTexts["fixture.home-typography"].label]
         for id in ["home-task-result", "home-task-model", "home-task-subagents", "home-task-spend"] {
             let value = element(app, "\(id)-subtext")
