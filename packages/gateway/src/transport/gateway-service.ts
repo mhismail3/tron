@@ -7,10 +7,10 @@ import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
 import { contextWindowLimits } from "../providers/context-window-policy.js";
 import { ModelReleaseDateCatalog } from "../providers/model-release-date-catalog.js";
 import type { GatewayConfig } from "../config.js";
-import { asUncertainOutcome, GatewayError, isUncertainOutcome } from "../errors.js";
+import { asUncertainOutcome, GatewayError } from "../errors.js";
 import { runtimeIdentity } from "./runtime-identity.js";
 import { HOME_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY, HOME_MEMORY_VIEW_CAPABILITY, HOME_PROFILE_LIST_CAPABILITY, HOME_PROFILE_EDIT_CAPABILITY } from "../protocol/capabilities.js";
-import type { CommandDetail, GatewayRestartResponse, HomeTaskStatusResult, JsonValue, ModelPage, ModelRef, SessionCommands, SessionListPage, TronModuleList } from "../protocol/types.js";
+import type { CommandDetail, GatewayRestartResponse, HomeTaskStatusResult, JsonValue, ModelPage, ModelRef, SessionCommands, SessionListPage } from "../protocol/types.js";
 import { admitHomeMemoryView, admitHomeMemoryEvidence } from "../episodic/home-memory-browser.js";
 import { GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import { PI_VERSION } from "../kernel/pi/version.js";
@@ -45,7 +45,6 @@ import { type UploadStore } from "../machine/upload-store.js";
 import { DISPLAY_CAPABILITY, BROWSER_LIVE_VIEW_CAPABILITY, NATIVE_LIVE_VIEW_CAPABILITY } from "../modules/display/contract.js";
 import type { TrustService } from "../kernel/resources/trust-service.js";
 import type { ModelConfigService } from "../admin/model-config-service.js";
-import type { PackageService } from "../admin/package-service.js";
 import type { GlobalProviderResources } from "../admin/global-provider-resources.js";
 import type { AuthBroker } from "../admin/auth-broker.js";
 import { withMcpAuthInteraction } from "../kernel/host/extension-adapters.js";
@@ -75,7 +74,6 @@ import { admitsAutomationTrigger } from "../automations/automation-contract.js";
 import { ProviderUsageOwner, providerUsageSupported, providerUsageLentTo, providerLocalOnly, PROVIDER_USAGE_CAPABILITY } from "../providers/provider-usage.js";
 import { openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import type { ProfileStore } from "../modules/home/profile-store.js";
-import { MODULES_CAPABILITY, tronModuleSummaries } from "../extensions/tron-modules.js";
 import type { HomeOwner } from "../modules/home/home-owner.js";
 import { isVirtualModel } from "../providers/virtual-model.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
@@ -280,7 +278,6 @@ export interface GatewayServiceDependencies {
   devicePreferences?: Pick<DevicePreferenceBridge, "reply" | "detachConnection">;
   macTerminal?: Pick<MacTerminalService, "status">;
   modelConfig: ModelConfigService;
-  packages: PackageService;
   auth: AuthBroker;
   globalProviderResources: Pick<GlobalProviderResources, "requestReload" | "withStableSnapshot" | "refreshModels">;
   updateService?: GatewayUpdateService;
@@ -457,8 +454,6 @@ export class GatewayService {
         "auth.v1",
         "settings.v1",
         SETTINGS_MODEL_CAPABILITY,
-        "packages.v1",
-        MODULES_CAPABILITY,
         "trust.v1",
         "filesystem.v1",
         "source-control.v1",
@@ -886,7 +881,7 @@ export class GatewayService {
         });
       case "push.registration.upsert":
         if (client.isLocal) throw new GatewayError("auth_required", "Only an authenticated mobile device can register push delivery");
-        const allowed = new Set(["commandId", "installationId", "grantId", "secret", "previewsEnabled", "relayOrigin", "notifyWhenAskPresented", "notifyWhenFinished", "notifyWhenWaiting"]);
+        const allowed = new Set(["commandId", "installationId", "grantId", "secret", "previewsEnabled", "relayOrigin"]);
         if (Object.keys(params).some((key) => !allowed.has(key))) throw new GatewayError("invalid_request", "Push registration contains unknown fields");
         const notifications = this.requireNotifications();
         void string(params.commandId, "commandId", { min: 8, max: 160 });
@@ -897,9 +892,6 @@ export class GatewayService {
           secret: string(params.secret, "secret", { min: 43, max: 171 }),
           previewsEnabled: params.previewsEnabled === undefined ? false : boolean(params.previewsEnabled, "previewsEnabled"),
           relayOrigin: string(params.relayOrigin, "relayOrigin", { min: 1, max: 512 }),
-          ...(params.notifyWhenAskPresented === undefined ? {} : { notifyWhenAskPresented: boolean(params.notifyWhenAskPresented, "notifyWhenAskPresented") }),
-          ...(params.notifyWhenFinished === undefined ? {} : { notifyWhenFinished: boolean(params.notifyWhenFinished, "notifyWhenFinished") }),
-          ...(params.notifyWhenWaiting === undefined ? {} : { notifyWhenWaiting: boolean(params.notifyWhenWaiting, "notifyWhenWaiting") }),
         };
         if (await notifications.registrationIsCurrent(input)) {
           return safeJson(await notifications.status(client.identity));
@@ -1841,39 +1833,6 @@ export class GatewayService {
       }
       case "trust.inspect":
         return safeJson(await this.dependencies.trust.inspect(string(params.cwd, "cwd", { max: 4_096 })));
-      case "packages.list":
-        rejectUnknownFields(params, ["cwd"], "Package listing");
-        return safeJson(await this.dependencies.packages.list(optionalString(params.cwd, "cwd", 4_096) ?? process.cwd()));
-      case "modules.list": {
-        rejectUnknownFields(params, [], "Module listing");
-        return safeJson({ modules: tronModuleSummaries(this.dependencies.sessions.moduleHost) } satisfies TronModuleList);
-      }
-      case "packages.checkUpdates":
-        rejectUnknownFields(params, ["cwd"], "Package update check");
-        return safeJson(await this.dependencies.packages.checkUpdates(optionalString(params.cwd, "cwd", 4_096) ?? process.cwd()));
-      case "packages.remove":
-      case "packages.update":
-        rejectUnknownFields(params, ["commandId", "cwd", "source", "local"], "Package mutation");
-        return this.mutation(client, method, params, async () => {
-          const cwd = optionalString(params.cwd, "cwd", 4_096) ?? process.cwd();
-          const local = params.local === undefined ? false : boolean(params.local, "local");
-          if (local) throw new GatewayError("invalid_request", "Repository packages are read-only in the app; edit the repository configuration");
-          let result: Awaited<ReturnType<PackageService["mutate"]>>;
-          try {
-            result = await this.dependencies.packages.mutate(
-              method === "packages.update" ? "update" : "remove",
-              method === "packages.update" ? optionalString(params.source, "source", 2_000) : string(params.source, "source", { max: 2_000 }),
-              cwd,
-              local,
-            );
-          } catch (error) {
-            if (!local && isUncertainOutcome(error)) this.dependencies.globalProviderResources.requestReload();
-            throw error;
-          }
-          this.dependencies.broadcast("packages.changed", { cwd });
-          if (!local) this.dependencies.globalProviderResources.requestReload();
-          return safeJson(result);
-        });
       case "models.custom.get":
         return safeJson(await this.dependencies.modelConfig.get());
       case "models.refresh": {

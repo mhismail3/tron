@@ -359,7 +359,7 @@ it("drives managed subagents through single, workflow, question and steering che
     resourceStates.repaired = await settings();
     expect(resourceStates.healthy.subagentDiagnostics).toBeNull();
     expect(resourceStates.repaired.subagentDiagnostics).toBeNull();
-    const inventory = await new PackageService(agentDir, trust, () => {}, undefined, managedSubagents).list(cwd) as { packages: Array<{ source: string; provides: { skills: string[]; prompts: string[] } }> };
+    const inventory = await new PackageService(agentDir, trust, undefined, managedSubagents).list(cwd) as { packages: Array<{ source: string; provides: { skills: string[]; prompts: string[] } }> };
     report.packages = inventory.packages.filter(value => value.provides.skills.includes("pi-subagents")).map(value => ({ source: value.source, skills: value.provides.skills, prompts: value.provides.prompts }));
     report.entries = entries();
     report.schemaVersion = 2;

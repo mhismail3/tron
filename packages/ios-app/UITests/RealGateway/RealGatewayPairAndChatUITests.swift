@@ -937,8 +937,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         openSheet("settings-link-Agent Behavior", "global-agent-behavior", section: "model")
         XCTAssertTrue(app.descendants(matching: .any)["settings-section-run-detail"].waitForExistence(timeout: 30))
         dismissTopSheet(app)
-        openSheet("settings-section-tools-open", "global-tools", section: "tools"); dismissTopSheet(app)
-        for (title, name) in [("MCP Servers", "mcp"), ("Extensions", "extensions"),
+        for (title, name) in [("MCP Servers", "mcp"),
                               ("Model Providers", "providers"), ("Setup", "setup")] {
             openSheet("settings-link-\(title)", name); dismissTopSheet(app)
         }
@@ -997,37 +996,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         keepScreenshot(app, name: "939-mcp-servers")
         dismissTopSheet(app)
 
-        let extensionsLink = app.buttons["settings-link-Extensions"]
-        for _ in 0..<12 where !extensionsLink.isHittable { app.swipeUp() }
-        extensionsLink.tap()
-        for (key, name) in [("sources.npmCommand", "npm"), ("sources.extensions", "search-path")] {
-            guard let row = hittableElement(app, identifier: settingRowToken(key), timeout: 60) else {
-                XCTFail("Extensions has no \(key) row: \(app.debugDescription)"); return
-            }
-            (row.buttons.allElementsBoundByIndex.last ?? row).tap()
-            let value = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Add value")).textFields.firstMatch
-            XCTAssertTrue(value.waitForExistence(timeout: 15), "the \(key) sheet has no add-value field: \(app.debugDescription)")
-            XCTAssertNotEqual(value.placeholderValue ?? "", "Value", "the placeholder must be a real example")
-            XCTAssertFalse((value.placeholderValue ?? "").isEmpty, "the add-value field shows the schema's example")
-            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "For example:")).firstMatch.exists,
-                          "the add-value row says what to enter: \(app.debugDescription)")
-            if key == "sources.npmCommand" {
-                XCTAssertEqual(value.placeholderValue, "pnpm")
-                value.tap()
-                XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10), "The real add-value field must acquire keyboard focus")
-                value.typeText("pnpm")
-                let add = app.keyboards.buttons.matching(NSPredicate(format: "label ==[c] %@", "done")).firstMatch
-                XCTAssertTrue(add.waitForExistence(timeout: 5), "the add-value return key must read Done")
-                add.tap()
-                XCTAssertTrue(waitForNonExistence(app.keyboards.firstMatch, timeout: 10), "Done must dismiss the keyboard")
-                XCTAssertTrue(app.staticTexts["pnpm"].waitForExistence(timeout: 5), "Done must add the typed value to the list")
-            }
-            keepScreenshot(app, name: "939-add-value-\(name)")
-            dismissTopSheet(app)
-        }
-        dismissTopSheet(app)
-
-        for (title, marker, name) in [("Connections", "Paired Macs", "connections"), ("Push Notifications", "Input needed", "push")] {
+        for (title, marker, name) in [("Connections", "Paired Macs", "connections"), ("Push Notifications", "Private agent alerts for this iPhone.", "push")] {
             let link = app.buttons["settings-link-\(title)"]
             revealBelowNavigationBar(app, link)
             link.tap()
@@ -1181,24 +1150,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                                              "Global embeds its former More Settings groups in Agent Behavior")
         coverage["settings"] = assertSettingsSurface(app, name: "settings", layers: ["global"], schema: schema, sectionDestinations: [
             "model": "Agent Behavior", "workers": "Agent Behavior", "context": "Agent Behavior", "run": "Agent Behavior",
-            "sources": "Extensions", "setup": "Setup"])
-        openSettingsSection(app, "tools")
-        let codeMode = app.buttons["Other tools with codemode"]
-        revealBelowNavigationBar(app, codeMode)
-        codeMode.tap()
-        let only = app.buttons["settings-option-Codemode only"]
-        XCTAssertTrue(only.waitForExistence(timeout: 5), app.debugDescription)
-        keepScreenshot(app, name: "settings-surface-code-mode-choice")
-        only.tap()
-        XCTAssertTrue(waitUntil(timeout: 30) {
-            let stored = (try? self.globalSettingsDocument(fixture.agentDirectory))?["codemode"] as? [String: Any]
-            return stored?["mode"] as? String == "only"
-        }, "The native Default Tools editor must persist through settings.change: \(app.debugDescription)")
-        dismissTopSheet(app)
-        openSettingsSection(app, "tools")
-        XCTAssertEqual(codeMode.value as? String, "Codemode only", "Reopening reads the stored code-mode setting")
-        keepScreenshot(app, name: "settings-surface-settings-code-mode-edit")
-        dismissTopSheet(app)
+            "setup": "Setup"])
         openSettingsSection(app, "setup", linkLabel: "Setup", loneRow: settingRowToken("setup.installTelemetry"))
         let globalEdit = toggleSetting(app, key: "setup.installTelemetry", confirmingReview: true)
         XCTAssertNotEqual(globalEdit.before, globalEdit.after, "the Global edit was not accepted")
@@ -1264,21 +1216,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             dismissTopSheet(app)
         }
         XCTAssertTrue(app.buttons["settings-done"].isHittable, "Apply again must return to Settings")
-        let extensionsLink = app.buttons["settings-link-Extensions"]
-        for _ in 0..<40 where !extensionsLink.isHittable { app.swipeDown() }
-        extensionsLink.tap()
-        let toolSearch = app.switches["Tool search"]
-        XCTAssertTrue(toolSearch.waitForExistence(timeout: 30), "Extensions must show the Built-in switches: \(app.debugDescription)")
-        for _ in 0..<10 where !toolSearch.isHittable { app.swipeUp() }
-        let toolSearchBefore = toolSearch.value as? String
-        toolSearch.tap()
-        XCTAssertTrue(waitUntil(timeout: 30) { (toolSearch.value as? String) != toolSearchBefore }, "the Built-in switch did not change")
-        XCTAssertTrue(waitUntil(timeout: 30) {
-            let entries = (try? self.globalSettingsDocument(fixture.agentDirectory))?["extensions"] as? [String] ?? []
-            return entries.contains("-builtin:tool-search") == (toolSearchBefore == "1")
-        }, "turning Tool search off must write -builtin:tool-search to the Global settings.json")
-        keepScreenshot(app, name: "settings-surface-builtin-extension-switch")
-        for _ in 0..<3 where app.navigationBars.staticTexts["Global Settings"].exists || app.switches["Tool search"].exists { dismissTopSheet(app); Thread.sleep(forTimeInterval: 1) }
+        for _ in 0..<3 where app.navigationBars.staticTexts["Global Settings"].exists { dismissTopSheet(app); Thread.sleep(forTimeInterval: 1) }
         XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
 
         openGlobalSettings()
@@ -1298,52 +1236,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         for _ in 0..<3 where app.navigationBars.staticTexts["Global Settings"].exists { dismissTopSheet(app); Thread.sleep(forTimeInterval: 1) }
         XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
 
-    }
-
-    @MainActor
-    func testExtensionsFlagsAPackageThatNeedsAnotherNode() throws {
-        continueAfterFailure = false
-        let fixture = try RealGatewayUIFixture.fromEnvironment()
-        let directory = try XCTUnwrap(fixture.agentDirectory, "run through scripts/ios-gateway-e2e-test run-ui to name the fixture's agent directory")
-        for (name, range) in [("future-node-package", ">=999.0.0"), ("current-node-package", ">=1")] {
-            let root = URL(fileURLWithPath: directory).appendingPathComponent(name)
-            let skill = root.appendingPathComponent("skills/\(name)")
-            try FileManager.default.createDirectory(at: skill, withIntermediateDirectories: true)
-            try JSONSerialization.data(withJSONObject: ["name": name, "version": "1.0.0", "engines": ["node": range],
-                                                        "pi": ["skills": ["skills"]]])
-                .write(to: root.appendingPathComponent("package.json"))
-            try "---\nname: \(name)\ndescription: Fixture skill.\n---\nFixture.\n"
-                .write(to: skill.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
-        }
-        try editGlobalSettingsOutsideTron(directory) { document in
-            document["packages"] = ["./future-node-package", "./current-node-package"]
-        }
-        let app = launchApp()
-        defer { app.terminate() }
-        open(fixture.invitationLink())
-        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
-        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
-        createSession(app, inWorkspace: fixture.workspace)
-        let gear = app.navigationBars.buttons["Settings"]
-        XCTAssertTrue(gear.waitForExistence(timeout: 30), app.debugDescription)
-        gear.tap()
-        XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 30), app.debugDescription)
-        let extensionsLink = app.buttons["settings-link-Extensions"]
-        for _ in 0..<20 where !extensionsLink.isHittable { app.swipeUp() }
-        extensionsLink.tap()
-        let flagged = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "./future-node-package.")).firstMatch
-        let met = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "./current-node-package.")).firstMatch
-        XCTAssertTrue(flagged.waitForExistence(timeout: 60), "Extensions must list the fixture package: \(app.debugDescription)")
-        XCTAssertTrue(flagged.label.contains("Needs Node >=999.0.0"), "the mismatched package's row must carry the tag: \(flagged.label)")
-        XCTAssertTrue(met.waitForExistence(timeout: 30), app.debugDescription)
-        XCTAssertFalse(met.label.contains("Needs Node"), "a met range carries no tag: \(met.label)")
-        for _ in 0..<10 where !flagged.isHittable { app.swipeUp() }
-        keepScreenshot(app, name: "extensions-package-needs-node-row")
-        flagged.tap()
-        let notice = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "This package needs Node >=999.0.0, but this Mac runs Node ")).firstMatch
-        XCTAssertTrue(notice.waitForExistence(timeout: 30), "the detail sheet must explain the mismatch: \(app.debugDescription)")
-        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "future-node-package")).firstMatch.exists, "the warned package still loads and provides its skill: \(app.debugDescription)")
-        keepScreenshot(app, name: "extensions-package-needs-node-detail")
     }
 
     private func globalSettingsDocument(_ agentDirectory: String?) throws -> [String: Any] {
@@ -1399,9 +1291,19 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         var groups: [String] = []
         for key in schema.keys where !groups.contains(key.group) { groups.append(key.group) }
         let customOwners = name == "settings" ? ["permissions.defaultProjectTrust": "the agent settings tool (5.8)",
-            "sources.packages": "Extensions' Installed list (#1482)", "sources.npmCommand": "Extensions' npm command card (#1482)",
             "permissions.macTerminalServer": "the Mac Terminal sheet (TronMacTerminalUITests)"] : [:]
+        let agentOwnedGroups: Set<String> = name == "settings" ? ["tools", "sources"] : []
         for group in groups {
+            if agentOwnedGroups.contains(group) {
+                XCTAssertFalse(app.buttons["settings-section-\(group)-open"].exists || app.buttons["settings-link-Extensions"].exists,
+                               "\(name) has no \(group) destination; the agent owns it (5.3)")
+                for key in schema.keys where key.group == group {
+                    XCTAssertEqual(app.descendants(matching: .any).matching(identifier: settingRowToken(key.id)).count, 0,
+                                   "\(name) must not show \(key.id); the agent settings tool owns it (5.3)")
+                    coverage.customOwnerChecked += 1
+                }
+                continue
+            }
             let rendered = schema.keys.filter { $0.group == group && !$0.layers.isDisjoint(with: layers) && customOwners[$0.id] == nil }
             let detail = openSettingsSectionIfServed(app, group, linkLabel: sectionDestinations[group],
                                                      loneRow: rendered.count == 1 ? settingRowToken(rendered[0].id) : nil)
@@ -1450,15 +1352,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                     continue
                 }
                 coverage.served += 1
-                if key.id == "tools.codemode.mode" && (name == "settings" || name == "project") {
-                    XCTAssertEqual(rows.count, 0, "There must not be a duplicate Code mode editor")
-                    let controls = elements.filter { $0.elementType == .button && $0.label == "Other tools with codemode" }
-                    XCTAssertEqual(controls.count, 1, "\(name) must expose its owning Default Tools control")
-                    XCTAssertEqual(controls.first?.value as? String, "Both", "Read the fresh fixture's default")
-                    coverage.customOwnerChecked += 1
-                    coverage.valueChecked += 1
-                    continue
-                }
                 if let owner = customOwners[key.id] {
                     XCTAssertEqual(rows.count, 0, "\(name) must not repeat \(key.id) beside \(owner)")
                     coverage.customOwnerChecked += 1

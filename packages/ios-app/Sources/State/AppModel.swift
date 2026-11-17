@@ -195,7 +195,6 @@ final class AppModel {
     let settingsTrust: SettingsTrustCoordinator
     private let providerAuth: ProviderAuthCoordinator
     private let devicePreference: DevicePreferenceCoordinator
-    private let packageConfiguration: PackageConfigurationCoordinator
     let composerDrafts: ComposerDraftCoordinator
     let extensionInteractionDrafts: ExtensionInteractionDraftStore
     let gatewayDiagnostics: GatewayDiagnosticsService
@@ -211,6 +210,17 @@ final class AppModel {
     var hasResolvedLaunchState: Bool { lifecycle.hasResolvedLaunchState }
     var gatewayInfo: GatewayInfo? { lifecycle.gatewayInfo }
     var gatewayConnectionID: Int? { lifecycle.connectionID }
+    var pushRetryConnection: PushConnectionIdentity? {
+        guard connectionState == .connected, let admission = lifecycle.admission,
+              let profile = lifecycle.profiles.selected, profile.id == lifecycle.selectedProfileID,
+              let runtimeEpoch = lifecycle.gatewayInfo?.runtimeEpoch else { return nil }
+        return PushConnectionIdentity(
+            profileID: profile.id,
+            machineID: profile.machineId,
+            runtimeEpoch: runtimeEpoch,
+            admission: admission
+        )
+    }
     private var sessionCatalog = SessionCatalogCoordinator()
     private let dashboardConnections: DashboardGatewayConnectionPool
     let automationCatalog: AutomationCatalogCoordinator
@@ -234,7 +244,6 @@ final class AppModel {
     private let sessionPresentation: SessionPresentationStore
     var settingsInvalidationGeneration: Int { settingsTrust.settingsInvalidationGeneration }
     var providerInvalidationGeneration: Int { providerAuth.invalidationGeneration }
-    var packageInvalidationGeneration: Int { packageConfiguration.invalidationGeneration }
     var trustRevision: Int { settingsTrust.trustRevision }
     var pairedDevices: [PairedDevice] = []
     var deviceCatalogRevision = 0
@@ -500,11 +509,6 @@ final class AppModel {
             mutationExecutor: mutationExecutor,
             uuidSource: uuidSource
         )
-        let packageConfiguration = PackageConfigurationCoordinator(
-            client: client,
-            mutationExecutor: mutationExecutor,
-            uuidSource: uuidSource
-        )
         let sessionPresentation = SessionPresentationStore(
             client: client,
             performanceSignposts: appLogSignposts,
@@ -631,7 +635,6 @@ final class AppModel {
         self.settingsTrust = settingsTrust
         self.providerAuth = providerAuth
         self.devicePreference = devicePreference
-        self.packageConfiguration = packageConfiguration
         self.composerDrafts = composerDrafts
         self.extensionInteractionDrafts = extensionInteractionDrafts
         self.gatewayDiagnostics = gatewayDiagnostics
@@ -673,7 +676,6 @@ final class AppModel {
         lifecycle.delegate = self
         sessionPresentation.delegate = self
         providerAuth.delegate = self
-        packageConfiguration.delegate = self
         installedApps.onFailure = { [weak self] error in self?.surface(error) }
         let events = client.events
         eventTask = Task { [weak self, events] in
@@ -1487,7 +1489,6 @@ extension AppModel {
         workspace = nil
         providerAuth.clearProfile()
         settingsTrust.clearProfile()
-        packageConfiguration.clearProfile()
         cancelAllExtensionEditorSynchronization()
         composerDrafts.retireProfilePresentation()
         noticeCenter.dismissAll()
@@ -3667,45 +3668,6 @@ extension AppModel {
                         "revision": .number(Double(snapshot.revision))])
     }
 
-    func packageInventory(for target: PackageConfigurationTarget) -> PackageInventory? {
-        packageConfiguration.inventory(for: target)
-    }
-
-    func packageUpdates(for target: PackageConfigurationTarget) -> [PackageUpdate] {
-        packageConfiguration.updates(for: target)
-    }
-
-    func packageError(for target: PackageConfigurationTarget) -> String? {
-        packageConfiguration.error(for: target)
-    }
-
-    @discardableResult
-    func loadPackages(target: PackageConfigurationTarget, surfaceError: Bool = true) async -> Bool {
-        await packageConfiguration.load(target: target, surfaceError: surfaceError)
-    }
-
-    @discardableResult
-    func checkPackageUpdates(target: PackageConfigurationTarget, surfaceError: Bool = true) async -> Bool {
-        await packageConfiguration.checkUpdates(target: target, surfaceError: surfaceError)
-    }
-
-    func mutatePackage(
-        action: PackageMutationAction,
-        source: String?,
-        local: Bool,
-        target: PackageConfigurationTarget,
-        surfaceError: Bool = true
-    ) async throws {
-        guard let admission = lifecycle.generationAdmission else { throw CancellationError() }
-        do {
-            try await packageConfiguration.mutate(action, source: source, local: local, target: target, surfaceError: surfaceError)
-        } catch {
-            guard admitsLifecycle(admission) else { throw CancellationError() }
-            throw error
-        }
-        try requireLifecycle(admission)
-    }
-
     nonisolated static func supportsSafeGatewayRestart(capabilities: [String]) -> Bool {
         capabilities.contains("restart-drain.v1") && capabilities.contains("restart-supervised.v1")
     }
@@ -4265,8 +4227,6 @@ extension AppModel {
             settingsTrust.noteTrustChanged()
         case "providers.changed":
             providerAuth.noteProvidersChanged()
-        case "packages.changed":
-            packageConfiguration.notePackagesChanged()
         case "models.catalogChanged":
             providerAuth.noteModelCatalogChanged()
         case "models.recentChanged":
@@ -4286,18 +4246,6 @@ extension AppModel {
         case "automation.changed":
             guard case .automationChanged = event.preparation else { return }
             automationCatalog.invalidate()
-        case "packages.progress", "packages.completed":
-            let completed = event.topic == "packages.completed"
-            let succeeded = event.payload.objectValue?["success"]?.boolValue == true
-            let failed = completed && !succeeded
-            let error = failed ? event.payload.objectValue?["error"]?.stringValue : nil
-            postNotice(
-                failed ? "Package operation failed\(error.map { ": \($0)" } ?? "")" : completed ? "Package operation completed" : "Updating agent package…",
-                replacing: .packageProgress,
-                role: failed ? .error : completed ? .success : .progress,
-                lifetime: .standard,
-                priority: failed ? .high : completed ? .normal : .low
-            )
         case "session.processTranscript.changed":
             if case .processTranscriptChanged(let changed) = event.preparation {
                 for sink in processTranscriptInvalidationSinks.values { sink(changed) }
@@ -4781,12 +4729,6 @@ extension AppModel: ProviderAuthCoordinatorDelegate {
 
     func providerAuthCoordinatorSetCompletionError(_ message: String?) {
         if let message { presentError(message) }
-    }
-}
-
-extension AppModel: PackageConfigurationCoordinatorDelegate {
-    func packageConfigurationCoordinatorSurface(_ error: Error) {
-        surface(error)
     }
 }
 

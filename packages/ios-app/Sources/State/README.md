@@ -27,7 +27,6 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
 | `MacTerminalController`, `MacTerminalEnrollmentStore` | Mac Terminal enrollment and shells ([Terminal](../UI/Terminal/README.md)). |
 | `SettingsTrustCoordinator` | Settings resolve/change/approvals and project trust. |
 | `ProviderAuthCoordinator` | Provider/model catalogs, auth operations and prompts, MCP sign-in. |
-| `PackageConfigurationCoordinator` | Package operations. |
 | `HomeStatusPresentationOwner`, `HomeSheetReadOwner`, `HomeMutationCoordinator` | Home status, Home sheet reads, Home commands. |
 | `AutomationCatalogCoordinator`, `AutomationRPCClient` | Automation summaries per Gateway. |
 | `KnowledgePresentationIdentity`, `KnowledgeDestinationIdentity` | Shared transport/read and accepted-result identities used by settings, uploads, auth and Profile; no corpus projection. |

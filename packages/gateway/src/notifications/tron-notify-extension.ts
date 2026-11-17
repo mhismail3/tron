@@ -1,5 +1,8 @@
+import { createHash } from "node:crypto";
 import { Type } from "../kernel/pi/ai.js";
 import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
+import { nativeChangeConfirmer, type NativeChangeRequest } from "../kernel/host/native-change.js";
+import type { ChangeReview } from "../protocol/types.js";
 import type { NotificationAdmissionStatus } from "./notification-service.js";
 import type { AgentTerminalOutcome } from "../kernel/host/module-host.js";
 
@@ -55,14 +58,51 @@ export async function notifyTronAgentTerminal(input: {
   });
 }
 
+export function pushRetryReview(input: { sessionId: string; toolCallId: string; reason: string }): ChangeReview {
+  return {
+    digest: createHash("sha256").update(JSON.stringify(["push-registration-retry", input.sessionId, input.toolCallId])).digest("hex"),
+    title: "Retry push registration",
+    requiresTap: true,
+    reason: input.reason,
+    intent: "push-registration-retry",
+    items: [{
+      label: "Push registration",
+      before: "Stopped on the iPhone that approves this card",
+      after: "Requested on that iPhone: one fresh App Attest key and one registration attempt",
+      detail: "The App Attest key belongs to this iPhone, so every paired Mac uses the new key at its next registration. The result is requested, not confirmed. No other iPhone is affected, and no setting changes.",
+    }],
+  };
+}
+
 export function createTronNotifyExtension(input: {
   sessionId: () => string;
   sessionTitle: () => string;
   machineId?: string;
   observed: () => boolean;
   enqueue: TronNotificationEnqueue;
+  requestChange: NativeChangeRequest;
 }): ExtensionFactory {
   return (pi) => {
+    pi.registerTool({
+      name: "push_retry",
+      annotations: { openWorldHint: false },
+      label: "Retry push",
+      description: "Ask the user to retry this Mac's push registration on the iPhone that approves the exact native card. Nothing runs without that tap; the card names the iPhone.",
+      promptSnippet: "Use push_retry only when push alerts are stopped and the user should retry registration on their iPhone.",
+      promptGuidelines: ["push_retry shows a native card; approval retries registration on the approving iPhone only."],
+      parameters: Type.Object({ reason: Type.String({ minLength: 1, maxLength: 2000 }) }, { additionalProperties: false }),
+      executionMode: "sequential",
+      execute: async (toolCallId, params, signal, _onUpdate, context) => {
+        const confirm = nativeChangeConfirmer(context, input.requestChange, signal);
+        if (!confirm) {
+          return { content: [{ type: "text", text: "A paired native change card is required; nothing changed." }], details: { status: "review" } };
+        }
+        const review = pushRetryReview({ sessionId: input.sessionId(), toolCallId, reason: params.reason });
+        const result = await confirm(review, async acceptance => ({ status: "requested" as const, deviceId: acceptance.deviceId }));
+        const status = result ? result.status : "declined";
+        return { content: [{ type: "text", text: status === "requested" ? "Retry requested on the approving iPhone." : `Push retry ${status}; nothing changed.` }], details: { status } };
+      },
+    });
     pi.registerTool({
       name: "notify",
       annotations: { openWorldHint: false },

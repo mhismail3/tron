@@ -221,18 +221,23 @@ package struct ChangeReview: Codable, Hashable, Sendable {
             exact = try c.decodeBoundedStringIfPresent(forKey: .exact, maximumBytes: 32 * 1_024)
         }
     }
+    package enum Intent: String, Codable, Hashable, Sendable {
+        case pushRegistrationRetry = "push-registration-retry"
+    }
     package let digest: String
     package let title: String
     package let requiresTap: Bool
     package let reason: String?
+    package let intent: Intent?
     package let items: [Item]
-    private enum CodingKeys: String, CodingKey { case digest, title, requiresTap, reason, items }
+    private enum CodingKeys: String, CodingKey { case digest, title, requiresTap, reason, intent, items }
     package init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         digest = try c.decodeBoundedString(forKey: .digest, maximumBytes: 64)
         title = try c.decodeBoundedString(forKey: .title, maximumBytes: 4 * 1_024)
         requiresTap = try c.decode(Bool.self, forKey: .requiresTap)
         reason = try c.decodeBoundedStringIfPresent(forKey: .reason, maximumBytes: 32 * 1_024)
+        intent = try c.decodeIfPresent(Intent.self, forKey: .intent)
         items = try c.decodeBoundedArray(Item.self, forKey: .items, maximum: 50)
     }
 }

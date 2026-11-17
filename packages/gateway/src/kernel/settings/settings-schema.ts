@@ -16,6 +16,7 @@ export const SECTIONS: readonly SectionDeclaration[] = [
   { id: "tools", title: "Tools", description: "Available tools, code mode, and shell", order: 30 },
   { id: "run", title: "Connection", description: "Proxy and retained overrides", order: 50 },
   { id: "trust", title: "Trusted Projects", description: "Project trust decisions and default policy", order: 55 },
+  { id: "notifications", title: "Notifications", description: "Push alerts for agent events; the agent can change them", order: 57 },
   { id: "connections", title: "Mac Terminal", description: "This iPhone's key on the connected Mac", order: 58 },
   { id: "accounts", title: "Accounts", description: "Providers, custom models, and services", order: 60 },
   { id: "sources", title: "Sources", description: "Packages and how they install", order: 70 },
@@ -480,6 +481,21 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       tap: "trust", id: "sources.npmCommand", sessionOverridable: false, projectSettable: false, group: "sources", type: types.stringList(20), layers: { global: pi("npmCommand") }, timing: "live", effect: "next-change",
       writers: ["ui", "home"], label: "npm command", help: "The command used to install packages.", order: 60, importance: "advanced", control: "list",
       entry: { hint: "One word per value: the program first (npm, pnpm or bun), then any arguments.", example: "pnpm" },
+    },
+    {
+      tap: "privacy", id: "notifications.push.inputNeeded", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "notifications", type: types.boolean(),
+      layers: { global: { store: "gateway", path: ["notifications", "push", "inputNeeded"] } }, defaultValue: true, timing: "live", effect: "next-request", direction: grants,
+      writers: ANY_ACTOR, label: "Input needed", help: "Send a push when Tron needs an answer or approval.", order: 10, importance: "essential",
+    },
+    {
+      tap: "privacy", id: "notifications.push.finished", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "notifications", type: types.boolean(),
+      layers: { global: { store: "gateway", path: ["notifications", "push", "finished"] } }, defaultValue: true, timing: "live", effect: "next-request", direction: grants,
+      writers: ANY_ACTOR, label: "Finished", help: "Send a push when a chat finishes its work.", order: 20, importance: "essential",
+    },
+    {
+      tap: "privacy", id: "notifications.push.waiting", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "notifications", type: types.boolean(),
+      layers: { global: { store: "gateway", path: ["notifications", "push", "waiting"] } }, defaultValue: true, timing: "live", effect: "next-request", direction: grants,
+      writers: ANY_ACTOR, label: "Waiting", help: "Send a push when work is waiting on background tasks.", order: 30, importance: "essential",
     },
     {
       tap: "irreversible", id: "setup.installTelemetry", sessionOverridable: false, projectSettable: false, group: "setup", type: types.boolean(), layers: { global: pi("enableInstallTelemetry") }, defaultValue: true,

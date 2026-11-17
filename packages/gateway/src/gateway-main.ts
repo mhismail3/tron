@@ -54,7 +54,8 @@ import { createProviderModelRuntime } from "./providers/provider-runtime.js";
 import { OpenAIModelEligibility } from "./providers/openai-model-eligibility.js";
 import { NotificationGrantStore } from "./notifications/grant-store.js";
 import { PushRelayClient } from "./notifications/relay-client.js";
-import { NotificationService } from "./notifications/notification-service.js";
+import { NotificationService, readNotificationPolicy } from "./notifications/notification-service.js";
+import { migratePushPolicy } from "./notifications/push-policy-migration.js";
 import { handledSignalExitCode, SUPERVISOR_RELAUNCH_EXIT_CODE } from "./lifecycle/supervisor-exit-policy.js";
 import { shutdownStep } from "./lifecycle/shutdown-step.js";
 import { exitAfterShutdown } from "./lifecycle/exit-after-shutdown.js";
@@ -138,9 +139,11 @@ let transport: GatewayServer;
 const devices = new DeviceStore(config.tronHome, config.machineId);
 await devices.initialize();
 startupCheckpoint("devices");
+await migratePushPolicy(config.tronHome);
 const notifications: NotificationService = new NotificationService(
   new NotificationGrantStore(config.tronHome),
   new PushRelayClient(config.pushServiceOrigin),
+  () => readNotificationPolicy(keys => sessions.resolveGlobalSettings(keys)),
   Date.now,
   (payload) => transport?.broadcast("notification.inbox.changed", payload),
   () => logger.log("warning", "Session notification read state could not be persisted; unread state is retained.", {
@@ -493,7 +496,6 @@ const knowledge = knowledgeStore;
 const packages = new PackageService(
   config.agentDir,
   trust,
-  (topic, payload) => transport?.broadcast(topic, payload),
   workRegistry,
   managedSubagents,
   outsideSettings,
@@ -765,7 +767,6 @@ const service = new GatewayService({
   devicePreferences,
   macTerminal: macTerminalKeys,
   modelConfig,
-  packages,
   auth,
   globalProviderResources,
   logger,
