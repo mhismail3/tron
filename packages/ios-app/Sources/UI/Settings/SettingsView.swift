@@ -154,7 +154,7 @@ enum SettingsGroupKind {
         }
     }
 
-    static let placedSections: Set<String> = ["model", "workers", "context", "run", "trust", "notifications", "connections", "tools", "sources", "setup"]
+    static let placedSections: Set<String> = ["model", "workers", "context", "run", "trust", "notifications", "connections", "tools", "sources"]
 
     static func icon(forSection id: String) -> String {
         switch id {
@@ -165,7 +165,6 @@ enum SettingsGroupKind {
         case "advanced": "gearshape.2"
         case "tools": "wrench.and.screwdriver"
         case "sources": "shippingbox"
-        case "setup": "gearshape.2"
         default: "slider.horizontal.3"
         }
     }
@@ -428,8 +427,6 @@ struct SetupSettingsView: View {
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             TronSettingsSections(alignment: .leading, spacing: 20, hidesLoneHeading: true) {
-                SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global",
-                                     presentation: .section("setup"), embedded: true)
                 ExperimentalSettingsContent()
             }
             .padding(20)
