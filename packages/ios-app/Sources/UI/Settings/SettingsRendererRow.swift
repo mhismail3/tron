@@ -350,7 +350,7 @@ func settingsLayerLabel(_ layer: String) -> String {
     }
 }
 
-private struct SettingsModelPicker: View {
+struct SettingsModelPicker: View {
     let setting: ResolvedSetting
     let target: JSONValue
     let title: String
