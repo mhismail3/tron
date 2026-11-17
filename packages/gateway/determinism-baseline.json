@@ -243,9 +243,27 @@
       "sleep": 1,
       "timeout-literal": 1
     },
-    "src/e2e/sessions/runtime-registry.integration.test.ts": {
-      "sleep": 39,
-      "timeout-literal": 11
+    "src/e2e/sessions/runtime-registry-activity.integration.test.ts": {
+      "sleep": 9,
+      "timeout-literal": 1
+    },
+    "src/e2e/sessions/runtime-registry-capacity.integration.test.ts": {
+      "sleep": 4
+    },
+    "src/e2e/sessions/runtime-registry-catalog.integration.test.ts": {
+      "sleep": 2,
+      "timeout-literal": 2
+    },
+    "src/e2e/sessions/runtime-registry-operations.integration.test.ts": {
+      "sleep": 16,
+      "timeout-literal": 4
+    },
+    "src/e2e/sessions/runtime-registry-sessions.integration.test.ts": {
+      "sleep": 1
+    },
+    "src/e2e/sessions/runtime-registry-tools.integration.test.ts": {
+      "sleep": 7,
+      "timeout-literal": 4
     },
     "src/e2e/sessions/sdk-behavior-trace.integration.test.ts": {
       "sleep": 1

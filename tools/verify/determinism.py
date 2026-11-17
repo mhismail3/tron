@@ -29,7 +29,7 @@ def git(*args: str, check: bool = True) -> subprocess.CompletedProcess:
 
 def scanned() -> list[str]:
     files = git("ls-files", "--cached", "--others", "--exclude-standard", "--", f"{GATEWAY}/src", f"{GATEWAY}/test-support", f"{GATEWAY}/test-fixtures").stdout.split()
-    return [path for path in files if path.endswith(".ts")
+    return [path for path in files if path.endswith(".ts") and (ROOT / path).is_file()
             and (path.endswith(".test.ts") or path.startswith((f"{GATEWAY}/test-support/", f"{GATEWAY}/test-fixtures/")))]
 
 
@@ -74,6 +74,21 @@ def compare(current: dict, allowed: dict) -> tuple[list[str], list[str]]:
     return grew, fixed
 
 
+def grown(sites: dict, bound: dict) -> list[str]:
+    lines, moved, freed = [], Counter(), Counter()
+    for path, rules in sites.items():
+        if path in bound:
+            lines += [f"{rule}: {GATEWAY}/{path} [{bound[path].get(rule, 0)} -> {n}]"
+                      for rule, n in rules.items() if n > bound[path].get(rule, 0)]
+        else:
+            moved.update(rules)
+    for path, rules in bound.items():
+        if path not in sites and not (ROOT / GATEWAY / path).exists():
+            freed.update(rules)
+    return lines + [f"{rule}: new files [{freed[rule]} freed by deleted files -> {moved[rule]}]"
+                    for rule in RULES if moved[rule] > freed[rule]]
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", default="origin/main")
@@ -90,9 +105,9 @@ def main(argv: list[str]) -> int:
     if bound is not None:
         if baseline is None:
             raise SystemExit(f"determinism: {BASELINE} is missing but {args.base} has one; restore it")
-        problems += [f"baseline grew past {args.base}: {line}" for line in compare(baseline, bound)[0]]
+        problems += [f"baseline grew past {args.base}: {line}" for line in grown(baseline, bound)]
     if args.update:
-        if baseline is not None and compare(current, baseline)[0]:
+        if baseline is not None and grown(current, baseline):
             problems.append("--update only removes fixed sites; new sites cannot be baselined")
         else:
             write(current)
