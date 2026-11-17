@@ -487,6 +487,22 @@ describe("settings.change", () => {
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
   });
 
+  caseIt("removing a source exclusion widens: Home needs the native card to re-enable an excluded extension or skill (#2583)", async owner => {
+    const f = await fixture(owner);
+    const ui = { actor: { kind: "ui" as const, id: "device:phone" }, reason: "Exclude the probes" };
+    const home = { actor: { kind: "home" as const, id: "home-fixture" }, reason: "Re-enable the probes" };
+    for (const [key, field, excluded] of [["sources.extensions", "extensions", "-builtin:codemode"], ["sources.skills", "skills", "!probe-*"]] as const) {
+      expect(await f.settingsChanges.change({ kind: "global" }, [{ key, layer: "global", op: "set", value: [excluded, "~/kept"] }], ui))
+        .toMatchObject({ status: "applied" });
+      const removal = await f.settingsChanges.change({ kind: "global" }, [{ key, layer: "global", op: "set", value: ["~/kept"] }], home);
+      expect(removal).toMatchObject({ status: "review", review: { requiresTap: true } });
+      expect((await f.macDocument())[field]).toEqual([excluded, "~/kept"]);
+      const narrowed = await f.settingsChanges.change({ kind: "global" }, [{ key, layer: "global", op: "set", value: [excluded] }], home);
+      expect(narrowed).toMatchObject({ status: "applied", review: { requiresTap: false } });
+      expect((await f.macDocument())[field]).toEqual([excluded]);
+    }
+  });
+
   caseIt("an agent reads its chat's inventory of hooks, packages and MCP status with credentials masked", async owner => {
     const f = await fixture(owner);
     const cwd = join(f.root, "inventory-chat");

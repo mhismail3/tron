@@ -19,6 +19,7 @@ The settings tool's `update` action (Tron Home only) installs one exact version 
 - **F3 Policy.** Routine reversible writes apply and log. Widening trust/executable
   authority, privacy or spend, and any install or irreversible effect, require an exact paired-native
   tap through the dedicated [native review](#native-review), never a generic form.
+  In a `sources.*` path list, adding an entry or removing a `-`/`!` exclusion widens.
 - **F4 Scopes.** Top wins: **Project > Session/Home override > Global**, among the scopes
   the target has and the key's grants allow. One resolver takes the topmost applied scope with
   a value; the effective value is computed, never stored.
