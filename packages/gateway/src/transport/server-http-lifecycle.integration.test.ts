@@ -10,7 +10,8 @@ import { DeviceStore } from "../security/device-store.js";
 import { GatewayLogger } from "./logger.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { BlobStore } from "../sessions/blob-store.js";
-import { GatewayServer, HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS, HTTP_MAXIMUM_REQUESTS_PER_CONNECTION, HTTP_REQUEST_IDLE_TIMEOUT_MS } from "./server.js";
+import { GatewayServer, HTTP_LISTENER_LIMITS, HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS, HTTP_MAXIMUM_REQUESTS_PER_CONNECTION, HTTP_REQUEST_IDLE_TIMEOUT_MS } from "./server.js";
+import type { LanListenerLimits } from "./lan-endpoint.js";
 import { MIN_PROTOCOL_VERSION, PROTOCOL_MISMATCH_CLOSE_CODE, PROTOCOL_VERSION } from "../version.js";
 import { awaitsWithin, HOOK_HANG_BOUND_MS, waitFor } from "../../test-support/wait-for.js";
 
@@ -27,7 +28,7 @@ function gate() {
   const promise = new Promise<void>(done => { resolve = done; });
   return { promise, resolve };
 }
-async function fixture(maximumHttpRequests = 128) {
+async function fixture(maximumHttpRequests = 128, listenerLimits?: LanListenerLimits) {
   const root = await mkdtemp(join(tmpdir(), "tron-http-lifecycle-"));
   const devices = new DeviceStore(root, "fixture-machine");
   await devices.initialize();
@@ -45,6 +46,7 @@ async function fixture(maximumHttpRequests = 128) {
     service: { info: () => ({ protocolVersion: 8 }), releaseClient: vi.fn() } as any,
     logger: logger as any,
     peerPathReader: { lookup: async () => ({ peerPath: "unknown" as const, peerPathSource: "not-tailscale" as const, peerRelay: "" }) },
+    ...(listenerLimits ? { listenerLimits } : {}),
   });
   const serverSockets: Socket[] = [];
   (gateway as unknown as { server: Server }).server.on("connection", socket => serverSockets.push(socket));
@@ -179,6 +181,7 @@ describe("HTTP pending-work ownership", () => {
     const listener = (f.gateway as unknown as { server: Server }).server;
     expect(listener.headersTimeout).toBe(15_000);
     expect(listener.requestTimeout).toBe(300_000);
+    expect(listener.connectionsCheckingInterval).toBe(1_000);
     const peer = createConnection({ host: "127.0.0.1", port: f.port });
     f.clientSockets.push(peer);
     peer.on("error", () => {});
@@ -192,30 +195,25 @@ describe("HTTP pending-work ownership", () => {
     expect(server.destroyed).toBe(true);
   });
 
-  it("closes a body that trickles past idle timeout at the 300-second whole-request deadline", async () => {
-    const f = await fixture();
+  it("closes a body that trickles past idle timeout at the whole-request deadline", async () => {
+    const limits = { ...HTTP_LISTENER_LIMITS, requestTimeout: 4_000, idleTimeout: 2_000, connectionsCheckingInterval: 50 };
+    const f = await fixture(128, limits);
     const peer = createConnection({ host: "127.0.0.1", port: f.port });
     f.clientSockets.push(peer);
     peer.on("error", () => {});
     peer.on("data", () => {});
     await awaitsWithin(once(peer, "connect"), "trickling body peer connect");
+    const started = process.hrtime.bigint();
     peer.write("POST /v1/pair HTTP/1.1\r\nHost: fixture\r\nContent-Type: application/json\r\nContent-Length: 8192\r\n\r\n{");
     const server = await waitFor(() => f.serverSockets[0], "accepted trickling body socket");
-    let closedAt: bigint | undefined;
-    const closed = new Promise<void>((resolve) => server.once("close", () => { closedAt = process.hrtime.bigint(); resolve(); }));
-    const started = process.hrtime.bigint();
-    let passedIdle = false;
-    while (closedAt === undefined && Number(process.hrtime.bigint() - started) / 1_000_000 < 340_000) {
-      await new Promise((resolve) => setTimeout(resolve, 10_000));
-      if (closedAt === undefined) peer.write("a");
-      if (closedAt === undefined && Number(process.hrtime.bigint() - started) / 1_000_000 >= 45_000) passedIdle = true;
-    }
-    expect(passedIdle, "request remains open beyond the 30-second idle bound").toBe(true);
-    if (closedAt === undefined) await awaitsWithin(closed, "whole-request body deadline", 5_000);
-    const durationMs = Number(closedAt! - started) / 1_000_000;
-    expect(durationMs).toBeGreaterThanOrEqual(280_000);
-    expect(durationMs).toBeLessThanOrEqual(335_000);
-  }, 350_000);
+    const closed = once(server, "close");
+    const trickle = setInterval(() => peer.write("a"), 50);
+    cleanups.push(async () => { clearInterval(trickle); });
+    await awaitsWithin(closed, "whole-request body deadline");
+    clearInterval(trickle);
+    const elapsedMs = Number(process.hrtime.bigint() - started) / 1_000_000;
+    expect(elapsedMs, "open past the idle bound until the whole-request deadline").toBeGreaterThanOrEqual(limits.requestTimeout);
+  });
 
   it("records an upgrade that opened and was then abandoned before hello", async () => {
     const f = await fixture();
@@ -354,13 +352,14 @@ describe("HTTP pending-work ownership", () => {
   });
 
   it("retires a pre-request peer that never completes its headers at the header deadline with a 408", async () => {
-    const f = await fixture();
+    const limits = { ...HTTP_LISTENER_LIMITS, headersTimeout: 500, connectionsCheckingInterval: 50 };
+    const f = await fixture(128, limits);
+    const startedAt = process.hrtime.bigint();
     const peer = createConnection({ host: "127.0.0.1", port: f.port });
     f.clientSockets.push(peer);
     peer.on("error", () => {});
     await awaitsWithin(once(peer, "connect"), "silent header peer connect");
     const server = await waitFor(() => f.serverSockets[0], "accepted header peer");
-    const startedAt = process.hrtime.bigint();
     const closed = new Promise<void>((resolve) => server.once("close", () => resolve()));
     const response = new Promise<string>((resolve) => {
       let text = "";
@@ -369,11 +368,11 @@ describe("HTTP pending-work ownership", () => {
         if (text.includes("\r\n\r\n")) resolve(text);
       });
     });
-    expect(await awaitsWithin(response, "header deadline response", 25_000)).toContain("HTTP/1.1 408 Request Timeout");
+    expect(await awaitsWithin(response, "header deadline response")).toContain("HTTP/1.1 408 Request Timeout");
     const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
-    expect(elapsedMs).toBeGreaterThanOrEqual(12_000);
-    await awaitsWithin(closed, "header deadline socket close", 5_000);
-  }, 40_000);
+    expect(elapsedMs).toBeGreaterThanOrEqual(limits.headersTimeout);
+    await awaitsWithin(closed, "header deadline socket close");
+  });
 
   it.each(["http", "upgrade"])("keeps %s authentication charged after peer close and rejects late admission", async kind => {
     const f = await fixture(1);

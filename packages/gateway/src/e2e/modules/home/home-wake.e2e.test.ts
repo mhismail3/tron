@@ -288,7 +288,8 @@ describe("Home wakes on its own task results (#749)", () => {
       await (await dispatch(f, "successive-a")).completion;
       await waitAcknowledged(f, "successive-a");
       const firstAt = Date.now();
-      await new Promise(resolve => setTimeout(resolve, 90_000));
+      vi.useFakeTimers({ toFake: ["Date"], now: firstAt, shouldAdvanceTime: true });
+      vi.setSystemTime(firstAt + 90_000);
       holdNext = true;
       await (await dispatch(f, "successive-b")).completion;
       await waitFor(() => homeTurns === 9, "ninth result starts Home with no user prompt");
@@ -304,8 +305,8 @@ describe("Home wakes on its own task results (#749)", () => {
       expect(homeTurns).toBe(10);
       checkinEvidence.push({ case: "successive-90s-and-active-wake", intervalMs: Date.now() - firstAt,
         homeTurns, tasks: await Promise.all(["successive-a", "successive-b", "successive-c"].map(id => settledTask(f, id))) });
-    } finally { hold.open(); }
-  }, 120_000);
+    } finally { hold.open(); vi.useRealTimers(); }
+  });
 
   it("delivers two results that settle during a user turn in one wake, after that turn", async () => {
     const f = await fixture();
