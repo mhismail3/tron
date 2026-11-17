@@ -75,7 +75,6 @@ struct ManageModelConfigurationCard: View {
 
     private func modelRow(_ setting: ResolvedSetting) -> some View {
         let value = setting.value?.objectValue
-        let catalogTarget: ProviderCatalogTarget = home ? .global : .session(id: sessionID)
         let selected = model.providerCatalog(for: catalogTarget)?.models.first {
             $0.provider == value?["provider"]?.stringValue && $0.id == value?["id"]?.stringValue
         }
@@ -85,7 +84,7 @@ struct ManageModelConfigurationCard: View {
                     SettingsModelPicker(setting: setting, target: target, title: "Models", selectionAvailability: availability,
                                         onReset: setting.overridden == true ? { change(setting, nil) } : nil) { change(setting, $0) }
                 } label: { TronInlineActionLabel("Switch Model") }
-                .disabled(!setting.presentation.editable || setting.projectSetting != nil)
+                .disabled(setting.projectSetting != nil)
                 .accessibilityIdentifier("manage-model-switch")
                 .accessibilityValue(availability.accessibilityValue)
             }
@@ -96,18 +95,42 @@ struct ManageModelConfigurationCard: View {
         .accessibilityIdentifier(settingsRowIdentifier(setting))
     }
 
+    private var catalogTarget: ProviderCatalogTarget { home ? .global : .session(id: sessionID) }
+
+    private var selectedModel: ModelSummary? {
+        guard let value = ref?.value?.objectValue, let provider = value["provider"]?.stringValue,
+              let id = value["id"]?.stringValue else { return nil }
+        return model.providerCatalog(for: catalogTarget)?.models.first { $0.provider == provider && $0.id == id }
+    }
+
+    private func options(for setting: ResolvedSetting) -> [SettingsOption] {
+        switch setting.key {
+        case "model.thinking[role=chat]":
+            return (model.sessionContextPresentation(for: sessionID)?.availableThinkingLevels ?? []).map {
+                SettingsOption(value: .string($0), label: ThinkingLevelPresentation.title($0), detail: nil, disabledReason: nil, resource: nil)
+            }
+        case "model.contextWindow":
+            guard let limits = selectedModel?.contextWindowLimits else { return [] }
+            return Array(Set([limits.minimum, limits.`default`, limits.maximum])).sorted().map { tokens in
+                SettingsOption(value: .number(Double(tokens)), label: tokens.isMultiple(of: 1_000) ? "\(tokens / 1_000)K tokens" : "\(tokens) tokens",
+                               detail: nil, disabledReason: nil, resource: nil)
+            }
+        default:
+            return []
+        }
+    }
+
     private func choiceRow(_ setting: ResolvedSetting, title: String, icon: String) -> some View {
-        let options = setting.presentation.optionsSource != nil ? (snapshot?.options[setting.id]?.options ?? [])
-            : (setting.presentation.options?.map { SettingsOption(value: $0.value, label: $0.label, detail: $0.detail, disabledReason: nil, resource: nil) } ?? [])
+        let options = options(for: setting)
         return HStack(spacing: 0) {
-            if options.isEmpty || !setting.presentation.editable || setting.projectSetting != nil {
+            if options.isEmpty || setting.projectSetting != nil {
                 TronSettingsRow(icon: icon, title: title) { TronInlineActionLabel(setting.display, accent: .tronPrimary) }
             } else {
                 SettingsChoiceSelectionRow(title: title, icon: icon, value: setting.value ?? .null, display: setting.display,
                                            options: options, onChange: { change(setting, $0) })
                     .environment(\.configurationSliderPresentation, sliderPresentation)
             }
-            if setting.overridden == true && setting.presentation.editable { resetButton(setting).padding(.trailing, 12) }
+            if setting.overridden == true && setting.projectSetting == nil { resetButton(setting).padding(.trailing, 12) }
         }
         .disabled(!availability.canSelect)
         .accessibilityElement(children: .contain)
@@ -115,7 +138,7 @@ struct ManageModelConfigurationCard: View {
     }
 
     private func resetAccessory(_ setting: ResolvedSetting) -> (@MainActor @Sendable () -> AnyView)? {
-        guard setting.overridden == true, setting.presentation.editable else { return nil }
+        guard setting.overridden == true, setting.projectSetting == nil else { return nil }
         let button = AnyView(resetButton(setting))
         return { button }
     }
@@ -188,15 +211,6 @@ struct SettingsModelPicker: View {
     let onChoose: (JSONValue) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var served: [SettingsOption]? // view-local: a rebuilt picker reads the served models again
-
-    private var servedModels: Set<ModelRef>? {
-        served.map { Set($0.compactMap { option in
-            guard let value = option.value.objectValue, let provider = value["provider"]?.stringValue,
-                  let id = value["id"]?.stringValue else { return nil }
-            return ModelRef(provider: provider, id: id)
-        }) }
-    }
 
     private var catalogTarget: ProviderCatalogTarget {
         if target.objectValue?["kind"]?.stringValue == "session", let id = target.objectValue?["sessionId"]?.stringValue {
@@ -221,10 +235,7 @@ struct SettingsModelPicker: View {
     }
 
     var body: some View {
-        let catalog = model.providerCatalog(for: catalogTarget)?.models.filter(\.available)
-        let models = servedModels.flatMap { served in
-            catalog?.filter { served.contains(ModelRef(provider: $0.provider, id: $0.id)) }
-        }
+        let models = model.providerCatalog(for: catalogTarget)?.models.filter(\.available)
         Group {
             if let models, models.isEmpty {
                 TronPlaceholderState(title: "No Models", detail: "No available model can be used here.", icon: "cpu")
@@ -252,19 +263,5 @@ struct SettingsModelPicker: View {
                 }
             }
             .task { await model.refreshProviders(target: catalogTarget) }
-            .task { await readServedPages() }
-    }
-
-    private func readServedPages() async {
-        var options: [SettingsOption] = []
-        var cursor: String?
-        var seen: Set<String> = []
-        repeat {
-            guard let page = try? await model.settingsOptions(target: target, key: setting.key, qualifiers: setting.qualifiers,
-                                                              cursor: cursor) else { return }
-            options += page.options
-            cursor = page.nextCursor
-        } while cursor.map { seen.insert($0).inserted } == true
-        served = options
     }
 }

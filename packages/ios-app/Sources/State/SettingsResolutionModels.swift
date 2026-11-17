@@ -37,7 +37,6 @@ struct ResolvedSetting: Decodable, Equatable, Sendable, Identifiable {
     let layers: [Layer]
     var overridden: Bool? = nil
     var projectSetting: SettingsProjectSource? = nil
-    let presentation: SettingsKeyPresentation
 
     var id: String { settingIdentity(key: key, qualifiers: qualifiers) }
 
@@ -65,12 +64,11 @@ struct SettingsProjectDiagnostic: Decodable, Sendable {
 
 struct SettingsResolution: Decodable, Sendable {
     let keys: [ResolvedSetting]
-    let sections: [SettingsRendererSection]
 
     let projectNotice: SettingsProjectNotice?
     let diagnostics: [SettingsProjectDiagnostic]
     let diagnosticsTruncated: Bool
-    private enum CodingKeys: String, CodingKey { case keys, sections, projectNotice, diagnostics, diagnosticsTruncated }
+    private enum CodingKeys: String, CodingKey { case keys, projectNotice, diagnostics, diagnosticsTruncated }
 
     func setting(_ key: String) -> ResolvedSetting? { keys.first { $0.key == key } }
 
@@ -80,6 +78,5 @@ struct SettingsResolution: Decodable, Sendable {
         diagnostics = try container.decodeIfPresent([SettingsProjectDiagnostic].self, forKey: .diagnostics) ?? []
         diagnosticsTruncated = try container.decodeIfPresent(Bool.self, forKey: .diagnosticsTruncated) ?? false
         keys = try container.decode([ResolvedSetting].self, forKey: .keys)
-        sections = try container.decodeIfPresent([SettingsRendererSection].self, forKey: .sections) ?? []
     }
 }
