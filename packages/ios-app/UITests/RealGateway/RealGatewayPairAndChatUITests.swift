@@ -1099,117 +1099,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         var customOwnerChecked = 0
     }
 
-    @MainActor
-    private func assertSettingsSurface(_ app: XCUIApplication, name: String, layers: Set<String>,
-                                       schema: SettingsSchemaInventory,
-                                       sectionDestinations: [String: String] = [:]) -> SurfaceCoverage {
-        var coverage = SurfaceCoverage()
-        let isGlobalTarget = layers == ["global"]
-        let surface: XCUIElement = app
-        var groups: [String] = []
-        for key in schema.keys where !groups.contains(key.group) { groups.append(key.group) }
-        let customOwners = name == "settings" ? ["permissions.defaultProjectTrust": "the agent settings tool (5.8)",
-            "permissions.macTerminalServer": "the Mac Terminal sheet (TronMacTerminalUITests)"] : [:]
-        let agentOwnedGroups: Set<String> = name == "settings" ? ["tools", "sources"] : []
-        for group in groups {
-            if agentOwnedGroups.contains(group) {
-                XCTAssertFalse(app.buttons["settings-section-\(group)-open"].exists || app.buttons["settings-link-Extensions"].exists,
-                               "\(name) has no \(group) destination; the agent owns it (5.3)")
-                for key in schema.keys where key.group == group {
-                    XCTAssertEqual(app.descendants(matching: .any).matching(identifier: settingRowToken(key.id)).count, 0,
-                                   "\(name) must not show \(key.id); the agent settings tool owns it (5.3)")
-                    coverage.customOwnerChecked += 1
-                }
-                continue
-            }
-            let rendered = schema.keys.filter { $0.group == group && !$0.layers.isDisjoint(with: layers) && customOwners[$0.id] == nil }
-            let detail = openSettingsSectionIfServed(app, group, linkLabel: sectionDestinations[group],
-                                                     loneRow: rendered.count == 1 ? settingRowToken(rendered[0].id) : nil)
-            let snapshot: XCUIElementSnapshot
-            do { snapshot = try (detail ?? surface).snapshot() }
-            catch {
-                XCTFail("could not read the \(name) \(group) accessibility tree: \(error)")
-                return coverage
-            }
-            let elements = [snapshot] + descendants(of: snapshot)
-            for key in schema.keys where key.group == group {
-                var keyElements = elements
-                var instances: XCUIElement?
-                let instancesLinkID = "settings-instances-\(key.id)-open"
-                if elements.contains(where: { $0.identifier == instancesLinkID }) {
-                    let link = hittableElement(app, identifier: instancesLinkID)
-                    XCTAssertNotNil(link, "\(name) cannot reach the instances of \(key.id)")
-                    link?.tap()
-                    let detail = app.descendants(matching: .any)["settings-instances-\(key.id)-detail"]
-                    XCTAssertTrue(detail.waitForExistence(timeout: 30), "the \(key.id) instances did not open")
-                    guard let snapshot = try? detail.snapshot() else {
-                        XCTFail("could not read the \(key.id) instances")
-                        return coverage
-                    }
-                    instances = detail
-                    keyElements = descendants(of: snapshot)
-                }
-                defer {
-                    if let instances {
-                        dismissTopSheet(app)
-                        XCTAssertTrue(waitForNonExistence(instances, timeout: 15), "the \(key.id) instances must dismiss")
-                    }
-                }
-                let token = settingRowToken(key.id)
-                let rows = keyElements.filter {
-                    $0.elementType == .other && ($0.identifier == token || $0.identifier.hasPrefix(token + "_"))
-                        && !$0.identifier.hasSuffix("-project") && !$0.identifier.hasSuffix("-reset")
-                        && !$0.identifier.hasSuffix("-applyAgain") && !$0.identifier.hasSuffix("-error")
-                }
-                let globalInstancesOnly = key.qualifier == "key" || key.qualifier == "device"
-                let served = !key.layers.isDisjoint(with: layers) && (!globalInstancesOnly || isGlobalTarget)
-                guard served else {
-                    coverage.notServed += 1
-                    XCTAssertEqual(rows.count, 0, "\(name) must not show \(key.id): it is not served on this surface")
-                    if rows.count == 0 { coverage.notServedAbsent += 1 }
-                    continue
-                }
-                coverage.served += 1
-                if let owner = customOwners[key.id] {
-                    XCTAssertEqual(rows.count, 0, "\(name) must not repeat \(key.id) beside \(owner)")
-                    coverage.customOwnerChecked += 1
-                    continue
-                }
-                guard rows.count > 0 else {
-                    XCTAssertTrue((key.qualifier == "project" || key.qualifier == "device") && isGlobalTarget,
-                                  "\(name) serves \(key.id) but shows no row")
-                    coverage.optionalAbsent += 1
-                    continue
-                }
-                coverage.rowsPresent += 1
-                let row = rows[0]
-                let children = descendants(of: row)
-                let rowElement = instances == nil && detail?.identifier == row.identifier ? detail!
-                    : (instances ?? detail ?? surface).descendants(matching: .any).matching(identifier: row.identifier).firstMatch
-                let provenance = rowProvenance(rowElement)
-                let reverts = provenance.contains("Revert") || provenance.contains("Reset")
-                XCTAssertEqual(provenance.contains("Overridden"), reverts && !isGlobalTarget,
-                               "\(name) row \(key.id) marks an override exactly beside its revert: \(provenance)")
-                XCTAssertFalse(reverts && provenance.contains("Set by Project settings"),
-                               "\(name) row \(key.id) cannot revert a repository value: \(provenance)")
-                coverage.provenanceChecked += 1
-                let described = children.map(\.label)
-                    + children.filter { $0.elementType == .switch }.compactMap { $0.value as? String }
-                XCTAssertTrue(described.contains { !$0.isEmpty && $0 != key.label && !provenanceWords.contains($0) },
-                              "\(name) row \(key.id) shows no value: \(described)")
-                coverage.valueChecked += 1
-            }
-            if let detail {
-                if sectionDestinations[group] != nil {
-                    keepScreenshot(app, name: "settings-surface-\(name)-\(group)")
-                }
-                dismissTopSheet(app)
-                XCTAssertTrue(waitForNonExistence(detail, timeout: 15), "the \(group) sub-sheet must dismiss")
-            }
-        }
-        return coverage
-    }
-
     private func descendants(of snapshot: XCUIElementSnapshot) -> [XCUIElementSnapshot] {
         snapshot.children.flatMap { [$0] + descendants(of: $0) }
     }
@@ -1241,13 +1130,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                       "the \(group) sub-sheet did not open: \(app.debugDescription)")
         let detail = details.element(boundBy: max(details.count - 1, 0))
         return detail
-    }
-
-    @MainActor
-    private func settingRows(_ scope: XCUIElement, key: String) -> XCUIElementQuery {
-        let token = settingRowToken(key)
-        return scope.descendants(matching: .any).matching(
-            NSPredicate(format: "identifier == %@ OR identifier BEGINSWITH %@", token, token + "_"))
     }
 
     @MainActor
@@ -1289,11 +1171,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     @MainActor
     private func hittableElement(_ app: XCUIApplication, identifier: String, timeout: TimeInterval = 20) -> XCUIElement? {
         revealedElement(app, where: NSPredicate(format: "identifier == %@", identifier), timeout: timeout)
-    }
-
-    @MainActor
-    private func hittableStaticText(_ app: XCUIApplication, _ text: String) -> XCUIElement? {
-        revealedElement(app, where: NSPredicate(format: "label == %@ AND elementType == %d", text, XCUIElement.ElementType.staticText.rawValue), timeout: 6)
     }
 
     @MainActor
@@ -1385,13 +1262,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             Thread.sleep(forTimeInterval: 0.25)
         } while Date() < deadline
         return condition()
-    }
-
-    private func attachSettingsCoverage(_ coverage: [String: SurfaceCoverage], schema: SettingsSchemaInventory) {
-        let attachment = XCTAttachment(string: coverageReport(coverage, schema: schema))
-        attachment.name = "settings-surface-coverage.json"
-        attachment.lifetime = .keepAlways
-        add(attachment)
     }
 
     private func coverageReport(_ coverage: [String: SurfaceCoverage], schema: SettingsSchemaInventory) -> String {

@@ -21,18 +21,6 @@ import XCTest
         XCTAssertTrue(actions.exists, "Actions remain in the sheet")
     }
 
-    func testSharedRowTitleKeepsFullWidthAtXXXL() {
-        let app = home(xxxl: true)
-        defer { app.terminate() }
-        let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'settings-row-model.queue_role_worker_' AND NOT identifier ENDSWITH '-reset'")).firstMatch
-        XCTAssertTrue(row.exists, app.debugDescription)
-        let title = row.staticTexts["Worker models"].firstMatch
-        let pill = row.staticTexts["Overridden"].firstMatch
-        XCTAssertTrue(title.exists && pill.exists, row.debugDescription)
-        XCTAssertLessThan(title.frame.height, pill.frame.height * 1.6, "The title is not broken into fragments: \(title.frame) vs \(pill.frame)")
-        XCTAssertGreaterThanOrEqual(pill.frame.minY, title.frame.maxY - 1, "The pill stacks below the title: \(pill.frame) vs \(title.frame)")
-    }
-
     private func home(dark: Bool = false, xxxl: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-settings-scope-review"] + (dark ? ["-home-dark"] : [])

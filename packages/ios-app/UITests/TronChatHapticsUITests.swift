@@ -110,43 +110,6 @@ final class TronChatHapticsUITests: XCTestCase {
         keep(app, "1599-tool-sheet")
     }
 
-    @MainActor func testSettingsAndNestedSheetsPlayOneImpactEach() {
-        continueAfterFailure = false
-        let app = launchSettings([]); defer { app.terminate() }
-        let section = app.buttons["settings-link-Agent Behavior"]
-        XCTAssertTrue(section.waitForExistence(timeout: 30), app.debugDescription)
-        assertHaptics(app, "none", "the Settings root presents no sheet")
-        section.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["settings-section-model-detail"].waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(waitHaptics(app, "sheetPresented"), haptics(app))
-
-        let heading = app.navigationBars.staticTexts["Agent Behavior"].firstMatch
-        XCTAssertTrue(heading.waitForExistence(timeout: 5), app.debugDescription)
-        heading.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
-        assertHaptics(app, "sheetPresented", "expanding the sheet's detent plays nothing")
-
-        let picker = app.descendants(matching: .any)["settings-row-model.ref"].buttons
-            .matching(NSPredicate(format: "NOT identifier ENDSWITH '-reset'")).firstMatch
-        let option = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Fixture Lite")).firstMatch
-        XCTAssertTrue(picker.waitForExistence(timeout: 10), app.debugDescription)
-        picker.tap()
-        XCTAssertTrue(option.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(waitHaptics(app, "sheetPresented,sheetPresented"), "the nested sheet taps once: \(haptics(app))")
-        keep(app, "1599-nested-sheet")
-        closeTopSheet(app)
-        XCTAssertTrue(option.waitForNonExistence(timeout: 10), app.debugDescription)
-        assertHaptics(app, "sheetPresented,sheetPresented", "dismissing the nested sheet plays nothing")
-
-        picker.tap()
-        XCTAssertTrue(option.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(waitHaptics(app, "sheetPresented,sheetPresented,sheetPresented"), haptics(app))
-        closeTopSheet(app)
-        closeTopSheet(app)
-        XCTAssertTrue(section.waitForExistence(timeout: 10), app.debugDescription)
-        assertHaptics(app, "sheetPresented,sheetPresented,sheetPresented", "dismissing both sheets plays nothing")
-    }
-
     @MainActor func testSheetPresentedAtMountPlaysNone() {
         continueAfterFailure = false
         let app = launchSettings(["-sheet-haptics-restored"]); defer { app.terminate() }

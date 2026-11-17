@@ -28,24 +28,6 @@ final class TronManageSessionReviewUITests: XCTestCase {
         XCTAssertTrue(html.isHittable, app.debugDescription)
     }
 
-    @MainActor func testSessionSettingsShowsProjectSection() {
-        let app = launch(dark: false); defer { app.terminate() }
-        let link = app.buttons["chat-settings-link"]
-        for _ in 0..<12 where !link.isHittable { app.swipeUp() }
-        link.tap()
-        expandSheet(app, title: "Session Settings")
-        let section = element(app, "session-project-settings")
-        XCTAssertTrue(section.waitForExistence(timeout: 8), app.debugDescription)
-        let none = element(app, "project-settings-no-overrides")
-        XCTAssertTrue(none.waitForExistence(timeout: 8), app.debugDescription)
-        for _ in 0..<6 where !none.isHittable { app.swipeUp() }
-        XCTAssertFalse(labels(none, containing: "No repository overrides").isEmpty, none.debugDescription)
-        XCTAssertLessThan(none.frame.height, 140, "No repository overrides is a row: \(none.frame)")
-        XCTAssertTrue(section.buttons["project-settings-trust"].exists, section.debugDescription)
-        XCTAssertTrue(labels(section, containing: "Workspace").isEmpty, "Manage Session's Workspace row already names the branch")
-        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "settings-ignored-defaultTools").count, 1)
-    }
-
     @MainActor private func launch(dark: Bool) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()

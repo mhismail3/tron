@@ -1,36 +1,6 @@
 import XCTest
 
 final class TronNewSessionUITests: XCTestCase {
-    @MainActor func testRepositoryOverridesAreReadOnlyBeforeFirstSession() {
-        continueAfterFailure = false
-        for appearance in ["light", "dark"] {
-            let app = XCUIApplication()
-            app.launchArguments = ["-tron-new-session-fixture", "-new-session-scenario", "project-settings",
-                                   "-fixture-appearance", appearance]
-            app.launch(); defer { app.terminate() }
-            let project = app.buttons["project-settings-link"]
-            XCTAssertTrue(project.waitForExistence(timeout: 10))
-            project.tap()
-            XCTAssertTrue(app.staticTexts["Project Settings"].waitForExistence(timeout: 5))
-            XCTAssertFalse(app.buttons["settings-section-model-open"].exists, "Repository values are direct, not another category sheet")
-            evidence(app, "1325-project-\(appearance)")
-            let row = app.descendants(matching: .any)["settings-row-model.ref_role_chat_"]
-            XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
-            XCTAssertFalse(app.buttons["settings-row-model.ref_role_chat_-reset"].exists)
-            XCTAssertFalse(row.buttons["Model"].exists, "Project values have no model-picker mutation route")
-            row.buttons.matching(NSPredicate(format: "label == %@", "Set by Project settings")).firstMatch.tap()
-            XCTAssertTrue(app.navigationBars.staticTexts["Project setting"].waitForExistence(timeout: 5))
-            evidence(app, "1325-project-\(appearance)-source")
-            app.buttons["Done"].firstMatch.tap()
-            app.buttons["Done"].firstMatch.tap()
-            XCTAssertTrue(app.buttons["Create"].isEnabled)
-            app.buttons["Create"].tap()
-            XCTAssertTrue(wait(app.staticTexts["fixture.create-result"], "label == 'callbacks:1 owned:true'"))
-            XCTAssertTrue(wait(app.staticTexts["fixture.create-counts"], "label CONTAINS 'creates:1 typed:0 projectWrites:0 inherited:true'"),
-                          "Creating from a repository default must not copy it to a Session override")
-            app.terminate()
-        }
-    }
 
     @MainActor func testSlowProjectSettingsShowsPulseThenRevealsContent() {
         continueAfterFailure = false

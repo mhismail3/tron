@@ -460,47 +460,6 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    private func paintedSettingsControl(_ target: XCUIElement, in app: XCUIApplication, backgroundX: CGFloat) -> CGRect {
-        guard let image = XCUIScreen.main.screenshot().image.cgImage else { XCTFail("Missing pixels"); return .zero }
-        let frame = target.frame
-        let scale = CGFloat(image.width) / app.windows.firstMatch.frame.width
-        func strip(_ rect: CGRect) -> [[Int]] {
-            let pixels = CGRect(x: rect.minX.rounded(), y: rect.minY.rounded(),
-                                width: rect.width.rounded(), height: rect.height.rounded())
-            guard let crop = image.cropping(to: pixels) else { XCTFail("Missing control raster: \(rect)"); return [] }
-            var bytes = [UInt8](repeating: 0, count: crop.width * crop.height * 4)
-            let context = CGContext(data: &bytes, width: crop.width, height: crop.height, bitsPerComponent: 8,
-                                    bytesPerRow: crop.width * 4, space: CGColorSpaceCreateDeviceRGB(),
-                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-            context.draw(crop, in: CGRect(x: 0, y: 0, width: crop.width, height: crop.height))
-            var samples = [[Int]]()
-            for offset in stride(from: 0, to: bytes.count, by: 4) {
-                samples.append([Int(bytes[offset]), Int(bytes[offset + 1]), Int(bytes[offset + 2])])
-            }
-            return samples
-        }
-        let background = strip(CGRect(x: backgroundX * scale, y: frame.midY * scale, width: 1, height: 1)).first ?? []
-        func extent(_ rect: CGRect, reversed: Bool = false) -> ClosedRange<CGFloat> {
-            let samples = strip(rect)
-            let isInk = samples.map { sample in (zip(sample, background).map { abs($0.0 - $0.1) }.max() ?? 0) > 4 }
-            var runs = [ClosedRange<Int>]()
-            for index in isInk.indices where isInk[index] {
-                if let run = runs.last, CGFloat(index - run.upperBound) <= 4 * scale { runs[runs.count - 1] = run.lowerBound...index } else { runs.append(index...index) }
-            }
-            guard let run = runs.max(by: { $0.count < $1.count }) else { XCTFail("No visible control surface: \(target.label)"); return 0...0 }
-            let (first, last) = (run.lowerBound, run.upperBound)
-            let start = reversed ? samples.count - 1 - last : first
-            let end = reversed ? samples.count - first : last + 1
-            return CGFloat(start) / scale...CGFloat(end) / scale
-        }
-        let horizontal = extent(CGRect(x: frame.minX * scale, y: frame.midY * scale, width: frame.width * scale, height: 1))
-        let centerX = frame.minX + (horizontal.lowerBound + horizontal.upperBound) / 2
-        let vertical = extent(CGRect(x: centerX * scale, y: frame.minY * scale, width: 1, height: frame.height * scale), reversed: true)
-        return CGRect(x: frame.minX + horizontal.lowerBound, y: frame.minY + vertical.lowerBound,
-                      width: horizontal.upperBound - horizontal.lowerBound, height: vertical.upperBound - vertical.lowerBound)
-    }
-
-    @MainActor
     func testCaptureGlobalAccountsAndProviderModelsInLightAndDark() {
         continueAfterFailure = false
         for appearance in ["light", "dark", "light-xxxl", "dark-xxxl"] {
@@ -548,95 +507,6 @@ final class TronSmokeUITests: XCTestCase {
         closeTopSheet(app)
         XCTAssertTrue(app.navigationBars.staticTexts["Providers"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["settings-link-Custom Models"].exists)
-    }
-
-    @MainActor
-    private func paintedSettingsGlyph(row: CGRect, label: CGRect, in app: XCUIApplication) -> CGRect {
-        guard let image = XCUIScreen.main.screenshot().image.cgImage else { XCTFail("Missing screenshot"); return .zero }
-        let scale = CGFloat(image.width) / app.windows.firstMatch.frame.width
-        let region = CGRect(x: (row.minX * scale).rounded(), y: (row.minY * scale).rounded(),
-                            width: ((label.minX - row.minX) * scale).rounded(), height: (row.height * scale).rounded())
-        guard let crop = image.cropping(to: region) else { XCTFail("Missing leading-column raster"); return .zero }
-        var bytes = [UInt8](repeating: 0, count: crop.width * crop.height * 4)
-        let context = CGContext(data: &bytes, width: crop.width, height: crop.height, bitsPerComponent: 8,
-                                bytesPerRow: crop.width * 4, space: CGColorSpaceCreateDeviceRGB(),
-                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-        context.draw(crop, in: CGRect(x: 0, y: 0, width: crop.width, height: crop.height))
-        var minX = crop.width, minY = crop.height, maxX = -1, maxY = -1
-        for y in 0..<crop.height {
-            for x in 0..<crop.width {
-                let offset = (y * crop.width + x) * 4
-                let r = Int(bytes[offset]), g = Int(bytes[offset + 1]), b = Int(bytes[offset + 2])
-                if g > r + 60 && g > b + 15 {
-                    minX = min(minX, x); maxX = max(maxX, x)
-                    minY = min(minY, y); maxY = max(maxY, y)
-                }
-            }
-        }
-        guard maxX >= minX else { XCTFail("No emerald glyph ink"); return .zero }
-        return CGRect(x: (region.minX + CGFloat(minX)) / scale,
-                      y: (region.minY + CGFloat(crop.height - 1 - maxY)) / scale,
-                      width: CGFloat(maxX - minX + 1) / scale, height: CGFloat(maxY - minY + 1) / scale)
-    }
-
-    @MainActor
-    private func assertRendersUntruncated(_ element: XCUIElement, matching pattern: String, named name: String,
-                                          file: StaticString = #filePath, line: UInt = #line) {
-        XCTAssertTrue(element.waitForExistence(timeout: 5), file: file, line: line)
-        let screenshot = element.screenshot()
-        let attachment = XCTAttachment(screenshot: screenshot)
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
-        guard let image = screenshot.image.cgImage else { return XCTFail("No element pixels for \(name)", file: file, line: line) }
-        let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .accurate
-        request.usesLanguageCorrection = false
-        XCTAssertNoThrow(try VNImageRequestHandler(cgImage: image).perform([request]), file: file, line: line)
-        let text = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
-            .joined(separator: " ").trimmingCharacters(in: .whitespaces)
-        XCTAssertNotNil(text.range(of: pattern, options: .regularExpression),
-                        "\(name) rendered \"\(text)\", expected \(pattern)", file: file, line: line)
-    }
-
-    @MainActor
-    private func assertVisibleGapBeforePill(in row: XCUIElement, named name: String,
-                                            file: StaticString = #filePath, line: UInt = #line) {
-        let pill = row.staticTexts["Overridden"]
-        XCTAssertTrue(pill.waitForExistence(timeout: 5), file: file, line: line)
-        let screenshot = XCUIScreen.main.screenshot()
-        let attachment = XCTAttachment(screenshot: screenshot)
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
-        let image = screenshot.image
-        guard let cgImage = image.cgImage else { return XCTFail("No screen pixels for \(name)", file: file, line: line) }
-        let scale = image.scale, width = cgImage.width
-        let y = Int((pill.frame.midY * scale).rounded())
-        guard let strip = cgImage.cropping(to: CGRect(x: 0, y: y, width: width, height: 1)) else {
-            return XCTFail("Cannot sample \(name)", file: file, line: line)
-        }
-        var pixels = [UInt8](repeating: 0, count: width * 4)
-        guard let context = CGContext(data: &pixels, width: width, height: 1, bitsPerComponent: 8, bytesPerRow: width * 4,
-                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-        else { return XCTFail("Cannot read \(name)", file: file, line: line) }
-        context.draw(strip, in: CGRect(x: 0, y: 0, width: width, height: 1))
-        func color(_ x: Int) -> [Int] { (0..<3).map { Int(pixels[max(0, min(width - 1, x)) * 4 + $0]) } }
-        let background = color(Int((pill.frame.maxX + 3) * scale))
-        var x = Int(pill.frame.minX * scale) - 3
-        var gap = 0
-        while x > 0, zip(color(x), background).allSatisfy({ abs($0 - $1) <= 12 }) { gap += 1; x -= 1 }
-        XCTAssertGreaterThanOrEqual(CGFloat(gap + 3) / scale, 6,
-            "\(name): \(CGFloat(gap + 3) / scale) pt of row background \(background) before the pill; then \(color(x))",
-            file: file, line: line)
-    }
-
-    @MainActor
-    private func assertCircularRevert(_ button: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
-        let frame = button.frame
-        XCTAssertGreaterThan(frame.width, 0, file: file, line: line)
-        XCTAssertEqual(frame.width, frame.height, accuracy: 0.5,
-                       "Revert must keep a square target around its circular glass: \(frame)", file: file, line: line)
     }
 
     @MainActor
@@ -1109,11 +979,6 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "manage-home-background-accepted-paused")
         app.buttons["home-sheet-done-manage"].tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 5))
-    }
-
-    @MainActor
-    private func settingEditor(_ row: XCUIElement) -> XCUIElement {
-        row.buttons.matching(NSPredicate(format: "NOT identifier ENDSWITH '-source' AND NOT identifier ENDSWITH '-reset'")).firstMatch
     }
 
     @MainActor
@@ -1720,23 +1585,8 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    private func showsText(_ text: String, in app: XCUIApplication) -> Bool {
-        app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch.exists
-    }
-
-    @MainActor
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
         for _ in 0..<16 where !(element.exists && element.isHittable) { app.swipeUp() }
-    }
-
-    @MainActor
-    private func assertStacked(_ control: XCUIElement, below title: XCUIElement, in app: XCUIApplication,
-                               file: StaticString = #filePath, line: UInt = #line) {
-        XCTAssertTrue(title.exists && control.exists, app.debugDescription, file: file, line: line)
-        XCTAssertGreaterThanOrEqual(control.frame.minY, title.frame.maxY,
-                                    "\(control.label) sits below \(title.label), not beside it", file: file, line: line)
-        XCTAssertEqual(control.frame.maxX, app.windows.firstMatch.frame.maxX - 32, accuracy: 1,
-                       "\(control.label) retains its container + standard row trailing inset", file: file, line: line)
     }
 
     @MainActor

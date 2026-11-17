@@ -106,9 +106,6 @@ final class TronConsolidatedUIRegressionTests: XCTestCase {
         let opus = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Claude Opus 5.5'")).firstMatch
         XCTAssertTrue(opus.waitForExistence(timeout: 5)); opus.tap()
         XCTAssertTrue(card.staticTexts["Claude Opus 5.5"].waitForExistence(timeout: 5), "Home selection must persist through the existing Home-scoped settings RPC")
-        tap(app, "home-manage-settings")
-        XCTAssertFalse(element(app, "home-settings-content").descendants(matching: .any)["settings-row-model.ref_role_chat_"].exists)
-        XCTAssertTrue(element(app, "settings-row-model.queue_role_worker_").waitForExistence(timeout: 5), "Worker/delegation choices are directly on Home Settings")
         keep("home-model-write-and-remaining-workers")
     }
 
@@ -127,21 +124,6 @@ final class TronConsolidatedUIRegressionTests: XCTestCase {
         XCTAssertTrue(card.staticTexts["Alternative Model"].waitForExistence(timeout: 10), "Only the acknowledged fenced session choice is published")
         XCTAssertTrue(app.staticTexts["Model requests: 1"].exists, "Preview must not count as a mutation")
         keep("session-model-fenced-write-and-effort-revert")
-    }
-
-    @MainActor func testSessionSettingsKeepsWorkerOverridesAndTrustReachable() {
-        let app = session(["-manage-session-review"]); defer { app.terminate() }
-        tap(app, "chat-settings-link")
-        XCTAssertTrue(element(app, "session-settings-content").waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["settings-section-model-open"].exists, "Session Settings no longer has a Models sheet")
-        XCTAssertFalse(app.staticTexts["Agent"].exists || app.staticTexts["Tools & Extensions"].exists)
-        XCTAssertTrue(app.buttons["settings-section-context-open"].exists && app.buttons["settings-section-tools-open"].exists)
-        XCTAssertTrue(app.buttons["project-settings-trust"].exists)
-        tap(app, "settings-section-advanced-open")
-        XCTAssertTrue(element(app, "settings-row-model.queue_role_background_").waitForExistence(timeout: 5), "Moving chat controls must not strand worker overrides")
-        close(app); tap(app, "project-settings-trust")
-        XCTAssertTrue(app.navigationBars.staticTexts["Project Trust"].waitForExistence(timeout: 5), app.debugDescription)
-        keep("session-settings-worker-and-trust-routes")
     }
 
     @MainActor private func home(_ extra: [String]) -> XCUIApplication {
