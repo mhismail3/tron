@@ -151,17 +151,15 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                 && !["tools.active", "model.thinking[role=chat]"].contains($0.objectValue?["key"]?.stringValue ?? "")
         }
         return .object(["keys": .array(keys.map { value in
-            guard var row = value.objectValue, var presentation = row["presentation"]?.objectValue else { return value }
+            guard var row = value.objectValue else { return value }
             let session = !project && row["layer"]?.stringValue == "session"
             if row["key"]?.stringValue == "model.contextWindow" {
                 row["qualifiers"] = .object(["model": .string("anthropic/claude-opus-5-5")])
             }
             if project { row["layer"] = .string("global") }
             row["overridden"] = .bool(session)
-            presentation["editable"] = .bool(!project && presentation["sessionOverridable"]?.boolValue == true)
-            row["presentation"] = .object(presentation)
             return .object(row)
-        }), "sections": .array(HostedSettingsReviewSchema.sections),
+        }),
             "diagnostics": .array([.object(["file": .string("/workspace/.pi/settings.json"), "layer": .string("project"),
                 "key": .string("tools.active"), "path": .string("defaultTools"), "reason": .string("project-forbidden")])])])
     }
@@ -194,9 +192,6 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             result = .object(["aborted": .bool(true)])
         case "settings.resolve" where HostedSettingsReviewSchema.scopeReview:
             result = Self.scopeReviewResolution(project: params["target"]?.objectValue?["kind"]?.stringValue == "project")
-        case "settings.options" where HostedSettingsReviewSchema.scopeReview:
-            result = .object(["key": .string("tools.active"), "source": .string("catalog.tools"), "dependsOn": .array([]),
-                "options": .array(Self.scopeReviewCatalog.map { .object(["value": .string($0), "label": .string($0), "resource": .object([:])]) })])
         case "settings.resolve":
             result = .object(["keys": .array([.object([
                 "key": .string("model.thinking[role=chat]"), "group": .string("model"),
@@ -204,19 +199,11 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                 "layer": .string("session"), "applied": .bool(true), "overridden": .bool(true),
                 "layers": .array([.object(["layer": .string("session"), "value": .string(snapshot.thinkingLevel), "display": .string(snapshot.thinkingLevel.capitalized), "applied": .bool(true)])]),
                 "badges": .array([]),
-                "presentation": .object(["label": .string("Thinking"), "help": .string("Thinking for this chat."),
-                    "order": .number(10), "importance": .string("essential"), "control": .string("choice"),
-                    "sessionOverridable": .bool(true), "projectSettable": .bool(true), "editable": .bool(true),
-                    "options": .array([.object(["value": .string("off"), "label": .string("Off")]),
-                                       .object(["value": .string("high"), "label": .string("High")])])]),
             ]), .object([
                 "key": .string("context.compaction.enabled"), "group": .string("context"),
                 "value": .bool(true), "display": .string("On"), "layer": .string("global"),
                 "applied": .bool(false), "badges": .array([]),
                 "layers": .array([.object(["layer": .string("session")]), .object(["layer": .string("global")])]),
-                "presentation": .object(["label": .string("Automatic compaction"), "help": .string("Automatic compaction policy."),
-                    "order": .number(10), "importance": .string("essential"),
-                    "sessionOverridable": .bool(true), "projectSettable": .bool(true), "editable": .bool(true)]),
             ]), HostedSettingsReviewSchema.key("model.ref[role=chat]", "model", "Model",
                 try JSONValue.encode(snapshot.model), snapshot.model?.id == "alternative" ? "Alternative Model" : "Fixture Model", "catalog", order: 5, essential: true, layer: "session"),
                 HostedSettingsReviewSchema.key("model.contextWindow", "model", "Context window", .number(200_000), "200K tokens", order: 30, essential: true,
@@ -225,16 +212,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                     .array([.string("fixture/memory-a"), .string("fixture/memory-b")]), "2 models", order: 44, essential: true)
             ] + HostedSettingsReviewSchema.additionalKeys.filter {
                 !["model.thinking[role=chat]", "context.compaction.enabled", "permissions.budget.task"].contains($0.objectValue?["key"]?.stringValue ?? "")
-            }), "sections": .array(HostedSettingsReviewSchema.sections)])
-            if var resolution = result.objectValue, let keys = resolution["keys"]?.arrayValue {
-                resolution["keys"] = .array(keys.map { value in
-                    guard var row = value.objectValue, var presentation = row["presentation"]?.objectValue else { return value }
-                    presentation["editable"] = .bool((row["layers"]?.arrayValue ?? []).contains { $0.objectValue?["layer"]?.stringValue == "session" })
-                    row["presentation"] = .object(presentation)
-                    return .object(row)
-                })
-                result = .object(resolution)
-            }
+            })])
         case "session.context":
             result = .object(["activeTools": .array(HostedSettingsReviewSchema.tools.map(JSONValue.string))])
         case let method where HostedManageSessionReview.enabled && HostedManageSessionReview.handles(method):
@@ -242,15 +220,6 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                 try await Task.sleep(for: .seconds(1))
             }
             result = HostedManageSessionReview.response(method)
-        case "settings.options" where params["key"]?.stringValue == "model.ref[role=chat]":
-            result = .object(["key": .string("model.ref[role=chat]"), "source": .string("catalog.models"), "dependsOn": .array([]),
-                "options": .array(["model", "alternative"].map { .object(["value": .object(["provider": .string("fixture"), "id": .string($0)]),
-                    "label": .string($0 == "model" ? "Fixture Model" : "Alternative Model")]) })])
-        case "settings.options":
-            result = .object(["key": .string("tools.active"), "source": .string("catalog.tools"),
-                "dependsOn": .array([]), "options": .array(HostedSettingsReviewSchema.tools.map {
-                    .object(["value": .string($0), "label": .string($0), "resource": .object([:])])
-                })])
         case "settings.change":
             let params = frame.objectValue?["params"]?.objectValue ?? [:]
             let change = params["changes"]?.arrayValue?.first?.objectValue

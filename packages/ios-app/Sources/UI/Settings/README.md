@@ -142,20 +142,13 @@ scripts/ios-gateway-e2e-test run-ui \
   --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testProjectSettingsExposeReadOnlyOverrides
 ```
 
-`TronSettingsScopeRowsUITests` checks read-only queue values, independent Revert and Project
-inspection. `TronSmokeUITests` keeps direct model/thinking and shared string-list editing,
-read-only numeric-map/no-write inspection and approvals coverage.
-`TronAgentBehaviorRegressionUITests` checks numeric-map values without native editor/reset routes in
-light/dark and XXXL; Gateway `native-change.e2e.test.ts` owns actual agent numeric-map changes,
-next-Pi-session admission, spend-card acceptance and Undo. Its painted-geometry journey measures the primitive and generic
-schema controls at both text sizes and appearances; background sampling stays outside the whole
-action cluster so a left-hand reset cannot sample its neighboring value pill.
+Gateway `native-change.e2e.test.ts` owns agent numeric-map changes, next-Pi-session admission, spend-card
+acceptance and Undo.
 The surviving memory/provider/queued-editor journeys in
 `TronForegroundCaptureUITests` own native-stack refresh, draft/focus preservation and invalid-child
 retirement; retired Worker thinking and Transport editor cases do not define that lifecycle.
 
-`TronAgentBehaviorRegressionUITests` exercises the production Global sheet over the hosted
-socket; it checks numeric-map values, retired rows, Global/Session value/reset order and captures both appearances. Hosted values are scripted,
+Hosted values are scripted,
 not persistence evidence. Real-UI journeys read their key inventory
 from the fixture Gateway's built schema. Before device sign-off, change values rapidly, dismiss while saving
 and switch profile: no untouched inherited setting may become an override.

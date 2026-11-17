@@ -30,29 +30,7 @@ enum HostedSettingsReviewSchema {
             "overridden": .bool(layer != "project"),
             "layers": .array(layers.map { .object(["layer": .string($0), "value": $0 == layer ? value : .null]) }),
             "badges": .array([]),
-            "presentation": .object(["label": .string(label), "help": .string(help.isEmpty && id == "tools.active" ? "The tools the model may call." : help),
-                "order": .number(order), "importance": .string(essential ? "essential" : "advanced"),
-                "sessionOverridable": .bool(layers.contains("session")),
-                "projectSettable": .bool(layers.contains("project")),
-                "editable": .bool(layer != "project"), "timing": .string("fixed"), "effect": .string("next-turn"),
-                "valueKind": .string(id == "permissions.budget.task" ? "numberMap" : control == "list" ? "stringList" : value.intValue != nil ? "integer" : "choice")]),
         ]
-        if let control, var presentation = row["presentation"]?.objectValue {
-            presentation["control"] = .string(control)
-            presentation["options"] = .array(options)
-            if id == "permissions.budget.task" {
-                presentation["range"] = .object(["min": .number(1), "max": .number(10_000_000_000), "step": .number(1), "unit": .string("tokens")])
-            }
-            row["presentation"] = .object(presentation)
-        }
-        if id == "tools.active", var presentation = row["presentation"]?.objectValue {
-            presentation["optionsSource"] = .object(["name": .string("catalog.tools"), "dependsOn": .array([])])
-            row["presentation"] = .object(presentation)
-        }
-        if id == "model.ref[role=chat]", var presentation = row["presentation"]?.objectValue {
-            presentation["optionsSource"] = .object(["name": .string("catalog.models"), "dependsOn": .array([])])
-            row["presentation"] = .object(presentation)
-        }
         if let qualifiers { row["qualifiers"] = .object(qualifiers.mapValues(JSONValue.string)) }
         if let subgroup { row["subgroup"] = .string(subgroup) }
         return .object(row)
@@ -64,15 +42,7 @@ enum HostedSettingsReviewSchema {
     }()
 
     static var agentBehaviorKeys: [JSONValue] {
-        additionalKeys.map { value in
-            guard var row = value.objectValue, row["key"]?.stringValue?.hasPrefix("model.queue[") == true,
-                  var presentation = row["presentation"]?.objectValue else { return value }
-            presentation["control"] = .string("list")
-            presentation["valueKind"] = .string("stringList")
-            presentation["optionsSource"] = .object(["name": .string("catalog.models"), "dependsOn": .array([])])
-            row["presentation"] = .object(presentation)
-            return .object(row)
-        } + [key("model.queue[role=background]", "workers", "Background models", .array([.string("fixture/pro")]), "1 model", "list", order: 44, essential: true)]
+        additionalKeys + [key("model.queue[role=background]", "workers", "Background models", .array([.string("fixture/pro")]), "1 model", "list", order: 44, essential: true)]
             + sheetThemeKeys.filter { $0.objectValue?["key"]?.stringValue == "permissions.floor" }
     }
 

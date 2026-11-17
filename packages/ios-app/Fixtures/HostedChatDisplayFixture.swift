@@ -788,8 +788,6 @@ private actor HostedHomeShellGateway {
         case "settings.resolve":
             if sheetState == "delayed-status", !configuredModels.isEmpty { try? await Task.sleep(for: .seconds(4)) }
             return (homeSettingsResolution(), nil)
-        case "settings.options":
-            return (try homeSettingsOptions(params), nil)
         case "home.pauseMemory", "home.resumeMemory", "settings.change", "home.disable":
             if method == "settings.change", params["dryRun"]?.boolValue == true {
                 return (settingsChangePreview(params), nil)
@@ -903,11 +901,6 @@ private actor HostedHomeShellGateway {
 
     private var settingsModelOverridden = true
     private var homeTools = HostedHomeShellGateway.defaultHomeTools
-    private static let homeToolDetails = [
-        "ask_user": "Ask the user one bounded set of questions and wait for one atomic answer in Tron.",
-        "date": "The date and time of message id.",
-        "web_search": "Search the public web (DuckDuckGo).",
-    ]
     private static let defaultHomeTools = ["ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "profile",
                              "web_search", "web_fetch", "session_search", "session_read", "knowledge", "read_file", "settings"]
     private func homeSettingsResolution() -> JSONValue {
@@ -922,10 +915,6 @@ private actor HostedHomeShellGateway {
                 .object(["kind": .string("layer"), "label": .string("Set in Home profile")]),
                 .object(["kind": .string("source"), "label": .string("Home profile")])
             ] : [.object(["kind": .string("layer"), "label": .string("Set on Mac")])]),
-            "presentation": .object(["label": .string("Model"), "help": .string("The default for Home’s new chapters."),
-                "sessionOverridable": .bool(true), "projectSettable": .bool(true), "editable": .bool(true),
-                "order": .number(10), "importance": .string("essential"), "control": .string("catalog"),
-                "optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])])
         ])
         let memoryName = configuredModels.isEmpty ? "Subagent queue" : "\(configuredModels.count) model\(configuredModels.count == 1 ? "" : "s")"
         let memoryKey: JSONValue = .object([
@@ -935,9 +924,6 @@ private actor HostedHomeShellGateway {
             "overridden": .bool(HostedSettingsReviewSchema.scopeReview && !configuredModels.isEmpty),
             "badges": .array([.object(["kind": .string("source"), "label": .string(configuredModels.isEmpty ? "Tron default" : "Set in Home profile")])]),
             "layers": .array([.object(["layer": .string("session"), "value": configuredModels.isEmpty ? .null : .array(configuredModels.map(JSONValue.string))]), .object(["layer": .string("global")]), .object(["layer": .string("global")])]),
-            "presentation": .object(["label": .string("Background models"), "help": .string("The models for memory and Knowledge calls, in order. Empty uses the subagent models."),
-                "sessionOverridable": .bool(true), "projectSettable": .bool(false), "editable": .bool(true),
-                "order": .number(44), "importance": .string("essential"), "valueKind": .string("stringList")]),
         ])
         let homeKeys = HostedSettingsReviewSchema.additionalKeys.filter {
             !["model.thinking[role=chat]", "tools.active"].contains($0.objectValue?["key"]?.stringValue ?? "")
@@ -951,46 +937,16 @@ private actor HostedHomeShellGateway {
         let reviewKeys = HostedSettingsReviewSchema.scopeReview ? [HostedSettingsReviewSchema.key("model.queue[role=subagent]", "workers", "Subagent models",
             .array(["anthropic/claude-haiku-5-5", "openai/gpt-6-luna", "opencode-go/deepseek-v4.1-flash"].map(JSONValue.string)), "3 models",
             order: 42, essential: true, layer: "session")] : []
-        var thinkingKey = HostedSettingsReviewSchema.key("model.thinking[role=chat]", "model", "Thinking", .string("high"), "High", "choice",
+        let thinkingKey = HostedSettingsReviewSchema.key("model.thinking[role=chat]", "model", "Thinking", .string("high"), "High", "choice",
             order: 20, essential: true, layer: "session", options: ["low", "medium", "high"].map {
                 .object(["value": .string($0), "label": .string($0.capitalized)])
-            }).objectValue!
-        var thinkingPresentation = thinkingKey["presentation"]!.objectValue!
-        thinkingPresentation["valueKind"] = .string("orderedChoice")
-        thinkingKey["presentation"] = .object(thinkingPresentation)
+            })
         let contextWindowKey = HostedSettingsReviewSchema.key("model.contextWindow", "model", "Context window", .number(200_000), "200K tokens", order: 30, essential: true,
             qualifiers: ["model": "anthropic/\(settingsModelOverridden ? "claude-opus-5-5" : "claude-haiku-5-5")"])
-        let profileKeys = reviewKeys + (configuredModels.isEmpty ? [] : [memoryKey]) + [modelKey, .object(thinkingKey), contextWindowKey,
+        let profileKeys = reviewKeys + (configuredModels.isEmpty ? [] : [memoryKey]) + [modelKey, thinkingKey, contextWindowKey,
             HostedSettingsReviewSchema.key("tools.active", "tools", "Tools", .array(homeTools.map(JSONValue.string)), "\(homeTools.count) tools", "checklist", essential: true, layer: "session")
         ] + homeKeys
-        let presented = profileKeys.map { value -> JSONValue in
-            guard var row = value.objectValue, row["key"]?.stringValue?.hasPrefix("model.queue[") == true,
-                  var presentation = row["presentation"]?.objectValue else { return value }
-            presentation["control"] = .string("list")
-            presentation["valueKind"] = .string("stringList")
-            presentation["optionsSource"] = .object(["name": .string("catalog.models"), "dependsOn": .array([])])
-            row["presentation"] = .object(presentation)
-            return .object(row)
-        }
-        return .object(["keys": .array(presented), "sections": .array(HostedSettingsReviewSchema.sections)])
-    }
-
-    private func homeSettingsOptions(_ params: [String: JSONValue]) throws -> JSONValue {
-        if params["key"]?.stringValue == "tools.active" {
-            return .object(["key": .string("tools.active"), "source": .string("catalog.tools"),
-                "dependsOn": .array([]), "options": .array(Self.defaultHomeTools.map { name in
-                    var option: [String: JSONValue] = ["value": .string(name), "label": .string(name), "resource": .object([:])]
-                    if let detail = Self.homeToolDetails[name] { option["detail"] = .string(detail) }
-                    return .object(option)
-                })])
-        }
-        if params["key"]?.stringValue == "model.ref[role=chat]" || params["key"]?.stringValue?.hasPrefix("model.queue[") == true {
-            let options: [JSONValue] = [("claude-opus-5-5", "Claude Opus 5.5"), ("claude-haiku-5-5", "Claude Haiku 5.5")].map { id, name in
-                .object(["value": .object(["provider": .string("anthropic"), "id": .string(id)]), "label": .string(name)])
-            }
-            return .object(["key": params["key"]!, "source": .string("catalog.models"), "dependsOn": .array([]), "options": .array(options)])
-        }
-        throw GatewayFailure(code: "invalid_request", message: "Unknown editor options", retryable: false, details: nil)
+        return .object(["keys": .array(profileKeys)])
     }
 
     private func settingsChangePreview(_ params: [String: JSONValue]) -> JSONValue {
