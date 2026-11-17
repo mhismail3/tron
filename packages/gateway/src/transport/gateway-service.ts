@@ -1812,8 +1812,6 @@ export class GatewayService {
       }
       case "trust.inspect":
         return safeJson(await this.dependencies.trust.inspect(string(params.cwd, "cwd", { max: 4_096 })));
-      case "models.custom.get":
-        return safeJson(await this.dependencies.modelConfig.get());
       case "models.refresh": {
         const controller = new AbortController();
         const work = this.workRegistry?.begin({

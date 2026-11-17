@@ -1406,9 +1406,6 @@ describe("outside changes to MCP servers and custom models", () => {
     const created = (await f.history()).find(entry => entry.key === "accounts.models.provider" && entry.qualifiers?.provider === "tron-provider" && entry.status === "applied")!;
     expect(await f.settingsChanges.undo(created.changeId, { actor: { kind: "home", id: "home" }, reason: "Undo the endpoint" })).toMatchObject({ status: "applied" });
     expect(await providers()).toEqual({ "hand-provider": { ...provider, baseUrl: "https://hand-models.invalid/v1", apiKey: secret } });
-    const served = await f.service.invoke(client(), "models.custom.get", {}) as { document: { providers: Record<string, unknown> } };
-    expect(Object.keys(served.document.providers)).toEqual(["hand-provider"]);
-    expect(JSON.stringify(served)).not.toContain(secret);
     transcript.push({ case: "outside mcp and models", detail: await outsideEntries(f) });
   });
   caseIt("refuses a provider write while models.json holds an unrelated invalid entry, and never persists or reports it applied", async owner => {
