@@ -352,6 +352,40 @@ describe("device log append RPC boundary", () => {
     expect(sequencesOf(lines.filter((entry) => !torn.includes(entry)).join("\n"))).toEqual([1, 2, 3, 4]);
   });
 
+  it("keeps its cursor after a restart when a maximal record is followed by a torn maximal envelope, and refuses records that grow past the bound", async () => {
+    const fixtureValue = await fixture();
+    const bootId = "boot-logs-maximal";
+    const client = await fixtureValue.connect();
+    const maximal = line(1, 16 * 1_024 - Buffer.byteLength(line(1)));
+    expect(Buffer.byteLength(maximal)).toBe(16 * 1_024);
+    expect((await client.request("max-first", "client.logs.append", { commandId: "max-first-0001", bootId, firstSequence: 1, lines: [maximal] })).result).toEqual({ bootId, sequence: 1 });
+    const grown = await client.request("max-grown", "client.logs.append", { commandId: "max-grown-0001", bootId, firstSequence: 2, lines: [JSON.stringify({ values: "[".concat(Array(3_000).fill("1e20").join(","), "]") }).replace(/"(\[[^"]*\])"/u, "$1")] });
+    expect(grown.ok).toBe(false);
+    expect(grown.error?.code).toBe("invalid_request");
+    const [file] = await deviceFiles(fixtureValue.root);
+    await appendFile(join(fixtureValue.root, "logs", "devices", file.name), `{"bootId":"${bootId}","sequence":2,"record":{"padding":"${"x".repeat(16_450)}`);
+    await fixtureValue.restart();
+    const recovered = await fixtureValue.connect();
+    expect((await recovered.request("max-cursor", "client.logs.cursor", {})).result).toEqual({ bootId, sequence: 1 });
+  });
+
+  it("deletes a device's log files when that device is unpaired", async () => {
+    const fixtureValue = await fixture();
+    const phone = await fixtureValue.connect();
+    const second = await fixtureValue.connect(await fixtureValue.pairDevice("Unpaired phone"));
+    await phone.request("keep-append", "client.logs.append", { commandId: "keep-append-0001", bootId: "boot-keep-0001", firstSequence: 1, lines: batch(1, 1) });
+    await second.request("gone-append", "client.logs.append", { commandId: "gone-append-0001", bootId: "boot-gone-0001", firstSequence: 1, lines: batch(1, 2) });
+    expect(await deviceFiles(fixtureValue.root)).toHaveLength(2);
+    const secondId = (second.frames.find((frame) => frame.type === "hello") as { deviceId?: string } | undefined)?.deviceId;
+    const devices = await phone.request("list-devices", "device.list", {});
+    const target = secondId ?? (devices.result.devices as Array<{ id: string; name: string }>).find((device) => device.name === "Unpaired phone")!.id;
+    const revoked = await phone.request("revoke-second", "device.revoke", { commandId: "revoke-second-0001", deviceId: target });
+    expect(revoked.result, JSON.stringify(revoked)).toEqual({ revoked: true });
+    const left = await deviceFiles(fixtureValue.root);
+    expect(left).toHaveLength(1);
+    expect(sequencesOf(left[0]!.text)).toEqual([1]);
+  });
+
   it("bounds the batch and keeps four 5 MiB segments per device", async () => {
     const fixtureValue = await fixture();
     const client = await fixtureValue.connect();

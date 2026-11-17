@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, statSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
@@ -10,7 +10,8 @@ export const DEVICE_LOG_MAX_APPEND_LINES = 256;
 export const DEVICE_LOG_MAX_LINE_BYTES = 16 * 1_024;
 const SEGMENT_BYTES = 5 * 1_024 * 1_024;
 const SEGMENT_COUNT = 4;
-const TAIL_BYTES = 2 * DEVICE_LOG_MAX_LINE_BYTES;
+const MAX_ENVELOPE_BYTES = DEVICE_LOG_MAX_LINE_BYTES + 512;
+const TAIL_BYTES = 2 * (MAX_ENVELOPE_BYTES + 1);
 const BOOT_ID = /^[A-Za-z0-9._-]{8,64}$/;
 
 export interface DeviceLogCursor {
@@ -73,6 +74,7 @@ export function parseDeviceLogAppend(value: unknown): DeviceLogAppend {
       throw invalid("a log record is not JSON");
     }
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) throw invalid("a log record must be a JSON object");
+    if (Buffer.byteLength(JSON.stringify(parsed)) > DEVICE_LOG_MAX_LINE_BYTES) throw invalid("a log record exceeds 16 KiB once stored");
     return parsed as Record<string, unknown>;
   });
   return { bootId, firstSequence: firstSequence as number, records, ...(gap ? { gap } : {}) };
@@ -129,6 +131,15 @@ export class DeviceLogStore {
 
   cursor(deviceId: string): Promise<DeviceLogCursor> {
     return this.mutex.run(() => ({ ...this.stream(deviceId).cursor }));
+  }
+
+  remove(deviceId: string): Promise<void> {
+    return this.mutex.run(() => {
+      const log = this.stream(deviceId).log;
+      for (let index = 0; index < SEGMENT_COUNT; index += 1) rmSync(log.segmentPath(index), { force: true });
+      this.streams.delete(deviceId);
+      this.owners.delete(deviceId);
+    });
   }
 
   append(deviceId: string, admission: number, input: unknown): Promise<DeviceLogCursor> {
