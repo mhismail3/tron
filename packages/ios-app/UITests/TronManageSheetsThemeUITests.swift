@@ -22,7 +22,7 @@ final class TronManageSheetsThemeUITests: XCTestCase {
             let app = launchManageSession(dark: dark); defer { app.terminate() }
             let mode = dark ? "dark" : "light"
             let theme = ink(app, navigationTitle(app, "Manage Session"))
-            for label in ["Workspace", "Instructions", "Resources", "Session History", "Subagent History"] {
+            for label in ["Workspace", "Instructions", "Session History", "Subagent History"] {
                 let row = app.buttons[label].firstMatch
                 XCTAssertTrue(row.waitForExistence(timeout: 8), app.debugDescription)
                 for _ in 0..<6 where !row.isHittable { app.swipeUp() }

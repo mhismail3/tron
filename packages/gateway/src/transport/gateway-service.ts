@@ -1562,10 +1562,6 @@ export class GatewayService {
         ), client.signal);
         return safeJson(detail);
       }
-      case "session.subagentDetail": {
-        const slot = await this.openedSlot(client, params);
-        return safeJson(await slot.readResources(() => slot.subagentDetail(string(params.name, "name", { max: 8_192 })), client.signal));
-      }
       case "session.export": {
         const slot = await this.openedSlot(client, params);
         return safeJson(await this.exportGate.run(
@@ -1581,11 +1577,6 @@ export class GatewayService {
         const slot = await this.openedSlot(client, params);
         return slot.readResources(() => slot.resources(), client.signal);
       }
-      case "session.reloadResources":
-        return this.mutation(client, method, params, async (workToken) => {
-          await (await this.openedSlot(client, params)).reload(undefined, true, false, workToken);
-          return { reloaded: true };
-        });
       case "extension.respond":
         return this.mutation(client, method, params, async () => {
           await (await this.openedSlot(client, params)).respondToInteraction(

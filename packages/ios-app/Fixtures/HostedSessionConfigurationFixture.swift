@@ -241,12 +241,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             if method == "session.workspace.inspect", HostedLaunch.arguments.contains("-workspace-capture-delay") {
                 try await Task.sleep(for: .seconds(1))
             }
-            result = HostedManageSessionReview.response(method, params: params)
-        case "session.resources":
-            result = .object(["tools": .array(HostedSettingsReviewSchema.tools.map {
-                .object(["name": .string($0), "description": .string("Session tool details for \($0)."),
-                         "parameters": .object(["type": .string("object"), "properties": .object([:])])])
-            })])
+            result = HostedManageSessionReview.response(method)
         case "settings.options" where params["key"]?.stringValue == "model.ref[role=chat]":
             result = .object(["key": .string("model.ref[role=chat]"), "source": .string("catalog.models"), "dependsOn": .array([]),
                 "options": .array(["model", "alternative"].map { .object(["value": .object(["provider": .string("fixture"), "id": .string($0)]),

@@ -591,10 +591,6 @@ struct GatewayConnectionDetailView: View {
                     gatewayUpdateGroup(config: updateConfig)
                 }
 
-                if currentProfile.id == model.profiles.selected?.id {
-                    SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global",
-                        presentation: .section("connections"), embedded: true)
-                }
                 GatewayMaintenanceActions(
                     lifecycle: lifecycleActions,
                     destructive: GatewayMaintenanceAction(id: "forget", title: "Forget Server") {
