@@ -44,6 +44,7 @@ import type { HomeTaskDiagnostic } from "./modules/home/home-task-dispatcher.js"
 import { homeWorkspaceDirectory } from "./modules/home/home-owner.js";
 import { CommandReceiptStore, COMMAND_RECEIPT_PRUNE_INTERVAL_MS } from "./transport/command-receipts.js";
 import { GatewayService } from "./transport/gateway-service.js";
+import { DevicePreferenceBridge } from "./transport/device-preference-bridge.js";
 import { GatewayServer } from "./transport/server.js";
 import { ResourceSampler } from "./transport/stall-diagnostics.js";
 import type { ResourceRuntimeEntry } from "./util/resource-recorder.js";
@@ -182,12 +183,18 @@ const mcpAdmin = new McpAdminService(
   (level, message, event, fields) => logger.log(level, message, { event, source: "mcp", ...fields }),
 );
 const modelConfig = new ModelConfigService(config.agentDir);
+const devicePreferences = new DevicePreferenceBridge({
+  pairedDevices: async () => (await devices.listDevices()).map((device) => device.id),
+  newestReadyConnection: (deviceId, capability) => transport?.newestReadyDeviceConnection(deviceId, capability),
+  send: (connectionId, topic, payload) => transport?.emitToClient(connectionId, topic, payload) ?? false,
+});
 const settingsModel = new SettingsModel(new SettingsStoreAdapter({
   schema: settingsSchema,
   macTerminalKeys,
   mcpAdmin,
   modelConfig,
   lessonMoves: new LessonMoves(config.agentDir, config.tronHome, () => new HomeProfileItems(() => knowledge)),
+  devicePreferences,
   agentDir: config.agentDir,
   tronHome: config.tronHome,
   trust,
@@ -561,6 +568,7 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
     workRegistry.beginDrain();
     sessionSearch?.cancelWarmup();
     backgroundWork.stop();
+    await shutdownStep("device-preference", async () => devicePreferences.dispose(), recordShutdownStep);
     await shutdownStep("transport-close", () => transport.close(), recordShutdownStep);
     if (!drainAcceptedWork) {
       await shutdownStep("cancellation", async () => { await Promise.allSettled([
@@ -756,6 +764,7 @@ const service = new GatewayService({
   trust,
   settingsModel,
   settingsChanges,
+  devicePreferences,
   macTerminal: macTerminalKeys,
   modelConfig,
   auth,
