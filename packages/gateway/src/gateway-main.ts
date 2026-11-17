@@ -766,7 +766,6 @@ const service = new GatewayService({
   settingsChanges,
   devicePreferences,
   macTerminal: macTerminalKeys,
-  modelConfig,
   auth,
   globalProviderResources,
   logger,

@@ -406,7 +406,6 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
     broadcast: (topic: string, payload: unknown) => broadcasts.push({ topic, payload }),
     globalProviderResources,
     mcpAdmin,
-    modelConfig,
   } as unknown as GatewayServiceDependencies);
   const change = (target: Record<string, unknown>, changes: unknown[], extra: Record<string, unknown> = {}, c = client()) =>
     maintainerChange(service, c, "settings.change", { commandId: commandId(), target, changes, ...extra });

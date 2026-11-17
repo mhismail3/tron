@@ -263,7 +263,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
       requestStop: () => { throw new Error("Lock scenario requested a stop"); },
     }),
     uploads,
-    filesystem: unreachable("filesystem"), modelConfig: unreachable("modelConfig"),
+    filesystem: unreachable("filesystem"),
     auth: options.lifecycleRequests
       ? unreachable("auth", { cancelWaitingForRestart: () => { lifecycleRequests.push({ kind: "auth.cancelWaitingForRestart" }); } })
       : unreachable("auth"),
