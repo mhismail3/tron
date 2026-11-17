@@ -206,7 +206,7 @@ describe("HTTP pending-work ownership", () => {
     const started = process.hrtime.bigint();
     peer.write("POST /v1/pair HTTP/1.1\r\nHost: fixture\r\nContent-Type: application/json\r\nContent-Length: 8192\r\n\r\n{");
     const server = await waitFor(() => f.serverSockets[0], "accepted trickling body socket");
-    const closed = once(server, "close");
+    const closed = new Promise<void>((resolve) => server.once("close", () => resolve()));
     const trickle = setInterval(() => peer.write("a"), 50);
     cleanups.push(async () => { clearInterval(trickle); });
     await awaitsWithin(closed, "whole-request body deadline");
