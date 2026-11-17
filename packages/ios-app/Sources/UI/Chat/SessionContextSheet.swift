@@ -210,7 +210,6 @@ struct SessionContextSheet: View {
                             SessionContextUsageCard(snapshot: snapshot, action: compactButton(snapshot))
                             ManageModelConfigurationCard(sessionID: sessionID)
                             sessionSection(snapshot)
-                            settingsSection(snapshot)
                         }
                         .tronSettingsVisualTheme(accent: .tronPrimary, surfaceAccent: .tronPrimarySurface)
                         exportSection
@@ -393,7 +392,6 @@ struct SessionContextSheet: View {
     }
 
     private var exportRowAccent: Color { .tronSlate }
-    private static let settingsTitle = "Session Settings"
 
     private func processHistoryRow(_ snapshot: SessionContextPresentation) -> some View {
         let overview = snapshot.processOverview
@@ -449,22 +447,6 @@ struct SessionContextSheet: View {
                         accent: .tronPrimary
                     )
                 }
-            }
-        }
-    }
-
-    private func settingsSection(_ snapshot: SessionContextPresentation) -> some View {
-        TronGlassCard(accent: .tronPrimary) {
-            VStack(spacing: 0) {
-                TronProgressiveSheetLink(accessibilityLabel: Self.settingsTitle, identity: "session.\(sessionID).settings",
-                                         accent: .tronPrimary) {
-                    SessionSettingsView(sessionID: sessionID, ownedLayers: ["session"], projectCWD: snapshot.cwd)
-                        .tronNavigationTitle(Self.settingsTitle)
-                } label: {
-                    TronSettingsRow(icon: "slider.horizontal.3", title: Self.settingsTitle,
-                                    subtitle: "Session overrides and project settings", accent: .tronPrimary)
-                }
-                .accessibilityIdentifier("chat-settings-link")
             }
         }
     }
