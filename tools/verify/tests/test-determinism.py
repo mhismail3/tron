@@ -60,6 +60,21 @@ class DeterminismTests(unittest.TestCase):
         self.assertEqual(widened.returncode, 1)
         self.assertIn("baseline grew past HEAD: sleep", widened.stdout)
 
+    def test_sites_move_only_out_of_deleted_files(self):
+        self.test.write_text(SLEEPY + SLEEPY)
+        self.assertEqual(self.lint("--update").returncode, 0)
+        self.commit()
+        first, second = self.test.with_name("b.test.ts"), self.test.with_name("c.test.ts")
+        first.write_text(SLEEPY)
+        self.assertEqual(self.lint("--update").returncode, 1)
+        self.test.unlink()
+        second.write_text(SLEEPY)
+        self.assertEqual(self.lint().returncode, 1)
+        self.assertEqual(self.lint("--update").returncode, 0)
+        self.assertEqual(self.lint().returncode, 0)
+        second.write_text(SLEEPY + SLEEPY)
+        self.assertEqual(self.lint("--update").returncode, 1)
+
 
 if __name__ == "__main__":
     unittest.main()
