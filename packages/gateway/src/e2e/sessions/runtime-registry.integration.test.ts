@@ -225,6 +225,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       syntheticTranscriptSizes.clear();
     } finally {
       await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
+      vi.restoreAllMocks();
       if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
       else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
     }
@@ -12481,7 +12482,6 @@ export default function (pi) {
     abandonedSession.appendMessage(fauxAssistantMessage("abandoned cold load"));
     await settleCatalog(fixture.registry);
     const loads: string[] = [];
-    vi.restoreAllMocks();
     const releaseLoads: Array<() => void> = [];
     const realCreate = RuntimeSlot.create.bind(RuntimeSlot);
     vi.spyOn(RuntimeSlot, "create").mockImplementation(async (...args) => {
@@ -12515,7 +12515,6 @@ export default function (pi) {
     other.appendMessage(fauxAssistantMessage("other cold load"));
     await settleCatalog(fixture.registry);
     const loads: string[] = [];
-    vi.restoreAllMocks();
     const releaseLoads: Array<() => void> = [];
     const realCreate = RuntimeSlot.create.bind(RuntimeSlot);
     vi.spyOn(RuntimeSlot, "create").mockImplementation(async (...args) => {
@@ -12568,7 +12567,6 @@ export default function (pi) {
   });
 
   it("reclaims the largest idle runtime under heap pressure and refuses a cold load when only a protected one is left", async () => {
-    vi.restoreAllMocks();
     const mebibyte = 1_024 * 1_024;
     const records: RuntimeLifecycleRecord[] = [];
     const sheds: CapacityShedRecord[] = [];
