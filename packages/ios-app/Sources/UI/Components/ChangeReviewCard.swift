@@ -91,14 +91,13 @@ struct ChangeReviewCard: View {
 
 struct ChangeReviewSheet: View {
     let review: ChangeReview
-    var submitting = false
     let approve: () -> Void
     let cancel: () -> Void
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                ChangeReviewCard(review: review, submitting: submitting, approve: approve, cancel: cancel)
+                ChangeReviewCard(review: review, approve: approve, cancel: cancel)
                     .padding(18)
             }
             .tronScrollEdgeChrome()

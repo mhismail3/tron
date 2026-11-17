@@ -55,8 +55,6 @@ export const DISPOSABLE_READ_METHODS: ReadonlySet<string> = new Set([
   "session.history.entry",
   "home.memory.view",
   "home.memory.evidence",
-  "projects.list",
-  "projects.inspect",
   "model.list",
   "provider.list",
   "provider.usage",
