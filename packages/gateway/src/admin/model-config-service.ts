@@ -109,15 +109,18 @@ export class ModelConfigService {
     return { document: redactedDocument, redacted: JSON.stringify(document) !== JSON.stringify(redactedDocument) };
   }
 
-  async configured(): Promise<{ providers: Array<{ id: string; host: string; api: string; models: string[] }>; errors: number }> {
-    const providers: Array<{ id: string; host: string; api: string; models: string[] }> = [];
+  async configured(): Promise<{ providers: Array<{ id: string; host?: string; api?: string; models: string[] }>; errors: number }> {
+    let entries: Array<[string, unknown]>;
+    try { entries = Object.entries(providersOf(await this.read())); } catch { return { providers: [], errors: 1 }; }
+    const providers: Array<{ id: string; host?: string; api?: string; models: string[] }> = [];
     let errors = 0;
-    for (const [id, raw] of Object.entries(providersOf(await this.read()))) {
-      const entry = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
-      const models = Array.isArray(entry.models) ? entry.models.map(model => (model as { id?: unknown } | null)?.id) : [];
-      const host = typeof entry.baseUrl === "string" && URL.canParse(entry.baseUrl) ? new URL(entry.baseUrl).host : undefined;
-      if (host === undefined || typeof entry.api !== "string" || !models.every(model => typeof model === "string")) { errors += 1; continue; }
-      providers.push({ id, host, api: entry.api, models: models as string[] });
+    for (const [id, raw] of entries) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) { errors += 1; continue; }
+      const entry = raw as Record<string, unknown>;
+      if (entry.baseUrl !== undefined && (typeof entry.baseUrl !== "string" || !URL.canParse(entry.baseUrl))) { errors += 1; continue; }
+      const models = Array.isArray(entry.models) ? entry.models.map(model => (model as { id?: unknown } | null)?.id).filter((model): model is string => typeof model === "string") : [];
+      providers.push({ id, ...(typeof entry.baseUrl === "string" ? { host: new URL(entry.baseUrl).host } : {}),
+        ...(typeof entry.api === "string" ? { api: entry.api } : {}), models });
     }
     return { providers, errors };
   }

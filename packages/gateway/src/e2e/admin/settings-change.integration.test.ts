@@ -503,7 +503,7 @@ describe("settings.change", () => {
     }
   });
 
-  caseIt("an agent reads its chat's inventory of hooks, packages and MCP status with credentials masked", async owner => {
+  caseIt("an agent reads its chat's inventory of hooks, packages, MCP status and model providers with credentials masked", async owner => {
     const f = await fixture(owner);
     const cwd = join(f.root, "inventory-chat");
     await mkdir(cwd);
@@ -529,7 +529,7 @@ describe("settings.change", () => {
     await writeFile(mcpPath, JSON.stringify(mcpDocument, null, 2));
     await writeFile(join(f.agentDir, "models.json"), JSON.stringify({ providers: { "inventory-local": {
       baseUrl: "https://models.inventory.test/v1", api: "openai-completions", apiKey: "inventory-provider-secret",
-      models: [{ id: "inventory-model-a" }, { id: "inventory-model-b" }] } } }));
+      models: [{ id: "inventory-model-a" }, { id: "inventory-model-b" }] }, openai: { apiKey: "inventory-builtin-secret" } } }));
     f.faux.setResponses([
       fauxAssistantMessage([fauxToolCall("settings", { action: "inventory" }, { id: "inventory-tool" })], { stopReason: "toolUse" }),
       fauxAssistantMessage("Done"),
@@ -554,7 +554,20 @@ describe("settings.change", () => {
     expect(inventory.mcp.servers).not.toContainEqual(expect.objectContaining({ name: "inventory-slash-userinfo" }));
     expect(inventory.mcp.errors).toBe(1);
     expect(inventory.models).toEqual({ providers: [{ id: "inventory-local", host: "models.inventory.test", api: "openai-completions",
-      models: ["inventory-model-a", "inventory-model-b"] }], errors: 0 });
+      models: ["inventory-model-a", "inventory-model-b"] }, { id: "openai", models: [] }], errors: 0 });
+    expect(JSON.stringify(inventory)).not.toContain("inventory-builtin-secret");
+    await writeFile(join(f.agentDir, "models.json"), "{ not json");
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("settings", { action: "inventory" }, { id: "inventory-broken-models" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage("Done"),
+    ]);
+    await slot.prompt("Read the settings inventory with a broken models.json");
+    await waitFor(() => !slot.isBusy && !slot.hasActiveAgentRun || undefined, "broken models inventory turn settled");
+    const broken = slot.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === "inventory-broken-models");
+    if (broken?.type !== "message" || broken.message.role !== "toolResult") throw new Error("No canonical broken-models inventory result");
+    expect(broken.message.isError).not.toBe(true);
+    expect((broken.message.details as SettingsInventory).models).toEqual({ providers: [], errors: 1 });
+    expect((broken.message.details as SettingsInventory).mcp.servers.length).toBeGreaterThan(0);
     expect(JSON.stringify(inventory)).not.toContain("inventory-provider-secret");
     expect(JSON.stringify(inventory)).not.toMatch(/inventory-secret|inventory-query-secret|pa\/ss|user:|127\.0\.0\.1|secret/);
   });
