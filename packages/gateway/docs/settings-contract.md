@@ -273,4 +273,4 @@ options endpoint. Its canonical type, validation and runtime clamping still appl
 not a pending-request inbox. Global writes Global, Session the Session scope, Home its saved settings;
 Project is inspection only. Session/Home reuse Global's renderer and editors; Project-owned rows
 have a read-only value and separate Project info pill, explicit overrides have Overridden/Revert,
-and Global alone has a Changes entry. Hand-built screens remain only for guided flows and viewers.
+and the app has no Changes entry: audit history and Undo are the `settings` tool's. Hand-built screens remain only for guided flows and viewers.
