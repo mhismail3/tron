@@ -1,8 +1,8 @@
 import { MAXIMUM_PROMPT_ATTACHMENTS } from "../kernel/resources/prompt-bounds.js";
 import { createHash, randomUUID } from "node:crypto";
-import { constants, createReadStream, type ReadStream } from "node:fs";
+import { createReadStream, type ReadStream } from "node:fs";
 import {
-  chmod, copyFile, link, lstat, mkdir, open, readFile, readdir, realpath,
+  chmod, link, lstat, mkdir, open, readFile, readdir, realpath,
   rename, rm, stat, statfs,
 } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
@@ -41,11 +41,6 @@ interface StagedUpload {
   reservedBytes: number;
 }
 
-interface UploadImportLease {
-  path: string;
-  release(): Promise<void>;
-}
-
 interface UploadLease {
   name: string;
   mimeType: string;
@@ -81,8 +76,6 @@ interface UploadCapacityStatus {
   retainedAvailableBytes: number;
   stagedCount: number;
   stagedBytes: number;
-  activeImportLeaseCount: number;
-  activeImportLeaseBytes: number;
   objectCount: number;
   objectBytes: number;
   deduplicatedBytes: number;
@@ -141,7 +134,6 @@ function isUploadMetadata(value: unknown, expectedID: string, maximumBytes: numb
 export class UploadStore {
   private readonly directory: string;
   private readonly bodyDirectory: string;
-  private readonly importDirectory: string;
   private readonly objectDirectory: string;
   private readonly maximumStagingEntries: number;
   private readonly maximumRetainedEntries: number;
@@ -155,7 +147,6 @@ export class UploadStore {
   private activeBodyAdmissions = 0;
   private readonly stagedUploads = new Map<string, number>();
   private activeDownloadReaders = 0;
-  private readonly activeImportLeases = new Map<string, number>();
   private readonly logicalIndex = new Map<string, UploadMetadata>();
   private readonly unclaimedIndex = new Set<string>();
   private indexedUnclaimedBytes = 0;
@@ -175,7 +166,6 @@ export class UploadStore {
   ) {
     this.directory = tronHomePath(tronHome, "state/uploads");
     this.bodyDirectory = tronHomePath(tronHome, "state/upload-bodies");
-    this.importDirectory = tronHomePath(tronHome, "state/upload-imports");
     this.objectDirectory = tronHomePath(tronHome, "state/upload-objects");
     this.maximumStagingEntries = options.maximumStagingEntries ?? DEFAULT_MAXIMUM_STAGING_ENTRIES;
     this.maximumRetainedEntries = options.maximumRetainedEntries ?? DEFAULT_MAXIMUM_RETAINED_ENTRIES;
@@ -411,13 +401,6 @@ export class UploadStore {
     return this.ensureOwnedDirectory(this.bodyDirectory, "Upload staging directory is not owned by the Gateway");
   }
 
-  private ensureImportDirectory(): Promise<string> {
-    return this.ensureOwnedDirectory(
-      this.importDirectory,
-      "Session import staging directory is not owned by the Gateway",
-    );
-  }
-
   private ensureUploadDirectory(): Promise<string> {
     return this.ensureOwnedDirectory(this.directory, "Upload directory is not owned by the Gateway");
   }
@@ -503,20 +486,8 @@ export class UploadStore {
     }));
   }
 
-  private async cleanupImportDirectory(): Promise<void> {
-    const root = await this.ensureImportDirectory();
-    const entries = await readdir(root, { withFileTypes: true });
-    for (const entry of entries) {
-      const path = join(root, entry.name);
-      if (!this.activeImportLeases.has(path)) {
-        await rm(path, { recursive: true, force: true });
-      }
-    }
-  }
-
   private outstandingDiskReservations(): number {
-    return [...this.stagedUploads.values(), ...this.activeImportLeases.values()]
-      .reduce((total, size) => total + size, 0);
+    return [...this.stagedUploads.values()].reduce((total, size) => total + size, 0);
   }
 
   private async cleanupObjectDirectory(referencedDigests: ReadonlySet<string>): Promise<void> {
@@ -593,57 +564,6 @@ export class UploadStore {
       this.verifiedObjectDigests.delete(digest);
       this.unavailableObjectDigests.set(digest, size);
     }
-  }
-
-  async prepareSessionImport(id: string): Promise<UploadImportLease> {
-    return this.serialize(async () => {
-      const metadata = await this.metadata(id);
-      const { actual } = await this.ownedLogicalPath(metadata);
-      const importDirectory = await this.ensureImportDirectory();
-      const importPath = join(importDirectory, `tron-import-${id}-${randomUUID()}.jsonl`);
-      const diskAvailableBytes = await this.readAvailableDiskBytes();
-      if (metadata.size + this.outstandingDiskReservations()
-        > Math.max(0, diskAvailableBytes - this.minimumFreeBytes)) {
-        throw new GatewayError(
-          "busy",
-          "Session import staging is preserving the Mac free-space floor",
-          true,
-          {
-            reason: "disk",
-            diskAvailableBytes,
-            minimumFreeBytes: this.minimumFreeBytes,
-            requestedBytes: metadata.size,
-            reservedBytes: this.outstandingDiskReservations(),
-          },
-        );
-      }
-      this.activeImportLeases.set(importPath, metadata.size);
-      try {
-        await copyFile(actual, importPath, constants.COPYFILE_EXCL);
-        const staged = await realpath(importPath);
-        const stagedInfo = await stat(staged);
-        if (!staged.startsWith(`${importDirectory}/`) || !stagedInfo.isFile()
-          || stagedInfo.size !== metadata.size) {
-          throw new GatewayError("conflict", "Import staging escaped its owned directory or changed size");
-        }
-        let released = false;
-        return {
-          path: staged,
-          release: async () => {
-            if (released) return;
-            released = true;
-            await this.serialize(async () => {
-              this.activeImportLeases.delete(importPath);
-              await rm(importPath, { force: true });
-            });
-          },
-        };
-      } catch (error) {
-        this.activeImportLeases.delete(importPath);
-        await rm(importPath, { force: true });
-        throw error;
-      }
-    });
   }
 
   async discard(id: string): Promise<void> {
@@ -726,7 +646,6 @@ export class UploadStore {
     return this.serialize(async () => {
       const bodyDirectory = await this.ensureBodyDirectory();
       await this.cleanupStagedUploads(bodyDirectory);
-      await this.cleanupImportDirectory();
       const liveSessionIds = await resolveLiveSessionIds?.();
       const inventory = this.inventoryInitialized
         ? await this.reconcileIndexedOwnership(liveSessionIds)
@@ -773,9 +692,6 @@ export class UploadStore {
       retainedAvailableBytes: Math.max(0, this.maximumRetainedLogicalBytes - claimedBytes),
       stagedCount: this.stagedUploads.size,
       stagedBytes,
-      activeImportLeaseCount: this.activeImportLeases.size,
-      activeImportLeaseBytes: [...this.activeImportLeases.values()]
-        .reduce((total, size) => total + size, 0),
       objectCount: objectSizes.size,
       objectBytes,
       deduplicatedBytes: Math.max(0, logicalBytes - objectBytes),
