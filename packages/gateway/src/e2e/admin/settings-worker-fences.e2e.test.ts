@@ -137,6 +137,26 @@ describe("settings worker changes and Session fences", () => {
     transcript.push({ case: "Home default trust change needs the native card", steps: [{ applied: applied.details }] });
   }, 90_000);
 
+  it("Home disables a built-in extension through sources.extensions behind the native card; a new chat lacks its tool", async () => {
+    const f = await gateway();
+    const { home, ask, resultOf } = await homeScript(f);
+    const tools = async () => (await f.registry.create(f.cwd)).settingsToolCatalog().map(tool => tool.name);
+    expect(await tools()).toContain("codemode");
+    const prompt = "Turn off the codemode built-in";
+    const asked = ask(prompt, "settings", { action: "change", reason: "Maintainer asked to turn off codemode",
+      changes: [{ key: "sources.extensions", layer: "global", op: "set", value: ["-builtin:codemode"] }] });
+    const card = await waitFor(() => home.snapshot().extensionPresentation.pendingInteractions[0], "native built-in extension card");
+    if (card.method !== "change") throw new Error("Disabling a built-in must present a change card");
+    expect(card.review).toMatchObject({ requiresTap: true });
+    expect(await tools()).toContain("codemode");
+    await expect(f.service.invoke(phone(), "extension.respond", { commandId: commandId(), sessionId: home.id, interactionId: card.id,
+      hostEpoch: card.hostEpoch, presentationRevision: card.presentationRevision, value: { digest: card.review.digest, approved: true } })).resolves.toBeDefined();
+    await asked;
+    expect((await resultOf(prompt)).details).toMatchObject({ status: "applied" });
+    expect(await tools()).not.toContain("codemode");
+    transcript.push({ case: "Home disables a built-in extension behind the card", steps: [{ disabled: "builtin:codemode" }] });
+  });
+
   it("a registered worker cannot change default trust itself; its own settings call is refused", async () => {
     const f = await gateway();
     const changes = [{ key: "permissions.defaultProjectTrust", layer: "global", op: "set", value: "always" }] as const;

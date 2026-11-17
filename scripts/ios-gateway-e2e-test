@@ -84,11 +84,6 @@ ui_owned_journeys=(
   "TronMobileUITests/RealGatewayPairAndChatUITests/testGatewayRestartWaitsForLiveWorkThenRestartsIdleAndReconnects"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testAgentBehaviorQueuesSaveReopenAndResetLight"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testAgentBehaviorQueuesSaveReopenAndResetDark"
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleApproveCreatesUntrustsAndTrusts"
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleDenialRetainsUntrustedRepository"
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleRefusedApprovalShowsItsReason"
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleBusyTrustUsesCanonicalReason"
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testTrustedProjectsListsAndAddsProjectsUntrusted"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectSettingsTrustRowTrustsABlockedProject"
 )
 
@@ -883,13 +878,6 @@ run_ui_journey() {
   fi
   if [[ "$journey" == *testHomeSettingsCardDeclineAppliesNothingAndDoubleApproveAppliesOnce ]]; then
     prepare_home_automation_fixture 100
-  fi
-  if [[ "$journey" == *testProjectLifecycleBusyTrustUsesCanonicalReason ]]; then
-    local busy="$TRON_E2E_WORKSPACE/busy-project"
-    printf '{}\n' >"$run_root/agent/trust.json"
-    /usr/bin/env -i PATH=/usr/bin:/bin HOME="$run_root/home" /usr/bin/git init --template= -b main "$busy"
-    /usr/bin/env -i PATH=/usr/bin:/bin HOME="$run_root/home" /usr/bin/git -C "$busy" -c user.name=Fixture -c user.email=fixture@example.invalid -c commit.gpgsign=false -c core.hooksPath=/dev/null commit --allow-empty -m fixture
-    /usr/bin/env -i PATH=/usr/bin:/bin HOME="$run_root/home" /usr/bin/git -C "$busy" -c core.hooksPath=/dev/null worktree add --detach "$run_root/home/busy-linked"
   fi
   patch_xctestrun "$xctestrun" "$ui_test_target"
   mkdir -p "$run_root/results"

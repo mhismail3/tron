@@ -371,19 +371,18 @@ export class HomeTaskStore {
     return createHash("sha256").update(`${info.dev}:${info.ino}:${info.birthtimeNs}`).digest("hex");
   }
 
-  async activeTargets(signal?: AbortSignal): Promise<string[]> {
+  async activeTargets(): Promise<string[]> {
     return this.run(async () => {
       const authority = await this.inspectAuthority();
       if (!authority) return [];
       const targets: string[] = [];
       for await (const name of this.taskNames()) {
-        signal?.throwIfAborted();
         const task = await this.readNamedTask(name);
         validateAuthorityReferences(task, authority);
         if (task.lifecycle !== "terminal") targets.push(task.target);
       }
       return targets;
-    }, signal);
+    });
   }
 
   async page(input: { limit?: number; cursor?: string; lineages?: boolean; filter?: "all" | "open" | "finished" }, signal?: AbortSignal): Promise<{ items: HomeTaskPageItem[]; nextCursor?: string; counts: HomeTaskCounts }> {

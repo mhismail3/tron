@@ -187,13 +187,10 @@ struct GlobalAgentBehaviorView: View {
     var body: some View {
         ScrollView {
             TronSettingsSections(alignment: .leading, spacing: 20, hidesLoneHeading: true) {
-                ForEach(["model", "workers", "context"], id: \.self) { section in
+                ForEach(["model", "workers", "context", "run"], id: \.self) { section in
                     SettingsRendererView(target: target, writeLayer: "global", presentation: .section(section), embedded: true,
                                          showsGroupHeadings: true)
                 }
-                TrustedProjectsSettingsView()
-                SettingsRendererView(target: target, writeLayer: "global", presentation: .section("run"), embedded: true,
-                                     showsGroupHeadings: true, selection: .allExcept(TrustedProjectsSettingsView.keys))
             }.padding(20)
         }
         .tronScrollEdgeChrome()
