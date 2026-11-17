@@ -250,6 +250,29 @@ final class TronSubagentParityUITests: XCTestCase {
     }
 
     @MainActor
+    func testStopSubagentAsksForConfirmation() throws {
+        continueAfterFailure = false
+        for scheme in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-subagent-parity-fixture", "-\(scheme)", "-stoppable"]
+            app.launch()
+            defer { app.terminate() }
+            let org = app.buttons["Subagents"]
+            XCTAssertTrue(org.waitForExistence(timeout: 10), app.debugDescription)
+            org.tap()
+            app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Worker")).firstMatch.tap()
+            let stop = app.buttons["stop-subagent-button"]
+            XCTAssertTrue(stop.waitForExistence(timeout: 10), app.debugDescription)
+            stop.tap()
+            XCTAssertTrue(app.staticTexts["Stop Worker?"].waitForExistence(timeout: 5), app.debugDescription)
+            Thread.sleep(forTimeInterval: 0.8)
+            try capture("stop-subagent-confirmation-\(scheme)")
+            app.buttons["confirmation-cancel"].tap()
+            XCTAssertTrue(stop.waitForExistence(timeout: 5), "Cancel returns to the subagent sheet without stopping")
+        }
+    }
+
+    @MainActor
     func testActivityRowsCaptures() throws {
         continueAfterFailure = false
         for scheme in ["light", "dark"] {

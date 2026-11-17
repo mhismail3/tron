@@ -57,6 +57,7 @@ struct ChatView: View {
     @State private var floatingDisplayCompletionTracker = DisplayFloatingCompletionTracker()
     @State private var viewportActivation = 0
     @State private var homeSheet: HomeSheetRoute?
+    @State private var confirmingClearQueue = false
     #if HOSTED_TEST
     @State private var hostedOpeningAttempts = 0
     @State private var hostedReadyExits = 0
@@ -260,6 +261,11 @@ struct ChatView: View {
     private var contentSurface: some View {
         contentChrome
         .modifier(chatRoutes)
+        .tronConfirmation("Clear queue?", isPresented: $confirmingClearQueue) {
+            Button("Clear Queue", role: .destructive) { Task { await clearQueuedMessages() } }
+        } message: {
+            Text("Every queued message is removed and will not be sent.")
+        }
         .onChange(of: sessionPresentation.photos) { _, values in photoSelectionChanged(values) }
         .onChange(of: attachmentMenuState) { previous, current in
             attachmentMenuStateChanged(from: previous, to: current)
@@ -1223,7 +1229,7 @@ struct ChatView: View {
                 }
             },
             onEditQueuedMessage: { sessionPresentation.queuedMessageEditor = .init(id: $0) },
-            onClearQueuedMessages: { Task { await clearQueuedMessages() } },
+            onClearQueuedMessages: { confirmingClearQueue = true },
             onMoveQueuedMessage: { id, offset in
                 Task { await moveQueuedMessage(id, offset: offset) }
             },

@@ -389,6 +389,7 @@ struct ReadOnlySubagentSessionSheet: View {
     @PresentationState private var scrollPosition = ScrollPosition(idType: String.self)
     @PresentationState private var detent: PresentationDetent = .medium
     @PresentationState private var stopRequested = false
+    @PresentationState private var confirmingStop = false
     @PresentationState private var invalidationSinkID: UUID?
     @PresentationState private var sheetRoutes = ChatTranscriptSheetRouteOwner()
 
@@ -405,7 +406,7 @@ struct ReadOnlySubagentSessionSheet: View {
             .toolbar {
                 if showsStopControl {
                     ToolbarItem(placement: .topBarLeading) {
-                        Button(action: requestStop) {
+                        Button { confirmingStop = true } label: {
                             Image(systemName: "stop.fill")
                                 .font(TronTypography.buttonSM)
                                 .tronToolbarAction(role: .destructive)
@@ -431,6 +432,11 @@ struct ReadOnlySubagentSessionSheet: View {
             }
         }
         .tronSettingsVisualTheme(accent: .tronSubagent)
+        .tronConfirmation("Stop \(process.title)?", isPresented: $confirmingStop) {
+            Button("Stop Subagent", role: .destructive, action: requestStop)
+        } message: {
+            Text("The subagent stops on the Mac. What it has done so far stays in its transcript.")
+        }
         .task(id: openIdentity) {
             guard model.connectionState == .connected,
                   let target = model.presentationTarget(for: parentSessionID),
