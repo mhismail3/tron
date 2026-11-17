@@ -2,17 +2,15 @@ import { createTestRegistry, displayStoreOf, displayOwnerOf } from "../../../tes
 import type { RunPersistence } from "../../kernel/run/run-persistence.js";
 import { performance as nodePerformance } from "node:perf_hooks";
 import { sealBrowserToolReference } from "../../display/browser-tool-reference.js";
-import * as fsPromises from "node:fs/promises";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { mkdir, readFile, readdir, rm, truncate, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { contentText, fauxAssistantMessage, fauxProvider, fauxToolCall, type AssistantMessage, type FauxResponseFactory, type FauxResponseStep, type ImageContent, type TextContent, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { TrustService } from "../../kernel/resources/trust-service.js";
 import type { NotificationService } from "../../notifications/notification-service.js";
 import type { SessionSummaryUpdate } from "../../protocol/types.js";
-import { stage } from "../../util/request-span.js";
 import { INVOCATION_RECEIPT_TYPE } from "../../kernel/receipts/invocation-receipts.js";
 import {
   RuntimeRegistry,
@@ -20,12 +18,12 @@ import {
 import { RuntimeSlot } from "../../kernel/run/runtime-slot.js";
 import { invocationReceipts } from "../../kernel/receipts/invocation-receipts.js";
 import { RunMarkerCompletionConflictError, type RunMarkerStore } from "../../kernel/run/run-markers.js";
-import { toolSegmentId } from "../../kernel/projection/projection.js";
 import { imageDimensions } from "../../../test-fixtures/pi-sdk/computer-use-image.js";
 import { syntheticOversizedJpeg, syntheticPng } from "../../../test-fixtures/synthetic-image.js";
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 import { createColdRegistryFixture, initializeRegistry, temporaryRoot } from "../../../test-support/runtime-registry-fixture.js";
 import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
+import { toolSegmentId } from "../../kernel/projection/projection.js";
 async function collectStream(stream: NodeJS.ReadableStream): Promise<Buffer> {
   const chunks: Buffer[] = [];
   for await (const value of stream) chunks.push(Buffer.isBuffer(value) ? value : Buffer.from(value));
@@ -106,24 +104,14 @@ function canonicalUserContents(slot: RuntimeSlot): Array<Array<TextContent | Ima
 describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false }, () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const registries: RuntimeRegistry[] = [];
-  const syntheticTranscriptSizes = new Map<string, number>();
 
   const coldFixture = createColdRegistryFixture.bind(undefined, registries);
 
   afterEach(async () => {
-    try {
-      const transcripts = [...syntheticTranscriptSizes];
-      await Promise.all(transcripts.map(([path, size]) => truncate(path, size)));
-      for (const [path, size] of transcripts) {
-        expect((await fsPromises.stat(path)).size).toBe(size);
-      }
-      syntheticTranscriptSizes.clear();
-    } finally {
-      await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
-      vi.restoreAllMocks();
-      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
-    }
+    await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
+    vi.restoreAllMocks();
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
   });
   it("applies the per-model prompt image profile once before canonical history", async () => {
     const root = await temporaryRoot("tron-prompt-image-bound-");

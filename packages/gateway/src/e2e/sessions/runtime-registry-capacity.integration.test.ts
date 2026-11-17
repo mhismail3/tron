@@ -1,8 +1,8 @@
 import type { RunPersistence } from "../../kernel/run/run-persistence.js";
 import * as fsPromises from "node:fs/promises";
-import { appendFile, mkdir, readFile, realpath, rename, rm, truncate, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, realpath, rm, truncate, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";

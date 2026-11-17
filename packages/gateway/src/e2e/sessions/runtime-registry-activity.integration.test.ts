@@ -3,9 +3,8 @@ import { refreshExtensionActivityFromArtifact, refreshSubagentActivityFromArtifa
 import { createTestRegistry } from "../../../test-support/gateway-registry.js";
 import type { RunPersistence } from "../../kernel/run/run-persistence.js";
 import { performance as nodePerformance } from "node:perf_hooks";
-import * as fsPromises from "node:fs/promises";
-import { mkdir, readFile, realpath, rename, rm, symlink, truncate, writeFile } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { mkdir, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { fileURLToPath } from "node:url";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
@@ -32,20 +31,10 @@ const statusJsonReplace = vi.hoisted(() => ({
   insideRetryInvocation: (): boolean => false,
 }));
 
-const quarantineLock = vi.hoisted(() => ({ armed: false, directory: "" }));
-
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return {
     ...actual,
-    rm: async (path: Parameters<typeof actual.rm>[0], ...rest: unknown[]) => {
-      if (quarantineLock.armed && String(path).includes(".tron-delete-")) {
-        quarantineLock.armed = false;
-        quarantineLock.directory = dirname(String(path));
-        await actual.chmod(quarantineLock.directory, 0o500);
-      }
-      return (actual.rm as unknown as (target: unknown, ...args: unknown[]) => Promise<void>)(path, ...rest);
-    },
     open: async (path: Parameters<typeof actual.open>[0], ...rest: unknown[]) => {
       const handle = await (actual.open as unknown as (target: unknown, ...args: unknown[]) => Promise<unknown>)(path, ...rest);
       if (statusJsonReplace.armed && statusJsonReplace.losses === 0
@@ -87,7 +76,6 @@ async function discoverExtensionArtifactsUntil(
 describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false }, () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const registries: RuntimeRegistry[] = [];
-  const syntheticTranscriptSizes = new Map<string, number>();
 
   const coldFixture = createColdRegistryFixture.bind(undefined, registries);
 
@@ -99,19 +87,10 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
   }
 
   afterEach(async () => {
-    try {
-      const transcripts = [...syntheticTranscriptSizes];
-      await Promise.all(transcripts.map(([path, size]) => truncate(path, size)));
-      for (const [path, size] of transcripts) {
-        expect((await fsPromises.stat(path)).size).toBe(size);
-      }
-      syntheticTranscriptSizes.clear();
-    } finally {
-      await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
-      vi.restoreAllMocks();
-      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
-    }
+    await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
+    vi.restoreAllMocks();
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
   });
   it("runs distinct sessions concurrently and keeps a run alive after its client disconnects", async () => {
     const root = await temporaryRoot("tron-runtime-integration-");

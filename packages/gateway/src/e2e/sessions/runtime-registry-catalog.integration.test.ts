@@ -19,16 +19,6 @@ import {
 import { AutomationService } from "../../automations/automation-service.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { catalogOwner, createColdRegistryFixture, initializeRegistry, settleCatalog, temporaryRoot } from "../../../test-support/runtime-registry-fixture.js";
-const statusJsonReplace = vi.hoisted(() => ({
-  armed: false,
-  replacements: 0,
-  losses: 0,
-  payload: "",
-  statusPath: "",
-  tempPath: "",
-  insideRetryInvocation: (): boolean => false,
-}));
-
 const quarantineLock = vi.hoisted(() => ({ armed: false, directory: "" }));
 
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -42,17 +32,6 @@ vi.mock("node:fs/promises", async (importOriginal) => {
         await actual.chmod(quarantineLock.directory, 0o500);
       }
       return (actual.rm as unknown as (target: unknown, ...args: unknown[]) => Promise<void>)(path, ...rest);
-    },
-    open: async (path: Parameters<typeof actual.open>[0], ...rest: unknown[]) => {
-      const handle = await (actual.open as unknown as (target: unknown, ...args: unknown[]) => Promise<unknown>)(path, ...rest);
-      if (statusJsonReplace.armed && statusJsonReplace.losses === 0
-        && statusJsonReplace.insideRetryInvocation() && String(path) === statusJsonReplace.statusPath) {
-        statusJsonReplace.losses += 1;
-        await actual.writeFile(statusJsonReplace.tempPath, statusJsonReplace.payload);
-        await actual.rename(statusJsonReplace.tempPath, statusJsonReplace.statusPath);
-        statusJsonReplace.replacements += 1;
-      }
-      return handle;
     },
   };
 });
@@ -76,24 +55,14 @@ function catalogHeaderReads(): { paths: () => string[]; restore: () => void } {
 describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false }, () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const registries: RuntimeRegistry[] = [];
-  const syntheticTranscriptSizes = new Map<string, number>();
 
   const coldFixture = createColdRegistryFixture.bind(undefined, registries);
 
   afterEach(async () => {
-    try {
-      const transcripts = [...syntheticTranscriptSizes];
-      await Promise.all(transcripts.map(([path, size]) => truncate(path, size)));
-      for (const [path, size] of transcripts) {
-        expect((await fsPromises.stat(path)).size).toBe(size);
-      }
-      syntheticTranscriptSizes.clear();
-    } finally {
-      await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
-      vi.restoreAllMocks();
-      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
-    }
+    await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
+    vi.restoreAllMocks();
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
   });
   it("bounds recursive catalog directories and streamed entries before materialization", async () => {
     const root = await temporaryRoot("tron-catalog-discovery-bounds-");

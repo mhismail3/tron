@@ -1,8 +1,7 @@
 import { createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { spawn, spawnSync } from "node:child_process";
-import * as fsPromises from "node:fs/promises";
-import { existsSync, writeFileSync } from "node:fs";
-import { mkdir, readFile, readdir, rm, symlink, truncate, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { contentText, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
@@ -20,7 +19,6 @@ import { INVOCATION_RECEIPT_TYPE } from "../../kernel/receipts/invocation-receip
 import {
   RuntimeRegistry,
 } from "../../kernel/session/runtime-registry.js";
-import { toolSegmentId } from "../../kernel/projection/projection.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { catalogOwner, createColdRegistryFixture, initializeRegistry, temporaryRoot } from "../../../test-support/runtime-registry-fixture.js";
 function subscribeAudience(registry: RuntimeRegistry, sessionId: string): void {
@@ -30,24 +28,14 @@ function subscribeAudience(registry: RuntimeRegistry, sessionId: string): void {
 describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false }, () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const registries: RuntimeRegistry[] = [];
-  const syntheticTranscriptSizes = new Map<string, number>();
 
   const coldFixture = createColdRegistryFixture.bind(undefined, registries);
 
   afterEach(async () => {
-    try {
-      const transcripts = [...syntheticTranscriptSizes];
-      await Promise.all(transcripts.map(([path, size]) => truncate(path, size)));
-      for (const [path, size] of transcripts) {
-        expect((await fsPromises.stat(path)).size).toBe(size);
-      }
-      syntheticTranscriptSizes.clear();
-    } finally {
-      await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
-      vi.restoreAllMocks();
-      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
-    }
+    await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
+    vi.restoreAllMocks();
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
   });
   it("aborts the exact foreground bash tree even when the client reports a stale bash kind", async () => {
     if (process.platform === "win32") return;

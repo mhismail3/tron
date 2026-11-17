@@ -1,10 +1,9 @@
 import { createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { randomUUID } from "node:crypto";
 import { performance as nodePerformance } from "node:perf_hooks";
-import * as fsPromises from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { appendFile, mkdir, rename, rm, truncate, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { appendFile, mkdir, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -33,24 +32,14 @@ function catalogWalks(): { count: () => number; restore: () => void } {
 describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false }, () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const registries: RuntimeRegistry[] = [];
-  const syntheticTranscriptSizes = new Map<string, number>();
 
   const coldFixture = createColdRegistryFixture.bind(undefined, registries);
 
   afterEach(async () => {
-    try {
-      const transcripts = [...syntheticTranscriptSizes];
-      await Promise.all(transcripts.map(([path, size]) => truncate(path, size)));
-      for (const [path, size] of transcripts) {
-        expect((await fsPromises.stat(path)).size).toBe(size);
-      }
-      syntheticTranscriptSizes.clear();
-    } finally {
-      await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
-      vi.restoreAllMocks();
-      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
-    }
+    await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
+    vi.restoreAllMocks();
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
   });
   it("rejects malformed or incomplete cold JSONL before branch projection", async () => {
     const fixture = await coldFixture("strict-search-jsonl");
