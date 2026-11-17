@@ -61,7 +61,6 @@ canonical-message check; the Process/Native rows assert presence, not exactly-on
 | `packages/gateway/src/e2e/admin/settings-gate.e2e.test.ts` › typed settings at real runtime boundaries › open chats follow live retry defaults while a canonical Session override stays local… | Registry | Global retry 0→1→2 and a Session override change the *next* prompt's provider attempt counts per chat; unset restores Global | Session fence |
 | `packages/gateway/src/e2e/admin/settings-three-layer.e2e.test.ts` › approved three-layer settings at real Gateway boundaries › applies, logs and undoes through receipts…; refuses a stale expected value… | Registry | Change applied and logged; Undo restores; Undo of Undo linked | A second Undo command for the same change `conflict`; stale expected value refused with no effect |
 | `packages/gateway/src/e2e/admin/admin.lock.integration.test.ts` › gateway/admin kernel locks › settings change: a Global change is recorded… | Lock socket | WebSocket `settings.change` → applied, file and Global/Session resolve show new value | — |
-| `TronMobileUITests/RealGatewayPairAndChatUITests/testAgentBehaviorQueuesSaveReopenAndResetLight` | Native | Worker/subagent/background queues: ordered save, reopen, remove, empty ≠ reset | Reset removes override |
 
 **GAP #2233:** no native or socket test shows the next prompt/dispatch consuming a UI change.
 
