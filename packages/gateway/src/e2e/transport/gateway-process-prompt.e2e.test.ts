@@ -202,5 +202,5 @@ describe("Run Swift files device preference through the production Gateway proce
     expect(arrivals().filter((request) => request.action === "set").map((request) => [request.expected, request.value])).toEqual([[true, false], [false, true]]);
     expect(arrivals()).toHaveLength(answered);
     await local.close(); await iphone.close();
-  }, 60_000);
+  });
 });
