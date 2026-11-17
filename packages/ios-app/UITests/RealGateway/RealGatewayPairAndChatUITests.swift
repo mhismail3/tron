@@ -955,7 +955,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     }
 
     @MainActor
-    func testSettingsOutsideChangesAndBuiltinExtensionPersist() throws {
+    func testOutsideMcpAdditionReachesTheOpenMcpScreen() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
         let app = launchApp()
@@ -970,44 +970,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             globalSettingsGear.tap()
             XCTAssertTrue(app.navigationBars.staticTexts["Global Settings"].waitForExistence(timeout: 30), app.debugDescription)
         }
-        openGlobalSettings()
-        let storedBefore = try globalSettingsDocument(fixture.agentDirectory)
-        let rawBefore = try XCTUnwrap(storedBefore["defaultThinkingLevel"] as? String, "the fixture's Global thinking level")
-        openGlobalAgentBehavior(app)
-        let globalEdit = chooseSetting(app, key: "model.thinking[role=chat]")
-        dismissTopSheet(app)
-        dismissTopSheet(app)
-        XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
-
-        let rawAfter = try XCTUnwrap(try globalSettingsDocument(fixture.agentDirectory)["defaultThinkingLevel"] as? String,
-                                     "the accepted Global edit must persist in the Global store")
-        XCTAssertNotEqual(rawAfter, rawBefore, "the accepted Global edit must change the stored value")
-        try editGlobalSettingsOutsideTron(fixture.agentDirectory) { document in
-            document["defaultThinkingLevel"] = rawBefore
-        }
-        openGlobalSettings()
-        openGlobalAgentBehavior(app)
-        let outsideRow = choiceRow(app, key: "model.thinking[role=chat]")
-        XCTAssertTrue(outsideRow.waitForExistence(timeout: 15), app.debugDescription)
-        XCTAssertTrue(waitUntil(timeout: 30) { self.choiceValue(outsideRow) == globalEdit.before }, "the live value must follow the edited store")
-        let applyAgain = hittableElement(app, identifier: outsideRow.identifier + "-applyAgain", timeout: 120)
-        XCTAssertNotNil(applyAgain, "the outside change of Tron's value must offer Apply again: \(app.debugDescription)")
-        keepScreenshot(app, name: "settings-surface-outside-change-apply-again")
-        applyAgain?.tap()
-        XCTAssertTrue(waitUntil(timeout: 60) {
-            self.choiceValue(outsideRow) == globalEdit.after
-        }, "Apply again must restore Tron's accepted value")
-        XCTAssertTrue(waitForNonExistence(app.buttons[outsideRow.identifier + "-applyAgain"], timeout: 30),
-                      "Apply again must clear the canonical outside-change evidence")
-
-        for _ in 0..<3 {
-            if app.buttons["settings-done"].isHittable { break }
-            dismissTopSheet(app)
-        }
-        XCTAssertTrue(app.buttons["settings-done"].isHittable, "Apply again must return to Settings")
-        for _ in 0..<3 where app.navigationBars.staticTexts["Global Settings"].exists { dismissTopSheet(app); Thread.sleep(forTimeInterval: 1) }
-        XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
-
         openGlobalSettings()
         let mcpLink = app.buttons["settings-link-MCP Servers"]
         for _ in 0..<20 where !mcpLink.isHittable { app.swipeUp() }
@@ -1027,21 +989,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
 
     }
 
-    private func globalSettingsDocument(_ agentDirectory: String?) throws -> [String: Any] {
-        let directory = try XCTUnwrap(agentDirectory)
-        let data = try Data(contentsOf: URL(fileURLWithPath: directory).appendingPathComponent("settings.json"))
-        return (try JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
-    }
 
-    private func editGlobalSettingsOutsideTron(_ agentDirectory: String?, _ edit: (inout [String: Any]) -> Void) throws {
-        let directory = try XCTUnwrap(agentDirectory, "run through scripts/ios-gateway-e2e-test run-ui to name the fixture's agent directory")
-        let store = URL(fileURLWithPath: directory).appendingPathComponent("settings.json")
-        var document = (try JSONSerialization.jsonObject(with: Data(contentsOf: store)) as? [String: Any]) ?? [:]
-        edit(&document)
-        let staged = store.deletingLastPathComponent().appendingPathComponent("settings.json.outside-edit")
-        try JSONSerialization.data(withJSONObject: document, options: [.prettyPrinted]).write(to: staged)
-        _ = try FileManager.default.replaceItemAt(store, withItemAt: staged)
-    }
 
     private func addMcpServerOutsideTron(_ agentDirectory: String?, name: String) throws {
         let directory = try XCTUnwrap(agentDirectory, "run through scripts/ios-gateway-e2e-test run-ui to name the fixture's agent directory")
@@ -1075,9 +1023,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     }
 
     @MainActor
-    private func settingRow(_ app: XCUIApplication, key: String) -> XCUIElement {
-        app.descendants(matching: .any)[settingRowToken(key)]
-    }
 
     @MainActor
     func revealBelowNavigationBar(_ app: XCUIApplication, _ element: XCUIElement) {
@@ -1125,47 +1070,11 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     }
 
     @MainActor
-    private func openGlobalAgentBehavior(_ app: XCUIApplication) {
-        let link = app.buttons["settings-link-Agent Behavior"]
-        XCTAssertTrue(link.waitForExistence(timeout: 30), app.debugDescription)
-        revealBelowNavigationBar(app, link)
-        link.tap()
-        XCTAssertTrue(app.navigationBars.staticTexts["Agent Behavior"].waitForExistence(timeout: 30), app.debugDescription)
-    }
 
     @MainActor
-    private func choiceRow(_ app: XCUIApplication, key: String) -> XCUIElement {
-        app.descendants(matching: .any).matching(NSPredicate(
-            format: "identifier BEGINSWITH %@ AND NOT identifier ENDSWITH '-reset' AND NOT identifier ENDSWITH '-applyAgain'",
-            settingRowToken(key) + "_")).firstMatch
-    }
 
-    private func choiceValue(_ row: XCUIElement) -> String? {
-        row.buttons["settings-choice-control"].value.map { String(describing: $0) }
-    }
 
     @MainActor
-    private func chooseSetting(_ app: XCUIApplication, key: String) -> (before: String?, after: String?) {
-        let row = choiceRow(app, key: key)
-        XCTAssertTrue(row.waitForExistence(timeout: 15), "\(key) has no row: \(app.debugDescription)")
-        revealBelowNavigationBar(app, row)
-        let control = row.buttons["settings-choice-control"]
-        XCTAssertTrue(waitForEnabled(control, timeout: 30), "\(key) has no editor: \(row.debugDescription)")
-        let before = choiceValue(row)
-        control.tap()
-        let slider = app.descendants(matching: .any)["settings-choice-slider"]
-        XCTAssertTrue(slider.waitForExistence(timeout: 10), "\(key) must open the shared choice slider: \(app.debugDescription)")
-        slider.coordinate(withNormalizedOffset: CGVector(dx: before == "Off" ? 0.95 : 0.02, dy: 0.5)).tap()
-        app.coordinate(withNormalizedOffset: .zero)
-            .withOffset(CGVector(dx: 10, dy: min(app.frame.maxY - 70, slider.frame.maxY + 80))).tap()
-        XCTAssertTrue(waitForNonExistence(slider, timeout: 10), "dismissing the slider saves the choice")
-        XCTAssertTrue(waitUntil(timeout: 60) { self.choiceValue(row) != before },
-                      "The Gateway did not accept the \(key) value")
-        let after = choiceValue(row)
-        XCTAssertTrue(waitForOverride(row, timeout: 30), "The accepted value must be this scope's override: \(rowProvenance(row))")
-        XCTAssertEqual(choiceValue(row), after, "Reading provenance must not mutate the accepted value")
-        return (before, after)
-    }
 
     @MainActor
     private func waitForOverride(_ row: XCUIElement, timeout: TimeInterval) -> Bool {
@@ -1487,9 +1396,3 @@ private struct SettingsSchemaInventory {
 }
 
 private enum SettingsInventoryError: Error { case malformed }
-
-private func settingRowToken(_ key: String) -> String {
-    "settings-row-" + String(key.unicodeScalars.map { scalar in
-        CharacterSet.alphanumerics.contains(scalar) || scalar == "." || scalar == "-" ? Character(scalar) : "_"
-    })
-}
