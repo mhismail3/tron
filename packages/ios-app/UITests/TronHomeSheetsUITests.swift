@@ -148,20 +148,6 @@ final class TronHomeSheetsUITests: XCTestCase {
     @MainActor private func exerciseTaskReadingSubtext(_ name: String, arguments: [String]) {
         let app = launchPolishManage(arguments + ["-home-task-padding-review"])
         defer { app.terminate() }
-        let settings = element(app, "home-manage-settings")
-        for _ in 0..<8 where !settings.isHittable { app.swipeUp() }
-        let metadata = settings.staticTexts["Assistant profile and worker launch choices"]
-        let settingsTitle = settings.staticTexts["Home Settings"]
-        XCTAssertTrue(metadata.exists && settingsTitle.exists)
-        let metadataLines = name == "ax-large" ? 2.0 : 1.0
-        if name == "ax-large" {
-            XCTAssertGreaterThan(metadata.frame.height, settingsTitle.frame.height, "The subtitle wraps at accessibility text")
-        }
-        let metadataHeight = metadata.frame.height / metadataLines
-        XCTAssertGreaterThan(metadataHeight, 0)
-        XCTAssertLessThan(metadataHeight, settingsTitle.frame.height,
-                          "Default shared-row callers keep their smaller metadata style")
-        shot("1771-default-metadata-\(name)")
         let tasks = element(app, "home-manage-tasks")
         for _ in 0..<8 where !tasks.isHittable { app.swipeDown() }
         open(app, tasks, ready: "home-task-terminal", name: "reading-subtext-tasks")
@@ -176,7 +162,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         XCTAssertTrue(title.exists)
         let lineHeight = title.frame.height
         XCTAssertGreaterThan(lineHeight, 0)
-        var geometry = ["metadataLine=\(metadataHeight)", "readingLine=\(lineHeight)",
+        var geometry = ["readingLine=\(lineHeight)",
                         app.staticTexts["fixture.home-typography"].label]
         for id in ["home-task-result", "home-task-model", "home-task-subagents", "home-task-spend"] {
             let value = element(app, "\(id)-subtext")
@@ -346,81 +332,6 @@ final class TronHomeSheetsUITests: XCTestCase {
         keep("931-\(level)-manage")
     }
 
-    @MainActor private func homeSettingsCards(name: String, arguments: [String]) {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"] + arguments
-        app.launch(); defer { app.terminate() }
-        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 15))
-        app.buttons["home-pinned-row"].tap()
-        let ring = app.buttons["session-context-button"]
-        XCTAssertTrue(waitFor(ring, "enabled == true"))
-        open(app, ring, ready: "home-manage-state", name: "manage")
-        expand(app, done: "home-sheet-done-manage")
-        let row = element(app, "home-manage-settings")
-        for _ in 0..<8 where !row.isHittable { app.swipeUp() }
-        open(app, row, ready: "home-settings-content", name: "home-settings")
-        expandSheet(app, title: "Home Settings")
-        let content = element(app, "home-settings-content")
-        let workers = element(app, "settings-row-model.queue_role_worker_")
-        let tools = element(app, "settings-row-tools.active")
-        XCTAssertTrue(workers.waitForExistence(timeout: 8), app.debugDescription)
-        XCTAssertTrue(tools.exists, content.debugDescription)
-        XCTAssertFalse(app.buttons["settings-section-model-open"].exists)
-        XCTAssertFalse(app.buttons["settings-section-tools-open"].exists)
-        XCTAssertFalse(app.buttons["settings-section-advanced-open"].exists)
-        XCTAssertLessThan(workers.frame.minY, tools.frame.minY)
-        XCTAssertEqual(workers.frame.minX, tools.frame.minX, accuracy: 1)
-        XCTAssertEqual(workers.frame.width, tools.frame.width, accuracy: 1)
-        shot("1478-home-settings-\(name)")
-        shot("1478-home-settings-\(name)-bottom")
-    }
-
-    @MainActor private func groupCards(_ app: XCUIApplication, _ content: XCUIElement) {
-        let compaction = app.buttons["settings-section-context-open"], more = app.buttons["settings-section-advanced-open"]
-        let tools = app.buttons["settings-section-tools-open"]
-        XCTAssertTrue(content.exists, app.debugDescription)
-        XCTAssertFalse(app.staticTexts["Agent"].exists, app.debugDescription)
-        XCTAssertFalse(app.staticTexts["Tools & Extensions"].exists, app.debugDescription)
-        XCTAssertFalse(element(app, "settings-row-tools.active").exists, "Tools opens from its row")
-        for row in [compaction, more, tools] { for _ in 0..<4 where !row.isHittable { app.swipeUp() } }
-        XCTAssertTrue(compaction.exists && more.exists && tools.exists, app.debugDescription)
-        for row in [more, tools] {
-            XCTAssertEqual(row.frame.minX, compaction.frame.minX, accuracy: 1, "Rows share one card width")
-            XCTAssertEqual(row.frame.width, compaction.frame.width, accuracy: 1, "Rows share one card width")
-        }
-        XCTAssertLessThan(compaction.frame.minY, tools.frame.minY, "Compaction precedes Tools")
-        XCTAssertLessThan(tools.frame.minY, more.frame.minY, "Tools precedes More Settings")
-    }
-
-    @MainActor private func expandSheet(_ app: XCUIApplication, title text: String) {
-        let title = app.navigationBars.staticTexts[text].firstMatch
-        XCTAssertTrue(title.waitForExistence(timeout: 5), app.debugDescription)
-        var last = title.frame.minY
-        for _ in 0..<10 {
-            Thread.sleep(forTimeInterval: 0.3)
-            let now = title.frame.minY
-            if abs(now - last) < 0.5 { break }
-            last = now
-        }
-        let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
-        for attempt in 0..<6 where title.frame.minY > 120 {
-            switch attempt % 3 {
-            case 0:
-                origin.withOffset(CGVector(dx: 60, dy: title.frame.midY))
-                    .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
-            case 1:
-                origin.withOffset(CGVector(dx: 60, dy: title.frame.maxY + 30))
-                    .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)),
-                           withVelocity: .fast, thenHoldForDuration: 0)
-            default:
-                app.swipeUp()
-            }
-            _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "frame.minY < 120"), object: title)], timeout: 2)
-        }
-        XCTAssertLessThan(title.frame.minY, 120, "\(text) reached its large detent")
-    }
-
     @MainActor private func shot(_ name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name
@@ -544,10 +455,9 @@ final class TronHomeSheetsUITests: XCTestCase {
         assertCompactHomeSummary(app, workers: "0 workers", level: "Normal")
 
         app.swipeUp()
-        let settings = element(app, "home-manage-settings"), tasks = element(app, "home-manage-tasks")
-        XCTAssertTrue(settings.waitForExistence(timeout: 3))
-        XCTAssertFalse(element(app, "home-manage-permissions").exists)
-        XCTAssertGreaterThan(settings.frame.minY, tasks.frame.maxY + 8, "Home Settings sits in a separate container")
+        let controls = element(app, "home-manage-controls"), tasks = element(app, "home-manage-tasks")
+        XCTAssertTrue(controls.waitForExistence(timeout: 3))
+        XCTAssertGreaterThan(controls.frame.minY, tasks.frame.maxY + 8, "Home controls sit in a separate container")
         keep("01b-manage-bottom")
         app.swipeDown()
 
