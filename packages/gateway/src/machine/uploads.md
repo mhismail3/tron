@@ -11,8 +11,7 @@ Byte stores behind the authenticated HTTP routes ([protocol](../transport/protoc
   eight times the per-upload limit (200 MiB). Retained ownership: 16,384 logical
   entries and 400 GiB, checked only when a prompt claims staging, so old history never
   starves a draft. At most half the staging ratio streams concurrently (four bodies).
-  Every body reservation and import copy keeps a 1 GiB free-space floor; import copies
-  are owned by a release lease.
+  Every body reservation keeps a 1 GiB free-space floor.
 - **Storage.** Chunks stream into protected staging while hashing; commit adopts one
   immutable sharded content-addressed object and hard-links the logical UUID path to
   it, so duplicate bytes are stored once while name, MIME type, ownership and the
@@ -32,9 +31,9 @@ Byte stores behind the authenticated HTTP routes ([protocol](../transport/protoc
   does the one physical inventory, migration, reconciliation and orphan sweep; the
   ten-minute maintenance slice (background scheduler) expires indexed unclaimed files,
   retries cleanup and drops claimed references only when the catalog proves their
-  owner gone. The in-memory index is rebuildable from metadata. Imports remove their
-  staging; session deletion removes claimed folders; a cleanup failure never turns a
-  completed import or deletion into an ambiguous receipt and is retried after restart.
+  owner gone. The in-memory index is rebuildable from metadata. Session deletion removes
+  claimed folders; a cleanup failure never turns a completed deletion into an ambiguous
+  receipt and is retried after restart.
 - **Projection.** `uploads.status` v2 reports counts, bytes, deduplication, headroom,
   pressure, active admissions, unavailable objects and cleanup backlog — never IDs,
   names, paths, digests or MIME data. Capacity errors name `staging_entries`,

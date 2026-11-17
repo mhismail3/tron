@@ -138,7 +138,7 @@ it("refuses the retired connection, extension-history, timeline and model-valida
     for (const method of [
       "connections.list", "connections.setup.begin", "connections.setup.complete", "connections.setup.cancel", "connections.policy.update", "connections.disconnect",
       "session.extensionActivity.list", "session.extensionActivity.get", "automation.timeline.list", "models.custom.validate",
-      "knowledge.x.oauth.begin", "knowledge.x.oauth.complete", "knowledge.x.credits",
+      "knowledge.x.oauth.begin", "knowledge.x.oauth.complete", "knowledge.x.credits", "session.import",
     ]) {
       expect(await phone.request(method, {}), method).toMatchObject({ ok: false, error: { code: "not_found", message: `Unknown gateway method: ${method}` } });
     }
