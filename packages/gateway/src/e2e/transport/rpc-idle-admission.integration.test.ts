@@ -720,7 +720,6 @@ describe("receipt-backed mutations against their own session work entry", () => 
     const bash = await step("session.bash", { command: "echo rpc-idle-admission" });
     expect(JSON.stringify(bash)).toContain("rpc-idle-admission");
     await step("session.navigate", { entryId: session.entryId, summarize: false });
-    await step("session.reloadResources", {});
     const current = await f.snapshot(client, session.id);
     expect(current.model, JSON.stringify(current)).toBeDefined();
     await step("chat.contextWindow", {
@@ -743,7 +742,6 @@ describe("receipt-backed mutations against their own session work entry", () => 
       "session.label",
       "session.bash",
       "session.navigate",
-      "session.reloadResources",
       "chat.contextWindow",
       "session.fork",
     ]);
@@ -770,7 +768,6 @@ describe("receipt-backed mutations against their own session work entry", () => 
       ["chat.tools", { tools: [] }],
       ["chat.thinking", { level: "off", expectedRuntimeGeneration: opened.runtimeGeneration, expectedModel: opened.model ?? null }],
       ["session.label", { entryId: session.entryId, label: "blocked" }],
-      ["session.reloadResources", {}],
     ] as Array<[string, Record<string, unknown>]>) {
       const request = { commandId: `${method.replace(/\./g, "-")}-blocked-command`, sessionId: session.id, ...params };
       const response = method.startsWith("chat.")

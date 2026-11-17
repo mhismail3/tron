@@ -144,16 +144,12 @@ final class SessionPresentationStore {
     private(set) var sessionTree: [SessionTreeNode] = []
     private(set) var commands: [CommandInfo] = []
     private(set) var commandCatalogTarget: SessionPresentationIdentity?
-    private(set) var resources: JSONValue?
-    private(set) var resourcesError: String?
-    private var resourceTarget: SessionPresentationIdentity?
     private var structureRevision = 0
     private var contextRevision = 0
     private var resourceRevision = 0
     private var contextLoadGeneration = 0
     private var treeLoadGeneration = 0
     private var commandLoadGeneration = 0
-    private var resourceLoadGeneration = 0
 
     init(
         client: GatewayClient,
@@ -390,16 +386,6 @@ extension SessionPresentationStore {
 
     func resourceRevision(for sessionID: String) -> Int {
         ownsSession(sessionID) ? resourceRevision : 0
-    }
-
-    func resourcesError(for sessionID: String) -> String? {
-        guard let target, target.sessionID == sessionID, resourceTarget == target else { return nil }
-        return resourcesError
-    }
-
-    func resources(for sessionID: String) -> JSONValue? {
-        guard let target, target.sessionID == sessionID, resourceTarget == target else { return nil }
-        return resources
     }
 
     func open(_ sessionID: String) async throws -> Int {
@@ -1265,34 +1251,6 @@ extension SessionPresentationStore {
         }
     }
 
-    func loadResources(sessionID: String) async {
-        guard let token = secondaryReadSubscriptionToken(for: sessionID),
-              let requestedTarget = subscriptionTarget,
-              requestedTarget.sessionID == sessionID else { return }
-        resourceLoadGeneration &+= 1
-        let generation = resourceLoadGeneration
-        struct Params: Codable { let sessionId: String }
-        do {
-            let loaded = try await client.requestValue("session.resources", Params(sessionId: sessionID), timeout: GatewayRequestTimeout.sessionResources)
-            guard !Task.isCancelled,
-                  generation == resourceLoadGeneration,
-                  ownsSubscription(sessionID: sessionID, requestedToken: token),
-                  subscriptionTarget == requestedTarget else { return }
-            resources = loaded
-            resourceTarget = requestedTarget
-            resourcesError = nil
-        } catch {
-            guard !Task.isCancelled,
-                  !(error is CancellationError),
-                  generation == resourceLoadGeneration,
-                  ownsSubscription(sessionID: sessionID, requestedToken: token),
-                  subscriptionTarget == requestedTarget else { return }
-            resourceTarget = requestedTarget
-            resourcesError = error.localizedDescription
-            delegate?.sessionPresentationStoreSurface(error)
-        }
-    }
-
     private func ownsExactRebaselineOwner(sessionID: String, subscriptionToken: String) -> Bool {
         if hasInstalledSubscription(for: sessionID) {
             return self.subscriptionToken == subscriptionToken
@@ -1355,14 +1313,10 @@ extension SessionPresentationStore {
         contextLoadGeneration &+= 1
         treeLoadGeneration &+= 1
         commandLoadGeneration &+= 1
-        resourceLoadGeneration &+= 1
         context = nil
         sessionTree = []
         commands = []
         commandCatalogTarget = nil
-        resources = nil
-        resourcesError = nil
-        resourceTarget = nil
     }
 
     private func closeCurrentSubscription() async -> Bool {
@@ -2846,15 +2800,11 @@ extension SessionPresentationStore {
     func installHostedSecondaryProjection(
         context: JSONValue?,
         tree: [SessionTreeNode],
-        commands: [CommandInfo],
-        resources: JSONValue?
+        commands: [CommandInfo]
     ) {
         self.context = context
         sessionTree = tree
         self.commands = commands
-        self.resources = resources
-        self.resourceTarget = mountedTarget
-        self.resourcesError = nil
     }
 
     func installHostedSnapshotWithoutPresentation(_ snapshot: SessionSnapshot) {

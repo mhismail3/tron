@@ -18,7 +18,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   (`IntegrationSheetRoutes`), `MCPServersSettingsView`, `ConnectionSettingsView`,
   `PairedDeviceDetailView`, `MacReplacementSheet`.
 - Extensions: `ExtensionsSettingsView`, `PackageDetailSheet`, `HooksSettingsView`,
-  `ProjectResourcesView`, `TrustSettingsView`.
+  `ProjectResourceDetailSheet` (tool detail for `SettingsToolsEditor`), `TrustSettingsView`.
 - This iPhone and diagnostics: `AppearanceSettingsView`, `AppLocalBehaviorSettings`,
   `PushNotificationsSettingsView`, `NotificationInboxView`, `GatewayLogsSettingsView`.
 
