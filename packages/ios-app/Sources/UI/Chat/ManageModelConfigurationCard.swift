@@ -97,23 +97,11 @@ struct ManageModelConfigurationCard: View {
 
     private var catalogTarget: ProviderCatalogTarget { home ? .global : .session(id: sessionID) }
 
-    private var selectedModel: ModelSummary? {
-        guard let value = ref?.value?.objectValue, let provider = value["provider"]?.stringValue,
-              let id = value["id"]?.stringValue else { return nil }
-        return model.providerCatalog(for: catalogTarget)?.models.first { $0.provider == provider && $0.id == id }
-    }
-
     private func choiceOptions(for setting: ResolvedSetting) -> [SettingsOption] {
         switch setting.key {
         case "model.thinking[role=chat]":
             return (model.sessionContextPresentation(for: sessionID)?.availableThinkingLevels ?? []).map {
                 SettingsOption(value: .string($0), label: ThinkingLevelPresentation.title($0), detail: nil, disabledReason: nil, resource: nil)
-            }
-        case "model.contextWindow":
-            guard let limits = selectedModel?.contextWindowLimits else { return [] }
-            return Array(Set([limits.minimum, limits.`default`, limits.maximum])).sorted().map { tokens in
-                SettingsOption(value: .number(Double(tokens)), label: tokens.isMultiple(of: 1_000) ? "\(tokens / 1_000)K tokens" : "\(tokens) tokens",
-                               detail: nil, disabledReason: nil, resource: nil)
             }
         default:
             return []
@@ -235,7 +223,7 @@ struct SettingsModelPicker: View {
     }
 
     var body: some View {
-        let models = model.providerCatalog(for: catalogTarget)?.models.filter(\.available)
+        let models = model.providerCatalog(for: catalogTarget)?.models.filter { $0.available && !(target.objectValue?["kind"]?.stringValue == "home" && $0.virtual) }
         Group {
             if let models, models.isEmpty {
                 TronPlaceholderState(title: "No Models", detail: "No available model can be used here.", icon: "cpu")
