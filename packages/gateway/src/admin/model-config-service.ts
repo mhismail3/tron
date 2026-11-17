@@ -56,15 +56,6 @@ function boundedReadFailure(error: unknown): never {
   throw error;
 }
 
-function redact(value: unknown, key = ""): unknown {
-  if (/key|secret|token|authorization/i.test(key) && typeof value === "string") return "<redacted>";
-  if (Array.isArray(value)) return value.map((item) => redact(item));
-  if (typeof value === "object" && value !== null) {
-    return Object.fromEntries(Object.entries(value).map(([childKey, child]) => [childKey, redact(child, childKey)]));
-  }
-  return value;
-}
-
 export function modelsErrorSummary(error: string): string {
   const bare = error.split("\n\nFile:")[0]!;
   if (bare.startsWith("Failed to parse")) return "models.json is not valid JSON; its text is not echoed";
@@ -102,12 +93,6 @@ export class ModelConfigService {
 
   constructor(agentDir: string) {
     this.path = join(agentDir, "models.json");
-  }
-
-  async get(): Promise<{ document: unknown; redacted: boolean }> {
-    const document = await this.read();
-    const redactedDocument = redact(document);
-    return { document: redactedDocument, redacted: JSON.stringify(document) !== JSON.stringify(redactedDocument) };
   }
 
   async configured(): Promise<SettingsInventory["models"]> {
