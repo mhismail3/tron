@@ -494,7 +494,7 @@ struct OnboardingView: View {
 
     private func configuredDefaultModel() async -> ModelRef? {
         do {
-            let resolution = try await model.resolveSettingsForRenderer(
+            let resolution = try await model.resolveSettings(
                 target: SettingsTarget.global.gatewayTarget, keys: [Self.defaultModelKey]
             )
             guard let ref = resolution.setting(Self.defaultModelKey)?.value?.objectValue,

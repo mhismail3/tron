@@ -3581,7 +3581,7 @@ extension AppModel {
         try await settingsTrust.applySettingsChangeAgain(changeID)
     }
 
-    func resolveSettingsForRenderer(target: JSONValue, keys: [String]? = nil) async throws -> SettingsResolution {
+    func resolveSettings(target: JSONValue, keys: [String]? = nil) async throws -> SettingsResolution {
         try await settingsTrust.resolve(target: target, keys: keys)
     }
 

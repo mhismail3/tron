@@ -300,7 +300,7 @@ struct NewSessionSheet: View {
                 let settingsTarget: JSONValue = requestedWorkspace.isEmpty
                     ? .object(["kind": .string("global")])
                     : .object(["kind": .string("project"), "cwd": .string(requestedWorkspace)])
-                async let settingsResponse = model.resolveSettingsForRenderer(target: settingsTarget, keys: ["model.ref[role=chat]"])
+                async let settingsResponse = model.resolveSettings(target: settingsTarget, keys: ["model.ref[role=chat]"])
                 let trustReady: Bool
                 if requestedWorkspace.isEmpty {
                     trustReady = true
