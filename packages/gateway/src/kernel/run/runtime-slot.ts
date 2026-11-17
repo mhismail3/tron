@@ -149,7 +149,7 @@ import { projectHookRegistrations } from "../projection/hook-projection.js";
 import { resourceDistribution } from "../../sessions/resource-distribution.js";
 import { skillTitle } from "../../sessions/skill-title.js";
 import { boundedUtf8Prefix } from "../../util/bounded-text.js";
-import { availableSubagentRow, loadSubagentCatalog, subagentDetail, type SubagentCatalog, type SubagentDetail } from "../delegation/subagent-catalog.js";
+import { availableSubagentRow, loadSubagentCatalog, type SubagentCatalog } from "../delegation/subagent-catalog.js";
 import type { SessionStore } from "../settings/settings-types.js";
 import { hasCompactionApplier, type SettingsSchema, type KeyDeclaration } from "../settings/settings-schema.js";
 
@@ -3844,7 +3844,6 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     });
   }
 
-  async subagentDetail(name: string): Promise<SubagentDetail> { this.assertNoTrustReload(); return subagentDetail((await this.subagentCatalog()).subagents, name); }
   private async subagentCatalog(): Promise<SubagentCatalog> {
     if (!this.liveProfile().subagentCatalog) return { subagents: [] };
     return loadSubagentCatalog({
@@ -3974,10 +3973,10 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     this.trustReloadPending = true;
   }
 
-  async reload(projectTrusted?: boolean, publish = true, trustTransition = false, initiatingWorkToken?: string): Promise<void> {
+  async reload(projectTrusted?: boolean, publish = true, trustTransition = false): Promise<void> {
     await this.lane.run(async () => {
       if (this.trustReloadWork) this.assertUsable(true);
-      else this.assertIdle(trustTransition, initiatingWorkToken);
+      else this.assertIdle(trustTransition);
       const work = this.trustReloadWork ?? this.dependencies.workRegistry.begin({
         kind: "administrative-provider-package-operation",
         sessionId: this.id,

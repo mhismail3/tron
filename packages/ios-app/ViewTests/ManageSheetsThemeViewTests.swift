@@ -30,7 +30,7 @@ final class ManageSheetsThemeViewTests: ShuffledTestCase {
                 try await app.until("Manage Session opens") { app.element("session-usage-summary") != nil }
                 try await app.expandTopSheet()
                 let theme = try await titleInk(app, "Manage Session")
-                for label in ["Workspace", "Instructions", "Resources", "Session History", "Subagent History"] {
+                for label in ["Workspace", "Instructions", "Session History", "Subagent History"] {
                         _ = try await revealed(app, label)
                     assertInk(try await app.inked("\(label) row icon") { app.element(label).map(leading) }, theme,
                               "\(label) row icon (\(mode))")

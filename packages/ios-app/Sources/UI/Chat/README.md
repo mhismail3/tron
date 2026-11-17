@@ -162,8 +162,7 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   Context Window); the existing settings renderer owns reads, writes and Revert; the shared approval
   sheet owns request review.
   Tool selection uses its `SettingsToolsEditor` with the shared `AvailableToolsList`. Session
-  container: Workspace (`workspace-inspector.v1`), Instructions, Resources (tags Global, Project or
-  External; Commands and Subagents preview a body whose View All opens the shared reader), Session
+  container: Workspace (`workspace-inspector.v1`), Instructions, Session
   History (`session-history-pages.v1`), Subagent History; Session Settings (Repository Overrides last);
   Terminal and Export as HTML/JSON. Workspace gives its single-line horizontally scrolling path a full line above a
   horizontally scrolling status-pill row; status content stays clipped to that row. Manage Session, Manage Home and every sheet they open take

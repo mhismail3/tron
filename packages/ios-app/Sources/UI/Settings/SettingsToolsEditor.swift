@@ -40,7 +40,7 @@ struct SettingsToolsEditor: View {
         }
         .tronNavigationTitle(title)
         .tronManagedSheet(item: $detail, identity: { _ in "settings.tool-detail" }) { selection in
-            ProjectResourceDetailSheet(sessionID: "", selection: selection, accentOverride: accent) { detail = nil }
+            ProjectResourceDetailSheet(selection: selection, accentOverride: accent) { detail = nil }
         }
     }
 

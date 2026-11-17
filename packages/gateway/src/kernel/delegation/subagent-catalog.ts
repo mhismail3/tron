@@ -1,9 +1,6 @@
 import { type SettingsManager } from "../pi/coding-agent.js";
 import type { ManagedSubagents } from "./managed-subagents.js";
 import type { ResourceDistribution } from "../../protocol/types.js";
-import { boundCommandContent } from "../projection/projection.js";
-import { redactCredentials } from "../../util/credential-redaction.js";
-import { GatewayError } from "../../errors.js";
 
 const SUBAGENT_PACKAGE = "pi-subagents";
 const MAX_SUBAGENTS = 128;
@@ -20,7 +17,6 @@ export interface AvailableSubagent {
   source: SubagentDiscoverySource;
   distribution: ResourceDistribution;
   filePath?: string;
-  systemPrompt?: string;
 }
 
 export interface SubagentCatalog {
@@ -80,7 +76,6 @@ function projectSubagent(value: unknown, groupSource?: SubagentDiscoverySource):
   const model = typeof record.model === "string" ? record.model : undefined;
   const thinking = typeof record.thinking === "string" ? record.thinking : undefined;
   const filePath = typeof record.filePath === "string" ? record.filePath : undefined;
-  const systemPrompt = typeof record.systemPrompt === "string" ? record.systemPrompt : undefined;
   return {
     name,
     ...(description ? { description } : {}),
@@ -89,7 +84,6 @@ function projectSubagent(value: unknown, groupSource?: SubagentDiscoverySource):
     source,
     distribution: subagentDistribution(source),
     ...(filePath ? { filePath } : {}),
-    ...(systemPrompt !== undefined ? { systemPrompt } : {}),
   };
 }
 
@@ -139,19 +133,4 @@ function unavailable(reason: string): SubagentCatalog {
 
 function boundedDiagnostic(text: string): string {
   return text.length <= MAX_DIAGNOSTIC_CHARACTERS ? text : `${text.slice(0, MAX_DIAGNOSTIC_CHARACTERS - 1)}…`;
-}
-
-export interface SubagentDetail extends AvailableSubagent {
-  content?: string;
-  contentBytes?: number;
-  contentTruncated?: boolean;
-}
-
-export function subagentDetail(subagents: readonly AvailableSubagent[], name: string): SubagentDetail {
-  const subagent = subagents.find((candidate) => candidate.name === name);
-  if (!subagent) throw new GatewayError("not_found", "That subagent is no longer available");
-  return {
-    ...availableSubagentRow(subagent),
-    ...(subagent.systemPrompt !== undefined ? boundCommandContent(redactCredentials(subagent.systemPrompt)) : {}),
-  };
 }

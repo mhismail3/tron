@@ -290,7 +290,6 @@ final class AppModel {
     private(set) var diagnosticsAreReady = false
     var commands: [CommandInfo] { sessionPresentation.commands }
     var commandCatalogTarget: SessionPresentationIdentity? { sessionPresentation.commandCatalogTarget }
-    var resources: JSONValue? { sessionPresentation.resources }
     var isAddingServer = false
     var setupComplete: Bool {
         get { UserDefaults.standard.bool(forKey: "tronSetupComplete.v1") }
@@ -759,14 +758,12 @@ extension AppModel {
     func installHostedSecondaryProjection(
         context: JSONValue?,
         tree: [SessionTreeNode],
-        commands: [CommandInfo] = [],
-        resources: JSONValue?
+        commands: [CommandInfo] = []
     ) {
         sessionPresentation.installHostedSecondaryProjection(
             context: context,
             tree: tree,
-            commands: commands,
-            resources: resources
+            commands: commands
         )
     }
 
@@ -929,10 +926,6 @@ extension AppModel {
 
     func sessionResourceRevision(for sessionID: String) -> Int {
         sessionPresentation.resourceRevision(for: sessionID)
-    }
-
-    func sessionResources(for sessionID: String) -> JSONValue? {
-        sessionPresentation.resources(for: sessionID)
     }
 
     func providerCatalog(for target: ProviderCatalogTarget) -> ProviderCatalog? {
@@ -3461,14 +3454,6 @@ extension AppModel {
         guard presentationTarget(for: sessionID) == target,
               admitsLiveSessionCommands(target) else { throw CancellationError() }
         return try CommandResourceDetailPolicy.admit(detail, matching: command)
-    }
-
-    func loadResources(sessionID: String) async {
-        await sessionPresentation.loadResources(sessionID: sessionID)
-    }
-
-    func reloadResources(sessionID: String) async throws {
-        try await sessionMutations.reloadResources(sessionID: sessionID)
     }
 
     func upload(

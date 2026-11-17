@@ -101,7 +101,7 @@ replay. Receipt reconciliation may cross a same-profile reconnect; profile repla
 
 `SessionPresentationStore` is the sole MainActor owner of the mounted session: immutable target,
 revocation, live snapshot, subscription lease, synchronization and quarantine, cursor reducer,
-transcript paging and session-keyed context/tree/resources/commands.
+transcript paging and session-keyed context/tree/commands.
 
 - **Open.** `session.open` returns a snapshot and sync token that stay provisional until
   `session.sync` succeeds and the exact route intent revalidates. Both tokens are nonempty,
