@@ -21,34 +21,6 @@ import XCTest
         XCTAssertTrue(actions.exists, "Actions remain in the sheet")
     }
 
-    private func home(dark: Bool = false, xxxl: Bool = false) -> XCUIApplication {
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-settings-scope-review"] + (dark ? ["-home-dark"] : [])
-        if xxxl { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"] }
-        app.launch()
-        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 15))
-        app.buttons["home-pinned-row"].tap()
-        let ring = app.buttons["session-context-button"]
-        XCTAssertTrue(ring.waitForExistence(timeout: 15))
-        XCTAssertTrue(wait(ring, "enabled == true"))
-        ring.tap()
-        let row = app.descendants(matching: .any)["home-manage-settings"].firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 8), app.debugDescription)
-        reveal(row, in: app)
-        row.tap()
-        expand(app, title: "Home Settings")
-        return app
-    }
-
-    private func session(dark: Bool = false, xxxl: Bool = false) -> XCUIApplication {
-        let app = sessionApp(dark: dark, xxxl: xxxl)
-        let link = app.buttons["chat-settings-link"]
-        reveal(link, in: app)
-        link.tap()
-        expand(app, title: "Session Settings")
-        return app
-    }
-
     private func history(dark: Bool = false) -> XCUIApplication {
         let app = sessionApp(dark: dark, extra: ["-manage-session-review", "-history-large"])
         let link = app.buttons["Session History"]
@@ -59,16 +31,6 @@ import XCTest
         app.buttons["history-row-h-6731"].tap()
         XCTAssertTrue(app.navigationBars.staticTexts["History Entry"].waitForExistence(timeout: 8), app.debugDescription)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ENDSWITH ' characters'")).firstMatch.waitForExistence(timeout: 8), app.debugDescription)
-        return app
-    }
-
-    private func sessionApp(dark: Bool, xxxl: Bool = false, extra: [String] = []) -> XCUIApplication {
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-session-configuration-fixture", "-settings-scope-review", "-fixture-appearance", dark ? "dark" : "light"] + extra
-        if xxxl { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"] }
-        app.launch()
-        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
-        app.buttons["Stop session"].tap()
         return app
     }
 

@@ -17,7 +17,7 @@ final class TronHomeTaskHistoryUITests: XCTestCase {
     @MainActor func testDisableHomeIconIsDestructiveRedInBothAppearances() {
         for dark in [false, true] {
             let app = launch(dark: dark); defer { app.terminate() }
-            let settings = element(app, "home-manage-settings")
+            let settings = element(app, "home-manage-controls")
             for _ in 0..<4 where !settings.isHittable { app.swipeUp() }
             settings.tap()
             let row = element(app, "home-manage-disable")
@@ -71,7 +71,7 @@ final class TronHomeTaskHistoryUITests: XCTestCase {
     @MainActor private func before(dark: Bool) {
         let app = launch(dark: dark); defer { app.terminate() }
         let name = dark ? "dark" : "light"
-        for _ in 0..<4 where !element(app, "home-manage-settings").isHittable { app.swipeUp() }
+        for _ in 0..<4 where !element(app, "home-manage-controls").isHittable { app.swipeUp() }
         shot("2073-before-manage-\(name)")
         app.swipeDown()
         open(app, "home-manage-tasks", ready: "home-task-active", done: "home-sheet-done-tasks")
@@ -82,7 +82,7 @@ final class TronHomeTaskHistoryUITests: XCTestCase {
     @MainActor private func verify(dark: Bool) {
         let app = launch(dark: dark); defer { app.terminate() }
         let name = dark ? "dark" : "light"
-        for _ in 0..<4 where !element(app, "home-manage-settings").isHittable { app.swipeUp() }
+        for _ in 0..<4 where !element(app, "home-manage-controls").isHittable { app.swipeUp() }
         shot("2073-after-manage-\(name)")
         app.swipeDown()
         open(app, "home-manage-tasks", ready: "home-task-active", done: "home-sheet-done-tasks")

@@ -86,7 +86,7 @@ final class TronPadSheetPresentationUITests: XCTestCase {
         let parent = sheetFrame(app, title: "Manage Home", done: app.buttons["home-sheet-done-manage"])
         assertTrailingColumn(parent, in: window)
 
-        let row = app.descendants(matching: .any)["home-manage-settings"]
+        let row = app.descendants(matching: .any)["home-manage-controls"]
         XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
         row.tap()
         XCTAssertTrue(app.descendants(matching: .any)["home-settings-controls"].waitForExistence(timeout: 8), app.debugDescription)

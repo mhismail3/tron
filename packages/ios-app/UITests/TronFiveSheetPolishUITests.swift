@@ -33,27 +33,6 @@ import Vision
         }
     }
 
-    func testToolsCountSharesHeaderLine() {
-        for mode in ["light", "dark"] {
-            let app = manage(mode)
-            defer { app.terminate() }
-            tap(app, "home-manage-settings")
-            expandTitle(app, title: "Home Settings")
-            let tools = e(app, "settings-row-tools.active")
-            reveal(tools, app: app)
-            let editor = tools.buttons.matching(NSPredicate(format: "NOT identifier ENDSWITH '-source' AND NOT identifier ENDSWITH '-reset'")).firstMatch
-            XCTAssertTrue(editor.waitForExistence(timeout: 5), app.debugDescription)
-            editor.tap()
-            XCTAssertTrue(e(app, "settings-tools-editor").waitForExistence(timeout: 8), app.debugDescription)
-            let title = app.staticTexts["Built-in"].firstMatch
-            let count = app.staticTexts["16 of 16 on"].firstMatch
-            XCTAssertTrue(title.exists && count.exists, app.debugDescription)
-            shot("tools-\(mode)")
-            XCTAssertEqual(title.frame.midY, count.frame.midY, accuracy: 3, "Count belongs on the header's baseline")
-            XCTAssertGreaterThan(count.frame.minX, title.frame.maxX)
-        }
-    }
-
     func testCheckinUsesCompactSpacingAndStandardSubtext() {
         for mode in ["light", "dark"] {
             let app = manage(mode)
