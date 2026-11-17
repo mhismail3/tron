@@ -111,6 +111,12 @@ describe("settings worker changes and Session fences", () => {
     expect(home.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
     const worker = await f.registry.acquire(workerSessionId);
     expect(worker.snapshot()).toMatchObject({ model: REASONING, thinkingLevel: "low" });
+    const rulesOff = await homeSays("Drop global rules for settled-worker", "settings", { action: "change", taskId: "settled-worker", reason: "Worker should skip global rules",
+      changes: [{ key: "context.rules.global", layer: "session", op: "set", value: false }] });
+    expect(rulesOff.details).toMatchObject({ status: "applied" });
+    const workerRules = await homeSays("Show settled-worker rules", "settings", { action: "resolve", taskId: "settled-worker", keys: ["context.rules.global"] });
+    expect((workerRules.details as { keys: Array<{ key: string; layer: string; value: unknown }> }).keys)
+      .toEqual([expect.objectContaining({ key: "context.rules.global", layer: "session", value: false })]);
     expect((await f.settingsChanges.history({ key: "model.thinking[role=chat]" }, { kind: "ui", id: "maintainer" })).entries.map(entry => entry.status)).not.toContain("failed");
     transcript.push({ case: "routine worker change without a client fence", steps: [{ applied: applied.details }] });
   }, 90_000);
@@ -143,6 +149,10 @@ describe("settings worker changes and Session fences", () => {
     const rules = async () => Object.fromEntries((await f.settings.settingsModel.resolve({ kind: "global" }, undefined, ["context.rules.global", "context.rules.project"]))
       .keys.map(key => [key.key, key.value]));
     expect(await rules()).toEqual({ "context.rules.global": true, "context.rules.project": true });
+    const seen = await homeSays("Show the AGENTS.md rules", "settings", { action: "resolve", keys: ["context.rules.global", "context.rules.project"] });
+    expect((seen.details as { keys: Array<{ key: string; layer: string; value: unknown }> }).keys
+      .map(key => `${key.key}=${String(key.value)}@${key.layer}`).sort())
+      .toEqual(["context.rules.global=true@global", "context.rules.project=true@global"]);
     const changes = (value: boolean) => ["global", "project"].map(scope => ({ key: `context.rules.${scope}`, layer: "global", op: "set", value }));
     const off = await homeSays("Stop sending AGENTS.md rules", "settings", { action: "change", reason: "Maintainer asked to drop the rules", changes: changes(false) });
     expect(off.isError, off.text).toBe(false);

@@ -66,7 +66,8 @@ native tap. Disabling, removing, or lowering exposure applies as routine. Undo u
 its own entry. The typed value carries no inline credentials: env, headers, OAuth and secret-named tokens are refused. Tron-made change entries retain the typed command, args or URL for Undo; outside-edit entries retain only a digest.
 
 `SettingsToolAccess` resolves and changes the current session or Home's delegated
-worker. Its `history` action pages the durable audit (50 records by default, at most 200),
+worker. Home's resolve also lists, from the Global target, each key Home may write that its
+own session does not resolve (device preferences only when named); those rows set Global, not Home. Its `history` action pages the durable audit (50 records by default, at most 200),
 optionally filtered by key, using the returned cursor. The caller's actor is threaded into
 `SettingsChangePath.history` and `undo`, where `historyVisible` decides scope; `history` returns public entries (`publicHistoryEntry`: before/after only for a declared key or record subject, never for a flagged, retired or unknown key), so the RPC and the tool share one redaction: an agent sees and
 undoes only changes whose target is its session or that its session initiated (its Global changes
