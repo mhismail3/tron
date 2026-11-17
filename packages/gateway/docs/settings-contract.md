@@ -19,6 +19,7 @@ The settings tool's `update` action (Tron Home only) installs one exact version 
 - **F3 Policy.** Routine reversible writes apply and log. Widening trust/executable
   authority, privacy or spend, and any install or irreversible effect, require an exact paired-native
   tap through the dedicated [native review](#native-review), never a generic form.
+  In a `sources.*` path list, adding an entry or removing a `-`/`!` exclusion widens.
 - **F4 Scopes.** Top wins: **Project > Session/Home override > Global**, among the scopes
   the target has and the key's grants allow. One resolver takes the topmost applied scope with
   a value; the effective value is computed, never stored.
@@ -190,8 +191,9 @@ or cause replay. An uncertain receipt requires inspection.
 The maintainer's own `settings.change`, `settings.undo` and `settings.applyAgain`
 apply directly: his tap is the authority. A renderer that shows a key's review card
 may bind that tap to it with `confirmationDigest`; a changed store refuses it as stale.
-Project lifecycle uses `projects.change`, binding its exact typed intent and review;
-its owner revalidates filesystem, Git, occupancy and trust before effects.
+Project creation uses the `projects` tool with its own exact native review, revalidating the
+Workspace identity before effects. Existing-project trust is `permissions.projectTrust`, bound
+to its exact review digest like any tap-required change. No project RPC exists.
 Project action facts do not invent generic inverses. Local RPC cannot confirm reviews. An agent's or Home's Undo that restores a tap-required value shows the same native card as a change.
 
 A refused bundle retains all per-change errors and before/after facts, but never

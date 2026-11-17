@@ -25,7 +25,7 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
 | [`ComposerDraftContracts`](../Features/Chat/State/ComposerDraftContracts.swift) | Draft, attachment, editor and submission values, admission policies and injected transport/file-access operations. |
 | `ChatMediaLoader`, `SessionExportArtifactStore` | Transcript media by `(profile, lifecycle, session, blob)`; photo decoding preflights dimensions/component depth against 64 MiB, then verifies actual bytes; export artifacts. |
 | `MacTerminalController`, `MacTerminalEnrollmentStore` | Mac Terminal enrollment and shells ([Terminal](../UI/Terminal/README.md)). |
-| `SettingsTrustCoordinator`, `ProjectLifecycleModels` | Settings resolve/change/history/approvals, project trust and the native lifecycle read/request contract. |
+| `SettingsTrustCoordinator` | Settings resolve/change/approvals and project trust. |
 | `ProviderAuthCoordinator` | Provider/model catalogs, auth operations and prompts, MCP sign-in. |
 | `PackageConfigurationCoordinator` | Package operations. |
 | `HomeStatusPresentationOwner`, `HomeSheetReadOwner`, `HomeMutationCoordinator` | Home status, Home sheet reads, Home commands. |
@@ -54,10 +54,9 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
   with `SettingsTarget.keyChange`, so iOS holds no settings-path table. Trust is the
   `permissions.projectTrust` key. `SettingsTrustCoordinator` keeps one bounded `SettingsSnapshot`
   per target that every renderer for that target reads; generic edits dry-run first.
-  Native project lifecycle uses `projects.lifecycle.v1`: disposable `projects.list`/`inspect`
-  projections and receipt-owned `projects.change`, whose review the shared card confirms by
-  resending its exact digest and intent. `ProjectLifecycleModels` decodes that contract strictly; names,
-  paths and cursors are never trimmed. There is no iOS project store or approval engine.
+  The app has no project list or lifecycle pages: the agent creates projects (`projects` tool)
+  and changes existing-project trust; the app writes `permissions.projectTrust` only from the
+  untrusted-project prompt and the Project Settings trust row.
 - **Provider auth.** Operations belong to the device identity; a 4-operation, 64-element,
   16 KiB pre-response quarantine admits events that arrive before `auth.begin` returns. Lost
   operations recover through `auth.begin` (`recovered: true`) and `replaceOperationId`; unsent input
@@ -177,7 +176,7 @@ The first set drives the selected lifecycle and dashboard pool with a byte trans
 accelerated clock. The real-UI journey keeps the mounted chat, draft and keyboard through a proxy
 blackhole and a held replacement open. The Builds journey creates real sessions, then resolves
 its original canonical session row from the dashboard and revisits its installed app. Gateway catalog bounds are owned by
-`runtime-registry.integration.test.ts`.
+`runtime-registry-catalog.integration.test.ts`.
 
 ## Not here
 

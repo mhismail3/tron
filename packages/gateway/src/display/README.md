@@ -150,7 +150,7 @@ scripts/tron test gateway src/e2e/display/runtime-retirement.lock.integration.te
   src/e2e/kernel/projection/codemode-nested-presentation.integration.test.ts
 ```
 
-Canonical-branch cases: `runtime-registry.integration.test.ts`.
+Canonical-branch cases: `runtime-registry-operations.integration.test.ts`.
 
 ## Not here
 
