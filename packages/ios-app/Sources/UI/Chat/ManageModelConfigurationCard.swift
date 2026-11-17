@@ -103,7 +103,7 @@ struct ManageModelConfigurationCard: View {
         return model.providerCatalog(for: catalogTarget)?.models.first { $0.provider == provider && $0.id == id }
     }
 
-    private func options(for setting: ResolvedSetting) -> [SettingsOption] {
+    private func choiceOptions(for setting: ResolvedSetting) -> [SettingsOption] {
         switch setting.key {
         case "model.thinking[role=chat]":
             return (model.sessionContextPresentation(for: sessionID)?.availableThinkingLevels ?? []).map {
@@ -121,7 +121,7 @@ struct ManageModelConfigurationCard: View {
     }
 
     private func choiceRow(_ setting: ResolvedSetting, title: String, icon: String) -> some View {
-        let options = options(for: setting)
+        let options = choiceOptions(for: setting)
         return HStack(spacing: 0) {
             if options.isEmpty || setting.projectSetting != nil {
                 TronSettingsRow(icon: icon, title: title) { TronInlineActionLabel(setting.display, accent: .tronPrimary) }
