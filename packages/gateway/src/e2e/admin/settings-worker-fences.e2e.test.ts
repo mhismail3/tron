@@ -156,7 +156,7 @@ describe("settings worker changes and Session fences", () => {
       reason: "Ordinary chat tries" })).rejects.toMatchObject({ code: "invalid_request", message: "Global AGENTS.md cannot be changed by agent" });
     expect(await rules()).toEqual({ "context.rules.global": true, "context.rules.project": true });
     transcript.push({ case: "Home changes the AGENTS.md rules keys", steps: [{ off: off.details, on: on.details }] });
-  }, 90_000);
+  });
 
   it("Home disables a built-in extension through sources.extensions behind the native card; a new chat lacks its tool", async () => {
     const f = await gateway();
