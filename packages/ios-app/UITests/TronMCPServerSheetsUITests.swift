@@ -57,6 +57,25 @@ final class TronMCPServerSheetsUITests: XCTestCase {
     }
 
     @MainActor
+    func testSignInCardOpensTheAuthSheet() {
+        continueAfterFailure = false
+        for dark in [false, true] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-integrations-fixture", "-integrations-scenario", "mcp-auth-card", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+                + (dark ? ["-ui-dark-mode"] : [])
+            app.launch()
+            let card = app.descendants(matching: .any)["mcp-sign-in-card"]
+            XCTAssertTrue(card.waitForExistence(timeout: 10), app.debugDescription)
+            keepScreenshot(app, name: "mcp-sign-in-card-\(dark ? "dark" : "light")")
+            app.buttons["mcp-sign-in-fixture-auth-server"].tap()
+            XCTAssertTrue(app.textFields["Fixture code"].waitForExistence(timeout: 10), "The card opens the kept MCP sign-in sheet")
+            XCTAssertTrue(counters(app, owner: "original", contain: "authStarts:1"))
+            keepScreenshot(app, name: "mcp-sign-in-sheet-from-card-\(dark ? "dark" : "light")")
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testAuthInputRejoinsSameCanonicalChallengeWithoutSubmitting() {
         continueAfterFailure = false
         let app = launch("mcp-auth-draft"); defer { app.terminate() }
