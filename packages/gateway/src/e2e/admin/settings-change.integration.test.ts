@@ -474,7 +474,8 @@ describe("settings.change", () => {
     await expect(f.settingsChanges.change({ kind: "global" }, [
       { key: "run.retry.maxRetries", layer: "global", op: "set", value: 8 },
       { key: "context.rules.global", layer: "global", op: "set", value: false },
-    ], actor)).rejects.toMatchObject({ code: "invalid_request", message: "Global AGENTS.md cannot be changed by home" });
+    ], { actor: { kind: "agent", id: "bundle-agent" }, reason: "Change the declared setting" }))
+      .rejects.toMatchObject({ code: "invalid_request", message: "Global AGENTS.md cannot be changed by agent" });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
     expect(await f.history()).toEqual([]);
     const preview = await f.settingsChanges.change({ kind: "global" }, [
