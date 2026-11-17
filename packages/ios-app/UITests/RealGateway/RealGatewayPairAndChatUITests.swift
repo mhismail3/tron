@@ -1023,8 +1023,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     }
 
     @MainActor
-
-    @MainActor
     func revealBelowNavigationBar(_ app: XCUIApplication, _ element: XCUIElement) {
         for _ in 0..<40 {
             let bar = app.navigationBars.allElementsBoundByIndex.last
@@ -1067,19 +1065,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             return
         }
         done.tap()
-    }
-
-    @MainActor
-
-    @MainActor
-
-
-    @MainActor
-
-    @MainActor
-    private func waitForOverride(_ row: XCUIElement, timeout: TimeInterval) -> Bool {
-        row.waitForExistence(timeout: timeout)
-            && row.buttons.matching(identifier: row.identifier + "-reset").firstMatch.waitForExistence(timeout: timeout)
     }
 
     @MainActor

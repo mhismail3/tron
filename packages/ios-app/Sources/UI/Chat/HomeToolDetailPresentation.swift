@@ -445,3 +445,12 @@ extension HomeToolDetailPresentation {
             sections: sections)
     }
 }
+
+private func settingsLayerLabel(_ layer: String) -> String {
+    switch layer {
+    case "project": "Project"
+    case "session": "Session"
+    case "global": "Global"
+    default: layer.capitalized
+    }
+}

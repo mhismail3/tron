@@ -1,12 +1,24 @@
 import XCTest
 import UIKit
 
-    private func expand(_ app: XCUIApplication, title: String) {
-        let label = app.navigationBars.staticTexts[title].firstMatch
-        XCTAssertTrue(label.waitForExistence(timeout: 10))
-        if label.frame.minY > 120 {
-            label.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1,
-                thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.05)))
+@MainActor final class TronBurgundyGlassUITests: XCTestCase {
+    func testWineGlassKeepsInkReadableAndLightBurgundyUnchanged() {
+        continueAfterFailure = false
+        for mode in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-phase-active",
+                "-home-sheet-dashboard-workers", "-dashboard-view-home",
+                "-themeColor", "burgundy"] + (mode == "dark" ? ["-home-dark"] : [])
+            app.launch()
+            defer { app.terminate() }
+            let card = app.buttons["home-usage-card"]
+            XCTAssertTrue(card.waitForExistence(timeout: 15), app.debugDescription)
+            let frame = card.frame
+            check(app, ink: CGRect(x: frame.minX + frame.width * 0.48, y: frame.minY + frame.height * 0.08,
+                                   width: frame.width * 0.49, height: frame.height * 0.24),
+                  background: CGRect(x: frame.minX + frame.width * 0.40, y: frame.minY + frame.height * 0.18,
+                                     width: 4, height: 4), mode: mode, name: "Home usage", darkContrastFloor: 2.564)
+
         }
     }
 

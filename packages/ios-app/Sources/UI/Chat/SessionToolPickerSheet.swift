@@ -82,7 +82,7 @@ enum AvailableToolsPresentation {
     }
 
     private static func title(name: String, value: JSONValue) -> String {
-        let title = ProjectResourceTitlePresentation.title(kind: .tools, value: value)
+        let title = ProjectResourceTitlePresentation.toolTitle(value)
         guard name.hasPrefix("mcp__"), let range = name.range(of: "__", range: name.index(name.startIndex, offsetBy: 5)..<name.endIndex)
         else { return title }
         let label = value.objectValue?["label"]?.stringValue
