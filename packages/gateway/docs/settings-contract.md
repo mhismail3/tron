@@ -115,6 +115,8 @@ Record subjects (`RECORD_SUBJECTS`), changed per instance through the same path:
 | `context.lesson` | context | lesson |
 <!-- /tron docs -->
 
+Install telemetry is not a setting: `gateway-main.ts` sets `PI_TELEMETRY=0` before any SDK work, so a hand-written `enableInstallTelemetry` cannot re-enable it; the pin also removes provider attribution headers and is inherited by child processes the Gateway starts.
+
 Other schema fields: `subgroup`, `type`, `options` or `optionsSource` (`catalog.models`,
 `catalog.thinkingLevels(model)`, `catalog.tools`, ...), `defaultValue`, `direction`, `tap`, `writers`
 (`ui`, `home`, `worker`, `agent`: the list is the grant), and display

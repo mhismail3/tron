@@ -1145,8 +1145,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         openGlobalSettings(); XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "More Settings")).count, 0,
                                              "Global embeds its former More Settings groups in Agent Behavior")
         coverage["settings"] = assertSettingsSurface(app, name: "settings", layers: ["global"], schema: schema, sectionDestinations: [
-            "model": "Agent Behavior", "workers": "Agent Behavior", "context": "Agent Behavior", "run": "Agent Behavior",
-            "setup": "Setup"])
+            "model": "Agent Behavior", "workers": "Agent Behavior", "context": "Agent Behavior", "run": "Agent Behavior"])
         openGlobalAgentBehavior(app)
         let globalEdit = chooseSetting(app, key: "model.thinking[role=chat]")
         XCTAssertNotEqual(globalEdit.before, globalEdit.after, "the Global edit was not accepted")
@@ -1396,12 +1395,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
 
     private func descendants(of snapshot: XCUIElementSnapshot) -> [XCUIElementSnapshot] {
         snapshot.children.flatMap { [$0] + descendants(of: $0) }
-    }
-
-    @MainActor
-    func openSettingsSection(_ app: XCUIApplication, _ group: String, linkLabel: String? = nil, loneRow: String? = nil) {
-        XCTAssertNotNil(openSettingsSectionIfServed(app, group, linkLabel: linkLabel, loneRow: loneRow),
-                        "the \(group) section has no settings link: \(app.debugDescription)")
     }
 
     @MainActor

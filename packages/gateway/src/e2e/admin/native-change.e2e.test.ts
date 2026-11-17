@@ -464,9 +464,9 @@ describe("typed changes and exact native acceptance", () => {
     expect((await settingsTurn(f, home, { action: "undo", changeId: second, reason: "Home reverts the second backoff" }, "home-undo-second")).isError).not.toBe(true);
     expect((await settingsTurn(f, home, { action: "undo", changeId: first, reason: "Home reverts the first backoff" }, "home-undo-first")).isError).not.toBe(true);
     expect(await valueOf()).toEqual(baseBefore);
-    const telemetry = await service.invoke(phone, "settings.change", { commandId: `home-writer-${++sequence}`, target: { kind: "global" },
+    const rulesSwitch = await service.invoke(phone, "settings.change", { commandId: `home-writer-${++sequence}`, target: { kind: "global" },
       changes: [{ key: "context.rules.global", layer: "global", op: "set", value: false }] }) as unknown as { changes: Array<{ changeId: string }> };
-    const refused = await settingsTurn(f, home, { action: "undo", changeId: telemetry.changes[0]!.changeId, reason: "Home reverts the global rules switch" }, "home-undo-writer");
+    const refused = await settingsTurn(f, home, { action: "undo", changeId: rulesSwitch.changes[0]!.changeId, reason: "Home reverts the global rules switch" }, "home-undo-writer");
     expect(refused.isError).toBe(true);
     expect(textOf(refused)).toBe("Global AGENTS.md cannot be changed by home");
   });

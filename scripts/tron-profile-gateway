@@ -436,7 +436,6 @@ class FixtureGateway:
             "defaultThinkingLevel": "low",
             "defaultProjectTrust": "never",
             "enableAnalytics": False,
-            "enableInstallTelemetry": False,
         }, indent=2) + "\n")
 
     def seed(self, count: int) -> list[dict[str, str]]:
