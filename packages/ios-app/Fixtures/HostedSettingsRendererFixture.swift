@@ -5,7 +5,6 @@ import TronMobileCore
 @MainActor
 struct HostedSettingsRendererFixture: View {
     @State private var model: AppModel
-    @State private var push = PushNotificationCoordinator(credentials: UIReviewPushStore(), notifications: .live, appAttest: .live, configuration: nil)
     @State private var ready = false
     @State private var activity = PresentationActivityCoordinator()
     @State private var covering = HostedLaunch.arguments.contains("-sheet-haptics-restored")
@@ -123,8 +122,6 @@ struct HostedSettingsRendererFixture: View {
                         SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global", presentation: .section("tools"))
                     } else if HostedLaunch.arguments.contains("-settings-ui-providers") {
                         providerReview
-                    } else if HostedLaunch.arguments.contains("-settings-ui-push") {
-                        PushNotificationsSettingsView()
                     } else if HostedLaunch.arguments.contains("-settings-renderer-held-preview") || HostedLaunch.arguments.contains("-settings-renderer-confirm") || HostedLaunch.arguments.contains("-settings-renderer-haptics") {
                         SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global", presentation: .section("context"))
                     } else if HostedLaunch.arguments.contains("-settings-nested") {
@@ -162,15 +159,12 @@ struct HostedSettingsRendererFixture: View {
             }
         }
         .environment(model)
-        .environment(push)
         .preferredColorScheme(HostedLaunch.arguments.contains("-settings-renderer-dark") ? .dark : .light)
         .tronPresentation()
         .tronSettingsLayout()
         .task {
             do {
                 try await model.connectHostedGateway(profile: profile, token: "fixture-token")
-                model.pushNotificationReadiness = .ready
-                model.pushRegistrationDiagnostic = .complete
                 ready = true
             } catch { self.error = String(describing: error) }
         }
@@ -183,11 +177,6 @@ struct HostedSettingsRendererFixture: View {
             }
         }
     }
-}
-
-private struct UIReviewPushStore: PushCredentialStoring {
-    func load() throws -> PushCredentialDocument? { nil }
-    func save(_ document: PushCredentialDocument) throws {}
 }
 
 private actor HostedSettingsRendererSocket: GatewaySocketConnection {

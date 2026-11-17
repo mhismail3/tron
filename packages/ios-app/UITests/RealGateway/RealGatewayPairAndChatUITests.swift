@@ -996,30 +996,26 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         keepScreenshot(app, name: "939-mcp-servers")
         dismissTopSheet(app)
 
-        for (title, marker, name) in [("Connections", "Paired Macs", "connections"), ("Push Notifications", "Private agent alerts for this iPhone.", "push")] {
-            let link = app.buttons["settings-link-\(title)"]
-            revealBelowNavigationBar(app, link)
-            link.tap()
-            func labelled(_ text: String) -> XCUIElement {
-                app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", text)).firstMatch
-            }
-            XCTAssertTrue(labelled(marker).waitForExistence(timeout: 30), "\(title) did not open: \(app.debugDescription)")
-            if title == "Connections" {
-                XCTAssertFalse(labelled("Input needed").exists, "push alerts moved to their own sheet")
-                assertToolbarTint(app, title: "Connections")
-                let device = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Details for ' AND label CONTAINS ' on '")).firstMatch
-                XCTAssertTrue(device.waitForExistence(timeout: 30), app.debugDescription)
-                let label = device.label.dropFirst("Details for ".count)
-                let deviceName = String(label[..<(label.range(of: " on ", options: .backwards)?.lowerBound ?? label.endIndex)])
-                device.tap()
-                XCTAssertTrue(app.buttons["device-rename"].waitForExistence(timeout: 30), app.debugDescription)
-                assertToolbarTint(app, title: deviceName)
-                keepScreenshot(app, name: "963-device-detail")
-                dismissTopSheet(app)
-            }
-            keepScreenshot(app, name: "939-\(name)")
-            dismissTopSheet(app)
+        let link = app.buttons["settings-link-Connections"]
+        revealBelowNavigationBar(app, link)
+        link.tap()
+        func labelled(_ text: String) -> XCUIElement {
+            app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", text)).firstMatch
         }
+        XCTAssertTrue(labelled("Paired Macs").waitForExistence(timeout: 30), "Connections did not open: \(app.debugDescription)")
+        XCTAssertFalse(labelled("Input needed").exists, "push alerts are Global settings the agent changes")
+        assertToolbarTint(app, title: "Connections")
+        let device = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Details for ' AND label CONTAINS ' on '")).firstMatch
+        XCTAssertTrue(device.waitForExistence(timeout: 30), app.debugDescription)
+        let label = device.label.dropFirst("Details for ".count)
+        let deviceName = String(label[..<(label.range(of: " on ", options: .backwards)?.lowerBound ?? label.endIndex)])
+        device.tap()
+        XCTAssertTrue(app.buttons["device-rename"].waitForExistence(timeout: 30), app.debugDescription)
+        assertToolbarTint(app, title: deviceName)
+        keepScreenshot(app, name: "963-device-detail")
+        dismissTopSheet(app)
+        keepScreenshot(app, name: "939-connections")
+        dismissTopSheet(app)
     }
 
     @MainActor

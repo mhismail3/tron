@@ -17,14 +17,14 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   `PairedDeviceDetailView`, `MacReplacementSheet`.
 - Resources: `ProjectResourceDetailSheet` (tool detail for `SettingsToolsEditor`), `TrustSettingsView`.
 - This iPhone and diagnostics: `AppearanceSettingsView`, `AppLocalBehaviorSettings`,
-  `PushNotificationsSettingsView`, `NotificationInboxView`, `GatewayLogsSettingsView`.
+  `NotificationInboxView`, `GatewayLogsSettingsView`.
 
 ## Contract
 
 - **Layout.** The gear opens one sheet: This iPhone (primary: Appearance, one sheet: Dashboard, Subagent Activity, Color Mode, Theme color, Text Font and Code Font),
   Accounts (primary: Connections, Model Providers),
   Agent & Tools (primary: Agent Behavior first, MCP Servers),
-  System (steel blue: Mac Terminal, Push Notifications, Setup, Logs). Every category destination
+  System (steel blue: Mac Terminal, Setup, Logs). Every category destination
   inherits its group tint for chrome, containers and icons; semantic statuses retain their colors.
   Primary groups use the selected theme's `tronPrimary`; System uses `tronSteel`, not the neutral `tronSlate` role.
   Agent Behavior opens one primary-accent sheet with the Model, Workers & delegation, Compaction

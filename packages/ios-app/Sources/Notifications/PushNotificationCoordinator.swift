@@ -23,15 +23,6 @@ enum PushRoute: String, Codable, Sendable {
     static var current: Self? { current() }
 }
 
-enum PushReadiness: Equatable, Sendable {
-    case unavailable
-    case permissionRequired
-    case denied
-    case registering
-    case ready
-    case pending
-}
-
 enum PushRegistrationDiagnostic: String, Equatable, Sendable {
     case idle = "Idle"
     case waitingForToken = "Waiting for APNs"
@@ -420,6 +411,7 @@ final class PushNotificationCoordinator {
     private let worker: PushWorkerClient?
     private let uuid: @Sendable () -> UUID
     private let clock: MonotonicClock
+    private let log: AppLog
     private let credentialLoadFailed: Bool
     private var document: PushCredentialDocument
     private var context: Context?
@@ -428,16 +420,23 @@ final class PushNotificationCoordinator {
     private var admissionGeneration = 0
     private var registrationAdmitted = false
 
-    private(set) var readiness: PushReadiness = .unavailable
-    private(set) var diagnostic: PushRegistrationDiagnostic = .idle
+    private(set) var diagnostic: PushRegistrationDiagnostic = .idle {
+        didSet {
+            guard diagnostic != oldValue else { return }
+            let previous = logTail, log = log, stage = diagnostic.rawValue
+            logTail = Task { await previous?.value; await log.recordCausal(name: "push.registration", outcome: stage) }
+        }
+    }
+    private var logTail: Task<Void, Never>?
     private var automaticRetryAvailable = true
 
-    convenience init() {
+    convenience init(log: AppLog) {
         self.init(
             credentials: KeychainPushCredentialStore(),
             notifications: .live,
             appAttest: .live,
-            configuration: PushProductConfiguration.bundled()
+            configuration: PushProductConfiguration.bundled(),
+            log: log
         )
     }
 
@@ -448,8 +447,10 @@ final class PushNotificationCoordinator {
         configuration: PushProductConfiguration?,
         transport: BoundedHTTPDataTransport = .noRedirects,
         uuid: @escaping @Sendable () -> UUID = UUID.init,
-        clock: MonotonicClock = .continuous
+        clock: MonotonicClock = .continuous,
+        log: AppLog
     ) {
+        self.log = log
         self.credentials = credentials
         self.notifications = notifications
         self.appAttest = appAttest
@@ -477,7 +478,6 @@ final class PushNotificationCoordinator {
         guard let profile else {
             invalidateRegistration(admission: false)
             context = nil
-            readiness = .unavailable
             diagnostic = .idle
             return
         }
@@ -493,7 +493,6 @@ final class PushNotificationCoordinator {
         )
         guard !credentialLoadFailed, worker != nil, appAttest.isSupported() else {
             invalidateRegistration(admission: false)
-            readiness = .unavailable
             diagnostic = .stoppedUnavailable
             return
         }
@@ -503,13 +502,11 @@ final class PushNotificationCoordinator {
               context?.profile.id == profile.id else { return }
         if status == .notDetermined {
             invalidateRegistration(admission: false)
-            readiness = .permissionRequired
             do {
                 status = try await notifications.requestAuthorization() ? .allowed : .denied
             } catch {
                 guard admissionGeneration == reconciliationAdmission,
                       context?.profile.id == profile.id else { return }
-                readiness = .pending
                 return
             }
             guard admissionGeneration == reconciliationAdmission,
@@ -518,7 +515,6 @@ final class PushNotificationCoordinator {
         guard status == .allowed else {
             invalidateRegistration(admission: false)
             let denialGeneration = registrationGeneration
-            readiness = .denied
             diagnostic = .idle
             if connected {
                 await removeRegistration(
@@ -533,7 +529,6 @@ final class PushNotificationCoordinator {
         registrationAdmitted = true
         notifications.registerForRemoteNotifications()
         guard document.apnsToken != nil else {
-            if document.grants[profile.id] == nil { readiness = .registering }
             diagnostic = .waitingForToken
             return
         }
@@ -552,7 +547,6 @@ final class PushNotificationCoordinator {
         updated.apnsToken = encoded
         do { try credentials.save(updated) }
         catch {
-            readiness = .pending
             diagnostic = .stoppedPersistence
             return
         }
@@ -562,7 +556,6 @@ final class PushNotificationCoordinator {
 
     func receiveRegistrationFailure() {
         guard registrationAdmitted else { return }
-        readiness = .pending
         diagnostic = .stoppedUnavailable
     }
 
@@ -599,7 +592,6 @@ final class PushNotificationCoordinator {
               registrationTask == nil,
               context != nil,
               document.apnsToken != nil else { return }
-        readiness = .registering
         registrationGeneration &+= 1
         let generation = registrationGeneration
         registrationTask = Task { @MainActor [weak self] in
@@ -615,16 +607,14 @@ final class PushNotificationCoordinator {
                 guard self.registrationIsValid(generation: generation) else { return }
                 if case .rejected(401) = error, self.automaticRetryAvailable, self.document.appAttestKeyRejected == true {
                     do { try self.rotateInvalidKey() }
-                    catch { self.readiness = .pending; self.diagnostic = .stoppedPersistence; return }
+                    catch { self.diagnostic = .stoppedPersistence; return }
                     self.diagnostic = .idle
                     Task { @MainActor [weak self] in self?.scheduleRegistration() }
                     return
                 }
-                self.readiness = .pending
                 self.diagnostic = Self.diagnostic(for: error)
             } catch {
                 guard self.registrationIsValid(generation: generation) else { return }
-                self.readiness = .pending
                 self.diagnostic = .stoppedUnavailable
             }
         }
@@ -651,7 +641,6 @@ final class PushNotificationCoordinator {
                let registrationRevision = admittedContext.registrationRevision,
                grant.acknowledgedRuntime == runtimeIdentity,
                grant.acknowledgedRegistrationRevision == registrationRevision {
-                readiness = .ready
                 diagnostic = .complete
                 return
             }
@@ -667,13 +656,11 @@ final class PushNotificationCoordinator {
                 registrationRevision: admittedContext.registrationRevision
             ) {
             case .ready:
-                readiness = .ready
                 diagnostic = .complete
                 return
             case .rotate:
                 try discardGrant(profileID: admittedContext.profile.id)
             case .configurationMismatch, .unavailable:
-                readiness = .pending
                 diagnostic = .stoppedUnavailable
                 return
             }
@@ -791,14 +778,11 @@ final class PushNotificationCoordinator {
                     )
                     switch transferResult {
                     case .ready:
-                        readiness = .ready
                         diagnostic = .complete
                     case .rotate:
                         try discardGrant(profileID: admittedContext.profile.id)
-                        readiness = .pending
                         diagnostic = .stoppedUnavailable
                     case .configurationMismatch, .unavailable:
-                        readiness = .pending
                         diagnostic = .stoppedUnavailable
                     }
                     return
@@ -996,7 +980,6 @@ final class PushNotificationCoordinator {
             document = cleared
             do { try credentials.save(cleared) }
             catch {
-                readiness = .pending
                 diagnostic = .stoppedPersistence
             }
         }
@@ -1013,7 +996,6 @@ final class PushNotificationCoordinator {
             updated.grants.removeValue(forKey: profile.id)
             try credentials.save(updated)
             document = updated
-            readiness = .denied
         } catch {
         }
     }

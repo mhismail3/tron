@@ -40,11 +40,12 @@ notification inbox.
   is persisted: an app death or a lost response after acceptance loses the effect (best effort, no replay).
   Duplicate approvals are refused at the answer boundary and never rotate. The approved attempt does not
   re-arm the automatic budget. The key is per iPhone, so the card names the other paired Macs.
-- **Residual.** The Push Notifications sheet shows readiness and the registration stage only; its alert
-  toggles and Retry Registration button are gone (slice 1.2). The sheet itself goes in slice 5.4.
+- **State.** There is no Push screen. Every registration stage change is recorded as a `push.registration`
+  app-log event (outcome = stage label), which reaches the uploaded diagnostics log; retry after a stop is
+  the agent's `push_retry` card.
 - **Secrets.** App Attest keys, token bytes and grants use a Keychain namespace separate from Gateway
   credentials; an unreadable Keychain document is never overwritten with an empty one (push fails
-  closed while the Gateway stays usable). Settings shows only a fixed local stage label; the app accepts no relay URL or push
+  closed while the Gateway stays usable). The app shows no push credential state and accepts no relay URL or push
   credential from settings.
 - **Alerts.** No badge, background fetch or notification approval actions. Exact changes
   are reviewed in the shared in-chat native card. The bundled `tron-notification.caf` sound; ask pushes are Time
@@ -95,7 +96,7 @@ notification inbox.
 
 ## Signals
 
-Registration stage label only.
+`push.registration` app-log events, one per stage change.
 
 ## Verify
 

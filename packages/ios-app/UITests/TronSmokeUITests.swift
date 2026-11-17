@@ -2681,20 +2681,6 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    func testPushSheetShowsReadinessWithoutPolicyToggles() {
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-ui-push"]
-        app.launch(); defer { app.terminate() }
-        let any = app.descendants(matching: .any)
-        let summary = any["push-registration-summary"]
-        XCTAssertTrue(summary.waitForExistence(timeout: 10))
-        XCTAssertFalse(any["push-alert-policy"].exists, "push alert policy is Global settings the agent changes")
-        XCTAssertEqual(app.switches.count, 0)
-        XCTAssertTrue(summary.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Complete")).firstMatch.exists)
-        keepScreenshot(named: "1261-push-separate-summary")
-    }
-
-    @MainActor
     func testRendererPickOfDisplayedDefaultPinsIt() {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-settings-renderer-fixture"]
