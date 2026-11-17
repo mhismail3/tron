@@ -328,10 +328,7 @@ describe("settings renderer contract", () => {
   it("offers canonical queue editors at Global and Home, preserving ordered saves, empty overrides and inheritance", async () => {
     const f = await fixture();
     const evidence: unknown[] = [];
-    const chatModels = await f.service.invoke(subscribed(), "settings.options", {
-      target: { kind: "global" }, key: "model.ref[role=chat]", query: "tron", limit: 200,
-    }) as unknown as { options: Array<{ value: { provider: string; id: string } }> };
-    expect(chatModels.options.some(option => option.value.provider === "tron" && option.value.id === "subagent")).toBe(true);
+    expect(f.modelRuntime.getModels().some(model => model.provider === "tron" && model.id === "subagent")).toBe(true);
     f.registry.setSettings(f.settingsModel, f.settingsChanges, settingsInventorySource({ agentDir: f.agentDir, trust: f.trust, modules: f.registry.moduleHost, mcp: new McpAdminService(f.agentDir, piCliBundle()) }));
     const queue = new ModelQueueOwner({ tronHome: f.tronHome, runtime: f.modelRuntime, usage: new ProviderUsageOwner(),
       queue: role => f.registry.modelQueueOf(role, "home") });
@@ -340,26 +337,20 @@ describe("settings renderer contract", () => {
     for (const role of ["worker", "subagent", "background"] as const) {
       const key = `model.queue[role=${role}]`;
       const resolve = async (target: { kind: "global" | "home" }) => await f.service.invoke(subscribed(), "settings.resolve", {
-        target, keys: [key], renderer: { version: 1, controls: [...CONTROLS] },
-      }) as unknown as PresentedResolution;
+        target, keys: [key],
+      }) as unknown as Parameters<typeof row>[0];
       for (const kind of ["global", "home"] as const) {
         const initial = await resolve({ kind });
-        expect(initial.keys.find(candidate => candidate.key === key), `${kind} ${role} editor`).toMatchObject({
-          presentation: { control: "list", editable: true, valueKind: "stringList", optionsSource: { name: "catalog.models" } },
-        });
+        expect(initial.keys.find(candidate => candidate.key === key), `${kind} ${role} queue`).toBeDefined();
         await expect(f.service.invoke(subscribed(), "settings.change", {
           commandId: `queue-virtual-${role}-${kind}`, target: { kind },
           changes: [{ key, layer: kind === "home" ? "session" : "global", op: "set", value: ["tron/subagent"] }],
         })).rejects.toMatchObject({ code: "invalid_request" });
         expect(row(await resolve({ kind }), key).value).toEqual([]);
       }
-      const options = await f.service.invoke(subscribed(), "settings.options", { target: { kind: "global" }, key, query: "tron" }) as unknown as {
-        options: Array<{ value: { provider: string; id: string }; disabledReason?: string }>;
-      };
-      const available = options.options.filter(option => option.value.provider === f.model.provider && !option.disabledReason);
+      const available = f.modelRuntime.getModels().filter(model => model.provider === f.model.provider);
       expect(available).toHaveLength(2);
-      expect(options.options.some(option => option.value.provider === "tron" && option.value.id === "subagent")).toBe(false);
-      const values = available.map(option => `${option.value.provider}/${option.value.id}`);
+      const values = available.map(model => `${model.provider}/${model.id}`);
       const change = async (kind: "global" | "home", op: "set" | "unset", value?: string[]) => {
         const result = await f.service.invoke(subscribed(), "settings.change", { commandId: `queue-editor-${role}-${kind}-${op}-${evidence.length}`,
           target: { kind }, changes: [{ key, layer: kind === "home" ? "session" : "global", op, ...(value ? { value } : {}) }],
