@@ -213,7 +213,7 @@ it.each([
         await slot.reload(trusted, true, true);
         assertManagedResources(await slot.resources() as unknown as typeof resources);
       }
-      const inventory = await new PackageService(agentDir, trust, () => {}, undefined, managedSubagents).list(cwd) as {
+      const inventory = await new PackageService(agentDir, trust, undefined, managedSubagents).list(cwd) as {
         packages: Array<{source: string; conflict?: {code: string; message: string}; provides: {tools: string[]; subagents: string[]; skills: string[]; prompts: string[]}}>;
       };
       const ignored = inventory.packages.filter(row => row.source === "npm:pi-subagents@0.59.0");

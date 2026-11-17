@@ -486,7 +486,6 @@ const knowledge = knowledgeStore;
 const packages = new PackageService(
   config.agentDir,
   trust,
-  (topic, payload) => transport?.broadcast(topic, payload),
   workRegistry,
   managedSubagents,
   outsideSettings,
@@ -756,7 +755,6 @@ const service = new GatewayService({
   settingsChanges,
   macTerminal: macTerminalKeys,
   modelConfig,
-  packages,
   auth,
   globalProviderResources,
   logger,

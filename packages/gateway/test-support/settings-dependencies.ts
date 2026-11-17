@@ -23,7 +23,7 @@ import type { SettingsInventorySource } from "../src/kernel/settings/tool-contra
 import type { ModuleHost } from "../src/kernel/host/module-host.js";
 
 export function settingsInventorySource(input: { agentDir: string; trust: TrustService; modules: ModuleHost; mcp: McpAdminService }): SettingsInventorySource {
-  return new SettingsInventoryReader(new HookResources(input.agentDir, input.trust), new PackageService(input.agentDir, input.trust, () => {}), input.mcp, input.trust, input.modules);
+  return new SettingsInventoryReader(new HookResources(input.agentDir, input.trust), new PackageService(input.agentDir, input.trust), input.mcp, input.trust, input.modules);
 }
 
 export function settingsDependencies(input: {

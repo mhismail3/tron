@@ -21,7 +21,6 @@ import { SettingsChangePath } from "../src/kernel/settings/settings-change.js";
 import { SettingsModel } from "../src/kernel/settings/settings-model.js";
 import { SettingsChangeRecord } from "../src/kernel/settings/settings-record.js";
 import { OutsideChanges } from "../src/admin/settings-outside.js";
-import { PackageService } from "../src/admin/package-service.js";
 import { MacTerminalService } from "../src/security/mac-terminal-service.js";
 import { DeviceStore } from "../src/security/device-store.js";
 import { UploadStore } from "../src/machine/upload-store.js";
@@ -56,7 +55,6 @@ export interface LockGatewayOptions {
   readonly home?: { readonly memorySummarizer: () => EpisodicSummarizer };
   readonly maximumLiveRuntimes?: number;
   readonly lifecycleRequests?: boolean;
-  readonly administrativeResources?: boolean;
   readonly root?: string;
 }
 
@@ -266,10 +264,6 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
     }),
     uploads,
     filesystem: unreachable("filesystem"), modelConfig: unreachable("modelConfig"),
-    ...(options.administrativeResources ? {
-      packages: new PackageService(agentDir, trust, (topic, payload) => server?.broadcast(topic, payload as never),
-        registry.administrativeWorkRegistry, undefined, outside),
-    } : { packages: unreachable("packages") }),
     auth: options.lifecycleRequests
       ? unreachable("auth", { cancelWaitingForRestart: () => { lifecycleRequests.push({ kind: "auth.cancelWaitingForRestart" }); } })
       : unreachable("auth"),

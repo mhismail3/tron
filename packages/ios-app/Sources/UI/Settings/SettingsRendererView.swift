@@ -115,8 +115,7 @@ struct SettingsRendererView: View {
 
     private func sectionHasNoRows(_ resolution: SettingsResolution) -> Bool {
         guard case .section(let id) = presentation else { return false }
-        let ownsDefaultTools = id == "tools" && target.objectValue?["kind"]?.stringValue == "global" && writeLayer != nil
-        return !ownsDefaultTools && !resolution.keys.contains { $0.group == id && selection.includes($0) }
+        return !resolution.keys.contains { $0.group == id && selection.includes($0) }
     }
 
     @ViewBuilder
@@ -142,21 +141,15 @@ struct SettingsRendererView: View {
     @ViewBuilder
     private func sectionDetail(_ id: String, resolution: SettingsResolution, options: [String: SettingsOptionsResponse]) -> some View {
         let section = Self.sections(resolution).first { $0.id == id } ?? SettingsRendererSection(id: id)
-        let ownsDefaultTools = id == "tools" && target.objectValue?["kind"]?.stringValue == "global" && writeLayer != nil
-        let keys = Self.sorted(resolution.keys.filter {
-            $0.group == id && selection.includes($0) && !(ownsDefaultTools && $0.key == "tools.codemode.mode")
-        })
+        let keys = Self.sorted(resolution.keys.filter { $0.group == id && selection.includes($0) })
         let groups = Self.detailGroups(section, keys: keys)
-        if !showsGroupHeadings, !ownsDefaultTools, groups.count == 1, let only = groups.first, only.manyInstances == nil,
+        if !showsGroupHeadings, groups.count == 1, let only = groups.first, only.manyInstances == nil,
            Self.rowsNameGroup(only) || only.keys.count == 1, (only.detail ?? section.note) == nil {
             TronSettingsGroup(nil) {
                 VStack(spacing: 0) { rows(only.keys, resolution: resolution, options: options, detailed: true, instanced: only.instanced) }
             }
         } else {
             TronSettingsSections(alignment: .leading, spacing: 20, hidesLoneHeading: !showsGroupHeadings) {
-                if ownsDefaultTools {
-                    DefaultToolsSettingsSection(projectCWD: target.objectValue?["cwd"]?.stringValue)
-                }
                 ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
                     Group {
                         if let many = group.manyInstances {

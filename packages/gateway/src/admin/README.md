@@ -30,15 +30,9 @@ Durable stores: `<tronHome>/state/settings/` (`changes/`,
 ## Contract
 
 The pinned `tron:pi-subagents@…#…` package source identifies Tron's bundled payload, not a
-user-managed package. Package commands refuse that exact source before mutation admission;
-ordinary configured packages retain install/update/remove. The real package-RPC regression in
-`package-node-requirement.integration.test.ts` verifies refusal and unchanged managed receipt,
-with ordinary-package controls through the same Gateway/Pi owner.
-
-`packages.checkUpdates` validates the Pi manager's own return type without a second DTO.
-The real Gateway/SDK/child-process lock pins accepted fields and user/project scopes,
-256 accepted updates and the 257-item conflict. Oversized/duplicate identities,
-per-field string failures and the aggregate byte-limit failure are not covered by that lock.
+user-managed package. The settings tool's package `update` refuses that exact source before
+admission; `package-node-requirement.integration.test.ts` verifies the refusal and the unchanged
+managed receipt. Packages are added and removed through `sources.packages` (install card).
 
 `settings-module.ts` owns the settings extension descriptor. Its request/result
 vocabulary is the [kernel settings contract](../kernel/settings/README.md); the
@@ -76,7 +70,7 @@ RPCs (shapes in the [Gateway README](../../README.md)): `settings.resolve`,
 `settings.applyAgain`, `settings.history` (the maintainer's full view), plus `home.profileChange` for learned-profile notes.
 Broadcasts: `settings.changed`, `trust.changed`, `mcp.changed`. Agents reach the same path through the `settings` tool
 (a thin client of resolve, change, history, undo, inventory and Home-only package update, each carrying the calling chat's actor; history and undo are
-scoped by that actor as the kernel contract defines). `inventory` is read-only: it projects the hook registrations (by extension and by event), configured packages, Tron modules and configured MCP servers (`configured` or `disabled`; never probed) for the chat's directory. Hooks and packages come from `HookResources` and `PackageService`, which load extension definitions for a trusted project as the `packages.list` RPC does (code loading, a residual risk; not a probe). MCP comes from `McpAdminService.configured` through the SDK's public, non-executing `loadMcpConfig` owner, with explicit agent directory, project trust and a 256 KiB per-file read limit. The SDK alone validates and merges global/project entries and restricted overrides; invalid entries contribute only an error count, never raw diagnostics. Inventory never runs `pi mcp` (which connects servers and resolves `!command` credentials), so no MCP server is started and no credential is resolved. Only name, effective scope, enabled state, exposure and transport kind are projected; commands, headers, URLs and paths are excluded. Every string is sanitized through credential redaction. An undecided project fails with `trust_required`. Home's tool may target a delegated worker by `taskId`.
+scoped by that actor as the kernel contract defines). `inventory` is read-only: it projects the hook registrations (by extension and by event), configured packages, Tron modules and configured MCP servers (`configured` or `disabled`; never probed) for the chat's directory. Hooks and packages come from `HookResources` and `PackageService`, which load extension definitions for a trusted project as the settings inventory reads them (code loading, a residual risk; not a probe). MCP comes from `McpAdminService.configured` through the SDK's public, non-executing `loadMcpConfig` owner, with explicit agent directory, project trust and a 256 KiB per-file read limit. The SDK alone validates and merges global/project entries and restricted overrides; invalid entries contribute only an error count, never raw diagnostics. Inventory never runs `pi mcp` (which connects servers and resolves `!command` credentials), so no MCP server is started and no credential is resolved. Only name, effective scope, enabled state, exposure and transport kind are projected; commands, headers, URLs and paths are excluded. Every string is sanitized through credential redaction. An undecided project fails with `trust_required`. Home's tool may target a delegated worker by `taskId`.
 
 Ports in: `gateway-main.ts` wires kernel `SettingsModel`/`SettingsChangePath`,
 admin `SettingsStoreAdapter`,

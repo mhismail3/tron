@@ -44,14 +44,8 @@ struct SettingsView: View {
                         }
                         .accessibilityIdentifier("settings-link-Agent Behavior")
                         TronSettingsDivider()
-                        SettingsSectionLinks(ids: ["tools"], sections: sections, target: SettingsTarget.global.gatewayTarget, writeLayer: "global")
-                        TronSettingsDivider()
                         settingsLink("MCP Servers", summary: "Tool providers and their sign-ins", icon: "server.rack") {
                             MCPServersSettingsView()
-                        }
-                        TronSettingsDivider()
-                        settingsLink("Extensions", summary: "Packages, built-ins, and themes", icon: "shippingbox") {
-                            ExtensionsSettingsView(projectCWD: nil)
                         }
                     }
                     let placed = SettingsGroupKind.placedSections

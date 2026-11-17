@@ -14,7 +14,6 @@ struct HostedSettingsRendererFixture: View {
     @State private var error: String?
     @State private var applied = 0
     @State private var thinkingOptions = -1
-    @State private var toolWrite = "none"
     @State private var providerOperations = ""
     private let socket = HostedSettingsRendererSocket()
     private let profile: GatewayProfile
@@ -120,8 +119,8 @@ struct HostedSettingsRendererFixture: View {
                         controlsReview
                     } else if HostedLaunch.arguments.contains("-settings-alignment-review") {
                         SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global", presentation: .section("context"))
-                    } else if HostedExtensionsReview.project {
-                        SettingsRendererView(target: SettingsTarget.project(cwd: "/fixture/project").gatewayTarget, writeLayer: nil, presentation: .section("tools"))
+                    } else if HostedLaunch.arguments.contains("-settings-ui-tools") {
+                        SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global", presentation: .section("tools"))
                     } else if HostedLaunch.arguments.contains("-settings-ui-providers") {
                         providerReview
                     } else if HostedLaunch.arguments.contains("-settings-ui-push") {
@@ -147,9 +146,6 @@ struct HostedSettingsRendererFixture: View {
                         if HostedLaunch.arguments.contains("-settings-renderer-held-preview") { Button("Cover renderer") { covering = true } }
                         Text("haptics:\(TronHapticsProbe.shared.summary)").accessibilityIdentifier("fixture.haptics")
                         Text("thinking-options:\(thinkingOptions)").accessibilityIdentifier("fixture.settings-renderer-thinking-options")
-                        if HostedLaunch.arguments.contains("-settings-ui-tools-write") {
-                            Text(toolWrite).accessibilityIdentifier("fixture.tools-write")
-                        }
                         if HostedLaunch.arguments.contains("-settings-provider-actions") {
                             Text(providerOperations).accessibilityIdentifier("fixture.provider-operations")
                         }
@@ -182,7 +178,6 @@ struct HostedSettingsRendererFixture: View {
             while !Task.isCancelled {
                 (applied, thinkingOptions) = await socket.counters()
                 heldPreviews = await socket.previewCount()
-                toolWrite = await socket.lastToolWrite()
                 providerOperations = await socket.providerOperationSummary()
                 try? await Task.sleep(for: .milliseconds(250))
             }
@@ -206,10 +201,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     private var pending: [Data] = []
     private var closed = false
     private var model = "pro"
-    private var activeTools = HostedExtensionsReview.builtinOff ? ["read", "+codemode"] : ["read", "retired"]
-    private var extensions = HostedExtensionsReview.builtinOff ? ["-builtin:codemode"] : [String]()
-    private var toolWrite = "none"
-    func lastToolWrite() -> String { toolWrite }
+    private var activeTools = ["read", "retired"]
     private var thinking = "high"
     private var invalidValue = ""
     private var blockImages = false
@@ -288,7 +280,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 await withCheckedContinuation { heldPreview = $0 }
             }
             result = try change(params)
-        default: result = HostedExtensionsReview.response(method) ?? .object([:])
+        default: result = .object([:])
         }
         try enqueue(.object(["type": .string("response"), "id": .string(id), "ok": .bool(true), "result": result]))
     }
@@ -358,7 +350,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             key("context.images.block", group: "context", value: .bool(blockImages), display: blockImages ? "On" : "Off",
                 presentation: presentation("Block images", "Images are not sent to the model.", 10, "essential", "toggle")),
             key("tools.active", group: "tools", value: .array(activeTools.map(JSONValue.string)), display: activeTools.joined(separator: ", "),
-                layer: HostedExtensionsReview.project ? "project" : "global", set: !HostedExtensionsReview.project, presentation: presentation("Tools", "Tools available to new chats.", 10, "essential", "checklist",
+                set: true, presentation: presentation("Tools", "Tools available to new chats.", 10, "essential", "checklist",
                     extra: ["optionsSource": .object(["name": .string("catalog.tools"), "dependsOn": .array([])])])),
             key("run.retry.maxRetries", group: "run", subgroup: "Retry", value: .number(6), display: "6 retries",
                 set: true, presentation: presentation("Retries", "How many times a failed request is retried.", 10, "essential", nil)),
@@ -397,7 +389,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             section("lab", "Lab", 95, "A section this app has never seen"),
         ]
         return .object(["target": .object(["kind": .string("global")]), "layers": .array([.string("global")]),
-                        "renderer": .object(["version": .number(1)]), "keys": .array(keys + HostedExtensionsReview.keys(extensions: extensions)), "sections": .array(sections),
+                        "renderer": .object(["version": .number(1)]), "keys": .array(keys), "sections": .array(sections),
                         "diagnostics": .array([])])
     }
 
@@ -456,8 +448,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             case "context.images.block": blockImages = value?.boolValue ?? blockImages
             case "tools.active":
                 activeTools = value?.arrayValue?.compactMap(\.stringValue) ?? activeTools
-                toolWrite = "\(change["layer"]?.stringValue ?? "?")@\(params["target"]?.objectValue?["kind"]?.stringValue ?? "?")=\(activeTools.joined(separator: ","))"
-            case "sources.extensions": extensions = value?.arrayValue?.compactMap(\.stringValue) ?? []
             case "lab.focusMode": focusMode = value?.stringValue ?? focusMode
             case "lab.paths": paths = value?.arrayValue?.compactMap(\.stringValue) ?? []
             default: break
@@ -476,13 +466,12 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         ].merging(dryRun ? ["dryRun": .bool(true)] : [:]) { $1 }.merging(review) { $1 })
     }
 
-    private func key(_ id: String, group: String, subgroup: String? = nil, value: JSONValue?, display: String, layer: String = "global",
+    private func key(_ id: String, group: String, subgroup: String? = nil, value: JSONValue?, display: String,
                      set: Bool = false, badges: [JSONValue] = [], presentation: JSONValue) -> JSONValue {
         var object: [String: JSONValue] = [
-            "key": .string(id), "group": .string(group), "display": .string(display), "layer": .string(layer), "applied": .bool(true),
+            "key": .string(id), "group": .string(group), "display": .string(display), "layer": .string("global"), "applied": .bool(true),
             "overridden": .bool(set),
-            "layers": .array(HostedLaunch.arguments.contains("-settings-ui-tools-write") && id == "tools.active"
-                ? HostedExtensionsReview.layers(own: value ?? .null) : [.object(["layer": .string("global")])]),
+            "layers": .array([.object(["layer": .string("global")])]),
             "badges": .array(badges),
             "presentation": presentation,
         ]

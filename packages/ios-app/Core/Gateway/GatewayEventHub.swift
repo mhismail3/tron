@@ -10,7 +10,7 @@ package enum GatewayDiagnosticTopicAdmission {
         "session.processTranscript.changed", "transport.disconnected", "transport.resyncRequired",
         "system.stopping", "notification.inbox.changed", "auth.prompt", "auth.event",
         "auth.completed", "automation.changed", "settings.changed", "trust.changed",
-        "providers.changed", "packages.changed", "packages.progress", "packages.completed",
+        "providers.changed",
         "models.recentChanged", "models.catalogChanged", "mcp.changed", "devices.changed"
     ]
 

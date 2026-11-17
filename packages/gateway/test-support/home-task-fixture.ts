@@ -166,7 +166,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
     ...(options.providerUsage ? { providerUsage: options.providerUsage } : {}),
   });
   const registry = await createRegistry();
-  const packages = new PackageService(agentDir, trust, () => {});
+  const packages = new PackageService(agentDir, trust);
   settings = settingsDependencies({ agentDir, tronHome, trust, modelRuntime: gateway, sessions: registry, registry, packages,
     home: () => homeOwnerOf(registry), knowledge,
     ...(options.settingsNow ? { now: options.settingsNow } : {}) });
