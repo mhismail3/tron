@@ -109,6 +109,19 @@ export class ModelConfigService {
     return { document: redactedDocument, redacted: JSON.stringify(document) !== JSON.stringify(redactedDocument) };
   }
 
+  async configured(): Promise<{ providers: Array<{ id: string; host: string; api: string; models: string[] }>; errors: number }> {
+    const providers: Array<{ id: string; host: string; api: string; models: string[] }> = [];
+    let errors = 0;
+    for (const [id, raw] of Object.entries(providersOf(await this.read()))) {
+      const entry = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+      const models = Array.isArray(entry.models) ? entry.models.map(model => (model as { id?: unknown } | null)?.id) : [];
+      const host = typeof entry.baseUrl === "string" && URL.canParse(entry.baseUrl) ? new URL(entry.baseUrl).host : undefined;
+      if (host === undefined || typeof entry.api !== "string" || !models.every(model => typeof model === "string")) { errors += 1; continue; }
+      providers.push({ id, host, api: entry.api, models: models as string[] });
+    }
+    return { providers, errors };
+  }
+
   async provider(id: string): Promise<ModelProviderValue | undefined> {
     const raw = providersOf(await this.read())[id];
     return raw === undefined ? undefined : modelProviderOnDisk(id, raw);

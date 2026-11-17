@@ -527,6 +527,9 @@ describe("settings.change", () => {
     mcpDocument.mcpServers["inventory-credential"] = { url: "http://127.0.0.1:1/credential", headers: { Authorization: `!touch ${resolved}; printf secret` } };
     mcpDocument.mcpServers["inventory-slash-userinfo"] = { url: "https://user:pa/ss@127.0.0.1:1/mcp" };
     await writeFile(mcpPath, JSON.stringify(mcpDocument, null, 2));
+    await writeFile(join(f.agentDir, "models.json"), JSON.stringify({ providers: { "inventory-local": {
+      baseUrl: "https://models.inventory.test/v1", api: "openai-completions", apiKey: "inventory-provider-secret",
+      models: [{ id: "inventory-model-a" }, { id: "inventory-model-b" }] } } }));
     f.faux.setResponses([
       fauxAssistantMessage([fauxToolCall("settings", { action: "inventory" }, { id: "inventory-tool" })], { stopReason: "toolUse" }),
       fauxAssistantMessage("Done"),
@@ -550,6 +553,9 @@ describe("settings.change", () => {
     ]));
     expect(inventory.mcp.servers).not.toContainEqual(expect.objectContaining({ name: "inventory-slash-userinfo" }));
     expect(inventory.mcp.errors).toBe(1);
+    expect(inventory.models).toEqual({ providers: [{ id: "inventory-local", host: "models.inventory.test", api: "openai-completions",
+      models: ["inventory-model-a", "inventory-model-b"] }], errors: 0 });
+    expect(JSON.stringify(inventory)).not.toContain("inventory-provider-secret");
     expect(JSON.stringify(inventory)).not.toMatch(/inventory-secret|inventory-query-secret|pa\/ss|user:|127\.0\.0\.1|secret/);
   });
 
