@@ -159,11 +159,11 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   capability-gated stop (`process-transcript-abort.v1`).
 - **Manage Session.** Usage card (tokens left over the used line, Compact Now trailing), then the
   shared primary-themed `ManageModelConfigurationCard` (catalog model/provider, Switch Model, Thinking and
-  Context Window); the existing settings renderer owns reads, writes and Revert; the shared approval
-  sheet owns request review.
-  Tool selection uses its `SettingsToolsEditor` with the shared `AvailableToolsList`. Session
+  Context Window), read from `settings.resolve`, the model catalog and the session's thinking levels; writes
+  and Revert go through `settings.change`; the shared approval sheet owns request review.
+  Tool selection uses the shared `AvailableToolsList`. Session
   container: Workspace (`workspace-inspector.v1`), Instructions, Session
-  History (`session-history-pages.v1`), Subagent History; Session Settings (Repository Overrides last);
+  History (`session-history-pages.v1`), Subagent History;
   Terminal and Export as HTML/JSON. Workspace gives its single-line horizontally scrolling path a full line above a
   horizontally scrolling status-pill row; status content stays clipped to that row. Manage Session, Manage Home and every sheet they open take
   the selected primary sheet theme (semantic colors aside). Session's usage, Model, workspace/history

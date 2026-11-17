@@ -2,20 +2,19 @@
 
 ## Purpose
 
-Mac and iPhone settings, the generic schema renderer shared by all settings surfaces, and management sheets for
+Mac and iPhone settings, and management sheets for
 providers, models, extensions, MCP servers, connected services, paired Macs and devices, notifications and logs.
 
 ## Owns
 
 - Shell: `SettingsView` (`SettingsGroupKind` groups, `SettingsGroupCard`).
-- Renderer: `SettingsRendererView`, `SettingsRendererRow`, `SettingsValueEditors`,
-  `SettingsChoiceSlider`.
+- Choices: `SettingsChoiceSlider`.
 - Exact reviews use the shared `ChangeReviewSheet`.
 - Agent configuration: `ConfigurationSlider(Surface)`.
 - Accounts: `ProviderSettingsView`, `ProviderUsageReadController`, `IntegrationsSettingsView`
   (`IntegrationSheetRoutes`), `MCPServersSettingsView`, `ConnectionSettingsView`,
   `PairedDeviceDetailView`, `MacReplacementSheet`.
-- Resources: `ProjectResourceDetailSheet` (tool detail for `SettingsToolsEditor`), `TrustSettingsView`.
+- Trust: `TrustSettingsView`.
 - This iPhone and diagnostics: `AppearanceSettingsView`, `AppLocalBehaviorSettings`,
   `NotificationInboxView`, `GatewayLogsSettingsView`.
 
@@ -23,31 +22,13 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
 
 - **Layout.** The gear opens one sheet: This iPhone (primary: Appearance, one sheet: Dashboard, Subagent Activity, Color Mode, Theme color, Text Font and Code Font),
   Accounts (primary: Connections, Model Providers),
-  Agent & Tools (primary: Agent Behavior first, MCP Servers),
+  Agent & Tools (MCP Servers),
   System (steel blue: Mac Terminal, Setup, Logs). Every category destination
   inherits its group tint for chrome, containers and icons; semantic statuses retain their colors.
   Primary groups use the selected theme's `tronPrimary`; System uses `tronSteel`, not the neutral `tronSlate` role.
-  Agent Behavior opens one primary-accent sheet with the Model, Workers & delegation, Compaction
-  and Connection groups in place, not another level of section links. Each
-  group keeps its shared section heading, without section-description text. Known settings use
-  semantic glyphs in the shared renderer, with control-kind glyphs for unknown keys. The
-  groups are the app's; the Gateway serves schema sections, and unplaced sections join More.
-  Model contains direct model/thinking; Workers & delegation contains all three ordered model queues
-  and the task budget. Scoped Home navigation still names its workers/delegation destination Models.
-  Queue drafts add available physical models through the shared picker, reorder/remove locally,
-  and write only on Save; an empty list is distinct from Reset/Revert to inheritance. Each
-  presentation seeds its list draft once from the canonical input; a refresh while it is open never
-  replaces unsaved edits. After an accepted change the renderer's rows stay disabled until the shared
-  snapshot reflects it, so no editor reopens on the superseded value.
-  Other routine settings have no editor exposure; explicit values retain read-only Reset/Revert and Project inspection.
-  Automatic compaction and Summary thinking are excluded by the shared iPhone row selection even
-  when saved; canonical Gateway values, scope rules and writers are unchanged. Other Compaction
-  values appear only while retained values need inspection or Revert. More Settings groups
-  retained values; Global embeds those groups directly. There is no Advanced section.
   The `trust` group has no Global view; the
   `connections` group (Mac Terminal key and private SSH service) is owned by the Mac Terminal sheet.
-  Notifications sit in the toolbar; no Value & Source sheet. Dashboard Settings
-  exposes only Global: editable keys plus explicit read-only values with Reset and Project inspection.
+  Notifications sit in the toolbar; there is no Value & Source sheet.
   The app has no Trusted Projects list: the agent changes `permissions.projectTrust` and
   `permissions.defaultProjectTrust` behind the native card; the untrusted-project prompt and the
   Project Settings trust row (`TrustSettingsView`) also write `permissions.projectTrust`.
@@ -59,31 +40,17 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   explains how to retry. Restores and Light/Dark/Auto changes do not request icon changes.
   Home Screen light/dark/clear/tinted renditions remain system/user-controlled and need not match
   the in-app color mode. Section layouts use
-  `TronSettingsSections`, including renderer-driven and conditional groups. Settings subsheets
+  `TronSettingsSections`, including conditional groups. Settings subsheets
   opt in with `hidesLoneHeading: true`: one container has no heading, multiple containers retain
   their headings, and explanatory detail remains. Top-level settings keep all group headings.
-  A headless renderer section (no group headings shown, one group without detail) whose rows name
-  the group, or which has one row, has no container of its own, so a lone row keeps its
-  `settings-row-*` identity; other sections are wrapped as `settings-section-<id>-detail`.
-- **Renderer.** Sends `SettingsRendererContract` version 1 (`toggle`, `choice`, `text`,
-  `list`, `catalog`, `readOnly`) with `settings.resolve` and renders sections in Gateway
-  order. An unimplemented control renders its `display` read-only; an
-  undeclared group shows under its id. The Gateway declaration owns row exposure. Options come from
-  `settings.options`, re-requested when a `dependsOn` key changes; catalog pages fence every
-  completion and stop on repeated cursors. Choices open picker sheets of `TronCatalogOptionRow`
-  (native menus fail inside nested sheets, #877); ordered choices use the shared
-  anchored slider with Gateway-served choices; a tap anywhere outside it closes and saves it, even
-  below a short embedded section. Embedded renderers inherit the enclosing sheet's slider host;
-  only standalone renderers install one, so the editor uses the sheet viewport rather than its card.
-  Session and Home retain their scope-specific section drill-in rows; overrides show the
-  shared Overridden pill beside the row title. The shared settings row places Reset/Revert
-  before the value: the value pill is rightmost, with independent 44-point targets.
+- **Settings rows.** The shared settings row places Reset/Revert before the value: the value pill is
+  rightmost, with independent 44-point targets. Overrides show the shared Overridden pill beside the row title.
 - **Writes.** Every write is a `settings.change`: dry run first, a refusal shows under its row and
   `confirm` text asks before sending. Secret drafts start empty and clear on dismissal; string-list
   drafts write only on Save. Numeric-map list controls use read-only value/provenance rows instead of
   a native form; agents configure them through `settings`, including the shared native card for a
   task-budget raise and logged Undo for
-  reversible changes. Unknown fields stay read-only. Model cards share the renderer's pending
+  reversible changes. Unknown fields stay read-only. Model cards share the pending
   receipt and the session owner's admission state with `ModelSelectionAvailability`: model browsing
   stays available while choices, Revert and picker reset are disabled. Their existing change gate
   still serializes writes; no presentation value grants mutation authority. Outside-change recovery
@@ -91,25 +58,14 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   detail link. The real-Gateway outside-change journey verifies the live value, receipt-backed restore
   and marker removal on that row. The Gateway supplies override presence and permissions;
   rows never infer ownership from value equality.
-- **Chat and Home settings.** Manage Session and Manage Home open `SessionSettingsView` (scopes:
-  Project, Session, Global); Home writes its saved settings, a chat its own Session scope.
-  Both reuse Global's renderer and editors. Manage model cards select the three chat-model keys:
-  catalog header/Switch Model, Thinking and an explicit model-qualified Context Window for inspection/Revert. They use the
-  same writes, approvals and Revert path; changing the card changes no scope semantics. The model
-  header is one line with a leading CPU glyph and no provider subtitle; model cards omit Overridden.
-  Home Settings embeds the former Models, Tools and More Settings sections directly under logical
-  headers, keeping its introductory caption, and ends with Home's pause/disable controls
-  (`HomeControlsSection`). Only that first level is flattened: shared row editors,
-  pickers, source inspection and Revert stay unchanged. Worker settings render independently of
-  delegation permission reads; an uninitialized task namespace must not hide saved profile editors.
-  Session Settings has one untitled container (Compaction, Tools, Project Trust, More Settings),
-  with its Global-inheritance caption immediately below as a footer;
-  no Models subsheet. Overridable keys only; Project-owned controls are read-only with “Set by Project settings”;
-  explicit overrides have Overridden and circular Revert. `SettingsProjectGroups` shows applied
-  Repository Overrides last; `ProjectSettingsSections` owns the unchanged trust editor and ignored
-  repository-field notices (no Workspace row in Session Settings). Summaries omit unset values. Trust still uses `TrustSettingsView`; another Mac requires **Use This Server**.
-  Until the user scrolls, `SessionSettingsView` keeps its content at its top edge as the presented
-  sheet's top inset settles, so an upward drag at medium expands the sheet rather than scrolling it.
+- **Manage Home and the chat model card.** Manage Home lists Controls (`HomeControlsSection`) and Task
+  Permissions (`HomeTaskSheet(permissionsFor:)`) as navigation rows beside Profile, Memory, Chapters and Tasks.
+  The chat model card (`ManageModelConfigurationCard`, `session-model-summary` or `home-model-summary`) reads
+  `settings.resolve` for the three chat-model keys. Switch Model lists the catalog, Thinking lists the session's
+  thinking levels, and Context Window lists the selected model's limits. Writes are `settings.change` at the
+  chat's Session scope (Home writes its saved settings). A Project-owned value is read-only and names its file.
+  The Project sheet keeps the trust row (`TrustSettingsView`) and the Workspace row; the app does not show
+  repository overrides, which the settings tool inspects.
 - **Changes.** The app has no settings audit view; the agent pages `history` and `undo` through the
   `settings` tool, and the durable record stays under `~/.tron`.
 - **Exact reviews.** The maintainer's own edits apply directly; picking the value the edited
@@ -166,7 +122,7 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
 
 ## Entry points
 
-`SettingsView.swift`, `SettingsRendererView.swift`,
+`SettingsView.swift`,
 `ProviderSettingsView.swift`, `MCPServersSettingsView.swift`, `ConnectionSettingsView.swift`.
 
 ## Verify
