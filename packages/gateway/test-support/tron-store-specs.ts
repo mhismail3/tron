@@ -206,7 +206,6 @@ export const STORES: readonly StoreSpec[] = [
     async record(home) {
       const grants = new NotificationGrantStore(home);
       await grants.initialize();
-      await grants.update((current) => ({ ...current, policy: { ...current.policy, notifyWhenAskPresented: false } }));
     },
     async read(home) {
       const grants = new NotificationGrantStore(home);

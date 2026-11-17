@@ -62,7 +62,7 @@ const HOME_EXTENSIONS = [
   "<inline:tron-projects> | tools projects",
   "<inline:tron-ask-user> | tools ask_user",
   "<inline:tron-display> | tools display | on tool_result×1,agent_end×1,session_shutdown×1",
-  "<inline:tron-notify> | tools notify",
+  "<inline:tron-notify> | tools push_retry,notify",
   "<inline:tron-computer> | tools computer | on session_shutdown×1,before_agent_start×1",
   "<inline:tron-home> | tools zoom,date,memory_search,profile,obligation,delegate,task | on tool_call×1,cache_warming_decision×1,before_provider_request×1",
   "<inline:tron-home-research> | tools session_search,session_read",
@@ -84,7 +84,7 @@ const WORKER_EXTENSIONS = [
   "<inline:tron-display> | tools display | on tool_result×1,agent_end×1,session_shutdown×1",
   "<inline:tron-swift-apps> | tools swift_app",
   "<inline:tron-computer> | tools computer | on session_shutdown×1,before_agent_start×1",
-  "<inline:tron-notify> | tools notify",
+  "<inline:tron-notify> | tools push_retry,notify",
   "<inline:tron-model-queue> | on session_start×3,agent_before_settle×2,before_agent_start×1,session_shutdown×1,tool_call×1",
   "<inline:tron-home-task-worker> | on before_agent_start×1,tool_call×1",
 ];
@@ -116,7 +116,7 @@ describe("gateway/home scenario lock", () => {
           relayRequests.push({ method: String(init.method), path: new URL(url).pathname, envelope: init.body ? JSON.parse(String(init.body)) : null });
           return new Response(JSON.stringify({ status: "accepted_by_apns" }), { status: 200 }) as never;
         });
-        notifications = new NotificationService(new NotificationGrantStore(tronHome), relay, Date.now, () => {}, () => {}, () => {},
+        notifications = new NotificationService(new NotificationGrantStore(tronHome), relay, async () => ({ inputNeeded: true, finished: true, waiting: true }), Date.now, () => {}, () => {}, () => {},
           (sessionId) => (gateway ? homeOwnerOf(gateway.registry) : undefined)?.chapterStateFor(sessionId).homeId !== undefined);
         await notifications.initialize();
         return notifications;
@@ -162,7 +162,6 @@ describe("gateway/home scenario lock", () => {
     const registered = await phone.request("push.registration.upsert", {
       commandId: gateway.commandId(), installationId: "lock-installation", grantId: "lock-grant-0001",
       secret: Buffer.alloc(32, 7).toString("base64url"), previewsEnabled: false, relayOrigin: RELAY_ORIGIN,
-      notifyWhenAskPresented: true, notifyWhenFinished: true, notifyWhenWaiting: true,
     });
     expect(registered.ok, JSON.stringify(registered)).toBe(true);
     const undesignated = await phone.request("home.status", {});
@@ -217,8 +216,7 @@ describe("gateway/home scenario lock", () => {
     const MODEL = `${LOCK_PROVIDER}/faux-1`;
     const HOST = { eventLoopUtilization: "<host>", level: "<host>", load1PerCpu: "<host>", sampledAt: "<host>" };
     expect(answers[0], "the push registration").toEqual({ error: null, ok: true, result: {
-      available: true, deviceRegistered: true, enabledDeviceCount: 1, notifyWhenAskPresented: true, notifyWhenFinished: true, notifyWhenWaiting: true,
-      pendingCount: 0, registered: true, relayOrigin: RELAY_ORIGIN, requiresGrantRotation: false } });
+      available: true, deviceRegistered: true, enabledDeviceCount: 1, pendingCount: 0, registered: true, relayOrigin: RELAY_ORIGIN, requiresGrantRotation: false } });
     expect(answers[1], "status before designation: no Home, designate is the recovery").toEqual({ error: null, ok: true, result: {
       activation: { available: false }, available: true, enabled: false, hostPressure: HOST, live: false,
       memory: { configured: false, open: false, paused: false }, phase: "undesignated", readiness: { gaps: ["not-designated"], ready: false },
@@ -437,7 +435,7 @@ describe("gateway/home scenario lock", () => {
     const FIXED = { "context.images.autoResize": { value: true }, "model.contextWindow": { qualifiers: { model: MODEL }, value: 128000 } };
     const HOME_TOOLS = ["ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "profile", "obligation", "web_search", "session_search",
       "session_read", "settings", "tool_search", "read", "write", "edit", "bash", "grep", "find", "ls", "computer"];
-    const WORKER_TOOLS = ["read", "bash", "edit", "write", "web_search", "settings", "ask_user", "display", "computer", "notify", "checkin", "report", "tool_search"];
+    const WORKER_TOOLS = ["read", "bash", "edit", "write", "web_search", "settings", "ask_user", "display", "computer", "push_retry", "notify", "checkin", "report", "tool_search"];
     expect(values(homeSessionJsonl), "Home's resolved settings").toEqual({ requestPins: { "context.images.block": false }, fixed: { ...FIXED,
       "model.ref[role=chat]": { qualifiers: { role: "chat" }, value: MODEL_REF },
       "model.thinking[role=chat]": { qualifiers: { model: MODEL, role: "chat" }, value: "off" }, "tools.active": { value: HOME_TOOLS } } });

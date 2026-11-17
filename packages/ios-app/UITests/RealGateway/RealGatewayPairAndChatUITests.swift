@@ -996,7 +996,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         keepScreenshot(app, name: "939-mcp-servers")
         dismissTopSheet(app)
 
-        for (title, marker, name) in [("Connections", "Paired Macs", "connections"), ("Push Notifications", "Input needed", "push")] {
+        for (title, marker, name) in [("Connections", "Paired Macs", "connections"), ("Push Notifications", "Private agent alerts for this iPhone.", "push")] {
             let link = app.buttons["settings-link-\(title)"]
             revealBelowNavigationBar(app, link)
             link.tap()
