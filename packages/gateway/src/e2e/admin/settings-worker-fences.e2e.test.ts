@@ -153,7 +153,7 @@ describe("settings worker changes and Session fences", () => {
     expect(await rules()).toEqual({ "context.rules.global": true, "context.rules.project": true });
     const chat = await f.registry.create(f.cwd);
     await expect(f.settingsChanges.change({ kind: "global" }, changes(false), { actor: { kind: "agent", id: chat.id, sessionId: chat.id },
-      reason: "Ordinary chat tries" })).rejects.toMatchObject({ code: "invalid_request" });
+      reason: "Ordinary chat tries" })).rejects.toMatchObject({ code: "invalid_request", message: "Global AGENTS.md cannot be changed by agent" });
     expect(await rules()).toEqual({ "context.rules.global": true, "context.rules.project": true });
     transcript.push({ case: "Home changes the AGENTS.md rules keys", steps: [{ off: off.details, on: on.details }] });
   }, 90_000);
