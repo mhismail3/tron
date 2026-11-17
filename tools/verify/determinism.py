@@ -37,8 +37,7 @@ def measure() -> dict[str, dict[str, int]]:
     found: dict[str, dict[str, int]] = {}
     for path in scanned():
         text = (ROOT / path).read_text()
-        counts = Counter({rule: len(pattern.findall(text)) for rule, pattern in RULES.items()})
-        counts = {rule: count for rule, count in counts.items() if count}
+        counts = {rule: n for rule, pattern in RULES.items() if (n := len(pattern.findall(text)))}
         if counts:
             found[path[len(GATEWAY) + 1:]] = dict(sorted(counts.items()))
     return found
@@ -80,6 +79,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--base", default="origin/main")
     parser.add_argument("--update", action="store_true", help="remove fixed sites from the baseline")
     args = parser.parse_args(argv)
+    if git("rev-parse", "--verify", "--quiet", f"{args.base}^{{commit}}", check=False).returncode:
+        raise SystemExit(f"determinism: base {args.base} not found; pass --base <ref>")
     shown = git("show", f"{args.base}:{BASELINE}", check=False)
     bound = load(shown.stdout if shown.returncode == 0 else None, f"{args.base}:{BASELINE}")
     path = ROOT / BASELINE
@@ -94,8 +95,7 @@ def main(argv: list[str]) -> int:
         if baseline is not None and compare(current, baseline)[0]:
             problems.append("--update only removes fixed sites; new sites cannot be baselined")
         else:
-            write({file: {rule: min(n, (baseline or current).get(file, {}).get(rule, 0)) for rule, n in rules.items()}
-                   for file, rules in current.items()})
+            write(current)
             print(f"determinism: baseline {'written' if baseline is None else 'tightened'}: {len(current)} files")
             baseline = current
     grew, fixed = compare(current, baseline or {})

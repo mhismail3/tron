@@ -22,6 +22,7 @@ class DeterminismTests(unittest.TestCase):
         self.git("init", "-q")
         self.git("config", "user.email", "t@example.invalid")
         self.git("config", "user.name", "t")
+        self.git("commit", "-q", "--allow-empty", "-m", "base")
 
     def git(self, *args):
         subprocess.run(["git", *args], cwd=self.root, check=True, capture_output=True)
@@ -46,7 +47,9 @@ class DeterminismTests(unittest.TestCase):
             self.assertIn(f"new site (tools/verify/README.md determinism): {rule}: packages/gateway/src/a.test.ts", grown.stdout)
         self.assertEqual(self.lint("--update").returncode, 1)
         self.test.write_text(CLEAN)
-        self.assertIn("improved, tighten the baseline", self.lint().stdout)
+        improved = self.lint()
+        self.assertEqual(improved.returncode, 1)
+        self.assertIn("improved, tighten the baseline", improved.stdout)
         self.assertEqual(self.lint("--update").returncode, 0)
         self.assertEqual(self.lint().returncode, 0)
         self.commit()
