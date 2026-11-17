@@ -135,7 +135,7 @@ export class DeviceLogStore {
 
   remove(deviceId: string): Promise<void> {
     return this.mutex.run(() => {
-      const log = this.stream(deviceId).log;
+      const log = new RotatingJsonl(this.path(deviceId), SEGMENT_BYTES, SEGMENT_COUNT);
       for (let index = 0; index < SEGMENT_COUNT; index += 1) rmSync(log.segmentPath(index), { force: true });
       this.streams.delete(deviceId);
       this.owners.delete(deviceId);
@@ -199,11 +199,14 @@ export class DeviceLogStore {
     const existing = this.streams.get(deviceId);
     if (existing) return existing;
     this.ensureDirectory();
-    const path = join(this.directory, `${createHash("sha256").update(deviceId).digest("hex").slice(0, 32)}.jsonl`);
-    const log = new RotatingJsonl(path, SEGMENT_BYTES, SEGMENT_COUNT);
+    const log = new RotatingJsonl(this.path(deviceId), SEGMENT_BYTES, SEGMENT_COUNT);
     const stream: Stream = { log, ...this.readTail(log) };
     this.streams.set(deviceId, stream);
     return stream;
+  }
+
+  private path(deviceId: string): string {
+    return join(this.directory, `${createHash("sha256").update(deviceId).digest("hex").slice(0, 32)}.jsonl`);
   }
 
   private ensureDirectory(): void {

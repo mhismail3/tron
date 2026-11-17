@@ -849,10 +849,8 @@ export class GatewayService {
           }
           await this.dependencies.notifications?.removeDevice(deviceId);
           const revoked = await this.dependencies.devices.revoke(deviceId, () => client.revokeDevice(deviceId));
-          if (revoked) {
-            await this.iosDeviceInstallService.removeDevice(deviceId);
-            await this.deviceLogStore().remove(deviceId);
-          }
+          if (revoked) await this.iosDeviceInstallService.removeDevice(deviceId);
+          await this.deviceLogStore().remove(deviceId);
           return { revoked };
         }));
       }

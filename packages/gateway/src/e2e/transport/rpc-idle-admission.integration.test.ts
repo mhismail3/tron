@@ -376,9 +376,8 @@ describe("device log append RPC boundary", () => {
     await phone.request("keep-append", "client.logs.append", { commandId: "keep-append-0001", bootId: "boot-keep-0001", firstSequence: 1, lines: batch(1, 1) });
     await second.request("gone-append", "client.logs.append", { commandId: "gone-append-0001", bootId: "boot-gone-0001", firstSequence: 1, lines: batch(1, 2) });
     expect(await deviceFiles(fixtureValue.root)).toHaveLength(2);
-    const secondId = (second.frames.find((frame) => frame.type === "hello") as { deviceId?: string } | undefined)?.deviceId;
     const devices = await phone.request("list-devices", "device.list", {});
-    const target = secondId ?? (devices.result.devices as Array<{ id: string; name: string }>).find((device) => device.name === "Unpaired phone")!.id;
+    const target = (devices.result.devices as Array<{ id: string; name: string }>).find((device) => device.name === "Unpaired phone")!.id;
     const revoked = await phone.request("revoke-second", "device.revoke", { commandId: "revoke-second-0001", deviceId: target });
     expect(revoked.result, JSON.stringify(revoked)).toEqual({ revoked: true });
     const left = await deviceFiles(fixtureValue.root);
