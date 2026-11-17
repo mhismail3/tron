@@ -494,7 +494,7 @@ export class SettingsChangePath {
   private async plan(target: SettingsTarget, stores: SettingsStores, request: ChangeRequest, context: ChangeContext, runtime: ModelRuntime): Promise<Planned> {
     const subject = recordSubject(request.key);
     const record = subject?.write ? this.model.schema.recordKey(request.key) : undefined;
-    const key = record ?? keyForHome(declaredKey(this.model.schema, request.key), stores.layers.includes("home"));
+    const key = record ?? keyForHome(declaredKey(this.model.schema, request.key), stores.layers.includes("home") && request.layer !== "global");
     if (request.layer === "project") {
       throw new GatewayError("invalid_request", "Project settings are read-only; edit the repository");
     }
