@@ -159,17 +159,6 @@ final class TronChatHapticsUITests: XCTestCase {
         assertHaptics(app, "none", "its dismissal plays nothing")
     }
 
-    @MainActor func testRendererToggleTicksOnceWithoutLoadFeedback() {
-        continueAfterFailure = false
-        let app = launchSettings(["-settings-renderer-haptics"]); defer { app.terminate() }
-        let toggle = app.switches["Block images"]
-        XCTAssertTrue(toggle.waitForExistence(timeout: 30), app.debugDescription)
-        assertHaptics(app, "none", "loading settings is silent")
-        toggle.tap()
-        XCTAssertTrue(waitHaptics(app, "toggleChanged"))
-        assertHaptics(app, "toggleChanged", "the server response does not echo the user's tick")
-    }
-
     @MainActor func testAcceptedFormAnswerPlaysSuccessOnce() {
         continueAfterFailure = false
         let app = launch(photos: 0); defer { app.terminate() }

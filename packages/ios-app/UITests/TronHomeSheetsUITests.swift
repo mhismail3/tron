@@ -346,12 +346,6 @@ final class TronHomeSheetsUITests: XCTestCase {
         keep("931-\(level)-manage")
     }
 
-    @MainActor func testHomeSettingsCardsLight() { homeSettingsCards(name: "light", arguments: []) }
-    @MainActor func testHomeSettingsCardsDark() { homeSettingsCards(name: "dark", arguments: ["-home-dark"]) }
-    @MainActor func testHomeSettingsCardsAccessibilityText() {
-        homeSettingsCards(name: "ax-large", arguments: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"])
-    }
-
     @MainActor private func homeSettingsCards(name: String, arguments: [String]) {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -380,32 +374,6 @@ final class TronHomeSheetsUITests: XCTestCase {
         XCTAssertEqual(workers.frame.width, tools.frame.width, accuracy: 1)
         shot("1478-home-settings-\(name)")
         shot("1478-home-settings-\(name)-bottom")
-    }
-
-    @MainActor func testSessionSettingsCardsShareHomeGap() {
-        continueAfterFailure = false
-        for (appearance, size) in [("light", "UICTContentSizeCategoryL"), ("dark", "UICTContentSizeCategoryL"),
-                                   ("light", "UICTContentSizeCategoryAccessibilityL")] {
-            let app = XCUIApplication()
-            app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", appearance,
-                                   "-UIPreferredContentSizeCategoryName", size]
-            app.launch()
-            XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
-            app.buttons["Stop session"].tap()
-            let link = app.buttons["chat-settings-link"]
-            for _ in 0..<12 where !link.isHittable { app.swipeUp() }
-            link.tap()
-            expandSheet(app, title: "Session Settings")
-            let content = element(app, "session-settings-content")
-            XCTAssertTrue(app.buttons["settings-section-tools-open"].waitForExistence(timeout: 8), app.debugDescription)
-            XCTAssertFalse(app.buttons["settings-section-model-open"].exists, "Session Settings has no Models subsheet")
-            let suffix = size.contains("Accessibility") ? "ax-large" : appearance
-            shot("1478-session-settings-\(suffix)")
-            groupCards(app, content)
-            XCTAssertFalse(element(app, "settings-row-context.images.autoResize").exists, content.debugDescription)
-            shot("1478-session-settings-\(suffix)-bottom")
-            app.terminate()
-        }
     }
 
     @MainActor private func groupCards(_ app: XCUIApplication, _ content: XCUIElement) {

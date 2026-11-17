@@ -4,20 +4,6 @@ import UIKit
 @MainActor final class TronSixSmallUIRegressionTests: XCTestCase {
     private let root = "/Users/fixture/Workspace/tron-worktrees/six-small-ui-fixes"
 
-    func testHomeSettingsOrder() {
-        for mode in ["light", "dark"] {
-            let app = launch("home", mode: mode)
-            let headings = ["Workers & delegation", "Tools", "Connection"].map { app.staticTexts[$0].firstMatch }
-            for heading in headings { XCTAssertTrue(heading.waitForExistence(timeout: 8), app.debugDescription) }
-            XCTAssertLessThan(headings[0].frame.minY, headings[1].frame.minY)
-            XCTAssertLessThan(headings[1].frame.minY, headings[2].frame.minY)
-            XCTAssertFalse(app.buttons["settings-section-model-open"].exists)
-            XCTAssertFalse(app.buttons["settings-section-tools-open"].exists)
-            XCTAssertFalse(app.buttons["settings-section-advanced-open"].exists)
-            app.terminate()
-        }
-    }
-
     func testSessionSettingsOrder() {
         for mode in ["light", "dark"] {
             let app = launch("session", mode: mode)

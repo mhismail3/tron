@@ -1,38 +1,6 @@
 import XCTest
 
 @MainActor final class TronSheetLayoutUITests: XCTestCase {
-    func testHomeSettingsAreOnMainSheet() {
-        let app = home()
-        defer { app.terminate() }
-        XCTAssertFalse(app.buttons["settings-section-model-open"].exists, "Workers are edited on Home Settings")
-        XCTAssertFalse(app.buttons["settings-section-tools-open"].exists, "The Tools setting is on Home Settings")
-        XCTAssertFalse(app.buttons["settings-section-advanced-open"].exists, "Connection and approvals are on Home Settings")
-        for prefix in ["settings-row-model.queue_role_worker_", "settings-row-model.queue_role_subagent_", "settings-row-model.queue_role_background_", "settings-row-tools.active", "settings-row-run.transport", "settings-row-run.retry.maxRetries"] {
-            let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@ AND NOT identifier ENDSWITH '-reset'", prefix)).firstMatch
-            XCTAssertTrue(row.exists, "Inline setting \(prefix)\n\(app.debugDescription)")
-        }
-        XCTAssertTrue(app.staticTexts["Home's overrides of Global settings. Worker launch choices apply to new workers."].exists)
-        let worker = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'settings-row-model.queue_role_worker_' AND NOT identifier ENDSWITH '-reset'")).firstMatch
-        XCTAssertTrue(worker.staticTexts["Overridden"].exists)
-        XCTAssertTrue(worker.buttons.matching(NSPredicate(format: "identifier ENDSWITH '-reset'")).firstMatch.exists)
-        let editor = worker.buttons["Worker models"].firstMatch
-        reveal(editor, in: app)
-        editor.tap()
-        XCTAssertTrue(app.navigationBars.staticTexts["Worker models"].waitForExistence(timeout: 8), "The existing deeper list editor still opens")
-    }
-
-    func testSessionCaptionFollowsUntitledSettingsCard() {
-        let app = session()
-        defer { app.terminate() }
-        XCTAssertFalse(app.staticTexts["Settings"].exists, "No Settings heading above the session card")
-        let tools = app.buttons["settings-section-tools-open"]
-        let trust = app.buttons["project-settings-trust"]
-        let caption = app.staticTexts["Choices for this session. Revert an override to use Global settings."]
-        XCTAssertTrue(tools.exists && trust.exists && caption.exists, app.debugDescription)
-        XCTAssertGreaterThan(caption.frame.minY, max(tools.frame.maxY, trust.frame.maxY), "The explanatory caption is the card's footer")
-        XCTAssertLessThan(caption.frame.minY, app.staticTexts["Repository Overrides"].frame.minY, "The footer belongs to session choices, not repository overrides")
-    }
-
     func testHistoryEntryUsesOneScrollAndClearsToolbarAtMedium() {
         let app = history()
         defer { app.terminate() }

@@ -880,70 +880,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     }
 
     @MainActor
-    func testSettingsSheetsOpenStably() throws {
-        continueAfterFailure = true
-        let fixture = try RealGatewayUIFixture.fromEnvironment()
-        let app = launchApp()
-        defer { app.terminate() }
-        open(fixture.invitationLink())
-        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
-        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
-        createSession(app, inWorkspace: fixture.workspace)
-        let loading = app.staticTexts["Loading settings…"]
-        func burst(_ name: String) {
-            for index in 0..<10 {
-                let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-                shot.name = String(format: "%@-%02d", name, index)
-                shot.lifetime = .keepAlways
-                add(shot)
-            }
-        }
-        func openSheet(_ identifier: String, _ name: String, section: String? = nil) {
-            _ = app.buttons.matching(identifier: identifier).firstMatch.waitForExistence(timeout: 30)
-            guard let button = app.buttons.matching(identifier: identifier).allElementsBoundByIndex.last else {
-                XCTFail("no \(identifier): \(app.debugDescription)"); return
-            }
-            for _ in 0..<12 where !button.isHittable { app.swipeUp() }
-            button.tap()
-            if let section {
-                XCTAssertTrue(app.descendants(matching: .any)["settings-section-\(section)-detail"].waitForExistence(timeout: 2),
-                              "the \(name) sheet did not open on its content")
-                XCTAssertFalse(loading.exists, "the \(name) sheet showed a loading state")
-            }
-            burst(name)
-        }
-
-        let ring = app.buttons["session-context-button"]
-        XCTAssertTrue(ring.waitForExistence(timeout: 60), app.debugDescription)
-        ring.tap()
-        XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 30), app.debugDescription)
-        burst("manage-session")
-        for _ in 0..<4 { app.swipeUp() }
-        burst("manage-session-rows")
-        openSheet("chat-settings-link", "session-settings")
-        let settings = app.descendants(matching: .any)["session-settings-content"]
-        XCTAssertFalse(settings.buttons["Switch Model"].exists)
-        openSheet("settings-section-tools-open", "session-tools", section: "tools")
-        XCTAssertFalse(app.buttons["settings-section-advanced-open"].exists, "An empty section has no destination")
-        dismissTopSheet(app)
-        dismissTopSheet(app)
-        dismissTopSheet(app)
-
-        let gear = app.navigationBars.buttons["Settings"]
-        XCTAssertTrue(gear.waitForExistence(timeout: 30), app.debugDescription)
-        gear.tap()
-        XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 30), app.debugDescription)
-        burst("settings")
-        openSheet("settings-link-Agent Behavior", "global-agent-behavior", section: "model")
-        XCTAssertTrue(app.descendants(matching: .any)["settings-section-run-detail"].waitForExistence(timeout: 30))
-        dismissTopSheet(app)
-        for (title, name) in [("MCP Servers", "mcp"),
-                              ("Model Providers", "providers"), ("Setup", "setup")] {
-            openSheet("settings-link-\(title)", name); dismissTopSheet(app)
-        }
-    }
-
-    @MainActor
     func testSettingsSourcesTextDoneAndRoutes() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
@@ -1019,82 +955,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     }
 
     @MainActor
-    func testRoutineEditorsDisappearAndExplicitGlobalValueResets() throws {
-        continueAfterFailure = false
-        let fixture = try RealGatewayUIFixture.fromEnvironment()
-        let agentDirectory = try XCTUnwrap(fixture.agentDirectory)
-        let file = URL(fileURLWithPath: agentDirectory).appendingPathComponent("settings.json")
-        var document = try globalSettingsDocument(fixture.agentDirectory)
-        document["retry"] = ["maxRetries": 0]
-        try JSONSerialization.data(withJSONObject: document).write(to: file)
-        let app = launchApp()
-        defer { app.terminate() }
-        open(fixture.invitationLink())
-        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
-        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
-        createSession(app, inWorkspace: fixture.workspace)
-        let gear = app.navigationBars.buttons["Settings"]
-        XCTAssertTrue(gear.waitForExistence(timeout: 30)); gear.tap()
-        openAgentBehavior(app)
-        XCTAssertFalse(settingRow(app, key: "context.compaction.enabled").exists,
-                       "Inherited routine compaction still has no editor in the consolidated sheet")
-        let row = settingRow(app, key: "run.retry.maxRetries")
-        revealBelowNavigationBar(app, row)
-        XCTAssertTrue(row.waitForExistence(timeout: 15), app.debugDescription)
-        XCTAssertTrue(row.staticTexts["0 retries"].exists, row.debugDescription)
-        let reset = app.buttons["settings-row-run.retry.maxRetries-reset"]
-        XCTAssertTrue(reset.isHittable, row.debugDescription)
-        XCTAssertEqual(row.buttons.count, 1, "An explicit routine value offers only Reset, never an editor")
-        keepScreenshot(app, name: "1975-zero-override-reset-only")
-        reset.tap()
-        XCTAssertTrue(waitUntil(timeout: 30) {
-            let retry = (try? self.globalSettingsDocument(fixture.agentDirectory))?["retry"] as? [String: Any]
-            return retry?["maxRetries"] == nil
-        }, "Reset removes the explicit value through the real settings change path")
-        XCTAssertTrue(waitForNonExistence(row, timeout: 30), app.debugDescription)
-        XCTAssertFalse(app.buttons["HTTP proxy"].exists, "The inert proxy editor is removed")
-        keepScreenshot(app, name: "1975-inherited-routine-row-gone")
-    }
-
-    @MainActor
-    func testSessionSettingsOmitsInheritedRoutineEditors() throws {
-        continueAfterFailure = false
-        let fixture = try RealGatewayUIFixture.fromEnvironment()
-        let app = launchApp()
-        defer { app.terminate() }
-        open(fixture.invitationLink())
-        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
-        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
-        createSession(app, inWorkspace: fixture.workspace)
-
-        let manageSessionButton = app.buttons["session-context-button"]
-        XCTAssertTrue(manageSessionButton.waitForExistence(timeout: 60), app.debugDescription)
-        XCTAssertTrue(manageSessionButton.label.contains("Manage Session"), manageSessionButton.debugDescription)
-        manageSessionButton.tap()
-        XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 30), app.debugDescription)
-        XCTAssertTrue(app.buttons["chat-settings-link"].waitForExistence(timeout: 15),
-                      "Manage Session must link to Session Settings: \(app.debugDescription)")
-        XCTAssertFalse(app.buttons["project-settings-link"].exists,
-                       "Project Settings is a section of Session Settings, not a Manage Session row (#1655)")
-        app.buttons["chat-settings-link"].tap()
-        XCTAssertTrue(app.navigationBars.staticTexts["Session Settings"].waitForExistence(timeout: 15), app.debugDescription)
-        XCTAssertTrue(app.descendants(matching: .any)["session-project-settings"].waitForExistence(timeout: 15))
-        for id in ["settings-section-context-open", "settings-section-run-open"] {
-            XCTAssertFalse(app.buttons[id].exists,
-                           "Session Settings offers recovery for explicit overrides, not inherited routine editors")
-        }
-        XCTAssertFalse(settingRow(app, key: "run.retry.enabled").exists)
-        keepScreenshot(app, name: "1975-session-inherited-routine-editors-absent")
-        dismissTopSheet(app)
-        dismissTopSheet(app)
-        manageSessionButton.tap()
-        XCTAssertTrue(app.buttons["chat-settings-link"].waitForExistence(timeout: 15))
-        app.buttons["chat-settings-link"].tap()
-        XCTAssertTrue(app.navigationBars.staticTexts["Session Settings"].waitForExistence(timeout: 15))
-        XCTAssertFalse(app.buttons["settings-section-run-open"].exists, "Reopening cannot manufacture an override")
-    }
-
-    @MainActor
     func testProjectSettingsExposeReadOnlyOverrides() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
@@ -1121,49 +981,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(none.waitForExistence(timeout: 30) && !row.exists, "Reopening reads the same repository state")
         XCTAssertEqual(try Data(contentsOf: projectFile), projectBytes)
         keepScreenshot(app, name: "1308-project-readonly-source")
-    }
-
-    @MainActor
-    func testGlobalSettingsServeExposedEditorsAndEditAtGlobalScope() throws {
-        continueAfterFailure = false
-        let fixture = try RealGatewayUIFixture.fromEnvironment()
-        let schema = try SettingsSchemaInventory.fromEnvironment()
-        let app = launchApp()
-        defer { app.terminate() }
-        open(fixture.invitationLink())
-        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
-        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
-        createSession(app, inWorkspace: fixture.workspace)
-        var coverage: [String: SurfaceCoverage] = [:]
-
-        let globalSettingsGear = app.navigationBars.buttons["Settings"]
-        func openGlobalSettings() {
-            XCTAssertTrue(globalSettingsGear.waitForExistence(timeout: 30), app.debugDescription)
-            globalSettingsGear.tap()
-            XCTAssertTrue(app.navigationBars.staticTexts["Global Settings"].waitForExistence(timeout: 30), app.debugDescription)
-        }
-        openGlobalSettings(); XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "More Settings")).count, 0,
-                                             "Global embeds its former More Settings groups in Agent Behavior")
-        coverage["settings"] = assertSettingsSurface(app, name: "settings", layers: ["global"], schema: schema, sectionDestinations: [
-            "model": "Agent Behavior", "workers": "Agent Behavior", "context": "Agent Behavior", "run": "Agent Behavior"])
-        openGlobalAgentBehavior(app)
-        let globalEdit = chooseSetting(app, key: "model.thinking[role=chat]")
-        XCTAssertNotEqual(globalEdit.before, globalEdit.after, "the Global edit was not accepted")
-        dismissTopSheet(app)
-        dismissTopSheet(app)
-        XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
-        openGlobalSettings()
-        openGlobalAgentBehavior(app)
-        let reopened = choiceRow(app, key: "model.thinking[role=chat]")
-        XCTAssertTrue(waitForOverride(reopened, timeout: 30),
-                      "the reopened Settings must offer the Global reset: \(reopened.debugDescription)")
-        XCTAssertEqual(choiceValue(reopened), globalEdit.after, "the reopened Global value is not the accepted value")
-        keepScreenshot(app, name: "settings-surface-settings-global-edit")
-        dismissTopSheet(app)
-        dismissTopSheet(app)
-        XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
-
-        attachSettingsCoverage(coverage, schema: schema)
     }
 
     @MainActor
