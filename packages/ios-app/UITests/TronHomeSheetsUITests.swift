@@ -471,7 +471,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         app.swipeUp()
         let controls = element(app, "home-manage-controls"), tasks = element(app, "home-manage-tasks")
         XCTAssertTrue(controls.waitForExistence(timeout: 3))
-        XCTAssertGreaterThan(controls.frame.minY, tasks.frame.maxY + 8, "Home controls sit in a separate container")
+        XCTAssertGreaterThan(controls.frame.minY, tasks.frame.maxY, "Controls follows Tasks in Manage Home's navigation card")
         keep("01b-manage-bottom")
         app.swipeDown()
 
