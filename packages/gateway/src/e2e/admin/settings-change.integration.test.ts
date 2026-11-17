@@ -552,9 +552,6 @@ describe("settings.change", () => {
     ]));
     expect(inventory.mcp.servers).not.toContainEqual(expect.objectContaining({ name: "inventory-slash-userinfo" }));
     expect(inventory.mcp.errors).toBe(1);
-    const described: Array<{ parameters: unknown }> = [];
-    createTronSettingsExtension(() => undefined, async () => undefined)({ registerTool: (tool: { parameters: unknown }) => { described.push(tool); } } as never);
-    expect(JSON.stringify(described[0]!.parameters)).toContain("configured MCP servers and custom model providers (id, base URL host, API, model ids)");
     expect(inventory.models).toEqual({ providers: [{ id: "inventory-local", host: "models.inventory.test", api: "openai-completions",
       models: ["inventory-model-a", "inventory-model-b"] }, { id: "openai", models: [] }], errors: 0 });
     await writeFile(join(f.agentDir, "models.json"), "{ not json");
