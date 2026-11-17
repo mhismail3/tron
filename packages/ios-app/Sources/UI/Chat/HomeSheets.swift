@@ -15,6 +15,8 @@ enum HomeSheetDestination: Identifiable {
     case task(String)
     case taskHistory(String)
     case checkin(HomeTaskHistoryItem)
+    case controls
+    case permissions
 
     var id: String {
         switch self {
@@ -31,6 +33,8 @@ enum HomeSheetDestination: Identifiable {
         case .task: "task"
         case .taskHistory: "task-history"
         case .checkin: "checkin"
+        case .controls: "controls"
+        case .permissions: "permissions"
         }
     }
 
@@ -44,6 +48,8 @@ enum HomeSheetDestination: Identifiable {
         case .tasks, .task: "Tasks"
         case .taskHistory: "Check-ins"
         case .checkin: "Check-in"
+        case .controls: "Controls"
+        case .permissions: "Task Permissions"
         }
     }
 
@@ -59,6 +65,8 @@ enum HomeSheetDestination: Identifiable {
         case .tasks: .tasks(nil)
         case .task(let id): .task(id)
         case .taskHistory(let id): .taskHistory(id, cursor: nil)
+        case .controls: .status
+        case .permissions: .permissions
         }
     }
 
@@ -67,7 +75,7 @@ enum HomeSheetDestination: Identifiable {
     }
 
     var loadsPage: Bool {
-        switch self { case .memoryItem, .chapter, .checkin: false; default: true }
+        switch self { case .memoryItem, .chapter, .checkin, .controls: false; default: true }
     }
 }
 
@@ -139,6 +147,8 @@ struct HomeSheet: View {
                 HomePagedListSheet(destination: destination, profileID: profileID, onOpenSession: onOpenSession)
             } else if case .taskHistory = destination {
                 HomePagedListSheet(destination: destination, profileID: profileID, onOpenSession: onOpenSession)
+            } else if case .permissions = destination {
+                HomeTaskSheet(permissionsFor: profileID)
             } else if case .checkin(let item) = destination {
                 HomeTaskCheckinSheet(item: item)
             } else if destination.isTaskSurface {
@@ -246,6 +256,7 @@ struct HomeSheet: View {
         case .memoryItem(let item): memoryDetail(item)
         case .chapter(let chapter, let limits): chapterDetail(chapter, limits: limits)
         case .profileItem(let item): profileItemDetail(loadedProfileItem(item))
+        case .controls: HomeControlsSection(profileID: profileID)
         default:
             loadedContent
         }

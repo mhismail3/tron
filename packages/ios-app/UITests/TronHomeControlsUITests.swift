@@ -60,15 +60,16 @@ final class TronHomeControlsUITests: XCTestCase {
         let ring = app.buttons["session-context-button"]
         XCTAssertTrue(waitFor(ring, "enabled == true"))
         open(app, ring, ready: "home-manage-state", name: "manage")
-        let settings = element(app, "home-manage-settings")
-        for _ in 0..<8 where settings.exists && (!settings.isHittable || settings.frame.maxY > app.frame.maxY - 50) { app.swipeUp() }
+        let controls = element(app, "home-manage-controls")
+        for _ in 0..<8 where controls.exists && (!controls.isHittable || controls.frame.maxY > app.frame.maxY - 50) { app.swipeUp() }
+        XCTAssertTrue(element(app, "home-manage-permissions").exists, "Task Permissions is a Manage Home row")
         XCTAssertFalse(element(app, "home-manage-pause").exists, "Pause is not a Manage Home row")
         XCTAssertFalse(element(app, "home-manage-disable").exists, "Disable is not a Manage Home row")
         let manage = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         manage.name = "manage-home-\(mode)\(accessibilityType ? "-accessibility" : "")"
         manage.lifetime = .keepAlways
         add(manage)
-        open(app, settings, ready: "home-settings-controls", name: "Home Settings")
+        open(app, controls, ready: "home-settings-controls", name: "Controls")
         return app
     }
 
