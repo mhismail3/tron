@@ -199,10 +199,9 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     private var applied = 0
     private var thinkingOptions = -1
     private var catalogRefreshes = 0
-    private var customReads = 0
     private var credentialWrites = 0
     func providerOperationSummary() -> String {
-        "refresh:\(catalogRefreshes) custom-read:\(customReads) credentials:\(credentialWrites)"
+        "refresh:\(catalogRefreshes) credentials:\(credentialWrites)"
     }
 
     func counters() -> (Int, Int) { (applied, thinkingOptions) }
@@ -223,9 +222,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             }
             catalogRefreshes += 1
             result = .object(["aborted": .bool(false), "errors": .object([:])])
-        case "models.custom.get":
-            customReads += 1
-            result = .object(["document": .object(["providers": .object([:])]), "redacted": .bool(false)])
         case "provider.list":
             result = .object(["providers": .array([.object([
                 "id": .string("fixture"), "name": .string("Fixture Provider"),
