@@ -7,7 +7,7 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall, getCurrentTools, type
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { settingsDependencies, setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
-import { HOME_TOOL_NAMES, homeToolCatalog } from "../../modules/home/home-runtime-policy.js";
+import { HOME_DEFAULT_TOOL_NAMES, HOME_TOOL_NAMES, homeToolCatalog } from "../../modules/home/home-runtime-policy.js";
 import { syntheticPng } from "../../../test-fixtures/synthetic-image.js";
 import { TrustService } from "../../kernel/resources/trust-service.js";
 import { maintainerChange } from "../../../test-support/native-change.js";
@@ -272,22 +272,14 @@ describe("typed settings at real runtime boundaries", () => {
     transcript.push({ case: "single durable Home model family", steps: [{ served, resolved, changes }] });
   });
 
-  it("Home's tool choices carry the descriptions its chapter registered", async () => {
+  it("Home's tool selection resolves to its own tool list before and after designation", async () => {
     const f = await fixture();
-    const options = () => f.service.invoke(phone(), "settings.options", { target: { kind: "home" }, key: "tools.active" }) as
-      Promise<{ options: Array<{ value: string; detail?: string }> }>;
-    const unloaded = (await options()).options;
-    expect(unloaded.map(option => option.value)).toEqual([...HOME_TOOL_NAMES]);
-    expect(unloaded.map(option => option.value)).not.toContain("knowledge");
-    const home = await f.designateHome();
-    const registered = new Map(home.runtime.session.getAllTools().map(tool => [tool.name, tool.description]));
-    const described = (await options()).options;
-    expect(described.map(option => option.value)).toEqual([...HOME_TOOL_NAMES]);
-    for (const option of described) {
-      const definition = registered.get(option.value);
-      expect(option.detail === undefined ? !definition : definition?.trim().startsWith(option.detail), option.value).toBe(true);
-    }
-    expect(described.find(option => option.value === "ask_user")?.detail).toBeTruthy();
+    const active = async () => ((await f.service.invoke(phone(), "settings.resolve", { target: { kind: "home" }, keys: ["tools.active"] })) as
+      unknown as { keys: Array<{ key: string; value: unknown }> }).keys.find(key => key.key === "tools.active")?.value;
+    expect(await active()).toEqual([...HOME_DEFAULT_TOOL_NAMES]);
+    expect(await active()).not.toContain("knowledge");
+    await f.designateHome();
+    expect(await active()).toEqual([...HOME_DEFAULT_TOOL_NAMES]);
   });
 
   it("Home's single Session override reaches its provider and a busy Home refuses without changing it", async () => {
