@@ -49,8 +49,7 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 ## Keys
 
 <!-- tron docs settings -->
-48 keys, declared in `packages/gateway/src/kernel/settings/settings-schema.ts` (`KEYS`).
-Install telemetry is not a setting: the Gateway process pins the pi SDK to `PI_TELEMETRY=0` before any SDK work, so a hand-written `enableInstallTelemetry` cannot re-enable it.
+47 keys, declared in `packages/gateway/src/kernel/settings/settings-schema.ts` (`KEYS`).
 
 | Key | Qualifier | Group | Layers | Home layers | Timing | Effect | Native tap |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -110,6 +109,8 @@ Record subjects (`RECORD_SUBJECTS`), changed per instance through the same path:
 | `accounts.models.provider` | accounts | provider |
 | `context.lesson` | context | lesson |
 <!-- /tron docs -->
+
+Install telemetry is not a setting: the Gateway process pins the pi SDK to `PI_TELEMETRY=0` before any SDK work, so a hand-written `enableInstallTelemetry` cannot re-enable it.
 
 Other schema fields: `subgroup`, `type`, `options` or `optionsSource` (`catalog.models`,
 `catalog.thinkingLevels(model)`, `catalog.tools`, ...), `defaultValue`, `direction`, `tap`, `writers`
