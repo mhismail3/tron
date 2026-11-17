@@ -874,7 +874,7 @@ describe("Tron Home research tools", () => {
     expect(unscoped!.isError).toBe(true);
     expect(unscoped!.text).toContain("cwd is required in Home");
     recordCase("session-import", { imported: imported!.isError === false, refused: [relative!.isError, unscoped!.isError] });
-  }, 60_000);
+  });
 
   it("imports into an ordinary chat's own workspace and refuses a different workspace", async () => {
     const f = await fixture("session-import-ordinary");
@@ -908,7 +908,7 @@ describe("Tron Home research tools", () => {
     expect(imported.isError).toBe(false);
     const { sessionId } = JSON.parse(imported.content.map(part => part.type === "text" ? part.text : "").join("")) as { sessionId: string };
     expect(JSON.stringify((await f.registry.acquire(sessionId)).canonicalSessionEntries())).toContain(marker);
-  }, 60_000);
+  });
 
   it("refuses cataloged children and malformed roots while reading an ordinary parent", async () => {
     const f = await fixture("delegated-admission", async (agentDir, cwd) => {

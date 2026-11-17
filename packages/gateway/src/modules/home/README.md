@@ -114,8 +114,8 @@ Composition supplies the same late K6 settings, Profile and raw model owners.
 - **Profile** (`home-session-profile.ts`) is fixed per runtime. An unrecorded new Home uses
   its creation recipe once; later runtimes read the record (enabled Home, otherwise ordinary).
   Only `tron-context-window`, `tron-compaction-policy`, `tron-settings`, `tron-projects`,
-  `tron-ask-user`, `tron-display`, `tron-notify`, `tron-schedule`, `tron-computer`, `tron-home`, `tron-home-research`, `tron-web-research`
-  and `tron-tool-search` (Pi's `tool_search`) load,
+  `tron-ask-user`, `tron-display`, `tron-notify`, `tron-schedule`, `tron-computer`, `tron-home`, `tron-home-research`, `tron-web-research`,
+  `tron-session-import` and `tron-tool-search` (Pi's `tool_search`) load,
   plus the already-installed, globally configured trusted browser package through its explicit local package path.
   Package metadata retains its existing browser-source attribution. Missing browser assets leave that tool unavailable;
   Home does not provision a second temporary checkout. Ambient extensions remain disabled.
