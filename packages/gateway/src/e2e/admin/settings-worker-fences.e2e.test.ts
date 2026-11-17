@@ -155,7 +155,7 @@ describe("settings worker changes and Session fences", () => {
     expect((await resultOf(prompt)).details).toMatchObject({ status: "applied" });
     expect(await tools()).not.toContain("codemode");
     transcript.push({ case: "Home disables a built-in extension behind the card", steps: [{ disabled: "builtin:codemode" }] });
-  }, 90_000);
+  });
 
   it("a registered worker cannot change default trust itself; its own settings call is refused", async () => {
     const f = await gateway();
