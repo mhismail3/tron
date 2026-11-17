@@ -44,7 +44,6 @@ import { MAXIMUM_PROMPT_ATTACHMENTS } from "../kernel/resources/prompt-bounds.js
 import { type UploadStore } from "../machine/upload-store.js";
 import { DISPLAY_CAPABILITY, BROWSER_LIVE_VIEW_CAPABILITY, NATIVE_LIVE_VIEW_CAPABILITY } from "../modules/display/contract.js";
 import type { TrustService } from "../kernel/resources/trust-service.js";
-import type { ModelConfigService } from "../admin/model-config-service.js";
 import type { GlobalProviderResources } from "../admin/global-provider-resources.js";
 import type { AuthBroker } from "../admin/auth-broker.js";
 import { withMcpAuthInteraction } from "../kernel/host/extension-adapters.js";
@@ -277,7 +276,6 @@ export interface GatewayServiceDependencies {
   settingsChanges: SettingsChangePath;
   devicePreferences?: Pick<DevicePreferenceBridge, "reply" | "detachConnection">;
   macTerminal?: Pick<MacTerminalService, "status">;
-  modelConfig: ModelConfigService;
   auth: AuthBroker;
   globalProviderResources: Pick<GlobalProviderResources, "requestReload" | "withStableSnapshot" | "refreshModels">;
   updateService?: GatewayUpdateService;
@@ -1812,8 +1810,6 @@ export class GatewayService {
       }
       case "trust.inspect":
         return safeJson(await this.dependencies.trust.inspect(string(params.cwd, "cwd", { max: 4_096 })));
-      case "models.custom.get":
-        return safeJson(await this.dependencies.modelConfig.get());
       case "models.refresh": {
         const controller = new AbortController();
         const work = this.workRegistry?.begin({
