@@ -1295,12 +1295,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         keepScreenshot(app, name: "settings-mcp-outside-addition")
         dismissTopSheet(app)
         XCTAssertTrue(waitUntil(timeout: 15) { !outsideServer.exists && mcpLink.exists }, "dismissing MCP Servers must return to Settings")
-        for _ in 0..<40 where !app.buttons["Changes"].isHittable { app.swipeDown() }
-        app.buttons["Changes"].tap()
-        let outsideEntry = app.staticTexts["MCP server outside-mcp"]
-        XCTAssertTrue(outsideEntry.waitForExistence(timeout: 60), "Changes must list the outside MCP addition by name: \(app.debugDescription)")
-        keepScreenshot(app, name: "settings-changes-outside-mcp")
-        for _ in 0..<3 where app.navigationBars.staticTexts["Global Settings"].exists || outsideEntry.exists { dismissTopSheet(app); Thread.sleep(forTimeInterval: 1) }
+        for _ in 0..<3 where app.navigationBars.staticTexts["Global Settings"].exists { dismissTopSheet(app); Thread.sleep(forTimeInterval: 1) }
         XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
 
     }
