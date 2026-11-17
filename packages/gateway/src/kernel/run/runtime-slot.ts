@@ -687,6 +687,18 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           ...(input.confirm ? { confirm: input.confirm } : {}),
         });
       },
+      applyAgain: async (changeId, input) => {
+        const toolActor = actor(input.toolCallId);
+        const entry = await owners.changes.record.find(changeId);
+        if (!entry || !historyVisible(toolActor, entry)) throw new GatewayError("not_found", "No such outside change");
+        const session = entry.target.kind !== "session" ? undefined
+          : entry.target.sessionId === this.id ? source() : await this.foreignSettingsSession(entry.target.sessionId);
+        return owners.changes.applyAgain(changeId, {
+          actor: toolActor, reason: input.reason,
+          ...(entry.target.kind === "home" && this.usesHomeSettings ? { homeChapter: chapter() } : {}),
+          ...(input.confirm ? { confirm: input.confirm } : {}),
+        }, session);
+      },
       updatePackage: input => owners.model.owner.updatePackage({ cwd: this.cwd, source: input.source, version: input.version, reason: input.reason },
         actor(input.toolCallId), input.confirm),
       resolve: async (keys, taskId) => {

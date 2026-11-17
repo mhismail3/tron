@@ -168,6 +168,26 @@ describe("settings worker changes and Session fences", () => {
     transcript.push({ case: "Home changes the AGENTS.md rules keys", steps: [{ off: off.details, on: on.details }] });
   });
 
+  it("Home applies again a value Tron wrote after an outside edit replaced it", async () => {
+    const f = await gateway();
+    const { homeSays } = await homeScript(f);
+    const retries = async () => (await f.settings.settingsModel.resolve({ kind: "global" }, undefined, ["run.retry.maxRetries"])).keys[0]?.value;
+    await retries();
+    const set = await homeSays("Set retries to 6", "settings", { action: "change", reason: "Maintainer asked for six retries",
+      changes: [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 6 }] });
+    expect(set.details).toMatchObject({ status: "applied" });
+    const path = join(f.agentDir, "settings.json");
+    await writeFile(path, JSON.stringify({ ...JSON.parse(await readFile(path, "utf8")), retry: { maxRetries: 9 } }));
+    expect(await retries()).toBe(9);
+    const outside = (await f.settingsChanges.history({ key: "run.retry.maxRetries" }, { kind: "ui", id: "maintainer" })).entries.find(entry => entry.status === "outside");
+    expect(outside).toBeDefined();
+    const again = await homeSays("Put retries back", "settings", { action: "applyAgain", changeId: outside!.changeId, reason: "Maintainer wants Tron's value back" });
+    expect(again.isError, again.text).toBe(false);
+    expect(again.details).toMatchObject({ status: "applied" });
+    expect(await retries()).toBe(6);
+    expect((await f.settingsChanges.history({ key: "run.retry.maxRetries" }, { kind: "ui", id: "maintainer" })).entries[0]).toMatchObject({ applyAgainOf: outside!.changeId, after: 6 });
+  });
+
   it("Home disables a built-in extension through sources.extensions behind the native card; a new chat lacks its tool", async () => {
     const f = await gateway();
     const { home, ask, resultOf } = await homeScript(f);
