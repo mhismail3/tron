@@ -555,7 +555,6 @@ describe("settings.change", () => {
     expect(inventory.mcp.errors).toBe(1);
     expect(inventory.models).toEqual({ providers: [{ id: "inventory-local", host: "models.inventory.test", api: "openai-completions",
       models: ["inventory-model-a", "inventory-model-b"] }, { id: "openai", models: [] }], errors: 0 });
-    expect(JSON.stringify(inventory)).not.toContain("inventory-builtin-secret");
     await writeFile(join(f.agentDir, "models.json"), "{ not json");
     f.faux.setResponses([
       fauxAssistantMessage([fauxToolCall("settings", { action: "inventory" }, { id: "inventory-broken-models" })], { stopReason: "toolUse" }),
@@ -568,7 +567,6 @@ describe("settings.change", () => {
     expect(broken.message.isError).not.toBe(true);
     expect((broken.message.details as SettingsInventory).models).toEqual({ providers: [], errors: 1 });
     expect((broken.message.details as SettingsInventory).mcp.servers.length).toBeGreaterThan(0);
-    expect(JSON.stringify(inventory)).not.toContain("inventory-provider-secret");
     expect(JSON.stringify(inventory)).not.toMatch(/inventory-secret|inventory-query-secret|pa\/ss|user:|127\.0\.0\.1|secret/);
   });
 

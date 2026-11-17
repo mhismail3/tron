@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { GatewayError } from "../errors.js";
 import { readJson, updateJsonLocked } from "../foundation/json.js";
 import { modelProviderOnDisk, type ModelProviderValue } from "../kernel/settings/model-provider-value.js";
+import type { SettingsInventory } from "../kernel/settings/tool-contract.js";
 import { ModelRuntime } from "../kernel/pi/coding-agent.js";
 import { redactCredentials } from "../util/credential-redaction.js";
 
@@ -109,10 +110,10 @@ export class ModelConfigService {
     return { document: redactedDocument, redacted: JSON.stringify(document) !== JSON.stringify(redactedDocument) };
   }
 
-  async configured(): Promise<{ providers: Array<{ id: string; host?: string; api?: string; models: string[] }>; errors: number }> {
+  async configured(): Promise<SettingsInventory["models"]> {
     let entries: Array<[string, unknown]>;
     try { entries = Object.entries(providersOf(await this.read())); } catch { return { providers: [], errors: 1 }; }
-    const providers: Array<{ id: string; host?: string; api?: string; models: string[] }> = [];
+    const providers: SettingsInventory["models"]["providers"] = [];
     let errors = 0;
     for (const [id, raw] of entries) {
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) { errors += 1; continue; }
