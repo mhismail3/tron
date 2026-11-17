@@ -7,6 +7,7 @@ import { redactCredentials, redactCredentialUrls } from "../util/credential-reda
 import type { HookResources } from "./hook-resources.js";
 import type { PackageService } from "./package-service.js";
 import type { McpAdminService } from "./mcp-admin-service.js";
+import type { ModelConfigService } from "./model-config-service.js";
 
 const LIMIT = 64;
 const TEXT_LIMIT = 2_048;
@@ -27,14 +28,16 @@ export class SettingsInventoryReader implements SettingsInventorySource {
     private readonly mcp: McpAdminService,
     private readonly trust: TrustService,
     private readonly modules: ModuleHost,
+    private readonly modelConfig: ModelConfigService,
   ) {}
 
   async read(cwd: string): Promise<SettingsInventory> {
     const resolved = await this.trust.requireResolved(cwd);
-    const [hookList, packageList, mcp] = await Promise.all([
+    const [hookList, packageList, mcp, models] = await Promise.all([
       this.hooks.list(cwd),
       this.packages.list(cwd),
       this.mcp.configured(resolved.trusted ? { scope: "project", cwd: resolved.projectDir, trusted: true } : undefined),
+      this.modelConfig.configured(),
     ]);
     return sanitize({
       hooks: this.hookInventory(hookList),
@@ -49,6 +52,7 @@ export class SettingsInventoryReader implements SettingsInventorySource {
       })),
       modules: bounded(tronModuleSummaries(this.modules)).map(module => ({ name: module.name, purpose: module.purpose, tools: module.tools, commands: module.commands })),
       mcp: { servers: bounded(mcp.servers), errors: mcp.errors },
+      models: { providers: bounded(models.providers).map(provider => ({ ...provider, models: bounded(provider.models) })), errors: models.errors },
     });
   }
 
