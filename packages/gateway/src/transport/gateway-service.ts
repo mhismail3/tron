@@ -671,12 +671,12 @@ export class GatewayService {
         });
       case "client.logs.cursor":
         rejectUnknownFields(params, [], method);
-        if (client.isLocal) throw new GatewayError("unauthenticated", "Device logs accept only paired device connections");
+        if (client.isLocal) throw new GatewayError("auth_required", "Device logs accept only paired device connections");
         return safeJson(await this.deviceLogStore().cursor(client.identity));
       case "client.logs.append":
+        if (client.isLocal) throw new GatewayError("auth_required", "Device logs accept only paired device connections");
         return this.mutation(client, method, params, async () => {
           rejectUnknownFields(params, ["commandId", "bootId", "firstSequence", "lines", "gapFrom", "reason"], method);
-          if (client.isLocal) throw new GatewayError("unauthenticated", "Device logs accept only paired device connections");
           return safeJson(await this.deviceLogStore().append(client.identity, client.admission, params));
         });
       case "uploads.status":

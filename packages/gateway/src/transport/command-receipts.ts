@@ -15,7 +15,8 @@ const COMMAND_RECEIPT_MAX_ENTRIES = 32_768;
 const COMMAND_RECEIPT_MAX_AGGREGATE_BYTES = 64 * 1_048_576;
 const COMMAND_RECEIPT_MAX_AGE_MS = 24 * 60 * 60_000;
 export const COMMAND_RECEIPT_PRUNE_INTERVAL_MS = 60_000;
-const EDITOR_UPDATE_RECEIPT_MAX_AGE_MS = 10 * 60_000;
+const SHORT_RECEIPT_MAX_AGE_MS = 10 * 60_000;
+const SHORT_RECEIPT_METHODS = new Set(["extension.editor.update", "client.logs.append"]);
 
 interface CommandReceiptCapacity {
   maximumEntries?: number;
@@ -260,8 +261,8 @@ export class CommandReceiptStore {
         .digest("base64url");
       const expectedName = `${expectedKey}.json`;
       if (this.lanes.get(expectedKey)?.preserveReceiptUntilDrain) continue;
-      const receiptMaxAgeMs = receipt.method === "extension.editor.update"
-        ? Math.min(maxAgeMs, EDITOR_UPDATE_RECEIPT_MAX_AGE_MS)
+      const receiptMaxAgeMs = SHORT_RECEIPT_METHODS.has(receipt.method)
+        ? Math.min(maxAgeMs, SHORT_RECEIPT_MAX_AGE_MS)
         : maxAgeMs;
       if (name === expectedName && Date.parse(receipt.createdAt) < now - receiptMaxAgeMs) {
         await rm(path, { force: true });

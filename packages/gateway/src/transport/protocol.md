@@ -120,7 +120,7 @@ unless another delivered response carries the same token.
   is retryable `busy`. Usage is kept in process and reconciled after a prune; the
   background scheduler prunes every `COMMAND_RECEIPT_PRUNE_INTERVAL_MS` (1 min) and
   admission forces one pass only at capacity. Only expired valid completed receipts
-  are reclaimed (editor updates: ten minutes); pending, malformed or mismatched
+  are reclaimed (editor updates and device log batches: ten minutes); pending, malformed or mismatched
   evidence is never pruned. Interrupted temporaries are scavenged only when no lane
   holds their command. Identical command keys serialize; everything else is
   concurrent. The store joins accepted persistence before releasing its directory.

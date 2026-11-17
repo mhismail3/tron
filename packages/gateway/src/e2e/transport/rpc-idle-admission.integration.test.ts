@@ -409,7 +409,7 @@ describe("device log append RPC boundary", () => {
     const local = await fixtureValue.connect(fixtureValue.localToken());
     const localAppend = await local.request("local-append", "client.logs.append", { commandId: "local-append-0001", bootId: "boot-local-01", firstSequence: 1, lines: batch(1, 1) });
     expect(localAppend.ok).toBe(false);
-    expect(localAppend.error?.code).toBe("unauthenticated");
+    expect(localAppend.error?.code).toBe("auth_required");
     const localCursor = await local.request("local-cursor", "client.logs.cursor", {});
     expect(localCursor.ok).toBe(false);
     const phone = await fixtureValue.connect();
