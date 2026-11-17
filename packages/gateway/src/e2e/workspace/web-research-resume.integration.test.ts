@@ -7,6 +7,7 @@ import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { expect, it } from "vitest";
 import { createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { waitFor } from "../../../test-support/wait-for.js";
+import { droppingAnyTurnFrame } from "../../../test-support/turn-frame.js";
 import { TrustService } from "../../kernel/resources/trust-service.js";
 import { ManagedSubagents } from "../../kernel/delegation/managed-subagents.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, DELEGATED_PROVIDER_ROOT_ENV } from "../../kernel/delegation/delegated-provider.js";
@@ -33,7 +34,7 @@ it("a retained research child keeps its scoped evidence and web access across pa
       if (providerCalls === 1) await heldRead;
       response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ success: true, data: { markdown: "# Durable evidence\nThe shared source survives parent extension reload.", metadata: { sourceURL: "https://example.org/evidence", title: "Durable evidence", statusCode: 200 } } })); return;
     }
-    const body = JSON.parse(bytes); const last = body.messages.at(-1);
+    const body = JSON.parse(bytes); const last = droppingAnyTurnFrame(body.messages).at(-1) as any;
     const parent = body.tools.some((tool: any) => tool.function.name === "subagent");
     const input = typeof last.content === "string" ? last.content : JSON.stringify(last.content);
     let answer: string | { name: string; id: string; args: Record<string, unknown> };
