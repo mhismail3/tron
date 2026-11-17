@@ -95,12 +95,12 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 | `run.httpIdleTimeoutMs` | — | run | project, session, global | as allowed | live | next-request | — |
 | `run.websocketConnectTimeoutMs` | — | run | project, session, global | as allowed | live | next-request | — |
 | `run.cacheWarming` | — | run | global | none | fixed | reload | spend |
-| `sources.extensions` | — | sources | project, global | none | fixed | reload | trust |
-| `sources.skills` | — | sources | project, global | none | fixed | reload | trust |
-| `sources.prompts` | — | sources | project, global | none | fixed | reload | — |
-| `sources.themes` | — | sources | project, global | none | fixed | reload | — |
-| `sources.packages` | — | sources | project, global | none | fixed | reload | install |
-| `sources.npmCommand` | — | sources | global | none | live | next-change | trust |
+| `sources.extensions` | — | sources | project, global | as allowed | fixed | reload | trust |
+| `sources.skills` | — | sources | project, global | as allowed | fixed | reload | trust |
+| `sources.prompts` | — | sources | project, global | as allowed | fixed | reload | — |
+| `sources.themes` | — | sources | project, global | as allowed | fixed | reload | — |
+| `sources.packages` | — | sources | project, global | as allowed | fixed | reload | install |
+| `sources.npmCommand` | — | sources | global | as allowed | live | next-change | trust |
 | `setup.installTelemetry` | — | setup | global | as allowed | live | next-request | irreversible |
 
 Record subjects (`RECORD_SUBJECTS`), changed per instance through the same path:
