@@ -10,8 +10,8 @@ accounts: [connections](../../docs/connections.md); MCP: [MCP](../../docs/mcp.md
 
 - `context-window.v1`. `model.list` keeps the SDK `contextWindow` and adds
   `contextWindowLimits` (`minimum` with compaction headroom, `maximum`, `default`,
-  optional `longContextThreshold`); `settings.options` for `model.contextWindow`
-  serves a target's live bounds. Capacity is what the catalog declares; one
+  optional `longContextThreshold`), the live bounds a `model.contextWindow` change is
+  clamped to. Capacity is what the catalog declares; one
   endpoint-qualified adapter supplies OpenAI's 1,050,000-token maximum for
   `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra` and `gpt-5.6-luna` on the OpenAI and
   OpenAI Codex routes only. Entitlement and billing stay the provider's.

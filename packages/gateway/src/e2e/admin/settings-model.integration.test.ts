@@ -22,8 +22,7 @@ import { SettingsChangeRecord, type ChangeEntry } from "../../kernel/settings/se
 import { maintainerChange as maintainerRpc } from "../../../test-support/native-change.js";
 const { KEYS } = TEST_SETTINGS_SCHEMA;
 import type { Resolution, ResolvedKey, SettingsTarget } from "../../kernel/settings/tool-contract.js";
-import { UPDATE_TRON_NOTE, type PresentedKey, type PresentedResolution } from "../../admin/settings-presentation.js";
-import { CONTROLS, PI_BUILTIN_TOOL_NAMES, type DevicePreferencePort, type DevicePreferenceRead } from "../../kernel/settings/settings-types.js";
+import { PI_BUILTIN_TOOL_NAMES, type DevicePreferencePort, type DevicePreferenceRead } from "../../kernel/settings/settings-types.js";
 import { ScopeToolCatalog } from "../../admin/tool-catalog.js";
 import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
@@ -389,10 +388,10 @@ describe("settings renderer contract", () => {
     const first = `${f.model.provider}/plain`;
     const second = f.modelKey;
     const resolve = async () => await f.service.invoke(subscribed(), "settings.resolve", {
-      target, keys: [queue, "tools.active"], renderer: { version: 1, controls: [...CONTROLS] },
-    }) as unknown as PresentedResolution;
+      target, keys: [queue, "tools.active"],
+    }) as unknown as Parameters<typeof row>[0];
     const initial = await resolve();
-    expect(row(initial, queue)).toMatchObject({ value: [], display: "Same as Home", presentation: { control: "list" } });
+    expect(row(initial, queue)).toMatchObject({ value: [], display: "Same as Home" });
     expect(row(initial, "tools.active")).toMatchObject({ display: "2 tools", value: ["read", "bash"] });
     const change = async (id: string, key: string, value: unknown) => await maintainerRpc(f.service, subscribed(), "settings.change", {
       commandId: id, target, changes: [{ key, layer: "global", op: "set", value }],
@@ -428,23 +427,13 @@ describe("settings renderer contract", () => {
   const commandId = () => `settings-renderer-${String(++command).padStart(4, "0")}`;
   const macTarget: SettingsTarget = { kind: "global" };
   type Fixture = Awaited<ReturnType<typeof fixture>>;
-  type Options = { key: string; source: string; dependsOn: string[]; options: Array<{ value: unknown; label: string; detail?: string; disabledReason?: string; resource?: Record<string, unknown> }>; range?: unknown; nextCursor?: string };
 
-  const resolveWith = (f: Fixture, target: Record<string, unknown>, renderer?: Record<string, unknown>) =>
-    f.service.invoke(subscribed(), "settings.resolve", { target, ...(renderer ? { renderer } : {}) }) as unknown as Promise<PresentedResolution>;
-  const presentedRow = (resolution: PresentedResolution, key: string, qualifiers?: Record<string, string>): PresentedKey =>
-    row(resolution, key, qualifiers) as PresentedKey;
-  const section = (resolution: PresentedResolution, id: string) => {
-    const found = resolution.sections.find(candidate => candidate.id === id);
-    if (!found) throw new Error(`section ${id} was not presented`);
-    return found;
-  };
+  const resolveAt = (f: Fixture, target: Record<string, unknown>) =>
+    f.service.invoke(subscribed(), "settings.resolve", { target }) as unknown as Promise<Parameters<typeof row>[0]>;
   const maintainerChange = (f: Fixture, changes: unknown[], dryRun = false) =>
     maintainerRpc(f.service, subscribed(), "settings.change", { commandId: commandId(), target: macTarget, changes, ...(dryRun ? { dryRun: true } : {}) });
-  const options = (f: Fixture, request: Record<string, unknown>, target: Record<string, unknown> = macTarget) =>
-    f.service.invoke(subscribed(), "settings.options", { target, ...request }) as Promise<Options>;
 
-  it("offers a tool selection's real tools and keeps a relative Project selection relative", async () => {
+  it("keeps Project tool selection read-only while Pi's built-in tools stay the base set", async () => {
     const f = await fixture();
     await f.trust.set(f.project, true);
     const changeAt = async (target: Record<string, unknown>, value: string[]) => {
@@ -461,16 +450,6 @@ describe("settings renderer contract", () => {
     };
     const projectTarget = { kind: "project", cwd: f.project };
 
-    const scope = await options(f, { key: "tools.active" }, projectTarget);
-    expect(scope.source).toBe("catalog.tools");
-    expect(scope.options.slice(0, PI_BUILTIN_TOOL_NAMES.length).map(option => option.value)).toEqual(PI_BUILTIN_TOOL_NAMES);
-    expect(scope.options.map(option => option.value)).toContain("codemode");
-    const read = scope.options.find(option => option.value === "read")!;
-    expect(read.resource).toMatchObject({ name: "read", label: expect.any(String), description: expect.any(String), parameters: { type: "object", properties: expect.any(Object) } });
-    const codemode = scope.options.find(option => option.value === "codemode")!;
-    expect(codemode.resource).toMatchObject({ name: "codemode", description: expect.any(String), parameters: { type: "object" } });
-    transcript.push({ case: "tools catalog: project", response: scope });
-
     const piDir = join(f.root, "pi-only");
     await mkdir(piDir, { recursive: true });
     const piSettings = SettingsManager.create(piDir, piDir);
@@ -479,20 +458,13 @@ describe("settings renderer contract", () => {
     const { session: piSession } = await createAgentSession({ cwd: piDir, agentDir: piDir, sessionManager: SessionManager.inMemory(), settingsManager: piSettings, resourceLoader: loader });
     expect(piSession.getAllTools().map(tool => tool.name)).toEqual(PI_BUILTIN_TOOL_NAMES);
     piSession.dispose();
-    const slot = await f.registry.create(f.project);
-    const context = await slot.context() as { activeTools: string[] };
-    const chat = await f.service.invoke(subscribed([slot.id]), "settings.options", {
-      target: { kind: "session", sessionId: slot.id }, key: "tools.active",
-    }) as unknown as Options;
-    for (const name of context.activeTools) expect(chat.options.map(option => option.value)).toContain(name);
-
     const before = await readFile(join(f.project, ".pi", "settings.json"), "utf8");
     await expect(changeAt(projectTarget, ["read", "bash", "write", "codemode"]))
       .rejects.toThrow("Project settings are read-only");
     expect(await readFile(join(f.project, ".pi", "settings.json"), "utf8")).toBe(before);
   });
 
-  it("omits the twenty-six retired routine controls but preserves explicit, Project and non-renderer inspection", async () => {
+  it("resolves every routine key at Global and keeps it inspectable at each target", async () => {
     const f = await fixture();
     await f.trust.set(f.project, true);
     const routine = new Set([
@@ -527,50 +499,27 @@ describe("settings renderer contract", () => {
     const caller = subscribed([slot.id]);
     const targets = [macTarget, { kind: "session", sessionId: slot.id }, { kind: "project", cwd: f.project }];
     for (const target of targets) {
-      const raw = await f.service.invoke(caller, "settings.resolve", { target }) as unknown as PresentedResolution;
-      const exposed = await f.service.invoke(caller, "settings.resolve", {
-        target, renderer: { version: 1, controls: [...CONTROLS] },
-      }) as unknown as PresentedResolution;
+      const raw = await f.service.invoke(caller, "settings.resolve", { target }) as unknown as Parameters<typeof row>[0];
       const candidates = raw.keys.filter(key => routine.has(key.key));
       if (target.kind === "global") expect(new Set(candidates.map(key => key.key))).toEqual(routine);
-      for (const original of candidates) {
-        const shown = exposed.keys.find(key => key.key === original.key && JSON.stringify(key.qualifiers) === JSON.stringify(original.qualifiers));
-        const inspect = original.overridden || original.projectSetting !== undefined || target.kind === "project";
-        expect(shown !== undefined, target.kind + ": " + original.key).toBe(inspect);
-        expect(original.presentation.control).toBeUndefined();
-        if (shown) {
-          expect(shown.value).toEqual(original.value);
-          expect(shown.presentation.control).toBeUndefined();
-          expect(shown.presentation.options).toBeUndefined();
-          expect(shown.presentation.range).toBeUndefined();
-          expect(shown.presentation.optionsSource).toBeUndefined();
-        }
-      }
-      transcript.push({ case: "routine inspection " + target.kind, response: { raw, exposed } });
+      for (const original of candidates) expect(original.value, target.kind + ": " + original.key).not.toBeUndefined();
+      transcript.push({ case: "routine inspection " + target.kind, response: raw });
     }
-    const surface = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
-    expect(presentedRow(surface, "permissions.budget.task").presentation).toMatchObject({ control: "list", valueKind: "numberMap" });
-    expect(presentedRow(surface, "model.ref[role=chat]").presentation.control).toBe("catalog");
-    expect(presentedRow(surface, "model.thinking[role=chat]", { model: f.modelKey }).presentation.control).toBe("choice");
-    expect(surface.keys.some(key => key.key === "permissions.floor")).toBe(false);
   });
 
-  it("keeps false overrides resettable and Changes undoable without publishing a routine editor", async () => {
+  it("keeps false overrides resettable and Changes undoable", async () => {
     const f = await fixture();
     const key = "context.compaction.enabled";
-    const resolve = () => resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
-    expect((await resolve()).keys.some(row => row.key === key)).toBe(false);
+    const resolve = () => resolveAt(f, macTarget);
+    expect(row(await resolve(), key)).toMatchObject({ value: true, overridden: false });
     expect((await maintainerChange(f, [{ key, layer: "global", op: "set", value: false }])).status).toBe("applied");
-    expect(presentedRow(await resolve(), key)).toMatchObject({
-      value: false, overridden: true, presentation: { editable: true },
-    });
-    expect(presentedRow(await resolve(), key).presentation.control).toBeUndefined();
+    expect(row(await resolve(), key)).toMatchObject({ value: false, overridden: true });
     const reset = await maintainerChange(f, [{ key, layer: "global", op: "unset" }]);
-    expect((await resolve()).keys.some(row => row.key === key)).toBe(false);
+    expect(row(await resolve(), key)).toMatchObject({ value: true, overridden: false });
     const history = await f.service.invoke(subscribed(), "settings.history", { key }) as unknown as { entries: ChangeEntry[] };
     expect(history.entries.some(entry => entry.before === false)).toBe(true);
     await f.service.invoke(subscribed(), "settings.undo", { commandId: commandId(), changeId: reset.changes[0]!.changeId });
-    expect(presentedRow(await resolve(), key)).toMatchObject({ value: false, overridden: true });
+    expect(row(await resolve(), key)).toMatchObject({ value: false, overridden: true });
     expect(JSON.parse(await readFile(join(f.agentDir, "settings.json"), "utf8")).compaction.enabled).toBe(false);
     transcript.push({ case: "routine false reset and undo", response: { reset, history, restored: await resolve() } });
   });

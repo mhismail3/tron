@@ -273,8 +273,7 @@ is the target's binding/writer capability, not a second client-side permission l
 presence is explicit even for equal/false/zero values. Applied Project values serve their exact
 file/key; ignored fields serve bounded value-free diagnostics. Untrusted/unreadable Project notices
 name their file and never make a Session editor look Project-owned.
-`settings.options` pages options only for declared controls; a key without an editor has no
-options endpoint. Its canonical type, validation and runtime clamping still apply to changes.
+A key's canonical type, validation and runtime clamping apply to every change.
 `dryRun` returns per-key errors and the immutable review. Changes is permanent history,
 not a pending-request inbox. Global writes Global, Session the Session scope, Home its saved settings;
 Project is inspection only. Session/Home reuse Global's renderer and editors; Project-owned rows
