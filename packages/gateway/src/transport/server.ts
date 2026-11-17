@@ -354,6 +354,7 @@ function helloCapabilities(value: unknown): ReadonlySet<string> {
 
 interface Connection {
   id: string;
+  admission: number;
   identity: string;
   isLocal: boolean;
   socket: WebSocket;
@@ -547,6 +548,7 @@ export class GatewayServer {
   private readonly localSockets: WebSocketServer;
   private readonly pairedSockets: WebSocketServer;
   private readonly clients = new Map<string, Connection>();
+  private connectionAdmissions = 0;
   private readonly httpSockets = new Set<Duplex>();
   private readonly pendingUpgrades = new Set<() => void>();
   private readonly httpConnectionsByAddress = new Map<string, number>();
@@ -1472,6 +1474,7 @@ export class GatewayServer {
     );
     connection = {
       id: randomUUID(),
+      admission: ++this.connectionAdmissions,
       identity,
       isLocal,
       socket,
@@ -1706,6 +1709,7 @@ export class GatewayServer {
     try {
       const context: ClientContext = {
         id: connection.id,
+        admission: connection.admission,
         identity: connection.identity,
         isLocal: connection.isLocal,
         signal: sessionOpenFlight?.controller.signal ?? requestController.signal,
