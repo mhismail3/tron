@@ -3577,9 +3577,6 @@ extension AppModel {
         try await settingsTrust.setTrust(target: target, decision: decision)
     }
 
-    func applySettingsChangeAgain(_ changeID: String) async throws {
-        try await settingsTrust.applySettingsChangeAgain(changeID)
-    }
 
     func resolveSettings(target: JSONValue, keys: [String]? = nil) async throws -> SettingsResolution {
         try await settingsTrust.resolve(target: target, keys: keys)

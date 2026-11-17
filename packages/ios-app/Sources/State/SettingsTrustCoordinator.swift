@@ -104,18 +104,6 @@ final class SettingsTrustCoordinator {
         settingsInvalidationGeneration &+= 1
     }
 
-    func applySettingsChangeAgain(_ changeID: String) async throws {
-        let admittedProfileGeneration = profileGeneration
-        let commandID = uuidSource.next().uuidString
-        let params = JSONValue.object(["commandId": .string(commandID), "changeId": .string(changeID)])
-        let value = try await mutationExecutor.performValue(method: "settings.applyAgain", commandID: commandID) {
-            try await client.requestValue("settings.applyAgain", params)
-        }
-        try requireProfile(admittedProfileGeneration)
-        try value.decode(SettingsChangeResult.self).throwIfRefused()
-        noteSettingsChanged()
-    }
-
     func refreshSnapshot(target: JSONValue, freshness: SettingsFreshness) async throws {
         if snapshots[target]?.freshness == freshness { return }
         if let running = refreshes[target], running.freshness == freshness { return try await running.task.value }
