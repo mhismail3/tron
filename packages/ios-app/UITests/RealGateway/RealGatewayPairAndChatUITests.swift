@@ -1398,7 +1398,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let surface: XCUIElement = app
         var groups: [String] = []
         for key in schema.keys where !groups.contains(key.group) { groups.append(key.group) }
-        let customOwners = name == "settings" ? ["permissions.defaultProjectTrust": "Trusted Projects (#1517)",
+        let customOwners = name == "settings" ? ["permissions.defaultProjectTrust": "the agent settings tool (5.8)",
             "sources.packages": "Extensions' Installed list (#1482)", "sources.npmCommand": "Extensions' npm command card (#1482)",
             "permissions.macTerminalServer": "the Mac Terminal sheet (TronMacTerminalUITests)"] : [:]
         for group in groups {
