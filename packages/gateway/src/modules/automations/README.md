@@ -26,6 +26,6 @@ record/action/trigger admission remain in `../../automations/`.
 ## Verification
 
 The manifest selects unchanged real Gateway/Pi owned-run, durable store and
-scheduler journeys. The existing `runtime-registry.integration.test.ts` case
+scheduler journeys. The existing `runtime-registry-sessions.integration.test.ts` case
 “recovers Automation session creation origin from the first canonical invocation
 binding” covers catalog discovery through cold and durable-indexed Registry reads.
