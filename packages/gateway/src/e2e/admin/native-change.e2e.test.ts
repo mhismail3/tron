@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fixture, disposeFixtures, reportCall } from "../../../test-support/home-task-fixture.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
-import { publishedNpmRegistry } from "../../../test-support/package-source-fixtures.js";
+import { installConfiguredPackage, publishedNpmRegistry } from "../../../test-support/package-source-fixtures.js";
 import type { ExtensionInteraction } from "../../protocol/types.js";
 import type { ChangeRequest, Resolution } from "../../kernel/settings/tool-contract.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
@@ -825,7 +825,7 @@ describe("package update through the registered settings tool", () => {
       const settingsPath = join(f.agentDir, "settings.json");
       const existing = JSON.parse(await readFile(settingsPath, "utf8").catch(() => "{}"));
       await writeFile(settingsPath, JSON.stringify({ ...existing, packages: [source] }));
-      await f.packages.mutate("update", source, f.cwd, false);
+      await installConfiguredPackage(f.agentDir, f.cwd, source);
       const installedVersion = async (configured = source) => {
         const installedPath = (await f.packages.list(f.cwd)).packages.find(row => row.source === configured)?.installedPath;
         return installedPath ? JSON.parse(await readFile(join(installedPath, "package.json"), "utf8")).version as string : undefined;
@@ -892,7 +892,7 @@ describe("package update through the registered settings tool", () => {
       const settingsPath = join(f.agentDir, "settings.json");
       const existing = JSON.parse(await readFile(settingsPath, "utf8").catch(() => "{}"));
       await writeFile(settingsPath, JSON.stringify({ ...existing, packages: [source] }));
-      await f.packages.mutate("update", source, f.cwd, false);
+      await installConfiguredPackage(f.agentDir, f.cwd, source);
       await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
 
       const home = await f.registry.acquire(f.home.sessionId);

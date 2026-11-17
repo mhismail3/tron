@@ -1,7 +1,7 @@
 # Runtime configuration
 
-Models, context windows, compaction policy, provider login and package
-administration over the wire. Owners: `gateway/admin` (auth broker, packages, custom
+Models, context windows, compaction policy, provider login and the package
+owner. Owners: `gateway/admin` (auth broker, packages, custom
 models, settings) with `gateway/providers` (catalog, release dates) and `gateway/run`
 (policy application). Settings design: [settings model](../../docs/settings-model.md);
 accounts: [connections](../../docs/connections.md); MCP: [MCP](../../docs/mcp.md).
@@ -81,12 +81,11 @@ provider that carries a credential is edited in `models.json` or the app.
 
 ## Packages
 
-Inventory and update projections reject duplicates, more than 256 packages, 1,000
-resources, 8 KiB strings or 768 KiB responses. Reads share the `PackageService` lane
-with mutations. Mutations fail closed on malformed settings, flush the SDK settings
-queue before success, and fence install/remove/update failures (including partial
-batches) as unknown outcomes. A scoped update touches only the selected installation;
-unknown fields are rejected.
+The inventory projection rejects duplicates, more than 256 packages, 1,000 resources,
+8 KiB strings or 768 KiB responses. Reads share the `PackageService` lane with the
+settings tool's `update`, which fails closed on malformed settings, flushes the SDK
+settings queue before installing, and fences a failed install as an unknown outcome.
+Adding and removing packages is a `sources.packages` change (install card).
 
 ## Model catalog
 

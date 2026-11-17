@@ -19,9 +19,6 @@
       "timeout-literal": 2,
       "wall-clock-expect": 1
     },
-    "src/e2e/admin/package-updates-dispose.integration.test.ts": {
-      "sleep": 1
-    },
     "src/e2e/admin/settings-change.integration.test.ts": {
       "sleep": 5,
       "timeout-literal": 2

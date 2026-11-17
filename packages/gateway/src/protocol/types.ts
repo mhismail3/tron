@@ -2394,16 +2394,6 @@ export function decodeTronModuleSummary(v: unknown, p = "$"): TronModuleSummary 
 export function encodeTronModuleSummary(v: TronModuleSummary): string {
   return "{" + (',"name":' + JSON.stringify(v.name) + ',"purpose":' + JSON.stringify(v.purpose) + ',"tools":' + "[" + v.tools.map((x) => JSON.stringify(x)).join(",") + "]" + ',"commands":' + "[" + v.commands.map((x) => JSON.stringify(x)).join(",") + "]").slice(1) + "}";
 }
-/** `modules.list`: the built-in Tron extension definitions. */
-export interface TronModuleList { modules: TronModuleSummary[] }
-export function decodeTronModuleList(v: unknown, p = "$"): TronModuleList {
-  const o = obj(v, p);
-  only(o, p, ["modules"]);
-  return { modules: seq(own(o, "modules"), p + ".modules", (x, q) => decodeTronModuleSummary(x, q)) };
-}
-export function encodeTronModuleList(v: TronModuleList): string {
-  return "{" + (',"modules":' + "[" + v.modules.map((x) => encodeTronModuleSummary(x)).join(",") + "]").slice(1) + "}";
-}
 export type PackageNodeRequirementStatus = "satisfied" | "unsatisfied" | "invalid";
 const PackageNodeRequirementStatusValues: ReadonlyArray<unknown> = ["satisfied", "unsatisfied", "invalid"];
 export function decodePackageNodeRequirementStatus(v: unknown, p = "$"): PackageNodeRequirementStatus { if (!PackageNodeRequirementStatusValues.includes(v)) throw new WireError(p, `unknown value ${JSON.stringify(v)}`); return v as PackageNodeRequirementStatus; }
@@ -2464,7 +2454,7 @@ const PackageScopeValues: ReadonlyArray<unknown> = ["user", "project"];
 export function decodePackageScope(v: unknown, p = "$"): PackageScope { if (!PackageScopeValues.includes(v)) throw new WireError(p, `unknown value ${JSON.stringify(v)}`); return v as PackageScope; }
 export function encodePackageScope(v: PackageScope): string { return JSON.stringify(v); }
 /**
- * One configured package as `packages.list` answers it: Pi's configured package, what it
+ * One configured package as the settings inventory reads it: Pi's configured package, what it
  * provides, and why it is ignored or may not run, when it is.
  */
 export interface PackageSummary {
@@ -2484,7 +2474,7 @@ export function decodePackageSummary(v: unknown, p = "$"): PackageSummary {
 export function encodePackageSummary(v: PackageSummary): string {
   return "{" + (',"source":' + JSON.stringify(v.source) + ',"scope":' + encodePackageScope(v.scope) + ',"filtered":' + JSON.stringify(v.filtered) + (v.installedPath === undefined ? "" : ',"installedPath":' + JSON.stringify(v.installedPath)) + (v.provides === undefined ? "" : ',"provides":' + encodePackageProvides(v.provides)) + (v.conflict === undefined ? "" : ',"conflict":' + encodePackageConflict(v.conflict)) + (v.nodeRequirement === undefined ? "" : ',"nodeRequirement":' + encodePackageNodeRequirement(v.nodeRequirement))).slice(1) + "}";
 }
-/** `packages.list`: the configured packages and Pi's resolved resources for the directory. */
+/** The configured packages and Pi's resolved resources for the directory. */
 export interface PackageInventory { packages: PackageSummary[]; resources: JsonValue; providesDiagnostic?: string }
 export function decodePackageInventory(v: unknown, p = "$"): PackageInventory {
   const o = obj(v, p);
@@ -2493,25 +2483,6 @@ export function decodePackageInventory(v: unknown, p = "$"): PackageInventory {
 }
 export function encodePackageInventory(v: PackageInventory): string {
   return "{" + (',"packages":' + "[" + v.packages.map((x) => encodePackageSummary(x)).join(",") + "]" + ',"resources":' + encodeJsonValue(v.resources) + (v.providesDiagnostic === undefined ? "" : ',"providesDiagnostic":' + JSON.stringify(v.providesDiagnostic))).slice(1) + "}";
-}
-export interface PackageUpdate { source: string; displayName: string; type: string; scope: PackageScope }
-export function decodePackageUpdate(v: unknown, p = "$"): PackageUpdate {
-  const o = obj(v, p);
-  only(o, p, ["source","displayName","type","scope"]);
-  return { source: str(own(o, "source"), p + ".source"), displayName: str(own(o, "displayName"), p + ".displayName"), type: str(own(o, "type"), p + ".type"), scope: decodePackageScope(own(o, "scope"), p + ".scope") };
-}
-export function encodePackageUpdate(v: PackageUpdate): string {
-  return "{" + (',"source":' + JSON.stringify(v.source) + ',"displayName":' + JSON.stringify(v.displayName) + ',"type":' + JSON.stringify(v.type) + ',"scope":' + encodePackageScope(v.scope)).slice(1) + "}";
-}
-/** `packages.checkUpdates`: the configured packages with an available update. */
-export interface PackageUpdates { updates: PackageUpdate[] }
-export function decodePackageUpdates(v: unknown, p = "$"): PackageUpdates {
-  const o = obj(v, p);
-  only(o, p, ["updates"]);
-  return { updates: seq(own(o, "updates"), p + ".updates", (x, q) => decodePackageUpdate(x, q)) };
-}
-export function encodePackageUpdates(v: PackageUpdates): string {
-  return "{" + (',"updates":' + "[" + v.updates.map((x) => encodePackageUpdate(x)).join(",") + "]").slice(1) + "}";
 }
 export type HomeProfileListItemKind = "preference" | "standing-decision" | "delegation-default" | "fact" | "correction";
 const HomeProfileListItemKindValues: ReadonlyArray<unknown> = ["preference", "standing-decision", "delegation-default", "fact", "correction"];

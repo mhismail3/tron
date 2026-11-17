@@ -11,13 +11,11 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
 - Renderer: `SettingsRendererView`, `SettingsRendererRow`, `SettingsValueEditors`,
   `SettingsChoiceSlider`.
 - Exact reviews use the shared `ChangeReviewSheet`.
-- Agent configuration: `ConfigurationSlider(Surface)`,
-  `DefaultToolsSettingsSection`.
+- Agent configuration: `ConfigurationSlider(Surface)`.
 - Accounts: `ProviderSettingsView`, `ProviderUsageReadController`, `IntegrationsSettingsView`
   (`IntegrationSheetRoutes`), `MCPServersSettingsView`, `ConnectionSettingsView`,
   `PairedDeviceDetailView`, `MacReplacementSheet`.
-- Extensions: `ExtensionsSettingsView`, `PackageDetailSheet`,
-  `ProjectResourceDetailSheet` (tool detail for `SettingsToolsEditor`), `TrustSettingsView`.
+- Resources: `ProjectResourceDetailSheet` (tool detail for `SettingsToolsEditor`), `TrustSettingsView`.
 - This iPhone and diagnostics: `AppearanceSettingsView`, `AppLocalBehaviorSettings`,
   `PushNotificationsSettingsView`, `NotificationInboxView`, `GatewayLogsSettingsView`.
 
@@ -25,7 +23,7 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
 
 - **Layout.** The gear opens one sheet: This iPhone (primary: Appearance, one sheet: Dashboard, Subagent Activity, Color Mode, Theme color, Text Font and Code Font),
   Accounts (primary: Connections, Model Providers),
-  Agent & Tools (primary: Agent Behavior first, Tools, MCP Servers, Extensions),
+  Agent & Tools (primary: Agent Behavior first, MCP Servers),
   System (steel blue: Mac Terminal, Push Notifications, Setup, Logs). Every category destination
   inherits its group tint for chrome, containers and icons; semantic statuses retain their colors.
   Primary groups use the selected theme's `tronPrimary`; System uses `tronSteel`, not the neutral `tronSlate` role.
@@ -135,16 +133,10 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   Model-registry activation still needs a maintainer-initiated Gateway restart; file edits do
   not promise hot reload.
   `compaction-policy.v1` adds per-field thinking and focus inheritance.
-- **Default Tools.** Global Tools' Always include switches edit `tools.active`. While
-  `sources.extensions` keeps the built-in from loading at that scope (Pi's rule: a Project entry
-  overrides the Global list), the switch is dimmed, shows Off and says why; the saved entry is kept,
-  and the row explains why.
-- **Extensions.** Inventory counts, installed packages (Tron's bundled subagents provider without
-  Update/Remove), the npm command, read-only Tron Modules and search paths. There is no native
-  install form: an agent proposes `sources.packages` (and `sources.npmCommand`) through the exact
-  install/trust card (#2172). A package's detail lists
-  what it Provides; `conflict` and `nodeRequirement` (#243) show as statuses. Hooks have no
-  app view; an agent reads them through the `settings` tool's `inventory` action.
+- **Tools and extensions.** Global Settings has no Tools, Extensions or package rows: the agent
+  changes `tools.*` and `sources.*` (installs and enables behind the native card), updates a
+  package with the `settings` tool's `update`, and reads packages, modules and hooks through
+  `inventory`. Session and Home Tools sections stay.
 - **MCP.** MCP Servers uses the Providers row layout and edits Pi's global `mcp.json`
   only, through `settings.change` on `tools.mcp.server` with each row's `mcp.list` `value`:
   it previews the change and shows the shared `ChangeReviewSheet` when the preview taps
@@ -181,7 +173,6 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
 
 ```bash
 scripts/tron-ios-test run \
-  --only-testing TronMobileUITests/TronExtensionsSettingsUITests \
   --only-testing TronMobileUITests/TronIntegrationSheetsUITests \
   --only-testing TronMobileUITests/TronMCPServerSheetsUITests \
   --only-testing TronMobileUITests/TronProjectTrustUITests \

@@ -113,7 +113,7 @@ services are created in `start` and closed over; per-runtime facts come from `Se
 ```ts
 interface ModuleDescriptor<C = void> {
   name: string;                     // = Pi inline extension name, "<inline:name>" source (B2)
-  purpose: string; tools: readonly string[]; commands: readonly string[]; // modules.list row
+  purpose: string; tools: readonly string[]; commands: readonly string[]; // settings inventory row
   start(host: GatewayHost): ModuleInstance<C> | Promise<ModuleInstance<C>>; // once, list order
 }
 interface ModuleInstance<C> {
@@ -151,7 +151,7 @@ prompt sections: B2) and is reproduced exactly per profile:
   `tron-home`, then `tron-home-research`; no settlement, built-ins, managed or queue extensions.
 
 Kernel-owned extensions (`tron-invocation-settlement`, `tron-compaction-policy`,
-`tron-context-window`, task worker) hold named positions in the array. `modules.list` keeps
+`tron-context-window`, task worker) hold named positions in the array. The settings inventory keeps
 reporting exactly the `TRON_MODULES` rows (`tron-modules.ts:306-313`).
 
 ## 4. K8 Pi seam
