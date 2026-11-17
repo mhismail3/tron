@@ -177,7 +177,7 @@ The first set drives the selected lifecycle and dashboard pool with a byte trans
 accelerated clock. The real-UI journey keeps the mounted chat, draft and keyboard through a proxy
 blackhole and a held replacement open. The Builds journey creates real sessions, then resolves
 its original canonical session row from the dashboard and revisits its installed app. Gateway catalog bounds are owned by
-`runtime-registry.integration.test.ts`.
+`runtime-registry-catalog.integration.test.ts`.
 
 ## Not here
 
