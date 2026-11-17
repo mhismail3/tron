@@ -10,8 +10,7 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
 - Shell: `SettingsView` (`SettingsGroupKind` groups, `SettingsGroupCard`).
 - Renderer: `SettingsRendererView`, `SettingsRendererRow`, `SettingsValueEditors`,
   `SettingsChoiceSlider`.
-- Audit: `SettingsChangesView`, `SettingsChangeRow`; exact reviews use the shared
-  `ChangeReviewSheet`.
+- Exact reviews use the shared `ChangeReviewSheet`.
 - Agent configuration: `ConfigurationSlider(Surface)`,
   `DefaultToolsSettingsSection`.
 - Accounts: `ProviderSettingsView`, `ProviderUsageReadController`, `IntegrationsSettingsView`
@@ -50,7 +49,7 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   retained values; Global embeds those groups directly. There is no Advanced section.
   Trusted Projects consumes its declared group without duplicating it in More Settings; the
   `connections` group (Mac Terminal key and private SSH service) is owned by the Mac Terminal sheet.
-  Notifications and Changes sit in the toolbar; no Value & Source sheet. Dashboard Settings
+  Notifications sit in the toolbar; no Value & Source sheet. Dashboard Settings
   exposes only Global: editable keys plus explicit read-only values with Reset and Project inspection.
   Trusted Projects owns the default trust policy and per-project trust; Add Project records the
   chosen folder as Not trusted through `settings.change`, a folder inside a listed project too
@@ -114,10 +113,8 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   repository-field notices (no Workspace row in Session Settings). Summaries omit unset values. Trust still uses `TrustSettingsView`; another Mac requires **Use This Server**.
   Until the user scrolls, `SessionSettingsView` keeps its content at its top edge as the presented
   sheet's top inset settles, so an upward drag at medium expands the sheet rather than scrolling it.
-- **Changes.** Only Global has a Changes entry. `SettingsChangesView` pages `settings.history` by
-  Project/Session/Global and keeps last-look per Mac. Undo and
-  Apply again are receipt-backed through `SettingsTrustCoordinator`; outside MCP and custom-model
-  entries never show their definition.
+- **Changes.** The app has no settings audit view; the agent pages `history` and `undo` through the
+  `settings` tool, and the durable record stays under `~/.tron`.
 - **Exact reviews.** The maintainer's own edits apply directly; picking the value the edited
   layer already stores sends nothing, while picking an inherited or default value pins it there. A row whose dry run requires a
   tap (trust, privacy or spend widening, installs, irreversible effects) opens the shared
@@ -178,7 +175,7 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
 
 ## Entry points
 
-`SettingsView.swift`, `SettingsRendererView.swift`, `SettingsChangesView.swift`,
+`SettingsView.swift`, `SettingsRendererView.swift`,
 `ProviderSettingsView.swift`, `MCPServersSettingsView.swift`, `ConnectionSettingsView.swift`.
 
 ## Verify
@@ -189,7 +186,6 @@ scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronIntegrationSheetsUITests \
   --only-testing TronMobileUITests/TronMCPServerSheetsUITests \
   --only-testing TronMobileUITests/TronProjectTrustUITests \
-  --only-testing TronMobileUITests/TronSettingsChangesReviewUITests \
   --only-testing TronMobileUITests/TronDiagnosticsExportUITests \
   --only-testing TronMobileUITests/TronSmokeUITests/testSettingsRowInspectionAndActionsStayIndependent \
   --only-testing TronMobileUITests/TronSmokeUITests/testIphoneDashboardPreferencesPersistAcrossRoutesAndRelaunch
@@ -202,7 +198,7 @@ scripts/ios-gateway-e2e-test run-ui \
 
 `TronSettingsScopeRowsUITests` checks read-only queue values, independent Revert and Project
 inspection. `TronSmokeUITests` keeps direct model/thinking and shared string-list editing,
-read-only numeric-map/no-write inspection, approvals and Changes coverage.
+read-only numeric-map/no-write inspection and approvals coverage.
 `TronAgentBehaviorRegressionUITests` checks numeric-map values without native editor/reset routes in
 light/dark and XXXL; Gateway `native-change.e2e.test.ts` owns actual agent numeric-map changes,
 next-Pi-session admission, spend-card acceptance and Undo. Its painted-geometry journey measures the primitive and generic

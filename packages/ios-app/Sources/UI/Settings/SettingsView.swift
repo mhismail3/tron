@@ -91,8 +91,6 @@ struct SettingsView: View {
                         unreadCount: model.notificationInbox.unreadCount,
                         action: { showsNotifications = true }
                     )
-                    SettingsChangesLink(scope: .all, onOpenSession: onImported)
-                        .tronSettingsVisualTheme(accent: .tronPrimary, surfaceAccent: .tronPrimarySurface)
                 }
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: "Global Settings") }
                 ToolbarItem(placement: .confirmationAction) {

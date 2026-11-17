@@ -63,7 +63,9 @@ Both `scripts/tron test gateway` and verify's Gateway Vitest groups use
 `tools/verify/gateway.py`. Without an explicit `--config`, file filters that select only files a
 listing config names (`vitest.nested.config.ts`, `vitest.mac-terminal.config.ts`, read by
 `vitest_configs.py`) run under that config; filters spanning configs are refused (exit 2) with
-each config's command, and nothing runs. It resolves pinned development Node first, then gives
+each config's command, and nothing runs. The default config runs files and tests in random order (`sequence.shuffle`); Vitest prints
+`Running tests with seed "<n>"` and `--sequence.seed <n>` reproduces that order. A describe whose cases form one
+stateful journey declares `shuffle: false`. `gateway.py` resolves pinned development Node first, then gives
 one test process its own temporary HOME, TMPDIR, Tron data directory and agent
 resource directory, under `/tmp` rather than the caller's TMPDIR, so fixture and socket path
 lengths do not depend on who runs the suite. It waits for Vitest before removing those directories, also

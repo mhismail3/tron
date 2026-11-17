@@ -500,23 +500,8 @@ private actor HostedHomeShellGateway {
             "projectionToken": .string("dashboard:\(dashboardRevision)"), "archivedCount": .number(1)])
     }
     private var profileItems: [HostedProfileItem] = HostedHomeToolFixture.profileItems
-    private var profileEntries: [JSONValue] = []
     private var profileUndo: [String: (before: [HostedProfileItem], after: [HostedProfileItem])] = [:]
     private var profileChangeCount = 0
-    private func seedHomeProfileEntry() {
-        guard profileEntries.isEmpty, let index = profileItems.firstIndex(where: { $0.id == "9a364c45-34fe-4f0a-93e6-fc507e2b0bdc" }) else { return }
-        var retired = profileItems
-        retired[index].status = "retired"
-        var entry = profileEntry(id: profileItems[index].id, before: [], after: profileItems, undoOf: nil).objectValue!
-        entry["actor"] = .object(["kind": .string("home"), "sessionId": .string("home-session")])
-        entry["presentation"] = .object(["label": .string("Profile item"), "section": .string("context"), "actor": .string("Home"),
-            "layer": .string("Session"), "display": .object(["before": .string("Not in the profile"),
-                "after": .string("Inferred preference: \(profileItems[index].text)")])])
-        entry["reason"] = .string("You asked for screenshots before testing on every UI change")
-        let changeID = entry["changeId"]!.stringValue!
-        profileEntries.append(.object(entry))
-        profileUndo[changeID] = (retired, profileItems)
-    }
     init(capabilityEnabled: Bool, initialState: String, phase: String? = nil, unresolved: Bool = false, delayed: Bool = false, browserState: String? = nil, emptyContext: Bool = false, sheetState: String? = nil) {
         self.sheetState = sheetState
         self.browserState = browserState
@@ -625,9 +610,7 @@ private actor HostedHomeShellGateway {
             profileItems[index] = item
             touched.insert(id, at: 0)
         }
-        let entries = touched.map { profileEntry(id: $0, before: before, after: profileItems, undoOf: nil) }
-        profileEntries.append(contentsOf: entries)
-        let changeIDs = entries.compactMap { $0.objectValue?["changeId"]?.stringValue }
+        let changeIDs = touched.map { _ in UUID().uuidString.lowercased() }
         for id in changeIDs { profileUndo[id] = (before, profileItems) }
         return (.object(["status": .string("applied"), "tier": .string("quiet"),
             "changes": .array(changeIDs.map { .object(["changeId": .string($0)]) }),
@@ -636,38 +619,9 @@ private actor HostedHomeShellGateway {
 
     private func profileUndo(_ params: [String: JSONValue]) -> (JSONValue?, JSONValue?) {
         guard let changeID = params["changeId"]?.stringValue, let recorded = profileUndo[changeID] else { return taskRefusal() }
-        let touched = Set(recorded.after.map(\.id) + recorded.before.map(\.id)).filter { id in
-            recorded.after.first { $0.id == id } != recorded.before.first { $0.id == id }
-        }
-        let current = profileItems
         profileItems = recorded.before
-        let entries = touched.sorted().map { profileEntry(id: $0, before: current, after: profileItems, undoOf: changeID) }
-        profileEntries.append(contentsOf: entries)
         for (key, value) in profileUndo where value.after == recorded.after { profileUndo.removeValue(forKey: key) }
         return (.object(["status": .string("applied"), "tier": .string("quiet"), "changes": .array([])]), nil)
-    }
-
-    private func profileEntry(id: String, before: [HostedProfileItem], after: [HostedProfileItem], undoOf: String?) -> JSONValue {
-        func display(_ item: HostedProfileItem?) -> String {
-            guard let item else { return "Not in the profile" }
-            switch item.status {
-            case "retired": return "Retired: \(item.text)"
-            case "superseded": return "Superseded: \(item.text)"
-            default: return "\(item.confirmed ? "Confirmed" : "Inferred") \(item.kind.replacingOccurrences(of: "-", with: " ")): \(item.text)"
-            }
-        }
-        let old = before.first { $0.id == id }, new = after.first { $0.id == id }
-        var entry: [String: JSONValue] = [
-            "changeId": .string(UUID().uuidString.lowercased()), "at": .string(ISO8601DateFormatter().string(from: Date())),
-            "actor": .object(["kind": .string("ui")]), "target": .object(["kind": .string("home")]), "layer": .string("session"),
-            "key": .string("home.profile.item"), "qualifiers": .object(["note": .string(id)]), "op": .string("set"),
-            "before": old.map { try! JSONValue.encode($0) } ?? .null, "after": new.map { try! JSONValue.encode($0) } ?? .null,
-            "tier": .string("quiet"), "status": .string("applied"),
-            "presentation": .object(["label": .string("Profile item"), "section": .string("context"), "actor": .string("You"),
-                "layer": .string("Session"), "display": .object(["before": .string(display(old)), "after": .string(display(new))])]),
-        ]
-        if let undoOf { entry["undoOf"] = .string(undoOf) }
-        return .object(entry)
     }
 
     func handle(_ method: String, _ params: [String: JSONValue]) async throws -> (JSONValue?, JSONValue?) {
@@ -702,23 +656,7 @@ private actor HostedHomeShellGateway {
             return (.object(["models": .array([anthropicModel("claude-opus-5-5", name: "Claude Opus 5.5", window: 1_000_000),
                 anthropicModel("claude-haiku-5-5", name: "Claude Haiku 5.5", window: 200_000), model("virtual", name: "Virtual model", virtual: true)]), "nextCursor": .null]), nil)
         case "model.recent": return (.object(["models": .array([])]), nil)
-        case "settings.history":
-            seedHomeProfileEntry()
-            let entries: [JSONValue] = HostedLaunch.arguments.contains("-home-settings-history") ? [
-                .object(["changeId": .string("worker-setting"), "at": .string("2026-10-11T12:00:00Z"),
-                    "actor": .object(["kind": .string("worker"), "sessionId": .string("worker-session"), "taskId": .string("active")]),
-                    "target": .object(["kind": .string("home")]), "layer": .string("session"), "key": .string("model.thinking[role=worker]"),
-                    "op": .string("set"), "before": .string("off"), "after": .string("high"), "tier": .string("notify"),
-                    "status": .string("applied"), "presentation": .object(["label": .string("Worker thinking"),
-                        "actor": .string("Worker"), "layer": .string("Session"), "section": .string("model"),
-                        "display": .object(["before": .string("Off"), "after": .string("High")])])])
-            ] : []
-            let profile = profileEntries.reversed().filter { entry in
-                params["actor"]?.stringValue != "agents" || entry.objectValue?["actor"]?.objectValue?["kind"]?.stringValue != "ui"
-            }
-            return (.object(["entries": .array(profile + entries)]), nil)
         case "home.profileChange":
-            seedHomeProfileEntry()
             return profileChange(params)
         case "settings.undo":
             return profileUndo(params)
@@ -791,7 +729,6 @@ private actor HostedHomeShellGateway {
         case "home.profileList" where HostedLaunch.arguments.contains("-home-profile-empty"):
             return (.object(["items": .array([]), "unclassified": .number(0)]), nil)
         case "home.profileList":
-            seedHomeProfileEntry()
             return (.object(["items": try JSONValue.encode(profileItems), "unclassified": .number(0)]), nil)
         case "home.chapterList":
             return (try await heldSheetRead { chapterListFixture() }, nil)
