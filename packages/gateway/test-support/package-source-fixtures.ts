@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
+import { DefaultPackageManager, SettingsManager } from "../src/kernel/pi/coding-agent.js";
 
 const execFileAsync = promisify(execFile);
 const GIT_IDENTITY = ["-c", "user.name=Tron Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false"];
@@ -87,4 +88,9 @@ export async function gitDaemonRepository(root: string, name: string) {
     });
   };
   return { url, source: `git:${locator}`, commit, activate, close: () => new Promise<void>(done => { daemon.once("exit", () => done()); daemon.kill(); }) };
+}
+
+export async function installConfiguredPackage(agentDir: string, cwd: string, source: string): Promise<void> {
+  const settings = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
+  await new DefaultPackageManager({ cwd, projectDir: cwd, agentDir, settingsManager: settings }).install(source, { local: false });
 }

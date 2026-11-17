@@ -27,7 +27,7 @@ Current behavior: [settings contract](settings-contract.md).
 - Missing/untrusted/unreadable Project settings contribute nothing. Session rows remain editable and
   show Session/Global values, never the Project pill. A notice says respectively “Project settings
   aren't applied until this project is trusted” or “Project settings couldn't be read”; details name
-  the path. Trust changes remain in Trusted Projects, not an automatic approval in this sheet.
+  the path. Trust changes go through the trust prompt, the Project Settings trust row or the agent, not an automatic approval in this sheet.
 - Unknown/disallowed repo keys are ignored with bounded diagnostics naming file/key/reason, never
   secret values. Permissions, trust, credentials, approval floors, grants and budgets are forbidden
   even in trusted repos. This deliberately tightens existing unsafe Project behavior, not parity loss

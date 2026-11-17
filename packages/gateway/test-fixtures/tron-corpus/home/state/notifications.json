@@ -1,10 +1,5 @@
 {
-  "version": 2,
-  "policy": {
-    "notifyWhenAskPresented": false,
-    "notifyWhenFinished": true,
-    "notifyWhenWaiting": true
-  },
+  "version": 3,
   "grants": [],
   "pending": [],
   "receipts": [],

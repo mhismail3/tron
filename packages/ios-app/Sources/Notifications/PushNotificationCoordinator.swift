@@ -1,8 +1,8 @@
 import CryptoKit
 import DeviceCheck
 import Foundation
-import Observation
 import Security
+import SwiftUI
 import TronMobileCore
 import UIKit
 import UserNotifications
@@ -22,15 +22,6 @@ enum PushRoute: String, Codable, Sendable {
     static var current: Self? { current() }
 }
 
-enum PushReadiness: Equatable, Sendable {
-    case unavailable
-    case permissionRequired
-    case denied
-    case registering
-    case ready
-    case pending
-}
-
 enum PushRegistrationDiagnostic: String, Equatable, Sendable {
     case idle = "Idle"
     case waitingForToken = "Waiting for APNs"
@@ -48,6 +39,8 @@ enum PushRegistrationDiagnostic: String, Equatable, Sendable {
     case stoppedPersistence = "Stopped: credential storage"
     case stoppedExhausted = "Stopped: retry limit"
     case stoppedUnavailable = "Stopped: unavailable"
+    case stoppedDenied = "Stopped: notifications denied"
+    case stoppedPermissionRequest = "Stopped: permission request failed"
 }
 
 struct PushGrant: Codable, Equatable, Sendable {
@@ -328,10 +321,59 @@ struct PushWorkerClient: Sendable {
     }
 }
 
-struct PushNotificationPolicy: Equatable, Sendable {
-    var inputNeeded = true
-    var finished = true
-    var waiting = true
+struct PushConnectionIdentity: Equatable, Sendable {
+    let profileID: String
+    let machineID: String
+    let runtimeEpoch: String
+    let admission: GatewayLifecycleCoordinator.Admission
+}
+
+struct PushRetryFence: Equatable, Sendable {
+    let connection: PushConnectionIdentity
+    let deviceID: String
+    let generation: Int
+}
+
+enum PushRetryRefusal: Error, Equatable, LocalizedError {
+    case notThisConnection
+    case changedBeforeRetry
+
+    var errorDescription: String? {
+        switch self {
+        case .notThisConnection:
+            "This approval belongs to another Mac connection. Nothing was approved or retried."
+        case .changedBeforeRetry:
+            "The connection changed after approval. The request was sent, but this iPhone did not retry push registration."
+        }
+    }
+}
+
+typealias PushRetryAnswer = @MainActor () async throws -> Void
+typealias PushRetryGate = @MainActor (PushRetryAnswer) async throws -> Void
+
+@MainActor
+struct PushRegistrationRetryApproval {
+    let connection: @MainActor () -> PushConnectionIdentity?
+    let coordinator: PushNotificationCoordinator
+
+    func approve(_ review: ChangeReview, answer: PushRetryAnswer) async throws {
+        guard let current = connection(), let fence = coordinator.retryFence(for: review, connection: current) else {
+            throw PushRetryRefusal.notThisConnection
+        }
+        try await answer()
+        try coordinator.retryAfterApprovedCard(fence, current: connection())
+    }
+}
+
+private struct PushRegistrationRetryApprovalKey: EnvironmentKey {
+    static let defaultValue: PushRegistrationRetryApproval? = nil
+}
+
+extension EnvironmentValues {
+    var pushRegistrationRetryApproval: PushRegistrationRetryApproval? {
+        get { self[PushRegistrationRetryApprovalKey.self] }
+        set { self[PushRegistrationRetryApprovalKey.self] = newValue }
+    }
 }
 
 private struct PushRegistrationTransfer: Encodable, Sendable {
@@ -341,9 +383,6 @@ private struct PushRegistrationTransfer: Encodable, Sendable {
     let secret: String
     let previewsEnabled: Bool
     let relayOrigin: String
-    let notifyWhenAskPresented: Bool
-    let notifyWhenFinished: Bool
-    let notifyWhenWaiting: Bool
 }
 
 private struct PushRegistrationRemoval: Encodable, Sendable { let commandId: String }
@@ -352,16 +391,12 @@ struct PushRegistrationStatus: Decodable, Sendable {
     let registered: Bool
     let deviceRegistered: Bool
     let enabledDeviceCount: Int
-    let notifyWhenAskPresented: Bool
-    let notifyWhenFinished: Bool
-    let notifyWhenWaiting: Bool
     let relayOrigin: String?
     let requiresGrantRotation: Bool?
 }
 private struct PushRegistrationRemovalResult: Decodable, Sendable { let removed: Bool }
 
 @MainActor
-@Observable
 final class PushNotificationCoordinator {
     private struct Context: Sendable {
         let profile: GatewayProfile
@@ -376,6 +411,7 @@ final class PushNotificationCoordinator {
     private let worker: PushWorkerClient?
     private let uuid: @Sendable () -> UUID
     private let clock: MonotonicClock
+    private let log: AppLog
     private let credentialLoadFailed: Bool
     private var document: PushCredentialDocument
     private var context: Context?
@@ -384,24 +420,24 @@ final class PushNotificationCoordinator {
     private var admissionGeneration = 0
     private var registrationAdmitted = false
 
-    private(set) var readiness: PushReadiness = .unavailable
-    private(set) var diagnostic: PushRegistrationDiagnostic = .idle
-    private(set) var notificationPolicy = PushNotificationPolicy()
-    private(set) var isUpdatingNotificationPolicy = false
-
-    var canRetryRejectedRegistration: Bool {
-        !credentialLoadFailed
-            && document.appAttestKeyID != nil
-            && document.appAttestKeyRejected == true
-            && diagnostic == .stoppedRejected
+    private(set) var diagnostic: PushRegistrationDiagnostic = .idle {
+        didSet {
+            guard diagnostic != oldValue else { return }
+            let previous = logTail, log = log, stage = diagnostic.rawValue
+            let level = stage.hasPrefix("Stopped") ? "warning" : nil
+            logTail = Task { await previous?.value; await log.recordCausal(name: "push.registration", outcome: stage, level: level) }
+        }
     }
+    private var logTail: Task<Void, Never>?
+    private var automaticRetryAvailable = true
 
-    convenience init() {
+    convenience init(log: AppLog) {
         self.init(
             credentials: KeychainPushCredentialStore(),
             notifications: .live,
             appAttest: .live,
-            configuration: PushProductConfiguration.bundled()
+            configuration: PushProductConfiguration.bundled(),
+            log: log
         )
     }
 
@@ -412,8 +448,10 @@ final class PushNotificationCoordinator {
         configuration: PushProductConfiguration?,
         transport: BoundedHTTPDataTransport = .noRedirects,
         uuid: @escaping @Sendable () -> UUID = UUID.init,
-        clock: MonotonicClock = .continuous
+        clock: MonotonicClock = .continuous,
+        log: AppLog
     ) {
+        self.log = log
         self.credentials = credentials
         self.notifications = notifications
         self.appAttest = appAttest
@@ -441,7 +479,6 @@ final class PushNotificationCoordinator {
         guard let profile else {
             invalidateRegistration(admission: false)
             context = nil
-            readiness = .unavailable
             diagnostic = .idle
             return
         }
@@ -457,7 +494,6 @@ final class PushNotificationCoordinator {
         )
         guard !credentialLoadFailed, worker != nil, appAttest.isSupported() else {
             invalidateRegistration(admission: false)
-            readiness = .unavailable
             diagnostic = .stoppedUnavailable
             return
         }
@@ -467,13 +503,12 @@ final class PushNotificationCoordinator {
               context?.profile.id == profile.id else { return }
         if status == .notDetermined {
             invalidateRegistration(admission: false)
-            readiness = .permissionRequired
             do {
                 status = try await notifications.requestAuthorization() ? .allowed : .denied
             } catch {
                 guard admissionGeneration == reconciliationAdmission,
                       context?.profile.id == profile.id else { return }
-                readiness = .pending
+                diagnostic = .stoppedPermissionRequest
                 return
             }
             guard admissionGeneration == reconciliationAdmission,
@@ -482,8 +517,7 @@ final class PushNotificationCoordinator {
         guard status == .allowed else {
             invalidateRegistration(admission: false)
             let denialGeneration = registrationGeneration
-            readiness = .denied
-            diagnostic = .idle
+            diagnostic = .stoppedDenied
             if connected {
                 await removeRegistration(
                     for: profile,
@@ -497,7 +531,6 @@ final class PushNotificationCoordinator {
         registrationAdmitted = true
         notifications.registerForRemoteNotifications()
         guard document.apnsToken != nil else {
-            if document.grants[profile.id] == nil { readiness = .registering }
             diagnostic = .waitingForToken
             return
         }
@@ -516,7 +549,6 @@ final class PushNotificationCoordinator {
         updated.apnsToken = encoded
         do { try credentials.save(updated) }
         catch {
-            readiness = .pending
             diagnostic = .stoppedPersistence
             return
         }
@@ -526,64 +558,35 @@ final class PushNotificationCoordinator {
 
     func receiveRegistrationFailure() {
         guard registrationAdmitted else { return }
-        readiness = .pending
         diagnostic = .stoppedUnavailable
     }
 
-    func updateNotificationPolicy(_ policy: PushNotificationPolicy) async throws {
-        guard !isUpdatingNotificationPolicy,
-              registrationTask == nil,
-              registrationAdmitted,
-              let context,
-              let worker,
-              let grant = document.grants[context.profile.id],
-              grant.relayOrigin == worker.relayOrigin,
-              grant.route == PushRoute.current else { throw PushRegistrationError.unavailable }
-        let generation = registrationGeneration
-        let previous = notificationPolicy
-        isUpdatingNotificationPolicy = true
-        defer { isUpdatingNotificationPolicy = false }
-        notificationPolicy = policy
-        let status: PushRegistrationStatus
-        do {
-            status = try await context.client.request(
-            "push.registration.upsert",
-            PushRegistrationTransfer(
-                commandId: uuid().uuidString,
-                installationId: grant.installationID,
-                grantId: grant.grantID,
-                secret: grant.grantSecret,
-                previewsEnabled: false,
-                relayOrigin: worker.relayOrigin,
-                notifyWhenAskPresented: policy.inputNeeded,
-                notifyWhenFinished: policy.finished,
-                notifyWhenWaiting: policy.waiting
-            )
-            )
-        } catch {
-            if registrationIsValid(generation: generation, profileID: context.profile.id) { notificationPolicy = previous }
-            throw error
-        }
-        guard registrationIsValid(generation: generation, profileID: context.profile.id),
-              status.relayOrigin == worker.relayOrigin else {
-            notificationPolicy = previous
-            throw CancellationError()
-        }
-        notificationPolicy = PushNotificationPolicy(
-            inputNeeded: status.notifyWhenAskPresented,
-            finished: status.notifyWhenFinished,
-            waiting: status.notifyWhenWaiting
-        )
+    func retryFence(for review: ChangeReview, connection: PushConnectionIdentity) -> PushRetryFence? {
+        guard review.intent == .pushRegistrationRetry, review.requiresTap, !credentialLoadFailed, registrationAdmitted,
+              let context, let deviceID = context.profile.deviceId, !deviceID.isEmpty,
+              context.profile.id == connection.profileID,
+              context.runtimeIdentity == Self.runtimeIdentity(connection) else { return nil }
+        return PushRetryFence(connection: connection, deviceID: deviceID, generation: registrationGeneration)
     }
 
-    func retryRejectedRegistration() throws {
-        guard canRetryRejectedRegistration else { return }
+    func retryAfterApprovedCard(_ fence: PushRetryFence, current: PushConnectionIdentity?) throws {
+        guard !credentialLoadFailed, let context, registrationAdmitted,
+              current == fence.connection,
+              context.profile.id == fence.connection.profileID,
+              context.profile.deviceId == fence.deviceID,
+              context.runtimeIdentity == Self.runtimeIdentity(fence.connection),
+              registrationGeneration == fence.generation,
+              document.appAttestKeyID != nil,
+              document.appAttestKeyRejected == true,
+              registrationTask == nil else { throw PushRetryRefusal.changedBeforeRetry }
         registrationGeneration &+= 1
-        registrationTask?.cancel()
-        registrationTask = nil
-        try persistAppAttestKeyID(nil, rejected: false)
+        try rotateInvalidKey()
         diagnostic = .idle
         scheduleRegistration()
+    }
+
+    private static func runtimeIdentity(_ connection: PushConnectionIdentity) -> String {
+        "\(connection.machineID):\(connection.runtimeEpoch)"
     }
 
     private func scheduleRegistration() {
@@ -591,7 +594,6 @@ final class PushNotificationCoordinator {
               registrationTask == nil,
               context != nil,
               document.apnsToken != nil else { return }
-        readiness = .registering
         registrationGeneration &+= 1
         let generation = registrationGeneration
         registrationTask = Task { @MainActor [weak self] in
@@ -599,15 +601,22 @@ final class PushNotificationCoordinator {
             defer {
                 if self.registrationGeneration == generation { self.registrationTask = nil }
             }
-            do { try await self.registerCurrent(generation: generation) }
+            do {
+                try await self.registerCurrent(generation: generation)
+            }
             catch is CancellationError { return }
             catch let error as PushRegistrationError {
                 guard self.registrationIsValid(generation: generation) else { return }
-                self.readiness = .pending
+                if case .rejected(401) = error, self.automaticRetryAvailable, self.document.appAttestKeyRejected == true {
+                    do { try self.rotateInvalidKey() }
+                    catch { self.diagnostic = .stoppedPersistence; return }
+                    self.diagnostic = .idle
+                    Task { @MainActor [weak self] in self?.scheduleRegistration() }
+                    return
+                }
                 self.diagnostic = Self.diagnostic(for: error)
             } catch {
                 guard self.registrationIsValid(generation: generation) else { return }
-                self.readiness = .pending
                 self.diagnostic = .stoppedUnavailable
             }
         }
@@ -634,7 +643,6 @@ final class PushNotificationCoordinator {
                let registrationRevision = admittedContext.registrationRevision,
                grant.acknowledgedRuntime == runtimeIdentity,
                grant.acknowledgedRegistrationRevision == registrationRevision {
-                readiness = .ready
                 diagnostic = .complete
                 return
             }
@@ -650,13 +658,11 @@ final class PushNotificationCoordinator {
                 registrationRevision: admittedContext.registrationRevision
             ) {
             case .ready:
-                readiness = .ready
                 diagnostic = .complete
                 return
             case .rotate:
                 try discardGrant(profileID: admittedContext.profile.id)
             case .configurationMismatch, .unavailable:
-                readiness = .pending
                 diagnostic = .stoppedUnavailable
                 return
             }
@@ -669,7 +675,6 @@ final class PushNotificationCoordinator {
             throw PushRegistrationError.invalidConfiguration
         }
         var mode: ProofMode = document.appAttestKeyID == nil ? .attestation : .assertion
-        var recoveredInvalidKey = false
         var retryIndex = 0
 
         while true {
@@ -714,12 +719,15 @@ final class PushNotificationCoordinator {
                         ? try await appAttest.attest(keyID, clientDataHash)
                         : try await appAttest.assert(keyID, clientDataHash)
                 } catch {
-                    guard mode == .assertion, Self.isInvalidAppAttestKey(error), !recoveredInvalidKey else {
+                    guard mode == .assertion, Self.isInvalidAppAttestKey(error) else {
                         if Self.isInvalidAppAttestKey(error) { throw PushRegistrationError.invalidAppAttestKey }
                         throw error
                     }
+                    guard automaticRetryAvailable else {
+                        try markCurrentKeyRejected()
+                        throw PushRegistrationError.invalidAppAttestKey
+                    }
                     try rotateInvalidKey()
-                    recoveredInvalidKey = true
                     mode = .attestation
                     continue
                 }
@@ -772,26 +780,22 @@ final class PushNotificationCoordinator {
                     )
                     switch transferResult {
                     case .ready:
-                        readiness = .ready
                         diagnostic = .complete
                     case .rotate:
                         try discardGrant(profileID: admittedContext.profile.id)
-                        readiness = .pending
                         diagnostic = .stoppedUnavailable
                     case .configurationMismatch, .unavailable:
-                        readiness = .pending
                         diagnostic = .stoppedUnavailable
                     }
                     return
                 } catch is CancellationError {
                     throw CancellationError()
                 } catch PushRegistrationError.rejected(401) {
-                    guard mode == .assertion, !recoveredInvalidKey else {
-                        if mode == .attestation { try markCurrentKeyRejected() }
+                    guard mode == .assertion, automaticRetryAvailable else {
+                        try markCurrentKeyRejected()
                         throw PushRegistrationError.rejected(401)
                     }
                     try rotateInvalidKey()
-                    recoveredInvalidKey = true
                     mode = .attestation
                     continue
                 } catch PushRegistrationError.persistence {
@@ -850,6 +854,7 @@ final class PushNotificationCoordinator {
 
     private func rotateInvalidKey() throws {
         try persistAppAttestKeyID(nil, rejected: false)
+        automaticRetryAvailable = false
     }
 
     private func markCurrentKeyRejected() throws {
@@ -912,19 +917,11 @@ final class PushNotificationCoordinator {
                     grantId: grant.grantID,
                     secret: grant.grantSecret,
                     previewsEnabled: false,
-                    relayOrigin: relayOrigin,
-                    notifyWhenAskPresented: notificationPolicy.inputNeeded,
-                    notifyWhenFinished: notificationPolicy.finished,
-                    notifyWhenWaiting: notificationPolicy.waiting
+                    relayOrigin: relayOrigin
                 )
             )
             try validateRegistration(generation: generation, profileID: profileID, token: token)
             guard status.relayOrigin == relayOrigin else { return .configurationMismatch }
-            notificationPolicy = PushNotificationPolicy(
-                inputNeeded: status.notifyWhenAskPresented,
-                finished: status.notifyWhenFinished,
-                waiting: status.notifyWhenWaiting
-            )
             if status.requiresGrantRotation == true { return .rotate }
             guard status.available && status.registered && status.deviceRegistered && status.enabledDeviceCount > 0 else {
                 return .unavailable
@@ -985,7 +982,6 @@ final class PushNotificationCoordinator {
             document = cleared
             do { try credentials.save(cleared) }
             catch {
-                readiness = .pending
                 diagnostic = .stoppedPersistence
             }
         }
@@ -1002,7 +998,6 @@ final class PushNotificationCoordinator {
             updated.grants.removeValue(forKey: profile.id)
             try credentials.save(updated)
             document = updated
-            readiness = .denied
         } catch {
         }
     }

@@ -68,7 +68,6 @@ ui_owned_journeys=(
   "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectSettingsExposeReadOnlyOverrides"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testGlobalSettingsServeExposedEditorsAndEditAtGlobalScope"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsOutsideChangesAndBuiltinExtensionPersist"
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testExtensionsFlagsAPackageThatNeedsAnotherNode"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSheetsOpenStably"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSourcesTextDoneAndRoutes"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testForegroundAndReconnectKeepSheetsAndTheirContent"
@@ -84,11 +83,6 @@ ui_owned_journeys=(
   "TronMobileUITests/RealGatewayPairAndChatUITests/testGatewayRestartWaitsForLiveWorkThenRestartsIdleAndReconnects"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testAgentBehaviorQueuesSaveReopenAndResetLight"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testAgentBehaviorQueuesSaveReopenAndResetDark"
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleApproveCreatesUntrustsAndTrusts"
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleDenialRetainsUntrustedRepository"
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleRefusedApprovalShowsItsReason"
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleBusyTrustUsesCanonicalReason"
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testTrustedProjectsListsAndAddsProjectsUntrusted"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectSettingsTrustRowTrustsABlockedProject"
 )
 
@@ -164,6 +158,14 @@ e2e_test_filters=(
 )
 e2e_diagnostic_test_filters=(
   "TronMobileE2ETests/GatewayTimeoutDiagnosticTests/testBothRawTimeoutNamesProduceTheSameTransportDiagnostic"
+  "TronMobileE2ETests/PushRegistrationRetryTests/testRegistrationStateReachesTheUploadedAppLog"
+  "TronMobileE2ETests/PushRegistrationRetryTests/testRetryCardRotatesOnceAfterAcceptedTapAndDuplicateApprovalDoesNot"
+  "TronMobileE2ETests/PushRegistrationRetryTests/testPresentedConnectionMismatchRefusesBeforeAnswer"
+  "TronMobileE2ETests/PushRegistrationRetryTests/testConnectionChangeAfterAcceptanceRefusesRotation"
+  "TronMobileE2ETests/PushRegistrationRetryTests/testUnflaggedStoredKeyRejectedInAssertionRotatesExactlyOnce"
+  "TronMobileE2ETests/PushRegistrationRetryTests/testInvalidKeyAssertionRecoveryConsumesTheOneLaunchBudget"
+  "TronMobileE2ETests/PushRegistrationRetryTests/testOnlyAPushRetryCardWithATapYieldsAFence"
+  "TronMobileE2ETests/PushRegistrationRetryTests/testTransientAttestationThenAssertionRejectionStopsWithCardEligibleKey"
 )
 e2e_lan_test_filters=(
   "TronMobileE2ETests/RealGatewayPiBoundaryTests/testRacesLanAndTailscaleLanes"
@@ -877,13 +879,6 @@ run_ui_journey() {
   if [[ "$journey" == *testHomeSettingsCardDeclineAppliesNothingAndDoubleApproveAppliesOnce ]]; then
     prepare_home_automation_fixture 100
   fi
-  if [[ "$journey" == *testProjectLifecycleBusyTrustUsesCanonicalReason ]]; then
-    local busy="$TRON_E2E_WORKSPACE/busy-project"
-    printf '{}\n' >"$run_root/agent/trust.json"
-    /usr/bin/env -i PATH=/usr/bin:/bin HOME="$run_root/home" /usr/bin/git init --template= -b main "$busy"
-    /usr/bin/env -i PATH=/usr/bin:/bin HOME="$run_root/home" /usr/bin/git -C "$busy" -c user.name=Fixture -c user.email=fixture@example.invalid -c commit.gpgsign=false -c core.hooksPath=/dev/null commit --allow-empty -m fixture
-    /usr/bin/env -i PATH=/usr/bin:/bin HOME="$run_root/home" /usr/bin/git -C "$busy" -c core.hooksPath=/dev/null worktree add --detach "$run_root/home/busy-linked"
-  fi
   patch_xctestrun "$xctestrun" "$ui_test_target"
   mkdir -p "$run_root/results"
   attempt_dir="$(mktemp -d "$run_root/results/$(date -u '+%Y%m%dT%H%M%SZ')-ui.XXXXXX")"
@@ -1302,7 +1297,7 @@ if ((${#selectors[@]})); then
     run|run-lan|iterate|all|check)
       for selector in "${selectors[@]/#-only-testing:/}"; do
         owned=0
-        for boundary_case in "${e2e_test_filters[@]}"; do
+        for boundary_case in "${e2e_test_filters[@]}" "${e2e_diagnostic_test_filters[@]}"; do
           [[ "$selector" != "$boundary_case" ]] || owned=1
         done
         ((owned)) || die "$selector is not a boundary method this command owns (see '$0 help')"

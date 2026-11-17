@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fixture, disposeFixtures, reportCall } from "../../../test-support/home-task-fixture.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
-import { publishedNpmRegistry } from "../../../test-support/package-source-fixtures.js";
+import { installConfiguredPackage, publishedNpmRegistry } from "../../../test-support/package-source-fixtures.js";
 import type { ExtensionInteraction } from "../../protocol/types.js";
 import type { ChangeRequest, Resolution } from "../../kernel/settings/tool-contract.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
@@ -21,6 +21,8 @@ import { displayOwnerOf, homeOwnerOf } from "../../../test-support/gateway-regis
 import { CHANGE_REVIEW_TTL_MS, SemanticUIBroker } from "../../kernel/host/semantic-ui-broker.js";
 import { ExtensionPresentationStore } from "../../kernel/host/presentation/extension-presentation-store.js";
 import { changeReview } from "../../kernel/settings/settings-types.js";
+import { pushRetryReview } from "../../notifications/tron-notify-extension.js";
+import { decodeChangeReview, encodeChangeReview } from "../../protocol/types.js";
 import { SettingsChangeRecord } from "../../kernel/settings/settings-record.js";
 import { SettingsChangePath } from "../../kernel/settings/settings-change.js";
 import type { RuntimeSlot } from "../../kernel/run/runtime-slot.js";
@@ -825,7 +827,7 @@ describe("package update through the registered settings tool", () => {
       const settingsPath = join(f.agentDir, "settings.json");
       const existing = JSON.parse(await readFile(settingsPath, "utf8").catch(() => "{}"));
       await writeFile(settingsPath, JSON.stringify({ ...existing, packages: [source] }));
-      await f.packages.mutate("update", source, f.cwd, false);
+      await installConfiguredPackage(f.agentDir, f.cwd, source);
       const installedVersion = async (configured = source) => {
         const installedPath = (await f.packages.list(f.cwd)).packages.find(row => row.source === configured)?.installedPath;
         return installedPath ? JSON.parse(await readFile(join(installedPath, "package.json"), "utf8")).version as string : undefined;
@@ -892,7 +894,7 @@ describe("package update through the registered settings tool", () => {
       const settingsPath = join(f.agentDir, "settings.json");
       const existing = JSON.parse(await readFile(settingsPath, "utf8").catch(() => "{}"));
       await writeFile(settingsPath, JSON.stringify({ ...existing, packages: [source] }));
-      await f.packages.mutate("update", source, f.cwd, false);
+      await installConfiguredPackage(f.agentDir, f.cwd, source);
       await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
 
       const home = await f.registry.acquire(f.home.sessionId);
@@ -926,5 +928,33 @@ describe("package update through the registered settings tool", () => {
       process.env.npm_config_registry = saved.registry;
       process.env.npm_config_cache = saved.cache;
     }
+  });
+});
+
+describe("push registration retry card is a typed native intent", () => {
+  it("presents the exact intent, applies only on the exact tap, and refuses a duplicate or stale digest", async () => {
+    const review = pushRetryReview({ sessionId: "session-retry", toolCallId: "call-retry", reason: "Alerts stopped" });
+    expect(decodeChangeReview(JSON.parse(encodeChangeReview(review)))).toEqual(review);
+    const broker = new SemanticUIBroker(new ExtensionPresentationStore(() => {}));
+    let applied: Array<{ deviceId: string; commandId: string }> = [];
+    try {
+      const requested = broker.requestChange({ review, apply: async acceptance => { applied.push(acceptance); return { status: "requested" as const, deviceId: acceptance.deviceId }; } });
+      const settled = requested.then(value => ({ value }), error => ({ error }));
+      const interaction = broker.interactions()[0]!;
+      expect(interaction.method).toBe("change");
+      if (interaction.method !== "change") throw new Error("the push retry card is not a change review");
+      expect(interaction.review).toMatchObject({ intent: "push-registration-retry", requiresTap: true, digest: review.digest });
+      expect(() => broker.respond(interaction.id, interaction.hostEpoch, interaction.presentationRevision,
+        { digest: "0".repeat(64), approved: true }, false, { deviceId: phone.identity, commandId: "stale-digest" })).toThrow(expect.objectContaining({ code: "invalid_request" }) as never);
+      expect(applied).toEqual([]);
+      await broker.respond(interaction.id, interaction.hostEpoch, interaction.presentationRevision,
+        { digest: review.digest, approved: true }, false, { deviceId: phone.identity, commandId: "exact-tap" });
+      expect(await settled).toEqual({ value: { status: "requested", deviceId: phone.identity } });
+      expect(() => broker.respond(interaction.id, interaction.hostEpoch, interaction.presentationRevision,
+        { digest: review.digest, approved: true }, false, { deviceId: phone.identity, commandId: "duplicate-tap" })).toThrow(expect.objectContaining({ code: "not_found" }) as never);
+      expect(applied).toEqual([{ deviceId: phone.identity, commandId: "exact-tap" }]);
+      expect(pushRetryReview({ sessionId: "session-retry", toolCallId: "call-retry", reason: "Other reason" }).digest).toBe(review.digest);
+      expect(pushRetryReview({ sessionId: "session-other", toolCallId: "call-retry", reason: "Alerts stopped" }).digest).not.toBe(review.digest);
+    } finally { broker.retire(); }
   });
 });

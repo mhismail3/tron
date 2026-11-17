@@ -2447,14 +2447,11 @@ final class TronSmokeUITests: XCTestCase {
     func testSettingsToolsEditorUsesAvailableToolsListAndDetails() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture"]
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-ui-tools"]
         app.launch()
         defer { app.terminate() }
-        let toolsSection = app.buttons["settings-section-tools-open"]
-        XCTAssertTrue(toolsSection.waitForExistence(timeout: 10), app.debugDescription)
-        tapScrolling(toolsSection, in: app)
         let toolsRow = app.descendants(matching: .any)["settings-row-tools.active"]
-        XCTAssertTrue(toolsRow.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(toolsRow.waitForExistence(timeout: 10), app.debugDescription)
         tapScrolling(settingEditor(toolsRow), in: app)
         let any = app.descendants(matching: .any)
         let count = any.matching(NSPredicate(format: "label == %@", "2 of 2 on")).firstMatch
@@ -2684,66 +2681,6 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    func testDefaultToolsMovesToToolsAndPreservesUnmanagedSelectors() {
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-ui-tools-write", "-settings-ui-extensions"]
-        app.launch(); defer { app.terminate() }
-        tapScrolling(app.buttons["settings-link-Extensions"], in: app)
-        XCTAssertTrue(app.navigationBars.staticTexts["Extensions"].waitForExistence(timeout: 10), app.debugDescription)
-        let codemode = app.switches["Codemode"]
-        XCTAssertTrue(codemode.waitForExistence(timeout: 10), app.debugDescription)
-        wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: codemode)], timeout: 5)
-        XCTAssertFalse(app.switches.matching(NSPredicate(format: "label CONTAINS %@", "Always include codemode")).firstMatch.exists)
-        closeTopSheet(app)
-        tapScrolling(app.buttons["settings-section-tools-open"], in: app)
-        let toggle = app.switches.matching(NSPredicate(format: "label CONTAINS %@", "Always include codemode")).firstMatch
-        XCTAssertTrue(toggle.waitForExistence(timeout: 5), app.debugDescription)
-        wait(for: [expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: toggle)], timeout: 5)
-        tapScrolling(toggle, in: app)
-        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.tools-write"], containing: "global@global=read,retired,+codemode", timeout: 5),
-                      "The relocated control writes only its Global layer and preserves unknown selectors")
-        XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:1")
-        closeTopSheet(app)
-        tapScrolling(app.buttons["settings-section-tools-open"], in: app)
-        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
-        XCTAssertEqual(toggle.value as? String, "1")
-        XCTAssertTrue(app.staticTexts["Other entries"].exists)
-        keepScreenshot(named: "1261-tools-persisted-selectors")
-    }
-
-    @MainActor
-    func testDefaultToolsCodemodePickerOffersEnabledChoices() {
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-ui-tools-write", "-settings-ui-extensions"]
-        app.launch(); defer { app.terminate() }
-        tapScrolling(app.buttons["settings-section-tools-open"], in: app)
-        let codeMode = app.buttons["Other tools with codemode"]
-        XCTAssertTrue(codeMode.waitForExistence(timeout: 10), app.debugDescription)
-        wait(for: [expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: codeMode)], timeout: 10)
-        tapScrolling(codeMode, in: app)
-        let only = app.buttons["settings-option-Codemode only"]
-        XCTAssertTrue(only.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(only.isEnabled, "The presented choices must be enabled: \(app.debugDescription)")
-        XCTAssertTrue(app.buttons["settings-option-Both"].isEnabled)
-    }
-
-    @MainActor
-    func testPushReadinessAndRegistrationAreSeparateFromPolicyToggles() {
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-ui-push"]
-        app.launch(); defer { app.terminate() }
-        let any = app.descendants(matching: .any)
-        let summary = any["push-registration-summary"], policy = any["push-alert-policy"]
-        XCTAssertTrue(summary.waitForExistence(timeout: 10))
-        XCTAssertTrue(policy.exists)
-        XCTAssertLessThan(summary.frame.maxY, policy.frame.minY)
-        XCTAssertEqual(summary.switches.count, 0)
-        XCTAssertEqual(policy.switches.count, 3)
-        XCTAssertTrue(summary.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Complete")).firstMatch.exists)
-        keepScreenshot(named: "1261-push-separate-summary")
-    }
-
-    @MainActor
     func testRendererPickOfDisplayedDefaultPinsIt() {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-settings-renderer-fixture"]
@@ -2812,40 +2749,12 @@ final class TronSmokeUITests: XCTestCase {
     @MainActor
     func testUIFixesVisualReviewCaptures() {
         continueAfterFailure = false
-        for surface in ["providers", "push", "placement"] {
-            let app = XCUIApplication()
-            app.launchArguments = ["-tron-settings-renderer-fixture"]
-            if surface != "placement" { app.launchArguments.append("-settings-ui-\(surface)") }
-            app.launch()
-            XCTAssertTrue(app.staticTexts["fixture.settings-renderer-applied"].waitForExistence(timeout: 10), app.debugDescription)
-            if surface == "placement" {
-                tapScrolling(app.buttons["settings-link-Extensions"], in: app)
-                XCTAssertTrue(app.staticTexts["Turn a built-in off for all sessions."].waitForExistence(timeout: 5), app.debugDescription)
-                keepScreenshot(named: "1261-extensions")
-                app.staticTexts.matching(identifier: "Extensions").allElementsBoundByIndex.last!
-                    .coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-                    .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
-                let defaultTools = app.staticTexts["Default Tools"]
-                if defaultTools.exists {
-                    let lastControl = app.buttons["Other tools with codemode"]
-                    for _ in 0..<5 where !lastControl.isHittable { app.swipeUp() }
-                    keepScreenshot(named: "1261-extensions-default-tools")
-                } else {
-                    keepScreenshot(named: "1261-extensions-large")
-                }
-                closeTopSheet(app)
-                tapScrolling(app.buttons["settings-section-tools-open"], in: app)
-                XCTAssertTrue(app.descendants(matching: .any)["settings-section-tools-detail"].waitForExistence(timeout: 5), app.debugDescription)
-                keepScreenshot(named: "1261-tools")
-                app.staticTexts.matching(identifier: "Tools").allElementsBoundByIndex.last!
-                    .coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-                    .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
-                keepScreenshot(named: "1261-tools-large")
-            } else {
-                keepScreenshot(named: "1261-\(surface)")
-            }
-            app.terminate()
-        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-ui-providers"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["fixture.settings-renderer-applied"].waitForExistence(timeout: 10), app.debugDescription)
+        keepScreenshot(named: "1261-providers")
+        app.terminate()
     }
 
     @MainActor

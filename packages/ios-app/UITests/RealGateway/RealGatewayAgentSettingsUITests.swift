@@ -163,17 +163,8 @@ extension RealGatewayPairAndChatUITests {
                 XCTAssertTrue(waitUntil(timeout: 15) { saved(role) == nil }, "Reset must remove, not copy, the inherited value")
             }
             XCTAssertFalse(app.descendants(matching: .any)["settings-row-permissions.defaultProjectTrust"].exists,
-                           "Agent Behavior must not duplicate the Trusted Projects policy row")
-            let projects = app.buttons["Trusted Projects"]
-            revealBelowNavigationBar(app, projects)
-            XCTAssertTrue(projects.waitForExistence(timeout: 15), app.debugDescription)
-            projects.tap()
-            XCTAssertTrue(app.navigationBars.staticTexts["Trusted Projects"].waitForExistence(timeout: 30), app.debugDescription)
-            let trust = app.descendants(matching: .any)["settings-row-permissions.defaultProjectTrust"]
-            revealBelowNavigationBar(app, trust)
-            XCTAssertTrue(trust.exists, app.debugDescription)
-            keepScreenshot(app, name: "2010-agent-settings-trust-\(appearance)")
-            dismissAgentSheet(app, title: "Trusted Projects")
+                           "The default trust policy is the agent's, not an app row")
+            XCTAssertFalse(app.buttons["Trusted Projects"].exists, "The app has no Trusted Projects page")
             for _ in 0..<5 { app.swipeUp() }
             keepScreenshot(app, name: "2010-agent-settings-more-\(appearance)")
             dismissAgentSheet(app, title: "Agent Behavior")

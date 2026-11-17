@@ -19,6 +19,7 @@ The settings tool's `update` action (Tron Home only) installs one exact version 
 - **F3 Policy.** Routine reversible writes apply and log. Widening trust/executable
   authority, privacy or spend, and any install or irreversible effect, require an exact paired-native
   tap through the dedicated [native review](#native-review), never a generic form.
+  In a `sources.*` path list, adding an entry or removing a `-`/`!` exclusion widens.
 - **F4 Scopes.** Top wins: **Project > Session/Home override > Global**, among the scopes
   the target has and the key's grants allow. One resolver takes the topmost applied scope with
   a value; the effective value is computed, never stored.
@@ -49,7 +50,7 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 ## Keys
 
 <!-- tron docs settings -->
-47 keys, declared in `packages/gateway/src/kernel/settings/settings-schema.ts` (`KEYS`).
+51 keys, declared in `packages/gateway/src/kernel/settings/settings-schema.ts` (`KEYS`).
 
 | Key | Qualifier | Group | Layers | Home layers | Timing | Effect | Native tap |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -78,6 +79,7 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 | `tools.shell.commandPrefix` | — | tools | project, global | none | fixed | reload | trust |
 | `permissions.projectTrust` | project | trust | global | as allowed | live | reload | trust |
 | `permissions.macTerminalKey` | device | connections | global | as allowed | live | next-change | trust |
+| `experimental.swiftApps` | device | iphone | global | as allowed | live | next-change | — |
 | `permissions.macTerminalServer` | — | connections | global | as allowed | live | next-change | trust |
 | `permissions.defaultProjectTrust` | — | trust | global | as allowed | live | next-change | trust |
 | `run.workers.maxConcurrent` | — | workers | global | as allowed | live | delegate | spend |
@@ -94,12 +96,15 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 | `run.httpIdleTimeoutMs` | — | run | project, session, global | as allowed | live | next-request | — |
 | `run.websocketConnectTimeoutMs` | — | run | project, session, global | as allowed | live | next-request | — |
 | `run.cacheWarming` | — | run | global | none | fixed | reload | spend |
-| `sources.extensions` | — | sources | project, global | none | fixed | reload | trust |
-| `sources.skills` | — | sources | project, global | none | fixed | reload | trust |
-| `sources.prompts` | — | sources | project, global | none | fixed | reload | — |
-| `sources.themes` | — | sources | project, global | none | fixed | reload | — |
-| `sources.packages` | — | sources | project, global | none | fixed | reload | install |
-| `sources.npmCommand` | — | sources | global | none | live | next-change | trust |
+| `sources.extensions` | — | sources | project, global | as allowed | fixed | reload | trust |
+| `sources.skills` | — | sources | project, global | as allowed | fixed | reload | trust |
+| `sources.prompts` | — | sources | project, global | as allowed | fixed | reload | — |
+| `sources.themes` | — | sources | project, global | as allowed | fixed | reload | — |
+| `sources.packages` | — | sources | project, global | as allowed | fixed | reload | install |
+| `sources.npmCommand` | — | sources | global | as allowed | live | next-change | trust |
+| `notifications.push.inputNeeded` | — | notifications | global | none | live | next-request | privacy |
+| `notifications.push.finished` | — | notifications | global | none | live | next-request | privacy |
+| `notifications.push.waiting` | — | notifications | global | none | live | next-request | privacy |
 
 Record subjects (`RECORD_SUBJECTS`), changed per instance through the same path:
 
@@ -109,8 +114,6 @@ Record subjects (`RECORD_SUBJECTS`), changed per instance through the same path:
 | `accounts.models.provider` | accounts | provider |
 | `context.lesson` | context | lesson |
 <!-- /tron docs -->
-
-Install telemetry is not a setting: the Gateway process pins the pi SDK to `PI_TELEMETRY=0` before any SDK work, so a hand-written `enableInstallTelemetry` cannot re-enable it.
 
 Other schema fields: `subgroup`, `type`, `options` or `optionsSource` (`catalog.models`,
 `catalog.thinkingLevels(model)`, `catalog.tools`, ...), `defaultValue`, `direction`, `tap`, `writers`
@@ -191,8 +194,9 @@ or cause replay. An uncertain receipt requires inspection.
 The maintainer's own `settings.change`, `settings.undo` and `settings.applyAgain`
 apply directly: his tap is the authority. A renderer that shows a key's review card
 may bind that tap to it with `confirmationDigest`; a changed store refuses it as stale.
-Project lifecycle uses `projects.change`, binding its exact typed intent and review;
-its owner revalidates filesystem, Git, occupancy and trust before effects.
+Project creation uses the `projects` tool with its own exact native review, revalidating the
+Workspace identity before effects. Existing-project trust is `permissions.projectTrust`, bound
+to its exact review digest like any tap-required change. No project RPC exists.
 Project action facts do not invent generic inverses. Local RPC cannot confirm reviews. An agent's or Home's Undo that restores a tap-required value shows the same native card as a change.
 
 A refused bundle retains all per-change errors and before/after facts, but never

@@ -84,12 +84,13 @@ final class ProductionSceneOwner: ObservableObject {
     let model: AppModel
     let appearance = AppearanceSettings.shared
     let backgroundCheckpoints = AppBackgroundCheckpointCoordinator()
-    let pushNotifications = PushNotificationCoordinator()
+    let pushNotifications: PushNotificationCoordinator
     let pendingShares = UserDefaultsPendingShareStore()
     let pathDiagnostics: GatewayPathDiagnosticsObserver
 
     init(model: AppModel) {
         self.model = model
+        pushNotifications = PushNotificationCoordinator(log: model.appLog)
         pathDiagnostics = GatewayPathDiagnosticsObserver(model: model)
     }
 }
@@ -105,7 +106,10 @@ struct ProductionSceneRoot: View {
             colorScheme: owner.appearance.mode.colorScheme
         )
             .environment(owner.model)
-            .environment(owner.pushNotifications)
+            .environment(\.pushRegistrationRetryApproval, PushRegistrationRetryApproval(
+                connection: { owner.model.pushRetryConnection },
+                coordinator: owner.pushNotifications
+            ))
             .tronPresentation()
             .preferredColorScheme(owner.appearance.mode.colorScheme)
             .task {
@@ -126,13 +130,6 @@ struct ProductionSceneRoot: View {
             }
             .onChange(of: owner.model.profileRevision) { _, _ in
                 Task { await reconcilePushNotifications() }
-            }
-            .onChange(of: owner.pushNotifications.readiness) { _, readiness in
-                owner.model.pushNotificationReadiness = readiness
-                owner.model.pushRegistrationDiagnostic = owner.pushNotifications.diagnostic
-            }
-            .onChange(of: owner.pushNotifications.diagnostic) { _, diagnostic in
-                owner.model.pushRegistrationDiagnostic = diagnostic
             }
             .onOpenURL { url in
                 if let invitation = PairingInvitationParser.parse(url) {
@@ -210,7 +207,5 @@ struct ProductionSceneRoot: View {
             pushRegistrationRevision: owner.model.gatewayInfo?.pushRegistrationRevision,
             client: owner.model.client
         )
-        owner.model.pushNotificationReadiness = owner.pushNotifications.readiness
-        owner.model.pushRegistrationDiagnostic = owner.pushNotifications.diagnostic
     }
 }

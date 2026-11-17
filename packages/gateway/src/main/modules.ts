@@ -24,6 +24,7 @@ import type { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import type { SessionSearchService } from "../sessions/session-search-service.js";
+import { sessionImportModule } from "../modules/session-import/session-import-module.js";
 
 export interface ModuleOwners extends RecentModelSignals {
   registry: RuntimeRegistry;
@@ -33,6 +34,7 @@ export interface ModuleOwners extends RecentModelSignals {
   connections?: ConnectionOwner | undefined;
   scheduleToolOperations?: ScheduleToolOperations | undefined;
   sessionSearch?: SessionSearchService | undefined;
+  maxUploadBytes: number;
 }
 
 export function gatewayModules(owners: () => ModuleOwners, projectOptions?: ConstructorParameters<typeof ProjectLifecycle>[2]) {
@@ -41,7 +43,7 @@ export function gatewayModules(owners: () => ModuleOwners, projectOptions?: Cons
     const owner = owners().sessionSearch;
     return owner ? (request: Parameters<SessionSearchService["search"]>[0], signal?: AbortSignal) => owner.search(request, signal) : undefined;
   } }));
-  const projects = projectsModule(new ProjectLifecycle(() => owners().home.trust, projectRuntimePort(registry, signal => home.owner().activeTaskTargets(signal)), projectOptions));
+  const projects = projectsModule(new ProjectLifecycle(() => owners().home.trust, projectRuntimePort(registry, () => home.owner().activeTaskTargets()), projectOptions));
   const providers = createContextWindowModule(() => owners().openAIModelEligibility, owners, () => owners().home.modelQueue);
   return { home: home.owner, projects, providers, runtimeOrder: ORDINARY_MODULE_NAMES, modules: [
     workspaceModule,
@@ -51,6 +53,7 @@ export function gatewayModules(owners: () => ModuleOwners, projectOptions?: Cons
     createCoreModule(() => ({ knowledge: owners().home.knowledge(), connections: owners().connections })),
     createWebResearchModule(() => owners().home.homeWebTransport),
     settingsModule,
+    sessionImportModule(() => ({ registry: registry(), maxBytes: owners().maxUploadBytes })),
     projects,
     askUserModule,
     createDisplayModule(() => owners().display),

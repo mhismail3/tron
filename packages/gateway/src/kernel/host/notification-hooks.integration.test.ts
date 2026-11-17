@@ -18,7 +18,7 @@ it("K3 notification hooks resolve optional owners per call and admit real termin
     return new Response(JSON.stringify({ status: "accepted_by_apns" }), { status: 200 }) as never;
   });
   const store = new NotificationGrantStore(home);
-  const notifications = new NotificationService(store, relay);
+  const notifications = new NotificationService(store, relay, async () => ({ inputNeeded: true, finished: true, waiting: true }));
   let available: NotificationService | undefined;
   let host: ModuleHost | undefined;
   try {

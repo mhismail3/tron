@@ -11,7 +11,7 @@
 // @swift HomeStatus HomeContextProjection HomeTaskPage HomeTaskStatusResult HomeTaskHistoryPage
 // @swift HomeMemoryView HomeMemoryEvidencePage HomeChapterList HomeProfileList
 // @swift AdministrativeDrainSnapshot GatewayRestartResponse
-// @swift SessionCommands CommandDetail TronModuleList PackageInventory PackageUpdates ModelPage
+// @swift SessionCommands CommandDetail ModelPage
 // @swift SessionPhase SessionSummaryUpdate SessionListPage
 // @swift ExtensionRunLifecycle SessionProcessLifecycle SessionProcessActivity
 // @swift SessionProcessOverview SessionProcessDelta ProcessTranscriptChanged
@@ -943,6 +943,7 @@ module Protocol {
       title: string,
       requiresTap: bool,
       reason: Option<string>,
+      intent: Option<string>,
       items: seq<ChangeReviewItemsItem>
     )
 
@@ -1611,10 +1612,6 @@ module Protocol {
       commands: seq<string>
     )
 
-  /// `modules.list`: the built-in Tron extension definitions.
-  // @wire
-  datatype TronModuleList = TronModuleList(modules: seq<TronModuleSummary>)
-
   // @wire enum
   datatype PackageNodeRequirementStatus = satisfied | unsatisfied | invalid
 
@@ -1651,7 +1648,7 @@ module Protocol {
   // @wire enum
   datatype PackageScope = user | project
 
-  /// One configured package as `packages.list` answers it: Pi's configured package, what it
+  /// One configured package as the settings inventory reads it: Pi's configured package, what it
   /// provides, and why it is ignored or may not run, when it is.
   // @wire
   datatype PackageSummary = PackageSummary(
@@ -1664,16 +1661,9 @@ module Protocol {
       nodeRequirement: Option<PackageNodeRequirement>
     )
 
-  /// `packages.list`: the configured packages and Pi's resolved resources for the directory.
+  /// The configured packages and Pi's resolved resources for the directory.
   // @wire
   datatype PackageInventory = PackageInventory(packages: seq<PackageSummary>, resources: JsonValue, providesDiagnostic: Option<string>)
-
-  // @wire
-  datatype PackageUpdate = PackageUpdate(source: string, displayName: string, type_: string, scope: PackageScope)
-
-  /// `packages.checkUpdates`: the configured packages with an available update.
-  // @wire
-  datatype PackageUpdates = PackageUpdates(updates: seq<PackageUpdate>)
 
   // @wire enum
   datatype HomeProfileListItemKind = preference | {:wire "standing-decision"} standingDecision | {:wire "delegation-default"} delegationDefault | fact | correction

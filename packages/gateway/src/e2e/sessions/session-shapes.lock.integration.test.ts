@@ -86,7 +86,7 @@ async function attach(phone: LockClient, sessionId: string): Promise<void> {
 const withNotifications = (relayOrigin = "https://relay.lock.invalid") => async (tronHome: string) => {
   const service = new NotificationService(new NotificationGrantStore(tronHome),
     new PushRelayClient(relayOrigin, async () => new Response(JSON.stringify({ status: "accepted_by_apns" }), { status: 200 }) as never),
-    Date.now, () => {}, () => {}, () => {}, () => false);
+    async () => ({ inputNeeded: true, finished: true, waiting: true }), Date.now, () => {}, () => {}, () => {}, () => false);
   await service.initialize();
   releases.push(async () => service.dispose());
   return service;

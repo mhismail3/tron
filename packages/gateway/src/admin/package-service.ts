@@ -11,7 +11,7 @@ import {
   type ResolvedPaths,
 } from "../kernel/pi/coding-agent.js";
 import { GatewayError, asUncertainOutcome } from "../errors.js";
-import type { JsonValue, PackageInventory, PackageUpdates } from "../protocol/types.js";
+import type { PackageInventory } from "../protocol/types.js";
 import type { TrustService } from "../kernel/resources/trust-service.js";
 import { loadPackageProvides, type InstalledPackage } from "./package-provides.js";
 import { AsyncMutex } from "../util/async-mutex.js";
@@ -26,7 +26,6 @@ import type { ChangeReview, NativeChangeAcceptance } from "../protocol/types.js"
 
 const MAXIMUM_PACKAGES = 256;
 const MAXIMUM_RESOURCE_ITEMS = 1_000;
-const MAXIMUM_PACKAGE_UPDATES = 256;
 const MAXIMUM_PACKAGE_STRING_BYTES = 8_192;
 const MAXIMUM_PACKAGE_RESPONSE_BYTES = 768 * 1_024;
 const PACKAGE_UPDATE_ACTION = "package.update";
@@ -151,19 +150,6 @@ function validatePackageInventory(packages: InstalledPackage[], resources: Resol
   }
 }
 
-function validatePackageUpdates(updates: Awaited<ReturnType<DefaultPackageManager["checkForAvailableUpdates"]>>): void {
-  if (updates.length > MAXIMUM_PACKAGE_UPDATES) throw new GatewayError("conflict", "Package updates exceed their item limit");
-  validateUnique(updates, (value) => `${value.scope}:${value.source}`, "Package updates");
-  for (const value of updates) {
-    if (!boundedString(value.source) || !boundedString(value.displayName) || !boundedString(value.type)) {
-      throw new GatewayError("conflict", "Package updates exceed their string limit");
-    }
-  }
-  if (Buffer.byteLength(JSON.stringify({ updates })) > MAXIMUM_PACKAGE_RESPONSE_BYTES) {
-    throw new GatewayError("conflict", "Package updates exceed their response byte limit");
-  }
-}
-
 export class PackageService {
   private readonly mutex = new AsyncMutex();
   private changes?: SettingsChangePath;
@@ -172,7 +158,6 @@ export class PackageService {
   constructor(
     private readonly agentDir: string,
     private readonly trust: TrustService,
-    private readonly broadcast: (topic: string, payload: JsonValue) => void,
     private readonly workRegistry?: GatewayWorkRegistry,
     private readonly managedSubagents?: ManagedSubagents,
     private readonly outside?: OutsideChanges,
@@ -185,12 +170,10 @@ export class PackageService {
     this.reload = reload;
   }
 
-  private async manager(cwdInput: string, requireProjectTrust: boolean): Promise<{
+  private async manager(cwdInput: string): Promise<{
     manager: DefaultPackageManager; settings: SettingsManager; project: { cwd: string; projectDir: string };
   }> {
-    const trust = requireProjectTrust
-      ? await this.trust.requireResolved(cwdInput)
-      : await this.trust.inspect(cwdInput).then((inspection) => ({ cwd: inspection.cwd, projectDir: inspection.projectDir, trusted: inspection.effectiveDecision === true }));
+    const trust = await this.trust.inspect(cwdInput).then((inspection) => ({ cwd: inspection.cwd, projectDir: inspection.projectDir, trusted: inspection.effectiveDecision === true }));
     const settings = SettingsManager.create(trust.projectDir, this.agentDir, { projectTrusted: trust.trusted });
     if (settings.drainErrors().length > 0) {
       throw new GatewayError("conflict", "Canonical package settings could not be loaded");
@@ -209,13 +192,6 @@ export class PackageService {
     }
   }
 
-  private ensureConfiguredSource(manager: DefaultPackageManager, source: string, local: boolean): void {
-    const scope = local ? "project" : "user";
-    if (!manager.listConfiguredPackages().some((entry) => entry.scope === scope && entry.source === source)) {
-      throw new GatewayError("not_found", "The requested package is not configured in that scope");
-    }
-  }
-
   private async trackAdministrative<T>(operation: (work: GatewayWorkHandle | undefined) => Promise<T>): Promise<T> {
     const work = this.workRegistry?.begin({
       kind: "administrative-provider-package-operation",
@@ -230,7 +206,7 @@ export class PackageService {
 
   async list(cwd: string): Promise<unknown> {
     return this.trackAdministrative(() => this.mutex.run(async () => {
-      const { manager, settings, project } = await this.manager(cwd, false);
+      const { manager, settings, project } = await this.manager(cwd);
       const packages = manager.listConfiguredPackages();
       const resolver = this.managedSubagents
         ? new DefaultPackageManager({ cwd: project.cwd, projectDir: project.projectDir, agentDir: this.agentDir, settingsManager: managedProviderSettingsView(settings) })
@@ -254,19 +230,10 @@ export class PackageService {
     }));
   }
 
-  async checkUpdates(cwd: string): Promise<unknown> {
-    return this.trackAdministrative(() => this.mutex.run(async () => {
-      const { manager } = await this.manager(cwd, false);
-      const updates = await manager.checkForAvailableUpdates();
-      validatePackageUpdates(updates);
-      return { updates } satisfies PackageUpdates;
-    }));
-  }
-
   async updatePackage(request: PackageUpdateRequest, requester: Actor, confirm?: ConfirmChange): Promise<ChangeResult> {
     if (!this.changes) throw new GatewayError("busy", "Package updates are not available");
     if (!request.reason.trim()) throw new GatewayError("invalid_request", "A reason is required for a package update");
-    const plan = await this.trackAdministrative(() => this.mutex.run(async () => this.planUpdate(request, requester, await this.manager(request.cwd, false))));
+    const plan = await this.trackAdministrative(() => this.mutex.run(async () => this.planUpdate(request, requester, await this.manager(request.cwd))));
     if (!confirm) return { status: "review", review: plan.review, changes: [] };
     return (await confirm(plan.review, accepted => this.applyUpdate(request, plan.review.digest, requester, accepted))) ?? { status: "declined", changes: [] };
   }
@@ -344,7 +311,7 @@ export class PackageService {
   private applyUpdate(request: PackageUpdateRequest, digest: string, requester: Actor, accepted: NativeChangeAcceptance): Promise<ChangeResult> {
     const changes = this.changes!;
     return changes.withTarget({ kind: "global" }, () => this.trackAdministrative(work => this.mutex.run(async () => {
-      const context = await this.manager(request.cwd, false);
+      const context = await this.manager(request.cwd);
       const plan = await this.planUpdate(request, requester, context);
       if (plan.review.digest !== digest) throw new GatewayError("conflict", "The package changed since review; nothing was applied");
       if (plan.kind === "git" && await gitRead(plan.installedPath!, ["status", "--porcelain", "--untracked-files=no"]) !== "") {
@@ -359,7 +326,7 @@ export class PackageService {
       const { manager, settings } = context;
       const writes: PlannedWrite[] = [{ store: { kind: "global" }, instance: instanceId("sources.packages", {}), changeId, value: plan.packages }];
       await this.outside?.begin(writes);
-      manager.setProgressCallback(event => { work?.progress(); this.broadcast("packages.progress", { operationId: changeId, event } as unknown as JsonValue); });
+      manager.setProgressCallback(() => { work?.progress(); });
       try {
         settings.setPackages(plan.packages);
         await this.flushSettings(settings);
@@ -380,65 +347,9 @@ export class PackageService {
       }
       await changes.record.append([{ ...entry, changeId: randomUUID(), refersTo: changeId, at: new Date().toISOString(), status: "applied" }])
         .catch(error => { throw asUncertainOutcome(error, "Package applied but history publication failed"); });
-      this.broadcast("packages.changed", { cwd: request.cwd });
       this.reload?.();
       return { status: "applied", review: plan.review, changes: [{ changeId, key: PACKAGE_UPDATE_ACTION, layer: "global",
         status: "applied", undoable: false, result: { source: plan.source, target: plan.target, from: plan.from, version: plan.version } }] };
     })));
-  }
-
-  async mutate(action: "remove" | "update", source: string | undefined, cwd: string, local: boolean): Promise<{ operationId: string }> {
-    return this.trackAdministrative((work) => this.mutex.run(async () => {
-      if (source === MANAGED_SUBAGENTS_SOURCE) {
-        throw new GatewayError("conflict", "Tron manages pi-subagents; package commands cannot change its bundled payload");
-      }
-      const operationId = randomUUID();
-      let manager: DefaultPackageManager | undefined;
-      let mutationAdmitted = false;
-      try {
-        const managed = await this.manager(cwd, local);
-        manager = managed.manager;
-        manager.setProgressCallback((event) => {
-          work?.progress();
-          this.broadcast("packages.progress", { operationId, event } as unknown as JsonValue);
-        });
-        const { settings } = managed;
-        const writes: PlannedWrite[] = [{ store: local ? { kind: "project", root: managed.project.projectDir } : { kind: "global" },
-          instance: instanceId("sources.packages", {}), changeId: operationId, value: undefined }];
-        await this.outside?.begin(writes);
-        try {
-        if (action === "remove") {
-          if (source === undefined) throw new GatewayError("invalid_request", "Package source is required");
-          mutationAdmitted = true;
-          await manager.removeAndPersist(source, { local });
-          await this.flushSettings(settings);
-        } else if (source === undefined) {
-          mutationAdmitted = true;
-          await manager.update();
-        } else {
-          this.ensureConfiguredSource(manager, source, local);
-          mutationAdmitted = true;
-          await manager.install(source, { local });
-        }
-        } finally {
-          await this.outside?.end(writes, new Map());
-        }
-        this.broadcast("packages.completed", { operationId, success: true });
-      } catch (error) {
-        try {
-          this.broadcast("packages.completed", {
-            operationId,
-            success: false,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        } catch { }
-        throw mutationAdmitted
-          ? asUncertainOutcome(error, "The admitted package operation has an unproven outcome; reconcile package state before issuing another command")
-          : error;
-      } finally {
-        manager?.setProgressCallback(undefined);
-      }
-      return { operationId };
-    }));
   }
 }

@@ -11,28 +11,25 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
 - Renderer: `SettingsRendererView`, `SettingsRendererRow`, `SettingsValueEditors`,
   `SettingsChoiceSlider`.
 - Exact reviews use the shared `ChangeReviewSheet`.
-- Agent configuration: `ConfigurationSlider(Surface)`,
-  `DefaultToolsSettingsSection`.
+- Agent configuration: `ConfigurationSlider(Surface)`.
 - Accounts: `ProviderSettingsView`, `ProviderUsageReadController`, `IntegrationsSettingsView`
   (`IntegrationSheetRoutes`), `MCPServersSettingsView`, `ConnectionSettingsView`,
   `PairedDeviceDetailView`, `MacReplacementSheet`.
-- Extensions: `ExtensionsSettingsView`, `PackageDetailSheet`,
-  `ProjectResourceDetailSheet` (tool detail for `SettingsToolsEditor`), `TrustSettingsView`.
+- Resources: `ProjectResourceDetailSheet` (tool detail for `SettingsToolsEditor`), `TrustSettingsView`.
 - This iPhone and diagnostics: `AppearanceSettingsView`, `AppLocalBehaviorSettings`,
-  `PushNotificationsSettingsView`, `NotificationInboxView`, `GatewayLogsSettingsView`.
+  `NotificationInboxView`, `GatewayLogsSettingsView`.
 
 ## Contract
 
 - **Layout.** The gear opens one sheet: This iPhone (primary: Appearance, one sheet: Dashboard, Subagent Activity, Color Mode, Theme color, Text Font and Code Font),
   Accounts (primary: Connections, Model Providers),
-  Agent & Tools (primary: Agent Behavior first, Tools, MCP Servers, Extensions),
-  System (steel blue: Mac Terminal, Push Notifications, Setup, Logs). Every category destination
+  Agent & Tools (primary: Agent Behavior first, MCP Servers),
+  System (steel blue: Mac Terminal, Setup, Logs). Every category destination
   inherits its group tint for chrome, containers and icons; semantic statuses retain their colors.
   Primary groups use the selected theme's `tronPrimary`; System uses `tronSteel`, not the neutral `tronSlate` role.
-  Agent Behavior opens one primary-accent sheet with the Model, Workers & delegation, Compaction, Trusted Projects
+  Agent Behavior opens one primary-accent sheet with the Model, Workers & delegation, Compaction
   and Connection groups in place, not another level of section links. Each
-  group keeps its shared section heading, without section-description text. Trusted Projects
-  uses the shared settings row so its icon inherits the same sheet tint; known settings use
+  group keeps its shared section heading, without section-description text. Known settings use
   semantic glyphs in the shared renderer, with control-kind glyphs for unknown keys. The
   groups are the app's; the Gateway serves schema sections, and unplaced sections join More.
   Model contains direct model/thinking; Workers & delegation contains all three ordered model queues
@@ -47,13 +44,13 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   when saved; canonical Gateway values, scope rules and writers are unchanged. Other Compaction
   values appear only while retained values need inspection or Revert. More Settings groups
   retained values; Global embeds those groups directly. There is no Advanced section.
-  Trusted Projects consumes its declared group without duplicating it in More Settings; the
+  The `trust` group has no Global view; the
   `connections` group (Mac Terminal key and private SSH service) is owned by the Mac Terminal sheet.
   Notifications sit in the toolbar; no Value & Source sheet. Dashboard Settings
   exposes only Global: editable keys plus explicit read-only values with Reset and Project inspection.
-  Trusted Projects owns the default trust policy and per-project trust; Add Project records the
-  chosen folder as Not trusted through `settings.change`, a folder inside a listed project too
-  (the nearest saved decision governs).
+  The app has no Trusted Projects list: the agent changes `permissions.projectTrust` and
+  `permissions.defaultProjectTrust` behind the native card; the untrusted-project prompt and the
+  Project Settings trust row (`TrustSettingsView`) also write `permissions.projectTrust`.
 - **Appearance.** Theme selection writes iPhone-local UserDefaults immediately and reloads in
   a fresh process. Emerald, Deep Burgundy and Olive Gold share adaptive primary roles;
   semantic statuses and resource identities do not change with the theme. Explicit theme
@@ -136,16 +133,10 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   Model-registry activation still needs a maintainer-initiated Gateway restart; file edits do
   not promise hot reload.
   `compaction-policy.v1` adds per-field thinking and focus inheritance.
-- **Default Tools.** Global Tools' Always include switches edit `tools.active`. While
-  `sources.extensions` keeps the built-in from loading at that scope (Pi's rule: a Project entry
-  overrides the Global list), the switch is dimmed, shows Off and says why; the saved entry is kept,
-  and the row explains why.
-- **Extensions.** Inventory counts, installed packages (Tron's bundled subagents provider without
-  Update/Remove), the npm command, read-only Tron Modules and search paths. There is no native
-  install form: an agent proposes `sources.packages` (and `sources.npmCommand`) through the exact
-  install/trust card (#2172). A package's detail lists
-  what it Provides; `conflict` and `nodeRequirement` (#243) show as statuses. Hooks have no
-  app view; an agent reads them through the `settings` tool's `inventory` action.
+- **Tools and extensions.** Global Settings has no Tools, Extensions or package rows: the agent
+  changes `tools.*` and `sources.*` (installs and enables behind the native card), updates a
+  package with the `settings` tool's `update`, and reads packages, modules and hooks through
+  `inventory`. Session and Home Tools sections stay.
 - **MCP.** MCP Servers uses the Providers row layout and edits Pi's global `mcp.json`
   only, through `settings.change` on `tools.mcp.server` with each row's `mcp.list` `value`:
   it previews the change and shows the shared `ChangeReviewSheet` when the preview taps
@@ -182,7 +173,6 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
 
 ```bash
 scripts/tron-ios-test run \
-  --only-testing TronMobileUITests/TronExtensionsSettingsUITests \
   --only-testing TronMobileUITests/TronIntegrationSheetsUITests \
   --only-testing TronMobileUITests/TronMCPServerSheetsUITests \
   --only-testing TronMobileUITests/TronProjectTrustUITests \
@@ -208,44 +198,11 @@ The surviving memory/provider/queued-editor journeys in
 `TronForegroundCaptureUITests` own native-stack refresh, draft/focus preservation and invalid-child
 retirement; retired Worker thinking and Transport editor cases do not define that lifecycle.
 
-`TronAgentBehaviorRegressionUITests` exercises the production Global sheet, medium-first
-project list, error/Retry and missing-response recovery over the hosted socket; it also checks
-Global/Session value/reset order and captures both appearances. Hosted values are scripted,
+`TronAgentBehaviorRegressionUITests` exercises the production Global sheet over the hosted
+socket; it checks numeric-map values, retired rows, Global/Session value/reset order and captures both appearances. Hosted values are scripted,
 not persistence evidence. Real-UI journeys read their key inventory
 from the fixture Gateway's built schema. Before device sign-off, change values rapidly, dismiss while saving
 and switch profile: no untouched inherited setting may become an override.
-
-## Project lifecycle presentation
-
-`ProjectLifecyclePages.swift` owns the project list, Add/Create and details (Request Trust,
-Untrust) presentation. Renames, archives and GitHub repositories are ordinary Git/`gh`
-work, not app routes. Lists use `TronListGroup`/`TronListRow` without chevrons; fields keep
-shared settings controls. Drill-ins use managed sub-sheets, never push routes.
-Callers supply project paths, effective trust, trust refusal reasons, form bindings,
-destinations and effect closures. The views do not infer eligibility or submit RPCs.
-`TrustedProjectsSettingsView` is the single Global entrypoint into these sheets, using
-`TronProgressiveSheetLink`'s medium-first/large-expandable presentation.
-`ProjectLifecycleView` refreshes disposable `projects.list`/`projects.inspect`
-projections on re-entry, reconnect and existing settings/trust/approval revisions;
-profile, activity and generation fences retire stale reads. Saved outside folders
-remain visible/read-only with Gateway reasons. The list omits saved decisions under
-the hidden `~/Workspace/.archive` folder and those whose inspection returns `not_found`;
-these trust records remain untouched. Choose Existing only inspects: it never writes
-an untrusted decision or creates a second project store.
-`SettingsTrustCoordinator` sends `projects.change` through its existing receipt
-executor, with a fresh command ID per call. The review creates nothing and opens the
-shared `ChangeReviewSheet`; its Approve resubmits the exact digest and typed intent,
-which the Gateway revalidates before effects. No agent-tool fallback is used.
-
-`TronProjectLifecyclePreviewUITests` routes through these production-owned views in
-`HOSTED_TEST`'s `HostedProjectLifecyclePreview`: it opens and dismisses detail, approval,
-Add/Create and folder sub-sheets. Sample paths, drafts, busy reasons and the preview-only
-disclaimer stay in the fixture. Untrust and Trust review reuse `ChangeReviewSheet` with
-synthetic reviews; the preview sends no command, so route checks are not real-Gateway
-lifecycle acceptance.
-`RealGatewayProjectLifecycleUITests` owns separate create/untrust/trust approval, denial,
-refused-approval and linked-worktree busy journeys through the real socket and canonical
-filesystem/trust store. The harness seeds only its isolated busy repository.
 
 ## Not here
 

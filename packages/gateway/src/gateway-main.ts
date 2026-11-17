@@ -44,6 +44,7 @@ import type { HomeTaskDiagnostic } from "./modules/home/home-task-dispatcher.js"
 import { homeWorkspaceDirectory } from "./modules/home/home-owner.js";
 import { CommandReceiptStore, COMMAND_RECEIPT_PRUNE_INTERVAL_MS } from "./transport/command-receipts.js";
 import { GatewayService } from "./transport/gateway-service.js";
+import { DevicePreferenceBridge } from "./transport/device-preference-bridge.js";
 import { GatewayServer } from "./transport/server.js";
 import { ResourceSampler } from "./transport/stall-diagnostics.js";
 import type { ResourceRuntimeEntry } from "./util/resource-recorder.js";
@@ -53,7 +54,8 @@ import { createProviderModelRuntime } from "./providers/provider-runtime.js";
 import { OpenAIModelEligibility } from "./providers/openai-model-eligibility.js";
 import { NotificationGrantStore } from "./notifications/grant-store.js";
 import { PushRelayClient } from "./notifications/relay-client.js";
-import { NotificationService } from "./notifications/notification-service.js";
+import { NotificationService, readNotificationPolicy } from "./notifications/notification-service.js";
+import { migratePushPolicy } from "./notifications/push-policy-migration.js";
 import { handledSignalExitCode, SUPERVISOR_RELAUNCH_EXIT_CODE } from "./lifecycle/supervisor-exit-policy.js";
 import { shutdownStep } from "./lifecycle/shutdown-step.js";
 import { exitAfterShutdown } from "./lifecycle/exit-after-shutdown.js";
@@ -138,9 +140,11 @@ let transport: GatewayServer;
 const devices = new DeviceStore(config.tronHome, config.machineId);
 await devices.initialize();
 startupCheckpoint("devices");
+await migratePushPolicy(config.tronHome);
 const notifications: NotificationService = new NotificationService(
   new NotificationGrantStore(config.tronHome),
   new PushRelayClient(config.pushServiceOrigin),
+  () => readNotificationPolicy(keys => sessions.resolveGlobalSettings(keys)),
   Date.now,
   (payload) => transport?.broadcast("notification.inbox.changed", payload),
   () => logger.log("warning", "Session notification read state could not be persisted; unread state is retained.", {
@@ -180,12 +184,18 @@ const mcpAdmin = new McpAdminService(
   (level, message, event, fields) => logger.log(level, message, { event, source: "mcp", ...fields }),
 );
 const modelConfig = new ModelConfigService(config.agentDir);
+const devicePreferences = new DevicePreferenceBridge({
+  pairedDevices: async () => (await devices.listDevices()).map((device) => device.id),
+  newestReadyConnection: (deviceId, capability) => transport?.newestReadyDeviceConnection(deviceId, capability),
+  send: (connectionId, topic, payload) => transport?.emitToClient(connectionId, topic, payload) ?? false,
+});
 const settingsModel = new SettingsModel(new SettingsStoreAdapter({
   schema: settingsSchema,
   macTerminalKeys,
   mcpAdmin,
   modelConfig,
   lessonMoves: new LessonMoves(config.agentDir, config.tronHome, () => new HomeProfileItems(() => knowledge)),
+  devicePreferences,
   agentDir: config.agentDir,
   tronHome: config.tronHome,
   trust,
@@ -304,7 +314,7 @@ const homeComposition: HomeComposition = {
   homeTaskDiagnostic,
 };
 const { modules, home, projects } = await startGatewayModules({ tronHome: config.tronHome, log: logger },
-  () => ({ registry: sessions, home: homeComposition, openAIModelEligibility, connections, scheduleToolOperations, sessionSearch,
+  () => ({ registry: sessions, home: homeComposition, openAIModelEligibility, connections, scheduleToolOperations, sessionSearch, maxUploadBytes: config.maxUploadBytes,
     display,
     recentModelsChanged: () => transport?.broadcast("models.recentChanged", {}), persistenceDiagnostic }));
 const globalProviderResources = await GlobalProviderResources.create({
@@ -487,7 +497,6 @@ const knowledge = knowledgeStore;
 const packages = new PackageService(
   config.agentDir,
   trust,
-  (topic, payload) => transport?.broadcast(topic, payload),
   workRegistry,
   managedSubagents,
   outsideSettings,
@@ -560,6 +569,7 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
     workRegistry.beginDrain();
     sessionSearch?.cancelWarmup();
     backgroundWork.stop();
+    await shutdownStep("device-preference", async () => devicePreferences.dispose(), recordShutdownStep);
     await shutdownStep("transport-close", () => transport.close(), recordShutdownStep);
     if (!drainAcceptedWork) {
       await shutdownStep("cancellation", async () => { await Promise.allSettled([
@@ -755,9 +765,9 @@ const service = new GatewayService({
   trust,
   settingsModel,
   settingsChanges,
+  devicePreferences,
   macTerminal: macTerminalKeys,
   modelConfig,
-  packages,
   auth,
   globalProviderResources,
   logger,

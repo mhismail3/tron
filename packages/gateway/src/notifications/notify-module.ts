@@ -7,7 +7,7 @@ interface NotifyModuleServices { notifications: NotificationService | undefined;
 export function createNotifyModule(services: () => NotifyModuleServices): ModuleDescriptor {
   return {
     name: "tron-notify", purpose: "Sends notifications to your Tron iPhones.",
-    tools: ["notify"], commands: [],
+    tools: ["notify", "push_retry"], commands: [],
     start: () => ({
       hooks: {
         sessionNotifications: () => services().notifications,
@@ -33,6 +33,7 @@ export function createNotifyModule(services: () => NotifyModuleServices): Module
         return createTronNotifyExtension({
           sessionId: session.sessionId, sessionTitle: session.title, observed: session.presented,
           ...(machineId ? { machineId } : {}), enqueue: input => notifications.enqueue(input),
+          requestChange: session.requestChange,
         });
       },
     }),

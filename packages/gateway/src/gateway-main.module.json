@@ -26,6 +26,7 @@
     "gateway/notifications",
     "gateway/run",
     "gateway/session-catalog",
+    "gateway/session-import",
     "gateway/delegation",
     "gateway/integrations",
     "gateway/machine",

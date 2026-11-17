@@ -229,7 +229,7 @@ artifact checks. Browser live views are admitted only from `builtin:agent-browse
   activates its payload's closure before extension discovery and fails closed on damage.
   Stable installation is maintainer-only.
 - **Admission:** one `ManagedSubagents` selection per payload and home serves runtime and admin
-  loads, discovery, `session.resources` and `packages.list`. It revalidates receipt and files
+  loads, discovery, `session.resources` and the package inventory. It revalidates receipt and files
   (every installed file byte-compared against the SHA-512-checked pinned archive, decoded once per process;
   a load re-compares, re-reading the archive if its file identity changed, only when the installed
   tree's lstat identity, or an ancestor's, changed since the last passing compare),
@@ -240,7 +240,7 @@ artifact checks. Browser live views are admitted only from `builtin:agent-browse
   `subagent`. Its factory and discovery loads use the closure's jiti with a private
   `<gateway-home>/cache/pi-subagents-transform-cache/<version>`. The first factory load of a
   process waits (asynchronously) for a worker to transform the whole build into that cache, and a
-  discovery read (catalog, `packages.list`) only for the modules its entry reaches, so the
+  discovery read (catalog, package inventory) only for the modules its entry reaches, so the
   Gateway thread never runs Babel; if the worker cannot fill the cache the load is refused (`busy`, retryable) and the next
   load prepares again. Each factory load still evaluates a fresh module graph per session.
   After it serves and recovers, the Gateway starts that whole-build preparation in the
@@ -249,8 +249,7 @@ artifact checks. Browser live views are admitted only from `builtin:agent-browse
   load to prepare again.
 - **User declarations** of `npm:pi-subagents` are ignored (filtered by
   `managedProviderSettingsView`, which also refuses package writes; `extensionsOverride` is too
-  late to exclude); `packages.list` shows a typed `conflict` (`managed-provider`), Settings says
-  "Remove it with `pi remove npm:pi-subagents`"; one `pi-subagents.user-package-ignored` per load.
+  late to exclude); the package inventory shows a typed `conflict` (`managed-provider`); one `pi-subagents.user-package-ignored` per load.
 - **Status coverage:** status and fleet discovery keep readable runs visible and report unreadable
   indexed records as incomplete coverage, without rewriting those records or their active markers.
   Missing process-terminal evidence remains unknown, including historical terminal records; it is

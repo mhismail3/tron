@@ -5,7 +5,6 @@ import TronMobileCore
 @MainActor
 struct HostedSettingsRendererFixture: View {
     @State private var model: AppModel
-    @State private var push = PushNotificationCoordinator(credentials: UIReviewPushStore(), notifications: .live, appAttest: .live, configuration: nil)
     @State private var ready = false
     @State private var activity = PresentationActivityCoordinator()
     @State private var covering = HostedLaunch.arguments.contains("-sheet-haptics-restored")
@@ -14,7 +13,6 @@ struct HostedSettingsRendererFixture: View {
     @State private var error: String?
     @State private var applied = 0
     @State private var thinkingOptions = -1
-    @State private var toolWrite = "none"
     @State private var providerOperations = ""
     private let socket = HostedSettingsRendererSocket()
     private let profile: GatewayProfile
@@ -106,10 +104,7 @@ struct HostedSettingsRendererFixture: View {
         NavigationStack {
             if ready {
                 Group {
-                    if let index = HostedLaunch.arguments.firstIndex(of: "-project-lifecycle-preview"),
-                       HostedLaunch.arguments.indices.contains(index + 1) {
-                        HostedProjectLifecyclePreview(surface: HostedLaunch.arguments[index + 1])
-                    } else if HostedLaunch.arguments.contains("-theme-icon-boundary") {
+                    if HostedLaunch.arguments.contains("-theme-icon-boundary") {
                         HostedThemeIconFixture()
                     } else if let index = HostedLaunch.arguments.firstIndex(of: "-six-ui-surface"),
                        HostedLaunch.arguments.indices.contains(index + 1) {
@@ -123,12 +118,10 @@ struct HostedSettingsRendererFixture: View {
                         controlsReview
                     } else if HostedLaunch.arguments.contains("-settings-alignment-review") {
                         SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global", presentation: .section("context"))
-                    } else if HostedExtensionsReview.project {
-                        SettingsRendererView(target: SettingsTarget.project(cwd: "/fixture/project").gatewayTarget, writeLayer: nil, presentation: .section("tools"))
+                    } else if HostedLaunch.arguments.contains("-settings-ui-tools") {
+                        SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global", presentation: .section("tools"))
                     } else if HostedLaunch.arguments.contains("-settings-ui-providers") {
                         providerReview
-                    } else if HostedLaunch.arguments.contains("-settings-ui-push") {
-                        PushNotificationsSettingsView()
                     } else if HostedLaunch.arguments.contains("-settings-renderer-held-preview") || HostedLaunch.arguments.contains("-settings-renderer-confirm") || HostedLaunch.arguments.contains("-settings-renderer-haptics") {
                         SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global", presentation: .section("context"))
                     } else if HostedLaunch.arguments.contains("-settings-nested") {
@@ -143,17 +136,13 @@ struct HostedSettingsRendererFixture: View {
                 .safeAreaInset(edge: .bottom) {
                     if !HostedLaunch.arguments.contains("-settings-alignment-review")
                         && !HostedLaunch.arguments.contains("-settings-controls-review")
-                        && !HostedLaunch.arguments.contains("-six-ui-surface")
-                        && !HostedLaunch.arguments.contains("-project-lifecycle-preview") {
+                        && !HostedLaunch.arguments.contains("-six-ui-surface") {
                     HStack {
                         Text("applied:\(applied)").accessibilityIdentifier("fixture.settings-renderer-applied")
                         Text("held:\(heldPreviews)").accessibilityIdentifier("fixture.settings-renderer-held")
                         if HostedLaunch.arguments.contains("-settings-renderer-held-preview") { Button("Cover renderer") { covering = true } }
                         Text("haptics:\(TronHapticsProbe.shared.summary)").accessibilityIdentifier("fixture.haptics")
                         Text("thinking-options:\(thinkingOptions)").accessibilityIdentifier("fixture.settings-renderer-thinking-options")
-                        if HostedLaunch.arguments.contains("-settings-ui-tools-write") {
-                            Text(toolWrite).accessibilityIdentifier("fixture.tools-write")
-                        }
                         if HostedLaunch.arguments.contains("-settings-provider-actions") {
                             Text(providerOperations).accessibilityIdentifier("fixture.provider-operations")
                         }
@@ -170,15 +159,12 @@ struct HostedSettingsRendererFixture: View {
             }
         }
         .environment(model)
-        .environment(push)
         .preferredColorScheme(HostedLaunch.arguments.contains("-settings-renderer-dark") ? .dark : .light)
         .tronPresentation()
         .tronSettingsLayout()
         .task {
             do {
                 try await model.connectHostedGateway(profile: profile, token: "fixture-token")
-                model.pushNotificationReadiness = .ready
-                model.pushRegistrationDiagnostic = .complete
                 ready = true
             } catch { self.error = String(describing: error) }
         }
@@ -186,17 +172,11 @@ struct HostedSettingsRendererFixture: View {
             while !Task.isCancelled {
                 (applied, thinkingOptions) = await socket.counters()
                 heldPreviews = await socket.previewCount()
-                toolWrite = await socket.lastToolWrite()
                 providerOperations = await socket.providerOperationSummary()
                 try? await Task.sleep(for: .milliseconds(250))
             }
         }
     }
-}
-
-private struct UIReviewPushStore: PushCredentialStoring {
-    func load() throws -> PushCredentialDocument? { nil }
-    func save(_ document: PushCredentialDocument) throws {}
 }
 
 private actor HostedSettingsRendererSocket: GatewaySocketConnection {
@@ -206,15 +186,11 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     func releasePreview() { heldPreview?.resume(); heldPreview = nil }
 
     private var hello = true
-    private var projectReads = 0
     private var receiver: CheckedContinuation<Data, Error>?
     private var pending: [Data] = []
     private var closed = false
     private var model = "pro"
-    private var activeTools = HostedExtensionsReview.builtinOff ? ["read", "+codemode"] : ["read", "retired"]
-    private var extensions = HostedExtensionsReview.builtinOff ? ["-builtin:codemode"] : [String]()
-    private var toolWrite = "none"
-    func lastToolWrite() -> String { toolWrite }
+    private var activeTools = ["read", "retired"]
     private var thinking = "high"
     private var invalidValue = ""
     private var blockImages = false
@@ -281,21 +257,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         case "session.workspace.list":
             result = .object(["root": .string("/Users/fixture/Workspace/tron-worktrees/six-small-ui-fixes"),
                 "path": .string(""), "parent": .null, "revision": .string("preview"), "entries": .array([])])
-        case "projects.list":
-            projectReads += 1
-            if HostedLaunch.arguments.contains("-projects-withhold-once"), projectReads == 1 { return }
-            if HostedLaunch.arguments.contains("-projects-fail-once"), projectReads == 1 {
-                try enqueue(.object(["type": .string("response"), "id": .string(id), "ok": .bool(false),
-                    "error": .object(["code": .string("busy"), "message": .string("Project listing is unavailable. Try again."), "retryable": .bool(true)])]))
-                return
-            }
-            result = .object(["workspace": .string("/fixture/projects"), "projects": .array([
-                .object(["name": .string("Example"), "path": .string("/fixture/projects/Example"),
-                    "trust": .object(["effectiveDecision": .bool(true)]),
-                    "eligibility": .object(Dictionary(uniqueKeysWithValues: ["trust", "untrust"].map {
-                        ($0, JSONValue.object(["allowed": .bool(true)]))
-                    }))])
-            ]), "nextCursor": .null])
         case "trust.inspect": result = .object(["requiresDecision": .bool(false), "effectiveDecision": .bool(true)])
         case "git.inspect": result = .object(["isRepository": .bool(true), "branch": .null, "dirty": .bool(false), "branches": .array([]), "commits": .array([])])
         case "model.recent": result = .object(["models": .array([])])
@@ -308,7 +269,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 await withCheckedContinuation { heldPreview = $0 }
             }
             result = try change(params)
-        default: result = HostedExtensionsReview.response(method) ?? .object([:])
+        default: result = .object([:])
         }
         try enqueue(.object(["type": .string("response"), "id": .string(id), "ok": .bool(true), "result": result]))
     }
@@ -377,7 +338,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             key("context.images.block", group: "context", value: .bool(blockImages), display: blockImages ? "On" : "Off",
                 presentation: presentation("Block images", "Images are not sent to the model.", 10, "essential", "toggle")),
             key("tools.active", group: "tools", value: .array(activeTools.map(JSONValue.string)), display: activeTools.joined(separator: ", "),
-                layer: HostedExtensionsReview.project ? "project" : "global", set: !HostedExtensionsReview.project, presentation: presentation("Tools", "Tools available to new chats.", 10, "essential", "checklist",
+                set: true, presentation: presentation("Tools", "Tools available to new chats.", 10, "essential", "checklist",
                     extra: ["optionsSource": .object(["name": .string("catalog.tools"), "dependsOn": .array([])])])),
             key("run.retry.maxRetries", group: "run", subgroup: "Retry", value: .number(6), display: "6 retries",
                 set: true, presentation: presentation("Retries", "How many times a failed request is retried.", 10, "essential", nil)),
@@ -416,7 +377,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             section("lab", "Lab", 95, "A section this app has never seen"),
         ]
         return .object(["target": .object(["kind": .string("global")]), "layers": .array([.string("global")]),
-                        "renderer": .object(["version": .number(1)]), "keys": .array(keys + HostedExtensionsReview.keys(extensions: extensions)), "sections": .array(sections),
+                        "renderer": .object(["version": .number(1)]), "keys": .array(keys), "sections": .array(sections),
                         "diagnostics": .array([])])
     }
 
@@ -475,8 +436,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             case "context.images.block": blockImages = value?.boolValue ?? blockImages
             case "tools.active":
                 activeTools = value?.arrayValue?.compactMap(\.stringValue) ?? activeTools
-                toolWrite = "\(change["layer"]?.stringValue ?? "?")@\(params["target"]?.objectValue?["kind"]?.stringValue ?? "?")=\(activeTools.joined(separator: ","))"
-            case "sources.extensions": extensions = value?.arrayValue?.compactMap(\.stringValue) ?? []
             case "lab.focusMode": focusMode = value?.stringValue ?? focusMode
             case "lab.paths": paths = value?.arrayValue?.compactMap(\.stringValue) ?? []
             default: break
@@ -495,13 +454,12 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         ].merging(dryRun ? ["dryRun": .bool(true)] : [:]) { $1 }.merging(review) { $1 })
     }
 
-    private func key(_ id: String, group: String, subgroup: String? = nil, value: JSONValue?, display: String, layer: String = "global",
+    private func key(_ id: String, group: String, subgroup: String? = nil, value: JSONValue?, display: String,
                      set: Bool = false, badges: [JSONValue] = [], presentation: JSONValue) -> JSONValue {
         var object: [String: JSONValue] = [
-            "key": .string(id), "group": .string(group), "display": .string(display), "layer": .string(layer), "applied": .bool(true),
+            "key": .string(id), "group": .string(group), "display": .string(display), "layer": .string("global"), "applied": .bool(true),
             "overridden": .bool(set),
-            "layers": .array(HostedLaunch.arguments.contains("-settings-ui-tools-write") && id == "tools.active"
-                ? HostedExtensionsReview.layers(own: value ?? .null) : [.object(["layer": .string("global")])]),
+            "layers": .array([.object(["layer": .string("global")])]),
             "badges": .array(badges),
             "presentation": presentation,
         ]
@@ -536,10 +494,8 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         guard !closed else { throw CancellationError() }
         if hello {
             hello = false
-            let capabilities = HostedLaunch.arguments.contains("-agent-behavior-regression")
-                ? #"["sessions.v1","projects.lifecycle.v1"]"#
-                : HostedLaunch.arguments.contains("-settings-sheet-theme-review")
-                    ? #"["sessions.v1","gateway-update.v1","restart-supervised.v1","projects.lifecycle.v1"]"# : #"["sessions.v1"]"#
+            let capabilities = HostedLaunch.arguments.contains("-settings-sheet-theme-review")
+                ? #"["sessions.v1","gateway-update.v1","restart-supervised.v1"]"# : #"["sessions.v1"]"#
             return Data("""
                 {"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":8,"minProtocolVersion":8,"machineId":"fixture-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":\(capabilities)}
                 """.utf8)

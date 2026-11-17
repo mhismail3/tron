@@ -33,14 +33,14 @@ const options = { automations: true, home: { memorySummarizer: () => async () =>
   notifications: async (root: string) => {
     const owner = new NotificationService(new NotificationGrantStore(root), new PushRelayClient("https://relay.lock.invalid", async () => {
       throw new Error("Tool admission must not send a push");
-    }), Date.now, () => {}, () => {}, () => {});
+    }), async () => ({ inputNeeded: true, finished: true, waiting: true }), Date.now, () => {}, () => {}, () => {});
     notifications.push(owner);
     await owner.initialize();
     return owner;
   },
 };
 const originalTools = ["ask_user", "display", "notify", "zoom", "date", "memory_search", "session_search",
-  "session_read", "delegate", "web_search", "settings", "task", "profile"];
+  "session_read", "session_import", "delegate", "web_search", "settings", "task", "profile"];
 const nonMaintainerTools = [...originalTools, "read", "grep", "find", "ls", "schedule", "obligation", "tool_search"].sort();
 const userTools = [...nonMaintainerTools, "write", "edit", "bash", "computer"].sort();
 const WAKE_REFUSAL = "This tool requires the current maintainer turn; wake content cannot grant file, shell, computer or browser authority.";

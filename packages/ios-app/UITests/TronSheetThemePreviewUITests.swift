@@ -15,13 +15,11 @@ final class TronSheetThemePreviewUITests: XCTestCase {
             app.swipeUp(); app.swipeUp()
             capture(app, "section-colors-agent-bottom-\(mode)")
             close(app)
-            open(app, "settings-link-Push Notifications")
-            expand(app, title: "Push Notifications")
+            open(app, "settings-link-Logs")
+            expand(app, title: "Logs")
             capture(app, "section-colors-system-\(mode)")
             close(app)
-            for (id, title) in [("settings-section-tools-open", "Tools"),
-                                ("settings-link-MCP Servers", "MCP Servers"),
-                                ("settings-link-Extensions", "Extensions")] {
+            for (id, title) in [("settings-link-MCP Servers", "MCP Servers")] {
                 open(app, id)
                 expand(app, title: title)
                 capture(app, "section-colors-\(title)-\(mode)")
@@ -53,36 +51,26 @@ final class TronSheetThemePreviewUITests: XCTestCase {
         }
     }
 
-    func testWorkspaceControlsFollowTwoPresentingThemes() {
+    func testWorkspaceControlsFollowThePresentingTheme() {
         for mode in ["light", "dark"] {
-            for entry in ["server", "trusted"] {
-                let app = settings(mode)
-                defer { app.terminate() }
-                if entry == "server" {
-                    open(app, "settings-link-Connections")
-                    expand(app, title: "Connections")
-                    open(app, "Details for Fixture")
-                    expand(app, title: "Fixture")
-                    open(app, "Configure source repository")
-                } else {
-                    open(app, "settings-link-Agent Behavior")
-                    expand(app, title: "Agent Behavior")
-                    open(app, "Trusted Projects")
-                    open(app, "Add Project")
-                    open(app, "project-lifecycle-existing")
-                }
-                XCTAssertTrue(app.buttons["Use current folder"].waitForExistence(timeout: 10))
-                let title = app.navigationBars.staticTexts["/fixture/projects"].firstMatch
-                for label in ["Default", "Go Up", "New Folder", "Hidden"] {
-                    let button = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", label)).allElementsBoundByIndex.last { $0.isHittable }!
-                    assertColor(app, area: button.frame, matches: title.frame, ink: true)
-                    assertColor(app, area: containerPatch(button.frame), matches: title.frame, ink: false)
-                }
-                let folder = app.buttons["Example"].frame
-                assertColor(app, area: CGRect(x: folder.minX, y: folder.minY, width: 45, height: folder.height), matches: title.frame, ink: true)
-                capture(app, "regression-workspace-\(entry)-\(mode)")
-                app.terminate()
+            let app = settings(mode)
+            defer { app.terminate() }
+            open(app, "settings-link-Connections")
+            expand(app, title: "Connections")
+            open(app, "Details for Fixture")
+            expand(app, title: "Fixture")
+            open(app, "Configure source repository")
+            XCTAssertTrue(app.buttons["Use current folder"].waitForExistence(timeout: 10))
+            let title = app.navigationBars.staticTexts["/fixture/projects"].firstMatch
+            for label in ["Default", "Go Up", "New Folder", "Hidden"] {
+                let button = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", label)).allElementsBoundByIndex.last { $0.isHittable }!
+                assertColor(app, area: button.frame, matches: title.frame, ink: true)
+                assertColor(app, area: containerPatch(button.frame), matches: title.frame, ink: false)
             }
+            let folder = app.buttons["Example"].frame
+            assertColor(app, area: CGRect(x: folder.minX, y: folder.minY, width: 45, height: folder.height), matches: title.frame, ink: true)
+            capture(app, "regression-workspace-server-\(mode)")
+            app.terminate()
         }
     }
 

@@ -16,11 +16,12 @@ export const SECTIONS: readonly SectionDeclaration[] = [
   { id: "tools", title: "Tools", description: "Available tools, code mode, and shell", order: 30 },
   { id: "run", title: "Connection", description: "Proxy and retained overrides", order: 50 },
   { id: "trust", title: "Trusted Projects", description: "Project trust decisions and default policy", order: 55 },
+  { id: "notifications", title: "Notifications", description: "Push alerts for agent events; the agent can change them", order: 57 },
   { id: "connections", title: "Mac Terminal", description: "This iPhone's key on the connected Mac", order: 58 },
   { id: "accounts", title: "Accounts", description: "Providers, custom models, and services", order: 60 },
   { id: "sources", title: "Sources", description: "Packages and how they install", order: 70 },
   { id: "setup", title: "Storage", description: "Import, session storage, and telemetry", order: 80 },
-  { id: "iphone", title: "This iPhone", description: "Appearance and sessions", order: 90, note: "Stored on this iPhone. It never changes what the agent does." },
+  { id: "iphone", title: "This iPhone", description: "Appearance and sessions", order: 90, note: "Stored on this iPhone. Run Swift files can be changed by Home for an explicitly selected iPhone; other settings stay on this iPhone." },
 ];
 
 export type Binding =
@@ -36,7 +37,8 @@ export type Binding =
   | { store: "gateway"; path: readonly string[] }
   | { store: "mcp" }
   | { store: "models" }
-  | { store: "lesson" };
+  | { store: "lesson" }
+  | { store: "device-preference" };
 
 export type TimingDeclaration = Timing | { widen: Timing; narrow: Timing };
 
@@ -97,6 +99,11 @@ const grants = (_before: unknown, after: unknown): Direction => after === true ?
 const toolsDirection = (before: unknown, after: unknown): Direction => {
   const was = new Set(Array.isArray(before) ? before as string[] : []);
   return Array.isArray(after) && (after as string[]).some(name => !was.has(name)) ? "widen" : "narrow";
+};
+const sourcesDirection = (before: unknown, after: unknown): Direction => {
+  const kept = new Set(Array.isArray(after) ? after as string[] : []);
+  const excluded = (Array.isArray(before) ? before as string[] : []).filter(entry => entry.startsWith("-") || entry.startsWith("!"));
+  return excluded.some(entry => !kept.has(entry)) ? "widen" : toolsDirection(before, after);
 };
 
 function thinkingBudgetsType(): ValueType {
@@ -340,6 +347,12 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       confirm: "This iPhone’s key will authorize your Mac account through the private Tron SSH service, after you trust its host fingerprint.",
     },
     {
+      id: "experimental.swiftApps", sessionOverridable: false, projectSettable: false, group: "iphone", qualifier: "device",
+      type: types.boolean(["Enabled", "Off"]), layers: { global: { store: "device-preference" } }, timing: "live", effect: "next-change",
+      writers: ["ui", "home"], label: "Run Swift files", order: 10, importance: "advanced", control: "toggle",
+      help: "Adds a Run button to .swift previews on this iPhone. Sandboxed; simulator-tested only.",
+    },
+    {
       tap: "trust", id: "permissions.macTerminalServer", sessionOverridable: false, projectSettable: false,
       group: "connections", subgroup: "Mac Terminal", type: types.boolean(["Enabled", "Stopped"]),
       layers: { global: { store: "mac-terminal-service" } }, defaultValue: false,
@@ -450,8 +463,8 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       label: "Cache warming", help: "Keep prompt caches warm between runs. Costs money.", order: 130, importance: "advanced",
     },
     ...(["extensions", "skills", "prompts", "themes"] as const).map((name, index): KeyDeclaration => ({
-      ...(name === "extensions" || name === "skills" ? { tap: "trust" as const } : {}), id: `sources.${name}`, sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "sources", subgroup: "Search paths", type: types.stringList(500),
-      layers: both(pi(name)), timing: "fixed", effect: "reload", direction: toolsDirection,
+      ...(name === "extensions" || name === "skills" ? { tap: "trust" as const } : {}), id: `sources.${name}`, sessionOverridable: false, projectSettable: true, group: "sources", subgroup: "Search paths", type: types.stringList(500),
+      layers: both(pi(name)), timing: "fixed", effect: "reload", direction: sourcesDirection,
       writers: ["ui", "home"], label: name[0]!.toUpperCase() + name.slice(1), help: `Paths searched for ${name}.`,
       order: 10 + index * 10, importance: "advanced",
       ...(name === "extensions" ? {
@@ -460,14 +473,29 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       } : {}),
     })),
     {
-      tap: "install", id: "sources.packages", sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "sources", type: packagesType(), layers: both(pi("packages")), timing: "fixed", effect: "reload",
+      tap: "install", id: "sources.packages", sessionOverridable: false, projectSettable: true, group: "sources", type: packagesType(), layers: both(pi("packages")), timing: "fixed", effect: "reload",
       direction: (b, a) => larger(Array.isArray(b) ? b.length : 0, Array.isArray(a) ? a.length : 0),
       writers: ["ui", "home"], label: "Packages", help: "Installed pi packages.", order: 50, importance: "essential", control: "readOnly",
     },
     {
-      tap: "trust", id: "sources.npmCommand", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "sources", type: types.stringList(20), layers: { global: pi("npmCommand") }, timing: "live", effect: "next-change",
+      tap: "trust", id: "sources.npmCommand", sessionOverridable: false, projectSettable: false, group: "sources", type: types.stringList(20), layers: { global: pi("npmCommand") }, timing: "live", effect: "next-change",
       writers: ["ui", "home"], label: "npm command", help: "The command used to install packages.", order: 60, importance: "advanced", control: "list",
       entry: { hint: "One word per value: the program first (npm, pnpm or bun), then any arguments.", example: "pnpm" },
+    },
+    {
+      tap: "privacy", id: "notifications.push.inputNeeded", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "notifications", type: types.boolean(),
+      layers: { global: { store: "gateway", path: ["notifications", "push", "inputNeeded"] } }, defaultValue: true, timing: "live", effect: "next-request", direction: grants,
+      writers: ANY_ACTOR, label: "Input needed", help: "Send a push when Tron needs an answer or approval.", order: 10, importance: "essential",
+    },
+    {
+      tap: "privacy", id: "notifications.push.finished", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "notifications", type: types.boolean(),
+      layers: { global: { store: "gateway", path: ["notifications", "push", "finished"] } }, defaultValue: true, timing: "live", effect: "next-request", direction: grants,
+      writers: ANY_ACTOR, label: "Finished", help: "Send a push when a chat finishes its work.", order: 20, importance: "essential",
+    },
+    {
+      tap: "privacy", id: "notifications.push.waiting", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "notifications", type: types.boolean(),
+      layers: { global: { store: "gateway", path: ["notifications", "push", "waiting"] } }, defaultValue: true, timing: "live", effect: "next-request", direction: grants,
+      writers: ANY_ACTOR, label: "Waiting", help: "Send a push when work is waiting on background tasks.", order: 30, importance: "essential",
     },
   ] satisfies readonly KeyDeclaration[]);
 
