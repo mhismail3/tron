@@ -15,8 +15,8 @@ final class TronSheetThemePreviewUITests: XCTestCase {
             app.swipeUp(); app.swipeUp()
             capture(app, "section-colors-agent-bottom-\(mode)")
             close(app)
-            open(app, "settings-link-Push Notifications")
-            expand(app, title: "Push Notifications")
+            open(app, "settings-link-Logs")
+            expand(app, title: "Logs")
             capture(app, "section-colors-system-\(mode)")
             close(app)
             for (id, title) in [("settings-link-MCP Servers", "MCP Servers")] {

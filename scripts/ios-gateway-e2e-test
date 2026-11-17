@@ -158,6 +158,7 @@ e2e_test_filters=(
 )
 e2e_diagnostic_test_filters=(
   "TronMobileE2ETests/GatewayTimeoutDiagnosticTests/testBothRawTimeoutNamesProduceTheSameTransportDiagnostic"
+  "TronMobileE2ETests/PushRegistrationRetryTests/testRegistrationStateReachesTheUploadedAppLog"
   "TronMobileE2ETests/PushRegistrationRetryTests/testRetryCardRotatesOnceAfterAcceptedTapAndDuplicateApprovalDoesNot"
   "TronMobileE2ETests/PushRegistrationRetryTests/testPresentedConnectionMismatchRefusesBeforeAnswer"
   "TronMobileE2ETests/PushRegistrationRetryTests/testConnectionChangeAfterAcceptanceRefusesRotation"

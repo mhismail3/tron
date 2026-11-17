@@ -249,8 +249,6 @@ final class AppModel {
     var deviceCatalogRevision = 0
     var mcpConfigurationRevision = 0
     let notificationInbox: NotificationInboxCoordinator
-    var pushNotificationReadiness: PushReadiness = .unavailable
-    var pushRegistrationDiagnostic: PushRegistrationDiagnostic = .idle
     private(set) var pushNavigationRequest: PushNavigationRequest?
     private var processTranscriptInvalidationSinks: [UUID: (PresentedProcessTranscriptChanged) -> Void] = [:]
     var actionablePushNavigationRequest: PushNavigationRequest? {

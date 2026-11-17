@@ -102,9 +102,10 @@ final class PushRegistrationRetryTests: XCTestCase {
         let ledger: Ledger
         let connection: ConnectionBox
         let gate: PushRegistrationRetryApproval
+        let log: AppLog
     }
 
-    private func makeHarness(flagged: Bool, assertionInvalidKey: Bool = false, installationStatuses: [Int] = []) throws -> Harness {
+    private func makeHarness(flagged: Bool, assertionInvalidKey: Bool = false, installationStatuses: [Int] = [], authorization: PushAuthorization = .allowed) throws -> Harness {
         let credentials = CredentialMemory(PushCredentialDocument(
             appAttestKeyID: Ledger.key(1),
             apnsToken: String(repeating: "ab", count: 32),
@@ -123,20 +124,22 @@ final class PushRegistrationRetryTests: XCTestCase {
                 return Data([2])
             }
         )
+        let log = AppLog(fileURL: FileManager.default.temporaryDirectory.appending(path: "push-registration-\(UUID().uuidString).jsonl"))
         let coordinator = PushNotificationCoordinator(
             credentials: credentials,
             notifications: PushNotificationSystem(
-                authorization: { .allowed },
+                authorization: { authorization },
                 requestAuthorization: { true },
                 registerForRemoteNotifications: {}
             ),
             appAttest: appAttest,
             configuration: try XCTUnwrap(PushProductConfiguration.admit(URL(string: "https://push.example.com")!)),
-            transport: BoundedHTTPDataTransport(dataForRequest: { request, _ in try ledger.respond(request) })
+            transport: BoundedHTTPDataTransport(dataForRequest: { request, _ in try ledger.respond(request) }),
+            log: log
         )
         let connection = ConnectionBox()
         let gate = PushRegistrationRetryApproval(connection: { connection.current }, coordinator: coordinator)
-        return Harness(coordinator: coordinator, credentials: credentials, ledger: ledger, connection: connection, gate: gate)
+        return Harness(coordinator: coordinator, credentials: credentials, ledger: ledger, connection: connection, gate: gate, log: log)
     }
 
     private func identity(_ profile: GatewayProfile, epoch: String = "epoch-1", admission: Int = 1) -> PushConnectionIdentity {
@@ -192,6 +195,25 @@ final class PushRegistrationRetryTests: XCTestCase {
         }
         XCTAssertEqual(harness.ledger.keysGenerated, 1, "the automatic retry generates exactly one key")
         return harness
+    }
+
+    func testRegistrationStateReachesTheUploadedAppLog() async throws {
+        let harness = try await stoppedAfterAutomaticRetry()
+        var stages: [String] = []
+        for _ in 0..<500 where !stages.contains("Stopped: rejected") {
+            stages = await harness.log.snapshot().filter { $0.event == "push.registration" }.compactMap(\.outcome)
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertEqual(stages.last, "Stopped: rejected", "registration stages reach the uploaded app log: \(stages)")
+        XCTAssertTrue(stages.contains("Submitting proof"), "intermediate stages are logged too: \(stages)")
+        let denied = try makeHarness(flagged: false, authorization: .denied)
+        await connect(denied)
+        var deniedStages: [String] = []
+        for _ in 0..<500 where deniedStages.isEmpty {
+            deniedStages = await denied.log.snapshot().filter { $0.event == "push.registration" }.compactMap(\.outcome)
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertEqual(deniedStages, ["Stopped: notifications denied"], "a notification denial reaches the uploaded app log")
     }
 
     func testRetryCardRotatesOnceAfterAcceptedTapAndDuplicateApprovalDoesNot() async throws {
