@@ -94,6 +94,10 @@ Commands:
                                     Seeded sampled mutation of one file against the tests
                                     verify selects for it (lock sensitivity, plan 6.6);
                                     test-results/mutate/; measures, never gates
+  determinism [--update] [--base <ref>]
+                                    Gateway test real-time, fixed-port, skip/only and retry
+                                    sites against packages/gateway/determinism-baseline.json;
+                                    shrink-only (tools/verify/README.md)
   layers [gateway|ios] [--update] [--base <ref>]
                                     Gateway import graph (pinned tsc) or iOS index store
                                     (fresh tron-ios-test build) against manifest layers
@@ -293,6 +297,9 @@ case "$cmd" in
     ;;
   layers)
     exec python3 "$ROOT/tools/layers/layers.py" "$@"
+    ;;
+  determinism)
+    exec python3 "$ROOT/tools/verify/determinism.py" "$@"
     ;;
   proof)
     case "${1:-}" in

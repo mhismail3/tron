@@ -1,0 +1,389 @@
+{
+  "comment": "Shrink-only: scripts/tron determinism --update removes fixed sites; new sites are never added (tools/verify/README.md).",
+  "sites": {
+    "src/admin/mcp-admin-service.integration.test.ts": {
+      "timeout-literal": 4
+    },
+    "src/admin/settings-outside-read.integration.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/client/gateway-client.integration.test.ts": {
+      "sleep": 1
+    },
+    "src/e2e/admin/mcp-auth-session.integration.test.ts": {
+      "sleep": 1,
+      "timeout-literal": 1
+    },
+    "src/e2e/admin/native-change.e2e.test.ts": {
+      "sleep": 1,
+      "timeout-literal": 2,
+      "wall-clock-expect": 1
+    },
+    "src/e2e/admin/package-updates-dispose.integration.test.ts": {
+      "sleep": 1
+    },
+    "src/e2e/admin/settings-change.integration.test.ts": {
+      "sleep": 5,
+      "timeout-literal": 2
+    },
+    "src/e2e/admin/settings-gate.e2e.test.ts": {
+      "timeout-literal": 2
+    },
+    "src/e2e/admin/settings-subject-audit.e2e.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/admin/settings-worker-fences.e2e.test.ts": {
+      "timeout-literal": 4
+    },
+    "src/e2e/admin/source-repository.integration.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/automations/schedule-run-now-stop-drain.integration.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/automations/tests/automation-rpc.lock.integration.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/display/display-image-lifetime.integration.test.ts": {
+      "timeout-literal": 2
+    },
+    "src/e2e/integrations/tests/connections.projection.integration.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/kernel/delegation/codemode-nested-delegation.integration.test.ts": {
+      "sleep": 1
+    },
+    "src/e2e/kernel/delegation/delegation.lock.integration.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/kernel/delegation/home-managed-provider.integration.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/kernel/delegation/managed-run-stop-drain.e2e.test.ts": {
+      "sleep": 1,
+      "timeout-literal": 3
+    },
+    "src/e2e/kernel/delegation/managed-subagents-warm-process.e2e.test.ts": {
+      "timeout-literal": 2
+    },
+    "src/e2e/kernel/delegation/managed-subagents.rollback.integration.test.ts": {
+      "timeout-literal": 2
+    },
+    "src/e2e/kernel/delegation/managed-subagents.transform.integration.test.ts": {
+      "timeout-literal": 4
+    },
+    "src/e2e/kernel/delegation/managed-workflow-children.integration.test.ts": {
+      "timeout-literal": 2
+    },
+    "src/e2e/kernel/projection/codemode-nested-presentation.integration.test.ts": {
+      "sleep": 1
+    },
+    "src/e2e/kernel/resources/project-root.integration.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/kernel/run/observation-counts.integration.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/kernel/run/resource-freshness.e2e.test.ts": {
+      "sleep": 5,
+      "timeout-literal": 8
+    },
+    "src/e2e/kernel/run/shared-prefix.integration.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/kernel/run/task-lifecycle.conformance.integration.test.ts": {
+      "timeout-literal": 3
+    },
+    "src/e2e/kernel/run/turn-frame.integration.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/modules/apps/apps-install.integration.test.ts": {
+      "timeout-literal": 5
+    },
+    "src/e2e/modules/apps/swift-app-store.integration.test.ts": {
+      "timeout-literal": 8
+    },
+    "src/e2e/modules/home/home-context-data.e2e.test.ts": {
+      "timeout-literal": 9
+    },
+    "src/e2e/modules/home/home-lesson-move.e2e.test.ts": {
+      "timeout-literal": 2
+    },
+    "src/e2e/modules/home/home-obligations.e2e.test.ts": {
+      "timeout-literal": 2
+    },
+    "src/e2e/modules/home/home-profile-triage.integration.test.ts": {
+      "timeout-literal": 4
+    },
+    "src/e2e/modules/home/home-profile-v2-recovery.integration.test.ts": {
+      "timeout-literal": 4
+    },
+    "src/e2e/modules/home/home-restart.lock.integration.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/modules/home/home-session-catalog.e2e.test.ts": {
+      "timeout-literal": 2
+    },
+    "src/e2e/modules/home/home-system-prompt.e2e.test.ts": {
+      "timeout-literal": 2
+    },
+    "src/e2e/modules/home/home-task-command-scope.e2e.test.ts": {
+      "timeout-literal": 2
+    },
+    "src/e2e/modules/home/home-task-continuity.e2e.test.ts": {
+      "timeout-literal": 18
+    },
+    "src/e2e/modules/home/home-task-dispatch.e2e.test.ts": {
+      "sleep": 4,
+      "timeout-literal": 55
+    },
+    "src/e2e/modules/home/home-task-managed-provider.e2e.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/modules/home/home-task-prompt-cache.e2e.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/modules/home/home-task-subagents-controls.e2e.test.ts": {
+      "sleep": 1,
+      "timeout-literal": 14
+    },
+    "src/e2e/modules/home/home-task-subagents-model-queue.e2e.test.ts": {
+      "timeout-literal": 2
+    },
+    "src/e2e/modules/home/home-task-subagents-reports.e2e.test.ts": {
+      "sleep": 1,
+      "timeout-literal": 12
+    },
+    "src/e2e/modules/home/home-task-subagents-settlement.e2e.test.ts": {
+      "sleep": 2,
+      "timeout-literal": 9
+    },
+    "src/e2e/modules/home/home-task-tool.e2e.test.ts": {
+      "timeout-literal": 3,
+      "wall-clock-expect": 1
+    },
+    "src/e2e/modules/home/home-task-worker-model.e2e.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/modules/home/home-wake-rollover.e2e.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/modules/home/home-wake.e2e.test.ts": {
+      "sleep": 3,
+      "timeout-literal": 17
+    },
+    "src/e2e/modules/home/home.lock.integration.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/notifications/notifications-queue.lock.integration.test.ts": {
+      "timeout-literal": 7
+    },
+    "src/e2e/protocol/client-event-schemas.lock.integration.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/security/mac-terminal.e2e.test.ts": {
+      "sleep": 2,
+      "timeout-literal": 6
+    },
+    "src/e2e/sessions/agent-instructions.integration.test.ts": {
+      "timeout-literal": 8
+    },
+    "src/e2e/sessions/browser-fork-receipts.integration.test.ts": {
+      "timeout-literal": 2
+    },
+    "src/e2e/sessions/catalog-metadata-shards.integration.test.ts": {
+      "sleep": 1,
+      "timeout-literal": 2
+    },
+    "src/e2e/sessions/home-activation.e2e.test.ts": {
+      "timeout-literal": 31
+    },
+    "src/e2e/sessions/home-cache-layout.e2e.test.ts": {
+      "timeout-literal": 5
+    },
+    "src/e2e/sessions/home-designation.integration.test.ts": {
+      "sleep": 2,
+      "timeout-literal": 1
+    },
+    "src/e2e/sessions/home-memory-browser-scale.e2e.test.ts": {
+      "timeout-literal": 2
+    },
+    "src/e2e/sessions/home-memory-tools.e2e.test.ts": {
+      "timeout-literal": 13
+    },
+    "src/e2e/sessions/home-profile.integration.test.ts": {
+      "timeout-literal": 11
+    },
+    "src/e2e/sessions/home-request-seam.integration.test.ts": {
+      "sleep": 1,
+      "timeout-literal": 33
+    },
+    "src/e2e/sessions/home-research-tools.integration.test.ts": {
+      "timeout-literal": 19
+    },
+    "src/e2e/sessions/multi-resource-message.e2e.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/sessions/native-tool-settlement.integration.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/sessions/pi-persisted-state-corpus.integration.test.ts": {
+      "timeout-literal": 2
+    },
+    "src/e2e/sessions/project-root-resources.lock.integration.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/sessions/run-lifecycle.lock.integration.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/sessions/run-queue.lock.integration.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/sessions/runtime-compaction.integration.test.ts": {
+      "sleep": 1,
+      "timeout-literal": 1
+    },
+    "src/e2e/sessions/runtime-registry.integration.test.ts": {
+      "sleep": 39,
+      "timeout-literal": 11
+    },
+    "src/e2e/sessions/sdk-behavior-trace.integration.test.ts": {
+      "sleep": 1
+    },
+    "src/e2e/sessions/session-entries.lock.integration.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/sessions/session-heap.lock.integration.test.ts": {
+      "timeout-literal": 2
+    },
+    "src/e2e/sessions/session-search.privacy.lock.integration.test.ts": {
+      "timeout-literal": 2
+    },
+    "src/e2e/sessions/session-shapes.lock.integration.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/transport/gateway-process-prompt.e2e.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/transport/request-span.integration.test.ts": {
+      "sleep": 1,
+      "timeout-literal": 2
+    },
+    "src/e2e/transport/session-archive.integration.test.ts": {
+      "sleep": 5,
+      "timeout-literal": 8
+    },
+    "src/e2e/workspace/tron-workspace.integration.test.ts": {
+      "timeout-literal": 4
+    },
+    "src/episodic/episodic-checkpoint-amortization.e2e.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/episodic/episodic-layout-migration.integration.test.ts": {
+      "timeout-literal": 2
+    },
+    "src/episodic/episodic-memory-recovery.integration.test.ts": {
+      "sleep": 4,
+      "timeout-literal": 8
+    },
+    "src/episodic/episodic-memory.e2e.test.ts": {
+      "timeout-literal": 9
+    },
+    "src/episodic/home-source.e2e.test.ts": {
+      "sleep": 1,
+      "timeout-literal": 1
+    },
+    "src/episodic/home-state.e2e.test.ts": {
+      "timeout-literal": 2
+    },
+    "src/kernel/delegation/managed-subagents.install.integration.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/kernel/delegation/managed-subagents.invalid-entry.integration.test.ts": {
+      "timeout-literal": 2
+    },
+    "src/kernel/delegation/managed-subagents.payload.integration.test.ts": {
+      "timeout-literal": 11
+    },
+    "src/kernel/run/direct-bash-process-owner.integration.test.ts": {
+      "timeout-literal": 12,
+      "wall-clock-expect": 2
+    },
+    "src/lifecycle/exit-after-shutdown.e2e.test.ts": {
+      "sleep": 1,
+      "timeout-literal": 1
+    },
+    "src/machine/workspace-inspection-service.integration.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/modules/apps/native-exec-stall-capture.integration.test.ts": {
+      "timeout-literal": 2
+    },
+    "src/modules/home/home-ledger-crash.e2e.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/modules/home/home-profile-you-centred.integration.test.ts": {
+      "timeout-literal": 5
+    },
+    "src/modules/home/home-receipt-crash.e2e.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/modules/home/home-task-store.integration.test.ts": {
+      "sleep": 1,
+      "timeout-literal": 13
+    },
+    "src/modules/home/home-wake-inbox.integration.test.ts": {
+      "timeout-literal": 2
+    },
+    "src/providers/context-window-policy.integration.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/providers/provider-usage.integration.test.ts": {
+      "sleep": 1
+    },
+    "src/security/mac-terminal-service.e2e.test.ts": {
+      "sleep": 1,
+      "timeout-literal": 2
+    },
+    "src/sessions/extension-artifact-discovery.integration.test.ts": {
+      "sleep": 3,
+      "timeout-literal": 1
+    },
+    "src/transport/lan-endpoint.integration.test.ts": {
+      "sleep": 4,
+      "timeout-literal": 1
+    },
+    "src/transport/openai-model-eligibility.integration.test.ts": {
+      "sleep": 1
+    },
+    "src/transport/server-capacity.integration.test.ts": {
+      "sleep": 1,
+      "timeout-literal": 1
+    },
+    "src/transport/server-connection-memory.integration.test.ts": {
+      "sleep": 1
+    },
+    "src/transport/server-heartbeat.integration.test.ts": {
+      "timeout-literal": 5
+    },
+    "src/transport/server-http-admission.integration.test.ts": {
+      "wall-clock-expect": 1
+    },
+    "src/transport/server-http-lifecycle.integration.test.ts": {
+      "sleep": 1,
+      "timeout-literal": 2
+    },
+    "src/transport/sync-protocol.integration.test.ts": {
+      "sleep": 5
+    },
+    "test-fixtures/pi-sdk/record-corpus.integration.test.ts": {
+      "timeout-literal": 1
+    },
+    "test-fixtures/tron-corpus/record-tron-corpus.integration.test.ts": {
+      "timeout-literal": 1
+    },
+    "test-support/package-source-fixtures.ts": {
+      "sleep": 1
+    }
+  }
+}
