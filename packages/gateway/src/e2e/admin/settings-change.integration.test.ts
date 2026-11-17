@@ -473,8 +473,8 @@ describe("settings.change", () => {
     const actor = { actor: { kind: "home" as const, id: "home-fixture" }, reason: "Change the declared setting" };
     await expect(f.settingsChanges.change({ kind: "global" }, [
       { key: "run.retry.maxRetries", layer: "global", op: "set", value: 8 },
-      { key: "setup.installTelemetry", layer: "global", op: "set", value: false },
-    ], actor)).rejects.toMatchObject({ code: "invalid_request", message: "Install telemetry cannot be changed by home" });
+      { key: "context.rules.global", layer: "global", op: "set", value: false },
+    ], actor)).rejects.toMatchObject({ code: "invalid_request", message: "Global AGENTS.md cannot be changed by home" });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
     expect(await f.history()).toEqual([]);
     const preview = await f.settingsChanges.change({ kind: "global" }, [
