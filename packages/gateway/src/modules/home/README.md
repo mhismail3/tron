@@ -114,8 +114,8 @@ Composition supplies the same late K6 settings, Profile and raw model owners.
 - **Profile** (`home-session-profile.ts`) is fixed per runtime. An unrecorded new Home uses
   its creation recipe once; later runtimes read the record (enabled Home, otherwise ordinary).
   Only `tron-context-window`, `tron-compaction-policy`, `tron-settings`, `tron-projects`,
-  `tron-ask-user`, `tron-display`, `tron-notify`, `tron-schedule`, `tron-computer`, `tron-home`, `tron-home-research`, `tron-web-research`
-  and `tron-tool-search` (Pi's `tool_search`) load,
+  `tron-ask-user`, `tron-display`, `tron-notify`, `tron-schedule`, `tron-computer`, `tron-home`, `tron-home-research`, `tron-web-research`,
+  `tron-session-import` and `tron-tool-search` (Pi's `tool_search`) load,
   plus the already-installed, globally configured trusted browser package through its explicit local package path.
   Package metadata retains its existing browser-source attribution. Missing browser assets leave that tool unavailable;
   Home does not provision a second temporary checkout. Ambient extensions remain disabled.
@@ -217,9 +217,11 @@ changes keep its store, cursors and spend.
 
 ### Tools and profile
 
-- **Research tools** (read-only): the shared `web_search` search/read/content contract
+- **Research tools** (read-only, except `session_import` below): the shared `web_search` search/read/content contract
   (`workspace/web-research-module.ts`), `session_search`,
   `session_read` (never Home chapters) and bounded explicit `profile` reads.
+  `session_import` is the one write: it creates one new session from a named `.jsonl` file
+  through the registry's import owner, in the explicit `cwd` Home must pass.
   Web schema, backend and quota owner are identical to ordinary workers and native
   research children. Results are capped untrusted data; delegation is not gated on them.
 - **Shared tools:** Pi owns `read`, `write`, `edit`, `bash`, `grep`, `find` and `ls`,
