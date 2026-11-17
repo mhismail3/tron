@@ -750,7 +750,7 @@ settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, {
   ),
   undoSubject: (entry, context) => new HomeProfileItems(() => knowledge).undo(settingsChanges, entry, context),
 });
-sessions.setSettings(settingsModel, settingsChanges, new SettingsInventoryReader(hookResources, packages, mcpAdmin, trust, modules));
+sessions.setSettings(settingsModel, settingsChanges, new SettingsInventoryReader(hookResources, packages, mcpAdmin, trust, modules, modelConfig));
 projects.register(settingsChanges);
 packages.register(settingsChanges, () => globalProviderResources.requestReload());
 

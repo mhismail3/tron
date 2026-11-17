@@ -267,13 +267,13 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
     {
       id: "context.rules.global", sessionOverridable: true, projectSettable: false, home: { layers: [] }, group: "context", subgroup: "Rules", type: types.boolean(),
       layers: { session: { store: "session-settings", path: ["contextRules", "global"] }, global: pi("contextRules", "global") },
-      defaultValue: true, timing: "fixed", effect: "reload", writers: ["ui"],
+      defaultValue: true, timing: "fixed", effect: "reload", writers: ["ui", "home"],
       label: "Global AGENTS.md", help: "Send the global AGENTS.md rules to chats and workers.", order: 60, importance: "advanced",
     },
     {
       id: "context.rules.project", sessionOverridable: true, projectSettable: false, home: { layers: [] }, group: "context", subgroup: "Rules", type: types.boolean(),
       layers: { session: { store: "session-settings", path: ["contextRules", "project"] }, global: pi("contextRules", "project") },
-      defaultValue: true, timing: "fixed", effect: "reload", writers: ["ui"],
+      defaultValue: true, timing: "fixed", effect: "reload", writers: ["ui", "home"],
       label: "Project AGENTS.md", help: "Send a trusted project's AGENTS.md rules to chats and workers.", order: 61, importance: "advanced",
     },
     {

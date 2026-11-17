@@ -503,7 +503,7 @@ describe("settings.change", () => {
     }
   });
 
-  caseIt("an agent reads its chat's inventory of hooks, packages and MCP status with credentials masked", async owner => {
+  caseIt("an agent reads its chat's inventory of hooks, packages, MCP status and model providers with credentials masked", async owner => {
     const f = await fixture(owner);
     const cwd = join(f.root, "inventory-chat");
     await mkdir(cwd);
@@ -527,6 +527,9 @@ describe("settings.change", () => {
     mcpDocument.mcpServers["inventory-credential"] = { url: "http://127.0.0.1:1/credential", headers: { Authorization: `!touch ${resolved}; printf secret` } };
     mcpDocument.mcpServers["inventory-slash-userinfo"] = { url: "https://user:pa/ss@127.0.0.1:1/mcp" };
     await writeFile(mcpPath, JSON.stringify(mcpDocument, null, 2));
+    await writeFile(join(f.agentDir, "models.json"), JSON.stringify({ providers: { "inventory-local": {
+      baseUrl: "https://models.inventory.test/v1", api: "openai-completions", apiKey: "inventory-provider-secret",
+      models: [{ id: "inventory-model-a" }, { id: "inventory-model-b" }] }, openai: { apiKey: "inventory-builtin-secret" } } }));
     f.faux.setResponses([
       fauxAssistantMessage([fauxToolCall("settings", { action: "inventory" }, { id: "inventory-tool" })], { stopReason: "toolUse" }),
       fauxAssistantMessage("Done"),
@@ -550,6 +553,20 @@ describe("settings.change", () => {
     ]));
     expect(inventory.mcp.servers).not.toContainEqual(expect.objectContaining({ name: "inventory-slash-userinfo" }));
     expect(inventory.mcp.errors).toBe(1);
+    expect(inventory.models).toEqual({ providers: [{ id: "inventory-local", host: "models.inventory.test", api: "openai-completions",
+      models: ["inventory-model-a", "inventory-model-b"] }, { id: "openai", models: [] }], errors: 0 });
+    await writeFile(join(f.agentDir, "models.json"), "{ not json");
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("settings", { action: "inventory" }, { id: "inventory-broken-models" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage("Done"),
+    ]);
+    await slot.prompt("Read the settings inventory with a broken models.json");
+    await waitFor(() => !slot.isBusy && !slot.hasActiveAgentRun || undefined, "broken models inventory turn settled");
+    const broken = slot.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === "inventory-broken-models");
+    if (broken?.type !== "message" || broken.message.role !== "toolResult") throw new Error("No canonical broken-models inventory result");
+    expect(broken.message.isError).not.toBe(true);
+    expect((broken.message.details as SettingsInventory).models).toEqual({ providers: [], errors: 1 });
+    expect((broken.message.details as SettingsInventory).mcp.servers.length).toBeGreaterThan(0);
     expect(JSON.stringify(inventory)).not.toMatch(/inventory-secret|inventory-query-secret|pa\/ss|user:|127\.0\.0\.1|secret/);
   });
 
@@ -1235,6 +1252,20 @@ describe("outside changes to MCP servers and custom models", () => {
     expect(applied).toEqual(expect.objectContaining({ status: "applied", qualifiers: { server: "home-docs" } }));
     await maintainerChange(f.service, client(), "settings.undo", { commandId: commandId(), changeId: applied!.changeId });
     expect(JSON.parse(await readFile(join(f.agentDir, "mcp.json"), "utf8")).mcpServers["home-docs"]).toBeUndefined();
+  });
+
+  caseIt("an agent-requested Mac Terminal key applies only when the device it names accepts the card", async owner => {
+    const f = await fixture(owner);
+    const key = macTerminalSampleKey();
+    const request = [{ key: "permissions.macTerminalKey", qualifiers: { device: ENROLLED_IPHONE }, layer: "global", op: "set", value: key }] as const;
+    const accepted = (deviceId: string) => f.settingsChanges.change({ kind: "global" }, request, {
+      actor: { kind: "agent", id: "terminal-agent" }, reason: "Enroll the iPhone's Mac Terminal key",
+      confirm: async (_review, apply) => apply({ deviceId, commandId: commandId() }),
+    });
+    await expect(accepted("00000000-0000-4000-8000-000000000002")).rejects.toMatchObject({ code: "invalid_request", message: "Only the iPhone a Mac Terminal key names can accept its card" });
+    expect((await f.macTerminalKeys.read())[ENROLLED_IPHONE]).toBeUndefined();
+    await expect(accepted(ENROLLED_IPHONE)).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("private SSH service") });
+    expect((await f.macTerminalKeys.read())[ENROLLED_IPHONE]).toBeUndefined();
   });
 
   caseIt("the app manages a bearer-token MCP server only through settings.change, holding a Keychain reference and never the token", async owner => {

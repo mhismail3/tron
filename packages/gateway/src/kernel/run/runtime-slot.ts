@@ -690,7 +690,16 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       updatePackage: input => owners.model.owner.updatePackage({ cwd: this.cwd, source: input.source, version: input.version, reason: input.reason },
         actor(input.toolCallId), input.confirm),
       resolve: async (keys, taskId) => {
-        if (taskId === undefined) return owners.model.resolve(target, source(), keys);
+        if (taskId === undefined) {
+          const resolution = await owners.model.resolve(target, source(), keys);
+          if (!this.usesHomeSettings) return resolution;
+          const listed = new Set(resolution.keys.map(key => key.key));
+          const globalOnly = owners.model.schema.KEYS.filter(key => key.writers.includes("home") && key.layers.global && !listed.has(key.id)
+            && (keys ? keys.includes(key.id) : key.layers.global.store !== "device-preference")).map(key => key.id);
+          if (globalOnly.length === 0) return resolution;
+          const global = await owners.model.resolve({ kind: "global" }, undefined, globalOnly, { storeState: false });
+          return { ...resolution, keys: [...resolution.keys, ...global.keys] };
+        }
         const { task, slot, target: workerTarget } = await worker(taskId, "resolve");
         const resolution = await owners.model.resolve(workerTarget, slot.settingsTargetSession(), keys);
         return { ...resolution, worker: { ...task, ...slot.taskWorkerSettingsState() } };

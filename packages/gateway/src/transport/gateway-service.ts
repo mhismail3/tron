@@ -1753,10 +1753,6 @@ export class GatewayService {
           const target = await this.canonicalSettingsTarget(params.target);
           if (!Array.isArray(params.changes)) throw new GatewayError("invalid_request", "changes must be an array");
           const changes = params.changes.map((raw, index) => settingsChangeRequest(raw, `changes[${index}]`));
-          if (changes.some(change => change.key === "permissions.macTerminalKey" && change.op === "set"
-            && change.qualifiers?.device !== client.identity)) {
-            throw new GatewayError("invalid_request", "An iPhone can enroll only its own Mac Terminal key");
-          }
           const session = target.kind === "session"
             ? await this.settingsSession(await this.openedSlot(client, { sessionId: target.sessionId }), params.fence, changes, workToken)
             : undefined;

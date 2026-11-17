@@ -66,11 +66,12 @@ native tap. Disabling, removing, or lowering exposure applies as routine. Undo u
 its own entry. The typed value carries no inline credentials: env, headers, OAuth and secret-named tokens are refused. Tron-made change entries retain the typed command, args or URL for Undo; outside-edit entries retain only a digest.
 
 `SettingsToolAccess` resolves and changes the current session or Home's delegated
-worker. Its `history` action pages the durable audit (50 records by default, at most 200),
+worker. Home's resolve also lists, from the Global target, each key Home may write that its
+own session does not resolve (device preferences only when named); those rows set Global, not Home. Its `history` action pages the durable audit (50 records by default, at most 200),
 optionally filtered by key, using the returned cursor. The caller's actor is threaded into
 `SettingsChangePath.history` and `undo`, where `historyVisible` decides scope; `history` returns public entries (`publicHistoryEntry`: before/after only for a declared key or record subject, never for a flagged, retired or unknown key), so the RPC and the tool share one redaction: an agent sees and
 undoes only changes whose target is its session or that its session initiated (its Global changes
-included); Tron Home and the maintainer see and undo every change. `inventory` is a read-only projection of hooks, packages, modules and configured MCP servers for the chat's directory; it starts no MCP server and resolves no credential (see `admin/README.md`). `undo` takes a change id and
+included); Tron Home and the maintainer see and undo every change. `inventory` is a read-only projection of hooks, packages, modules, configured MCP servers and custom model providers (id, base URL host, API, model ids) for the chat's directory; it starts no MCP server and resolves no credential (see `admin/README.md`). `undo` takes a change id and
 reason; the target session's own store is acquired through its owner, never Home's snapshot.
 Writer grants, exact native taps, expected-value checks and busy/idle rules still apply.
 A device-preference key (`device-preference` store, one explicit iPhone qualifier) is read through `SettingsStores.devicePreferences`, a per-request snapshot the owner takes only for the keys requested, through the injected `DevicePreferencePort`. An unconfigured, unavailable or unknown read is shown as such and never as a default; a write refuses unless its fresh read is a value, and an unconfirmed write is reported as an uncertain outcome, never replayed. `applyStore` receives the value the store holds before the write as `current`: a forward write passes the planned `before`, and bundle compensation passes the planned `after`, so a device compensation CASes on what the phone actually holds.

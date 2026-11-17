@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { GatewayError } from "../errors.js";
 import { readJson, updateJsonLocked } from "../foundation/json.js";
 import { modelProviderOnDisk, type ModelProviderValue } from "../kernel/settings/model-provider-value.js";
+import type { SettingsInventory } from "../kernel/settings/tool-contract.js";
 import { ModelRuntime } from "../kernel/pi/coding-agent.js";
 import { redactCredentials } from "../util/credential-redaction.js";
 
@@ -107,6 +108,22 @@ export class ModelConfigService {
     const document = await this.read();
     const redactedDocument = redact(document);
     return { document: redactedDocument, redacted: JSON.stringify(document) !== JSON.stringify(redactedDocument) };
+  }
+
+  async configured(): Promise<SettingsInventory["models"]> {
+    let entries: Array<[string, unknown]>;
+    try { entries = Object.entries(providersOf(await this.read())); } catch { return { providers: [], errors: 1 }; }
+    const providers: SettingsInventory["models"]["providers"] = [];
+    let errors = 0;
+    for (const [id, raw] of entries) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) { errors += 1; continue; }
+      const entry = raw as Record<string, unknown>;
+      if (entry.baseUrl !== undefined && (typeof entry.baseUrl !== "string" || !URL.canParse(entry.baseUrl))) { errors += 1; continue; }
+      const models = Array.isArray(entry.models) ? entry.models.map(model => (model as { id?: unknown } | null)?.id).filter((model): model is string => typeof model === "string") : [];
+      providers.push({ id, ...(typeof entry.baseUrl === "string" ? { host: new URL(entry.baseUrl).host } : {}),
+        ...(typeof entry.api === "string" ? { api: entry.api } : {}), models });
+    }
+    return { providers, errors };
   }
 
   async provider(id: string): Promise<ModelProviderValue | undefined> {

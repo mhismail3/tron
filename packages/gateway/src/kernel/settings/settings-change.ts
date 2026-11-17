@@ -494,7 +494,7 @@ export class SettingsChangePath {
   private async plan(target: SettingsTarget, stores: SettingsStores, request: ChangeRequest, context: ChangeContext, runtime: ModelRuntime): Promise<Planned> {
     const subject = recordSubject(request.key);
     const record = subject?.write ? this.model.schema.recordKey(request.key) : undefined;
-    const key = record ?? keyForHome(declaredKey(this.model.schema, request.key), stores.layers.includes("home"));
+    const key = record ?? keyForHome(declaredKey(this.model.schema, request.key), stores.layers.includes("home") && request.layer !== "global");
     if (request.layer === "project") {
       throw new GatewayError("invalid_request", "Project settings are read-only; edit the repository");
     }
@@ -513,6 +513,9 @@ export class SettingsChangePath {
       if (named !== undefined && named !== value) throw new GatewayError("invalid_request", `${key.id} is the ${name}=${value} instance; ${name}=${named} is a different setting`);
     }
     const qualifiers: Qualifiers = { ...(request.qualifiers ?? {}), ...(key.fixed ?? {}) };
+    if (key.id === "permissions.macTerminalKey" && request.op === "set" && context.actor.kind === "ui" && qualifiers.device !== context.actor.id) {
+      throw new GatewayError("invalid_request", "Only the iPhone a Mac Terminal key names can accept its card");
+    }
     if (key.qualifier === "project" && target.kind !== "global" && stores.project) {
       if (request.qualifiers?.project !== undefined && request.qualifiers.project !== stores.project.root) {
         throw new GatewayError("invalid_request", `${key.label} for another project belongs to that project's target`);
