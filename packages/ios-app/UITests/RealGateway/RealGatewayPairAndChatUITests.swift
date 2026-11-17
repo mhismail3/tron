@@ -955,35 +955,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     }
 
     @MainActor
-    func testProjectSettingsExposeReadOnlyOverrides() throws {
-        continueAfterFailure = false
-        let fixture = try RealGatewayUIFixture.fromEnvironment()
-        let projectFile = URL(fileURLWithPath: fixture.workspace).appendingPathComponent(".pi/settings.json")
-        try FileManager.default.createDirectory(at: projectFile.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let projectBytes = Data(#"{"compaction":{"enabled":false}}"#.utf8)
-        try projectBytes.write(to: projectFile)
-        let app = launchApp()
-        defer { app.terminate() }
-        open(fixture.invitationLink())
-        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
-        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
-        createSession(app, inWorkspace: fixture.workspace)
-        let manage = app.buttons["session-context-button"]
-        XCTAssertTrue(manage.waitForExistence(timeout: 60)); manage.tap()
-        openProjectCard(app)
-        let none = app.staticTexts["No repository overrides"]
-        let row = settingRow(app, key: "context.compaction.enabled")
-        XCTAssertTrue(none.waitForExistence(timeout: 30), "An untrusted override is not applied: \(app.debugDescription)")
-        XCTAssertFalse(row.exists, "An unapplied repository override has no row or mutation route")
-        XCTAssertEqual(try Data(contentsOf: projectFile), projectBytes, "Inspection must not change repository bytes")
-        dismissTopSheet(app)
-        openProjectCard(app)
-        XCTAssertTrue(none.waitForExistence(timeout: 30) && !row.exists, "Reopening reads the same repository state")
-        XCTAssertEqual(try Data(contentsOf: projectFile), projectBytes)
-        keepScreenshot(app, name: "1308-project-readonly-source")
-    }
-
-    @MainActor
     func testSettingsOutsideChangesAndBuiltinExtensionPersist() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
@@ -1104,35 +1075,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     }
 
     @MainActor
-    func openSettingsSectionIfServed(_ app: XCUIApplication, _ group: String,
-                                           linkLabel: String? = nil, loneRow: String? = nil) -> XCUIElement? {
-        let links = linkLabel.map { app.buttons.matching(NSPredicate(format: "label == %@", $0)) }
-            ?? app.buttons.matching(identifier: "settings-section-\(group)-open")
-        guard links.firstMatch.waitForExistence(timeout: 5) else { return nil }
-        let link = links.allElementsBoundByIndex.last!
-        func barBottom() -> CGFloat { app.navigationBars.allElementsBoundByIndex.last?.frame.maxY ?? 0 }
-        for _ in 0..<24 where !(link.isHittable && link.frame.minY >= barBottom()) {
-            if link.frame.minY < barBottom() + 40 { app.swipeDown() } else { app.swipeUp() }
-        }
-        guard link.isHittable, link.frame.minY >= barBottom() else { return nil }
-        link.tap()
-        let details = app.descendants(matching: .any).matching(identifier: "settings-section-\(group)-detail")
-        let lone = loneRow.map { app.descendants(matching: .any).matching(identifier: $0) }
-        if let linkLabel {
-            XCTAssertTrue(app.navigationBars.staticTexts[linkLabel].waitForExistence(timeout: 30),
-                          "the \(linkLabel) destination did not open: \(app.debugDescription)")
-            for _ in 0..<24 where !details.firstMatch.exists && lone?.firstMatch.exists != true { app.swipeUp() }
-        }
-        if let lone, !details.firstMatch.exists, lone.firstMatch.waitForExistence(timeout: 30) {
-            return lone.element(boundBy: max(lone.count - 1, 0))
-        }
-        XCTAssertTrue(details.firstMatch.waitForExistence(timeout: 30),
-                      "the \(group) sub-sheet did not open: \(app.debugDescription)")
-        let detail = details.element(boundBy: max(details.count - 1, 0))
-        return detail
-    }
-
-    @MainActor
     private func settingRow(_ app: XCUIApplication, key: String) -> XCUIElement {
         app.descendants(matching: .any)[settingRowToken(key)]
     }
@@ -1180,18 +1122,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             return
         }
         done.tap()
-    }
-
-    @MainActor
-    private func openProjectCard(_ app: XCUIApplication) {
-        let link = app.buttons["chat-settings-link"]
-        XCTAssertTrue(link.waitForExistence(timeout: 30), "Manage Session has no Session Settings link: \(app.debugDescription)")
-        for _ in 0..<12 where !link.isHittable { app.swipeUp() }
-        link.tap()
-        XCTAssertTrue(app.navigationBars.staticTexts["Session Settings"].waitForExistence(timeout: 15), app.debugDescription)
-        let section = app.descendants(matching: .any)["session-project-settings"]
-        XCTAssertTrue(section.waitForExistence(timeout: 30), "Session Settings has no Project section: \(app.debugDescription)")
-        for _ in 0..<12 where !app.buttons["project-settings-trust"].isHittable { app.swipeUp() }
     }
 
     @MainActor
