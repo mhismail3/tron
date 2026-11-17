@@ -162,7 +162,7 @@ describe("gateway/home scenario lock", () => {
     const registered = await phone.request("push.registration.upsert", {
       commandId: gateway.commandId(), installationId: "lock-installation", grantId: "lock-grant-0001",
       secret: Buffer.alloc(32, 7).toString("base64url"), previewsEnabled: false, relayOrigin: RELAY_ORIGIN,
-      });
+    });
     expect(registered.ok, JSON.stringify(registered)).toBe(true);
     const undesignated = await phone.request("home.status", {});
     expect(undesignated.ok, JSON.stringify(undesignated)).toBe(true);

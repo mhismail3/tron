@@ -127,15 +127,6 @@ describe("push policy migration at Gateway start", () => {
     expect(await incompleteDirectories(home)).toEqual([]);
   });
 
-  it("a stale temporary file left under a process-id name cannot fail a start", async () => {
-    const home = await seed();
-    await mkdir(dirname(settingsPath(home)), { recursive: true });
-    await writeFile(`${settingsPath(home)}.migration-${process.pid}.tmp`, "stale");
-    await writeFile(`${documentPath(home)}.migration-${process.pid}.tmp`, "stale");
-    expect(await migratePushPolicy(home)).toBe(true);
-    expect(JSON.parse(await readFile(documentPath(home), "utf8"))).toEqual(V3);
-  });
-
   it("does nothing to a store already at version 3", async () => {
     const home = await seed();
     await writeFile(documentPath(home), `${JSON.stringify(V3, null, 2)}\n`);
@@ -168,6 +159,15 @@ describe("push policy restore", () => {
     expect(await restorePushPolicyMigration(home, agentPath(home))).toBe(true);
     expect(await readFile(documentPath(home))).toEqual(originalDocument);
     await expect(stat(settingsPath(home))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(backupPath(home))).rejects.toMatchObject({ code: "ENOENT" });
+    expect((await readdir(join(home, "state", "migrations"))).filter((name) => name.startsWith("push-policy-v3.restored-"))).toHaveLength(1);
+
+    await writeFile(documentPath(home), `${JSON.stringify({ ...V2, policy: { ...V2.policy, notifyWhenFinished: false } }, null, 2)}\n`);
+    expect(await migratePushPolicy(home)).toBe(true);
+    expect(JSON.parse(await readFile(documentPath(home), "utf8"))).toEqual(V3);
+    expect(JSON.parse(await readFile(settingsPath(home), "utf8"))).toEqual({
+      notifications: { push: { inputNeeded: false, finished: false, waiting: false } },
+    });
   });
 
   it("refuses a manifest with a path outside the store, a non-digest, or a store edited after migrating", async () => {

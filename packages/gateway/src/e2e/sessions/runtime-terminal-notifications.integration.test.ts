@@ -466,7 +466,7 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     await notifications.upsertGrant({
       deviceId: "device_abcdefgh", installationId: "install_abcdefgh", grantId: "grant_abcdefgh",
       secret: Buffer.alloc(32, 9).toString("base64url"), previewsEnabled: true,
-      relayOrigin: "https://push.example.test"
+      relayOrigin: "https://push.example.test",
     });
     const childStarted = barrier();
     const releaseChild = barrier();

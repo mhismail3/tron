@@ -136,7 +136,7 @@ async function pushLock(name: string, extensions: Array<{ name: string; source: 
   const phone = await gateway.connect("phone", { clientRole: "mobile" });
   expect(answer(await phone.request("push.registration.upsert", {
     commandId: gateway.commandId(), installationId: "lock-installation", grantId: GRANT,
-    secret: SECRET, previewsEnabled: false, relayOrigin: RELAY_ORIGIN
+    secret: SECRET, previewsEnabled: false, relayOrigin: RELAY_ORIGIN,
   })), "the registration").toEqual({ ok: true, result: REGISTERED, error: null });
   const created = await phone.request("session.create", { commandId: gateway.commandId(), cwd: gateway.cwd });
   const sessionId = created.result.sessionId as string;

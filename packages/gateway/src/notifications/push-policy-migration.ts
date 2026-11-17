@@ -160,10 +160,10 @@ async function writeBackup(tronHome: string, changes: Change[]): Promise<void> {
   await syncDirectory(dirname(directory));
 }
 
-async function preserveIncomplete(tronHome: string): Promise<void> {
+async function setBackupAside(tronHome: string, label: "incomplete" | "restored"): Promise<void> {
   const directory = backupDirectory(tronHome);
   const stamp = `${new Date().toISOString().replace(/[:.]/gu, "-")}-${randomBytes(4).toString("hex")}`;
-  await rename(directory, `${directory}.incomplete-${stamp}`);
+  await rename(directory, `${directory}.${label}-${stamp}`);
   await syncDirectory(dirname(directory));
 }
 
@@ -211,7 +211,7 @@ export async function migratePushPolicy(tronHome: string): Promise<boolean> {
         throw conflict(`The push policy migration was interrupted with an unreadable backup; restore it by hand from ${directory}`);
       }
     }
-    await preserveIncomplete(tronHome);
+    await setBackupAside(tronHome, "incomplete");
   }
   const changes = planChanges(documentBefore, await readBounded(settingsPath));
   await writeBackup(tronHome, changes);
@@ -245,6 +245,7 @@ export async function restorePushPolicyMigration(tronHome: string, agentDir: str
       else await publish(action.path, action.bytes!, action.expected);
       restored = true;
     }
+    await setBackupAside(tronHome, "restored");
     return restored;
   } finally {
     await release();

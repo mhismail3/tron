@@ -47,8 +47,8 @@ Commands:
   migrate push-policy --restore --tron-home <dir>
                                     Rollback to a pre-v3 build: restores the two stores from
                                     state/migrations/push-policy-v3. Refuses while a Gateway owns
-                                    the agent directory. Starting this Gateway on a v2 store
-                                    migrates it again, so restore only before running this build.
+                                    the agent directory, then sets the backup aside; a later
+                                    start of this build backs up and migrates again.
   diagnose [--since <1..9999><s|m|h|d>] [--out <path>]
                                     Write one read-only redacted diagnostic bundle
                                     to <path>, or to a new file in the system temp

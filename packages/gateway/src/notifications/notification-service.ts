@@ -614,13 +614,13 @@ export class NotificationService {
     const now = this.now();
     const dedupeKey = notificationHash(`${input.kind}\0${input.sessionId}\0${input.sourceId}`);
     const sessionKey = notificationHash(`session\0${input.sessionId}`);
-    const policy = await this.policy();
+    const policy = input.kind === "explicit" ? undefined : await this.policy();
     let result: NotificationAdmissionStatus = "queued";
     const document = await this.update((current) => {
       retainRevocationAuthority(prune(current, now), now);
-      if (input.kind === "ask" && !policy.inputNeeded
+      if (policy && (input.kind === "ask" && !policy.inputNeeded
         || input.kind === "agent_finished" && !policy.finished
-        || input.kind === "waiting" && !policy.waiting) {
+        || input.kind === "waiting" && !policy.waiting)) {
         result = "suppressed";
         return undefined;
       }

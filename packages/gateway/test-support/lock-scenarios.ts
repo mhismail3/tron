@@ -387,7 +387,7 @@ export async function notificationsPushScenario(own: (release: () => Promise<voi
   const responses: Record<string, { ok: boolean; result?: unknown; error?: unknown }> = {};
   const registered = await phone.request("push.registration.upsert", {
     commandId: gateway.commandId(), installationId: "lock-installation", grantId: "lock-grant-0001",
-    secret: Buffer.alloc(32, 7).toString("base64url"), previewsEnabled: false, relayOrigin: PUSH_RELAY_ORIGIN
+    secret: Buffer.alloc(32, 7).toString("base64url"), previewsEnabled: false, relayOrigin: PUSH_RELAY_ORIGIN,
   });
   responses.registered = registered;
 
