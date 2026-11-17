@@ -172,3 +172,99 @@ struct ManageModelConfigurationCard: View {
         }
     }
 }
+
+func settingsRowIdentifier(_ setting: ResolvedSetting) -> String {
+    "settings-row-" + String(setting.id.unicodeScalars.map { scalar in
+        CharacterSet.alphanumerics.contains(scalar) || scalar == "." || scalar == "-" ? Character(scalar) : "_"
+    })
+}
+
+struct SettingsModelPicker: View {
+    let setting: ResolvedSetting
+    let target: JSONValue
+    let title: String
+    var selectionAvailability: ModelSelectionAvailability = .ready
+    var onReset: (() -> Void)? = nil
+    let onChoose: (JSONValue) -> Void
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    @State private var served: [SettingsOption]? // view-local: a rebuilt picker reads the served models again
+
+    private var servedModels: Set<ModelRef>? {
+        served.map { Set($0.compactMap { option in
+            guard let value = option.value.objectValue, let provider = value["provider"]?.stringValue,
+                  let id = value["id"]?.stringValue else { return nil }
+            return ModelRef(provider: provider, id: id)
+        }) }
+    }
+
+    private var catalogTarget: ProviderCatalogTarget {
+        if target.objectValue?["kind"]?.stringValue == "session", let id = target.objectValue?["sessionId"]?.stringValue {
+            return .session(id: id)
+        }
+        return .global
+    }
+
+    private var selection: Binding<ModelRef?> {
+        Binding(
+            get: {
+                guard let value = setting.value?.objectValue, let provider = value["provider"]?.stringValue,
+                      let id = value["id"]?.stringValue else { return nil }
+                return ModelRef(provider: provider, id: id)
+            },
+            set: { ref in
+                guard let ref, selectionAvailability.canSelect else { return }
+                onChoose(.object(["provider": .string(ref.provider), "id": .string(ref.id)]))
+                dismiss()
+            }
+        )
+    }
+
+    var body: some View {
+        let catalog = model.providerCatalog(for: catalogTarget)?.models.filter(\.available)
+        let models = servedModels.flatMap { served in
+            catalog?.filter { served.contains(ModelRef(provider: $0.provider, id: $0.id)) }
+        }
+        Group {
+            if let models, models.isEmpty {
+                TronPlaceholderState(title: "No Models", detail: "No available model can be used here.", icon: "cpu")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let models {
+                ModelPicker(selection: selection, models: models, selectionAvailability: selectionAvailability)
+            } else {
+                TronSheetLoadingState(label: "Loading models…")
+            }
+        }
+            .tronNavigationTitle(title)
+            .toolbar {
+                if let onReset {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            guard selectionAvailability.canSelect else { return }
+                            onReset(); dismiss()
+                        } label: {
+                            Image(systemName: "arrow.uturn.backward").tronToolbarAction()
+                        }
+                        .accessibilityLabel("Reset to inherited")
+                        .accessibilityIdentifier("\(settingsRowIdentifier(setting))-picker-reset")
+                        .disabled(!selectionAvailability.canSelect)
+                    }
+                }
+            }
+            .task { await model.refreshProviders(target: catalogTarget) }
+            .task { await readServedPages() }
+    }
+
+    private func readServedPages() async {
+        var options: [SettingsOption] = []
+        var cursor: String?
+        var seen: Set<String> = []
+        repeat {
+            guard let page = try? await model.settingsOptions(target: target, key: setting.key, qualifiers: setting.qualifiers,
+                                                              cursor: cursor) else { return }
+            options += page.options
+            cursor = page.nextCursor
+        } while cursor.map { seen.insert($0).inserted } == true
+        served = options
+    }
+}
