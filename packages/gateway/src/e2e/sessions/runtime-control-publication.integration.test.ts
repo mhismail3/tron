@@ -60,8 +60,7 @@ describe("runtime control publication through canonical settings", () => {
   it("refuses the retired offered-model control while the real catalog and selection remain available", async () => {
     const f = await fixture();
     await expect(f.change("model.offered", [`${f.faux.provider.id}/first`])).rejects.toThrow();
-    const catalog = await f.settingsModel.options({ kind: "global" }, undefined, { key: "model.ref[role=chat]", query: f.faux.provider.id });
-    expect(catalog.options.map(option => option.value)).toEqual([
+    expect(f.runtime.getModels().filter(model => model.provider === f.faux.provider.id).map(model => ({ provider: model.provider, id: model.id }))).toEqual([
       { provider: f.faux.provider.id, id: "first" }, { provider: f.faux.provider.id, id: "second" },
     ]);
     await f.slot.setModel(f.faux.provider.id, "second");
