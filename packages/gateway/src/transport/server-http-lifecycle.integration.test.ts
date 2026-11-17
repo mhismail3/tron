@@ -196,7 +196,7 @@ describe("HTTP pending-work ownership", () => {
   });
 
   it("closes a body that trickles past idle timeout at the whole-request deadline", async () => {
-    const limits = { ...HTTP_LISTENER_LIMITS, requestTimeout: 4_000, idleTimeout: 2_000, connectionsCheckingInterval: 50 };
+    const limits = { ...HTTP_LISTENER_LIMITS, headersTimeout: 1_000, requestTimeout: 4_000, idleTimeout: 2_000, connectionsCheckingInterval: 50 };
     const f = await fixture(128, limits);
     const peer = createConnection({ host: "127.0.0.1", port: f.port });
     f.clientSockets.push(peer);
