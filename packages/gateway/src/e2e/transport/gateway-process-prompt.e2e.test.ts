@@ -171,7 +171,7 @@ describe("prompt journeys across the real Gateway process", () => {
     expect(headers["http-referer"]).toBeUndefined();
     expect(headers["x-openrouter-title"]).toBeUndefined();
     expect(headers["x-openrouter-categories"]).toBeUndefined();
-  }, 60_000);
+  });
 });
 
 describe("Run Swift files device preference through the production Gateway process composition", () => {
