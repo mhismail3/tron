@@ -20,7 +20,7 @@ export const SECTIONS: readonly SectionDeclaration[] = [
   { id: "accounts", title: "Accounts", description: "Providers, custom models, and services", order: 60 },
   { id: "sources", title: "Sources", description: "Packages and how they install", order: 70 },
   { id: "setup", title: "Storage", description: "Import, session storage, and telemetry", order: 80 },
-  { id: "iphone", title: "This iPhone", description: "Appearance and sessions", order: 90, note: "Stored on this iPhone. It never changes what the agent does." },
+  { id: "iphone", title: "This iPhone", description: "Appearance and sessions", order: 90, note: "Stored on this iPhone. Run Swift files can be changed by Home for an explicitly selected iPhone; other settings stay on this iPhone." },
 ];
 
 export type Binding =
@@ -36,7 +36,8 @@ export type Binding =
   | { store: "gateway"; path: readonly string[] }
   | { store: "mcp" }
   | { store: "models" }
-  | { store: "lesson" };
+  | { store: "lesson" }
+  | { store: "device-preference" };
 
 export type TimingDeclaration = Timing | { widen: Timing; narrow: Timing };
 
@@ -343,6 +344,12 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       help: "Lets this paired iPhone open a shell through Tron’s private Tailscale-only SSH service, even without the Gateway.",
       order: 15, importance: "advanced", control: "readOnly",
       confirm: "This iPhone’s key will authorize your Mac account through the private Tron SSH service, after you trust its host fingerprint.",
+    },
+    {
+      id: "experimental.swiftApps", sessionOverridable: false, projectSettable: false, group: "iphone", qualifier: "device",
+      type: types.boolean(["Enabled", "Off"]), layers: { global: { store: "device-preference" } }, timing: "live", effect: "next-change",
+      writers: ["ui", "home"], label: "Run Swift files", order: 10, importance: "advanced", control: "toggle",
+      help: "Adds a Run button to .swift previews on this iPhone. Sandboxed; simulator-tested only.",
     },
     {
       tap: "trust", id: "permissions.macTerminalServer", sessionOverridable: false, projectSettable: false,

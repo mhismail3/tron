@@ -23,7 +23,7 @@ import { maintainerChange as maintainerRpc } from "../../../test-support/native-
 const { KEYS } = TEST_SETTINGS_SCHEMA;
 import type { Resolution, ResolvedKey, SettingsTarget } from "../../kernel/settings/tool-contract.js";
 import { UPDATE_TRON_NOTE, type PresentedKey, type PresentedResolution } from "../../admin/settings-presentation.js";
-import { CONTROLS, PI_BUILTIN_TOOL_NAMES } from "../../kernel/settings/settings-types.js";
+import { CONTROLS, PI_BUILTIN_TOOL_NAMES, type DevicePreferencePort, type DevicePreferenceRead } from "../../kernel/settings/settings-types.js";
 import { ScopeToolCatalog } from "../../admin/tool-catalog.js";
 import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
@@ -49,7 +49,7 @@ function row(resolution: Resolution, key: string, qualifiers?: Record<string, st
   return found;
 }
 
-async function fixture() {
+async function fixture(devicePreferences?: DevicePreferencePort) {
   const root = await mkdtemp(join(tmpdir(), "tron-settings-model-"));
   roots.push(root);
   const tronHome = join(root, "tron");
@@ -95,7 +95,7 @@ async function fixture() {
   registries.push(registry);
   await registry.initialize();
   const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA,
-    agentDir, tronHome, trust, modelRuntime,
+    agentDir, tronHome, trust, modelRuntime, devicePreferences,
     toolCatalog: async target => target.kind === "session" ? registry.liveToolCatalog(target.sessionId)
       : scopeTools.list(target.kind === "project" ? target.cwd : undefined),
   }));
@@ -111,6 +111,17 @@ async function fixture() {
     broadcast: () => {}, globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
   } as unknown as GatewayServiceDependencies);
   return { root, tronHome, agentDir, project, trust, registry, service, settingsModel, settingsChanges, modelRuntime, model, modelKey, faux };
+}
+
+function scriptedPhone(initial: DevicePreferenceRead) {
+  let read: DevicePreferenceRead = initial;
+  const port: DevicePreferencePort = {
+    devices: async () => ["device:phone"],
+    read: async () => { phone.reads += 1; return read; },
+    compareAndSet: async () => { throw new Error("the write path is owned by the real-socket test"); },
+  };
+  const phone = { port, reads: 0, script: (next: DevicePreferenceRead) => { read = next; } };
+  return phone;
 }
 
 function piEffective(manager: SettingsManager, model: { provider: string; id: string }): Record<string, unknown> {
@@ -174,6 +185,24 @@ describe("settings.resolve", () => {
     await expect(f.service.invoke(subscribed(), "settings.resolve", { target })).rejects.toThrow("Home profile value for model.thinking[role=worker] is invalid");
     await writeFile(join(f.tronHome, "state", "home", "profile.json"), JSON.stringify({ oversized: "x".repeat(256 * 1024) }));
     await expect(f.service.invoke(subscribed(), "settings.resolve", { target })).rejects.toThrow("Home profile exceeds its 262144-byte limit");
+  });
+  it("SCOPE: adapter snapshot only (scripted port, no socket): one fresh read per request for the requested device key, unavailable never false, no phone traffic without the key", async () => {
+    const phone = scriptedPhone({ status: "value", value: true });
+    const f = await fixture(phone.port);
+    const home = { kind: "home" } as const;
+    const device = { device: "device:phone" };
+    const resolveKey = async () => row(await f.service.invoke(subscribed(), "settings.resolve", { target: home, keys: ["experimental.swiftApps"] }) as Resolution, "experimental.swiftApps", device);
+    expect(await resolveKey()).toMatchObject({ value: true, qualifiers: device });
+    expect(phone.reads).toBe(1);
+    phone.script({ status: "value", value: false });
+    expect(await resolveKey()).toMatchObject({ value: false });
+    expect(phone.reads).toBe(2);
+    await f.service.invoke(subscribed(), "settings.resolve", { target: home, keys: ["model.ref[role=chat]"] });
+    expect(phone.reads).toBe(2);
+    phone.script({ status: "unavailable" });
+    const offline = await resolveKey();
+    expect(offline.value).toBeNull();
+    expect(offline.badges).toContainEqual(expect.objectContaining({ label: "Unavailable" }));
   });
   it("resolves three scopes for every target, shows an untrusted project as not applied, and matches pi and a live chat", async () => {
     const { service, project, registry, model, modelKey, tronHome, agentDir, trust } = await fixture();

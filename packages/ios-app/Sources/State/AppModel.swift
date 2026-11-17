@@ -194,6 +194,7 @@ final class AppModel {
     private let sessionImports: SessionImportCoordinator
     let settingsTrust: SettingsTrustCoordinator
     private let providerAuth: ProviderAuthCoordinator
+    private let devicePreference: DevicePreferenceCoordinator
     private let packageConfiguration: PackageConfigurationCoordinator
     let composerDrafts: ComposerDraftCoordinator
     let extensionInteractionDrafts: ExtensionInteractionDraftStore
@@ -488,6 +489,12 @@ final class AppModel {
             mutationExecutor: mutationExecutor,
             uuidSource: uuidSource
         )
+        let devicePreference = DevicePreferenceCoordinator(
+            client: client,
+            mutationExecutor: mutationExecutor,
+            uuidSource: uuidSource,
+            experiment: .shared
+        )
         let providerAuth = ProviderAuthCoordinator(
             client: client,
             mutationExecutor: mutationExecutor,
@@ -623,6 +630,7 @@ final class AppModel {
         )
         self.settingsTrust = settingsTrust
         self.providerAuth = providerAuth
+        self.devicePreference = devicePreference
         self.packageConfiguration = packageConfiguration
         self.composerDrafts = composerDrafts
         self.extensionInteractionDrafts = extensionInteractionDrafts
@@ -4247,6 +4255,10 @@ extension AppModel {
             providerAuth.handleEvent(event.payload)
         case "auth.completed":
             providerAuth.dispatchCompletion(event.payload)
+        case "device.preference.request":
+            if let admission = lifecycle.admission, admission.connectionID != nil {
+                devicePreference.handleRequest(event.payload, admission: admission, profileID: lifecycle.selectedProfileID)
+            }
         case "settings.changed":
             settingsTrust.noteSettingsChanged()
         case "trust.changed":
