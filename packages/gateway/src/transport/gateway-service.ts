@@ -9,6 +9,7 @@ import { ModelReleaseDateCatalog } from "../providers/model-release-date-catalog
 import type { GatewayConfig } from "../config.js";
 import { asUncertainOutcome, GatewayError } from "../errors.js";
 import { runtimeIdentity } from "./runtime-identity.js";
+import { DeviceLogStore } from "./device-logs.js";
 import { HOME_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY, HOME_MEMORY_VIEW_CAPABILITY, HOME_PROFILE_LIST_CAPABILITY, HOME_PROFILE_EDIT_CAPABILITY } from "../protocol/capabilities.js";
 import type { CommandDetail, GatewayRestartResponse, HomeTaskStatusResult, JsonValue, ModelPage, ModelRef, SessionCommands, SessionListPage } from "../protocol/types.js";
 import { admitHomeMemoryView, admitHomeMemoryEvidence } from "../episodic/home-memory-browser.js";
@@ -241,6 +242,7 @@ const MAXIMUM_CONCURRENT_WORKSPACE_INSPECTIONS = 2;
 
 export interface ClientContext {
   id: string;
+  admission: number;
   identity: string;
   isLocal: boolean;
   signal?: AbortSignal;
@@ -310,6 +312,7 @@ export class GatewayService {
   private readonly modelReleaseDates: ModelReleaseDateCatalog;
   private readonly exportGate = new QueuedWorkGate(MAXIMUM_CONCURRENT_SESSION_EXPORTS);
   private readonly workspaceGate = new QueuedWorkGate(MAXIMUM_CONCURRENT_WORKSPACE_INSPECTIONS);
+  private deviceLogs: DeviceLogStore | undefined;
 
   constructor(private readonly dependencies: GatewayServiceDependencies) {
     this.updateService = dependencies.updateService ?? new GatewayUpdateService({
@@ -448,6 +451,7 @@ export class GatewayService {
         "sessions.v1",
         "device-label.v1",
         "diagnostic-export.v1",
+        "device-logs.v1",
         "session-export.v2",
         "auth.v1",
         "settings.v1",
@@ -664,6 +668,16 @@ export class GatewayService {
             tronHomePath(tronHome, "logs/device-exports"),
             client.identity,
           ));
+        });
+      case "client.logs.cursor":
+        rejectUnknownFields(params, [], method);
+        if (client.isLocal) throw new GatewayError("unauthenticated", "Device logs accept only paired device connections");
+        return safeJson(await this.deviceLogStore().cursor(client.identity));
+      case "client.logs.append":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId", "bootId", "firstSequence", "lines", "gapFrom", "reason"], method);
+          if (client.isLocal) throw new GatewayError("unauthenticated", "Device logs accept only paired device connections");
+          return safeJson(await this.deviceLogStore().append(client.identity, client.admission, params));
         });
       case "uploads.status":
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Upload status accepts no parameters");
@@ -2187,6 +2201,11 @@ export class GatewayService {
         this.mobileIdentityLanes.delete(deviceId);
       }
     }
+  }
+
+  private deviceLogStore(): DeviceLogStore {
+    this.deviceLogs ??= new DeviceLogStore(tronHomePath(this.dependencies.config.tronHome, "logs/devices"));
+    return this.deviceLogs;
   }
 
   private async mutation(

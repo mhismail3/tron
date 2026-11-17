@@ -1,5 +1,5 @@
 import { displayOwnerOf, createTestRegistry } from "../../../test-support/gateway-registry.js";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
@@ -54,7 +54,10 @@ interface Fixture {
   faux: ReturnType<typeof fauxProvider>;
   port: number;
   logRecords: Array<{ level: string; message: string; metadata: Record<string, unknown> }>;
-  connect(): Promise<Client>;
+  connect(token?: string): Promise<Client>;
+  restart(): Promise<void>;
+  pairDevice(name: string): Promise<string>;
+  localToken(): string;
   coldSession(label: string): Promise<{ id: string; file: string; entryId: string }>;
   snapshot(client: Client, sessionId: string): Promise<any>;
   openSession(client: Client, sessionId: string): Promise<any>;
@@ -129,41 +132,49 @@ async function fixture(options: {
   ) : undefined;
   let retirement = "running";
   let retirementTask: Promise<void> | undefined;
-  const service = new GatewayService({
-    display: displayOwnerOf(registry),
-    config: { tronHome: root },
-    devices,
-    sessions: registry,
-    ...settingsDependencies({ agentDir, tronHome: root, trust, modelRuntime: await runtimeFactory(), sessions: registry }),
-    broadcast: (topic: string, payload: unknown) => server?.broadcast(topic, payload as never),
-    receipts: new CommandReceiptStore(root),
-    uploads,
-    logger: diagnosticLogger,
-    ...(options.authRuntime ? { modelRuntime: options.authRuntime } : {}),
-    ...(auth ? { auth } : {}),
-    workRegistry: registry.administrativeWorkRegistry,
-    requestStop: () => {
-      retirement = "draining";
-      retirementTask = Promise.resolve().then(() => options.onStopRequested?.(registry)).then(
-        () => { retirement = "drained"; },
-        () => { retirement = "failed"; },
-      );
-    },
-  } as never);
-  server = new GatewayServer({ display: displayOwnerOf(registry),
-    host: "127.0.0.1",
-    port: 0,
-    maxFrameBytes: 1_048_576,
-    devices,
-    sessions: registry,
-    service,
-    uploads: uploads as never,
-    auth: { cancelOwner: () => {}, detachClient: () => {} } as never,
-    logger: diagnosticLogger as never,
-  });
-  await server.listen();
-  const port = (server as unknown as { server: { address(): { port: number } } }).server.address().port;
+  const start = async (): Promise<number> => {
+    const service = new GatewayService({
+      display: displayOwnerOf(registry),
+      config: { tronHome: root },
+      devices,
+      sessions: registry,
+      ...settingsDependencies({ agentDir, tronHome: root, trust, modelRuntime: await runtimeFactory(), sessions: registry }),
+      broadcast: (topic: string, payload: unknown) => server?.broadcast(topic, payload as never),
+      receipts: new CommandReceiptStore(root),
+      uploads,
+      logger: diagnosticLogger,
+      ...(options.authRuntime ? { modelRuntime: options.authRuntime } : {}),
+      ...(auth ? { auth } : {}),
+      workRegistry: registry.administrativeWorkRegistry,
+      requestStop: () => {
+        retirement = "draining";
+        retirementTask = Promise.resolve().then(() => options.onStopRequested?.(registry)).then(
+          () => { retirement = "drained"; },
+          () => { retirement = "failed"; },
+        );
+      },
+    } as never);
+    server = new GatewayServer({ display: displayOwnerOf(registry),
+      host: "127.0.0.1",
+      port: 0,
+      maxFrameBytes: 1_048_576,
+      devices,
+      sessions: registry,
+      service,
+      uploads: uploads as never,
+      auth: { cancelOwner: () => {}, detachClient: () => {} } as never,
+      logger: diagnosticLogger as never,
+    });
+    await server.listen();
+    return (server as unknown as { server: { address(): { port: number } } }).server.address().port;
+  };
+  let port = await start();
   report.ports.push(port);
+  const restart = async (): Promise<void> => {
+    sockets.forEach((socket) => socket.terminate());
+    await server?.close();
+    port = await start();
+  };
 
   cleanup.push(async () => {
     sockets.forEach((socket) => socket.terminate());
@@ -176,8 +187,8 @@ async function fixture(options: {
     await rm(root, { recursive: true, force: true });
   });
 
-  const connect = async (): Promise<Client> => {
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${paired.token}` } });
+  const connect = async (token = paired.token): Promise<Client> => {
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
     sockets.push(socket);
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
@@ -220,9 +231,200 @@ async function fixture(options: {
     expect(synced.ok, JSON.stringify(synced)).toBe(true);
     return opened.result.session;
   };
-  return { root, registry, faux, uploads, port, logRecords, connect, coldSession, snapshot, openSession,
+  const pairDevice = async (name: string): Promise<string> => {
+    const invitation = await devices.ensureEnrollment();
+    const device = await devices.pair(invitation.code, name);
+    await devices.ensureEnrollment();
+    return device.token;
+  };
+  return { root, registry, faux, uploads, port, logRecords, connect, restart, pairDevice, localToken: () => (devices as unknown as { localToken: string }).localToken, coldSession, snapshot, openSession,
     retirementState: () => retirement };
 }
+
+describe("device log append RPC boundary", () => {
+  const line = (sequence: number, padding = 0) => JSON.stringify({ timestamp: "2026-11-14T00:00:00.000Z", level: "info", message: `synthetic-${sequence}`, padding: "x".repeat(padding) });
+  const batch = (first: number, count: number, padding = 0) => Array.from({ length: count }, (_, index) => line(first + index, padding));
+  const deviceFiles = async (root: string) => {
+    const directory = join(root, "logs", "devices");
+    const names = await readdir(directory).catch(() => [] as string[]);
+    return Promise.all(names.map(async (name) => ({ name, text: await readFile(join(directory, name), "utf8") })));
+  };
+  const envelopesOf = (text: string) => text.split("\n").filter(Boolean).map((entry) => JSON.parse(entry) as { bootId: string; sequence: number });
+  const sequencesOf = (text: string) => envelopesOf(text).map((envelope) => envelope.sequence);
+
+  it("holds each device sequence once, reports the cursor, and refuses gaps", async () => {
+    const fixtureValue = await fixture();
+    const client = await fixtureValue.connect();
+    const bootId = "boot-logs-0001";
+    const initial = await client.request("cursor-initial", "client.logs.cursor", {});
+    expect(initial.ok, JSON.stringify(initial)).toBe(true);
+    expect(initial.result).toEqual({ bootId: null, sequence: 0 });
+    const first = await client.request("append-first", "client.logs.append", { commandId: "append-first-0001", bootId, firstSequence: 1, lines: batch(1, 3) });
+    expect(first.result).toEqual({ bootId, sequence: 3 });
+    const retried = await client.request("append-retry", "client.logs.append", { commandId: "append-first-0001", bootId, firstSequence: 1, lines: batch(1, 3) });
+    expect(retried.ok, JSON.stringify(retried)).toBe(true);
+    expect(retried.result).toEqual({ bootId, sequence: 3 });
+    const overlap = await client.request("append-overlap", "client.logs.append", { commandId: "append-overlap-0002", bootId, firstSequence: 2, lines: batch(2, 3) });
+    expect(overlap.result).toEqual({ bootId, sequence: 4 });
+    const gap = await client.request("append-gap", "client.logs.append", { commandId: "append-gap-0003", bootId, firstSequence: 9, lines: batch(9, 1) });
+    expect(gap.ok).toBe(false);
+    const files = await deviceFiles(fixtureValue.root);
+    expect(files).toHaveLength(1);
+    expect(sequencesOf(files[0].text)).toEqual([1, 2, 3, 4]);
+    const cursor = await client.request("cursor-after", "client.logs.cursor", {});
+    expect(cursor.result).toEqual({ bootId, sequence: 4 });
+    const unknown = await client.request("append-path", "client.logs.append", { commandId: "append-path-0004", bootId, firstSequence: 5, lines: batch(5, 1), path: "../escape.jsonl" });
+    expect(unknown.ok).toBe(false);
+  });
+
+  it("refuses an older connection's boot after a newer connection starts one", async () => {
+    const fixtureValue = await fixture();
+    const older = await fixtureValue.connect();
+    const newer = await fixtureValue.connect();
+    const started = await newer.request("boot-b-start", "client.logs.append", { commandId: "boot-b-start-0001", bootId: "boot-logs-b", firstSequence: 1, lines: batch(1, 2) });
+    expect(started.result).toEqual({ bootId: "boot-logs-b", sequence: 2 });
+    const stale = await older.request("boot-a-stale", "client.logs.append", { commandId: "boot-a-stale-0001", bootId: "boot-logs-a", firstSequence: 1, lines: batch(1, 3) });
+    expect(stale.ok).toBe(false);
+    expect(stale.error?.code).toBe("conflict");
+    const skipped = await newer.request("boot-c-skip", "client.logs.append", { commandId: "boot-c-skip-0001", bootId: "boot-logs-c", firstSequence: 3, lines: batch(3, 1) });
+    expect(skipped.ok).toBe(false);
+    expect(skipped.error?.code).toBe("invalid_request");
+    const cursor = await newer.request("boot-b-cursor", "client.logs.cursor", {});
+    expect(cursor.result).toEqual({ bootId: "boot-logs-b", sequence: 2 });
+    const files = await deviceFiles(fixtureValue.root);
+    expect(files).toHaveLength(1);
+    expect(envelopesOf(files[0].text).map((envelope) => envelope.bootId)).toEqual(["boot-logs-b", "boot-logs-b"]);
+  });
+
+  it("carries a local-rotation gap in the first envelope of a new epoch, once", async () => {
+    const fixtureValue = await fixture();
+    const client = await fixtureValue.connect();
+    await client.request("gap-old", "client.logs.append", { commandId: "gap-old-0001", bootId: "epoch-old-0001", firstSequence: 1, lines: batch(1, 3) });
+    const epoch = { commandId: "gap-new-0001", bootId: "epoch-new-0001", firstSequence: 1, gapFrom: 3, reason: "local-rotation", lines: batch(1, 2) };
+    const started = await client.request("gap-new", "client.logs.append", epoch);
+    expect(started.result).toEqual({ bootId: "epoch-new-0001", sequence: 2 });
+    const replay = await client.request("gap-new-retry", "client.logs.append", epoch);
+    expect(replay.ok, JSON.stringify(replay)).toBe(true);
+    expect(replay.result).toEqual({ bootId: "epoch-new-0001", sequence: 2 });
+    const files = await deviceFiles(fixtureValue.root);
+    const envelopes = envelopesOf(files[0].text);
+    const first = envelopes.filter((envelope) => envelope.bootId === "epoch-new-0001");
+    expect(first.map((envelope) => envelope.sequence)).toEqual([1, 2]);
+    expect(first[0]).toMatchObject({ gap: { fromSequence: 3, reason: "local-rotation" } });
+    expect(first[1]).not.toHaveProperty("gap");
+    expect(envelopes.filter((envelope) => envelope.bootId === "epoch-old-0001").every((envelope) => !("gap" in envelope))).toBe(true);
+  });
+
+  it("refuses a gap that does not name the exact held cursor, and writes nothing", async () => {
+    const fixtureValue = await fixture();
+    const client = await fixtureValue.connect();
+    await client.request("stale-gap-old", "client.logs.append", { commandId: "stale-gap-old-01", bootId: "epoch-stale-01", firstSequence: 1, lines: batch(1, 3) });
+    const stale = await client.request("stale-gap-new", "client.logs.append", { commandId: "stale-gap-new-01", bootId: "epoch-stale-02", firstSequence: 1, gapFrom: 2, reason: "local-rotation", lines: batch(1, 1) });
+    expect(stale.ok).toBe(false);
+    expect(stale.error?.code).toBe("conflict");
+    const unknownReason = await client.request("stale-gap-reason", "client.logs.append", { commandId: "stale-gap-reason-01", bootId: "epoch-stale-02", firstSequence: 1, gapFrom: 3, reason: "other", lines: batch(1, 1) });
+    expect(unknownReason.ok).toBe(false);
+    expect(unknownReason.error?.code).toBe("invalid_request");
+    const files = await deviceFiles(fixtureValue.root);
+    expect(envelopesOf(files[0].text).map((envelope) => envelope.bootId)).toEqual(["epoch-stale-01", "epoch-stale-01", "epoch-stale-01"]);
+    expect((await client.request("stale-gap-cursor", "client.logs.cursor", {})).result).toEqual({ bootId: "epoch-stale-01", sequence: 3 });
+  });
+
+  it("recovers the cursor after a restart and a torn tail, then continues on a fresh line", async () => {
+    const fixtureValue = await fixture();
+    const bootId = "boot-logs-restart";
+    const first = await fixtureValue.connect();
+    await first.request("restart-first", "client.logs.append", { commandId: "restart-first-0001", bootId, firstSequence: 1, lines: batch(1, 3) });
+    await fixtureValue.restart();
+    const recovered = await fixtureValue.connect();
+    expect((await recovered.request("restart-cursor", "client.logs.cursor", {})).result).toEqual({ bootId, sequence: 3 });
+    const [file] = await deviceFiles(fixtureValue.root);
+    await appendFile(join(fixtureValue.root, "logs", "devices", file.name), '{"bootId":"boot-logs-restart","sequence":4,"record":{"mess');
+    await fixtureValue.restart();
+    const afterTear = await fixtureValue.connect();
+    expect((await afterTear.request("tear-cursor", "client.logs.cursor", {})).result).toEqual({ bootId, sequence: 3 });
+    const next = await afterTear.request("tear-next", "client.logs.append", { commandId: "tear-next-0001", bootId, firstSequence: 4, lines: batch(4, 1) });
+    expect(next.result).toEqual({ bootId, sequence: 4 });
+    const [after] = await deviceFiles(fixtureValue.root);
+    const lines = after.text.split("\n").filter(Boolean);
+    const torn = lines.filter((entry) => { try { JSON.parse(entry); return false; } catch { return true; } });
+    expect(torn).toHaveLength(1);
+    expect(sequencesOf(lines.filter((entry) => !torn.includes(entry)).join("\n"))).toEqual([1, 2, 3, 4]);
+  });
+
+  it("bounds the batch and keeps four 5 MiB segments per device", async () => {
+    const fixtureValue = await fixture();
+    const client = await fixtureValue.connect();
+    const bootId = "boot-logs-rotate";
+    const oversized = await client.request("append-oversized", "client.logs.append", { commandId: "append-oversized-01", bootId, firstSequence: 1, lines: batch(1, 17, 16_000) });
+    expect(oversized.ok).toBe(false);
+    const tooLong = await client.request("append-long-line", "client.logs.append", { commandId: "append-long-line-01", bootId, firstSequence: 1, lines: [line(1, 17_000)] });
+    expect(tooLong.ok).toBe(false);
+    const batchBytes = 16 * 1024;
+    let next = 1;
+    for (let round = 0; round < 110; round += 1) {
+      const lines = batch(next, 16, batchBytes - 200);
+      const response = await client.request(`append-round-${round}`, "client.logs.append", { commandId: `append-round-${round}-0001`, bootId, firstSequence: next, lines });
+      expect(response.ok, JSON.stringify(response)).toBe(true);
+      next += 16;
+    }
+    const files = await deviceFiles(fixtureValue.root);
+    expect(files.length).toBeLessThanOrEqual(4);
+    expect(files.every((file) => Buffer.byteLength(file.text) <= 5 * 1024 * 1024)).toBe(true);
+    const newest = files.flatMap((file) => sequencesOf(file.text)).reduce((max, value) => Math.max(max, value), 0);
+    expect(newest).toBe(next - 1);
+    const expired = await client.request("append-expired-first", "client.logs.append", { commandId: "append-expired-0001", bootId, firstSequence: 1, lines: batch(1, 1) });
+    expect(expired.ok).toBe(false);
+    expect(expired.error?.code).toBe("conflict");
+  });
+
+  it("holds a same-boot replay of the first batch to the durable gap of its epoch, across a restart", async () => {
+    const fixtureValue = await fixture();
+    const client = await fixtureValue.connect();
+    await client.request("durable-old", "client.logs.append", { commandId: "durable-old-0001", bootId: "epoch-durable-old", firstSequence: 1, lines: batch(1, 3) });
+    const epoch = { commandId: "durable-new-0001", bootId: "epoch-durable-new", firstSequence: 1, gapFrom: 3, reason: "local-rotation", lines: batch(1, 2) };
+    expect((await client.request("durable-new", "client.logs.append", epoch)).result).toEqual({ bootId: "epoch-durable-new", sequence: 2 });
+    const [file] = await deviceFiles(fixtureValue.root);
+    const before = file.text;
+    const withoutGap = await client.request("durable-no-gap", "client.logs.append", { commandId: "durable-no-gap-0001", bootId: "epoch-durable-new", firstSequence: 1, lines: batch(1, 2) });
+    expect(withoutGap.ok).toBe(false);
+    expect(withoutGap.error?.code).toBe("conflict");
+    const otherFrom = await client.request("durable-other-from", "client.logs.append", { ...epoch, commandId: "durable-other-from-01", gapFrom: 2 });
+    expect(otherFrom.ok).toBe(false);
+    expect(otherFrom.error?.code).toBe("conflict");
+    expect((await deviceFiles(fixtureValue.root))[0].text).toBe(before);
+    expect((await client.request("durable-cursor", "client.logs.cursor", {})).result).toEqual({ bootId: "epoch-durable-new", sequence: 2 });
+    await fixtureValue.restart();
+    const recovered = await fixtureValue.connect();
+    const afterRestartDiffers = await recovered.request("durable-restart-differs", "client.logs.append", { ...epoch, commandId: "durable-restart-differs-01", gapFrom: 2 });
+    expect(afterRestartDiffers.error?.code).toBe("conflict");
+    const afterRestartMatches = await recovered.request("durable-restart-matches", "client.logs.append", { ...epoch, commandId: "durable-restart-matches-01" });
+    expect(afterRestartMatches.ok, JSON.stringify(afterRestartMatches)).toBe(true);
+    expect(afterRestartMatches.result).toEqual({ bootId: "epoch-durable-new", sequence: 2 });
+    expect((await deviceFiles(fixtureValue.root))[0].text).toBe(before);
+  });
+
+  it("refuses a local wrapper and keeps each paired device in its own file", async () => {
+    const fixtureValue = await fixture();
+    const local = await fixtureValue.connect(fixtureValue.localToken());
+    const localAppend = await local.request("local-append", "client.logs.append", { commandId: "local-append-0001", bootId: "boot-local-01", firstSequence: 1, lines: batch(1, 1) });
+    expect(localAppend.ok).toBe(false);
+    expect(localAppend.error?.code).toBe("unauthenticated");
+    const localCursor = await local.request("local-cursor", "client.logs.cursor", {});
+    expect(localCursor.ok).toBe(false);
+    const phone = await fixtureValue.connect();
+    const secondToken = await fixtureValue.pairDevice("Second phone");
+    const second = await fixtureValue.connect(secondToken);
+    await phone.request("phone-append", "client.logs.append", { commandId: "phone-append-0001", bootId: "boot-phone-01", firstSequence: 1, lines: batch(1, 2) });
+    const other = await second.request("second-cursor", "client.logs.cursor", {});
+    expect(other.result).toEqual({ bootId: null, sequence: 0 });
+    await second.request("second-append", "client.logs.append", { commandId: "second-append-0001", bootId: "boot-second-01", firstSequence: 1, lines: batch(1, 1) });
+    const files = await deviceFiles(fixtureValue.root);
+    expect(files).toHaveLength(2);
+    expect(files.map((file) => file.name).every((name) => /^[a-f0-9]{32}\.jsonl$/.test(name))).toBe(true);
+    expect(files.map((file) => sequencesOf(file.text).length).sort()).toEqual([1, 2]);
+  });
+});
 
 describe("diagnostic export RPC boundary", () => {
   it("records bounded authenticated ingress and completion without export content", async () => {
