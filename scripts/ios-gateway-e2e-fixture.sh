@@ -316,8 +316,7 @@ EOF
   "defaultThinkingLevel": "low",
   "defaultTools": ["+codemode"],
   "defaultProjectTrust": "never",
-  "enableAnalytics": false,
-  "enableInstallTelemetry": false
+  "enableAnalytics": false
 }
 EOF
 }

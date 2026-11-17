@@ -289,7 +289,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                         return key != "model.thinking[role=chat]" && !key.hasPrefix("context.")
                     }
                 + (HostedLaunch.arguments.contains("-settings-sheet-theme-review") ? HostedSettingsReviewSchema.sheetThemeKeys : [])
-                + [HostedSettingsReviewSchema.key("setup.installTelemetry", "setup", "Install telemetry", .bool(false), "Off", "toggle", order: 20)]
             if HostedLaunch.arguments.contains("-six-ui-surface") {
                 return .object(["keys": .array(rows), "sections": .array(HostedSettingsReviewSchema.sections)])
             }
@@ -310,8 +309,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 }
                 return .object(row)
             }
-            return .object(["keys": .array(keys), "sections": .array(HostedSettingsReviewSchema.sections + [
-                .object(["id": .string("setup"), "title": .string("Setup"), "order": .number(80)])])])
+            return .object(["keys": .array(keys), "sections": .array(HostedSettingsReviewSchema.sections)])
         }
         if HostedLaunch.arguments.contains("-settings-alignment-review") {
             let keys = [("inherited", "Inherited value", "16,384 tokens", false),
@@ -373,7 +371,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             section("permissions", "Permissions", 40, "Project trust and agent approvals"),
             section("accounts", "Accounts", 60, "Providers, custom models, and services"),
             section("sources", "Sources", 70, "Packages and how they install"),
-            section("setup", "Setup", 80, "Import, session storage, and telemetry"),
             section("run", "Run", 50, "Message delivery, retries, and transport"),
             section("lab", "Lab", 95, "A section this app has never seen"),
         ]

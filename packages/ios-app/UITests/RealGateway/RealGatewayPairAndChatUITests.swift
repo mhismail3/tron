@@ -1145,20 +1145,19 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         openGlobalSettings(); XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "More Settings")).count, 0,
                                              "Global embeds its former More Settings groups in Agent Behavior")
         coverage["settings"] = assertSettingsSurface(app, name: "settings", layers: ["global"], schema: schema, sectionDestinations: [
-            "model": "Agent Behavior", "workers": "Agent Behavior", "context": "Agent Behavior", "run": "Agent Behavior",
-            "setup": "Setup"])
-        openSettingsSection(app, "setup", linkLabel: "Setup", loneRow: settingRowToken("setup.installTelemetry"))
-        let globalEdit = toggleSetting(app, key: "setup.installTelemetry", confirmingReview: true)
+            "model": "Agent Behavior", "workers": "Agent Behavior", "context": "Agent Behavior", "run": "Agent Behavior"])
+        openGlobalAgentBehavior(app)
+        let globalEdit = chooseSetting(app, key: "model.thinking[role=chat]")
         XCTAssertNotEqual(globalEdit.before, globalEdit.after, "the Global edit was not accepted")
         dismissTopSheet(app)
         dismissTopSheet(app)
         XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
         openGlobalSettings()
-        openSettingsSection(app, "setup", linkLabel: "Setup", loneRow: settingRowToken("setup.installTelemetry"))
-        let reopenedTelemetry = topSwitchRow(app, key: "setup.installTelemetry")
-        XCTAssertTrue(waitForOverride(reopenedTelemetry, timeout: 30),
-                      "the reopened Settings must offer the Global reset: \(reopenedTelemetry.debugDescription)")
-        XCTAssertEqual(switchValue(reopenedTelemetry), globalEdit.after, "the reopened Global value is not the accepted value")
+        openGlobalAgentBehavior(app)
+        let reopened = choiceRow(app, key: "model.thinking[role=chat]")
+        XCTAssertTrue(waitForOverride(reopened, timeout: 30),
+                      "the reopened Settings must offer the Global reset: \(reopened.debugDescription)")
+        XCTAssertEqual(choiceValue(reopened), globalEdit.after, "the reopened Global value is not the accepted value")
         keepScreenshot(app, name: "settings-surface-settings-global-edit")
         dismissTopSheet(app)
         dismissTopSheet(app)
@@ -1184,27 +1183,33 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             XCTAssertTrue(app.navigationBars.staticTexts["Global Settings"].waitForExistence(timeout: 30), app.debugDescription)
         }
         openGlobalSettings()
-        openSettingsSection(app, "setup", linkLabel: "Setup", loneRow: settingRowToken("setup.installTelemetry"))
-        let globalEdit = toggleSetting(app, key: "setup.installTelemetry", confirmingReview: true)
+        let storedBefore = try globalSettingsDocument(fixture.agentDirectory)
+        let rawBefore = try XCTUnwrap(storedBefore["defaultThinkingLevel"] as? String, "the fixture's Global thinking level")
+        openGlobalAgentBehavior(app)
+        let globalEdit = chooseSetting(app, key: "model.thinking[role=chat]")
         dismissTopSheet(app)
         dismissTopSheet(app)
         XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
 
+        let rawAfter = try XCTUnwrap(try globalSettingsDocument(fixture.agentDirectory)["defaultThinkingLevel"] as? String,
+                                     "the accepted Global edit must persist in the Global store")
+        XCTAssertNotEqual(rawAfter, rawBefore, "the accepted Global edit must change the stored value")
         try editGlobalSettingsOutsideTron(fixture.agentDirectory) { document in
-            document["enableInstallTelemetry"] = globalEdit.before == "1"
+            document["defaultThinkingLevel"] = rawBefore
         }
         openGlobalSettings()
-        openSettingsSection(app, "setup", linkLabel: "Setup", loneRow: settingRowToken("setup.installTelemetry"))
-        let outsideRow = topSwitchRow(app, key: "setup.installTelemetry")
-        XCTAssertEqual(switchValue(outsideRow), globalEdit.before, "the live value must follow the edited store")
-        let applyAgain = hittableElement(app, identifier: settingRowToken("setup.installTelemetry") + "-applyAgain", timeout: 120)
+        openGlobalAgentBehavior(app)
+        let outsideRow = choiceRow(app, key: "model.thinking[role=chat]")
+        XCTAssertTrue(outsideRow.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(waitUntil(timeout: 30) { self.choiceValue(outsideRow) == globalEdit.before }, "the live value must follow the edited store")
+        let applyAgain = hittableElement(app, identifier: outsideRow.identifier + "-applyAgain", timeout: 120)
         XCTAssertNotNil(applyAgain, "the outside change of Tron's value must offer Apply again: \(app.debugDescription)")
         keepScreenshot(app, name: "settings-surface-outside-change-apply-again")
         applyAgain?.tap()
         XCTAssertTrue(waitUntil(timeout: 60) {
-            self.switchValue(outsideRow) == globalEdit.after
+            self.choiceValue(outsideRow) == globalEdit.after
         }, "Apply again must restore Tron's accepted value")
-        XCTAssertTrue(waitForNonExistence(app.buttons[settingRowToken("setup.installTelemetry") + "-applyAgain"], timeout: 30),
+        XCTAssertTrue(waitForNonExistence(app.buttons[outsideRow.identifier + "-applyAgain"], timeout: 30),
                       "Apply again must clear the canonical outside-change evidence")
 
         for _ in 0..<3 {
@@ -1393,12 +1398,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     }
 
     @MainActor
-    func openSettingsSection(_ app: XCUIApplication, _ group: String, linkLabel: String? = nil, loneRow: String? = nil) {
-        XCTAssertNotNil(openSettingsSectionIfServed(app, group, linkLabel: linkLabel, loneRow: loneRow),
-                        "the \(group) section has no settings link: \(app.debugDescription)")
-    }
-
-    @MainActor
     func openSettingsSectionIfServed(_ app: XCUIApplication, _ group: String,
                                            linkLabel: String? = nil, loneRow: String? = nil) -> XCUIElement? {
         let links = linkLabel.map { app.buttons.matching(NSPredicate(format: "label == %@", $0)) }
@@ -1453,18 +1452,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     }
 
     @MainActor
-    private func topSwitchRow(_ app: XCUIApplication, key: String) -> XCUIElement {
-        let rows = app.descendants(matching: .any).matching(identifier: settingRowToken(key))
-        for _ in 0..<30 {
-            for index in 0..<min(rows.count, 4) where rows.element(boundBy: index).switches.firstMatch.isHittable {
-                return rows.element(boundBy: index)
-            }
-            app.swipeUp()
-        }
-        return rows.element(boundBy: max(rows.count - 1, 0))
-    }
-
-    @MainActor
     func revealedElement(_ app: XCUIApplication, where predicate: NSPredicate, timeout: TimeInterval = 20) -> XCUIElement? {
         let deadline = Date().addingTimeInterval(timeout)
         var swipes = 0
@@ -1513,27 +1500,46 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         for _ in 0..<12 where !app.buttons["project-settings-trust"].isHittable { app.swipeUp() }
     }
 
-    private func switchValue(_ row: XCUIElement) -> String? {
-        row.switches.firstMatch.value.map { String(describing: $0) }
+    @MainActor
+    private func openGlobalAgentBehavior(_ app: XCUIApplication) {
+        let link = app.buttons["settings-link-Agent Behavior"]
+        XCTAssertTrue(link.waitForExistence(timeout: 30), app.debugDescription)
+        revealBelowNavigationBar(app, link)
+        link.tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Agent Behavior"].waitForExistence(timeout: 30), app.debugDescription)
     }
 
     @MainActor
-    private func toggleSetting(_ app: XCUIApplication, key: String, confirmingReview: Bool = false) -> (before: String?, after: String?) {
-        XCTAssertTrue(settingRow(app, key: key).waitForExistence(timeout: 15), "\(key) has no row: \(app.debugDescription)")
-        let row = topSwitchRow(app, key: key)
-        let toggle = row.switches.firstMatch
-        let before = switchValue(row)
-        toggle.tap()
-        if confirmingReview {
-            let approve = app.buttons["change-review-approve"]
-            XCTAssertTrue(approve.waitForExistence(timeout: 30), "\(key) must ask for its exact review: \(app.debugDescription)")
-            approve.tap()
-        }
-        XCTAssertTrue(waitUntil(timeout: 60) { self.switchValue(row) != before },
+    private func choiceRow(_ app: XCUIApplication, key: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND NOT identifier ENDSWITH '-reset' AND NOT identifier ENDSWITH '-applyAgain'",
+            settingRowToken(key) + "_")).firstMatch
+    }
+
+    private func choiceValue(_ row: XCUIElement) -> String? {
+        row.buttons["settings-choice-control"].value.map { String(describing: $0) }
+    }
+
+    @MainActor
+    private func chooseSetting(_ app: XCUIApplication, key: String) -> (before: String?, after: String?) {
+        let row = choiceRow(app, key: key)
+        XCTAssertTrue(row.waitForExistence(timeout: 15), "\(key) has no row: \(app.debugDescription)")
+        revealBelowNavigationBar(app, row)
+        let control = row.buttons["settings-choice-control"]
+        XCTAssertTrue(waitForEnabled(control, timeout: 30), "\(key) has no editor: \(row.debugDescription)")
+        let before = choiceValue(row)
+        control.tap()
+        let slider = app.descendants(matching: .any)["settings-choice-slider"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 10), "\(key) must open the shared choice slider: \(app.debugDescription)")
+        slider.coordinate(withNormalizedOffset: CGVector(dx: before == "Off" ? 0.95 : 0.02, dy: 0.5)).tap()
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: 10, dy: min(app.frame.maxY - 70, slider.frame.maxY + 80))).tap()
+        XCTAssertTrue(waitForNonExistence(slider, timeout: 10), "dismissing the slider saves the choice")
+        XCTAssertTrue(waitUntil(timeout: 60) { self.choiceValue(row) != before },
                       "The Gateway did not accept the \(key) value")
-        let after = switchValue(row)
+        let after = choiceValue(row)
         XCTAssertTrue(waitForOverride(row, timeout: 30), "The accepted value must be this scope's override: \(rowProvenance(row))")
-        XCTAssertEqual(switchValue(row), after, "Reading provenance must not mutate the accepted value")
+        XCTAssertEqual(choiceValue(row), after, "Reading provenance must not mutate the accepted value")
         return (before, after)
     }
 

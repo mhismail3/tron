@@ -22,6 +22,7 @@ export const BACKGROUND_MODEL = "scripted-background";
 
 export interface ScriptedRequest {
   readonly model: string;
+  readonly headers: Readonly<Record<string, string | string[] | undefined>>;
   readonly messages: ReadonlyArray<{ role: string; content?: unknown; tool_calls?: unknown; tool_call_id?: string }>;
   readonly body: string;
 }
@@ -67,7 +68,7 @@ export async function startScriptedProvider(): Promise<ScriptedProvider> {
       response.end(JSON.stringify({ error: { message: "unparsable provider request" } }));
       return;
     }
-    const record: ScriptedRequest = { model: String(parsed.model), messages: parsed.messages ?? [], body };
+    const record: ScriptedRequest = { model: String(parsed.model), headers: request.headers, messages: parsed.messages ?? [], body };
     requests.push(record);
     const step = standing.get(record.model) ?? steps.shift();
     if (!step) {
@@ -151,7 +152,7 @@ async function joinExit(child: ChildProcess, label: string, boundMs?: number): P
 
 const KILL_JOIN_BOUND_MS = 3_000;
 
-export async function startGatewayProcess(options: { settings?: Record<string, unknown> } = {}): Promise<GatewayProcess> {
+export async function startGatewayProcess(options: { settings?: Record<string, unknown>; providerName?: string } = {}): Promise<GatewayProcess> {
   const provider = await startScriptedProvider();
   let root: string | undefined;
   let child: ChildProcess | undefined;
@@ -173,7 +174,7 @@ export async function startGatewayProcess(options: { settings?: Record<string, u
 }
 
 async function launchGatewayProcess(
-  options: { settings?: Record<string, unknown> },
+  options: { settings?: Record<string, unknown>; providerName?: string },
   provider: ScriptedProvider,
   root: string,
   spawned: (child: ChildProcess) => void,
@@ -184,12 +185,13 @@ async function launchGatewayProcess(
   for (const directory of [tronHome, agentDir, cwd, join(root, "home"), join(root, "tmp")]) await mkdir(directory, { recursive: true, mode: 0o700 });
   const model = (id: string) => ({ id, name: id, reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 4096,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } });
-  await writeFile(join(agentDir, "models.json"), JSON.stringify({ providers: { [SCRIPTED_PROVIDER]: {
+  const providerName = options.providerName ?? SCRIPTED_PROVIDER;
+  await writeFile(join(agentDir, "models.json"), JSON.stringify({ providers: { [providerName]: {
     baseUrl: `http://127.0.0.1:${provider.port}/v1`, api: "openai-completions", apiKey: "fixture-only",
     models: [model(SCRIPTED_MODEL), model("scripted-alternate"), model(BACKGROUND_MODEL)] } } }, null, 2));
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({
-    defaultProvider: SCRIPTED_PROVIDER, defaultModel: SCRIPTED_MODEL, defaultProjectTrust: "never",
-    enableAnalytics: false, enableInstallTelemetry: false, ...options.settings,
+    defaultProvider: providerName, defaultModel: SCRIPTED_MODEL, defaultProjectTrust: "never",
+    enableAnalytics: false, ...options.settings,
   }, null, 2));
   const port = await freePort();
   const environment = {

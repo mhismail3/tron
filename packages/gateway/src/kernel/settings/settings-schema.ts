@@ -20,7 +20,6 @@ export const SECTIONS: readonly SectionDeclaration[] = [
   { id: "connections", title: "Mac Terminal", description: "This iPhone's key on the connected Mac", order: 58 },
   { id: "accounts", title: "Accounts", description: "Providers, custom models, and services", order: 60 },
   { id: "sources", title: "Sources", description: "Packages and how they install", order: 70 },
-  { id: "setup", title: "Storage", description: "Import, session storage, and telemetry", order: 80 },
   { id: "iphone", title: "This iPhone", description: "Appearance and sessions", order: 90, note: "Stored on this iPhone. Run Swift files can be changed by Home for an explicitly selected iPhone; other settings stay on this iPhone." },
 ];
 
@@ -496,11 +495,6 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       tap: "privacy", id: "notifications.push.waiting", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "notifications", type: types.boolean(),
       layers: { global: { store: "gateway", path: ["notifications", "push", "waiting"] } }, defaultValue: true, timing: "live", effect: "next-request", direction: grants,
       writers: ANY_ACTOR, label: "Waiting", help: "Send a push when work is waiting on background tasks.", order: 30, importance: "essential",
-    },
-    {
-      tap: "irreversible", id: "setup.installTelemetry", sessionOverridable: false, projectSettable: false, group: "setup", type: types.boolean(), layers: { global: pi("enableInstallTelemetry") }, defaultValue: true,
-      timing: "live", effect: "next-request", writers: ["ui"], label: "Install telemetry",
-      help: "Send pi's anonymous install attribution header.", order: 20, importance: "advanced", control: "toggle",
     },
   ] satisfies readonly KeyDeclaration[]);
 

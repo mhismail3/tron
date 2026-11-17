@@ -50,7 +50,7 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 ## Keys
 
 <!-- tron docs settings -->
-52 keys, declared in `packages/gateway/src/kernel/settings/settings-schema.ts` (`KEYS`).
+51 keys, declared in `packages/gateway/src/kernel/settings/settings-schema.ts` (`KEYS`).
 
 | Key | Qualifier | Group | Layers | Home layers | Timing | Effect | Native tap |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -105,7 +105,6 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 | `notifications.push.inputNeeded` | — | notifications | global | none | live | next-request | privacy |
 | `notifications.push.finished` | — | notifications | global | none | live | next-request | privacy |
 | `notifications.push.waiting` | — | notifications | global | none | live | next-request | privacy |
-| `setup.installTelemetry` | — | setup | global | as allowed | live | next-request | irreversible |
 
 Record subjects (`RECORD_SUBJECTS`), changed per instance through the same path:
 
@@ -115,6 +114,8 @@ Record subjects (`RECORD_SUBJECTS`), changed per instance through the same path:
 | `accounts.models.provider` | accounts | provider |
 | `context.lesson` | context | lesson |
 <!-- /tron docs -->
+
+Install telemetry is not a setting: `gateway-main.ts` sets `PI_TELEMETRY=0` before any SDK work, so a hand-written `enableInstallTelemetry` cannot re-enable it; the pin also removes provider attribution headers and is inherited by child processes the Gateway starts.
 
 Other schema fields: `subgroup`, `type`, `options` or `optionsSource` (`catalog.models`,
 `catalog.thinkingLevels(model)`, `catalog.tools`, ...), `defaultValue`, `direction`, `tap`, `writers`
