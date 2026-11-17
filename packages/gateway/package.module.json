@@ -4,6 +4,7 @@
     ".oxlintrc.json",
     "AGENTS.md",
     "README.md",
+    "determinism-baseline.json",
     "layer-baseline.json",
     "package-lock.json",
     "package.json",
