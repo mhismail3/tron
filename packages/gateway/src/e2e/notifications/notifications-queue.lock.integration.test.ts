@@ -101,8 +101,7 @@ function dedupeKeysJoin(document: PushDocument): void {
 
 const answer = (frame: { ok: boolean; result?: unknown; error?: unknown }) => ({ ok: frame.ok, result: frame.result ?? null, error: frame.error ?? null });
 
-const REGISTERED = { available: true, deviceRegistered: true, enabledDeviceCount: 1, notifyWhenAskPresented: true, notifyWhenFinished: true,
-  notifyWhenWaiting: true, pendingCount: 0, registered: true, relayOrigin: RELAY_ORIGIN, requiresGrantRotation: false };
+const REGISTERED = { available: true, deviceRegistered: true, enabledDeviceCount: 1, pendingCount: 0, registered: true, relayOrigin: RELAY_ORIGIN, requiresGrantRotation: false };
 
 interface PushLock {
   readonly gateway: LockGateway;
@@ -126,7 +125,7 @@ async function pushLock(name: string, extensions: Array<{ name: string; source: 
   let gateway!: LockGateway;
   let home = "";
   const build = async () => {
-    current = new NotificationService(new NotificationGrantStore(home), new PushRelayClient(RELAY_ORIGIN, relay.fetcher, clock), clock,
+    current = new NotificationService(new NotificationGrantStore(home), new PushRelayClient(RELAY_ORIGIN, relay.fetcher, clock), async () => ({ inputNeeded: true, finished: true, waiting: true }), clock,
       () => {}, () => {}, () => {}, () => false);
     await current.initialize();
     owned.push(async () => current.dispose());
@@ -138,7 +137,6 @@ async function pushLock(name: string, extensions: Array<{ name: string; source: 
   expect(answer(await phone.request("push.registration.upsert", {
     commandId: gateway.commandId(), installationId: "lock-installation", grantId: GRANT,
     secret: SECRET, previewsEnabled: false, relayOrigin: RELAY_ORIGIN,
-    notifyWhenAskPresented: true, notifyWhenFinished: true, notifyWhenWaiting: true,
   })), "the registration").toEqual({ ok: true, result: REGISTERED, error: null });
   const created = await phone.request("session.create", { commandId: gateway.commandId(), cwd: gateway.cwd });
   const sessionId = created.result.sessionId as string;

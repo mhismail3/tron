@@ -26,8 +26,8 @@ lookup live in K3, not a second registry here.
 - **Decision descriptor.** `ask-user-module.ts` owns `tron-ask-user` metadata and
   its stateless extension. The started module is used at the same ordinary and
   Home registration position.
-- **`modules.list`** reports Tron's built-in modules for Settings without a session:
-  the ordinary profile's descriptor rows (name, purpose, tool and command names).
+- **Module inventory.** The `settings` tool's `inventory` reports Tron's built-in modules without
+  a session: the ordinary profile's descriptor rows (name, purpose, tool and command names).
   `ModuleHost` reads the started descriptors, never adapter metadata; an absent host
   has no rows. `tron-invocation-settlement` comes first and has no tools or commands.
   Each runtime supplies only `SessionContext`; capability owners stay in descriptor closures.
@@ -38,7 +38,7 @@ lookup live in K3, not a second registry here.
   re-read during the load. It never starts a session or replays provider
   registrations, serializes on one mutex as drain-aware admin work, and is bounded
   to 256 KiB (an extension-module load cannot be cancelled, so no deadline is
-  claimed). `packages.list` adds per package what it `provides` (skills, prompts,
+  claimed). The package inventory adds per package what it `provides` (skills, prompts,
   themes, subagents, tools, commands; at most 256 per kind, partial results with one
   `providesDiagnostic`) and `nodeRequirement {range, runtime, status}` from
   `engines.node`, judged against the running Node: a warning, never a refusal.
@@ -50,7 +50,7 @@ lookup live in K3, not a second registry here.
 
 ## Invariants
 
-- Started descriptors feed registration and `modules.list`; profile lists contain only names.
+- Started descriptors feed registration and the module inventory; profile lists contain only names.
 - Project extension code loads only under a true canonical trust decision.
 - Reserved tool names (`subagent`, `notify`) belong to their build-bound owners.
 

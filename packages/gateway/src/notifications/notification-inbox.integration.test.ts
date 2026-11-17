@@ -70,6 +70,7 @@ async function fixture() {
   const notifications = new NotificationService(
     store,
     { available: false, relayOrigin: "https://push.example.test" } as PushRelayClient,
+    async () => ({ inputNeeded: true, finished: true, waiting: true }),
     Date.now,
     (payload) => broadcasts.push(payload),
   );

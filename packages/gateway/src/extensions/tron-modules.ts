@@ -19,8 +19,6 @@ export const ORDINARY_MODULE_NAMES: readonly string[] = [
   "tron-notify",
 ];
 
-export const MODULES_CAPABILITY = "modules.v1";
-
 export function tronModuleSummaries(modules?: ModuleHost): TronModuleSummary[] {
   return modules?.summaries(modules.runtimeOrder) ?? [];
 }

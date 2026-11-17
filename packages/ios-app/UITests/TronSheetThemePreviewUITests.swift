@@ -19,9 +19,7 @@ final class TronSheetThemePreviewUITests: XCTestCase {
             expand(app, title: "Push Notifications")
             capture(app, "section-colors-system-\(mode)")
             close(app)
-            for (id, title) in [("settings-section-tools-open", "Tools"),
-                                ("settings-link-MCP Servers", "MCP Servers"),
-                                ("settings-link-Extensions", "Extensions")] {
+            for (id, title) in [("settings-link-MCP Servers", "MCP Servers")] {
                 open(app, id)
                 expand(app, title: title)
                 capture(app, "section-colors-\(title)-\(mode)")
