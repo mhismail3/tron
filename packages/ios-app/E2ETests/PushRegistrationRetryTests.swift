@@ -105,7 +105,7 @@ final class PushRegistrationRetryTests: XCTestCase {
         let log: AppLog
     }
 
-    private func makeHarness(flagged: Bool, assertionInvalidKey: Bool = false, installationStatuses: [Int] = []) throws -> Harness {
+    private func makeHarness(flagged: Bool, assertionInvalidKey: Bool = false, installationStatuses: [Int] = [], authorization: PushAuthorization = .allowed) throws -> Harness {
         let credentials = CredentialMemory(PushCredentialDocument(
             appAttestKeyID: Ledger.key(1),
             apnsToken: String(repeating: "ab", count: 32),
@@ -128,7 +128,7 @@ final class PushRegistrationRetryTests: XCTestCase {
         let coordinator = PushNotificationCoordinator(
             credentials: credentials,
             notifications: PushNotificationSystem(
-                authorization: { .allowed },
+                authorization: { authorization },
                 requestAuthorization: { true },
                 registerForRemoteNotifications: {}
             ),
@@ -206,6 +206,14 @@ final class PushRegistrationRetryTests: XCTestCase {
         }
         XCTAssertEqual(stages.last, "Stopped: rejected", "registration stages reach the uploaded app log: \(stages)")
         XCTAssertTrue(stages.contains("Submitting proof"), "intermediate stages are logged too: \(stages)")
+        let denied = try makeHarness(flagged: false, authorization: .denied)
+        await connect(denied)
+        var deniedStages: [String] = []
+        for _ in 0..<500 where deniedStages.isEmpty {
+            deniedStages = await denied.log.snapshot().filter { $0.event == "push.registration" }.compactMap(\.outcome)
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertEqual(deniedStages, ["Stopped: notifications denied"], "a notification denial reaches the uploaded app log")
     }
 
     func testRetryCardRotatesOnceAfterAcceptedTapAndDuplicateApprovalDoesNot() async throws {

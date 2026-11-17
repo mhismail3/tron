@@ -103,8 +103,7 @@ notification inbox.
 ```bash
 scripts/tron-ios-test run --only-testing TronMobileUITests/TronNotificationInboxUITests \
   --only-testing TronMobileUITests/TronHomePushNavigationUITests \
-  --only-testing TronMobileUITests/TronDeliveredNotificationUITests \
-  --only-testing TronMobileUITests/TronSmokeUITests/testPushSheetShowsReadinessWithoutPolicyToggles
+  --only-testing TronMobileUITests/TronDeliveredNotificationUITests
 scripts/validate-push-service-config.sh config/PushService.xcconfig
 ```
 
@@ -113,7 +112,7 @@ Notification Center local deliveries and production chat visibility over a fixtu
 `HostedDeliveredNotificationFixture` owns exact-ID cleanup. Neither suite proves APNs delivery.
 `TRON_PUSH_SERVICE_ORIGIN` is shared with the Mac payload, so a change installs the Mac first.
 Before shipping an identity, check its signed entitlements, pair a physical device, rotate its
-token by reinstalling, and verify revoke, offline retry and the Settings registration stage.
+token by reinstalling, and verify revoke, offline retry and the `push.registration` events in exported diagnostics.
 
 ## Not here
 

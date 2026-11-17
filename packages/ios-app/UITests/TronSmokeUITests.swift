@@ -2749,15 +2749,12 @@ final class TronSmokeUITests: XCTestCase {
     @MainActor
     func testUIFixesVisualReviewCaptures() {
         continueAfterFailure = false
-        for surface in ["providers", "push"] {
-            let app = XCUIApplication()
-            app.launchArguments = ["-tron-settings-renderer-fixture"]
-            app.launchArguments.append("-settings-ui-\(surface)")
-            app.launch()
-            XCTAssertTrue(app.staticTexts["fixture.settings-renderer-applied"].waitForExistence(timeout: 10), app.debugDescription)
-            keepScreenshot(named: "1261-\(surface)")
-            app.terminate()
-        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-ui-providers"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["fixture.settings-renderer-applied"].waitForExistence(timeout: 10), app.debugDescription)
+        keepScreenshot(named: "1261-providers")
+        app.terminate()
     }
 
     @MainActor

@@ -1,7 +1,6 @@
 import CryptoKit
 import DeviceCheck
 import Foundation
-import Observation
 import Security
 import SwiftUI
 import TronMobileCore
@@ -40,6 +39,8 @@ enum PushRegistrationDiagnostic: String, Equatable, Sendable {
     case stoppedPersistence = "Stopped: credential storage"
     case stoppedExhausted = "Stopped: retry limit"
     case stoppedUnavailable = "Stopped: unavailable"
+    case stoppedDenied = "Stopped: notifications denied"
+    case stoppedPermissionRequest = "Stopped: permission request failed"
 }
 
 struct PushGrant: Codable, Equatable, Sendable {
@@ -396,7 +397,6 @@ struct PushRegistrationStatus: Decodable, Sendable {
 private struct PushRegistrationRemovalResult: Decodable, Sendable { let removed: Bool }
 
 @MainActor
-@Observable
 final class PushNotificationCoordinator {
     private struct Context: Sendable {
         let profile: GatewayProfile
@@ -424,7 +424,8 @@ final class PushNotificationCoordinator {
         didSet {
             guard diagnostic != oldValue else { return }
             let previous = logTail, log = log, stage = diagnostic.rawValue
-            logTail = Task { await previous?.value; await log.recordCausal(name: "push.registration", outcome: stage) }
+            let level = stage.hasPrefix("Stopped") ? "warning" : nil
+            logTail = Task { await previous?.value; await log.recordCausal(name: "push.registration", outcome: stage, level: level) }
         }
     }
     private var logTail: Task<Void, Never>?
@@ -507,6 +508,7 @@ final class PushNotificationCoordinator {
             } catch {
                 guard admissionGeneration == reconciliationAdmission,
                       context?.profile.id == profile.id else { return }
+                diagnostic = .stoppedPermissionRequest
                 return
             }
             guard admissionGeneration == reconciliationAdmission,
@@ -515,7 +517,7 @@ final class PushNotificationCoordinator {
         guard status == .allowed else {
             invalidateRegistration(admission: false)
             let denialGeneration = registrationGeneration
-            diagnostic = .idle
+            diagnostic = .stoppedDenied
             if connected {
                 await removeRegistration(
                     for: profile,
