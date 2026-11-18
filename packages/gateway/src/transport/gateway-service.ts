@@ -631,13 +631,6 @@ export class GatewayService {
         try { return safeJson(await this.requireMcpAdmin().list(scope)); }
         finally { work?.settle(); }
       }
-      case "mcp.logout":
-        return this.mutation(client, method, params, async () => {
-          rejectUnknownFields(params, ["commandId", "server"], method);
-          const server = mcpServerName(params);
-          await this.requireMcpAdmin().logout(server);
-          return safeJson({ servers: [server] });
-        });
       case "mcp.token.set":
         return this.mutation(client, method, params, async () => {
           rejectUnknownFields(params, ["commandId", "server", "token"], method);

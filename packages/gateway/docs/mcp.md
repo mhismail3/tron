@@ -80,7 +80,7 @@ wire shape: at most 128 servers, each with `name`, `state`, `scope`, `enabled`,
 `exposure`, `transport`, at most 128 tool names, and an optional bounded `error`.
 Each string is capped at 256 characters (except `state`, capped at 64); `error`
 is stripped of control bytes and capped at 2,048 characters. Filesystem `source`
-paths are not exposed. Every bundled-CLI run the admin service makes (status, sign-out) binds
+paths are not exposed. Every bundled-CLI run the admin service makes (status) binds
 `PI_CODING_AGENT_DIR` to the Gateway's agent directory at spawn, so the ambient process environment
 never selects which `mcp.json` or trust store a status read or mutation touches. Top-level `errors` is a count, not a copy of Pi diagnostic
 objects. The captured pinned CLI payload fixture and startup/config behavior are
@@ -119,9 +119,9 @@ Servers are added, changed and removed only through `settings.change` on
 `tools.mcp.server` at the Global layer ([settings contract](settings-contract.md));
 the app previews the change and shows the shared change card when it taps (adding,
 enabling, a new command, address or bearer reference, or wider visibility).
-Repository `.pi/mcp.json` is read-only. `mcp.logout { server }` and
-`mcp.token.set { server, token }` take a `commandId` and use the command receipt store;
-sign-out applies at a running session's next turn. `mcp.token.set` stores the token
+Repository `.pi/mcp.json` is read-only. `mcp.token.set { server, token }` takes a
+`commandId` and uses the command receipt store. Sign-out is `/mcp logout` in chat; the
+Gateway has no sign-out RPC. `mcp.token.set` stores the token
 through the Keychain owner, writes no configuration and returns `{ server, reference }`;
 the app then sets that reference through `settings.change`. Rotating the token of a
 server that already holds its reference needs no settings change. Token values are

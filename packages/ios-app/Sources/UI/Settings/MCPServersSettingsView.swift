@@ -238,9 +238,6 @@ struct MCPServersSettingsView: View {
                         Button("Set Bearer Token", systemImage: "key") { tokenServer = server.name }
                     }
                 }
-                if !MCPServerPresentationPolicy.isNeedsAuth(server.state) {
-                    Button("Sign Out", systemImage: "rectangle.portrait.and.arrow.right") { Task { if await mutate("mcp.logout", ["server": .string(server.name)], destination: destination) != nil { generation &+= 1 } } }
-                }
                 if server.value != nil {
                     Divider()
                     Button("Remove", systemImage: "trash", role: .destructive) { Task { await changeServer(server.name, to: nil, destination: destination) } }

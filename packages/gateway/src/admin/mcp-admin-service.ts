@@ -197,10 +197,6 @@ export class McpAdminService {
       errors: configured.errors.length,
     };
   }
-  async logout(server: string): Promise<void> {
-    const result = await runProcess(process.execPath, this.cliArgs(["logout", server]), { cwd: this.agentDir, timeoutMs: this.cliTimeoutMs, env: this.cliEnvironment() });
-    if (result.code !== 0) throw new GatewayError("conflict", `MCP logout failed: ${result.stderr.slice(0, 2_000)}`);
-  }
   private async globalServers(): Promise<Record<string, unknown> | undefined> {
     const text = await readFile(this.configPath, "utf8").catch((error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT") return undefined;
