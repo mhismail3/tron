@@ -121,8 +121,8 @@ import Vision
         app.launch()
         return app
     }
-    private func manage(_ mode: String, extra: [String] = []) -> XCUIApplication {
-        let app = launch(mode, fixture: "-tron-home-dashboard-fixture", extra: ["-home-shell-ready"] + extra)
+    private func manage(_ mode: String) -> XCUIApplication {
+        let app = launch(mode, fixture: "-tron-home-dashboard-fixture", extra: ["-home-shell-ready"])
         tap(app, "home-pinned-row")
         let context = app.buttons["session-context-button"]
         XCTAssertTrue(wait(context, "enabled == true"))
@@ -149,15 +149,6 @@ import Vision
         origin.withOffset(CGVector(dx: 60, dy: done.frame.midY)).press(forDuration: 0.1,
             thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
         _ = wait(done, "frame.minY < 120")
-    }
-    private func expandTitle(_ app: XCUIApplication, title: String) {
-        let bar = app.navigationBars.staticTexts[title].firstMatch
-        XCTAssertTrue(bar.waitForExistence(timeout: 5))
-        guard bar.frame.minY > 120 else { return }
-        let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
-        origin.withOffset(CGVector(dx: 60, dy: bar.frame.midY)).press(forDuration: 0.1,
-            thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
-        _ = wait(bar, "frame.minY < 120")
     }
     private func wait(_ element: XCUIElement, _ predicate: String) -> Bool {
         XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: predicate), object: element)], timeout: 8) == .completed

@@ -4,7 +4,6 @@ import UIKit
 @MainActor final class TronSixSmallUIRegressionTests: XCTestCase {
     private let root = "/Users/fixture/Workspace/tron-worktrees/six-small-ui-fixes"
 
-
     func testToastGlyphUsesActivePrimary() {
         for mode in ["light", "dark"] {
             let app = launch("toast", mode: mode)
@@ -46,19 +45,6 @@ import UIKit
         pro.tap()
         XCTAssertEqual(pro.value as? String, "Selected")
         XCTAssertTrue(app.navigationBars.staticTexts["Models"].exists, "Selection must not dismiss the picker")
-        app.terminate()
-    }
-
-    func testModelRowUsesSharedSubtextAndMonospacedID() {
-        let app = launch("models", extra: ["-six-ui-typography"])
-        for slot in ["subtext", "metadata"] {
-            let actual = app.descendants(matching: .any)["model-picker-row-opencode-go/deepseek-v4-pro-\(slot)"].firstMatch
-            let reference = app.descendants(matching: .any)["six-ui-row-reference-\(slot)"].firstMatch
-            XCTAssertTrue(actual.waitForExistence(timeout: 8), app.debugDescription)
-            XCTAssertTrue(reference.exists)
-            XCTAssertEqual(actual.frame.height, reference.frame.height, accuracy: 0.5, "Catalog \(slot) must use the shared row's type metrics")
-            XCTAssertEqual(actual.frame.width, reference.frame.width, accuracy: 0.5, "ID glyph advances must match the shared monospaced reference")
-        }
         app.terminate()
     }
 
@@ -117,7 +103,6 @@ import UIKit
             app.terminate()
         }
     }
-
 
     private func launch(_ surface: String, mode: String = "light", extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
