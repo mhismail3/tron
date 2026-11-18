@@ -100,7 +100,13 @@ struct ManageModelConfigurationCard: View {
     private func choiceOptions(for setting: ResolvedSetting) -> [SettingsOption] {
         switch setting.key {
         case "model.thinking[role=chat]":
-            return (model.sessionContextPresentation(for: sessionID)?.availableThinkingLevels ?? []).map {
+            let session = model.sessionContextPresentation(for: sessionID)?.availableThinkingLevels ?? []
+            let reasoning = ref?.value?.objectValue.flatMap { value in
+                model.providerCatalog(for: catalogTarget)?.models.first {
+                    $0.provider == value["provider"]?.stringValue && $0.id == value["id"]?.stringValue
+                }?.reasoning
+            } == true
+            return (session.isEmpty && reasoning ? ["off", "low", "medium", "high"] : session).map {
                 SettingsOption(value: .string($0), label: ThinkingLevelPresentation.title($0), detail: nil, disabledReason: nil, resource: nil)
             }
         default:
