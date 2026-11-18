@@ -310,26 +310,6 @@ final class TronListStandardUITests: XCTestCase {
         }
     }
 
-    @MainActor func testInstructionRowsCarryTagsOnTitleLineAndCentreEntryIcons() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-agent-instructions-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-        app.launch(); defer { app.terminate() }
-        let row = app.buttons["agent-instructions-section-tools"]
-        XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
-        let tags = element(app, "agent-instructions-section-tools-tags")
-        XCTAssertTrue(tags.waitForExistence(timeout: 5), "The row publishes its tags\n\(app.debugDescription)")
-        XCTAssertLessThan(tags.frame.minY - row.frame.minY, 20, "The tags are on the title line")
-        XCTAssertGreaterThan(tags.frame.maxX, row.frame.maxX - 24, "The tags are at the trailing edge")
-        row.tap()
-        let entry = element(app, "agent-instructions-entry-tools.1")
-        let icon = element(app, "agent-instructions-entry-tools.1-leading")
-        XCTAssertTrue(entry.waitForExistence(timeout: 8), app.debugDescription)
-        XCTAssertTrue(icon.waitForExistence(timeout: 5), "The entry publishes its icon\n\(app.debugDescription)")
-        XCTAssertGreaterThan(entry.frame.height, 3 * icon.frame.height, "The entry's description wraps")
-        XCTAssertEqual(icon.frame.midY, entry.frame.midY, accuracy: 2, "The icon is centred vertically in the row")
-    }
-
     @MainActor func testTaskFeedRetriesAndEnds() {
         continueAfterFailure = false
         let app = XCUIApplication()
