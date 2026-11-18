@@ -23,7 +23,7 @@ final class NotificationRunBoundaryViewTests: ShuffledTestCase {
             }, app.tree())
             let mids = try await app.still("the error notifications") {
                 let frames = errors().map(\.accessibilityFrame).sorted { $0.minY < $1.minY }
-                return frames.count == 2 ? frames.map(\.midY) : nil
+                return frames.count == 2 ? frames.map { Double($0.midY) } : nil
             }
             XCTAssertGreaterThan(mids[1] - mids[0], 80, "Prose and tools must remain chronological boundaries, not join an event run")
         }
