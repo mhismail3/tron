@@ -258,15 +258,9 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
 
     private func resolution() -> JSONValue {
         if HostedLaunch.arguments.contains("-settings-expanded-review") {
-            let rows = [HostedSettingsReviewSchema.key("model.ref[role=chat]", "model", "Model", .object(["provider": .string("fixture"), "id": .string("pro")]), "Fixture Model", "catalog", essential: true)]
-                + (HostedLaunch.arguments.contains("-agent-behavior-regression")
-                    ? HostedSettingsReviewSchema.agentBehaviorKeys : HostedSettingsReviewSchema.additionalKeys)
-                    .filter { row in
-                        guard HostedLaunch.arguments.contains("-served-agent-behavior") else { return true }
-                        let key = row.objectValue?["key"]?.stringValue ?? ""
-                        return key != "model.thinking[role=chat]" && !key.hasPrefix("context.")
-                    }
-                + (HostedLaunch.arguments.contains("-settings-sheet-theme-review") ? HostedSettingsReviewSchema.sheetThemeKeys : [])
+            let rows = [HostedSettingsReviewSchema.key("model.ref[role=chat]", "model", .object(["provider": .string("fixture"), "id": .string("pro")]), "Fixture Model")]
+                + HostedSettingsReviewSchema.additionalKeys
+                + (HostedLaunch.arguments.contains("-settings-sheet-theme-review") ? HostedSettingsReviewSchema.macTerminalKeys : [])
             if HostedLaunch.arguments.contains("-six-ui-surface") {
                 return .object(["keys": .array(rows)])
             }
@@ -284,9 +278,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                         ("short", "Short value", "—", false),
                         ("revert", "Owned value", "High", true),
                         ("unset", "Optional override", "16,384 tokens", true)].enumerated().map { index, item -> JSONValue in
-                var row = HostedSettingsReviewSchema.key("alignment.\(item.0)", "context", item.1,
-                    .string(item.2), item.2, "choice", order: Double(index),
-                    options: [.object(["value": .string(item.2), "label": .string(item.2)])]).objectValue!
+                var row = HostedSettingsReviewSchema.key("alignment.\(item.0)", "context", .string(item.2), item.2).objectValue!
                 row["overridden"] = .bool(item.3)
                 return .object(row)
             }

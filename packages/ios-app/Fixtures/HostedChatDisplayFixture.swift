@@ -934,17 +934,11 @@ private actor HostedHomeShellGateway {
                 && !id.hasPrefix("tools.codemode") && !id.hasPrefix("tools.shell")
                 && !["model.thinking[role=summarizer]", "run.cacheWarming"].contains(id)
         }
-        let reviewKeys = HostedSettingsReviewSchema.scopeReview ? [HostedSettingsReviewSchema.key("model.queue[role=subagent]", "workers", "Subagent models",
-            .array(["anthropic/claude-haiku-5-5", "openai/gpt-6-luna", "opencode-go/deepseek-v4.1-flash"].map(JSONValue.string)), "3 models",
-            order: 42, essential: true, layer: "session")] : []
-        let thinkingKey = HostedSettingsReviewSchema.key("model.thinking[role=chat]", "model", "Thinking", .string("high"), "High", "choice",
-            order: 20, essential: true, layer: "session", options: ["low", "medium", "high"].map {
-                .object(["value": .string($0), "label": .string($0.capitalized)])
-            })
-        let contextWindowKey = HostedSettingsReviewSchema.key("model.contextWindow", "model", "Context window", .number(200_000), "200K tokens", order: 30, essential: true,
-            qualifiers: ["model": "anthropic/\(settingsModelOverridden ? "claude-opus-5-5" : "claude-haiku-5-5")"])
+        let reviewKeys = HostedSettingsReviewSchema.scopeReview ? [HostedSettingsReviewSchema.key("model.queue[role=subagent]", "workers", .array(["anthropic/claude-haiku-5-5", "openai/gpt-6-luna", "opencode-go/deepseek-v4.1-flash"].map(JSONValue.string)), "3 models", layer: "session")] : []
+        let thinkingKey = HostedSettingsReviewSchema.key("model.thinking[role=chat]", "model", .string("high"), "High", layer: "session")
+        let contextWindowKey = HostedSettingsReviewSchema.key("model.contextWindow", "model", .number(200_000), "200K tokens", qualifiers: ["model": "anthropic/\(settingsModelOverridden ? "claude-opus-5-5" : "claude-haiku-5-5")"])
         let profileKeys = reviewKeys + (configuredModels.isEmpty ? [] : [memoryKey]) + [modelKey, thinkingKey, contextWindowKey,
-            HostedSettingsReviewSchema.key("tools.active", "tools", "Tools", .array(homeTools.map(JSONValue.string)), "\(homeTools.count) tools", "checklist", essential: true, layer: "session")
+            HostedSettingsReviewSchema.key("tools.active", "tools", .array(homeTools.map(JSONValue.string)), "\(homeTools.count) tools", layer: "session")
         ] + homeKeys
         return .object(["keys": .array(profileKeys)])
     }

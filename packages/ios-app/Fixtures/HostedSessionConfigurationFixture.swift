@@ -138,14 +138,10 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
     private static func scopeReviewResolution(project: Bool) -> JSONValue {
         let thinking = HostedSettingsReviewSchema.additionalKeys.filter { $0.objectValue?["key"]?.stringValue == "model.thinking[role=chat]" }
         let keys = [
-            HostedSettingsReviewSchema.key("model.ref[role=chat]", "model", "Model",
-                .object(["provider": .string("anthropic"), "id": .string("claude-opus-5-5")]), "Claude Opus 5.5", "catalog", order: 10,
-                help: "The model this chat runs.", essential: true),
+            HostedSettingsReviewSchema.key("model.ref[role=chat]", "model", .object(["provider": .string("anthropic"), "id": .string("claude-opus-5-5")]), "Claude Opus 5.5"),
         ] + thinking + [
-            HostedSettingsReviewSchema.key("model.contextWindow", "model", "Context window", .null, "Not set", order: 30,
-                help: "Tokens of conversation the model is given.", essential: true),
-            HostedSettingsReviewSchema.key("tools.active", "tools", "Tools", .array(scopeReviewCatalog.prefix(27).map(JSONValue.string)),
-                "27 tools", "checklist", essential: true, layer: "session"),
+            HostedSettingsReviewSchema.key("model.contextWindow", "model", .null, "Not set"),
+            HostedSettingsReviewSchema.key("tools.active", "tools", .array(scopeReviewCatalog.prefix(27).map(JSONValue.string)), "27 tools", layer: "session"),
         ] + HostedSettingsReviewSchema.additionalKeys.filter {
             $0.objectValue?["group"]?.stringValue != "workers"
                 && !["tools.active", "model.thinking[role=chat]"].contains($0.objectValue?["key"]?.stringValue ?? "")
@@ -204,12 +200,9 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                 "value": .bool(true), "display": .string("On"), "layer": .string("global"),
                 "applied": .bool(false), "badges": .array([]),
                 "layers": .array([.object(["layer": .string("session")]), .object(["layer": .string("global")])]),
-            ]), HostedSettingsReviewSchema.key("model.ref[role=chat]", "model", "Model",
-                try JSONValue.encode(snapshot.model), snapshot.model?.id == "alternative" ? "Alternative Model" : "Fixture Model", "catalog", order: 5, essential: true, layer: "session"),
-                HostedSettingsReviewSchema.key("model.contextWindow", "model", "Context window", .number(200_000), "200K tokens", order: 30, essential: true,
-                    qualifiers: ["model": "\(snapshot.model?.provider ?? "fixture")/\(snapshot.model?.id ?? "model")"]),
-                HostedSettingsReviewSchema.key("model.queue[role=background]", "workers", "Background models",
-                    .array([.string("fixture/memory-a"), .string("fixture/memory-b")]), "2 models", order: 44, essential: true)
+            ]), HostedSettingsReviewSchema.key("model.ref[role=chat]", "model", try JSONValue.encode(snapshot.model), snapshot.model?.id == "alternative" ? "Alternative Model" : "Fixture Model", layer: "session"),
+                HostedSettingsReviewSchema.key("model.contextWindow", "model", .number(200_000), "200K tokens", qualifiers: ["model": "\(snapshot.model?.provider ?? "fixture")/\(snapshot.model?.id ?? "model")"]),
+                HostedSettingsReviewSchema.key("model.queue[role=background]", "workers", .array([.string("fixture/memory-a"), .string("fixture/memory-b")]), "2 models")
             ] + HostedSettingsReviewSchema.additionalKeys.filter {
                 !["model.thinking[role=chat]", "context.compaction.enabled", "permissions.budget.task"].contains($0.objectValue?["key"]?.stringValue ?? "")
             })])
