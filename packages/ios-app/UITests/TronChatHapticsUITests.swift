@@ -113,12 +113,12 @@ final class TronChatHapticsUITests: XCTestCase {
     @MainActor func testSheetPresentedAtMountPlaysNone() {
         continueAfterFailure = false
         let app = launchSettings(["-sheet-haptics-restored"]); defer { app.terminate() }
-        XCTAssertTrue(app.buttons["Release preview"].waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Sheet at mount"].waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertTrue(app.staticTexts["fixture.haptics"].waitForExistence(timeout: 30), app.debugDescription)
         keep(app, "1599-restored-sheet")
         assertHaptics(app, "none", "a sheet presented at mount plays nothing")
         closeTopSheet(app)
-        XCTAssertTrue(app.buttons["Release preview"].waitForNonExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Sheet at mount"].waitForNonExistence(timeout: 10), app.debugDescription)
         assertHaptics(app, "none", "its dismissal plays nothing")
     }
 

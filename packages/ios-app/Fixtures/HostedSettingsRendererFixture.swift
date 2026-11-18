@@ -8,7 +8,7 @@ struct HostedSettingsRendererFixture: View {
     @State private var ready = false
     @State private var activity = PresentationActivityCoordinator()
     @State private var nestedSettings = false
-    @State private var heldPreviews = 0
+    @State private var covering = HostedLaunch.arguments.contains("-sheet-haptics-restored")
     @State private var error: String?
     @State private var applied = 0
     @State private var providerOperations = ""
@@ -88,7 +88,6 @@ struct HostedSettingsRendererFixture: View {
                     if !HostedLaunch.arguments.contains("-six-ui-surface") {
                     HStack {
                         Text("applied:\(applied)").accessibilityIdentifier("fixture.settings-renderer-applied")
-                        Text("held:\(heldPreviews)").accessibilityIdentifier("fixture.settings-renderer-held")
                         Text("haptics:\(TronHapticsProbe.shared.summary)").accessibilityIdentifier("fixture.haptics")
                         if HostedLaunch.arguments.contains("-settings-provider-actions") {
                             Text(providerOperations).accessibilityIdentifier("fixture.provider-operations")
@@ -98,6 +97,12 @@ struct HostedSettingsRendererFixture: View {
                     }
                 }
             } else if let error { Text(error) }
+        }
+        .tronManagedSheet(isPresented: $covering, identity: "fixture.settings-cover") {
+            NavigationStack {
+                Text("Sheet at mount")
+                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { covering = false } } }
+            }
         }
         .environment(model)
         .preferredColorScheme(HostedLaunch.arguments.contains("-settings-renderer-dark") ? .dark : .light)
@@ -112,7 +117,6 @@ struct HostedSettingsRendererFixture: View {
         .task {
             while !Task.isCancelled {
                 applied = await socket.counters()
-                heldPreviews = await socket.previewCount()
                 providerOperations = await socket.providerOperationSummary()
                 try? await Task.sleep(for: .milliseconds(250))
             }
@@ -121,10 +125,6 @@ struct HostedSettingsRendererFixture: View {
 }
 
 private actor HostedSettingsRendererSocket: GatewaySocketConnection {
-    private var heldPreview: CheckedContinuation<Void, Never>?
-    private var previewsHeld = 0
-    func previewCount() -> Int { previewsHeld }
-    func releasePreview() { heldPreview?.resume(); heldPreview = nil }
 
     private var hello = true
     private var receiver: CheckedContinuation<Data, Error>?
@@ -198,11 +198,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         case "model.recent": result = .object(["models": .array([])])
         case "settings.resolve": result = resolution()
         case "settings.change":
-            if HostedLaunch.arguments.contains("-settings-renderer-held-preview"),
-               params["dryRun"]?.boolValue == true, previewsHeld == 0 {
-                previewsHeld += 1
-                await withCheckedContinuation { heldPreview = $0 }
-            }
             result = try change(params)
         default: result = .object([:])
         }
@@ -281,14 +276,9 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         }
         var outcome: [String: JSONValue] = ["changeId": .string(dryRun ? "" : "change-\(applied)"), "key": .string(key),
             "layer": .string("global"), "status": .string("applied"), "tier": .string("quiet")]
-        let review: [String: JSONValue] = dryRun && key == "context.images.block" && HostedLaunch.arguments.contains("-settings-renderer-confirm")
-            ? ["review": .object(["digest": .string(String(repeating: "b", count: 64)), "title": .string("Change image delivery"),
-                "requiresTap": .bool(true), "reason": .string("Confirm changing image delivery."),
-                "items": .array([.object(["label": .string("Block images"), "before": .string("Off"), "after": .string("On")])])])]
-            : [:]
         return .object([
             "status": .string("applied"), "tier": .string("quiet"), "changes": .array([.object(outcome)]),
-        ].merging(dryRun ? ["dryRun": .bool(true)] : [:]) { $1 }.merging(review) { $1 })
+        ].merging(dryRun ? ["dryRun": .bool(true)] : [:]) { $1 })
     }
 
     private func key(_ id: String, group: String, subgroup: String? = nil, value: JSONValue?, display: String,

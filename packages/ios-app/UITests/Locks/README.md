@@ -44,15 +44,12 @@ matrix. `TronUILockTests` retains these witnesses, light and dark each:
 
 | State | Focused owner |
 |---|---|
-| Home Settings | Shared chrome and #1607 source/control metadata |
+| Global Settings (Home gear) | Shared chrome and #1607 source/control metadata |
 | Memory-search tool detail | Shared chrome and #1607 source/control metadata |
 
 Chat content/tool controls retain `TronWorkerToolRegressionTests.testTranscriptChipsUseFriendlyNames`,
 `TronConsolidatedUIRegressionTests.testMemoryToolRowsAndCanonicalNavigation` and
-the retained tool-detail interaction journey. Session Settings retain
-`TronMobileViewTests/SixSmallUIRegressionViewTests.testSessionSettingsOrder` and
-`TronConsolidatedUIRegressionTests.testSessionSettingsKeepsWorkerOverridesAndTrustReachable`;
-light onboarding retains `TronSmokeUITests.testOnboardingPreservesPagedSheetAndPairingJourney`.
+the retained tool-detail interaction journey; light onboarding retains `TronSmokeUITests.testOnboardingPreservesPagedSheetAndPairingJourney`.
 There are no pixel goldens: the composer placeholder and subtitle tint (#2093) and dark onboarding
 welcome have no rendered witness,.
 

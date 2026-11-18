@@ -22,7 +22,7 @@ final class TronManageSessionReviewUITests: XCTestCase {
         for gone in ["Current Branch", "Agent Instructions", "Resources"] {
             XCTAssertTrue(labels(app, containing: gone).isEmpty, "\(gone) is renamed or removed")
         }
-        XCTAssertFalse(app.buttons["project-settings-link"].exists, "Project Settings lives in Session Settings")
+        XCTAssertFalse(app.buttons["project-settings-link"].exists, "Project Settings is not a Manage Session row")
         let html = app.buttons["session-export-html"]
         for _ in 0..<4 where !html.isHittable { app.swipeUp() }
         XCTAssertTrue(html.isHittable, app.debugDescription)

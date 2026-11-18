@@ -481,7 +481,7 @@ final class TronSmokeUITests: XCTestCase {
         let state = app.descendants(matching: .any)["home-manage-state"]
         XCTAssertEqual(state.label, "Ready")
         XCTAssertTrue(app.descendants(matching: .any)["home-context-summary"].exists, "The compact summary reads the Home chat's real usage")
-        XCTAssertFalse(app.buttons["Background models"].firstMatch.exists, "Model controls belong only to Home Settings")
+        XCTAssertFalse(app.buttons["Background models"].firstMatch.exists, "Manage Home carries no model controls")
         XCTAssertFalse(app.textFields["settings-renderer-search"].exists, "Manage Home carries no settings search")
         XCTAssertFalse(app.staticTexts["Automatic Compaction"].exists, "Home never compacts; it uses chapters")
         XCTAssertFalse(app.descendants(matching: .any)["home-manage-context"].exists, "Home's context is Manage Home's top card, not a sub-sheet")
@@ -730,7 +730,7 @@ final class TronSmokeUITests: XCTestCase {
         gear.tap()
         XCTAssertTrue(app.staticTexts["Global Settings"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertFalse(app.descendants(matching: .any)["home-manage-state"].exists)
-        XCTAssertTrue(homeControlCount.label.contains("control-count:0"), "Opening Home Settings must not apply controls")
+        XCTAssertTrue(homeControlCount.label.contains("control-count:0"), "Opening Global Settings must not apply controls")
         keepScreenshot(named: "home-gear-settings-sheet")
         app.buttons["Done"].firstMatch.tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 5), app.debugDescription)
@@ -752,7 +752,7 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertTrue(app.descendants(matching: .any)[row].exists, row)
         }
         for row in ["home-manage-pause", "home-manage-disable"] {
-            XCTAssertFalse(app.descendants(matching: .any)[row].exists, "\(row) lives in Home Settings")
+            XCTAssertFalse(app.descendants(matching: .any)[row].exists, "\(row) lives in Controls")
         }
         tapManageRow(app, "home-manage-memory-browser")
         XCTAssertTrue(app.descendants(matching: .any)["home-memory-row-39"].waitForExistence(timeout: 5), app.debugDescription)

@@ -43,21 +43,14 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   `TronSettingsSections`, including conditional groups. Settings subsheets
   opt in with `hidesLoneHeading: true`: one container has no heading, multiple containers retain
   their headings, and explanatory detail remains. Top-level settings keep all group headings.
-- **Settings rows.** The shared settings row places Reset/Revert before the value: the value pill is
-  rightmost, with independent 44-point targets. Overrides show the shared Overridden pill beside the row title.
-- **Writes.** Every write is a `settings.change`: dry run first, a refusal shows under its row and
-  `confirm` text asks before sending. Secret drafts start empty and clear on dismissal; string-list
-  drafts write only on Save. Numeric-map list controls use read-only value/provenance rows instead of
-  a native form; agents configure them through `settings`, including the shared native card for a
-  task-budget raise and logged Undo for
-  reversible changes. Unknown fields stay read-only. Model cards share the pending
-  receipt and the session owner's admission state with `ModelSelectionAvailability`: model browsing
-  stays available while choices, Revert and picker reset are disabled. Their existing change gate
-  still serializes writes; no presentation value grants mutation authority. Outside-change recovery
-  remains an explicit inline Apply again action beneath the same value control, not a row-opening
-  detail link. The real-Gateway outside-change journey verifies the live value, receipt-backed restore
-  and marker removal on that row. The Gateway supplies override presence and permissions;
-  rows never infer ownership from value equality.
+- **Model card rows.** Revert sits before the value; the value pill is rightmost, with independent
+  44-point targets, and an override shows the shared Overridden pill beside the row title.
+- **Writes.** Every write is a `settings.change`: dry run first, and a refusal shows under its row.
+  The model card shares the pending receipt and the session owner's admission state with
+  `ModelSelectionAvailability`: model browsing stays available while choices, Revert and picker reset
+  are disabled, and its change gate serializes writes. Every other setting, outside-change recovery
+  (`applyAgain`) and Undo go through the agent's `settings` tool. The Gateway supplies override
+  presence and permissions; rows never infer ownership from value equality.
 - **Manage Home and the chat model card.** Manage Home lists Controls (`HomeControlsSection`) and Task
   Permissions (`HomeTaskSheet(permissionsFor:)`) as navigation rows beside Profile, Memory, Chapters and Tasks.
   The chat model card (`ManageModelConfigurationCard`, `session-model-summary` or `home-model-summary`) reads
