@@ -432,10 +432,13 @@ struct ReadOnlySubagentSessionSheet: View {
             }
         }
         .tronSettingsVisualTheme(accent: .tronSubagent)
-        .tronConfirmation("Stop \(process.title)?", isPresented: $confirmingStop) {
-            Button("Stop Subagent", role: .destructive, action: requestStop)
-        } message: {
-            Text("The subagent stops on the Mac. What it has done so far stays in its transcript.")
+        .tronManagedSheet(isPresented: $confirmingStop, identity: "subagent.\(process.processId).stop") {
+            TronConfirmationSheet(
+                title: "Stop \(process.title)?",
+                message: "The subagent stops on the Mac. What it has done so far stays in its transcript.",
+                confirmTitle: "Stop Subagent", destructive: true, icon: "stop.fill",
+                onConfirm: requestStop
+            )
         }
         .task(id: openIdentity) {
             guard model.connectionState == .connected,

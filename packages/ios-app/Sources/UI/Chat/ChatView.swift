@@ -261,10 +261,13 @@ struct ChatView: View {
     private var contentSurface: some View {
         contentChrome
         .modifier(chatRoutes)
-        .tronConfirmation("Clear queue?", isPresented: $confirmingClearQueue) {
-            Button("Clear Queue", role: .destructive) { Task { await clearQueuedMessages() } }
-        } message: {
-            Text("Every queued message is removed and will not be sent.")
+        .tronManagedSheet(isPresented: $confirmingClearQueue, identity: "chat.\(sessionID).clear-queue") {
+            TronConfirmationSheet(
+                title: "Clear queue?",
+                message: "Every queued message is removed and will not be sent.",
+                confirmTitle: "Clear Queue", destructive: true, icon: "trash.slash",
+                onConfirm: { Task { await clearQueuedMessages() } }
+            )
         }
         .onChange(of: sessionPresentation.photos) { _, values in photoSelectionChanged(values) }
         .onChange(of: attachmentMenuState) { previous, current in
