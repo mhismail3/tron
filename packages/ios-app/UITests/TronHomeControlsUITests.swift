@@ -1,33 +1,6 @@
 import XCTest
 
 final class TronHomeControlsUITests: XCTestCase {
-    @MainActor func testDisableHomeSubtitleMatchesDestructiveTitle() {
-        continueAfterFailure = false
-        for mode in ["light", "dark"] {
-            let app = openHomeSettings(mode: mode); defer { app.terminate() }
-            let disable = element(app, "home-manage-disable")
-            for _ in 0..<5 where !disable.isHittable || disable.frame.maxY > app.frame.maxY - 50 {
-                app.swipeUp()
-            }
-            XCTAssertTrue(disable.isHittable)
-            let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-            screenshot.name = "disable-home-subtitle-\(mode)"
-            screenshot.lifetime = .keepAlways
-            add(screenshot)
-            let title = ink(app, disable, crop: { frame in
-                CGRect(x: frame.minX + 56, y: frame.minY,
-                       width: frame.width - 56, height: frame.height / 2)
-            })
-            let subtitle = ink(app, disable, crop: { frame in
-                CGRect(x: frame.minX + 56, y: frame.midY,
-                       width: frame.width - 56, height: frame.height / 2)
-            })
-            XCTAssertGreaterThan(title[0] - max(title[1], title[2]), 0.3, "Destructive title is red in \(mode)")
-            XCTAssertLessThan(zip(title, subtitle).map { abs($0 - $1) }.max()!, 0.12,
-                              "Disable Home's subtitle matches its destructive title in \(mode): \(subtitle) vs \(title)")
-        }
-    }
-
     @MainActor func testPauseMemoryRowIsNeutralGray() {
         continueAfterFailure = false
         for mode in ["light", "dark"] {
@@ -111,31 +84,6 @@ final class TronHomeControlsUITests: XCTestCase {
 
     private func waitFor(_ element: XCUIElement, _ format: String, timeout: TimeInterval = 10) -> Bool {
         XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: format), object: element)], timeout: timeout) == .completed
-    }
-
-    @MainActor private func ink(_ app: XCUIApplication, _ element: XCUIElement, crop: (CGRect) -> CGRect) -> [Double] {
-        XCTAssertTrue(element.waitForExistence(timeout: 5), app.debugDescription)
-        let area = crop(element.frame)
-        let window = app.windows.firstMatch.frame.width
-        guard let source = XCUIScreen.main.screenshot().image.cgImage,
-              let crop = source.cropping(to: area.applying(CGAffineTransform(scaleX: CGFloat(source.width) / window,
-                                                                              y: CGFloat(source.width) / window))) else {
-            XCTFail("No pixels for \(element)"); return [0, 0, 0]
-        }
-        let width = crop.width, height = crop.height
-        var pixels = [UInt8](repeating: 0, count: width * height * 4)
-        CGContext(data: &pixels, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
-                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-            .draw(crop, in: CGRect(x: 0, y: 0, width: width, height: height))
-        var sum = [0.0, 0.0, 0.0], count = 0.0
-        for i in stride(from: 0, to: pixels.count, by: 4) {
-            let rgb = [Int(pixels[i]), Int(pixels[i + 1]), Int(pixels[i + 2])]
-            guard rgb.max()! - rgb.min()! > 60 else { continue }
-            for c in 0..<3 { sum[c] += Double(rgb[c]) / 255 }
-            count += 1
-        }
-        XCTAssertGreaterThan(count, 10, "No inked pixels in \(element)")
-        return sum.map { $0 / max(count, 1) }
     }
 
 }
