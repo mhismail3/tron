@@ -111,7 +111,9 @@ export function createTronSettingsExtension(access: () => SettingsToolAccess | u
         const confirm = nativeChangeConfirmer(context, requestChange, signal);
         const result = input.action === "update" ? await owner.updatePackage({
           source: input.source, version: input.version, reason: input.reason, toolCallId, ...(confirm ? { confirm } : {}),
-        }) : input.action === "undo" || input.action === "applyAgain" ? await (input.action === "undo" ? owner.undo : owner.applyAgain)(input.changeId, {
+        }) : input.action === "undo" ? await owner.undo(input.changeId, {
+          reason: input.reason, toolCallId, ...(confirm ? { confirm } : {}),
+        }) : input.action === "applyAgain" ? await owner.applyAgain(input.changeId, {
           reason: input.reason, toolCallId, ...(confirm ? { confirm } : {}),
         }) : await owner.change(input.changes, {
           reason: input.reason, toolCallId, ...(input.dryRun ? { dryRun: true } : {}), ...(input.taskId ? { taskId: input.taskId } : {}),
