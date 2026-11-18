@@ -50,7 +50,7 @@ matrix. `TronUILockTests` retains these witnesses, light and dark each:
 Chat content/tool controls retain `TronWorkerToolRegressionTests.testTranscriptChipsUseFriendlyNames`,
 `TronConsolidatedUIRegressionTests.testMemoryToolRowsAndCanonicalNavigation` and
 the retained tool-detail interaction journey. Session Settings retain
-`TronSixSmallUIRegressionTests.testSessionSettingsOrder` and
+`TronMobileViewTests/SixSmallUIRegressionViewTests.testSessionSettingsOrder` and
 `TronConsolidatedUIRegressionTests.testSessionSettingsKeepsWorkerOverridesAndTrustReachable`;
 light onboarding retains `TronSmokeUITests.testOnboardingPreservesPagedSheetAndPairingJourney`.
 There are no pixel goldens: the composer placeholder and subtitle tint (#2093) and dark onboarding
