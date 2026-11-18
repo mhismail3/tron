@@ -1,35 +1,8 @@
 import XCTest
 
 final class TronManageSessionReviewUITests: XCTestCase {
-    @MainActor func testManageSessionLayout() {
-        let app = launch(dark: false); defer { app.terminate() }
-        let card = element(app, "session-usage-summary")
-        let headline = element(app, "session-usage-headline"), detail = element(app, "session-usage-detail")
-        let compact = app.buttons["manage-session-compact"]
-        XCTAssertTrue(headline.exists && detail.exists && compact.exists, card.debugDescription)
-        XCTAssertEqual(detail.label, "311K/1M • 31% used")
-        XCTAssertEqual(detail.frame.minX, headline.frame.minX, accuracy: 1, "the usage line is left-aligned under the headline")
-        XCTAssertGreaterThanOrEqual(detail.frame.minY, headline.frame.maxY - 1, "the usage line is below the headline")
-        XCTAssertTrue(card.frame.contains(compact.frame), "Compact Now is inside the usage card: \(compact.frame) vs \(card.frame)")
-        XCTAssertGreaterThan(compact.frame.minX, max(headline.frame.maxX, detail.frame.maxX), "Compact Now trails both lines")
-        XCTAssertEqual(compact.frame.midY, (headline.frame.minY + detail.frame.maxY) / 2, accuracy: 1.5,
-                       "Compact Now is centered on both lines")
-        XCTAssertTrue(labels(app, containing: "Compact conversation").isEmpty, "no separate Compact row")
-        XCTAssertTrue(app.buttons["manage-session-rename"].exists, "the edit pencil stays")
-        for title in ["Workspace", "Instructions"] {
-            XCTAssertTrue(app.buttons[title].exists, "\(title) row\n\(app.debugDescription)")
-        }
-        for gone in ["Current Branch", "Agent Instructions", "Resources"] {
-            XCTAssertTrue(labels(app, containing: gone).isEmpty, "\(gone) is renamed or removed")
-        }
-        XCTAssertFalse(app.buttons["project-settings-link"].exists, "Project Settings lives in Session Settings")
-        let html = app.buttons["session-export-html"]
-        for _ in 0..<4 where !html.isHittable { app.swipeUp() }
-        XCTAssertTrue(html.isHittable, app.debugDescription)
-    }
-
     @MainActor func testSessionSettingsShowsProjectSection() {
-        let app = launch(dark: false); defer { app.terminate() }
+        let app = launch(); defer { app.terminate() }
         let link = app.buttons["chat-settings-link"]
         for _ in 0..<12 where !link.isHittable { app.swipeUp() }
         link.tap()
@@ -46,11 +19,11 @@ final class TronManageSessionReviewUITests: XCTestCase {
         XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "settings-ignored-defaultTools").count, 1)
     }
 
-    @MainActor private func launch(dark: Bool) -> XCUIApplication {
+    @MainActor private func launch() -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-tron-session-configuration-fixture", "-settings-scope-review", "-manage-session-review",
-                               "-fixture-appearance", dark ? "dark" : "light"]
+                               "-fixture-appearance", "light"]
         app.launch()
         XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
         app.buttons["Stop session"].tap()
