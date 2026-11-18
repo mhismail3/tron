@@ -164,9 +164,6 @@ private actor NewSessionFixtureGateway {
     func handle(_ method: String, params: [String: JSONValue], replacement: Bool) async -> JSONValue? {
         switch method {
         case "settings.resolve":
-            if scenario == "project-settings-slow", params["target"]?.objectValue?["kind"]?.stringValue == "project" {
-                try? await Task.sleep(for: .seconds(2.5))
-            }
             return projectResolution()
         case "trust.inspect": return .object(["requiresDecision": .bool(scenario.hasPrefix("trust-") && !trustResolved), "effectiveDecision": scenario.hasPrefix("trust-") && !trustResolved ? .null : .bool(false)])
         case "settings.change":
