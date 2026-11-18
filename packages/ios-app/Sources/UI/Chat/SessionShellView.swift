@@ -193,7 +193,7 @@ struct SessionShellView: View {
                     title: "Delete \(session.title)?",
                     message: "This removes the canonical session from the Mac and cannot be undone.",
                     confirmTitle: "Delete",
-                    destructive: true,
+                    destructiveGlyph: "trash",
                     icon: "trash",
                     onConfirm: { delete(session) }
                 )

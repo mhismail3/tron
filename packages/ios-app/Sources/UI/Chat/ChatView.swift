@@ -57,6 +57,7 @@ struct ChatView: View {
     @State private var floatingDisplayCompletionTracker = DisplayFloatingCompletionTracker()
     @State private var viewportActivation = 0
     @State private var homeSheet: HomeSheetRoute?
+    @State private var confirmingClearQueue = false
     #if HOSTED_TEST
     @State private var hostedOpeningAttempts = 0
     @State private var hostedReadyExits = 0
@@ -260,6 +261,14 @@ struct ChatView: View {
     private var contentSurface: some View {
         contentChrome
         .modifier(chatRoutes)
+        .tronManagedSheet(isPresented: $confirmingClearQueue, identity: "chat.\(sessionID).clear-queue") {
+            TronConfirmationSheet(
+                title: "Clear queue?",
+                message: "Every queued message is removed and will not be sent.",
+                confirmTitle: "Clear Queue", destructiveGlyph: "trash.slash", icon: "trash.slash",
+                onConfirm: { Task { await clearQueuedMessages() } }
+            )
+        }
         .onChange(of: sessionPresentation.photos) { _, values in photoSelectionChanged(values) }
         .onChange(of: attachmentMenuState) { previous, current in
             attachmentMenuStateChanged(from: previous, to: current)
@@ -1223,7 +1232,7 @@ struct ChatView: View {
                 }
             },
             onEditQueuedMessage: { sessionPresentation.queuedMessageEditor = .init(id: $0) },
-            onClearQueuedMessages: { Task { await clearQueuedMessages() } },
+            onClearQueuedMessages: { confirmingClearQueue = true },
             onMoveQueuedMessage: { id, offset in
                 Task { await moveQueuedMessage(id, offset: offset) }
             },

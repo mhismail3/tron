@@ -21,8 +21,13 @@ import XCTest
         XCTAssertTrue(actions.exists, "Actions remain in the sheet")
     }
 
-    private func history(dark: Bool = false) -> XCUIApplication {
-        let app = sessionApp(dark: dark, extra: ["-manage-session-review", "-history-large"])
+    private func history() -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture", "-settings-scope-review", "-fixture-appearance", "light",
+                               "-manage-session-review", "-history-large"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
+        app.buttons["Stop session"].tap()
         let link = app.buttons["Session History"]
         reveal(link, in: app)
         link.tap()
@@ -31,16 +36,6 @@ import XCTest
         app.buttons["history-row-h-6731"].tap()
         XCTAssertTrue(app.navigationBars.staticTexts["History Entry"].waitForExistence(timeout: 8), app.debugDescription)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ENDSWITH ' characters'")).firstMatch.waitForExistence(timeout: 8), app.debugDescription)
-        return app
-    }
-
-    private func sessionApp(dark: Bool, xxxl: Bool = false, extra: [String] = []) -> XCUIApplication {
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-session-configuration-fixture", "-settings-scope-review", "-fixture-appearance", dark ? "dark" : "light"] + extra
-        if xxxl { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"] }
-        app.launch()
-        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
-        app.buttons["Stop session"].tap()
         return app
     }
 

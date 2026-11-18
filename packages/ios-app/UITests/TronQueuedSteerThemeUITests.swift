@@ -61,6 +61,33 @@ import UIKit
         }
     }
 
+    func testClearQueueAsksForConfirmation() throws {
+        for mode in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready",
+                "-foreground-queued-editor", "-foreground-queued-steer", "-foreground-queued-two", "-themeColor", "burgundy"]
+                + (mode == "dark" ? ["-home-dark"] : [])
+            app.launch()
+            defer { app.terminate() }
+            let home = app.buttons["home-pinned-row"]
+            guard home.waitForExistence(timeout: 15) else { XCTFail(app.debugDescription); return }
+            home.tap()
+            let row = app.buttons["Second queued message"]
+            guard row.waitForExistence(timeout: 15) else { XCTFail(app.debugDescription); return }
+            Thread.sleep(forTimeInterval: 0.6)
+            row.press(forDuration: 1.0)
+            let clear = app.buttons["Clear entire queue"]
+            guard clear.waitForExistence(timeout: 5) else { XCTFail(app.debugDescription); return }
+            clear.tap()
+            XCTAssertTrue(app.staticTexts["Clear queue?"].waitForExistence(timeout: 5), app.debugDescription)
+            Thread.sleep(forTimeInterval: 0.8)
+            keep(app.screenshot(), "clear-queue-confirmation-\(mode)")
+            let cancel = app.buttons["confirmation-cancel"]
+            cancel.tap()
+            XCTAssertTrue(cancel.waitForNonExistence(timeout: 5), "Cancel dismisses the confirmation and keeps the queue")
+        }
+    }
+
     private func assertTheme(_ color: [Double], theme: String, context: String,
                              file: StaticString = #filePath, line: UInt = #line) {
         switch theme {

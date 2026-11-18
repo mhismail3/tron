@@ -1016,7 +1016,7 @@ struct TronConfirmationSheet: View {
     let title: String
     let message: String
     let confirmTitle: String
-    let destructive: Bool
+    let destructiveGlyph: String?
     let secondaryTitle: String?
     let centersTitle: Bool
     let alwaysUsesToolbarActions: Bool
@@ -1037,7 +1037,7 @@ struct TronConfirmationSheet: View {
         title: String,
         message: String,
         confirmTitle: String,
-        destructive: Bool = false,
+        destructiveGlyph: String? = nil,
         secondaryTitle: String? = nil,
         centersTitle: Bool = false,
         alwaysUsesToolbarActions: Bool = false,
@@ -1053,7 +1053,7 @@ struct TronConfirmationSheet: View {
         self.title = title
         self.message = message
         self.confirmTitle = confirmTitle
-        self.destructive = destructive
+        self.destructiveGlyph = destructiveGlyph
         self.secondaryTitle = secondaryTitle
         self.centersTitle = centersTitle
         self.alwaysUsesToolbarActions = alwaysUsesToolbarActions
@@ -1153,11 +1153,13 @@ struct TronConfirmationSheet: View {
         } label: {
             TronToolbarTextLabel(
                 confirmTitle,
-                systemImage: destructive ? "trash" : "checkmark"
+                systemImage: destructiveGlyph ?? "checkmark"
             )
         }
         .disabled(!canConfirm)
     }
+
+    private var destructive: Bool { destructiveGlyph != nil }
 
     private var accent: Color { destructive ? .tronError : settingsTheme?.accent ?? .tronPrimary }
 }

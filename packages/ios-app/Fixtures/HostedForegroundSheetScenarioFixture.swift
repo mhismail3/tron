@@ -16,9 +16,11 @@ struct HostedForegroundSheetScenario {
                 attachments: [.init(id: "queued-attachment", name: photo ? "queued-photo.png" : "queued-note.txt",
                     mimeType: photo ? "image/png" : "text/plain", size: 128)])]
         }
-        return [.init(id: "foreground-queued-message",
+        let first = SessionSnapshot.QueuedMessage(id: "foreground-queued-message",
                       behavior: HostedLaunch.arguments.contains("-foreground-queued-steer") ? .steer : .followUp,
-                      text: queuedText, attachmentCount: 0)]
+                      text: queuedText, attachmentCount: 0)
+        guard HostedLaunch.arguments.contains("-foreground-queued-two") else { return [first] }
+        return [first, .init(id: "foreground-queued-second", behavior: .followUp, text: "Second queued message", attachmentCount: 0)]
     }
 
     private var attachmentKind: String? {

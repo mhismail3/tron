@@ -53,7 +53,7 @@ struct HomeControlsSection: View {
                 title: "Disable Home?",
                 message: "Activations stop. Home's history is preserved.",
                 confirmTitle: "Disable Home",
-                destructive: true,
+                destructiveGlyph: "trash",
                 icon: "house.slash",
                 onConfirm: { if let disableAdmission { run(.disable, disableAdmission) } }
             )
