@@ -13,7 +13,7 @@ const CHANGE = Type.Object({
 }, { additionalProperties: false });
 
 const PARAMETERS = Type.Object({
-  action: StringEnum(["resolve", "change", "history", "undo", "inventory", "update"] as const, { description: "resolve: read current values and scopes. inventory: read-only hooks by event and extension, packages, Tron modules, configured MCP servers and custom model providers (id, base URL host, API, model ids) for this chat's directory (configured or disabled; nothing is started or probed; credentials masked). history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card. update (Tron Home only): install one exact npm version or full git commit SHA of one configured package behind the native install card; the card shows any configured pin change; never undoable." }),
+  action: StringEnum(["resolve", "change", "history", "undo", "applyAgain", "inventory", "update"] as const, { description: "resolve: read current values and scopes. inventory: read-only hooks by event and extension, packages, Tron modules, configured MCP servers and custom model providers (id, base URL host, API, model ids) for this chat's directory (configured or disabled; nothing is started or probed; credentials masked). history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. applyAgain: restore the value Tron wrote that an outside edit replaced, by that outside change's changeId from history, under the same rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card. update (Tron Home only): install one exact npm version or full git commit SHA of one configured package behind the native install card; the card shows any configured pin change; never undoable." }),
   keys: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 200 }), { maxItems: 200, description: "resolve: the key ids to read; omit for every key." })),
   taskId: Type.Optional(Type.String({ minLength: 1, maxLength: 160,
     description: "Tron Home only: the delegated task (from task list) whose worker session to read or change instead of this chat." })),
@@ -21,8 +21,8 @@ const PARAMETERS = Type.Object({
   key: Type.Optional(Type.String({ minLength: 1, maxLength: 200, description: "history: include only this key." })),
   cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 200, description: "history: nextCursor from the previous page." })),
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200, description: "history: maximum records per page (default 50)." })),
-  changeId: Type.Optional(Type.String({ minLength: 1, maxLength: 200, description: "undo (required): changeId from history." })),
-  reason: Type.Optional(Type.String({ minLength: 1, maxLength: 2_000, description: "change/undo (required): why, for the maintainer." })),
+  changeId: Type.Optional(Type.String({ minLength: 1, maxLength: 200, description: "undo/applyAgain (required): changeId from history." })),
+  reason: Type.Optional(Type.String({ minLength: 1, maxLength: 2_000, description: "change/undo/applyAgain (required): why, for the maintainer." })),
   dryRun: Type.Optional(Type.Boolean({ description: "change: validate and return exact before/after without applying." })),
   source: Type.Optional(Type.String({ minLength: 1, maxLength: 2_000, description: "update (required): the configured package source exactly as in sources.packages, e.g. npm:name." })),
   version: Type.Optional(Type.String({ minLength: 1, maxLength: 64, description: "update (required): the exact npm version (e.g. 1.2.3) or the full 40-character git commit SHA to install. Tags and ranges are refused." })),
@@ -33,13 +33,14 @@ type SettingsCall =
   | { action: "history"; key?: string; cursor?: string; limit?: number }
   | { action: "inventory" }
   | { action: "undo"; changeId: string; reason: string }
+  | { action: "applyAgain"; changeId: string; reason: string }
   | { action: "change"; changes: ChangeRequest[]; reason: string; dryRun?: boolean; taskId?: string }
   | { action: "update"; source: string; version: string; reason: string };
 
-function admitSettingsCall(input: { action: "resolve" | "change" | "history" | "undo" | "inventory" | "update"; keys?: string[]; taskId?: string; changes?: unknown[]; reason?: string; dryRun?: boolean; key?: string; cursor?: string; limit?: number; changeId?: string; source?: string; version?: string }): SettingsCall {
+function admitSettingsCall(input: { action: "resolve" | "change" | "history" | "undo" | "applyAgain" | "inventory" | "update"; keys?: string[]; taskId?: string; changes?: unknown[]; reason?: string; dryRun?: boolean; key?: string; cursor?: string; limit?: number; changeId?: string; source?: string; version?: string }): SettingsCall {
   const fields = {
     resolve: ["keys", "taskId"], change: ["changes", "reason", "dryRun", "taskId"],
-    history: ["key", "cursor", "limit"], undo: ["changeId", "reason"], inventory: [] as string[], update: ["source", "version", "reason"],
+    history: ["key", "cursor", "limit"], undo: ["changeId", "reason"], applyAgain: ["changeId", "reason"], inventory: [] as string[], update: ["source", "version", "reason"],
   }[input.action];
   for (const [field, value] of Object.entries(input)) {
     if (field !== "action" && value !== undefined && !fields.includes(field)) throw new Error(`settings ${input.action}: "${field}" is not used by this action`);
@@ -52,10 +53,11 @@ function admitSettingsCall(input: { action: "resolve" | "change" | "history" | "
     if (!input.reason?.trim()) throw new Error("settings update: reason is required, written for the maintainer");
     return { action: "update", source: input.source, version: input.version, reason: input.reason };
   }
-  if (input.action === "undo") {
-    if (!input.changeId?.trim()) throw new Error("settings undo: changeId is required");
-    if (!input.reason?.trim()) throw new Error("settings undo: reason is required, written for the maintainer");
-    return { action: "undo", changeId: input.changeId, reason: input.reason };
+  if (input.action === "undo" || input.action === "applyAgain") {
+    if (!input.changeId?.trim()) throw new Error(`settings ${input.action}: changeId is required`);
+    if (!input.reason?.trim()) throw new Error(`settings ${input.action}: reason is required, written for the maintainer`);
+    return input.action === "undo" ? { action: "undo", changeId: input.changeId, reason: input.reason }
+      : { action: "applyAgain", changeId: input.changeId, reason: input.reason };
   }
   if (input.action === "resolve") {
     return { action: "resolve", ...(input.keys ? { keys: input.keys } : {}), ...(input.taskId ? { taskId: input.taskId } : {}) };
@@ -110,6 +112,8 @@ export function createTronSettingsExtension(access: () => SettingsToolAccess | u
         const result = input.action === "update" ? await owner.updatePackage({
           source: input.source, version: input.version, reason: input.reason, toolCallId, ...(confirm ? { confirm } : {}),
         }) : input.action === "undo" ? await owner.undo(input.changeId, {
+          reason: input.reason, toolCallId, ...(confirm ? { confirm } : {}),
+        }) : input.action === "applyAgain" ? await owner.applyAgain(input.changeId, {
           reason: input.reason, toolCallId, ...(confirm ? { confirm } : {}),
         }) : await owner.change(input.changes, {
           reason: input.reason, toolCallId, ...(input.dryRun ? { dryRun: true } : {}), ...(input.taskId ? { taskId: input.taskId } : {}),
