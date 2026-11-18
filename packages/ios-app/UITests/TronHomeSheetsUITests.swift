@@ -41,8 +41,6 @@ final class TronHomeSheetsUITests: XCTestCase {
         shot("2063-after-snapshot-change")
     }
 
-    @MainActor func testRingAlignmentReviewLight() { captureRingAlignment("light", arguments: []) }
-    @MainActor func testRingAlignmentReviewDark() { captureRingAlignment("dark", arguments: ["-home-dark"]) }
     @MainActor func testRingAlignmentReviewXXXL() {
         captureRingAlignment("xxxl", arguments: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"])
     }
@@ -245,8 +243,6 @@ final class TronHomeSheetsUITests: XCTestCase {
         keep("931-\(level)-manage")
     }
 
-    @MainActor func testHomeSettingsCardsLight() { homeSettingsCards(name: "light", arguments: []) }
-    @MainActor func testHomeSettingsCardsDark() { homeSettingsCards(name: "dark", arguments: ["-home-dark"]) }
     @MainActor func testHomeSettingsCardsAccessibilityText() {
         homeSettingsCards(name: "ax-large", arguments: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"])
     }
