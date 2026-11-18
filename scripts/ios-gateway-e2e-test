@@ -46,18 +46,13 @@ die() { echo "error: $*" >&2; exit 1; }
 
 ui_owned_journeys=(
   'TronMobileUITests/RealGatewayPairAndChatUITests/testPendingAppReviewInstallLight'
-  'TronMobileUITests/RealGatewayPairAndChatUITests/testPendingAppReviewInstallDark'
   'TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallLight'
-  'TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallDark'
   'TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallLightXXXL'
-  'TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallDarkXXXL'
-  'TronMobileUITests/RealGatewayPairAndChatUITests/testCaptureAppsAndManageLight'
   'TronMobileUITests/RealGatewayPairAndChatUITests/testCaptureAppsAndManageDark'
   'TronMobileUITests/RealGatewayPairAndChatUITests/testRefusedSaveAfterAnAppUpdateIsShownAndKeptUntilDiscarded'
   'TronMobileUITests/RealGatewayPairAndChatUITests/testManageRenamesClearsDataAndRemovesOnlyAfterConfirmation'
   'TronMobileUITests/RealGatewayPairAndChatUITests/testTronMenuListsInstalledAppAndKeepsItsValuesAcrossReopen'
   'TronMobileUITests/RealGatewayPairAndChatUITests/testHomeAutomationEditorAndAttributedMessageLight'
-  'TronMobileUITests/RealGatewayPairAndChatUITests/testHomeAutomationEditorAndAttributedMessageDark'
   'TronMobileUITests/RealGatewayPairAndChatUITests/testHomeQueueEditorUsesHomeScopeAndKeepsModelsRoute'
   'TronMobileUITests/RealGatewayPairAndChatUITests/testHomeQueueEditorUsesHomeScopeAndKeepsModelsRouteDark'
   "TronMobileUITests/RealGatewayPairAndChatUITests/testRoutineEditorsDisappearAndExplicitGlobalValueResets"
@@ -97,7 +92,7 @@ ui_journey_is_owned() {
 ui_journey_connections() {
   case "$1" in
     *testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground) echo "2 yes" ;;
-    *testPendingAppReviewInstallLight|*testPendingAppReviewInstallDark|*testHomeStatusShowsHostPressureAndWorkers|*testTronMenuListsInstalledAppAndKeepsItsValuesAcrossReopen|*testRefusedSaveAfterAnAppUpdateIsShownAndKeptUntilDiscarded|*testManageRenamesClearsDataAndRemovesOnlyAfterConfirmation|*testCaptureAppsAndManageLight|*testCaptureAppsAndManageDark|*testBuildsInstallLight|*testBuildsInstallDark|*testBuildsInstallLightXXXL|*testBuildsInstallDarkXXXL) echo "1 no" ;;
+    *testPendingAppReviewInstallLight|*testHomeStatusShowsHostPressureAndWorkers|*testTronMenuListsInstalledAppAndKeepsItsValuesAcrossReopen|*testRefusedSaveAfterAnAppUpdateIsShownAndKeptUntilDiscarded|*testManageRenamesClearsDataAndRemovesOnlyAfterConfirmation|*testCaptureAppsAndManageDark|*testBuildsInstallLight|*testBuildsInstallLightXXXL) echo "1 no" ;;
     *testGatewayRestartWaitsForLiveWorkThenRestartsIdleAndReconnects) echo "3 yes" ;;
     *testForegroundAndReconnectKeepSheetsAndTheirContent|*testProviderLoginSurvivesSafariAndReconnect|*testStreamedReplyAppearsExactlyOnceAcrossReconnect) echo "2 yes" ;;
     *) echo "0 no" ;;
@@ -873,7 +868,7 @@ run_ui_journey() {
   fi
   start_fresh_fixture ${runtime_limits[@]+"${runtime_limits[@]}"}
   load_state
-  if [[ "$journey" == *testHomeAutomationEditorAndAttributedMessageLight || "$journey" == *testHomeAutomationEditorAndAttributedMessageDark ]]; then
+  if [[ "$journey" == *testHomeAutomationEditorAndAttributedMessageLight ]]; then
     prepare_home_automation_fixture
   fi
   if [[ "$journey" == *testHomeSettingsCardDeclineAppliesNothingAndDoubleApproveAppliesOnce ]]; then

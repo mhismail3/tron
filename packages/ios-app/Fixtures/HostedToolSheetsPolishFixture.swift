@@ -8,7 +8,7 @@ struct HostedToolSheetsPolishFixture: View {
     @Environment(\.dismiss) private var dismiss
     private var scenario: String {
         let args = HostedLaunch.arguments
-        guard let index = args.firstIndex(of: "-polish-scenario"), args.indices.contains(index + 1) else { return "ask" }
+        guard let index = args.firstIndex(of: "-polish-scenario"), args.indices.contains(index + 1) else { return "" }
         return args[index + 1]
     }
     static let brief = """
@@ -25,10 +25,6 @@ struct HostedToolSheetsPolishFixture: View {
     ## Delivery
     Commit checkpoints on the isolated branch. Report the exact evidence and residual uncertainty. Wait for visual approval before behavioral regression runs or merging.
     """
-    static let report = (1...30).map { index in
-        "## Gateway check \(index)\n\nThe session retained its authoritative transcript after reconnect. Accepted prompts were not replayed, and the selected worker kept the same session identity. The report is read-only context, not a new instruction.\n\n- Connection ownership remained explicit.\n- No production transition was performed.\n- Further device verification remains with the maintainer."
-    }.joined(separator: "\n\n")
-
     var body: some View {
         VStack(spacing: 24) {
             Text("Transcript presentation review").font(TronTypography.headline)
@@ -83,32 +79,23 @@ struct HostedToolSheetsPolishFixture: View {
     }
 
     @ViewBuilder private var destination: some View {
-        if scenario == "context-long" || scenario == "context-short" {
-            InboundContextDetailsSheet(item: Self.context(text: scenario == "context-long" ? Self.report : "Gateway checks completed. The session resumed without replaying the prompt. No production changes were made."))
-        } else {
-            let tool = Self.tool(scenario)
-            NavigationStack {
-                ToolDetailSheet(tool: tool, density: .expanded)
-                    .tronToolDetailNavigationChrome()
-                    .toolbar {
-                        ToolbarItem(placement: .principal) { ToolDetailNavigationTitle(tool: tool) }
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button { showing = false } label: {
-                                Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: ToolDetailNavigationTitle.accent(for: tool))
-                            }.accessibilityLabel("Done")
-                        }
+        let tool = Self.tool(scenario)
+        NavigationStack {
+            ToolDetailSheet(tool: tool, density: .expanded)
+                .tronToolDetailNavigationChrome()
+                .toolbar {
+                    ToolbarItem(placement: .principal) { ToolDetailNavigationTitle(tool: tool) }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button { showing = false } label: {
+                            Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: ToolDetailNavigationTitle.accent(for: tool))
+                        }.accessibilityLabel("Done")
                     }
-            }
-            .tronTopBlur(.toolDetail)
-            .presentationDetents([.large])
-            .presentationDragIndicator(.hidden)
-            .tronPresentation()
+                }
         }
-    }
-
-    static func context(text: String) -> TranscriptItem {
-        let object: [String: Any] = ["id": "review-context", "parentId": NSNull(), "timestamp": "2026-10-18T02:00:00Z", "kind": "customMessage", "customType": "worker-report", "content": [["id": "report-text", "ordinal": 0, "type": "text", "text": text]]]
-        return try! JSONDecoder.gateway.decode(TranscriptItem.self, from: JSONSerialization.data(withJSONObject: object))
+        .tronTopBlur(.toolDetail)
+        .presentationDetents([.large])
+        .presentationDragIndicator(.hidden)
+        .tronPresentation()
     }
 
     static func tool(_ scenario: String) -> ChatToolPresentation {
@@ -136,26 +123,12 @@ struct HostedToolSheetsPolishFixture: View {
             if action == "stop" { request["operationId"] = "photo-operation" }
             details = ["accepted": true]
             if action == "resume" { details["sessionId"] = "worker-session"; details["operationId"] = "next-operation" }
-        case "task":
-            name = "task"
-            let taskID = "home-secondary-row-review-with-a-long-task-identifier-1318"
-            request = ["action": "status", "taskId": taskID]
-            details = ["taskId": taskID, "homeId": "home-fixture", "createdAt": 1791960000000,
-                       "updatedAt": 1791962700000, "intent": ["text": brief], "target": "/workspace/project",
-                       "title": "Standardize Home tool detail rows", "project": "tron", "lifecycle": "active",
-                       "operationId": "operation-1318-with-a-long-opaque-identifier-for-wrapping",
-                       "sessionId": "worker-session-1318", "workerModel": ["provider": "openai", "id": "gpt-6.1-sol"],
-                       "subagents": ["started": 0]]
-        case "search":
+        default:
             name = "session_search"
             request = ["query": "photo upload composer readiness"]
             details = ["status": "ok", "query": "photo upload composer readiness", "coverage": "partial", "ranking": "localSemantic", "hits": [
                 ["sessionId": "session-one", "entryId": "entry-one", "title": "Photo attachments and Send readiness", "role": "assistant", "updatedAt": "2026-10-18T02:20:00Z", "snippet": "The attachment coordinator owns preparation. Send becomes available only when every selected photo is ready; retry retains the selected files."],
                 ["sessionId": "session-two", "entryId": "entry-two", "title": "Preserve the composer during reconnect", "role": "user", "updatedAt": "2026-10-17T14:00:00Z", "snippet": "Keep the keyboard, draft and attachment previews in place while the authoritative session reconnects."]]]
-        default:
-            name = "ask_user"
-            request = [:]
-            details = ["title": "Transcript presentation", "cancelled": false, "questions": [["question": "Which improvements should ship together?", "options": [["label": "Tool sheet clarity", "description": "Readable results with technical details still reachable."], ["label": "Compact prompt previews", "description": "Bound long briefs without losing the full content."], ["label": "Keep the current layout"]], "multiSelect": true, "allowOther": false]], "answers": ["Which improvements should ship together?": ["selected": ["Tool sheet clarity", "Compact prompt previews"]]]]
         }
         let args = try! JSONDecoder().decode(JSONValue.self, from: JSONSerialization.data(withJSONObject: request))
         let result = try! JSONDecoder().decode(JSONValue.self, from: JSONSerialization.data(withJSONObject: details))

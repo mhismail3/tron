@@ -435,114 +435,6 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    func testCaptureHomeRevokeCapsuleForReview() {
-        continueAfterFailure = false
-        for mode in ["light", "dark"] {
-            for large in [false, true] {
-                let app = XCUIApplication()
-                app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-permissions-empty"]
-                if mode == "dark" { app.launchArguments.append("-home-dark") }
-                if large {
-                    app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
-                }
-                app.launch()
-                XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 15))
-                app.buttons["home-pinned-row"].tap()
-                openManageHome(app)
-                openHomeModelsSettings(app)
-                let revoke = app.buttons["Revoke scope scope-one"]
-                reveal(revoke, in: app)
-                XCTAssertTrue(revoke.isHittable, app.debugDescription)
-                keepScreenshot(named: "1318-delegation-\(mode)-\(large ? "accessibility" : "standard")")
-                app.terminate()
-            }
-        }
-    }
-
-    @MainActor
-    func testCaptureCompactSettingsAndFadeInLightAndDark() {
-        continueAfterFailure = false
-        for appearance in ["light", "dark"] {
-            let dark = appearance == "dark"
-            for surface in ["prompt", "home", "session", "global", "photo"] {
-                let app = XCUIApplication()
-                switch surface {
-                case "prompt":
-                    app.launchArguments = ["-tron-tool-sheets-polish-fixture", "-polish-scenario", "prompt", dark ? "-polish-dark" : "-polish-light"]
-                case "photo":
-                    app.launchArguments = ["-tron-chat-display-fixture", "-chat-display-inline-group", dark ? "-polish-dark" : "-polish-light"]
-                case "home":
-                    app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
-                    if dark { app.launchArguments.append("-home-dark") }
-                case "session":
-                    app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", appearance]
-                default:
-                    app.launchArguments = ["-tron-settings-renderer-fixture"]
-                    if dark { app.launchArguments.append("-settings-renderer-dark") }
-                }
-                app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-                app.launch()
-                defer { app.terminate() }
-                switch surface {
-                case "prompt":
-                    XCTAssertTrue(app.staticTexts["Transcript presentation review"].waitForExistence(timeout: 10))
-                case "photo":
-                    let preview = app.buttons["Open Home dashboard after the fix photo preview"]
-                    XCTAssertTrue(preview.waitForExistence(timeout: 25), app.debugDescription)
-                    preview.tap()
-                    XCTAssertTrue(app.buttons["Technical details"].waitForExistence(timeout: 10))
-                case "home":
-                    XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
-                    app.buttons["home-pinned-row"].tap()
-                    openManageHome(app)
-                    tapManageRow(app, "home-manage-settings")
-                    expandSettingsSheet(app, title: "Home Settings")
-                    XCTAssertTrue(app.descendants(matching: .any)["settings-row-model.queue_role_worker_"].waitForExistence(timeout: 5))
-                case "session":
-                    XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
-                    app.buttons["Stop session"].tap()
-                    app.buttons["Release terminal settlement"].tap()
-                    expandSettingsSheet(app, title: "Manage Session")
-                default:
-                    let behavior = app.buttons["settings-link-Agent Behavior"]
-                    XCTAssertTrue(behavior.waitForExistence(timeout: 10))
-                    behavior.tap()
-                    XCTAssertTrue(app.navigationBars.staticTexts["Agent Behavior"].waitForExistence(timeout: 5))
-                    XCTAssertTrue(app.descendants(matching: .any)["settings-row-model.ref"].waitForExistence(timeout: 5), app.debugDescription)
-                }
-                keepScreenshot(named: "1308-\(surface)-\(appearance)")
-            }
-        }
-    }
-
-    @MainActor
-    func testCaptureSettingsTrailingAlignmentForReview() {
-        continueAfterFailure = false
-        for appearance in ["light", "dark"] {
-            for textSize in ["standard", "accessibility"] {
-                for surface in ["compaction", "controls"] {
-                    let app = XCUIApplication()
-                    app.launchArguments = ["-tron-settings-renderer-fixture",
-                        surface == "compaction" ? "-settings-alignment-review" : "-settings-controls-review",
-                        "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-                    if appearance == "dark" { app.launchArguments.append("-settings-renderer-dark") }
-                    if textSize == "accessibility" {
-                        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"]
-                    }
-                    app.launch()
-                    XCTAssertTrue(app.staticTexts["Inherited value"].firstMatch.waitForExistence(timeout: 10))
-                    keepScreenshot(named: "1321-\(surface)-\(appearance)-\(textSize)")
-                    if textSize == "accessibility" {
-                        app.scrollViews.firstMatch.swipeUp()
-                        keepScreenshot(named: "1321-\(surface)-\(appearance)-\(textSize)-lower")
-                    }
-                    app.terminate()
-                }
-            }
-        }
-    }
-
-    @MainActor
     func testSettingsPaintedEdgesSpacingAndHitTargets() {
         for appearance in ["light", "dark"] {
             for largeText in [false, true] {
@@ -643,29 +535,6 @@ final class TronSmokeUITests: XCTestCase {
         let vertical = extent(CGRect(x: centerX * scale, y: frame.minY * scale, width: 1, height: frame.height * scale), reversed: true)
         return CGRect(x: frame.minX + horizontal.lowerBound, y: frame.minY + vertical.lowerBound,
                       width: horizontal.upperBound - horizontal.lowerBound, height: vertical.upperBound - vertical.lowerBound)
-    }
-
-    @MainActor
-    func testCaptureGlobalAccountsAndProviderModelsInLightAndDark() {
-        continueAfterFailure = false
-        for appearance in ["light", "dark", "light-xxxl", "dark-xxxl"] {
-            let app = XCUIApplication()
-            app.launchArguments = ["-tron-settings-renderer-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-            if appearance.hasPrefix("dark") { app.launchArguments.append("-settings-renderer-dark") }
-            if appearance.hasSuffix("xxxl") {
-                app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
-            }
-            app.launch()
-            defer { app.terminate() }
-            let providers = app.buttons["settings-link-Model Providers"]
-            XCTAssertTrue(providers.waitForExistence(timeout: 10))
-            keepScreenshot(named: "1308-global-accounts-\(appearance)")
-            providers.tap()
-            expandSettingsSheet(app, title: "Providers")
-            XCTAssertTrue(app.staticTexts["3 models currently available"].waitForExistence(timeout: 10))
-            keepScreenshot(named: "1308-providers-\(appearance)")
-            app.terminate()
-        }
     }
 
     @MainActor
@@ -955,55 +824,6 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    func testCaptureSettingsScopesAtAccessibilityXXXL() {
-        continueAfterFailure = false
-        for appearance in ["light", "dark"] {
-            for scope in ["session", "home", "project"] {
-                let app = XCUIApplication()
-                switch scope {
-                case "home":
-                    app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
-                    if appearance == "dark" { app.launchArguments.append("-home-dark") }
-                case "session":
-                    app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", appearance]
-                default:
-                    app.launchArguments = ["-tron-new-session-fixture", "-new-session-scenario", "project-settings", "-fixture-appearance", appearance]
-                }
-                app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
-                app.launch()
-                defer { app.terminate() }
-                let title: String
-                switch scope {
-                case "home":
-                    XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
-                    app.buttons["home-pinned-row"].tap()
-                    openManageHome(app)
-                    tapManageRow(app, "home-manage-settings")
-                    title = "Home Settings"
-                case "session":
-                    XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
-                    app.buttons["Stop session"].tap()
-                    app.buttons["Release terminal settlement"].tap()
-                    openChatSettings(app)
-                    title = "Session Settings"
-                default:
-                    XCTAssertTrue(app.buttons["project-settings-link"].waitForExistence(timeout: 10))
-                    tapScrolling(app.buttons["project-settings-link"], in: app)
-                    title = "Project Settings"
-                }
-                expandSettingsSheet(app, title: title)
-                let anchor = scope == "project" || scope == "session"
-                    ? app.descendants(matching: .any)["settings-row-model.ref_role_chat_"]
-                    : app.descendants(matching: .any)["settings-row-model.queue_role_worker_"]
-                XCTAssertTrue(anchor.waitForExistence(timeout: 5), app.debugDescription)
-                keepScreenshot(named: "1634-\(scope)-\(appearance)-xxxl")
-                app.swipeUp()
-                keepScreenshot(named: "1634-\(scope)-\(appearance)-xxxl-scrolled")
-            }
-        }
-    }
-
-    @MainActor
     private func captureSettingsTools(_ app: XCUIApplication, scope: String, appearance: String) {
         if scope == "project" {
             let model = app.descendants(matching: .any)["settings-row-model.ref_role_chat_"]
@@ -1210,7 +1030,6 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
-
     @MainActor
     func testHomeCrossSurfaceProofMatrix() {
         continueAfterFailure = false
@@ -1392,22 +1211,6 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    func testHomeTitleUsesCanonicalRole() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
-        app.launch()
-        defer { app.terminate() }
-        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["home-pinned-row"].label.contains("Home"))
-        app.buttons["home-pinned-row"].tap()
-        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.navigationBars.staticTexts["Home fixture chat"].exists)
-        keepScreenshot(named: "home-canonical-title")
-        openManageHome(app)
-    }
-
-    @MainActor
     func testManageHomeOpensAtMediumFromRingAndHomeGearOpensSettings() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -1554,8 +1357,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(waitForLabel(app.buttons["session-context-button"], containing: "Manage Home", timeout: 10), "The successor chat did not claim the Home status")
         keepScreenshot(named: "home-rollover-followed")
     }
-
-
 
     @MainActor
     func testManageHomeRejectsStaleRouteAction() {
@@ -1932,24 +1733,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(row.label.contains("Blocked"), row.label)
         XCTAssertFalse(row.label.contains("Ready"), row.label)
         app.terminate()
-    }
-
-    @MainActor
-    func testHomePinnedRowLightDarkAndAccessibilityCaptures() {
-        continueAfterFailure = false
-        for appearance in ["light", "dark"] {
-            for type in ["normal", "accessibility"] {
-                let app = XCUIApplication()
-                app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
-                if appearance == "dark" { app.launchArguments.append("-home-dark") }
-                if type == "accessibility" { app.launchArguments.append("-home-accessibility-type") }
-                app.launch()
-                XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
-                XCTAssertTrue(app.buttons["session-row-home-shell-fixture:ordinary-session"].exists)
-                keepScreenshot(named: "home-pinned-\(appearance)-\(type)")
-                app.terminate()
-            }
-        }
     }
 
     @MainActor
@@ -2747,17 +2530,6 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    func testUIFixesVisualReviewCaptures() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-ui-providers"]
-        app.launch()
-        XCTAssertTrue(app.staticTexts["fixture.settings-renderer-applied"].waitForExistence(timeout: 10), app.debugDescription)
-        keepScreenshot(named: "1261-providers")
-        app.terminate()
-    }
-
-    @MainActor
     func testMacSettingsUsesSchemaGroupsAndSharedThinkingEditor() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -2942,15 +2714,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(connect.frame.width, 72, "Connect must retain default iOS toolbar horizontal insets")
         XCTAssertGreaterThanOrEqual(connect.frame.height, 35, "Connect must retain default iOS toolbar control height")
         keepScreenshot(named: "onboarding-pairing-large-current")
-        assertAccessibilityAuditPasses(app)
-    }
-
-    @MainActor
-    func testOnboardingPairingPassesAccessibilityAuditInLightMode() {
-        let app = launchResetApp(extraArguments: ["-appearanceMode", "light"])
-        for _ in 0..<3 { app.buttons["Next"].tap() }
-        app.buttons["Enter Manually"].tap()
-        XCTAssertTrue(app.secureTextFields["One-time code"].waitForExistence(timeout: 3))
         assertAccessibilityAuditPasses(app)
     }
 

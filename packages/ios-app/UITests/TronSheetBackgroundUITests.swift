@@ -1,54 +1,10 @@
 import XCTest
 
 final class TronSheetBackgroundUITests: XCTestCase {
-    @MainActor func testTopBlurVisualCheckpoint() {
-        continueAfterFailure = false
-        for mode in ["light", "dark"] {
-            let app = XCUIApplication()
-            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-presentation-loading"]
-                + (mode == "dark" ? ["-home-dark"] : [])
-            app.launch()
-            XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 15))
-            app.buttons["home-pinned-row"].tap()
-            let ring = app.buttons["session-context-button"]
-            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
-                predicate: NSPredicate(format: "exists == true AND enabled == true"), object: ring)], timeout: 15), .completed)
-            ring.tap()
-            XCTAssertTrue(app.buttons["home-sheet-done-manage"].waitForExistence(timeout: 15))
-            releaseHeldTaskList()
-            XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].waitForExistence(timeout: 30))
-            capture(app, name: "manage-\(mode)")
-            app.terminate()
-
-            app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-nested", "-settings-expanded-review", "-settings-sheet-theme-review"]
-                + (mode == "dark" ? ["-settings-renderer-dark"] : [])
-            app.launch()
-            XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 15))
-            app.buttons["Open Settings"].tap()
-            let models = app.buttons["settings-link-Agent Behavior"]
-            XCTAssertTrue(models.waitForExistence(timeout: 10))
-            models.tap()
-            XCTAssertTrue(app.navigationBars.staticTexts["Agent Behavior"].waitForExistence(timeout: 10))
-            capture(app, name: "settings-models-\(mode)")
-            app.terminate()
-
-            app.launchArguments = ["-tron-tool-sheets-polish-fixture", "-polish-scenario", "search", "-polish-\(mode)"]
-            app.launch()
-            XCTAssertTrue(app.buttons["Done"].firstMatch.waitForExistence(timeout: 10))
-            capture(app, name: "tool-search-\(mode)")
-            app.terminate()
-        }
-    }
 
     private func releaseHeldTaskList() {
         CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
             CFNotificationName(rawValue: "com.tron.mobile.fixture.home.release-task-list" as CFString), nil, nil, true)
-    }
-
-    @MainActor private func capture(_ app: XCUIApplication, name: String) {
-        Thread.sleep(forTimeInterval: 1)
-        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = "1631-\(name)"; shot.lifetime = .keepAlways; add(shot)
     }
 
     @MainActor func testSheetBackgroundContinuousInLight() { journey(dark: false) }

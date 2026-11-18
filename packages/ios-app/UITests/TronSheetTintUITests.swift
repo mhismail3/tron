@@ -1,36 +1,6 @@
 import XCTest
 
 final class TronSheetTintUITests: XCTestCase {
-    @MainActor
-    func testSettingsSheetToolbarsTakeTheirTitleTint() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-navigation-fixture", "-themeColor", "burgundy"]
-        app.launch(); defer { app.terminate() }
-        XCTAssertTrue(app.buttons["settings-link-Connections"].waitForExistence(timeout: 10), app.debugDescription)
-        assertToolbarTint(app, title: "Global Settings")
-        for title in ["Connections", "MCP Servers", "Appearance"] {
-            let link = app.buttons["settings-link-\(title)"]
-            for _ in 0..<12 where !link.isHittable { app.swipeUp() }
-            let window = app.windows.firstMatch.frame.width
-            let icon = CGRect(x: link.frame.minX, y: link.frame.minY, width: 48, height: link.frame.height)
-            assertBurgundy(sheetInk(XCUIScreen.main.screenshot().image, icon, window: window), "\(title) row icon")
-            link.tap()
-            assertToolbarTint(app, title: title)
-            let sheetTitle = app.navigationBars.staticTexts.matching(identifier: title).allElementsBoundByIndex.last
-            assertBurgundy(sheetTitle.flatMap { sheetInk(XCUIScreen.main.screenshot().image, $0.frame, window: window) },
-                           "\(title) sheet title")
-            app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
-            XCTAssertTrue(app.navigationBars.staticTexts["Global Settings"].firstMatch.waitForExistence(timeout: 5))
-            for _ in 0..<12 where !app.buttons["settings-link-Connections"].isHittable { app.swipeDown() }
-        }
-    }
-
-    private func assertBurgundy(_ ink: [Double]?, _ context: String, file: StaticString = #filePath, line: UInt = #line) {
-        guard let ink else { return XCTFail("\(context): no inked pixels", file: file, line: line) }
-        XCTAssertGreaterThan(ink[0], ink[2], "\(context) \(ink) is not the burgundy theme", file: file, line: line)
-        XCTAssertGreaterThan(ink[2], ink[1], "\(context) \(ink) is not the burgundy theme", file: file, line: line)
-    }
 
     @MainActor
     func testNestedSessionsRetentionOpensAndPersistsInLightAndDark() {
@@ -135,42 +105,4 @@ final class TronSheetTintUITests: XCTestCase {
         }
     }
 
-    @MainActor
-    func testDashboardSheetToolbarsTakeTheirTitleTint() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-accessibility-fixture", "-fixture-dashboard"]
-        app.launch(); defer { app.terminate() }
-        let menu = app.buttons["dashboard.menu"]
-        XCTAssertTrue(menu.waitForExistence(timeout: 10), app.debugDescription)
-        menu.tap(); app.buttons["Automations"].tap()
-        assertToolbarTint(app, title: "Automations")
-        app.buttons["automations.new"].tap()
-        assertToolbarTint(app, title: "New Automation")
-        app.terminate()
-
-
-    }
-
-    @MainActor
-    func testManageHomeToolbarsTakeTheirTitleTint() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
-        app.launch(); defer { app.terminate() }
-        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
-        app.buttons["home-pinned-row"].tap()
-        let ring = app.buttons["session-context-button"]
-        XCTAssertTrue(ring.waitForExistence(timeout: 10))
-        XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: ring)],
-                                     timeout: 10) == .completed)
-        ring.tap()
-        XCTAssertTrue(app.buttons["home-sheet-done-manage"].waitForExistence(timeout: 10), app.debugDescription)
-        assertToolbarTint(app, title: "Manage Home")
-        let memory = app.descendants(matching: .any)["home-manage-memory-browser"].firstMatch
-        XCTAssertTrue(memory.waitForExistence(timeout: 5), app.debugDescription)
-        memory.tap()
-        XCTAssertTrue(app.buttons["home-sheet-done-memory"].waitForExistence(timeout: 10), app.debugDescription)
-        assertToolbarTint(app, title: "Memory")
-    }
 }

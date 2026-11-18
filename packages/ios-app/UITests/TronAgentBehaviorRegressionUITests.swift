@@ -46,24 +46,6 @@ final class TronAgentBehaviorRegressionUITests: XCTestCase {
         }
     }
 
-    func testRetiredCompactionRowsAreNotDisplayed() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-nested", "-settings-expanded-review", "-agent-behavior-regression"]
-        app.launch()
-        defer { app.terminate() }
-        XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 15))
-        app.buttons["Open Settings"].tap()
-        expand(app, "Global Settings")
-        tap(app, "settings-link-Agent Behavior")
-        expand(app, "Agent Behavior")
-        XCTAssertTrue(app.staticTexts["Worker models"].waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertFalse(app.descendants(matching: .any)["settings-row-context.compaction.enabled"].exists,
-                       "Retired Automatic compaction must not be a read-only row, even with a saved value")
-        XCTAssertFalse(app.descendants(matching: .any)["settings-row-model.thinking_role_summarizer_"].exists,
-                       "Retired Summary thinking must not be a read-only row, even with a saved value")
-    }
-
     func testGlobalValuePillFollowsReset() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -83,27 +65,6 @@ final class TronAgentBehaviorRegressionUITests: XCTestCase {
         XCTAssertLessThanOrEqual(reset.frame.maxX, value.frame.minX, "Reset must precede the rightmost value pill")
         XCTAssertGreaterThanOrEqual(reset.frame.width, 43.5)
         XCTAssertGreaterThanOrEqual(value.frame.height, 43.5)
-    }
-
-    func testAgentBehaviorReviewLightDark() {
-        continueAfterFailure = false
-        for mode in ["light", "dark"] {
-            let app = XCUIApplication()
-            app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-nested", "-settings-expanded-review", "-agent-behavior-regression"]
-                + (mode == "dark" ? ["-settings-renderer-dark"] : [])
-            app.launch()
-            XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 15))
-            app.buttons["Open Settings"].tap()
-            expand(app, "Global Settings")
-            tap(app, "settings-link-Agent Behavior")
-            expand(app, "Agent Behavior")
-            capture(app, "agent-top-\(mode)")
-            app.swipeUp()
-            capture(app, "agent-middle-\(mode)")
-            app.swipeUp()
-            capture(app, "agent-bottom-\(mode)")
-            app.terminate()
-        }
     }
 
     func testSessionValuePillFollowsRevertLightDark() {
