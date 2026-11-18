@@ -81,6 +81,7 @@ extension HomeSheet {
                                     subtitle: "Assistant profile and worker launch choices", accent: accent)
                 }
                 .accessibilityIdentifier("home-manage-settings")
+                .tronListMarkers("home-manage-settings")
             }
         }
     }
