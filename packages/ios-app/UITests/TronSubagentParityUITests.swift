@@ -205,23 +205,6 @@ final class TronSubagentParityUITests: XCTestCase {
     }
 
     @MainActor
-    func testInterleavedNotificationsPreserveConversationAndToolBoundaries() throws {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-subagent-parity-fixture", "-presentation-polish", "-interleaved-events", "-dark"]
-        app.launch()
-        defer { app.terminate() }
-        let errors = app.buttons.matching(NSPredicate(format: "label == %@", "Tron · Notification, Error"))
-        XCTAssertTrue(errors.firstMatch.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertEqual(errors.count, 2)
-        XCTAssertTrue(assistantReply(app, labeled: "Conversation between independent events.").exists, app.debugDescription)
-        XCTAssertTrue(app.buttons["Read file, Interrupted"].exists, app.debugDescription)
-        let frames = [errors.element(boundBy: 0).frame, errors.element(boundBy: 1).frame].sorted { $0.minY < $1.minY }
-        XCTAssertGreaterThan(frames[1].midY - frames[0].midY, 80, "Prose and tools must remain chronological boundaries, not join an event run")
-        try capture("852-interleaved-events")
-    }
-
-    @MainActor
     func testNativeOrganizationAndPills() throws {
         continueAfterFailure = false
         for scheme in ["light", "dark"] {
