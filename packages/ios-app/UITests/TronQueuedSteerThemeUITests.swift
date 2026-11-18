@@ -72,7 +72,7 @@ import UIKit
             let home = app.buttons["home-pinned-row"]
             guard home.waitForExistence(timeout: 15) else { XCTFail(app.debugDescription); return }
             home.tap()
-            let row = app.staticTexts["Second queued message"]
+            let row = app.buttons["Second queued message"]
             guard row.waitForExistence(timeout: 15) else { XCTFail(app.debugDescription); return }
             Thread.sleep(forTimeInterval: 0.6)
             row.press(forDuration: 1.0)
