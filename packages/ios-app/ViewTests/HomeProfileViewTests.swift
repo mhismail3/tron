@@ -29,7 +29,8 @@ final class HomeProfileViewTests: ShuffledTestCase {
 
     private func text(_ app: MountedFixture, _ title: String) -> NSObject? {
         MountedFixture.elements(in: app.top).last {
-            $0.isAccessibilityElement && ($0.accessibilityLabel == title || $0.accessibilityLabel?.hasPrefix(title + ", ") == true)
+            $0.isAccessibilityElement && ($0.accessibilityLabel == title || $0.accessibilityLabel.map { label in
+                label.hasPrefix(title + ", ") && Int(label.dropFirst(title.count + 2)) != nil } == true)
                 && !$0.accessibilityTraits.contains(.button)
         }
     }
