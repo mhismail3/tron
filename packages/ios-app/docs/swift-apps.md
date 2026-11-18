@@ -293,9 +293,7 @@ not an implemented web backend. It writes no app data and runs no migrations.
 `TronAppsDesignUITests` captures Apps and Manage in light/dark and default/Accessibility
 XXXL. `-apps-design-expanded` selects the shared large detent for still captures; the normal
 fixture and interaction journey start medium. XXXL Manage captures include a scrolled
-continuation so a first-viewport image does not imply that all rows fit at once. The focused
-`testCaptureAppsManage…` journeys omit the independent Automations comparison; the original
-comparison journeys remain available separately. Its interaction journey opens the real
+continuation so a first-viewport image does not imply that all rows fit at once. Its interaction journey opens the real
 interpreter, returns through Manage and Data, then continues the shared feed. It does not prove
 installed persistence, provenance or HTML launch. No production Apps menu entry is enabled by
 this fixture.

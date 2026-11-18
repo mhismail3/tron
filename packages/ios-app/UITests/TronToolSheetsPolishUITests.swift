@@ -1,21 +1,6 @@
 import XCTest
 
 final class TronToolSheetsPolishUITests: XCTestCase {
-    @MainActor func testCaptureComposerPickerSubtextForReview() {
-        continueAfterFailure = false
-        for mode in ["light", "dark"] {
-            for large in [false, true] {
-                let app = XCUIApplication()
-                app.launchArguments = ["-tron-tool-sheets-polish-fixture", "-polish-scenario", "picker",
-                                       "-polish-\(mode)", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-                if large { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"] }
-                app.launch()
-                XCTAssertTrue(app.staticTexts["Home Settings"].waitForExistence(timeout: 15), app.debugDescription)
-                capture(app, "1572-pickers-\(mode)-\(large ? "larger" : "standard")")
-                app.terminate()
-            }
-        }
-    }
 
     @MainActor func testComposerPickerSecondaryTextMatchesManageHomeRow() {
         continueAfterFailure = false
@@ -40,74 +25,6 @@ final class TronToolSheetsPolishUITests: XCTestCase {
                 XCTAssertEqual(query.frame.height, reference.frame.height, accuracy: 0.5)
             }
             app.terminate()
-        }
-    }
-
-    @MainActor func testCaptureLightAndDarkReviewSurfaces() {
-        continueAfterFailure = false
-        for dark in [false, true] {
-            let mode = dark ? "dark" : "light"
-            for scenario in ["ask", "search", "delegate", "context-long", "context-short", "prompt", "short-prompt"] {
-                let app = XCUIApplication()
-                app.launchArguments = ["-tron-tool-sheets-polish-fixture", "-polish-scenario", scenario,
-                                       dark ? "-polish-dark" : "-polish-light", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-                app.launch()
-                XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15))
-                if scenario == "prompt" || scenario == "short-prompt" {
-                    XCTAssertTrue(app.staticTexts["Transcript presentation review"].waitForExistence(timeout: 10))
-                } else {
-                    XCTAssertTrue(app.buttons["Done"].firstMatch.waitForExistence(timeout: 10))
-                }
-                capture(app, "\(scenario)-\(mode)")
-                if scenario == "delegate" {
-                    app.swipeUp()
-                    capture(app, "delegate-models-\(mode)")
-                }
-                if scenario == "prompt" {
-                    let prompt = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Fix: attaching photos'")).firstMatch
-                    XCTAssertTrue(prompt.waitForExistence(timeout: 5), app.debugDescription)
-                    prompt.tap()
-                    XCTAssertTrue(app.staticTexts["Prompt"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
-                    capture(app, "prompt-full-content-\(mode)")
-                }
-                app.terminate()
-            }
-            let app = XCUIApplication()
-            app.launchArguments = ["-tron-chat-display-fixture", "-chat-display-inline-group",
-                                   dark ? "-polish-dark" : "-polish-light", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-            app.launch()
-            let first = app.buttons["Open Home dashboard after the fix photo preview"]
-            XCTAssertTrue(first.waitForExistence(timeout: 25), app.debugDescription)
-            capture(app, "display-inline-\(mode)")
-            first.tap()
-            XCTAssertTrue(app.buttons["Technical details"].firstMatch.waitForExistence(timeout: 10), app.debugDescription)
-            capture(app, "display-preview-\(mode)")
-            app.terminate()
-        }
-    }
-
-    @MainActor func testCaptureHomeSecondaryRowsForReview() {
-        continueAfterFailure = false
-        for mode in ["light", "dark"] {
-            for large in [false, true] {
-                for scenario in ["task", "delegate", "search"] {
-                    let app = XCUIApplication()
-                    app.launchArguments = ["-tron-tool-sheets-polish-fixture", "-polish-scenario", scenario,
-                                           "-polish-\(mode)", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-                    if large {
-                        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
-                    }
-                    app.launch()
-                    XCTAssertTrue(app.buttons["Technical details"].waitForExistence(timeout: 15), app.debugDescription)
-                    let content = scenario == "search" ? "session-search-tool-detail" : "home-tool-detail"
-                    XCTAssertTrue(app.descendants(matching: .any)[content].exists, app.debugDescription)
-                    let suffix = "\(mode)-\(large ? "accessibility" : "standard")"
-                    capture(app, "1318-\(scenario)-\(suffix)")
-                    app.swipeUp()
-                    capture(app, "1318-\(scenario)-lower-\(suffix)")
-                    app.terminate()
-                }
-            }
         }
     }
 

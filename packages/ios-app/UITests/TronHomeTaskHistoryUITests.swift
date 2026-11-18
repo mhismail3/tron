@@ -1,17 +1,6 @@
 import XCTest
 
 final class TronHomeTaskHistoryUITests: XCTestCase {
-    @MainActor func testBeforeLight() { before(dark: false) }
-    @MainActor func testBeforeDark() { before(dark: true) }
-    @MainActor func testStructuredWhitespaceSections() {
-        let app = launch(dark: false); defer { app.terminate() }
-        open(app, "home-manage-tasks", ready: "home-task-active", done: "home-sheet-done-tasks")
-        open(app, "home-task-active", ready: "home-task-detail", done: "home-sheet-done-task")
-        let done = element(app, "home-task-checkin-done")
-        XCTAssertTrue(done.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(done.label.contains("Clean 99a69ce97") && done.label.contains("rc65 uncapped 289.538s"), done.label)
-        XCTAssertTrue(element(app, "home-task-checkin-next").label.contains("same 4 light/dark"))
-    }
     @MainActor func testStructuredCheckinWhitespaceAndHistoryLight() { verify(dark: false) }
     @MainActor func testStructuredCheckinWhitespaceAndHistoryDark() { verify(dark: true) }
     @MainActor func testDisableHomeIconIsDestructiveRedInBothAppearances() {

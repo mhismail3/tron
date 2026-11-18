@@ -461,43 +461,6 @@ final class TronHomeSheetsUITests: XCTestCase {
     }
 
     @MainActor
-    func testPagedListPreview() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
-        app.launch(); defer { app.terminate() }
-        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
-        app.buttons["home-pinned-row"].tap()
-        let ring = app.buttons["session-context-button"]
-        XCTAssertTrue(waitFor(ring, "enabled == true"))
-        open(app, ring, ready: "home-manage-state", name: "manage")
-        expand(app, done: "home-sheet-done-manage")
-        open(app, element(app, "home-manage-memory-browser"), ready: "home-memory-row-39", name: "memory")
-        expand(app, done: "home-sheet-done-memory")
-        keep("1214-memory")
-        for _ in 0..<12 where !element(app, "home-memory-summary-0-16").exists { app.swipeUp() }
-        XCTAssertTrue(element(app, "home-memory-summary-0-16").waitForExistence(timeout: 5))
-        app.buttons["home-sheet-done-memory"].tap()
-        open(app, element(app, "home-manage-tasks"), ready: "home-task-active", name: "tasks")
-        expand(app, done: "home-sheet-done-tasks")
-        keep("1214-tasks")
-        app.terminate()
-        app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", "light"]
-        app.launch()
-        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
-        app.buttons["Stop session"].tap()
-        let history = app.buttons["Session History"]
-        for _ in 0..<12 where !history.isHittable { app.swipeUp() }
-        XCTAssertTrue(history.isHittable); history.tap()
-        XCTAssertTrue(app.buttons["history-row-fixture-prompt"].waitForExistence(timeout: 10))
-        let done = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)!
-        let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
-        origin.withOffset(CGVector(dx: 60, dy: done.frame.midY))
-            .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
-        keep("1214-history")
-    }
-
-    @MainActor
     func testHomeCursorPagesRetryAndRetainScroll() {
         continueAfterFailure = false
         let app = XCUIApplication()

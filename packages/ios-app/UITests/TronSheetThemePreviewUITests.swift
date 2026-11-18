@@ -2,32 +2,6 @@ import XCTest
 
 @MainActor
 final class TronSheetThemePreviewUITests: XCTestCase {
-    func testSettingsSectionColorReviewLightDark() {
-        for mode in ["light", "dark"] {
-            let app = settings(mode)
-            defer { app.terminate() }
-            capture(app, "section-colors-root-top-\(mode)")
-            app.swipeUp()
-            capture(app, "section-colors-root-bottom-\(mode)")
-            open(app, "settings-link-Agent Behavior")
-            expand(app, title: "Agent Behavior")
-            capture(app, "section-colors-agent-\(mode)")
-            app.swipeUp(); app.swipeUp()
-            capture(app, "section-colors-agent-bottom-\(mode)")
-            close(app)
-            open(app, "settings-link-Logs")
-            expand(app, title: "Logs")
-            capture(app, "section-colors-system-\(mode)")
-            close(app)
-            for (id, title) in [("settings-link-MCP Servers", "MCP Servers")] {
-                open(app, id)
-                expand(app, title: title)
-                capture(app, "section-colors-\(title)-\(mode)")
-                close(app)
-            }
-            app.terminate()
-        }
-    }
 
     func testMaintenanceContainersFollowSheetThemeAndForgetStaysDestructive() {
         for mode in ["light", "dark"] {

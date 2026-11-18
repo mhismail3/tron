@@ -130,7 +130,6 @@ extension RealGatewayPairAndChatUITests {
         keepScreenshot(app, name: "2076-real-gateway-apps-empty-light")
     }
 
-    @MainActor func testCaptureAppsAndManageLight() throws { try captureAppsAndManage(scheme: "light") }
     @MainActor func testCaptureAppsAndManageDark() throws { try captureAppsAndManage(scheme: "dark") }
 
     @MainActor

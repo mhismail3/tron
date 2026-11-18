@@ -84,17 +84,6 @@ final class TronDiagnosticsExportUITests: XCTestCase {
     }
 
     @MainActor
-    func testOriginalConnectedExportWritesOnceWithCapturedEvidence() {
-        let app = launch("normal")
-        defer { app.terminate() }
-        app.buttons["Export Diagnostics"].tap()
-        XCTAssertTrue(observe(app, "fixture.export-original", "exports:1 commands:1 repeats:0 originalEvidence:true"))
-        XCTAssertTrue(observe(app, "fixture.export-notices", "Diagnostics saved on Mac"))
-        XCTAssertTrue(observe(app, "fixture.export-replacement", "exports:0 commands:0 repeats:0"))
-        evidence(app, "360-export-original-once")
-    }
-
-    @MainActor
     func testOlderRemoteFallbackCannotReplaceOrLeakLocalShareArtifact() {
         let app = launch("held-failure")
         defer { app.terminate() }

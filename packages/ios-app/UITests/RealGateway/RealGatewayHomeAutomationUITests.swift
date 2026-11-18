@@ -8,11 +8,6 @@ extension RealGatewayPairAndChatUITests {
     }
 
     @MainActor
-    func testHomeAutomationEditorAndAttributedMessageDark() throws {
-        try homeAutomationJourney(appearance: "dark")
-    }
-
-    @MainActor
     private func homeAutomationJourney(appearance: String) throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()

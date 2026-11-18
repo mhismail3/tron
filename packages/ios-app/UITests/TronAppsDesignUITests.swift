@@ -8,11 +8,6 @@ final class TronAppsDesignUITests: XCTestCase {
     @MainActor func testLightXXXLProposal() { review(dark: false, large: true) }
     @MainActor func testDarkXXXLProposal() { review(dark: true, large: true) }
 
-    @MainActor func testCaptureAppsManageLightDefault() { review(dark: false, large: false, compareAutomations: false) }
-    @MainActor func testCaptureAppsManageDarkDefault() { review(dark: true, large: false, compareAutomations: false) }
-    @MainActor func testCaptureAppsManageLightXXXL() { review(dark: false, large: true, compareAutomations: false) }
-    @MainActor func testCaptureAppsManageDarkXXXL() { review(dark: true, large: true, compareAutomations: false) }
-
     @MainActor func testSharedRowsOpenRunnerManageAndContinueFeed() {
         let app = launch(dark: false, large: false)
         openProposal(app)

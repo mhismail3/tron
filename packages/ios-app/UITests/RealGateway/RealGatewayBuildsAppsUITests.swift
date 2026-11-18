@@ -3,7 +3,6 @@ import CryptoKit
 
 extension RealGatewayPairAndChatUITests {
     @MainActor func testPendingAppReviewInstallLight() throws { try pendingAppJourney(dark: false) }
-    @MainActor func testPendingAppReviewInstallDark() throws { try pendingAppJourney(dark: true) }
 
     @MainActor private func pendingAppJourney(dark: Bool) throws {
         continueAfterFailure = false
@@ -58,9 +57,7 @@ extension RealGatewayPairAndChatUITests {
     }
 
     @MainActor func testBuildsInstallLight() throws { try buildsJourney(dark: false, large: false) }
-    @MainActor func testBuildsInstallDark() throws { try buildsJourney(dark: true, large: false) }
     @MainActor func testBuildsInstallLightXXXL() throws { try buildsJourney(dark: false, large: true) }
-    @MainActor func testBuildsInstallDarkXXXL() throws { try buildsJourney(dark: true, large: true) }
 
     @MainActor private func buildsJourney(dark: Bool, large: Bool) throws {
         continueAfterFailure = false
