@@ -251,10 +251,10 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
 
 ## Verify
 
-`TronToolSummaryTintUITests` renders canonical transcript DTOs through mounted ChatView and samples
-native title ink: recovered (count retained), latest failure, no failures, cross-group continuation,
-and active failure/amber. Calls deliberately disagree with collection, result-arrival and timestamp
-ordering. Its capture-only method provides light/dark visual review, not behavioral acceptance.
+`TronMobileViewTests/ToolSummaryTintViewTests` renders canonical transcript DTOs through mounted ChatView
+in-process and samples title ink: recovered (count retained), latest failure, no failures, cross-group
+continuation, and active failure/amber. Calls deliberately disagree with collection, result-arrival and
+timestamp ordering.
 
 `TronChatChipCategoryColorUITests` renders one hosted transcript holding every chip category and
 compares each chip's rendered title ink with its category's contrast-safe palette in light and dark;

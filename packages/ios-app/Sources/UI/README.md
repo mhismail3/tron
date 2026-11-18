@@ -145,7 +145,7 @@ It is not a physical-device or notification-icon guarantee.
 
 Activity primary ink is checked against the rendered primary title/plus across all themes,
 light/dark, dashboard working dots and composer active/recent/extension states:
-`TronMobileUITests/TronActivityPrimaryColorUITests/testActivityInkFollowsPrimaryThemeLightAndDark`.
+`TronMobileViewTests/ActivityPrimaryColorViewTests/testActivityInkFollowsPrimaryThemeLightAndDark`.
 Wine glass hue, native ink contrast and unchanged light ink are checked through Home → Home
 Settings by `TronMobileUITests/TronBurgundyGlassUITests/testWineGlassKeepsInkReadableAndLightBurgundyUnchanged`.
 `TronNotificationInboxUITests/testSheetFollowsGatewayLiveWithoutOfflineRowOrPullToRefresh`
