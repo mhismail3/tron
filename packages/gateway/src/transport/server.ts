@@ -93,7 +93,7 @@ function diagnosticErrorDetails(error: unknown): { operationId?: string; ageMs?:
 }
 
 export const HTTP_REQUEST_IDLE_TIMEOUT_MS = 30_000;
-export const HTTP_HEADERS_TIMEOUT_MS = 15_000;
+const HTTP_HEADERS_TIMEOUT_MS = 15_000;
 const HTTP_REQUEST_TIMEOUT_MS = 300_000;
 const HTTP_SHUTDOWN_GRACE_MS = 1_000;
 const HTTP_MAXIMUM_CONNECTIONS = 128;
@@ -354,6 +354,7 @@ function helloCapabilities(value: unknown): ReadonlySet<string> {
 
 interface Connection {
   id: string;
+  admission: number;
   identity: string;
   isLocal: boolean;
   socket: WebSocket;
@@ -547,6 +548,7 @@ export class GatewayServer {
   private readonly localSockets: WebSocketServer;
   private readonly pairedSockets: WebSocketServer;
   private readonly clients = new Map<string, Connection>();
+  private connectionAdmissions = 0;
   private readonly httpSockets = new Set<Duplex>();
   private readonly pendingUpgrades = new Set<() => void>();
   private readonly httpConnectionsByAddress = new Map<string, number>();
@@ -558,6 +560,7 @@ export class GatewayServer {
   private lastHeartbeatAt = performance.now();
   private readonly stallSampler: StallSampler;
   private readonly disposableReadDeadlines: ReadonlyMap<string, number>;
+  private readonly listenerLimits: LanListenerLimits;
   private readonly resourceSampler: ResourceSampler;
   private readonly resourceTimer: NodeJS.Timeout;
   private resourceSampleInFlight = false;
@@ -597,6 +600,7 @@ export class GatewayServer {
       resourceSampler?: ResourceSampler;
       peerPathReader?: PeerPathReader;
       lanEndpoint?: LanEndpointConfig;
+      listenerLimits?: LanListenerLimits;
     },
   ) {
     this.stallSampler = options.stallSampler ?? new StallSampler();
@@ -613,7 +617,7 @@ export class GatewayServer {
       options.maximumHttpRequests,
       options.maximumHttpRequestsPerIdentity,
     );
-    const listenerLimits = HTTP_LISTENER_LIMITS;
+    const listenerLimits = this.listenerLimits = options.listenerLimits ?? HTTP_LISTENER_LIMITS;
     this.server = createServer(httpListenerOptions(listenerLimits), (request, response) => void this.handleHttp(request, response, this.primaryTransport));
     this.server.timeout = listenerLimits.idleTimeout;
     this.server.on("connection", (socket) => this.admitHttpConnection(socket, maximumHttpConnections, this.primaryTransport));
@@ -989,7 +993,7 @@ export class GatewayServer {
     const trace = this.adoptAcceptedSocketTrace(request.socket);
     if (trace) trace.handled = true;
     const readLifetime = new AbortController();
-    response.setTimeout(HTTP_REQUEST_IDLE_TIMEOUT_MS, () => { readLifetime.abort(); response.destroy(); });
+    response.setTimeout(this.listenerLimits.idleTimeout, () => { readLifetime.abort(); response.destroy(); });
     const address = request.socket.remoteAddress ?? "unknown";
     const transportLease = this.httpAdmission.admit(address, request.socket);
     if (!transportLease) {
@@ -1306,7 +1310,7 @@ export class GatewayServer {
     socket.once("end", retireForPeer);
     socket.once("error", retireForPeer);
     socket.once("close", retireForPeer);
-    const authenticationDeadline = setTimeout(() => retirePendingUpgrade("timeout"), HTTP_REQUEST_IDLE_TIMEOUT_MS);
+    const authenticationDeadline = setTimeout(() => retirePendingUpgrade("timeout"), this.listenerLimits.idleTimeout);
     authenticationDeadline.unref();
     const releasePendingUpgrade = (): void => {
       this.pendingUpgrades.delete(endPendingUpgradeAtShutdown);
@@ -1472,6 +1476,7 @@ export class GatewayServer {
     );
     connection = {
       id: randomUUID(),
+      admission: ++this.connectionAdmissions,
       identity,
       isLocal,
       socket,
@@ -1706,6 +1711,7 @@ export class GatewayServer {
     try {
       const context: ClientContext = {
         id: connection.id,
+        admission: connection.admission,
         identity: connection.identity,
         isLocal: connection.isLocal,
         signal: sessionOpenFlight?.controller.signal ?? requestController.signal,

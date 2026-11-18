@@ -1211,19 +1211,20 @@
             "additionalProperties": false,
             "properties": {
               "action": {
-                "description": "resolve: read current values and scopes. inventory: read-only hooks by event and extension, packages, Tron modules, configured MCP servers and custom model providers (id, base URL host, API, model ids) for this chat's directory (configured or disabled; nothing is started or probed; credentials masked). history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card. update (Tron Home only): install one exact npm version or full git commit SHA of one configured package behind the native install card; the card shows any configured pin change; never undoable.",
+                "description": "resolve: read current values and scopes. inventory: read-only hooks by event and extension, packages, Tron modules, configured MCP servers and custom model providers (id, base URL host, API, model ids) for this chat's directory (configured or disabled; nothing is started or probed; credentials masked). history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. applyAgain: restore the value Tron wrote that an outside edit replaced, by that outside change's changeId from history, under the same rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card. update (Tron Home only): install one exact npm version or full git commit SHA of one configured package behind the native install card; the card shows any configured pin change; never undoable.",
                 "enum": [
                   "resolve",
                   "change",
                   "history",
                   "undo",
+                  "applyAgain",
                   "inventory",
                   "update"
                 ],
                 "type": "string"
               },
               "changeId": {
-                "description": "undo (required): changeId from history.",
+                "description": "undo/applyAgain (required): changeId from history.",
                 "maxLength": 200,
                 "minLength": 1,
                 "type": "string"
@@ -1322,7 +1323,7 @@
                 "type": "integer"
               },
               "reason": {
-                "description": "change/undo (required): why, for the maintainer.",
+                "description": "change/undo/applyAgain (required): why, for the maintainer.",
                 "maxLength": 2000,
                 "minLength": 1,
                 "type": "string"
@@ -1917,19 +1918,20 @@
             "additionalProperties": false,
             "properties": {
               "action": {
-                "description": "resolve: read current values and scopes. inventory: read-only hooks by event and extension, packages, Tron modules, configured MCP servers and custom model providers (id, base URL host, API, model ids) for this chat's directory (configured or disabled; nothing is started or probed; credentials masked). history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card. update (Tron Home only): install one exact npm version or full git commit SHA of one configured package behind the native install card; the card shows any configured pin change; never undoable.",
+                "description": "resolve: read current values and scopes. inventory: read-only hooks by event and extension, packages, Tron modules, configured MCP servers and custom model providers (id, base URL host, API, model ids) for this chat's directory (configured or disabled; nothing is started or probed; credentials masked). history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. applyAgain: restore the value Tron wrote that an outside edit replaced, by that outside change's changeId from history, under the same rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card. update (Tron Home only): install one exact npm version or full git commit SHA of one configured package behind the native install card; the card shows any configured pin change; never undoable.",
                 "enum": [
                   "resolve",
                   "change",
                   "history",
                   "undo",
+                  "applyAgain",
                   "inventory",
                   "update"
                 ],
                 "type": "string"
               },
               "changeId": {
-                "description": "undo (required): changeId from history.",
+                "description": "undo/applyAgain (required): changeId from history.",
                 "maxLength": 200,
                 "minLength": 1,
                 "type": "string"
@@ -2028,7 +2030,7 @@
                 "type": "integer"
               },
               "reason": {
-                "description": "change/undo (required): why, for the maintainer.",
+                "description": "change/undo/applyAgain (required): why, for the maintainer.",
                 "maxLength": 2000,
                 "minLength": 1,
                 "type": "string"

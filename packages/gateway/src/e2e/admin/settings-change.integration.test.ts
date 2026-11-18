@@ -992,6 +992,25 @@ describe("outside changes", () => {
   const outsideEntries = async (f: Awaited<ReturnType<typeof fixture>>) => (await f.history()).filter(entry => entry.status === "outside");
   const label = (r: Row, text: string) => r.badges.find(badge => badge.label === text);
 
+  caseIt("Home's settings tool applies again the value Tron wrote after an outside edit replaced it", async owner => {
+    const f = await fixture(owner);
+    await row(f, { kind: "global" }, "run.retry.maxRetries");
+    await f.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 6 }]);
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...await f.macDocument(), retry: { maxRetries: 9 } }));
+    expect((await row(f, { kind: "global" }, "run.retry.maxRetries")).value).toBe(9);
+    const outside = (await outsideEntries(f)).find(entry => entry.key === "run.retry.maxRetries")!;
+    const tools: Array<{ execute: (...args: unknown[]) => Promise<{ details: { status: string } }> }> = [];
+    const actor = { kind: "home" as const, id: "home-session", sessionId: "home-session" };
+    createTronSettingsExtension(() => ({
+      applyAgain: (changeId, input) => f.settingsChanges.applyAgain(changeId, { actor: { ...actor, toolCallId: input.toolCallId }, reason: input.reason }),
+    }) as never, async () => undefined)({ registerTool: tool => { tools.push(tool as never); } } as never);
+    const result = await tools[0]!.execute("apply-again", { action: "applyAgain", changeId: outside.changeId, reason: "Maintainer wants Tron's value back" },
+      new AbortController().signal, () => {}, { hasUI: true });
+    expect(result.details).toMatchObject({ status: "applied" });
+    expect((await f.macDocument()).retry).toEqual({ maxRetries: 6 });
+    expect((await f.history())[0]).toMatchObject({ applyAgainOf: outside.changeId, after: 6, actor: { kind: "home" } });
+  });
+
   caseIt("records one outside entry per hand-edited Global key, never Tron's own write, and catches rename-replace", async owner => {
     const f = await fixture(owner);
     await row(f, { kind: "global" }, "run.retry.maxRetries");

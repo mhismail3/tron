@@ -1026,10 +1026,6 @@ private actor HostedHomeShellGateway {
         var scope: [String: JSONValue] = ["id": .string("scope-one"), "kind": .string("all-trusted-projects"),
             "active": .bool(!scopeRevoked), "restoreEpoch": .string("fixture-epoch"), "createdAt": .number(1000)]
         if scopeRevoked { scope["revokedAt"] = .number(2000) }
-        if HostedLaunch.arguments.contains("-home-permissions-empty") {
-            return .object(["revision": .number(1), "needsReconfirmation": .bool(false), "scopes": .array([.object(scope)]),
-                            "requests": .array([]), "decisions": .array([]), "grants": .array([])])
-        }
         return .object(["revision": .number(Double(controlCount + 1)), "scopes": .array([.object(scope)]),
             "needsReconfirmation": .bool(HostedLaunch.arguments.contains("-home-permissions-restored") && !scopeRevoked && controlCount == 0),
             "requests": .array(ids.map { .object(["id": .string($0), "request": binding]) }), "decisions": .array(decisions), "grants": .array([.object(grant)])])

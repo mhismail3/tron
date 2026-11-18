@@ -62,21 +62,6 @@ import UIKit
         app.terminate()
     }
 
-    func testWorkspacePathNeverIntersectsStatusPills() {
-        for extra in [[], ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]] {
-            let app = launch("workspace", extra: extra)
-            let path = app.staticTexts[root].firstMatch
-            XCTAssertTrue(path.waitForExistence(timeout: 8), app.debugDescription)
-            for label in ["b8d31a1d", "Clean", "Detached HEAD"] {
-                let pill = app.staticTexts[label].firstMatch
-                XCTAssertTrue(pill.waitForExistence(timeout: 8), app.debugDescription)
-                XCTAssertFalse(path.frame.intersects(pill.frame), "Workspace path \(path.frame) overlaps \(label) \(pill.frame)")
-            }
-            attach(app.screenshot(), "workspace-no-overlap-\(extra.isEmpty ? "standard" : "accessibility")")
-            app.terminate()
-        }
-    }
-
     func testWorkspaceNarrowAndAccessibilitySizesDoNotOverlapPath() {
         let largest = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         for extra in [["-six-ui-narrow"], ["-six-ui-narrow"] + largest,

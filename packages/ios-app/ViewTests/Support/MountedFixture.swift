@@ -15,6 +15,7 @@ final class MountedFixture {
     private let host: UIHostingController<AnyView>
     private let savedArguments: [String]
     private let savedTheme: ThemeColor
+    private let savedFilter: DashboardServerFilterState
 
     init(_ arguments: [String], theme: ThemeColor = .emerald,
          contentSize: UIContentSizeCategory = .large) throws {
@@ -27,7 +28,9 @@ final class MountedFixture {
         savedTheme = AppearanceSettings.shared.themeColor
         HostedLaunch.arguments = ["TronMobile"] + arguments
         AppearanceSettings.shared.themeColor = theme
+        savedFilter = AppLocalBehaviorSettings.shared.dashboardFilter
         HostedFixtureRoot.prepareLaunch()
+        AppLocalBehaviorSettings.shared.dashboardFilter = DashboardServerFilterPreferences.load()
         host = UIHostingController(rootView: AnyView(HostedFixtureRoot(hostedModel: AppModel())
             .environment(\.scenePhase, .active)
             .transaction { $0.animation = nil; $0.disablesAnimations = true }))
@@ -45,6 +48,7 @@ final class MountedFixture {
         window.rootViewController = nil
         HostedLaunch.arguments = savedArguments
         AppearanceSettings.shared.themeColor = savedTheme
+        AppLocalBehaviorSettings.shared.dashboardFilter = savedFilter
         UIView.setAnimationsEnabled(true)
     }
 
@@ -64,7 +68,9 @@ final class MountedFixture {
     }
 
     private static func animating(_ layer: CALayer) -> Bool {
-        if layer.animationKeys()?.contains(where: { layer.animation(forKey: $0)?.duration.isFinite == true }) == true { return true }
+        if layer.animationKeys()?.contains(where: { key in
+            layer.animation(forKey: key).map { $0.duration.isFinite && $0.repeatCount < .greatestFiniteMagnitude } == true
+        }) == true { return true }
         return layer.sublayers?.contains(where: animating) ?? false
     }
 
@@ -147,7 +153,7 @@ final class MountedFixture {
         }
     }
 
-    func ink(_ area: CGRect, image: UIImage? = nil) -> [Double]? {
+    func pixels(_ area: CGRect, image: UIImage? = nil) -> [[Double]]? {
         let bounds = area.integral
         let image = image ?? render(bounds)
         let local = image.size == window.bounds.size ? area : area.offsetBy(dx: -bounds.minX, dy: -bounds.minY)
@@ -155,19 +161,39 @@ final class MountedFixture {
         let scale = CGFloat(source.width) / image.size.width
         guard let crop = source.cropping(to: local.applying(CGAffineTransform(scaleX: scale, y: scale))) else { return nil }
         let width = crop.width, height = crop.height
-        var pixels = [UInt8](repeating: 0, count: width * height * 4)
-        guard let context = CGContext(data: &pixels, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
-                                      space: CGColorSpaceCreateDeviceRGB(),
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        guard let context = CGContext(data: &bytes, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
         context.draw(crop, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return stride(from: 0, to: bytes.count, by: 4).map { [Double(bytes[$0]), Double(bytes[$0 + 1]), Double(bytes[$0 + 2])] }
+    }
+
+    func ink(_ area: CGRect, image: UIImage? = nil) -> [Double]? {
+        guard let pixels = pixels(area, image: image) else { return nil }
         var sum = [0.0, 0.0, 0.0], count = 0.0
-        for index in stride(from: 0, to: pixels.count, by: 4) {
-            let rgb = [Int(pixels[index]), Int(pixels[index + 1]), Int(pixels[index + 2])]
-            guard rgb.max()! - rgb.min()! > 60 else { continue }
-            for channel in 0..<3 { sum[channel] += Double(rgb[channel]) / 255 }
+        for rgb in pixels where rgb.max()! - rgb.min()! > 60 {
+            for channel in 0..<3 { sum[channel] += rgb[channel] / 255 }
             count += 1
         }
         return count > 10 ? sum.map { $0 / count } : nil
+    }
+
+    func chroma(_ area: CGRect, range minimum: Double, image: UIImage? = nil) -> (ink: [Double], count: Int)? {
+        guard let pixels = pixels(area, image: image) else { return nil }
+        var sum = [0.0, 0.0, 0.0], count = 0
+        for rgb in pixels {
+            let low = rgb.min()!, range = rgb.max()! - low
+            guard range >= minimum else { continue }
+            for channel in 0..<3 { sum[channel] += (rgb[channel] - low) / range }
+            count += 1
+        }
+        return count > 0 ? (sum.map { $0 / Double(count) }, count) : nil
+    }
+
+    func labelled(_ prefix: String) -> NSObject? {
+        Self.elements(in: top).last {
+            $0.isAccessibilityElement && $0.accessibilityTraits.contains(.button) && $0.accessibilityLabel?.hasPrefix(prefix) == true
+        }
     }
 
     func animations() -> [String] {
@@ -183,11 +209,15 @@ final class MountedFixture {
     }
 
     func inked(_ what: String, _ area: () -> CGRect?) async throws -> [Double] {
+        try await still(what) { area().flatMap { ink($0) } }
+    }
+
+    func still(_ what: String, _ sample: () -> [Double]?) async throws -> [Double] {
         var previous: [Double]?
         var found: [Double]?
         try await until("\(what) is drawn and still") {
             previous = found
-            found = area().flatMap { ink($0) }
+            found = sample()
             guard let found, let previous else { return false }
             return zip(found, previous).allSatisfy { abs($0 - $1) < 0.002 }
         }

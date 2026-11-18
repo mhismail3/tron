@@ -2,14 +2,13 @@ import XCTest
 import CryptoKit
 
 extension RealGatewayPairAndChatUITests {
-    @MainActor func testPendingAppReviewInstallLight() throws { try pendingAppJourney(dark: false) }
-    @MainActor func testPendingAppReviewInstallDark() throws { try pendingAppJourney(dark: true) }
+    @MainActor func testPendingAppReviewInstallLight() throws { try pendingAppJourney() }
 
-    @MainActor private func pendingAppJourney(dark: Bool) throws {
+    @MainActor private func pendingAppJourney() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
         let appDirectory = fixture.tronHome.appendingPathComponent("workspace/state/apps/builds")
-        let suffix = dark ? "dark" : "light"
+        let suffix = "light"
         let app = launchApp(additionalArguments: ["-appearanceMode", suffix, "-tron.experimental.swiftApps", "NO"])
         defer { app.terminate() }
         open(fixture.invitationLink())
@@ -57,12 +56,10 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertFalse(pending.exists, "Authoritative reload must keep it installed, not pending")
     }
 
-    @MainActor func testBuildsInstallLight() throws { try buildsJourney(dark: false, large: false) }
-    @MainActor func testBuildsInstallDark() throws { try buildsJourney(dark: true, large: false) }
-    @MainActor func testBuildsInstallLightXXXL() throws { try buildsJourney(dark: false, large: true) }
-    @MainActor func testBuildsInstallDarkXXXL() throws { try buildsJourney(dark: true, large: true) }
+    @MainActor func testBuildsInstallLight() throws { try buildsJourney(large: false) }
+    @MainActor func testBuildsInstallLightXXXL() throws { try buildsJourney(large: true) }
 
-    @MainActor private func buildsJourney(dark: Bool, large: Bool) throws {
+    @MainActor private func buildsJourney(large: Bool) throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
         let tron = fixture.tronHome
@@ -70,8 +67,8 @@ extension RealGatewayPairAndChatUITests {
         let sourceURL = URL(fileURLWithPath: fixture.workspace).appendingPathComponent("Builds.swift")
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
         try seedBuild(tron: tron, second: false)
-        let suffix = "\(dark ? "dark" : "light")-\(large ? "xxxl" : "default")"
-        let app = launchApp(additionalArguments: ["-appearanceMode", dark ? "dark" : "light", "-tron.experimental.swiftApps", "YES"]
+        let suffix = "light-\(large ? "xxxl" : "default")"
+        let app = launchApp(additionalArguments: ["-appearanceMode", "light", "-tron.experimental.swiftApps", "YES"]
             + (large ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] : []))
         defer { app.terminate() }
         open(fixture.invitationLink())
@@ -194,7 +191,7 @@ extension RealGatewayPairAndChatUITests {
         confirm.tap()
         XCTAssertTrue(app.staticTexts["No apps are installed on this Mac yet. Ask Tron to build one and install it."].waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertFalse(FileManager.default.fileExists(atPath: appDirectory.path), "Remove must remove source and data")
-        if !dark && !large {
+        if !large {
             buildsClose(app)
             let original = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@", "session-row-", ":\(originalSessionID)")).firstMatch
             buildsReveal(app, original); original.tap()

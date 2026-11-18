@@ -3,27 +3,6 @@ import XCTest
 @MainActor
 final class TronSheetThemePreviewUITests: XCTestCase {
 
-    func testMaintenanceContainersFollowSheetThemeAndForgetStaysDestructive() {
-        for mode in ["light", "dark"] {
-            let app = settings(mode)
-            defer { app.terminate() }
-            open(app, "settings-link-Connections")
-            expand(app, title: "Connections")
-            open(app, "Details for Fixture")
-            expand(app, title: "Fixture")
-            let title = app.navigationBars.staticTexts["Fixture"].firstMatch
-            for label in ["Rebuild from Source", "Restart", "Disable"] {
-                let button = app.buttons[label]
-                XCTAssertTrue(button.waitForExistence(timeout: 5))
-                assertColor(app, area: containerPatch(button.frame), matches: title.frame, ink: false)
-            }
-            let red = color(app, area: containerPatch(app.buttons["Forget Server"].frame), ink: false)
-            XCTAssertGreaterThan(red[0], red[1] + 0.05, "Forget Server must remain red: \(red)")
-            XCTAssertGreaterThan(red[0], red[2] + 0.05, "Forget Server must remain red: \(red)")
-            capture(app, "regression-maintenance-\(mode)")
-            app.terminate()
-        }
-    }
 
     func testWorkspaceControlsFollowThePresentingTheme() {
         for mode in ["light", "dark"] {

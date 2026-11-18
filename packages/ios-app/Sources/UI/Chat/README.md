@@ -145,8 +145,9 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   breakdown and first/last times; native disclosures reveal each occurrence's metadata and
   selectable `ToolDetailCodeBlock` JSON (or verbatim text). Long payload cards use the shared
   static-surface policy instead of a tall backdrop filter.
-- **Error presentation.** `TronChatProviderErrorStyleUITests` captures actual hosted ChatView
-  error pills and native sheets in both appearances for visual review.
+- **Error presentation.** `TronMobileViewTests/ChatProviderErrorStyleViewTests` checks that hosted
+  ChatView error pills stay centred in both appearances; `TronChatProviderErrorStyleUITests` keeps the
+  standard error sheet's payload selectable (light).
 - **Haptics.** Live events only, through `TronHaptics`; `ChatLiveHapticLedger` tells live from restored.
 - **Extension interactions.** The mounted route is the sole sheet owner and presents pending
   interactions only after the first ready frame. Forms (one to four questions) keep a device-local
@@ -251,10 +252,10 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
 
 ## Verify
 
-`TronToolSummaryTintUITests` renders canonical transcript DTOs through mounted ChatView and samples
-native title ink: recovered (count retained), latest failure, no failures, cross-group continuation,
-and active failure/amber. Calls deliberately disagree with collection, result-arrival and timestamp
-ordering. Its capture-only method provides light/dark visual review, not behavioral acceptance.
+`TronMobileViewTests/ToolSummaryTintViewTests` renders canonical transcript DTOs through mounted ChatView
+in-process and samples title ink: recovered (count retained), latest failure, no failures, cross-group
+continuation, and active failure/amber. Calls deliberately disagree with collection, result-arrival and
+timestamp ordering.
 
 `TronChatChipCategoryColorUITests` renders one hosted transcript holding every chip category and
 compares each chip's rendered title ink with its category's contrast-safe palette in light and dark;
@@ -293,8 +294,7 @@ Classes under `TronMobileUITests/`: `TronHomeControlsUITests`, `TronHomeDashboar
 Workspace cover/uncover, Manage model writes and scoped Settings routes),
 `TronSubsheetReliabilityUITests` (fresh Profile item and Chapter first taps, reopen/foreground,
 Canonical transcript medium→large and fresh medium reset, shared presenter lifecycle/haptics),
-`TronDashboardHomeButtonUITests`, `TronSharedPrimaryAccentsUITests` (native usage, attributed
-source badges and history ink across primary themes in light/dark), `TronNewSessionUITests`, `TronSubagentParityUITests`,
+`TronDashboardHomeButtonUITests`, `TronNewSessionUITests`, `TronSubagentParityUITests`,
 `TronToolSheetsPolishUITests`, `TronChatDisplayStripUITests`, `TronChatAnnotationUITests`,
 `TronComposerUploadUITests`, `TronChatHapticsUITests`, `TronReadonlyAttachmentUITests`, `TronCameraCaptureUITests`,
 `TronSessionRowClockUITests`, and the Home, Manage Session and Ask User journeys in

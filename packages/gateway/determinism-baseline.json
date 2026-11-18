@@ -166,8 +166,8 @@
       "timeout-literal": 1
     },
     "src/e2e/modules/home/home-wake.e2e.test.ts": {
-      "sleep": 3,
-      "timeout-literal": 17
+      "sleep": 2,
+      "timeout-literal": 16
     },
     "src/e2e/modules/home/home.lock.integration.test.ts": {
       "timeout-literal": 1
@@ -365,8 +365,7 @@
       "timeout-literal": 1
     },
     "src/transport/lan-endpoint.integration.test.ts": {
-      "sleep": 4,
-      "timeout-literal": 1
+      "sleep": 4
     },
     "src/transport/openai-model-eligibility.integration.test.ts": {
       "sleep": 1
@@ -383,10 +382,6 @@
     },
     "src/transport/server-http-admission.integration.test.ts": {
       "wall-clock-expect": 1
-    },
-    "src/transport/server-http-lifecycle.integration.test.ts": {
-      "sleep": 1,
-      "timeout-literal": 2
     },
     "src/transport/sync-protocol.integration.test.ts": {
       "sleep": 5

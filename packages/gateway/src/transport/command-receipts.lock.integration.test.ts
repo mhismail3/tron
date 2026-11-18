@@ -18,6 +18,7 @@ const RECEIPT_FILE: Record<string, string> = {
   "prompt-0001|session.prompt": "buU3IMhRdft8xqINjbscedLiCLkHW0gG12WtgtxnSug",
   "export-0001|session.export": "DNQlhl9Bw3qgcIniS_W21v6KJI5gMe5vnK6GmCe__FQ",
   "editor-0001|extension.editor.update": "je0FSFERaKJTKu7TJlzhN9WEBUi8lTxKKKeMJIpFutw",
+  "logs-0001|client.logs.append": "gpkKr43WKDpiY_gZwuhkAQFf8ejvtVqOtBL_N8S_wUM",
   "fill-0001|session.rename": "_n163GzFvRszO2dm5FAAerVEwzwUPleDYubLByHwIFE",
   "fill-0003|session.rename": "X4I8Ae1_MGb8uAIOhZNimhqbPwKKLcCZ-kEaToSOZKw",
   "bytes-0002|session.rename": "f4KMxAISjfqbRmINkc8QHg65UpEFlTZ-cbTuPjmHX40",
@@ -139,6 +140,10 @@ it("command-receipt-paths: execute, replay, fence, bound, prune and dispose", as
   const editor = fileOf("editor-0001|extension.editor.update");
   expected[editor] = receiptDocument("editor-0001", "extension.editor.update", "completed", T(0), { result: { saved: true } });
   await holds("an editor update");
+  expect(await store.execute(phone, "client.logs.append", "logs-0001", h.run({ bootId: "boot-0001", sequence: 1 })), "a device log batch").toEqual({ bootId: "boot-0001", sequence: 1 });
+  const logs = fileOf("logs-0001|client.logs.append");
+  expected[logs] = receiptDocument("logs-0001", "client.logs.append", "completed", T(0), { result: { bootId: "boot-0001", sequence: 1 } });
+  await holds("a device log batch");
   await mkdir(h.directory, { recursive: true });
   const crashTemporary = `${"A".repeat(43)}.json.123.0123456789ab.tmp`;
   await writeFile(join(h.directory, crashTemporary), "{");
@@ -147,8 +152,9 @@ it("command-receipt-paths: execute, replay, fence, bound, prune and dispose", as
   h.advance(11 * 60_000);
   await store.prune();
   delete expected[editor];
+  delete expected[logs];
   delete expected[crashTemporary];
-  await holds("prune after eleven minutes drops the editor update and the crash temporary");
+  await holds("prune after eleven minutes drops the editor update, the device log batch and the crash temporary");
   h.advance(24 * 60 * 60_000);
   await store.prune();
   expected = { [fileOf("fork-0001|session.fork")]: expected[fileOf("fork-0001|session.fork")], [fileOf("export-0001|session.export")]: expected[fileOf("export-0001|session.export")] };
@@ -220,7 +226,7 @@ it("command-receipt-paths: execute, replay, fence, bound, prune and dispose", as
   expect(await outcome(() => h.counted(() => store.execute(phone, "session.rename", "broken-0001", h.run({})))), "execute over a malformed receipt is refused")
     .toEqual(fenced("Idempotency receipt is malformed or oversized; refresh authoritative state instead of replaying"));
   await holds("without writing");
-  expect(h.calls(), "without running: operations run so far").toBe(13);
+  expect(h.calls(), "without running: operations run so far").toBe(14);
   await store.dispose();
   expect(await outcome(() => store.execute(phone, "session.rename", "late-0001", h.run({}))), "a disposed store refuses work")
     .toEqual({ refused: "Command receipt store is shutting down", code: "conflict", retryable: true, details: null });
