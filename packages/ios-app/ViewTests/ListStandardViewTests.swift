@@ -60,4 +60,29 @@ final class ListStandardViewTests: ShuffledTestCase {
             XCTAssertTrue(first.contains(row.accessibilityFrame.insetBy(dx: 1, dy: 1)), "The first row is inside the first container")
         }
     }
+
+    func testInstructionRowsCarryTagsOnTitleLineAndCentreEntryIcons() async throws {
+        try await mounted(["-tron-agent-instructions-fixture"]) { app in
+            var row: NSObject?
+            try await app.until("the tools row and its tags") {
+                row = button(app, "agent-instructions-section-tools")
+                return row != nil && app.element("agent-instructions-section-tools-tags") != nil
+            }
+            let rowFrame = row!.accessibilityFrame, tags = app.element("agent-instructions-section-tools-tags")!.accessibilityFrame
+            XCTAssertLessThan(tags.minY - rowFrame.minY, 20, "The tags are on the title line")
+            XCTAssertGreaterThan(tags.maxX, rowFrame.maxX - 24, "The tags are at the trailing edge")
+            XCTAssertTrue(row!.accessibilityActivate())
+            try await app.until("the entry and its icon") {
+                app.element("agent-instructions-entry-tools.1") != nil && app.element("agent-instructions-entry-tools.1-leading") != nil
+            }
+            let entry = app.element("agent-instructions-entry-tools.1")!.accessibilityFrame
+            let icon = app.element("agent-instructions-entry-tools.1-leading")!.accessibilityFrame
+            XCTAssertGreaterThan(entry.height, 3 * icon.height, "The entry's description wraps")
+            XCTAssertEqual(icon.midY, entry.midY, accuracy: 2, "The icon is centred vertically in the row")
+        }
+    }
+
+    private func button(_ app: MountedFixture, _ id: String) -> NSObject? {
+        MountedFixture.elements(in: app.top).last { MountedFixture.identifier($0) == id && $0.accessibilityTraits.contains(.button) }
+    }
 }
