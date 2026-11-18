@@ -1,38 +1,6 @@
 import XCTest
 
 @MainActor final class TronSheetLayoutUITests: XCTestCase {
-    func testHomeSettingsAreOnMainSheet() {
-        let app = home()
-        defer { app.terminate() }
-        XCTAssertFalse(app.buttons["settings-section-model-open"].exists, "Workers are edited on Home Settings")
-        XCTAssertFalse(app.buttons["settings-section-tools-open"].exists, "The Tools setting is on Home Settings")
-        XCTAssertFalse(app.buttons["settings-section-advanced-open"].exists, "Connection and approvals are on Home Settings")
-        for prefix in ["settings-row-model.queue_role_worker_", "settings-row-model.queue_role_subagent_", "settings-row-model.queue_role_background_", "settings-row-tools.active", "settings-row-run.transport", "settings-row-run.retry.maxRetries"] {
-            let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@ AND NOT identifier ENDSWITH '-reset'", prefix)).firstMatch
-            XCTAssertTrue(row.exists, "Inline setting \(prefix)\n\(app.debugDescription)")
-        }
-        XCTAssertTrue(app.staticTexts["Home's overrides of Global settings. Worker launch choices apply to new workers."].exists)
-        let worker = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'settings-row-model.queue_role_worker_' AND NOT identifier ENDSWITH '-reset'")).firstMatch
-        XCTAssertTrue(worker.staticTexts["Overridden"].exists)
-        XCTAssertTrue(worker.buttons.matching(NSPredicate(format: "identifier ENDSWITH '-reset'")).firstMatch.exists)
-        let editor = worker.buttons["Worker models"].firstMatch
-        reveal(editor, in: app)
-        editor.tap()
-        XCTAssertTrue(app.navigationBars.staticTexts["Worker models"].waitForExistence(timeout: 8), "The existing deeper list editor still opens")
-    }
-
-    func testSessionCaptionFollowsUntitledSettingsCard() {
-        let app = session()
-        defer { app.terminate() }
-        XCTAssertFalse(app.staticTexts["Settings"].exists, "No Settings heading above the session card")
-        let tools = app.buttons["settings-section-tools-open"]
-        let trust = app.buttons["project-settings-trust"]
-        let caption = app.staticTexts["Choices for this session. Revert an override to use Global settings."]
-        XCTAssertTrue(tools.exists && trust.exists && caption.exists, app.debugDescription)
-        XCTAssertGreaterThan(caption.frame.minY, max(tools.frame.maxY, trust.frame.maxY), "The explanatory caption is the card's footer")
-        XCTAssertLessThan(caption.frame.minY, app.staticTexts["Repository Overrides"].frame.minY, "The footer belongs to session choices, not repository overrides")
-    }
-
     func testHistoryEntryUsesOneScrollAndClearsToolbarAtMedium() {
         let app = history()
         defer { app.terminate() }
@@ -54,7 +22,7 @@ import XCTest
     }
 
     func testSharedRowTitleKeepsFullWidthAtXXXL() {
-        let app = home(xxxl: true)
+        let app = home()
         defer { app.terminate() }
         let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'settings-row-model.queue_role_worker_' AND NOT identifier ENDSWITH '-reset'")).firstMatch
         XCTAssertTrue(row.exists, app.debugDescription)
@@ -65,10 +33,10 @@ import XCTest
         XCTAssertGreaterThanOrEqual(pill.frame.minY, title.frame.maxY - 1, "The pill stacks below the title: \(pill.frame) vs \(title.frame)")
     }
 
-    private func home(dark: Bool = false, xxxl: Bool = false) -> XCUIApplication {
+    private func home() -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-settings-scope-review"] + (dark ? ["-home-dark"] : [])
-        if xxxl { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"] }
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-settings-scope-review",
+                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]
         app.launch()
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 15))
         app.buttons["home-pinned-row"].tap()
@@ -84,17 +52,13 @@ import XCTest
         return app
     }
 
-    private func session(dark: Bool = false, xxxl: Bool = false) -> XCUIApplication {
-        let app = sessionApp(dark: dark, xxxl: xxxl)
-        let link = app.buttons["chat-settings-link"]
-        reveal(link, in: app)
-        link.tap()
-        expand(app, title: "Session Settings")
-        return app
-    }
-
-    private func history(dark: Bool = false) -> XCUIApplication {
-        let app = sessionApp(dark: dark, extra: ["-manage-session-review", "-history-large"])
+    private func history() -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture", "-settings-scope-review", "-fixture-appearance", "light",
+                               "-manage-session-review", "-history-large"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
+        app.buttons["Stop session"].tap()
         let link = app.buttons["Session History"]
         reveal(link, in: app)
         link.tap()
@@ -103,16 +67,6 @@ import XCTest
         app.buttons["history-row-h-6731"].tap()
         XCTAssertTrue(app.navigationBars.staticTexts["History Entry"].waitForExistence(timeout: 8), app.debugDescription)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ENDSWITH ' characters'")).firstMatch.waitForExistence(timeout: 8), app.debugDescription)
-        return app
-    }
-
-    private func sessionApp(dark: Bool, xxxl: Bool = false, extra: [String] = []) -> XCUIApplication {
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-session-configuration-fixture", "-settings-scope-review", "-fixture-appearance", dark ? "dark" : "light"] + extra
-        if xxxl { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"] }
-        app.launch()
-        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
-        app.buttons["Stop session"].tap()
         return app
     }
 

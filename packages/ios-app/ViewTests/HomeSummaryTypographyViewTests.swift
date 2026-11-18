@@ -18,7 +18,6 @@ final class HomeSummaryTypographyViewTests: ShuffledTestCase {
                 XCTAssertEqual(actual.accessibilityLabel, reference.accessibilityLabel, "Compare the same rendered stats, not unrelated text")
                 let a = actual.accessibilityFrame, r = reference.accessibilityFrame
                 let observed = "\(largeType ? "xxxLarge" : "large"): stats=\(a), code reference=\(r)"
-                print("Home stats typography: \(observed)")
                 XCTAssertEqual(a.width, r.width, accuracy: 0.5, "Stats must use shared code glyph advances; \(observed)")
                 XCTAssertEqual(a.height, r.height, accuracy: 0.5, "Stats must use shared code line metrics; \(observed)")
                 heights.append(a.height)
