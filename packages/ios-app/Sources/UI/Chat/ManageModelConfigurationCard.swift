@@ -7,7 +7,6 @@ struct ManageModelConfigurationCard: View {
     var home = false
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var activity
-    @PresentationState private var sliderPresentation = ConfigurationSliderPresentation()
     @PresentationState private var changing = false
     @PresentationState private var error: String?
     @PresentationState private var pending: PendingReview?
@@ -56,7 +55,6 @@ struct ManageModelConfigurationCard: View {
         .environment(\.tronPresentationDependencyRead, PresentationDependencyRead(
             id: .init(target: target, freshness: model.settingsFreshness),
             perform: { try? await model.refreshSettingsSnapshot(for: target) }))
-        .tronConfigurationSliderHost(sliderPresentation)
         .tronManagedSheet(item: $pending, identity: { "manage.model.review.\($0.id)" }) { item in
             ChangeReviewSheet(review: item.review, approve: {
                 guard pending?.id == item.id else { return }
@@ -100,13 +98,7 @@ struct ManageModelConfigurationCard: View {
     private func choiceOptions(for setting: ResolvedSetting) -> [SettingsOption] {
         switch setting.key {
         case "model.thinking[role=chat]":
-            let session = model.sessionContextPresentation(for: sessionID)?.availableThinkingLevels ?? []
-            let reasoning = ref?.value?.objectValue.flatMap { value in
-                model.providerCatalog(for: catalogTarget)?.models.first {
-                    $0.provider == value["provider"]?.stringValue && $0.id == value["id"]?.stringValue
-                }?.reasoning
-            } == true
-            return (session.isEmpty && reasoning ? ["off", "low", "medium", "high"] : session).map {
+            return (model.sessionContextPresentation(for: sessionID)?.availableThinkingLevels ?? []).map {
                 SettingsOption(value: .string($0), label: ThinkingLevelPresentation.title($0), detail: nil, disabledReason: nil, resource: nil)
             }
         default:
@@ -122,7 +114,6 @@ struct ManageModelConfigurationCard: View {
             } else {
                 SettingsChoiceSelectionRow(title: title, icon: icon, value: setting.value ?? .null, display: setting.display,
                                            options: options, onChange: { change(setting, $0) })
-                    .environment(\.configurationSliderPresentation, sliderPresentation)
             }
             if setting.overridden == true && setting.projectSetting == nil { resetButton(setting).padding(.trailing, 12) }
         }
