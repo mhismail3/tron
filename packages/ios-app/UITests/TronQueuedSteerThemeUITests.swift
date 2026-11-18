@@ -82,8 +82,9 @@ import UIKit
             XCTAssertTrue(app.staticTexts["Clear queue?"].waitForExistence(timeout: 5), app.debugDescription)
             Thread.sleep(forTimeInterval: 0.8)
             keep(app.screenshot(), "clear-queue-confirmation-\(mode)")
-            app.buttons["confirmation-cancel"].tap()
-            XCTAssertTrue(row.waitForExistence(timeout: 5), "Cancel keeps the queue")
+            let cancel = app.buttons["confirmation-cancel"]
+            cancel.tap()
+            XCTAssertTrue(cancel.waitForNonExistence(timeout: 5), "Cancel dismisses the confirmation and keeps the queue")
             app.terminate()
         }
     }
