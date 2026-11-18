@@ -4,28 +4,6 @@ import UIKit
 @MainActor final class TronSixSmallUIRegressionTests: XCTestCase {
     private let root = "/Users/fixture/Workspace/tron-worktrees/six-small-ui-fixes"
 
-    func testHomeSettingsOrder() {
-        for mode in ["light", "dark"] {
-            let app = launch("home", mode: mode)
-            let headings = ["Workers & delegation", "Tools", "Connection"].map { app.staticTexts[$0].firstMatch }
-            for heading in headings { XCTAssertTrue(heading.waitForExistence(timeout: 8), app.debugDescription) }
-            XCTAssertLessThan(headings[0].frame.minY, headings[1].frame.minY)
-            XCTAssertLessThan(headings[1].frame.minY, headings[2].frame.minY)
-            XCTAssertFalse(app.buttons["settings-section-model-open"].exists)
-            XCTAssertFalse(app.buttons["settings-section-tools-open"].exists)
-            XCTAssertFalse(app.buttons["settings-section-advanced-open"].exists)
-            app.terminate()
-        }
-    }
-
-    func testSessionSettingsOrder() {
-        for mode in ["light", "dark"] {
-            let app = launch("session", mode: mode)
-            ordered(app, ["Compaction", "Tools", "Project Trust", "More Settings"])
-            app.terminate()
-        }
-    }
-
     func testToastGlyphUsesActivePrimary() {
         for mode in ["light", "dark"] {
             let app = launch("toast", mode: mode)
@@ -67,19 +45,6 @@ import UIKit
         pro.tap()
         XCTAssertEqual(pro.value as? String, "Selected")
         XCTAssertTrue(app.navigationBars.staticTexts["Models"].exists, "Selection must not dismiss the picker")
-        app.terminate()
-    }
-
-    func testModelRowUsesSharedSubtextAndMonospacedID() {
-        let app = launch("models", extra: ["-six-ui-typography"])
-        for slot in ["subtext", "metadata"] {
-            let actual = app.descendants(matching: .any)["model-picker-row-opencode-go/deepseek-v4-pro-\(slot)"].firstMatch
-            let reference = app.descendants(matching: .any)["six-ui-row-reference-\(slot)"].firstMatch
-            XCTAssertTrue(actual.waitForExistence(timeout: 8), app.debugDescription)
-            XCTAssertTrue(reference.exists)
-            XCTAssertEqual(actual.frame.height, reference.frame.height, accuracy: 0.5, "Catalog \(slot) must use the shared row's type metrics")
-            XCTAssertEqual(actual.frame.width, reference.frame.width, accuracy: 0.5, "ID glyph advances must match the shared monospaced reference")
-        }
         app.terminate()
     }
 
@@ -137,17 +102,6 @@ import UIKit
             }
             app.terminate()
         }
-    }
-
-    private func ordered(_ app: XCUIApplication, _ titles: [String]) {
-        var previous: XCUIElement?
-        for title in titles {
-            let row = app.buttons[title].firstMatch
-            XCTAssertTrue(row.waitForExistence(timeout: 8), app.debugDescription)
-            if let previous { XCTAssertLessThan(previous.frame.midY, row.frame.midY, "\(previous.label) must precede \(title)") }
-            previous = row
-        }
-        attach(app.screenshot(), "settings-order")
     }
 
     private func launch(_ surface: String, mode: String = "light", extra: [String] = []) -> XCUIApplication {
