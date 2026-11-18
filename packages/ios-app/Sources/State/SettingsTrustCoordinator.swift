@@ -104,28 +104,15 @@ final class SettingsTrustCoordinator {
         settingsInvalidationGeneration &+= 1
     }
 
-    func applySettingsChangeAgain(_ changeID: String) async throws {
-        let admittedProfileGeneration = profileGeneration
-        let commandID = uuidSource.next().uuidString
-        let params = JSONValue.object(["commandId": .string(commandID), "changeId": .string(changeID)])
-        let value = try await mutationExecutor.performValue(method: "settings.applyAgain", commandID: commandID) {
-            try await client.requestValue("settings.applyAgain", params)
-        }
-        try requireProfile(admittedProfileGeneration)
-        try value.decode(SettingsChangeResult.self).throwIfRefused()
-        noteSettingsChanged()
-    }
-
     func refreshSnapshot(target: JSONValue, freshness: SettingsFreshness) async throws {
         if snapshots[target]?.freshness == freshness { return }
         if let running = refreshes[target], running.freshness == freshness { return try await running.task.value }
         let admittedProfileGeneration = profileGeneration
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
-            let resolution = try await self.resolveForRenderer(target: target)
-            let options = await self.options(for: resolution, target: target)
+            let resolution = try await self.resolve(target: target)
             try self.requireProfile(admittedProfileGeneration)
-            self.snapshots[target] = SettingsSnapshot(resolution: resolution, options: options, freshness: freshness)
+            self.snapshots[target] = SettingsSnapshot(resolution: resolution, freshness: freshness)
             self.snapshotOrder.removeAll { $0 == target }
             self.snapshotOrder.append(target)
             while self.snapshotOrder.count > Self.snapshotLimit { self.snapshots[self.snapshotOrder.removeFirst()] = nil }
@@ -136,53 +123,13 @@ final class SettingsTrustCoordinator {
         try await task.value
     }
 
-    private func options(for resolution: SettingsResolution, target: JSONValue) async -> [String: SettingsOptionsResponse] {
-        let sourced = resolution.keys.filter { setting in
-            setting.presentation.optionsSource != nil
-                && [.choice, .checklist].contains(SettingsRowControl(negotiated: setting.presentation.control))
-        }
-        let client = client
-        return await withTaskGroup(of: (String, SettingsOptionsResponse?).self) { group in
-            for setting in sourced {
-                let id = setting.id, key = setting.key, qualifiers = setting.qualifiers
-                group.addTask { (id, try? await Self.readOptions(client: client, target: target, key: key, qualifiers: qualifiers)) }
-            }
-            var read: [String: SettingsOptionsResponse] = [:]
-            for await (id, response) in group { if let response { read[id] = response } }
-            return read
-        }
-    }
-
-    private nonisolated static func readOptions(client: GatewayClient, target: JSONValue, key: String,
-                                                qualifiers: [String: String]?) async throws -> SettingsOptionsResponse {
-        var params: [String: JSONValue] = ["target": target, "key": .string(key)]
-        if let qualifiers { params["qualifiers"] = .object(qualifiers.mapValues { JSONValue.string($0) }) }
-        return try await client.requestValue("settings.options", JSONValue.object(params)).decode(SettingsOptionsResponse.self)
-    }
-
-    func resolveForRenderer(target: JSONValue, keys: [String]? = nil) async throws -> SettingsResolution {
+    func resolve(target: JSONValue, keys: [String]? = nil) async throws -> SettingsResolution {
         let admittedProfileGeneration = profileGeneration
-        var params: [String: JSONValue] = [
-            "target": target,
-            "renderer": .object([
-                "version": .number(Double(SettingsRendererContract.version)),
-                "controls": .array(SettingsRendererContract.controls.map { JSONValue.string($0) }),
-            ]),
-        ]
+        var params: [String: JSONValue] = ["target": target]
         if let keys { params["keys"] = .array(keys.map(JSONValue.string)) }
         let value = try await client.requestValue("settings.resolve", JSONValue.object(params))
         try requireProfile(admittedProfileGeneration)
         return try value.decode(SettingsResolution.self)
-    }
-
-    func settingsOptions(target: JSONValue, key: String, qualifiers: [String: String]?, cursor: String? = nil) async throws -> SettingsOptionsResponse {
-        let admittedProfileGeneration = profileGeneration
-        var params: [String: JSONValue] = ["target": target, "key": .string(key)]
-        if let qualifiers { params["qualifiers"] = .object(qualifiers.mapValues { JSONValue.string($0) }) }
-        if let cursor { params["cursor"] = .string(cursor) }
-        let value = try await client.requestValue("settings.options", JSONValue.object(params))
-        try requireProfile(admittedProfileGeneration)
-        return try value.decode(SettingsOptionsResponse.self)
     }
 
     func previewChange(target: JSONValue, change: JSONValue, fence: JSONValue? = nil) async throws -> SettingsChangeResult {
@@ -240,6 +187,5 @@ struct SettingsFreshness: Hashable, Sendable {
 
 struct SettingsSnapshot {
     let resolution: SettingsResolution
-    let options: [String: SettingsOptionsResponse]
     let freshness: SettingsFreshness
 }

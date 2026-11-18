@@ -3577,12 +3577,9 @@ extension AppModel {
         try await settingsTrust.setTrust(target: target, decision: decision)
     }
 
-    func applySettingsChangeAgain(_ changeID: String) async throws {
-        try await settingsTrust.applySettingsChangeAgain(changeID)
-    }
 
-    func resolveSettingsForRenderer(target: JSONValue, keys: [String]? = nil) async throws -> SettingsResolution {
-        try await settingsTrust.resolveForRenderer(target: target, keys: keys)
+    func resolveSettings(target: JSONValue, keys: [String]? = nil) async throws -> SettingsResolution {
+        try await settingsTrust.resolve(target: target, keys: keys)
     }
 
     func settingsSnapshot(for target: JSONValue) -> SettingsSnapshot? { settingsTrust.snapshots[target] }
@@ -3596,10 +3593,6 @@ extension AppModel {
     }
 
     func noteSettingsChanged() { settingsTrust.noteSettingsChanged() }
-
-    func settingsOptions(target: JSONValue, key: String, qualifiers: [String: String]?, cursor: String? = nil) async throws -> SettingsOptionsResponse {
-        try await settingsTrust.settingsOptions(target: target, key: key, qualifiers: qualifiers, cursor: cursor)
-    }
 
     func previewSettingsChange(target: JSONValue, change: JSONValue) async throws -> SettingsChangeResult {
         let snapshot = try rendererConfigurationSnapshot(target)

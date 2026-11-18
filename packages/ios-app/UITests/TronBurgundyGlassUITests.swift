@@ -7,7 +7,7 @@ import UIKit
         for mode in ["light", "dark"] {
             let app = XCUIApplication()
             app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-phase-active",
-                "-home-sheet-dashboard-workers", "-dashboard-view-home", "-settings-scope-review",
+                "-home-sheet-dashboard-workers", "-dashboard-view-home",
                 "-themeColor", "burgundy"] + (mode == "dark" ? ["-home-dark"] : [])
             app.launch()
             defer { app.terminate() }
@@ -19,28 +19,6 @@ import UIKit
                   background: CGRect(x: frame.minX + frame.width * 0.40, y: frame.minY + frame.height * 0.18,
                                      width: 4, height: 4), mode: mode, name: "Home usage", darkContrastFloor: 2.564)
 
-            app.buttons["dashboard.menu"].tap()
-            let manage = app.buttons["session-context-button"]
-            XCTAssertTrue(manage.waitForExistence(timeout: 15)); manage.tap()
-            XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].firstMatch.waitForExistence(timeout: 10))
-            expand(app, title: "Manage Home")
-            app.buttons["home-manage-settings"].tap()
-            let models = app.descendants(matching: .any)["settings-row-model.queue_role_worker_"].firstMatch
-            XCTAssertTrue(models.waitForExistence(timeout: 10))
-            expand(app, title: "Home Settings")
-            let row = models.frame
-            check(app, ink: CGRect(x: row.minX, y: row.midY - 12, width: 30, height: 24),
-                  background: CGRect(x: row.midX - 2, y: row.minY + 4, width: 4, height: 4),
-                  mode: mode, name: "Inherited Home Settings", darkContrastFloor: 2.505)
-        }
-    }
-
-    private func expand(_ app: XCUIApplication, title: String) {
-        let label = app.navigationBars.staticTexts[title].firstMatch
-        XCTAssertTrue(label.waitForExistence(timeout: 10))
-        if label.frame.minY > 120 {
-            label.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1,
-                thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.05)))
         }
     }
 

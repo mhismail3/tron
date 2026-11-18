@@ -29,10 +29,11 @@ import { GlobalProviderResources } from "../../admin/global-provider-resources.j
 import { type SettingsStores } from "../../kernel/settings/settings-types.js";
 import { composedBelow, readBinding } from "../../kernel/settings/settings-resolver.js";
 import { type Resolution, type SettingsInventory } from "../../kernel/settings/tool-contract.js";
-import { type KeyDeclaration } from "../../kernel/settings/settings-schema.js";
+import { keyForHome, type KeyDeclaration } from "../../kernel/settings/settings-schema.js";
 import { instanceId } from "../../kernel/settings/scope-resolution.js";
 const { KEYS } = TEST_SETTINGS_SCHEMA;
-import type { PresentedResolution } from "../../admin/settings-presentation.js";
+import { getSupportedThinkingLevels } from "../../kernel/pi/ai.js";
+import { scopeAdmitted } from "../../kernel/settings/scope-resolution.js";
 import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
@@ -460,10 +461,9 @@ describe("settings.change", () => {
       .rejects.toMatchObject({ code: "invalid_request" });
     expect((await f.macDocument()).thinkingBudgets).toEqual({ low: 1_234 });
     const resolution = await f.service.invoke(client(), "settings.resolve", {
-      target: { kind: "global" }, keys: ["model.thinkingBudgets"], renderer: { version: 1, controls: ["list", "readOnly"] },
-    }) as unknown as PresentedResolution;
-    expect(resolution.keys[0]).toMatchObject({ value: { low: 1_234 }, presentation: { valueKind: "numberMap" } });
-    expect(resolution.keys[0]!.presentation.control).toBeUndefined();
+      target: { kind: "global" }, keys: ["model.thinkingBudgets"],
+    }) as unknown as { keys: Array<{ value: unknown }> };
+    expect(resolution.keys[0]).toMatchObject({ value: { low: 1_234 } });
     transcript.push({ case: "numeric-map-persistence", detail: resolution });
   });
 
@@ -1460,7 +1460,7 @@ describe("every key at every allowed layer", () => {
       session: { kind: "session", sessionId: slot.id }, home: { kind: "home" }, project: { kind: "project", cwd: project }, global: { kind: "global" },
     };
     type Served = { key: string; group: string; qualifiers?: Record<string, string>; value: unknown; layer: string;
-      projectSetting?: { file: string; path: string }; presentation: { editable: boolean } };
+      projectSetting?: { file: string; path: string } };
     const resolve = async (layer: string, key: string) => {
       const resolution = await f.service.invoke(client([slot.id]), "settings.resolve", { target: targets[layer], keys: [key] }) as unknown as { keys: Served[] };
       if (key === "permissions.macTerminalKey") expect(resolution.keys[0]?.group).toBe("connections");
@@ -1474,8 +1474,8 @@ describe("every key at every allowed layer", () => {
       if (key.fixed?.role && valueKind === "stringList") return [`${second.provider}/${second.id}`, `${first.provider}/${first.id}`];
       if (optionsSource?.name === "catalog.models") return differs(row.value, { provider: second.provider, id: second.id }) ? { provider: second.provider, id: second.id } : { provider: first.provider, id: first.id };
       if (optionsSource?.name === "catalog.thinkingLevels") {
-        const served = await f.service.invoke(client([slot.id]), "settings.options", { target: targets[layer], key: row.key, ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) }) as unknown as { options: Array<{ value: unknown }> };
-        return served.options.map(option => option.value).find(value => differs(value, row.value));
+        const [provider, ...id] = (row.qualifiers?.model ?? `${first.provider}/${first.id}`).split("/");
+        return getSupportedThinkingLevels(f.modelRuntime.getModel(provider!, id.join("/"))!).find(value => differs(value, row.value));
       }
       if (optionsSource?.name === "catalog.contextWindow") return row.value === first.contextWindow ? first.contextWindow - 1 : first.contextWindow;
       if (row.key === "permissions.macTerminalKey") return macTerminalSampleKey();
@@ -1520,7 +1520,9 @@ describe("every key at every allowed layer", () => {
           report.push({ ...instance, result: "verified masked by Project" });
           continue;
         }
-        if (!row.presentation.editable) {
+        const homeKey = keyForHome(key, layer === "home");
+        const binding = homeKey.layers[layer as "global"];
+        if (layer === "project" || !scopeAdmitted(homeKey, layer as "global") || !key.writers.includes("ui") || !binding || binding.store === "session-launch") {
           await expect(f.change(targets[layer]!, request, extra, client([slot.id]))).rejects.toMatchObject({ code: "invalid_request" });
           report.push({ ...instance, result: "verified read-only" });
           continue;

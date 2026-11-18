@@ -3,22 +3,8 @@ import Foundation
 import TronMobileCore
 
 enum HostedSettingsReviewSchema {
-    static let sections: [JSONValue] = [
-        section("model", "Model", 10, inline: true),
-        section("workers", "Workers & delegation", 15, inline: true),
-        section("context", "Compaction", 20), section("tools", "Tools", 30),
-        section("run", "Connection", 50),
-        section("trust", "Trusted Projects", 55), section("connections", "Mac Terminal", 58),
-    ]
-
-    private static func section(_ id: String, _ title: String, _ order: Int, inline: Bool = false) -> JSONValue {
-        .object(["id": .string(id), "title": .string(title), "order": .number(Double(order)), "chatInline": .bool(inline)])
-    }
-
-    static func key(_ id: String, _ group: String, _ label: String, _ value: JSONValue,
-                    _ display: String, _ control: String? = nil, order: Double = 10,
-                    help: String = "", subgroup: String? = nil, essential: Bool = false,
-                    layer: String = "global", options: [JSONValue] = [], qualifiers: [String: String]? = nil) -> JSONValue {
+    static func key(_ id: String, _ group: String, _ value: JSONValue, _ display: String,
+                    subgroup: String? = nil, layer: String = "global", qualifiers: [String: String]? = nil) -> JSONValue {
         let layers = id.hasPrefix("model.queue") || id == "permissions.budget.task" ? ["session", "global"]
             : ["model.ref[role=chat]", "model.thinking[role=chat]", "tools.active"].contains(id) ? ["session", "project", "global"]
             : id.hasPrefix("tools.codemode") || id.hasPrefix("tools.shell") || id == "model.thinkingBudgets" ? ["project", "global"]
@@ -30,86 +16,47 @@ enum HostedSettingsReviewSchema {
             "overridden": .bool(layer != "project"),
             "layers": .array(layers.map { .object(["layer": .string($0), "value": $0 == layer ? value : .null]) }),
             "badges": .array([]),
-            "presentation": .object(["label": .string(label), "help": .string(help.isEmpty && id == "tools.active" ? "The tools the model may call." : help),
-                "order": .number(order), "importance": .string(essential ? "essential" : "advanced"),
-                "sessionOverridable": .bool(layers.contains("session")),
-                "projectSettable": .bool(layers.contains("project")),
-                "editable": .bool(layer != "project"), "timing": .string("fixed"), "effect": .string("next-turn"),
-                "valueKind": .string(id == "permissions.budget.task" ? "numberMap" : control == "list" ? "stringList" : value.intValue != nil ? "integer" : "choice")]),
         ]
-        if let control, var presentation = row["presentation"]?.objectValue {
-            presentation["control"] = .string(control)
-            presentation["options"] = .array(options)
-            if id == "permissions.budget.task" {
-                presentation["range"] = .object(["min": .number(1), "max": .number(10_000_000_000), "step": .number(1), "unit": .string("tokens")])
-            }
-            row["presentation"] = .object(presentation)
-        }
-        if id == "tools.active", var presentation = row["presentation"]?.objectValue {
-            presentation["optionsSource"] = .object(["name": .string("catalog.tools"), "dependsOn": .array([])])
-            row["presentation"] = .object(presentation)
-        }
-        if id == "model.ref[role=chat]", var presentation = row["presentation"]?.objectValue {
-            presentation["optionsSource"] = .object(["name": .string("catalog.models"), "dependsOn": .array([])])
-            row["presentation"] = .object(presentation)
-        }
         if let qualifiers { row["qualifiers"] = .object(qualifiers.mapValues(JSONValue.string)) }
         if let subgroup { row["subgroup"] = .string(subgroup) }
         return .object(row)
     }
 
-    static let sheetThemeKeys: [JSONValue] = {
-        [key("permissions.macTerminalKey", "connections", "Mac Terminal key", .null, "Not set", "readOnly", order: 15,
-            help: "Lets this paired iPhone open a shell on the Mac over Tailscale through Remote Login, even when the Gateway is not running.")]
+    static let macTerminalKeys: [JSONValue] = {
+        [key("permissions.macTerminalKey", "connections", .null, "Not set")]
     }()
-
-    static var agentBehaviorKeys: [JSONValue] {
-        additionalKeys.map { value in
-            guard var row = value.objectValue, row["key"]?.stringValue?.hasPrefix("model.queue[") == true,
-                  var presentation = row["presentation"]?.objectValue else { return value }
-            presentation["control"] = .string("list")
-            presentation["valueKind"] = .string("stringList")
-            presentation["optionsSource"] = .object(["name": .string("catalog.models"), "dependsOn": .array([])])
-            row["presentation"] = .object(presentation)
-            return .object(row)
-        } + [key("model.queue[role=background]", "workers", "Background models", .array([.string("fixture/pro")]), "1 model", "list", order: 44, essential: true)]
-            + sheetThemeKeys.filter { $0.objectValue?["key"]?.stringValue == "permissions.floor" }
-    }
 
     static var scopeReview: Bool { HostedLaunch.arguments.contains("-settings-scope-review") }
 
     static let tools = ["ask_user", "display", "notify", "read", "bash", "edit", "write", "web_search", "fetch_content", "knowledge", "computer", "schedule", "connections", "settings", "zoom"]
     static let additionalKeys: [JSONValue] = [
-        key("model.thinking[role=chat]", "model", "Thinking", .string("high"), "High", "choice", order: 20,
-            help: "How much the model reasons before it answers.", essential: true, layer: "session",
-            options: [.object(["value": .string("high"), "label": .string("High")])]),
-        key("model.queue[role=worker]", "workers", "Worker models", .array([.string("anthropic/claude-opus-5-5"), .string("openai/gpt-6")]), "2 models", order: 40, essential: true, layer: "session"),
-        key("model.queue[role=subagent]", "workers", "Subagent models", .array([.string("openai/gpt-6-luna")]), "1 model", order: 42, essential: true, layer: "session"),
-        key("permissions.budget.task", "workers", "Task budget", .object(["inputTokens": .number(200_000)]), "input 200000", "list", order: 50, help: "Tokens one Home task may use, cached included. Empty is no limit.", essential: true, layer: "session",
-            options: [.object(["value": .string("inputTokens"), "label": .string("Input tokens")]), .object(["value": .string("outputTokens"), "label": .string("Output tokens")])]),
-        key("context.compaction.enabled", "context", "Automatic compaction", .bool(true), "On", help: "Summarize older conversation when the context fills.", essential: true),
-        key("context.compaction.reserveTokens", "context", "Response reserve", .number(16_384), "16,384 tokens", order: 20, help: "Tokens kept free for the reply. Compaction starts once the conversation fills the context window minus this."),
-        key("context.compaction.keepRecentTokens", "context", "Kept after compaction", .number(20_000), "20K tokens", order: 30, help: "The latest tokens of conversation kept word for word; older turns become a summary."),
-        key("context.compaction.instructions", "context", "Summary instructions", .string(""), "—", order: 40, help: "Extra instructions for compaction summaries."),
-        key("context.branchSummary.reserveTokens", "context", "Branch summary reserve", .number(16_384), "16,384 tokens", order: 50, help: "Tokens reserved when summarizing an abandoned branch."),
-        key("model.thinking[role=summarizer]", "context", "Summary thinking", .string("inherit"), "Same as chat", order: 80, help: "Thinking level for compaction summaries."),
-        key("tools.active", "tools", "Tools", .array(tools.map(JSONValue.string)), "15 tools", "checklist", essential: true, layer: "session"),
-        key("tools.codemode.mode", "tools", "Code mode", .string("on"), "On", "choice", order: 20, help: "Let the model call tools from a script.", options: [.object(["value": .string("on"), "label": .string("On")])]),
-        key("tools.codemode.inlineBudget", "tools", "Inline budget", .number(16_000), "16000", order: 30, help: "Estimated tokens available for inline codemode tool declarations."),
-        key("tools.shell.path", "tools", "Shell", .string("/bin/bash"), "/bin/bash", "text", order: 40, help: "The shell the bash tool runs."),
-        key("tools.shell.commandPrefix", "tools", "Command prefix", .string(""), "—", "text", order: 50, help: "Text run before every shell command."),
-        key("context.images.autoResize", "tools", "Resize images", .bool(true), "On", order: 60, help: "Shrink large images before they are sent.", subgroup: "Images"),
-        key("context.images.block", "tools", "Block images", .bool(false), "Allowed", "toggle", order: 70, help: "Replace images with a placeholder for the model.", subgroup: "Images", layer: "session"),
-        key("run.transport", "run", "Transport", .string("auto"), "Automatic", order: 90, help: "How requests reach the provider.", essential: true),
-        key("run.httpIdleTimeoutMs", "run", "Idle timeout", .number(300_000), "300 s", order: 100, help: "How long a silent HTTP stream may idle."),
-        key("run.websocketConnectTimeoutMs", "run", "WebSocket connect timeout", .number(10_000), "10 s", order: 110, help: "How long a WebSocket connection may take to open."),
-        key("run.cacheWarming", "run", "Cache warming", .string("off"), "Off", order: 130, help: "Keep model prompt caches warm."),
-        key("permissions.defaultProjectTrust", "trust", "Default trust policy", .string("ask"), "Ask", "choice", order: 20, help: "What happens with a project that has no trust decision.", options: [.object(["value": .string("ask"), "label": .string("Ask")])]),
-        key("model.thinkingBudgets", "workers", "Thinking budgets", .object(["high": .number(16_384)]), "1 budget", order: 60, help: "Token budget per thinking level, for models that take one."),
-        key("run.queue.steeringMode", "run", "Steering delivery", .string("one-at-a-time"), "One at a time", order: 10, subgroup: "Queue"),
-        key("run.queue.followUpMode", "run", "Follow-up delivery", .string("one-at-a-time"), "One at a time", order: 20, subgroup: "Queue"),
-        key("run.retry.enabled", "run", "Retry", .bool(true), "On", order: 30, subgroup: "Retry"),
-        key("run.retry.maxRetries", "run", "Retries", .number(3), "3 retries", order: 40, subgroup: "Retry"),
+        key("model.thinking[role=chat]", "model", .string("high"), "High", layer: "session"),
+        key("model.queue[role=worker]", "workers", .array([.string("anthropic/claude-opus-5-5"), .string("openai/gpt-6")]), "2 models", layer: "session"),
+        key("model.queue[role=subagent]", "workers", .array([.string("openai/gpt-6-luna")]), "1 model", layer: "session"),
+        key("permissions.budget.task", "workers", .object(["inputTokens": .number(200_000)]), "input 200000", layer: "session"),
+        key("context.compaction.enabled", "context", .bool(true), "On"),
+        key("context.compaction.reserveTokens", "context", .number(16_384), "16,384 tokens"),
+        key("context.compaction.keepRecentTokens", "context", .number(20_000), "20K tokens"),
+        key("context.compaction.instructions", "context", .string(""), "—"),
+        key("context.branchSummary.reserveTokens", "context", .number(16_384), "16,384 tokens"),
+        key("model.thinking[role=summarizer]", "context", .string("inherit"), "Same as chat"),
+        key("tools.active", "tools", .array(tools.map(JSONValue.string)), "15 tools", layer: "session"),
+        key("tools.codemode.mode", "tools", .string("on"), "On"),
+        key("tools.codemode.inlineBudget", "tools", .number(16_000), "16000"),
+        key("tools.shell.path", "tools", .string("/bin/bash"), "/bin/bash"),
+        key("tools.shell.commandPrefix", "tools", .string(""), "—"),
+        key("context.images.autoResize", "tools", .bool(true), "On", subgroup: "Images"),
+        key("context.images.block", "tools", .bool(false), "Allowed", subgroup: "Images", layer: "session"),
+        key("run.transport", "run", .string("auto"), "Automatic"),
+        key("run.httpIdleTimeoutMs", "run", .number(300_000), "300 s"),
+        key("run.websocketConnectTimeoutMs", "run", .number(10_000), "10 s"),
+        key("run.cacheWarming", "run", .string("off"), "Off"),
+        key("permissions.defaultProjectTrust", "trust", .string("ask"), "Ask"),
+        key("model.thinkingBudgets", "workers", .object(["high": .number(16_384)]), "1 budget"),
+        key("run.queue.steeringMode", "run", .string("one-at-a-time"), "One at a time", subgroup: "Queue"),
+        key("run.queue.followUpMode", "run", .string("one-at-a-time"), "One at a time", subgroup: "Queue"),
+        key("run.retry.enabled", "run", .bool(true), "On", subgroup: "Retry"),
+        key("run.retry.maxRetries", "run", .number(3), "3 retries", subgroup: "Retry"),
     ]
 }
 

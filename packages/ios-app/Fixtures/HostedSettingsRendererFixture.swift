@@ -7,12 +7,10 @@ struct HostedSettingsRendererFixture: View {
     @State private var model: AppModel
     @State private var ready = false
     @State private var activity = PresentationActivityCoordinator()
-    @State private var covering = HostedLaunch.arguments.contains("-sheet-haptics-restored")
     @State private var nestedSettings = false
-    @State private var heldPreviews = 0
+    @State private var covering = HostedLaunch.arguments.contains("-sheet-haptics-restored")
     @State private var error: String?
     @State private var applied = 0
-    @State private var thinkingOptions = -1
     @State private var providerOperations = ""
     private let socket = HostedSettingsRendererSocket()
     private let profile: GatewayProfile
@@ -61,45 +59,6 @@ struct HostedSettingsRendererFixture: View {
         }.tronNavigationTitle("Model Providers", accent: .tronPurple)
     }
 
-    private var controlsReview: some View {
-        ScrollView {
-            TronSettingsGroup("Mixed controls") {
-                TronSettingsRow(icon: "number", title: "Inherited value") {
-                    Button {} label: { TronInlineActionLabel("16,384 tokens") }.buttonStyle(.plain)
-                        .accessibilityIdentifier("alignment.inherited")
-                }
-                TronSettingsDivider()
-                TronSettingsRow(icon: "slider.horizontal.3", title: "Short value") {
-                    Button {} label: { TronInlineActionLabel("—") }.buttonStyle(.plain)
-                        .accessibilityIdentifier("alignment.short")
-                }
-                TronSettingsDivider()
-                TronSettingsRow(icon: "slider.horizontal.3", title: "Summary thinking", subtitle: "Value and reset remain independent targets.") {
-                    Button {} label: { TronInlineActionLabel("High") }.buttonStyle(.plain)
-                        .accessibilityIdentifier("alignment.revert-value")
-                }
-                .environment(\.tronSettingsRowAccessory, {
-                    AnyView(Button {} label: { TronInlineActionLabel("", icon: "arrow.uturn.backward", alignment: .leading) }
-                        .buttonStyle(.plain).accessibilityLabel("Revert")
-                        .accessibilityIdentifier("alignment.revert"))
-                })
-                TronSettingsDivider()
-                TronSettingsRow(icon: "number", title: "Optional override", subtitle: "Unset uses the same circular control geometry.") {
-                    Button {} label: { TronInlineActionLabel("16,384 tokens") }.buttonStyle(.plain)
-                        .accessibilityIdentifier("alignment.unset-value")
-                }
-                .environment(\.tronSettingsRowAccessory, {
-                    AnyView(Button {} label: { TronInlineActionLabel("", icon: "minus", alignment: .leading) }
-                        .buttonStyle(.plain).accessibilityLabel("Unset")
-                        .accessibilityIdentifier("alignment.unset"))
-                })
-            }
-            .padding(20)
-        }
-        .tronNavigationTitle("Shared controls")
-        .tronSettingsLayout()
-    }
-
     private var fixtureContent: some View {
         NavigationStack {
             if ready {
@@ -114,16 +73,8 @@ struct HostedSettingsRendererFixture: View {
                         } else {
                             HostedSixSmallUIFixture(surface: surface)
                         }
-                    } else if HostedLaunch.arguments.contains("-settings-controls-review") {
-                        controlsReview
-                    } else if HostedLaunch.arguments.contains("-settings-alignment-review") {
-                        SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global", presentation: .section("context"))
-                    } else if HostedLaunch.arguments.contains("-settings-ui-tools") {
-                        SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global", presentation: .section("tools"))
                     } else if HostedLaunch.arguments.contains("-settings-ui-providers") {
                         providerReview
-                    } else if HostedLaunch.arguments.contains("-settings-renderer-held-preview") || HostedLaunch.arguments.contains("-settings-renderer-confirm") || HostedLaunch.arguments.contains("-settings-renderer-haptics") {
-                        SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global", presentation: .section("context"))
                     } else if HostedLaunch.arguments.contains("-settings-nested") {
                         Button("Open Settings") { nestedSettings = true }
                             .tronManagedSheet(isPresented: $nestedSettings, identity: "fixture.nested-settings") {
@@ -134,15 +85,10 @@ struct HostedSettingsRendererFixture: View {
                     }
                 }
                 .safeAreaInset(edge: .bottom) {
-                    if !HostedLaunch.arguments.contains("-settings-alignment-review")
-                        && !HostedLaunch.arguments.contains("-settings-controls-review")
-                        && !HostedLaunch.arguments.contains("-six-ui-surface") {
+                    if !HostedLaunch.arguments.contains("-six-ui-surface") {
                     HStack {
                         Text("applied:\(applied)").accessibilityIdentifier("fixture.settings-renderer-applied")
-                        Text("held:\(heldPreviews)").accessibilityIdentifier("fixture.settings-renderer-held")
-                        if HostedLaunch.arguments.contains("-settings-renderer-held-preview") { Button("Cover renderer") { covering = true } }
                         Text("haptics:\(TronHapticsProbe.shared.summary)").accessibilityIdentifier("fixture.haptics")
-                        Text("thinking-options:\(thinkingOptions)").accessibilityIdentifier("fixture.settings-renderer-thinking-options")
                         if HostedLaunch.arguments.contains("-settings-provider-actions") {
                             Text(providerOperations).accessibilityIdentifier("fixture.provider-operations")
                         }
@@ -154,7 +100,7 @@ struct HostedSettingsRendererFixture: View {
         }
         .tronManagedSheet(isPresented: $covering, identity: "fixture.settings-cover") {
             NavigationStack {
-                Button("Release preview") { Task { await socket.releasePreview() } }
+                Text("Sheet at mount")
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { covering = false } } }
             }
         }
@@ -170,8 +116,7 @@ struct HostedSettingsRendererFixture: View {
         }
         .task {
             while !Task.isCancelled {
-                (applied, thinkingOptions) = await socket.counters()
-                heldPreviews = await socket.previewCount()
+                applied = await socket.counters()
                 providerOperations = await socket.providerOperationSummary()
                 try? await Task.sleep(for: .milliseconds(250))
             }
@@ -180,10 +125,6 @@ struct HostedSettingsRendererFixture: View {
 }
 
 private actor HostedSettingsRendererSocket: GatewaySocketConnection {
-    private var heldPreview: CheckedContinuation<Void, Never>?
-    private var previewsHeld = 0
-    func previewCount() -> Int { previewsHeld }
-    func releasePreview() { heldPreview?.resume(); heldPreview = nil }
 
     private var hello = true
     private var receiver: CheckedContinuation<Data, Error>?
@@ -197,15 +138,13 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     private var focusMode = "calm"
     private var paths = ["alpha", "beta"]
     private var applied = 0
-    private var thinkingOptions = -1
     private var catalogRefreshes = 0
-    private var customReads = 0
     private var credentialWrites = 0
     func providerOperationSummary() -> String {
-        "refresh:\(catalogRefreshes) custom-read:\(customReads) credentials:\(credentialWrites)"
+        "refresh:\(catalogRefreshes) credentials:\(credentialWrites)"
     }
 
-    func counters() -> (Int, Int) { (applied, thinkingOptions) }
+    func counters() -> Int { applied }
     func resume() async { }
     func ping() async throws { }
 
@@ -223,9 +162,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             }
             catalogRefreshes += 1
             result = .object(["aborted": .bool(false), "errors": .object([:])])
-        case "models.custom.get":
-            customReads += 1
-            result = .object(["document": .object(["providers": .object([:])]), "redacted": .bool(false)])
         case "provider.list":
             result = .object(["providers": .array([.object([
                 "id": .string("fixture"), "name": .string("Fixture Provider"),
@@ -261,13 +197,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         case "git.inspect": result = .object(["isRepository": .bool(true), "branch": .null, "dirty": .bool(false), "branches": .array([]), "commits": .array([])])
         case "model.recent": result = .object(["models": .array([])])
         case "settings.resolve": result = resolution()
-        case "settings.options": result = try options(key: params["key"]?.stringValue ?? "", cursor: params["cursor"]?.stringValue)
         case "settings.change":
-            if HostedLaunch.arguments.contains("-settings-renderer-held-preview"),
-               params["dryRun"]?.boolValue == true, previewsHeld == 0 {
-                previewsHeld += 1
-                await withCheckedContinuation { heldPreview = $0 }
-            }
             result = try change(params)
         default: result = .object([:])
         }
@@ -280,139 +210,43 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
 
     private func resolution() -> JSONValue {
         if HostedLaunch.arguments.contains("-settings-expanded-review") {
-            let rows = [HostedSettingsReviewSchema.key("model.ref[role=chat]", "model", "Model", .object(["provider": .string("fixture"), "id": .string("pro")]), "Fixture Model", "catalog", essential: true)]
-                + (HostedLaunch.arguments.contains("-agent-behavior-regression")
-                    ? HostedSettingsReviewSchema.agentBehaviorKeys : HostedSettingsReviewSchema.additionalKeys)
-                    .filter { row in
-                        guard HostedLaunch.arguments.contains("-served-agent-behavior") else { return true }
-                        let key = row.objectValue?["key"]?.stringValue ?? ""
-                        return key != "model.thinking[role=chat]" && !key.hasPrefix("context.")
-                    }
-                + (HostedLaunch.arguments.contains("-settings-sheet-theme-review") ? HostedSettingsReviewSchema.sheetThemeKeys : [])
+            let rows = [HostedSettingsReviewSchema.key("model.ref[role=chat]", "model", .object(["provider": .string("fixture"), "id": .string("pro")]), "Fixture Model")]
+                + HostedSettingsReviewSchema.additionalKeys
+                + (HostedLaunch.arguments.contains("-settings-sheet-theme-review") ? HostedSettingsReviewSchema.macTerminalKeys : [])
             if HostedLaunch.arguments.contains("-six-ui-surface") {
-                return .object(["keys": .array(rows), "sections": .array(HostedSettingsReviewSchema.sections)])
+                return .object(["keys": .array(rows)])
             }
             let keys = rows.compactMap { value -> JSONValue? in
                 guard var row = value.objectValue,
                       row["layers"]?.arrayValue?.contains(where: { $0.objectValue?["layer"]?.stringValue == "global" }) == true else { return nil }
                 row["layer"] = .string("global")
                 row["layers"] = .array([.object(["layer": .string("global"), "value": row["value"] ?? .null])])
-                if var presentation = row["presentation"]?.objectValue {
-                    presentation["sessionOverridable"] = .bool(false)
-                    presentation["projectSettable"] = .bool(false)
-                    presentation["editable"] = .bool(true)
-                    if row["key"]?.stringValue == "model.ref[role=chat]" {
-                        presentation["valueKind"] = .string("model")
-                        presentation["optionsSource"] = .object(["name": .string("catalog.models"), "dependsOn": .array([])])
-                    }
-                    row["presentation"] = .object(presentation)
-                }
                 return .object(row)
             }
-            return .object(["keys": .array(keys), "sections": .array(HostedSettingsReviewSchema.sections)])
-        }
-        if HostedLaunch.arguments.contains("-settings-alignment-review") {
-            let keys = [("inherited", "Inherited value", "16,384 tokens", false),
-                        ("short", "Short value", "—", false),
-                        ("revert", "Owned value", "High", true),
-                        ("unset", "Optional override", "16,384 tokens", true)].enumerated().map { index, item -> JSONValue in
-                var row = HostedSettingsReviewSchema.key("alignment.\(item.0)", "context", item.1,
-                    .string(item.2), item.2, "choice", order: Double(index),
-                    options: [.object(["value": .string(item.2), "label": .string(item.2)])]).objectValue!
-                row["overridden"] = .bool(item.3)
-                return .object(row)
-            }
-            return .object(["target": .object(["kind": .string("global")]), "layers": .array([.string("global")]),
-                "renderer": .object(["version": .number(1)]), "keys": .array(keys),
-                "sections": .array(HostedSettingsReviewSchema.sections), "diagnostics": .array([])])
+            return .object(["keys": .array(keys)])
         }
         let keys: [JSONValue] = [
             key("model.ref", group: "model", value: .object(["provider": .string("fixture"), "id": .string(model)]), display: modelName,
-                set: true, presentation: presentation("Model", "The model new chats start with.", 10, "essential", "catalog",
-                    extra: ["optionsSource": .object(["name": .string("fixture.catalog"), "dependsOn": .array([])])])),
+                set: true),
             key("model.thinking", group: "model", value: model == "pro" ? .string(thinking) : .string("off"),
-                display: model == "pro" ? thinking.capitalized : "Off", presentation: presentation("Thinking", "How much the model reasons.", 20,
-                    "essential", "choice", extra: ["valueKind": .string("orderedChoice"), "optionsSource": .object(["name": .string("catalog.thinkingLevels"),
-                                                                              "dependsOn": .array([.string("model.ref")])])])),
-            key("context.images.block", group: "context", value: .bool(blockImages), display: blockImages ? "On" : "Off",
-                presentation: presentation("Block images", "Images are not sent to the model.", 10, "essential", "toggle")),
+                display: model == "pro" ? thinking.capitalized : "Off"),
+            key("context.images.block", group: "context", value: .bool(blockImages), display: blockImages ? "On" : "Off"),
             key("tools.active", group: "tools", value: .array(activeTools.map(JSONValue.string)), display: activeTools.joined(separator: ", "),
-                set: true, presentation: presentation("Tools", "Tools available to new chats.", 10, "essential", "checklist",
-                    extra: ["optionsSource": .object(["name": .string("catalog.tools"), "dependsOn": .array([])])])),
+                set: true),
             key("run.retry.maxRetries", group: "run", subgroup: "Retry", value: .number(6), display: "6 retries",
-                set: true, presentation: presentation("Retries", "How many times a failed request is retried.", 10, "essential", nil)),
-            key("lab.invalidValue", group: "lab", value: .string(invalidValue), display: invalidValue.isEmpty ? "Ready" : invalidValue,
-                presentation: presentation("Validation", "A fixture value used to prove Gateway refusal.", 5, "essential", "text")),
-            key("run.transport", group: "run", value: .string("sse"), display: "Server-sent events", set: true,
-                presentation: presentation("Transport", "How requests reach the provider.", 20, "advanced", nil)),
+                set: true),
+            key("lab.invalidValue", group: "lab", value: .string(invalidValue), display: invalidValue.isEmpty ? "Ready" : invalidValue),
+            key("run.transport", group: "run", value: .string("sse"), display: "Server-sent events", set: true),
             key("lab.focusMode", group: "lab", subgroup: "Experiments", value: .string(focusMode), display: focusMode.capitalized,
-                badges: [.object(["kind": .string("sparkle"), "label": .string("New")])],
-                presentation: presentation("Focus mode", "A choice this app was never told about.", 10, "essential", "choice",
-                    extra: ["options": .array([choice("calm", "Calm"), choice("deep", "Deep")])])),
-            key("lab.palette", group: "lab", subgroup: "Experiments", value: .string("teal"), display: "Teal",
-                presentation: presentation("Palette", "A control this app does not implement.", 20, "advanced", "colorWheel")),
-            key("lab.paths", group: "lab", value: .array(paths.map { .string($0) }), display: paths.joined(separator: ", "),
-                presentation: presentation("Paths", "Ordered search locations.", 25, "advanced", "list",
-                    extra: ["valueKind": .string("stringList")])),
-            key("lab.weights", group: "lab", value: .object(weights), display: weights.keys.sorted().map { "\($0):\(weights[$0]!)" }.joined(separator: ", "),
-                presentation: presentation("Weights", "Gateway-defined numeric fields.", 26, "advanced", "list",
-                    extra: ["valueKind": .string("numberMap"),
-                        "options": .array([.object(["value": .string("red"), "label": .string("Red weight")]),
-                                           .object(["value": .string("blue"), "label": .string("Blue weight")])]),
-                        "range": .object(["min": .number(0), "max": .number(100), "step": .number(1)])])),
-            key("lab.secretToken", group: "lab", value: nil, display: "Set",
-                presentation: presentation("Token", "A secret this app cannot edit yet.", 30, "advanced", "readOnly",
-                    extra: ["note": .string("Update Tron to edit")])),
-        ]
-        let sections: [JSONValue] = [
-            section("model", "Model", 10, "Models, thinking, and context window"),
-            section("context", "Context", 20, "Compaction and image handling"),
-            section("tools", "Tools", 30, "Available tools, code mode, and shell"),
-            section("permissions", "Permissions", 40, "Project trust and agent approvals"),
-            section("accounts", "Accounts", 60, "Providers, custom models, and services"),
-            section("sources", "Sources", 70, "Packages and how they install"),
-            section("run", "Run", 50, "Message delivery, retries, and transport"),
-            section("lab", "Lab", 95, "A section this app has never seen"),
+                badges: [.object(["kind": .string("sparkle"), "label": .string("New")])]),
+            key("lab.palette", group: "lab", subgroup: "Experiments", value: .string("teal"), display: "Teal"),
+            key("lab.paths", group: "lab", value: .array(paths.map { .string($0) }), display: paths.joined(separator: ", ")),
+            key("lab.weights", group: "lab", value: .object(weights), display: weights.keys.sorted().map { "\($0):\(weights[$0]!)" }.joined(separator: ", ")),
+            key("lab.secretToken", group: "lab", value: nil, display: "Set"),
         ]
         return .object(["target": .object(["kind": .string("global")]), "layers": .array([.string("global")]),
-                        "renderer": .object(["version": .number(1)]), "keys": .array(keys), "sections": .array(sections),
+                        "keys": .array(keys),
                         "diagnostics": .array([])])
-    }
-
-    private func options(key: String, cursor: String?) throws -> JSONValue {
-        switch key {
-        case "model.ref":
-            let entries = [("pro", "Fixture Pro"), ("lite", "Fixture Lite"), ("page", "Fixture Page Two")]
-            let offset = Int(cursor ?? "0") ?? 0
-            let page = Array(entries.dropFirst(offset).prefix(2))
-            var result: [String: JSONValue] = ["key": .string(key), "source": .string("fixture.catalog"), "dependsOn": .array([]),
-                "options": .array(page.map { id, label in
-                    .object(["value": .object(["provider": .string("fixture"), "id": .string(id)]), "label": .string(label), "detail": .string("fixture")])
-                })]
-            if offset + page.count < entries.count { result["nextCursor"] = .string(String(offset + page.count)) }
-            return .object(result)
-        case "tools.active":
-            let definitions: [(String, String, String, String)] = [
-                ("read", "Read", "Read file contents from a path.", "path"),
-                ("codemode", "Code mode", "Run TypeScript against available tools.", "code"),
-            ]
-            return .object(["key": .string(key), "source": .string("catalog.tools"), "dependsOn": .array([]), "options": .array(definitions.map { name, label, description, field in
-                .object(["value": .string(name), "label": .string(label), "detail": .string(description), "resource": .object([
-                    "name": .string(name), "label": .string(label), "description": .string(description),
-                    "distribution": .string(name == "read" ? "sdk" : "external"), "source": .string(name == "read" ? "builtin" : "npm:fixture"),
-                    "parameters": .object(["type": .string("object"), "properties": .object([field: .object(["type": .string("string"), "description": .string("Fixture \(field) input")])]), "required": .array([.string(field)])]),
-                ])])
-            } + activeTools.filter { name in !definitions.contains { $0.0 == name } }.map { name in
-                .object(["value": .string(name), "label": .string(name), "disabledReason": .string("Not available here")])
-            })])
-        case "model.thinking":
-            let levels = model == "pro" ? [("off", "Off"), ("low", "Low"), ("medium", "Medium"), ("high", "High")] : []
-            thinkingOptions = levels.count
-            return .object(["key": .string(key), "source": .string("catalog.thinkingLevels"), "dependsOn": .array([.string("model.ref")]),
-                            "options": .array(levels.map { choice($0.0, $0.1) })])
-        default:
-            throw GatewayFailure(code: "invalid_request", message: "Unknown setting \(key)", retryable: false, details: nil)
-        }
     }
 
     private func change(_ params: [String: JSONValue]) throws -> JSONValue {
@@ -442,39 +276,22 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         }
         var outcome: [String: JSONValue] = ["changeId": .string(dryRun ? "" : "change-\(applied)"), "key": .string(key),
             "layer": .string("global"), "status": .string("applied"), "tier": .string("quiet")]
-        let review: [String: JSONValue] = dryRun && key == "context.images.block" && HostedLaunch.arguments.contains("-settings-renderer-confirm")
-            ? ["review": .object(["digest": .string(String(repeating: "b", count: 64)), "title": .string("Change image delivery"),
-                "requiresTap": .bool(true), "reason": .string("Confirm changing image delivery."),
-                "items": .array([.object(["label": .string("Block images"), "before": .string("Off"), "after": .string("On")])])])]
-            : [:]
         return .object([
             "status": .string("applied"), "tier": .string("quiet"), "changes": .array([.object(outcome)]),
-        ].merging(dryRun ? ["dryRun": .bool(true)] : [:]) { $1 }.merging(review) { $1 })
+        ].merging(dryRun ? ["dryRun": .bool(true)] : [:]) { $1 })
     }
 
     private func key(_ id: String, group: String, subgroup: String? = nil, value: JSONValue?, display: String,
-                     set: Bool = false, badges: [JSONValue] = [], presentation: JSONValue) -> JSONValue {
+                     set: Bool = false, badges: [JSONValue] = []) -> JSONValue {
         var object: [String: JSONValue] = [
             "key": .string(id), "group": .string(group), "display": .string(display), "layer": .string("global"), "applied": .bool(true),
             "overridden": .bool(set),
             "layers": .array([.object(["layer": .string("global")])]),
             "badges": .array(badges),
-            "presentation": presentation,
         ]
         if let subgroup { object["subgroup"] = .string(subgroup) }
         if let value { object["value"] = value }
         return .object(object)
-    }
-
-    private func presentation(_ label: String, _ help: String, _ order: Int, _ importance: String, _ control: String?,
-                              extra: [String: JSONValue] = [:]) -> JSONValue {
-        var fields: [String: JSONValue] = [
-            "label": .string(label), "help": .string(help), "order": .number(Double(order)), "importance": .string(importance),
-            "valueKind": .string("fixture"),
-            "sessionOverridable": .bool(false), "projectSettable": .bool(false), "editable": .bool(true),
-        ]
-        if let control { fields["control"] = .string(control) }
-        return .object(fields.merging(extra) { $1 })
     }
 
     private func choice(_ value: String, _ label: String) -> JSONValue { .object(["value": .string(value), "label": .string(label)]) }

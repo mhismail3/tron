@@ -16,7 +16,6 @@ extension HomeSheet {
             usageHeader(read)
             if let sessionID { ManageModelConfigurationCard(sessionID: sessionID, home: true) }
             manageRows(read, unresolved: unresolved)
-            settingsRow
         }
     }
 
@@ -56,6 +55,12 @@ extension HomeSheet {
                 navigationRow(icon: "checklist",
                               subtitle: HomeManageRowPresentation.tasks(read.tasks, admitted: status.admitsTaskReads),
                               destination: .tasks, id: "home-manage-tasks")
+                divider()
+                navigationRow(icon: "switch.2", subtitle: "Pause or resume memory, or disable Home",
+                              destination: .controls, id: "home-manage-controls")
+                divider()
+                navigationRow(icon: "lock.shield", subtitle: "Scopes and grants Home's workers may use",
+                              destination: .permissions, id: "home-manage-permissions")
             }
         }
     }
@@ -68,24 +73,6 @@ extension HomeSheet {
         }
     }
 
-    @ViewBuilder var settingsRow: some View {
-        if let sessionID {
-            let title = "Home Settings"
-            TronGlassCard(accent: accent) {
-                TronProgressiveSheetLink(accessibilityLabel: title, identity: "home.settings", accent: accent,
-                                         surfaceAccent: .tronPrimarySurface) {
-                    SessionSettingsView(sessionID: sessionID, ownedLayers: ["session"], homeProfileID: profileID)
-                        .tronNavigationTitle(title, accent: accent)
-                } label: {
-                    TronSettingsRow(icon: "slider.horizontal.3", title: title,
-                                    subtitle: "Assistant profile and worker launch choices", accent: accent)
-                }
-                .accessibilityIdentifier("home-manage-settings")
-                .tronListMarkers("home-manage-settings")
-            }
-        }
-    }
-
     func navigationRow(icon: String, subtitle: String? = nil,
                        destination: HomeSheetDestination, id: String) -> some View {
         Button { present(destination) } label: {
@@ -93,6 +80,7 @@ extension HomeSheet {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(id)
+        .tronListMarkers(id)
     }
 
     func divider() -> some View {

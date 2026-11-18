@@ -86,21 +86,21 @@ final class TronPadSheetPresentationUITests: XCTestCase {
         let parent = sheetFrame(app, title: "Manage Home", done: app.buttons["home-sheet-done-manage"])
         assertTrailingColumn(parent, in: window)
 
-        let row = app.descendants(matching: .any)["home-manage-settings"]
+        let row = app.descendants(matching: .any)["home-manage-controls"]
         XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
         row.tap()
         XCTAssertTrue(app.descendants(matching: .any)["home-settings-controls"].waitForExistence(timeout: 8), app.debugDescription)
-        let childTitle = app.staticTexts["Home Settings"].firstMatch
+        let childTitle = app.staticTexts["Controls"].firstMatch
         XCTAssertTrue(childTitle.waitForExistence(timeout: 5), app.debugDescription)
         let childDone = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex
             .max { $0.frame.minY < $1.frame.minY } ?? app.buttons["Done"]
-        let child = sheetFrame(app, title: "Home Settings", done: childDone)
+        let child = sheetFrame(app, title: "Controls", done: childDone)
         assertTrailingColumn(child, in: window)
         XCTAssertEqual(child.minX, parent.minX, accuracy: 24, "The child sheet stays in the parent's column")
-        XCTAssertGreaterThan(child.minY, parent.minY, "Manage Home's top edge shows above the stacked Home Settings: \(child) over \(parent)")
+        XCTAssertGreaterThan(child.minY, parent.minY, "Manage Home's top edge shows above the stacked Controls: \(child) over \(parent)")
         keepScreenshot(app, "ipad-landscape-manage-home-home-settings-stacked")
-        assertChatInteractive(app, beside: child, typing: "Typed beside Home Settings")
-        XCTAssertTrue(app.descendants(matching: .any)["home-settings-controls"].exists, "Using the chat must not dismiss Home Settings")
+        assertChatInteractive(app, beside: child, typing: "Typed beside Controls")
+        XCTAssertTrue(app.descendants(matching: .any)["home-settings-controls"].exists, "Using the chat must not dismiss Controls")
     }
 
     @MainActor

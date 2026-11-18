@@ -300,31 +300,34 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     await f.project({ retry: { maxRetries: 2 } });
     const read = async () => f.service.invoke(f.client, "settings.resolve", {
       target: { kind: "session", sessionId: slot.id }, keys: ["run.retry.maxRetries"],
-      renderer: { version: 1, controls: [] },
-    }) as Promise<{ keys: Array<{ value: unknown; overridden: boolean; projectSetting?: { file: string; path: string }; presentation: { sessionOverridable: boolean; projectSettable: boolean; editable: boolean } }> }>;
+    }) as Promise<{ keys: Array<{ value: unknown; overridden: boolean; projectSetting?: { file: string; path: string } }> }>;
     const masked = (await read()).keys[0]!;
     expect(masked).toMatchObject({ value: 2, overridden: true,
-      projectSetting: { file: join(await realpath(f.cwd), ".pi", "settings.json"), path: "retry.maxRetries" },
-      presentation: { sessionOverridable: true, projectSettable: true, editable: true } });
+      projectSetting: { file: join(await realpath(f.cwd), ".pi", "settings.json"), path: "retry.maxRetries" } });
     await f.project({});
     const active = (await read()).keys[0]!;
     expect(active).toMatchObject({ value: 0, overridden: true });
     expect(active.projectSetting).toBeUndefined();
     await f.retryChange(slot, "unset");
-    expect((await read()).keys).toEqual([]);
+    const inherited = (await read()).keys;
+    expect(inherited).toHaveLength(1);
+    expect(inherited[0]).toMatchObject({ value: 1, layer: "global", overridden: false });
+    expect(inherited[0]!.projectSetting).toBeUndefined();
   });
 
   it("serves target-specific recovery capability and Global reset presence", async () => {
     const f = await setup();
     const read = (target: Record<string, string>) => f.service.invoke(f.client, "settings.resolve", {
-      target, keys: ["run.retry.maxRetries"], renderer: { version: 1, controls: ["text"] },
-    }) as Promise<{ keys: Array<{ key: string; overridden: boolean; presentation: { editable: boolean } }> }>;
+      target, keys: ["run.retry.maxRetries"],
+    }) as Promise<{ keys: Array<{ key: string; overridden: boolean }> }>;
     const global = await read({ kind: "global" });
     expect(global.keys).toHaveLength(1);
-    expect(global.keys[0]).toMatchObject({ key: "run.retry.maxRetries", overridden: true, presentation: { editable: true } });
+    expect(global.keys[0]).toMatchObject({ key: "run.retry.maxRetries", overridden: true });
     await f.project({ retry: { maxRetries: 2 } });
     const project = await read({ kind: "project", cwd: f.cwd });
-    expect(project.keys.find(row => row.key === "run.retry.maxRetries")?.presentation.editable).toBe(false);
+    expect(project.keys.find(row => row.key === "run.retry.maxRetries")).toBeDefined();
+    await expect(f.service.invoke(f.client, "settings.change", { commandId: randomUUID(), target: { kind: "project", cwd: f.cwd },
+      changes: [{ key: "run.retry.maxRetries", layer: "project", op: "set", value: 3 }] })).rejects.toMatchObject({ code: "invalid_request" });
   });
 
   it("reports ignored Project fields with a bounded file/key/reason projection, never their values", async () => {
@@ -365,9 +368,8 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     const readPolicy = () => readNotificationPolicy((names) => f.registry.resolveGlobalSettings(names));
     expect(await readPolicy()).toEqual({ inputNeeded: true, finished: true, waiting: true });
     const presented = await f.service.invoke(f.client, "settings.resolve", { target: { kind: "global" } }) as unknown as {
-      sections: Array<{ id: string; title: string }>; keys: Array<{ key: string; group: string }>;
+      keys: Array<{ key: string; group: string }>;
     };
-    expect(presented.sections).toContainEqual(expect.objectContaining({ id: "notifications", title: "Notifications" }));
     expect(presented.keys.filter(key => key.group === "notifications").map(key => key.key).sort())
       .toEqual(["notifications.push.finished", "notifications.push.inputNeeded", "notifications.push.waiting"]);
     const changed = await f.service.invoke(f.client, "settings.change", {

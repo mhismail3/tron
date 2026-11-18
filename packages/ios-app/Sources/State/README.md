@@ -45,14 +45,14 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
   before startup suspends, only while no scene transition has been observed. An active,
   inactive or background callback keeps authority across startup awaits; the launch's older
   phase cannot restore or revoke that callback's admission.
-- **Typed targets.** Settings, providers and packages use typed `.global`,
-  `.project(cwd:)`, `.workspace(cwd:)` or `.session(id:)` targets. Global reads never inherit the
-  selected session's project; a newer same-target read rejects an older completion.
+- **Typed targets.** Settings use `SettingsTarget.global` or a session target
+  (`SettingsTarget.sessionGatewayTarget`); providers use `ProviderCatalogTarget` `.global` or
+  `.session(id:)`. Global reads never inherit the selected session's project; a newer same-target read rejects an older completion.
 - **Settings.** Read only through `settings.resolve` and written only through `settings.change`
   ([settings model](../../../gateway/docs/settings-model.md)); hand-built screens send schema keys
   with `SettingsTarget.keyChange`, so iOS holds no settings-path table. Trust is the
   `permissions.projectTrust` key. `SettingsTrustCoordinator` keeps one bounded `SettingsSnapshot`
-  per target that every renderer for that target reads; generic edits dry-run first.
+  per target that its readers share; generic edits dry-run first.
   The app has no project list or lifecycle pages: the agent creates projects (`projects` tool)
   and changes existing-project trust; the app writes `permissions.projectTrust` only from the
   untrusted-project prompt and the Project Settings trust row.

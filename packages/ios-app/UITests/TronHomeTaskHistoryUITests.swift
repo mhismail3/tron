@@ -36,7 +36,7 @@ final class TronHomeTaskHistoryUITests: XCTestCase {
     @MainActor private func verify(dark: Bool) {
         let app = launch(dark: dark); defer { app.terminate() }
         let name = dark ? "dark" : "light"
-        for _ in 0..<4 where !element(app, "home-manage-settings").isHittable { app.swipeUp() }
+        for _ in 0..<4 where !element(app, "home-manage-controls").isHittable { app.swipeUp() }
         shot("2073-after-manage-\(name)")
         app.swipeDown()
         open(app, "home-manage-tasks", ready: "home-task-active", done: "home-sheet-done-tasks")

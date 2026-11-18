@@ -40,7 +40,7 @@ final class ManageSessionReviewViewTests: ShuffledTestCase {
             for gone in ["Current Branch", "Agent Instructions", "Resources"] {
                 XCTAssertTrue(labels(containing: gone).isEmpty, "\(gone) is renamed or removed")
             }
-            XCTAssertNil(button("project-settings-link"), "Project Settings lives in Session Settings")
+            XCTAssertNil(button("project-settings-link"), "Project Settings lives in the session list's Project sheet")
             let html = try await revealed(app, "session-export-html")
             XCTAssertTrue(html.accessibilityTraits.contains(.button))
             XCTAssertTrue(app.window.bounds.contains(app.element("session-export-html")!.accessibilityFrame), app.tree())

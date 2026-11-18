@@ -22,7 +22,7 @@ OUTCOMES = [
         "src/e2e/sessions/home-memory-tools.e2e.test.ts",
         "src/e2e/modules/home/home-profile-triage.integration.test.ts"]),
     ("Controls: settings persistence and exact native review", [
-        "testSettingsOutsideChangesAndBuiltinExtensionPersist"], [
+        "testOutsideMcpAdditionReachesTheOpenMcpScreen"], [
         "src/e2e/admin/native-change.e2e.test.ts"]),
     ("Files/artifacts/research: uploads, reopen and source reads", [
         "testTronMenuListsInstalledAppAndKeepsItsValuesAcrossReopen"], [

@@ -21,37 +21,6 @@ import XCTest
         XCTAssertTrue(actions.exists, "Actions remain in the sheet")
     }
 
-    func testSharedRowTitleKeepsFullWidthAtXXXL() {
-        let app = home()
-        defer { app.terminate() }
-        let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'settings-row-model.queue_role_worker_' AND NOT identifier ENDSWITH '-reset'")).firstMatch
-        XCTAssertTrue(row.exists, app.debugDescription)
-        let title = row.staticTexts["Worker models"].firstMatch
-        let pill = row.staticTexts["Overridden"].firstMatch
-        XCTAssertTrue(title.exists && pill.exists, row.debugDescription)
-        XCTAssertLessThan(title.frame.height, pill.frame.height * 1.6, "The title is not broken into fragments: \(title.frame) vs \(pill.frame)")
-        XCTAssertGreaterThanOrEqual(pill.frame.minY, title.frame.maxY - 1, "The pill stacks below the title: \(pill.frame) vs \(title.frame)")
-    }
-
-    private func home() -> XCUIApplication {
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-settings-scope-review",
-                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]
-        app.launch()
-        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 15))
-        app.buttons["home-pinned-row"].tap()
-        let ring = app.buttons["session-context-button"]
-        XCTAssertTrue(ring.waitForExistence(timeout: 15))
-        XCTAssertTrue(wait(ring, "enabled == true"))
-        ring.tap()
-        let row = app.descendants(matching: .any)["home-manage-settings"].firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 8), app.debugDescription)
-        reveal(row, in: app)
-        row.tap()
-        expand(app, title: "Home Settings")
-        return app
-    }
-
     private func history() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-session-configuration-fixture", "-settings-scope-review", "-fixture-appearance", "light",

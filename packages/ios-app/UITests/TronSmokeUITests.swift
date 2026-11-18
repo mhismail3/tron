@@ -44,7 +44,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
         openManageHome(app)
-        openHomeModelsSettings(app)
+        openHomePermissions(app)
         let reconfirm = app.buttons["home-permissions-reconfirm"]
         reveal(reconfirm, in: app); reconfirm.tap()
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
@@ -65,7 +65,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
         openManageHome(app)
-        openHomeModelsSettings(app)
+        openHomePermissions(app)
         reveal(app.buttons["Revoke scope scope-one"], in: app)
         app.buttons["Revoke scope scope-one"].tap()
         XCTAssertTrue(app.buttons["confirmation-cancel"].waitForExistence(timeout: 5))
@@ -417,7 +417,7 @@ final class TronSmokeUITests: XCTestCase {
                 XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
                 app.buttons["home-pinned-row"].tap()
                 openManageHome(app)
-                openHomeModelsSettings(app)
+                openHomePermissions(app)
                 let anchor = state == "restored" ? app.buttons["home-permissions-reconfirm"] : app.buttons["Revoke scope scope-one"]
                 reveal(anchor, in: app)
                 XCTAssertTrue(anchor.isHittable, app.debugDescription)
@@ -435,109 +435,6 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    func testSettingsPaintedEdgesSpacingAndHitTargets() {
-        for appearance in ["light", "dark"] {
-            for largeText in [false, true] {
-                for gallery in [false, true] {
-                    let app = XCUIApplication()
-                    app.launchArguments = ["-tron-settings-renderer-fixture", gallery ? "-settings-controls-review" : "-settings-alignment-review"]
-                    if appearance == "dark" { app.launchArguments.append("-settings-renderer-dark") }
-                    if largeText { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"] }
-                    app.launch()
-                    let row: (String) -> XCUIElement = { app.descendants(matching: .any)["settings-row-\($0)"] }
-                    let button: (String, String) -> XCUIElement = { id, label in
-                        app.buttons.matching(NSPredicate(format: "identifier == %@ AND label == %@", id, label)).firstMatch
-                    }
-                    let inherited = gallery ? button("alignment.inherited", "16,384 tokens") : settingEditor(row("alignment.inherited"))
-                    let short = gallery ? button("alignment.short", "—") : settingEditor(row("alignment.short"))
-                    let pairs = gallery
-                        ? [(button("alignment.revert-value", "High"), button("alignment.revert", "Revert")),
-                           (button("alignment.unset-value", "16,384 tokens"), button("alignment.unset", "Unset"))]
-                        : [(settingEditor(row("alignment.revert")), app.buttons["settings-row-alignment.revert-reset"]),
-                           (settingEditor(row("alignment.unset")), app.buttons["settings-row-alignment.unset-reset"])]
-                    var measurements = [String]()
-                    func measure(_ target: XCUIElement, circle: Bool = false) -> CGRect {
-                        XCTAssertTrue(target.waitForExistence(timeout: 10), app.debugDescription)
-                        let scroll = app.scrollViews.firstMatch
-                        let viewport = scroll.frame.intersection(app.windows.firstMatch.frame).insetBy(dx: 0, dy: 50)
-                        for _ in 0..<10 where !viewport.contains(target.frame) {
-                            if target.frame.minY < viewport.minY { scroll.swipeDown() } else { scroll.swipeUp() }
-                        }
-                        XCTAssertTrue(viewport.contains(target.frame), "Measure the entire visible target: \(target.frame)")
-                        let hit = target.frame
-                        XCTAssertGreaterThanOrEqual(hit.width + 0.001, 44)
-                        XCTAssertGreaterThanOrEqual(hit.height + 0.001, 44)
-                        let visible = paintedSettingsControl(target, in: app, backgroundX: inherited.frame.maxX + 6)
-                        if circle {
-                            XCTAssertEqual(hit.width, hit.height, accuracy: 0.5)
-                            XCTAssertEqual(visible.width, 28, accuracy: 1.5, "Round glass diameter, not the hit frame")
-                            XCTAssertEqual(visible.height, 28, accuracy: 1.5)
-                        }
-                        measurements.append("\(target.identifier): hit=\(hit), painted=\(visible)")
-                        return visible
-                    }
-                    let right = measure(inherited).maxX
-                    XCTAssertEqual(right, app.windows.firstMatch.frame.maxX - 34, accuracy: 1)
-                    XCTAssertEqual(measure(short).maxX, right, accuracy: 1)
-                    for (value, circle) in pairs {
-                        let valuePaint = measure(value)
-                        let circlePaint = measure(circle, circle: true)
-                        XCTAssertEqual(valuePaint.maxX, right, accuracy: 1, "Painted value trailing edges must match the standalone value")
-                        XCTAssertEqual(valuePaint.minX - circlePaint.maxX, 16, accuracy: 1, "Visible spacing must not depend on glyph or value width")
-                        XCTAssertLessThanOrEqual(circle.frame.maxX, value.frame.minX + 0.5, "Independent targets must not overlap")
-                    }
-                    let name = "1321-measured-\(gallery ? "gallery" : "compaction")-\(appearance)-\(largeText ? "large" : "standard")"
-                    let attachment = XCTAttachment(string: measurements.joined(separator: "\n"))
-                    attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
-                    keepScreenshot(named: name)
-                    app.terminate()
-                }
-            }
-        }
-    }
-
-    @MainActor
-    private func paintedSettingsControl(_ target: XCUIElement, in app: XCUIApplication, backgroundX: CGFloat) -> CGRect {
-        guard let image = XCUIScreen.main.screenshot().image.cgImage else { XCTFail("Missing pixels"); return .zero }
-        let frame = target.frame
-        let scale = CGFloat(image.width) / app.windows.firstMatch.frame.width
-        func strip(_ rect: CGRect) -> [[Int]] {
-            let pixels = CGRect(x: rect.minX.rounded(), y: rect.minY.rounded(),
-                                width: rect.width.rounded(), height: rect.height.rounded())
-            guard let crop = image.cropping(to: pixels) else { XCTFail("Missing control raster: \(rect)"); return [] }
-            var bytes = [UInt8](repeating: 0, count: crop.width * crop.height * 4)
-            let context = CGContext(data: &bytes, width: crop.width, height: crop.height, bitsPerComponent: 8,
-                                    bytesPerRow: crop.width * 4, space: CGColorSpaceCreateDeviceRGB(),
-                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-            context.draw(crop, in: CGRect(x: 0, y: 0, width: crop.width, height: crop.height))
-            var samples = [[Int]]()
-            for offset in stride(from: 0, to: bytes.count, by: 4) {
-                samples.append([Int(bytes[offset]), Int(bytes[offset + 1]), Int(bytes[offset + 2])])
-            }
-            return samples
-        }
-        let background = strip(CGRect(x: backgroundX * scale, y: frame.midY * scale, width: 1, height: 1)).first ?? []
-        func extent(_ rect: CGRect, reversed: Bool = false) -> ClosedRange<CGFloat> {
-            let samples = strip(rect)
-            let isInk = samples.map { sample in (zip(sample, background).map { abs($0.0 - $0.1) }.max() ?? 0) > 4 }
-            var runs = [ClosedRange<Int>]()
-            for index in isInk.indices where isInk[index] {
-                if let run = runs.last, CGFloat(index - run.upperBound) <= 4 * scale { runs[runs.count - 1] = run.lowerBound...index } else { runs.append(index...index) }
-            }
-            guard let run = runs.max(by: { $0.count < $1.count }) else { XCTFail("No visible control surface: \(target.label)"); return 0...0 }
-            let (first, last) = (run.lowerBound, run.upperBound)
-            let start = reversed ? samples.count - 1 - last : first
-            let end = reversed ? samples.count - first : last + 1
-            return CGFloat(start) / scale...CGFloat(end) / scale
-        }
-        let horizontal = extent(CGRect(x: frame.minX * scale, y: frame.midY * scale, width: frame.width * scale, height: 1))
-        let centerX = frame.minX + (horizontal.lowerBound + horizontal.upperBound) / 2
-        let vertical = extent(CGRect(x: centerX * scale, y: frame.minY * scale, width: 1, height: frame.height * scale), reversed: true)
-        return CGRect(x: frame.minX + horizontal.lowerBound, y: frame.minY + vertical.lowerBound,
-                      width: horizontal.upperBound - horizontal.lowerBound, height: vertical.upperBound - vertical.lowerBound)
-    }
-
-    @MainActor
     func testProviderModelRoutesAndRefreshAreIndependent() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -549,409 +446,19 @@ final class TronSmokeUITests: XCTestCase {
         app.buttons["settings-link-Model Providers"].tap()
         expandSettingsSheet(app, title: "Providers")
         XCTAssertTrue(app.staticTexts["3 models currently available"].waitForExistence(timeout: 10))
-        XCTAssertTrue(waitForLabel(operations, containing: "refresh:0 custom-read:0 credentials:0", timeout: 5))
+        XCTAssertTrue(waitForLabel(operations, containing: "refresh:0 credentials:0", timeout: 5))
         app.buttons["Refresh"].tap()
-        XCTAssertTrue(waitForLabel(operations, containing: "refresh:1 custom-read:0 credentials:0", timeout: 5),
+        XCTAssertTrue(waitForLabel(operations, containing: "refresh:1 credentials:0", timeout: 5),
                       "Refresh must dispatch only the owned global catalog command")
         XCTAssertFalse(app.buttons["settings-link-Custom Models"].exists, "Routine definitions use agent source configuration, not a second native editor")
         XCTAssertFalse(app.navigationBars.staticTexts["Custom Models"].exists, "Refresh must not navigate to the editor")
         app.buttons["Details for Fixture Provider"].tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Fixture Provider"].waitForExistence(timeout: 5))
-        XCTAssertTrue(waitForLabel(operations, containing: "refresh:1 custom-read:0 credentials:0", timeout: 5),
+        XCTAssertTrue(waitForLabel(operations, containing: "refresh:1 credentials:0", timeout: 5),
                       "Provider setup navigation must neither refresh the catalog nor edit custom definitions/credentials")
         closeTopSheet(app)
         XCTAssertTrue(app.navigationBars.staticTexts["Providers"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["settings-link-Custom Models"].exists)
-    }
-
-    @MainActor
-    func testSettingsRowEditorAndRevertStayIndependent() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture"]
-        app.launch(); defer { app.terminate() }
-        let applied = app.staticTexts["fixture.settings-renderer-applied"]
-        openRendererSection(app, "model")
-        expandSettingsSheet(app, title: "Agent Behavior")
-        let row = app.descendants(matching: .any)["settings-row-model.ref"]
-        let editor = settingEditor(row)
-        let reset = app.buttons["settings-row-model.ref-reset"]
-        for target in [editor, reset] {
-            let scale = CGFloat(XCUIScreen.main.screenshot().image.cgImage?.width ?? 0) / app.windows.firstMatch.frame.width
-            func points(_ value: CGFloat) -> CGFloat { (value * scale).rounded() / scale }
-            let clock = ContinuousClock()
-            let deadline = clock.now.advanced(by: .seconds(5))
-            let isReady = {
-                let matches = target.isHittable && points(target.frame.height) >= 44 && points(target.frame.width) >= 44
-                return matches && clock.now <= deadline
-            }
-            var ready = isReady()
-            while !ready && clock.now < deadline {
-                let remaining = clock.now.duration(to: deadline).components
-                let pause = max(0, min(0.1, Double(remaining.seconds) + Double(remaining.attoseconds) / 1e18))
-                RunLoop.current.run(until: Date().addingTimeInterval(pause))
-                guard clock.now < deadline else { break }
-                ready = isReady()
-            }
-            XCTAssertTrue(ready, "\(target.label): \(target.frame)")
-        }
-        XCTAssertFalse(editor.frame.intersects(reset.frame), "Editing and Revert must not share targets")
-        editor.tap()
-        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Fixture Lite")).firstMatch.waitForExistence(timeout: 5))
-        closeTopSheet(app)
-        XCTAssertEqual(applied.label, "applied:0", "Opening/dismissing an editor cannot submit its draft")
-        reset.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.5)).tap()
-        XCTAssertTrue(waitForLabel(applied, containing: "applied:1", timeout: 5))
-        XCTAssertEqual(editor.value as? String, "Fixture Lite")
-        closeTopSheet(app)
-        openRendererSection(app, "context")
-        let toggle = app.switches["Block images"]
-        reveal(toggle, in: app)
-        let before = toggle.value as? String
-        toggle.tap()
-        XCTAssertTrue(waitForLabel(applied, containing: "applied:2", timeout: 5))
-        XCTAssertNotEqual(toggle.value as? String, before)
-        keepScreenshot(named: "1308-independent-row-actions")
-    }
-
-    @MainActor
-    func testSharedSettingsGlyphStaysInsideColumn() {
-        for mode in ["light", "dark"] {
-            var standardTitleHeight: CGFloat = 0
-            for large in [false, true] {
-                let app = XCUIApplication()
-                app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-nested", "-settings-expanded-review"]
-                if mode == "dark" { app.launchArguments.append("-settings-renderer-dark") }
-                if large { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
-                app.launch()
-                defer { app.terminate() }
-                XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 10))
-                app.buttons["Open Settings"].tap()
-                expandSettingsSheet(app, title: "Global Settings")
-                let row = app.buttons["settings-link-Appearance"].firstMatch
-                let title = app.staticTexts["Appearance"].firstMatch
-                XCTAssertTrue(row.waitForExistence(timeout: 5))
-                XCTAssertTrue(row.isHittable)
-                XCTAssertGreaterThanOrEqual(row.frame.height, 44)
-                let presentationScale = row.frame.width / (app.windows.firstMatch.frame.width - 40)
-                if large {
-                    XCTAssertGreaterThan(title.frame.height / presentationScale, standardTitleHeight * 2,
-                                         "Only the decorative glyph is capped; meaningful text must still grow at XXXL")
-                } else {
-                    standardTitleHeight = title.frame.height / presentationScale
-                }
-                XCTAssertEqual(title.frame.minX - row.frame.minX, 48 * presentationScale, accuracy: 0.5,
-                               "Keep the shared 14pt inset, 22pt icon column and 12pt gap")
-                let glyph = paintedSettingsGlyph(row: row.frame, label: title.frame, in: app)
-                let suffix = "\(mode)-\(large ? "large" : "standard")"
-                let evidence = XCTAttachment(string: "row=\(row.frame)\ntitle=\(title.frame)\npainted glyph=\(glyph)")
-                evidence.name = "1325-glyph-metrics-\(suffix)"
-                evidence.lifetime = .keepAlways
-                add(evidence)
-                keepScreenshot(named: "1325-glyph-global-\(suffix)")
-                XCTAssertGreaterThan(glyph.width, 5, "Require real colored symbol pixels; an absent/hidden glyph cannot pass")
-                XCTAssertLessThanOrEqual(glyph.width, 22 * presentationScale + 1, "Decorative glyph must fit its 22pt column, with 1pt raster tolerance")
-                XCTAssertLessThanOrEqual(glyph.height, 22 * presentationScale + 1)
-                XCTAssertGreaterThanOrEqual(glyph.minX, row.frame.minX + 14 * presentationScale - 1)
-                XCTAssertLessThanOrEqual(glyph.maxX, title.frame.minX - 12 * presentationScale + 1,
-                                         "Preserve the shared 12pt icon-to-label gap")
-                row.tap()
-                XCTAssertTrue(app.navigationBars.staticTexts["Appearance"].waitForExistence(timeout: 5),
-                              "The unchanged row target still opens Appearance")
-            }
-        }
-    }
-
-    @MainActor
-    private func paintedSettingsGlyph(row: CGRect, label: CGRect, in app: XCUIApplication) -> CGRect {
-        guard let image = XCUIScreen.main.screenshot().image.cgImage else { XCTFail("Missing screenshot"); return .zero }
-        let scale = CGFloat(image.width) / app.windows.firstMatch.frame.width
-        let region = CGRect(x: (row.minX * scale).rounded(), y: (row.minY * scale).rounded(),
-                            width: ((label.minX - row.minX) * scale).rounded(), height: (row.height * scale).rounded())
-        guard let crop = image.cropping(to: region) else { XCTFail("Missing leading-column raster"); return .zero }
-        var bytes = [UInt8](repeating: 0, count: crop.width * crop.height * 4)
-        let context = CGContext(data: &bytes, width: crop.width, height: crop.height, bitsPerComponent: 8,
-                                bytesPerRow: crop.width * 4, space: CGColorSpaceCreateDeviceRGB(),
-                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-        context.draw(crop, in: CGRect(x: 0, y: 0, width: crop.width, height: crop.height))
-        var minX = crop.width, minY = crop.height, maxX = -1, maxY = -1
-        for y in 0..<crop.height {
-            for x in 0..<crop.width {
-                let offset = (y * crop.width + x) * 4
-                let r = Int(bytes[offset]), g = Int(bytes[offset + 1]), b = Int(bytes[offset + 2])
-                if g > r + 60 && g > b + 15 {
-                    minX = min(minX, x); maxX = max(maxX, x)
-                    minY = min(minY, y); maxY = max(maxY, y)
-                }
-            }
-        }
-        guard maxX >= minX else { XCTFail("No emerald glyph ink"); return .zero }
-        return CGRect(x: (region.minX + CGFloat(minX)) / scale,
-                      y: (region.minY + CGFloat(crop.height - 1 - maxY)) / scale,
-                      width: CGFloat(maxX - minX + 1) / scale, height: CGFloat(maxY - minY + 1) / scale)
-    }
-
-    @MainActor
-    func testExpandedSettingsRoutesForVisualReview() {
-        continueAfterFailure = false
-        for mode in ["light", "dark"] {
-            for large in [false, true] {
-                let app = XCUIApplication()
-                app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-nested", "-settings-expanded-review"]
-                if mode == "dark" { app.launchArguments.append("-settings-renderer-dark") }
-                if large { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
-                app.launch()
-                XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 10))
-                app.buttons["Open Settings"].tap()
-                expandSettingsSheet(app, title: "Global Settings")
-                let suffix = "\(mode)-\(large ? "large" : "standard")"
-                keepScreenshot(named: "1325-expanded-global-\(suffix)")
-                tapScrolling(app.buttons["settings-link-Appearance"], in: app)
-                expandSettingsSheet(app, title: "Appearance")
-                keepScreenshot(named: "1325-expanded-appearance-\(suffix)")
-                let theme = app.buttons["theme-color-emerald"]
-                for _ in 0..<8 where !theme.isHittable || theme.frame.maxY > app.windows.firstMatch.frame.height * 0.8 { app.swipeUp(velocity: .slow) }
-                XCTAssertTrue(theme.isHittable, "The theme row is reachable in the Appearance sheet")
-                keepScreenshot(named: "1325-expanded-appearance-theme-\(suffix)")
-                if !large {
-                    for _ in 0..<8 where !app.buttons["Dashboard View"].firstMatch.isHittable { app.swipeDown() }
-                    tapScrolling(app.buttons["Dashboard View"].firstMatch, in: app)
-                    XCTAssertTrue(app.buttons["settings-option-By Project / Server"].waitForExistence(timeout: 5))
-                    keepScreenshot(named: "1325-expanded-dashboard-view-\(suffix)")
-                    closeTopSheet(app)
-                    tapScrolling(app.buttons["Visible Servers"].firstMatch, in: app)
-                    XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Workshop Mac")).firstMatch.waitForExistence(timeout: 5))
-                    keepScreenshot(named: "1325-expanded-visible-servers-\(suffix)")
-                    closeTopSheet(app)
-                }
-                closeTopSheet(app)
-                tapScrolling(app.buttons["settings-link-Agent Behavior"], in: app)
-                expandSettingsSheet(app, title: "Agent Behavior")
-                keepScreenshot(named: "1325-expanded-agent-behavior-\(suffix)")
-                closeTopSheet(app)
-                if !large {
-                    tapScrolling(app.buttons["settings-link-Agent Behavior"], in: app)
-                    expandSettingsSheet(app, title: "Agent Behavior")
-                    app.swipeUp(); app.swipeUp()
-                    keepScreenshot(named: "1325-expanded-agent-behavior-bottom-\(suffix)")
-                    closeTopSheet(app)
-                    tapScrolling(app.buttons["settings-link-Setup"], in: app)
-                    expandSettingsSheet(app, title: "Setup")
-                    XCTAssertTrue(app.switches["Run Swift files"].waitForExistence(timeout: 5))
-                    keepScreenshot(named: "1325-expanded-setup-\(suffix)")
-                    closeTopSheet(app)
-                    keepScreenshot(named: "1325-expanded-diagnostics-\(suffix)")
-                }
-                app.terminate()
-            }
-            let home = XCUIApplication()
-            home.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
-            if mode == "dark" { home.launchArguments.append("-home-dark") }
-            home.launch()
-            XCTAssertTrue(home.buttons["dashboard.menu"].waitForExistence(timeout: 10))
-            home.buttons["dashboard.menu"].tap()
-            XCTAssertTrue(home.buttons["New Session"].waitForExistence(timeout: 5))
-            keepScreenshot(named: "1325-expanded-tron-menu-\(mode)")
-            home.terminate()
-            home.launch()
-            XCTAssertTrue(home.buttons["home-pinned-row"].waitForExistence(timeout: 10))
-            home.buttons["home-pinned-row"].tap()
-            openManageHome(home)
-            tapManageRow(home, "home-manage-settings")
-            expandSettingsSheet(home, title: "Home Settings")
-            keepScreenshot(named: "1325-expanded-home-settings-\(mode)")
-            keepScreenshot(named: "1325-expanded-home-models-\(mode)")
-            let scopes = home.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Revoke")).firstMatch
-            reveal(scopes, in: home)
-            XCTAssertTrue(scopes.isHittable, home.debugDescription)
-            keepScreenshot(named: "1325-expanded-home-delegation-\(mode)")
-            home.terminate()
-        }
-    }
-
-    @MainActor
-    func testSettingsScopeVisualReviewInLightAndDark() {
-        continueAfterFailure = false
-        for appearance in ["light", "dark"] {
-            for scope in ["global", "home", "session", "project"] {
-                let app = XCUIApplication()
-                if scope == "home" {
-                    app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
-                    if appearance == "dark" { app.launchArguments.append("-home-dark") }
-                } else if scope == "session" {
-                    app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", appearance]
-                } else if scope == "project" {
-                    app.launchArguments = ["-tron-new-session-fixture", "-new-session-scenario", "project-settings", "-fixture-appearance", appearance]
-                } else {
-                    app.launchArguments = ["-tron-settings-renderer-fixture"]
-                    if appearance == "dark" { app.launchArguments.append("-settings-renderer-dark") }
-                }
-                app.launch()
-                defer { app.terminate() }
-                if scope == "home" {
-                    XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
-                    app.buttons["home-pinned-row"].tap()
-                    openManageHome(app)
-                    tapManageRow(app, "home-manage-settings")
-                    expandSettingsSheet(app, title: "Home Settings")
-                    XCTAssertTrue(app.descendants(matching: .any)["settings-row-model.queue_role_worker_"].waitForExistence(timeout: 5))
-                    keepScreenshot(named: "1325-home-\(appearance)")
-                    captureSettingsTools(app, scope: scope, appearance: appearance)
-                    captureModels(app, scope: scope, appearance: appearance)
-                } else if scope == "session" {
-                    XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
-                    app.buttons["Stop session"].tap()
-                    app.buttons["Release terminal settlement"].tap()
-                    expandSettingsSheet(app, title: "Manage Session")
-                    captureModels(app, scope: scope, appearance: appearance)
-                    openChatSettings(app)
-                    expandSettingsSheet(app, title: "Session Settings")
-                    keepScreenshot(named: "1325-session-\(appearance)")
-                    captureSettingsTools(app, scope: scope, appearance: appearance)
-                } else if scope == "project" {
-                    XCTAssertTrue(app.buttons["project-settings-link"].waitForExistence(timeout: 10))
-                    app.buttons["project-settings-link"].tap()
-                    expandSettingsSheet(app, title: "Project Settings")
-                    keepScreenshot(named: "1325-project-\(appearance)")
-                    captureSettingsTools(app, scope: scope, appearance: appearance)
-                } else {
-                    XCTAssertTrue(app.buttons["settings-link-Agent Behavior"].waitForExistence(timeout: 10))
-                    keepScreenshot(named: "1305-global-\(appearance)")
-                }
-                app.terminate()
-            }
-        }
-    }
-
-    @MainActor
-    private func captureSettingsTools(_ app: XCUIApplication, scope: String, appearance: String) {
-        if scope == "project" {
-            let model = app.descendants(matching: .any)["settings-row-model.ref_role_chat_"]
-            reveal(model, in: app)
-            XCTAssertTrue(model.waitForExistence(timeout: 5), app.debugDescription)
-            XCTAssertTrue(app.staticTexts["Project Pro"].exists)
-            XCTAssertFalse(app.descendants(matching: .any)["settings-row-tools.active"].exists)
-            let source = model.buttons.matching(NSPredicate(format: "label == %@", "Set by Project settings")).firstMatch
-            XCTAssertTrue(source.isHittable, app.debugDescription)
-            assertRendersUntruncated(source, matching: "^Set by Project settings$", named: "1325-\(scope)-\(appearance)-project-source")
-            source.tap()
-            XCTAssertTrue(app.navigationBars.staticTexts["Project setting"].waitForExistence(timeout: 5))
-            XCTAssertTrue(app.staticTexts["defaultProvider + defaultModel"].exists)
-            XCTAssertFalse(app.buttons["Revert"].exists)
-            keepScreenshot(named: "1325-\(scope)-\(appearance)-project-info")
-            closeTopSheet(app)
-            return
-        }
-        if scope != "home" {
-            let section = app.buttons["settings-section-tools-open"]
-            reveal(section, in: app)
-            section.tap()
-            expandSettingsSheet(app, title: "Tools")
-        }
-        let row = app.descendants(matching: .any)["settings-row-tools.active"]
-        let editor = settingEditor(row)
-        reveal(editor, in: app)
-        XCTAssertTrue(editor.isHittable, app.debugDescription)
-        assertRendersUntruncated(row.staticTexts["Overridden"], matching: "^Overridden$", named: "1325-\(scope)-\(appearance)-overridden-pill")
-        assertRendersUntruncated(editor, matching: #"^\d+ of \d+ tools$"#, named: "1325-\(scope)-\(appearance)-tools-chip")
-        let resize = app.descendants(matching: .any)["settings-row-context.images.autoResize"]
-        reveal(resize, in: app)
-        assertVisibleGapBeforePill(in: resize, named: "1325-\(scope)-\(appearance)-toggle-pill-gap")
-        keepScreenshot(named: "1325-\(scope)-\(appearance)-direct-tools")
-        tapScrolling(settingEditor(row), in: app)
-        let tool = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", scope == "home" ? "Ask user" : "Read file")).firstMatch
-        XCTAssertTrue(tool.waitForExistence(timeout: 5), app.debugDescription)
-        keepScreenshot(named: "1325-\(scope)-\(appearance)-populated-tools")
-        closeTopSheet(app)
-        if scope != "home" { closeTopSheet(app) }
-    }
-
-    @MainActor
-    private func captureModels(_ app: XCUIApplication, scope: String, appearance: String) {
-        if scope == "home" {
-            let worker = app.descendants(matching: .any)["settings-row-model.queue_role_worker_"]
-            for _ in 0..<12 where !worker.isHittable { app.swipeDown() }
-            XCTAssertTrue(worker.isHittable, app.debugDescription)
-            XCTAssertFalse(app.descendants(matching: .any)["settings-row-model.ref_role_chat_"].exists)
-            keepScreenshot(named: "1325-\(scope)-\(appearance)-canonical-models")
-            return
-        }
-        if scope == "session" {
-            XCTAssertFalse(app.buttons["settings-section-model-open"].exists)
-            XCTAssertTrue(app.descendants(matching: .any)["settings-row-model.ref_role_chat_"].waitForExistence(timeout: 5), app.debugDescription)
-            XCTAssertTrue(app.descendants(matching: .any)["settings-row-model.thinking_role_chat_"].waitForExistence(timeout: 5), app.debugDescription)
-            keepScreenshot(named: "1325-\(scope)-\(appearance)-canonical-models")
-            return
-        }
-        let models = app.buttons["settings-section-model-open"]
-        reveal(models, in: app)
-        XCTAssertTrue(models.isHittable, app.debugDescription)
-        models.tap()
-        expandSettingsSheet(app, title: "Models")
-        XCTAssertTrue(app.descendants(matching: .any)["settings-row-model.ref_role_chat_"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.descendants(matching: .any)["settings-row-model.thinking_role_chat_"].waitForExistence(timeout: 5))
-        keepScreenshot(named: "1325-\(scope)-\(appearance)-canonical-models")
-        closeTopSheet(app)
-    }
-
-    @MainActor
-    private func assertRendersUntruncated(_ element: XCUIElement, matching pattern: String, named name: String,
-                                          file: StaticString = #filePath, line: UInt = #line) {
-        XCTAssertTrue(element.waitForExistence(timeout: 5), file: file, line: line)
-        let screenshot = element.screenshot()
-        let attachment = XCTAttachment(screenshot: screenshot)
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
-        guard let image = screenshot.image.cgImage else { return XCTFail("No element pixels for \(name)", file: file, line: line) }
-        let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .accurate
-        request.usesLanguageCorrection = false
-        XCTAssertNoThrow(try VNImageRequestHandler(cgImage: image).perform([request]), file: file, line: line)
-        let text = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
-            .joined(separator: " ").trimmingCharacters(in: .whitespaces)
-        XCTAssertNotNil(text.range(of: pattern, options: .regularExpression),
-                        "\(name) rendered \"\(text)\", expected \(pattern)", file: file, line: line)
-    }
-
-    @MainActor
-    private func assertVisibleGapBeforePill(in row: XCUIElement, named name: String,
-                                            file: StaticString = #filePath, line: UInt = #line) {
-        let pill = row.staticTexts["Overridden"]
-        XCTAssertTrue(pill.waitForExistence(timeout: 5), file: file, line: line)
-        let screenshot = XCUIScreen.main.screenshot()
-        let attachment = XCTAttachment(screenshot: screenshot)
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
-        let image = screenshot.image
-        guard let cgImage = image.cgImage else { return XCTFail("No screen pixels for \(name)", file: file, line: line) }
-        let scale = image.scale, width = cgImage.width
-        let y = Int((pill.frame.midY * scale).rounded())
-        guard let strip = cgImage.cropping(to: CGRect(x: 0, y: y, width: width, height: 1)) else {
-            return XCTFail("Cannot sample \(name)", file: file, line: line)
-        }
-        var pixels = [UInt8](repeating: 0, count: width * 4)
-        guard let context = CGContext(data: &pixels, width: width, height: 1, bitsPerComponent: 8, bytesPerRow: width * 4,
-                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-        else { return XCTFail("Cannot read \(name)", file: file, line: line) }
-        context.draw(strip, in: CGRect(x: 0, y: 0, width: width, height: 1))
-        func color(_ x: Int) -> [Int] { (0..<3).map { Int(pixels[max(0, min(width - 1, x)) * 4 + $0]) } }
-        let background = color(Int((pill.frame.maxX + 3) * scale))
-        var x = Int(pill.frame.minX * scale) - 3
-        var gap = 0
-        while x > 0, zip(color(x), background).allSatisfy({ abs($0 - $1) <= 12 }) { gap += 1; x -= 1 }
-        XCTAssertGreaterThanOrEqual(CGFloat(gap + 3) / scale, 6,
-            "\(name): \(CGFloat(gap + 3) / scale) pt of row background \(background) before the pill; then \(color(x))",
-            file: file, line: line)
-    }
-
-    @MainActor
-    private func assertCircularRevert(_ button: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
-        let frame = button.frame
-        XCTAssertGreaterThan(frame.width, 0, file: file, line: line)
-        XCTAssertEqual(frame.width, frame.height, accuracy: 0.5,
-                       "Revert must keep a square target around its circular glass: \(frame)", file: file, line: line)
     }
 
     @MainActor
@@ -974,7 +481,7 @@ final class TronSmokeUITests: XCTestCase {
         let state = app.descendants(matching: .any)["home-manage-state"]
         XCTAssertEqual(state.label, "Ready")
         XCTAssertTrue(app.descendants(matching: .any)["home-context-summary"].exists, "The compact summary reads the Home chat's real usage")
-        XCTAssertFalse(app.buttons["Background models"].firstMatch.exists, "Model controls belong only to Home Settings")
+        XCTAssertFalse(app.buttons["Background models"].firstMatch.exists, "Manage Home carries no model controls")
         XCTAssertFalse(app.textFields["settings-renderer-search"].exists, "Manage Home carries no settings search")
         XCTAssertFalse(app.staticTexts["Automatic Compaction"].exists, "Home never compacts; it uses chapters")
         XCTAssertFalse(app.descendants(matching: .any)["home-manage-context"].exists, "Home's context is Manage Home's top card, not a sub-sheet")
@@ -984,21 +491,16 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Stop response"].exists, "Stop is the composer's control, not a Manage Home row")
         XCTAssertFalse(app.descendants(matching: .any)["home-manage-stop"].exists)
         XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "Home · ")).firstMatch.exists, "The state is a pill, not a row")
-        for _ in 0..<4 where !app.descendants(matching: .any)["home-manage-settings"].isHittable { app.swipeUp() }
+        for _ in 0..<4 where !app.descendants(matching: .any)["home-manage-controls"].isHittable { app.swipeUp() }
         for row in ["home-manage-pause", "home-manage-resume", "home-manage-disable", "home-settings-controls"] {
             XCTAssertFalse(app.descendants(matching: .any)[row].exists, "\(row) is not a Manage Home row")
         }
         keepScreenshot(named: "manage-home-sheet")
         openHomeControls(app)
-        let content = app.descendants(matching: .any)["home-settings-content"]
-        let controls = app.descendants(matching: .any)["home-settings-controls"]
         let pause = app.descendants(matching: .any)["home-manage-pause"]
         let disable = app.descendants(matching: .any)["home-manage-disable"]
-        let connection = content.staticTexts["Connection"].firstMatch
-        XCTAssertTrue(pause.exists && disable.exists && connection.exists, app.debugDescription)
+        XCTAssertTrue(pause.exists && disable.exists, app.debugDescription)
         XCTAssertLessThan(pause.frame.maxY, disable.frame.minY + 1, "Pause sits above Disable")
-        XCTAssertGreaterThan(controls.frame.minY, connection.frame.maxY, "The controls sit below Connection")
-        XCTAssertEqual(controls.frame.maxY, content.frame.maxY, accuracy: 1, "The controls are Home Settings' last section")
         keepScreenshot(named: "home-settings-controls")
     }
 
@@ -1228,7 +730,7 @@ final class TronSmokeUITests: XCTestCase {
         gear.tap()
         XCTAssertTrue(app.staticTexts["Global Settings"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertFalse(app.descendants(matching: .any)["home-manage-state"].exists)
-        XCTAssertTrue(homeControlCount.label.contains("control-count:0"), "Opening Home Settings must not apply controls")
+        XCTAssertTrue(homeControlCount.label.contains("control-count:0"), "Opening Global Settings must not apply controls")
         keepScreenshot(named: "home-gear-settings-sheet")
         app.buttons["Done"].firstMatch.tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 5), app.debugDescription)
@@ -1246,11 +748,11 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertLessThan(done.frame.minY, mediumTop - 100, "Manage Home must drag to its large detent")
         keepScreenshot(named: "manage-home-large")
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-chapters"].exists)
-        for row in ["home-manage-memory-browser", "home-manage-tasks", "home-manage-settings"] {
+        for row in ["home-manage-memory-browser", "home-manage-tasks", "home-manage-controls", "home-manage-permissions"] {
             XCTAssertTrue(app.descendants(matching: .any)[row].exists, row)
         }
         for row in ["home-manage-pause", "home-manage-disable"] {
-            XCTAssertFalse(app.descendants(matching: .any)[row].exists, "\(row) lives in Home Settings")
+            XCTAssertFalse(app.descendants(matching: .any)[row].exists, "\(row) lives in Controls")
         }
         tapManageRow(app, "home-manage-memory-browser")
         XCTAssertTrue(app.descendants(matching: .any)["home-memory-row-39"].waitForExistence(timeout: 5), app.debugDescription)
@@ -1312,7 +814,7 @@ final class TronSmokeUITests: XCTestCase {
                 XCTAssertTrue(app.staticTexts["No tasks"].waitForExistence(timeout: 5))
                 keepScreenshot(named: "home-tasks-empty")
                 app.buttons["home-sheet-done-tasks"].tap()
-                tapManageRow(app, "home-manage-settings")
+                tapManageRow(app, "home-manage-permissions")
                 let refusal = app.staticTexts["Home task permissions refused"]
                 XCTAssertTrue(refusal.waitForExistence(timeout: 10), app.debugDescription)
                 reveal(refusal, in: app)
@@ -1413,11 +915,6 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    private func settingEditor(_ row: XCUIElement) -> XCUIElement {
-        row.buttons.matching(NSPredicate(format: "NOT identifier ENDSWITH '-source' AND NOT identifier ENDSWITH '-reset'")).firstMatch
-    }
-
-    @MainActor
     private func tapScrolling(_ element: XCUIElement, in app: XCUIApplication) {
         XCTAssertTrue(element.waitForExistence(timeout: 5), app.debugDescription)
         for _ in 0..<4 where !element.isHittable { app.swipeUp() }
@@ -1493,7 +990,7 @@ final class TronSmokeUITests: XCTestCase {
 
     @MainActor
     private func openHomeControls(_ app: XCUIApplication) {
-        tapManageRow(app, "home-manage-settings")
+        tapManageRow(app, "home-manage-controls")
         XCTAssertTrue(app.descendants(matching: .any)["home-settings-controls"].waitForExistence(timeout: 8), app.debugDescription)
         let last = app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN %@",
             ["home-manage-disable", "home-manage-check-completion"])).firstMatch
@@ -1672,35 +1169,10 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    func testManageHomeContextWindowOpenDismissDoesNotWrite() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
-        app.launch(); defer { app.terminate() }
-        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
-        app.buttons["home-pinned-row"].tap()
-        openManageHome(app)
-        tapManageRow(app, "home-manage-settings")
-        let editor = app.descendants(matching: .any)["home-settings-content"]
-        XCTAssertFalse(editor.descendants(matching: .any).matching(
-            NSPredicate(format: "identifier BEGINSWITH %@", "settings-row-model.contextWindow")).firstMatch.exists)
-        closeTopSheet(app)
-        app.buttons["home-sheet-done-manage"].tap()
-        app.buttons["Back"].tap()
-        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:0", timeout: 5),
-                      "Opening Home Settings cannot call settings.change")
-    }
-
-    private func modelPickerRow(_ app: XCUIApplication, _ name: String) -> XCUIElement {
-        let collapsed = app.buttons.matching(NSPredicate(format: "label ENDSWITH %@ AND value == %@", " models", "collapsed")).firstMatch
-        if collapsed.waitForExistence(timeout: 3) { collapsed.tap() }
-        return app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
-    }
-
-    @MainActor
-    private func openHomeModelsSettings(_ app: XCUIApplication) {
-        tapManageRow(app, "home-manage-settings")
-        expandSettingsSheet(app, title: "Home Settings")
+    private func openHomePermissions(_ app: XCUIApplication) {
+        let row = app.descendants(matching: .any)["home-manage-permissions"]
+        reveal(row, in: app)
+        row.tap()
     }
 
     private func waitForEnabled(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
@@ -1991,57 +1463,6 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    private func openChatSettings(_ app: XCUIApplication) {
-        tapScrolling(app.buttons["chat-settings-link"], in: app)
-        XCTAssertTrue(app.navigationBars.staticTexts["Session Settings"].waitForExistence(timeout: 5), app.debugDescription)
-    }
-
-    @MainActor
-    func testManageSessionSectionsAtAccessibilityTypeInLightAndDark() {
-        continueAfterFailure = false
-        for appearance in ["light", "dark"] {
-            let app = XCUIApplication()
-            app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", appearance,
-                                   "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
-            app.launch()
-            XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
-            app.buttons["Stop session"].tap()
-            XCTAssertTrue(app.buttons["chat-settings-link"].waitForExistence(timeout: 5), app.debugDescription)
-            XCTAssertFalse(app.buttons["Show all"].exists, "Manage Session never expands settings in place")
-            keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-primary")
-            app.buttons["Release terminal settlement"].tap()
-            let reset = app.buttons["settings-row-model.thinking_role_chat_-reset"]
-            reveal(reset, in: app)
-            XCTAssertTrue(reset.isHittable, "The canonical Thinking reset must stay reachable at XXXL")
-            let compactNow = app.buttons["Compact Now"]
-            let compactTitle = app.descendants(matching: .any)["session-usage-detail"]
-            XCTAssertTrue(compactNow.waitForExistence(timeout: 5), app.debugDescription)
-            for _ in 0..<6 where !(compactNow.isHittable && compactTitle.isHittable) { app.swipeDown() }
-            keepScreenshot(named: "868-manage-session-\(appearance)-xxxl-compact-row")
-            assertStacked(compactNow, below: compactTitle, in: app)
-            let branchTitle = app.staticTexts["Workspace"]
-            let branchValue = app.staticTexts["Unavailable"]
-            XCTAssertTrue(branchValue.waitForExistence(timeout: 5), app.debugDescription)
-            for _ in 0..<6 where !(branchTitle.isHittable && branchValue.isHittable) { app.swipeUp() }
-            keepScreenshot(named: "868-manage-session-\(appearance)-xxxl-branch-row")
-            assertStacked(branchValue, below: branchTitle, in: app)
-            for _ in 0..<12 where !app.buttons["chat-settings-link"].isHittable { app.swipeUp() }
-            keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-context")
-            openChatSettings(app)
-            tapScrolling(app.buttons["settings-section-context-open"], in: app)
-            let compaction = app.descendants(matching: .any)["settings-section-context-detail"]
-            XCTAssertTrue(compaction.waitForExistence(timeout: 5), app.debugDescription)
-            XCTAssertFalse(app.switches["Automatic compaction"].exists, "The retired policy row stays retired")
-            let policy = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'settings-row-context.'")).firstMatch
-            XCTAssertTrue(policy.waitForExistence(timeout: 5), app.debugDescription)
-            reveal(policy, in: app)
-            XCTAssertTrue(policy.isHittable, "The canonical compaction policy must stay reachable at XXXL")
-            keepScreenshot(named: "1325-session-\(appearance)-xxxl-policy")
-            app.terminate()
-        }
-    }
-
-    @MainActor
     func testSheetCaptionTextMatchesRowSubtitleSize() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -2072,202 +1493,6 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    func testSettingsRendererRetiresCoveredPreviewWithoutWritingOrLockingRows() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-renderer-held-preview"]
-        app.launch()
-        defer { app.terminate() }
-        let any = app.descendants(matching: .any)
-        XCTAssertTrue(any["settings-row-context.images.block"].waitForExistence(timeout: 10), app.debugDescription)
-        let toggle = any["settings-row-context.images.block"].switches.firstMatch
-        tapScrolling(toggle, in: app)
-        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-held"], containing: "held:1", timeout: 5))
-        app.buttons["Cover renderer"].tap()
-        app.buttons["Release preview"].tap()
-        app.buttons["Done"].firstMatch.tap()
-        XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:0")
-        XCTAssertTrue(toggle.isEnabled, "Retiring a disposable preview must release its busy state")
-        tapScrolling(toggle, in: app)
-        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
-        keepScreenshot(named: "758-retired-preview-rejoined")
-    }
-
-    @MainActor
-    func testSettingsRendererRendersAFixtureSchema() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture"]
-        app.launch()
-        defer { app.terminate() }
-        let any = app.descendants(matching: .any)
-        let applied = app.staticTexts["fixture.settings-renderer-applied"]
-        let thinking = app.staticTexts["fixture.settings-renderer-thinking-options"]
-        XCTAssertTrue(app.buttons["settings-link-Agent Behavior"].waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertFalse(any["settings-row-model.ref"].exists, "Keys live on section sheets")
-        XCTAssertFalse(app.buttons["Show all"].exists, "Settings never expands in place")
-        XCTAssertTrue(app.buttons["settings-section-lab-open"].exists, "A section the app never heard of renders from its served title")
-        keepScreenshot(named: "settings-renderer-primary")
-
-        openRendererSection(app, "run", link: "advanced")
-        XCTAssertTrue(any["settings-row-run.transport"].exists)
-        XCTAssertTrue(showsText("How many times a failed request is retried", in: app), "Section rows carry source and help")
-        keepScreenshot(named: "settings-renderer-run-sheet")
-        closeTopSheet(app)
-
-        openRendererSection(app, "lab")
-        let invalid = any["settings-row-lab.invalidValue"]
-        scrollTo(invalid, in: app)
-        let field = invalid.textFields.firstMatch
-        tapScrolling(field, in: app)
-        field.tap()
-        field.typeText("rejected\n")
-        XCTAssertTrue(any["settings-row-lab.invalidValue-error"].waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Fixture value rejected")).firstMatch.exists)
-        XCTAssertTrue(waitForLabel(applied, containing: "applied:0", timeout: 2))
-        keepScreenshot(named: "settings-renderer-invalid")
-        XCTAssertTrue(showsText("Experiments", in: app), "A subgroup the app never heard of")
-        scrollTo(any["settings-row-lab.palette"], in: app)
-        XCTAssertTrue(showsText("Teal", in: app), "An unknown control shows its display read-only")
-        scrollTo(any["settings-row-lab.secretToken"], in: app)
-        XCTAssertTrue(showsText("Update Tron to edit", in: app))
-        keepScreenshot(named: "settings-renderer-lab-sheet")
-        closeTopSheet(app)
-
-        openRendererSection(app, "model")
-        let modelCatalogRow = settingEditor(any["settings-row-model.ref"])
-        tapScrolling(modelCatalogRow, in: app)
-        let lite = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Fixture Lite")).firstMatch
-        XCTAssertTrue(lite.waitForExistence(timeout: 5), app.debugDescription)
-        keepScreenshot(named: "settings-renderer-catalog")
-        XCTAssertTrue(app.images["Selected"].exists, "The catalog marks the current value like the existing pickers")
-        closeTopSheet(app)
-        XCTAssertTrue(waitForLabel(applied, containing: "applied:0", timeout: 2), "Opening and dismissing the catalog must not write settings")
-        tapScrolling(modelCatalogRow, in: app)
-        XCTAssertTrue(lite.waitForExistence(timeout: 5), app.debugDescription)
-        lite.tap()
-        XCTAssertTrue(waitForLabel(applied, containing: "applied:1", timeout: 5))
-        XCTAssertTrue(waitForLabel(thinking, containing: "thinking-options:0", timeout: 5))
-        XCTAssertTrue(any["settings-row-model.thinking"].descendants(matching: .any)
-            .matching(NSPredicate(format: "label CONTAINS %@", "Off")).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
-    }
-
-    @MainActor
-    func testHomeSettingsModelsOrderAndToolDescriptionsForVisualReview() {
-        continueAfterFailure = false
-        for appearance in ["light", "dark"] {
-            let app = XCUIApplication()
-            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
-            if appearance == "dark" { app.launchArguments.append("-home-dark") }
-            app.launch(); defer { app.terminate() }
-            XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
-            app.buttons["home-pinned-row"].tap()
-            openManageHome(app)
-            tapManageRow(app, "home-manage-settings")
-            expandSettingsSheet(app, title: "Home Settings")
-            let models = app.descendants(matching: .any)["settings-row-model.queue_role_worker_"]
-            let section = app.descendants(matching: .any)["settings-row-tools.active"]
-            XCTAssertTrue(models.waitForExistence(timeout: 5))
-            XCTAssertTrue(section.exists)
-            XCTAssertLessThan(models.frame.minY, section.frame.minY, "Worker choices precede Tools in Home Settings")
-            XCTAssertFalse(app.buttons["settings-section-model-open"].exists, "The first-level Models drill-in is removed")
-            keepScreenshot(named: "1332-home-settings-\(appearance)")
-            let tools = app.descendants(matching: .any)["settings-row-tools.active"]
-            XCTAssertTrue(tools.waitForExistence(timeout: 5))
-            tapScrolling(settingEditor(tools), in: app)
-            XCTAssertTrue(app.switches["Ask user"].waitForExistence(timeout: 5))
-            keepScreenshot(named: "1332-home-tools-\(appearance)")
-            XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Ask the user one bounded set of questions")).firstMatch.exists,
-                          "Home tool rows carry their catalog's explanatory subtitles\n\(app.debugDescription)")
-            app.switches["Ask user"].tap()
-            closeTopSheet(app)
-            XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:0", timeout: 5), "Preview dismissal does not save a draft")
-        }
-    }
-
-    @MainActor
-    func testHomeToolsCatalogDraftAndRetainedConfiguration() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
-        app.launch(); defer { app.terminate() }
-        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
-        app.buttons["home-pinned-row"].tap()
-        openManageHome(app)
-        tapManageRow(app, "home-manage-settings")
-        expandSettingsSheet(app, title: "Home Settings")
-        let row = app.descendants(matching: .any)["settings-row-tools.active"]
-        XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
-        let count = app.staticTexts["fixture.home-control-count"]
-        func openTools() {
-            tapScrolling(settingEditor(row), in: app)
-            XCTAssertTrue(app.switches["Ask user"].waitForExistence(timeout: 5),
-                          "Home's real resource:{} options must produce actual tool rows")
-            XCTAssertFalse(app.staticTexts["No tools"].exists)
-        }
-        openTools()
-        XCTAssertEqual(app.switches["Ask user"].value as? String, "1")
-        app.switches["Ask user"].tap()
-        closeTopSheet(app)
-        XCTAssertTrue(waitForLabel(count, containing: "control-count:0", timeout: 5))
-        openTools()
-        XCTAssertEqual(app.switches["Ask user"].value as? String, "1", "Cancel does not alter Home defaults")
-        app.switches["Ask user"].tap()
-        app.buttons["tron-sheet-save"].tap()
-        XCTAssertTrue(waitForLabel(count, containing: "control-count:1", timeout: 5))
-        openTools()
-        XCTAssertEqual(app.switches["Ask user"].value as? String, "0", "Reopen reads the accepted profile change")
-        closeTopSheet(app)
-        let reset = app.buttons["settings-row-tools.active-reset"]
-        tapScrolling(reset, in: app)
-        XCTAssertTrue(waitForLabel(count, containing: "control-count:2", timeout: 5))
-        openTools()
-        XCTAssertEqual(app.switches["Ask user"].value as? String, "1", "Unset restores the inherited tool selection")
-        keepScreenshot(named: "1325-home-tools-accepted-unset")
-    }
-
-    @MainActor
-    func testSettingsToolsEditorUsesAvailableToolsListAndDetails() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-ui-tools"]
-        app.launch()
-        defer { app.terminate() }
-        let toolsRow = app.descendants(matching: .any)["settings-row-tools.active"]
-        XCTAssertTrue(toolsRow.waitForExistence(timeout: 10), app.debugDescription)
-        tapScrolling(settingEditor(toolsRow), in: app)
-        let any = app.descendants(matching: .any)
-        let count = any.matching(NSPredicate(format: "label == %@", "2 of 2 on")).firstMatch
-        XCTAssertTrue(count.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(any.matching(NSPredicate(format: "label == %@", "Read file")).firstMatch.exists, app.debugDescription)
-        keepScreenshot(named: "900-tools-list-light")
-        let detailButton = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Read file, Read file contents")).firstMatch
-        tapScrolling(detailButton, in: app)
-        XCTAssertTrue(app.staticTexts["Fixture path input"].waitForExistence(timeout: 5), app.debugDescription)
-        keepScreenshot(named: "900-tools-detail-light")
-        closeTopSheet(app)
-        XCTAssertTrue(app.staticTexts["Not available here"].exists, app.debugDescription)
-        let applied = app.staticTexts["fixture.settings-renderer-applied"]
-        let read = app.switches["Read file"]
-        XCTAssertTrue(read.waitForExistence(timeout: 5), app.debugDescription)
-        read.tap()
-        tapScrolling(app.switches["Retired"], in: app)
-        XCTAssertTrue(any.matching(NSPredicate(format: "label == %@", "0 of 2 on")).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertEqual(applied.label, "applied:0", "Toggling edits the draft; nothing applies before Save")
-        app.buttons["tron-sheet-save"].tap()
-        XCTAssertTrue(waitForLabel(applied, containing: "applied:1", timeout: 5))
-    }
-
-    @MainActor
-    private func openRendererSection(_ app: XCUIApplication, _ id: String, link: String? = nil) {
-        let consolidated = ["model", "workers", "context", "run"].contains(id)
-        let row = consolidated ? "settings-link-Agent Behavior" : "settings-section-\(link ?? id)-open"
-        tapScrolling(app.buttons[row], in: app)
-        let detail = app.descendants(matching: .any)["settings-section-\(id)-detail"]
-        XCTAssertTrue(detail.waitForExistence(timeout: 5), app.debugDescription)
-    }
-
-    @MainActor
     private func closeTopSheet(_ app: XCUIApplication) {
         let done = app.buttons.matching(NSPredicate(format: "label == %@", "Done")).allElementsBoundByIndex.last { $0.isHittable }
         XCTAssertNotNil(done, app.debugDescription)
@@ -2275,148 +1500,8 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    func testSettingsRendererRevertUsesTheReceiptPath() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture"]
-        app.launch()
-        defer { app.terminate() }
-        XCTAssertTrue(app.buttons["settings-link-Agent Behavior"].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.buttons["settings-row-model.ref-open"].exists, "No per-key intermediate sheet")
-        openRendererSection(app, "model")
-        let reset = app.buttons["settings-row-model.ref-reset"]
-        XCTAssertTrue(reset.waitForExistence(timeout: 5), app.debugDescription)
-        assertCircularRevert(reset)
-        keepScreenshot(named: "settings-revert-before")
-        tapScrolling(reset, in: app)
-        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
-        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "value == %@", "Fixture Lite")).firstMatch
-            .waitForExistence(timeout: 5), "The reset value reads back on the key's row")
-        keepScreenshot(named: "settings-revert-after")
-    }
-
-    @MainActor
-    func testSettingsRendererCatalogPagesWithoutWriting() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture"]
-        app.launch()
-        defer { app.terminate() }
-        let any = app.descendants(matching: .any)
-        openRendererSection(app, "model")
-        tapScrolling(settingEditor(any["settings-row-model.ref"]), in: app)
-        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Fixture Pro")).firstMatch.waitForExistence(timeout: 5))
-        XCTAssertFalse(any["settings-option-Fixture Page Two"].exists)
-        let more = app.buttons["settings-catalog-more"]
-        XCTAssertTrue(more.waitForExistence(timeout: 5), "A served nextCursor must make the rest of the catalog reachable")
-        more.tap()
-        XCTAssertTrue(any["settings-option-Fixture Page Two"].waitForExistence(timeout: 5))
-        XCTAssertFalse(more.exists, "The final page retires its cursor")
-        keepScreenshot(named: "settings-catalog-second-page")
-        closeTopSheet(app)
-        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:0", timeout: 5))
-    }
-
-    @MainActor
-    func testSettingsRendererOrderedChoiceUsesSharedSlider() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture"]
-        app.launch()
-        defer { app.terminate() }
-        let any = app.descendants(matching: .any)
-        openRendererSection(app, "model")
-        let row = any["settings-row-model.thinking"]
-        XCTAssertTrue(row.waitForExistence(timeout: 5))
-        keepScreenshot(named: "settings-renderer-ordered-choice-row")
-        tapScrolling(settingEditor(row), in: app)
-        let slider = any["settings-choice-slider"]
-        XCTAssertTrue(slider.waitForExistence(timeout: 5), "An ordered choice reuses the native anchored slider, not a menu")
-        keepScreenshot(named: "settings-renderer-ordered-choice-expanded")
-        slider.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).tap()
-        let outside = app.coordinate(withNormalizedOffset: .zero)
-            .withOffset(CGVector(dx: 10, dy: min(app.frame.maxY - 70, slider.frame.maxY + 80)))
-        outside.tap()
-        XCTAssertTrue(slider.waitForNonExistence(timeout: 5))
-        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
-        XCTAssertTrue(row.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR value == %@", "Off", "Off"))
-            .firstMatch.waitForExistence(timeout: 5), app.debugDescription)
-    }
-
-    @MainActor
-    func testSettingsRendererListEditor() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture"]
-        app.launch()
-        defer { app.terminate() }
-        let any = app.descendants(matching: .any)
-        openRendererSection(app, "lab")
-        let paths = any["settings-row-lab.paths"]
-        tapScrolling(settingEditor(paths), in: app)
-        XCTAssertTrue(app.buttons["Remove alpha"].waitForExistence(timeout: 5))
-        expandSettingsSheet(app, title: "Paths")
-        keepScreenshot(named: "settings-renderer-list-before-edit")
-        app.buttons["Remove alpha"].tap()
-        app.textFields["Value"].tap()
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
-        app.textFields["Value"].typeText("gamma")
-        app.buttons["Add"].tap()
-        app.buttons["Save"].tap()
-        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
-        XCTAssertTrue(paths.buttons.matching(NSPredicate(format: "value == %@", "beta, gamma")).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
-        tapScrolling(settingEditor(paths), in: app)
-        XCTAssertTrue(app.buttons["Remove gamma"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["Remove alpha"].exists)
-        keepScreenshot(named: "settings-renderer-list-persisted")
-        closeTopSheet(app)
-
-        let weights = any["settings-row-lab.weights"]
-        reveal(weights, in: app)
-        XCTAssertFalse(weights.buttons["Weights"].exists)
-        XCTAssertFalse(weights.buttons["settings-row-lab.weights-reset"].exists)
-        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5), "Read-only map inspection must not mutate")
-        keepScreenshot(named: "settings-renderer-number-map-readonly")
-    }
-
-    @MainActor
-    func testSettingsRendererDarkLargeType() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-renderer-dark",
-                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
-        app.launch()
-        defer { app.terminate() }
-        let any = app.descendants(matching: .any)
-        XCTAssertTrue(app.buttons["settings-link-Agent Behavior"].waitForExistence(timeout: 10), app.debugDescription)
-        keepScreenshot(named: "settings-renderer-dark-xxxl-primary")
-        openRendererSection(app, "run", link: "advanced")
-        scrollTo(any["settings-row-run.retry.maxRetries"], in: app)
-        XCTAssertTrue(any["settings-row-run.retry.maxRetries"].isHittable, "Section rows stay reachable at XXXL")
-        let transport = any["settings-row-run.transport"]
-        XCTAssertTrue(transport.waitForExistence(timeout: 5), app.debugDescription)
-        scrollTo(transport, in: app)
-        keepScreenshot(named: "settings-renderer-dark-xxxl-run-sheet")
-    }
-
-    @MainActor
-    private func showsText(_ text: String, in app: XCUIApplication) -> Bool {
-        app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch.exists
-    }
-
-    @MainActor
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
         for _ in 0..<16 where !(element.exists && element.isHittable) { app.swipeUp() }
-    }
-
-    @MainActor
-    private func assertStacked(_ control: XCUIElement, below title: XCUIElement, in app: XCUIApplication,
-                               file: StaticString = #filePath, line: UInt = #line) {
-        XCTAssertTrue(title.exists && control.exists, app.debugDescription, file: file, line: line)
-        XCTAssertGreaterThanOrEqual(control.frame.minY, title.frame.maxY,
-                                    "\(control.label) sits below \(title.label), not beside it", file: file, line: line)
-        XCTAssertEqual(control.frame.maxX, app.windows.firstMatch.frame.maxX - 32, accuracy: 1,
-                       "\(control.label) retains its container + standard row trailing inset", file: file, line: line)
     }
 
     @MainActor
@@ -2464,46 +1549,6 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    func testRendererPickOfDisplayedDefaultPinsIt() {
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture"]
-        app.launch(); defer { app.terminate() }
-        let applied = app.staticTexts["fixture.settings-renderer-applied"]
-        XCTAssertTrue(applied.waitForExistence(timeout: 10))
-        tapScrolling(app.buttons["settings-section-lab-open"], in: app)
-        let row = app.descendants(matching: .any)["settings-row-lab.focusMode"]
-        XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
-        tapScrolling(settingEditor(row), in: app)
-        let calm = app.buttons["settings-option-Calm"]
-        XCTAssertTrue(calm.waitForExistence(timeout: 5), app.debugDescription)
-        calm.tap()
-        XCTAssertTrue(waitForLabel(applied, containing: "applied:1", timeout: 5), "A displayed default is written to the edited layer")
-    }
-
-    @MainActor
-    func testRendererConfirmationSurvivesCoverageAndCancelDoesNotWrite() {
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-renderer-confirm"]
-        app.launch(); defer { app.terminate() }
-        let toggle = app.descendants(matching: .any)["settings-row-context.images.block"].switches.firstMatch
-        tapScrolling(toggle, in: app)
-        let confirm = app.buttons["change-review-approve"]
-        XCTAssertTrue(confirm.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertEqual(app.alerts.count, 0)
-        XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:0")
-        app.buttons["change-review-cancel"].tap()
-        XCTAssertTrue(confirm.waitForNonExistence(timeout: 5))
-        XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:0")
-        tapScrolling(toggle, in: app)
-        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
-        confirm.tap()
-        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
-        XCTAssertTrue(confirm.waitForNonExistence(timeout: 5))
-        XCTAssertTrue(toggle.exists && toggle.isEnabled, "Only the confirmation closes, not its settings parent")
-        keepScreenshot(named: "1261-renderer-confirmed-once")
-    }
-
-    @MainActor
     func testSharedRenameValidatesClearsAndCommitsTheEnteredName() {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-session-configuration-fixture"]
@@ -2530,26 +1575,35 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    func testMacSettingsUsesSchemaGroupsAndSharedThinkingEditor() {
+    func testManageSessionSectionsAtAccessibilityTypeInLightAndDark() {
         continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-mac-settings-fixture"]
-        app.launch()
-        defer { app.terminate() }
-        tapScrolling(app.buttons["settings-link-Agent Behavior"], in: app)
-        let thinking = app.descendants(matching: .any)["settings-row-model.thinking"]
-        XCTAssertTrue(thinking.waitForExistence(timeout: 5), app.debugDescription)
-        tapScrolling(settingEditor(thinking), in: app)
-        let slider = app.descendants(matching: .any)["settings-choice-slider"]
-        XCTAssertTrue(slider.waitForExistence(timeout: 3))
-        keepScreenshot(named: "mac-settings-schema-thinking")
-        app.coordinate(withNormalizedOffset: .zero)
-            .withOffset(CGVector(dx: 10, dy: min(app.frame.maxY - 70, slider.frame.maxY + 80))).tap()
-        XCTAssertTrue(slider.waitForNonExistence(timeout: 3))
-        XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:0")
-        XCTAssertFalse(app.buttons["Settings Scope"].exists)
-        closeTopSheet(app)
-        XCTAssertTrue(app.buttons["settings-link-Agent Behavior"].isHittable)
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", appearance,
+                                   "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+            app.launch()
+            XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+            app.buttons["Stop session"].tap()
+            XCTAssertTrue(app.descendants(matching: .any)["session-model-summary"].waitForExistence(timeout: 5), app.debugDescription)
+            keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-primary")
+            app.buttons["Release terminal settlement"].tap()
+            let reset = app.buttons["settings-row-model.thinking_role_chat_-reset"]
+            reveal(reset, in: app)
+            XCTAssertTrue(reset.isHittable, "The canonical Thinking reset must stay reachable at XXXL")
+            let compactNow = app.buttons["Compact Now"]
+            let compactTitle = app.descendants(matching: .any)["session-usage-detail"]
+            XCTAssertTrue(compactNow.waitForExistence(timeout: 5), app.debugDescription)
+            for _ in 0..<6 where !(compactNow.isHittable && compactTitle.isHittable) { app.swipeDown() }
+            keepScreenshot(named: "868-manage-session-\(appearance)-xxxl-compact-row")
+            assertStacked(compactNow, below: compactTitle, in: app)
+            let branchTitle = app.staticTexts["Workspace"]
+            let branchValue = app.staticTexts["Unavailable"]
+            XCTAssertTrue(branchValue.waitForExistence(timeout: 5), app.debugDescription)
+            for _ in 0..<6 where !(branchTitle.isHittable && branchValue.isHittable) { app.swipeUp() }
+            keepScreenshot(named: "868-manage-session-\(appearance)-xxxl-branch-row")
+            assertStacked(branchValue, below: branchTitle, in: app)
+            app.terminate()
+        }
     }
 
     @MainActor
@@ -3673,5 +2727,15 @@ final class TronSmokeUITests: XCTestCase {
         app.launchArguments = ["--tron-reset-ui-test-state", "-ApplePersistenceIgnoreState", "YES"] + extraArguments
         app.launch()
         return app
+    }
+
+    @MainActor
+    private func assertStacked(_ control: XCUIElement, below title: XCUIElement, in app: XCUIApplication,
+                               file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(title.exists && control.exists, app.debugDescription, file: file, line: line)
+        XCTAssertGreaterThanOrEqual(control.frame.minY, title.frame.maxY,
+                                    "\(control.label) sits below \(title.label), not beside it", file: file, line: line)
+        XCTAssertEqual(control.frame.maxX, app.windows.firstMatch.frame.maxX - 32, accuracy: 1,
+                       "\(control.label) retains its container + standard row trailing inset", file: file, line: line)
     }
 }

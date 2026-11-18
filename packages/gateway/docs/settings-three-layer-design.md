@@ -154,7 +154,6 @@ pills and passive Overridden tags reuse the shared control/status owners.
 | --- | --- |
 | Global `SettingsView`, section links/cards | Keep current group styling/order; every setting row editable, never an inspection clone |
 | Session `SessionContextSheet`, Home `HomeManageSheet` | One Settings row each; remove competing model/tool settings cards from Manage Session, keep composer shortcuts on same owner |
-| `SessionSettingsView` | Replace split inline/editable/Configuration branches with same card/section components as Global; only eligible/applicable keys |
 | Inherited / explicit override row | Plain effective Global value / Overridden tag plus existing round Revert; no source badge/link |
 | Eligible row masked by Project | Disabled editor; separately tappable “Set by Project settings” pill (accessible while editor disabled) |
 | Project pill info | Small sheet: “This is set by the current project's settings. Ask an agent to update them in the repo.” File and exact JSON key path |
@@ -162,7 +161,6 @@ pills and passive Overridden tags reuse the shared control/status owners.
 | Untrusted/disallowed Project values | Diagnostic notice/details, not active Project overrides or disabled Session controls |
 | `SettingsConfigurationInspection` | Delete destination, routes and solely-owned fixtures/assertions; no read-only Global Configuration anywhere |
 | `SettingsConfigurationGroups` | Retire generic Global inspection; reuse only necessary read-only Project grouping, with Project-specific name |
-| `SettingsProvenanceView` / Value & Source in `SettingsRendererRow` | Delete entire sheet, row inspection state/routes and source-only actions; shared editors/formatters stay |
 | `TronValueRow` source affordance/hint | Remove settings-only source link/hint; do not change shared sheet chrome (`TronPresentation`, #1631) |
 | Session/Home/Project `SettingsChangesLink` | Delete all; Global toolbar is the single Changes entry and sheet |
 | Dashboard/New Session Project Settings routes | Reuse one Project read-only content owner; no Changes or inherited Global inspection |

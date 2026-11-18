@@ -1,83 +1,6 @@
-import { HOME_PROFILE_SUBJECT, SECTIONS, keyForHome, recordSubject, type SettingsSchema, type EntryGuidance, type KeyDeclaration } from "../kernel/settings/settings-schema.js";
-import type { ResolvedKey, Resolution } from "../kernel/settings/tool-contract.js";
+import { HOME_PROFILE_SUBJECT, recordSubject, type SettingsSchema } from "../kernel/settings/settings-schema.js";
 import type { Actor, ChangeEntry } from "../kernel/settings/settings-record.js";
-import { formatStoredSetting, LAYER_LABELS, RENDERER_CONTRACT_VERSION, type Control, type ValueType } from "../kernel/settings/settings-types.js";
-import { scopeAdmitted } from "../kernel/settings/scope-resolution.js";
-
-export const UPDATE_TRON_NOTE = "Update Tron to edit";
-
-function negotiateControl(key: KeyDeclaration, clientControls: readonly string[] | undefined): { control?: Control; note?: string } {
-  if (key.control === undefined) return {};
-  if (key.control === "readOnly") return { control: "readOnly" };
-  const supports = (control: Control) => clientControls?.includes(control) === true;
-  if (supports(key.control)) return { control: key.control };
-  return { control: "readOnly", note: UPDATE_TRON_NOTE };
-}
-
-export interface KeyPresentation {
-  label: string;
-  help: string;
-  order: number;
-  importance: "essential" | "advanced";
-  control?: Control;
-  note?: string;
-  valueKind: string;
-  options?: readonly { value: unknown; label: string; detail?: string }[];
-  range?: NonNullable<ValueType["range"]>;
-  optionsSource?: { name: string; dependsOn: readonly string[] };
-  confirm?: string;
-  entry?: EntryGuidance;
-  sessionOverridable: boolean;
-  projectSettable: boolean;
-  editable: boolean;
-  timing: KeyDeclaration["timing"];
-  effect: KeyDeclaration["effect"];
-}
-
-function presentKey(key: KeyDeclaration, clientControls: readonly string[] | undefined, layer: "global" | "session" | "home" | "project"): KeyPresentation {
-  const binding = key.layers[layer];
-  const { control, note } = negotiateControl(key, clientControls);
-  return {
-    label: key.label,
-    help: key.help,
-    order: key.order,
-    importance: key.importance,
-    ...(control ? { control } : {}),
-    ...(note ? { note } : {}),
-    valueKind: key.type.kind,
-    sessionOverridable: key.sessionOverridable,
-    projectSettable: key.projectSettable,
-    editable: layer !== "project" && scopeAdmitted(key, layer) && key.writers.includes("ui") && binding !== undefined && binding.store !== "session-launch",
-    timing: key.timing,
-    effect: key.effect,
-    ...(control && key.type.options ? { options: key.type.options } : {}),
-    ...(control && key.type.range ? { range: key.type.range } : {}),
-    ...(control && key.optionsSource ? { optionsSource: key.optionsSource } : {}),
-    ...(key.confirm ? { confirm: key.confirm } : {}),
-    ...(key.entry ? { entry: key.entry } : {}),
-  };
-}
-
-export interface SettingsSectionPresentation {
-  id: string;
-  title: string;
-  order: number;
-  description: string;
-  note?: string;
-  chatInline?: boolean;
-}
-
-export type PresentedKey = ResolvedKey & { presentation: KeyPresentation };
-
-export interface PresentedResolution extends Omit<Resolution, "keys"> {
-  renderer: { version: number };
-  keys: PresentedKey[];
-  sections: SettingsSectionPresentation[];
-}
-
-interface PresentationInput {
-  controls?: readonly string[];
-}
+import { formatStoredSetting, LAYER_LABELS } from "../kernel/settings/settings-types.js";
 
 function requesterLabel(actor: Actor): string {
   return actor.kind === "worker" && actor.taskId ? `Home task ${actor.taskId}`
@@ -128,28 +51,4 @@ export function presentHistoryEntry(schema: SettingsSchema, entry: ChangeEntry) 
       display,
     },
   };
-}
-
-export function presentResolution(schema: SettingsSchema, resolution: Resolution, input: PresentationInput): PresentedResolution {
-  const layer = resolution.target.kind === "global" ? "global" : resolution.target.kind === "project" ? "project"
-    : resolution.target.kind === "home" ? "home" : "session";
-  const keys: PresentedKey[] = resolution.keys.filter(key => {
-    if (input.controls === undefined) return true;
-    const declaration = schema.schemaKey(key.key);
-    return declaration.writers.length > 0 && (declaration.control !== undefined
-      || key.overridden === true || key.projectSetting !== undefined || layer === "project");
-  }).map(key => {
-    const declaration = keyForHome(schema.schemaKey(key.key), resolution.target.kind === "home");
-    return {
-      ...key,
-      presentation: presentKey(declaration, input.controls, layer),
-    };
-  });
-  const sections = SECTIONS.flatMap((section): SettingsSectionPresentation[] =>
-    keys.some(key => key.group === section.id) ? [{
-      id: section.id, title: section.title, description: section.description, order: section.order,
-      ...(section.note ? { note: section.note } : {}),
-      ...(section.chatInline ? { chatInline: true } : {}),
-    }] : []);
-  return { ...resolution, renderer: { version: RENDERER_CONTRACT_VERSION }, keys, sections };
 }

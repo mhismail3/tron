@@ -66,7 +66,7 @@ In short:
   trust/executable authority, privacy or spend, and for install or irreversible effects.
 
 RPCs (shapes in the [Gateway README](../../README.md)): `settings.resolve`,
-`settings.options`, `settings.change` (with `dryRun`), `settings.undo`,
+`settings.change` (with `dryRun`), `settings.undo`,
 `settings.applyAgain`, `settings.history` (the maintainer's full view), plus `home.profileChange` for learned-profile notes.
 Broadcasts: `settings.changed`, `trust.changed`, `mcp.changed`. Agents reach the same path through the `settings` tool
 (a thin client of resolve, change, history, undo, applyAgain, inventory and Home-only package update, each carrying the calling chat's actor; history and undo are
@@ -181,5 +181,4 @@ retains worker model/thinking and Session fence witnesses.
 
 - Home's learned profile store and task authorization: `src/modules/home/`.
 - Model fallback queue availability and routing: `src/providers/model-queue.ts`.
-- The iOS renderer: `packages/ios-app` (`SettingsRendererView`).
 - RPC dispatch: `src/transport/gateway-service.ts`.

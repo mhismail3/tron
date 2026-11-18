@@ -24,17 +24,6 @@ final class TronAppearanceBehaviorUITests: XCTestCase {
         app.terminate()
     }
 
-    func testSingleSectionRetainsHeadingWithoutScreenOptIn() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-controls-review"]
-        app.launch()
-        XCTAssertTrue(app.buttons["alignment.inherited"].waitForExistence(timeout: 15))
-        XCTAssertTrue(app.buttons["alignment.revert"].exists, "Rows and actions must survive heading suppression")
-        XCTAssertTrue(app.staticTexts["Mixed controls"].exists, "A shared group retains its heading unless the screen opts in to hiding it")
-        app.terminate()
-    }
-
     func testSourceControlHeadingTracksActualContainerCount() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -49,16 +38,6 @@ final class TronAppearanceBehaviorUITests: XCTestCase {
         newBranch.tap()
         XCTAssertTrue(app.staticTexts["New Branch"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["Checkout Strategy"].exists, "Two real sections must retain both headings")
-        app.terminate()
-    }
-
-    func testMultipleSectionsRetainTheirHeadings() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-nested", "-settings-expanded-review"]
-        app.launch()
-        openAppearance(app)
-        XCTAssertTrue(app.staticTexts["Text Font"].exists, "Structural counting must retain headings on a multi-section page")
         app.terminate()
     }
 

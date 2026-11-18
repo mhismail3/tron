@@ -117,6 +117,7 @@ struct SettingsChoiceSelectionRow: View {
         .onChange(of: options) { _, _ in cancel() }
         .onChange(of: isEnabled) { _, enabled in if !enabled { cancel() } }
         .onDisappear { cancel() }
+        .accessibilityLabel(title)
         .accessibilityHint(canEdit ? "Opens a slider of available choices. Dismiss to save." : "No alternative choices are available.")
     }
 

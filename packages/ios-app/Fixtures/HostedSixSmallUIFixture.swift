@@ -50,12 +50,6 @@ struct HostedSixSmallUIFixture: View {
 
     @ViewBuilder private var destination: some View {
         switch surface {
-        case "home":
-            SessionSettingsView(sessionID: "fixture-chat", ownedLayers: ["session"], homeProfileID: "settings-renderer-fixture")
-                .tronNavigationTitle("Home Settings")
-        case "session":
-            SessionSettingsView(sessionID: "fixture-chat", ownedLayers: ["session"], projectCWD: "/fixture/project")
-                .tronNavigationTitle("Session Settings")
         case "models":
             ModelPicker(selection: $selection, models: Self.models)
                 .tronNavigationTitle("Models")

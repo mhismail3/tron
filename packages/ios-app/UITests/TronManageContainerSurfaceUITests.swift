@@ -26,14 +26,12 @@ import UIKit
                 let summary = pigment(top, app: app, frame: usage.frame)
                 let workspace = app.buttons["Workspace"]
                 let navigation = pigment(top, app: app, frame: workspace.frame)
-                let settings = app.buttons["chat-settings-link"]
-                for _ in 0..<6 where !settings.isHittable { app.swipeUp() }
+                for _ in 0..<6 { app.swipeUp() }
                 let bottom = app.screenshot()
                 keep(bottom, "manage-containers-\(theme)-\(mode)-bottom")
-                let setting = pigment(bottom, app: app, frame: settings.frame)
-                print("MANAGE_SURFACE \(theme)-\(mode) model=\(reference) usage=\(summary) navigation=\(navigation) settings=\(setting)")
+                print("MANAGE_SURFACE \(theme)-\(mode) model=\(reference) usage=\(summary) navigation=\(navigation)")
                 if theme == "burgundy", mode == "dark" {
-                    for (name, color) in [("usage", summary), ("navigation", navigation), ("settings", setting)] {
+                    for (name, color) in [("usage", summary), ("navigation", navigation)] {
                         XCTAssertEqual(color[0] - color[1], reference[0] - reference[1], accuracy: 5,
                             "\(name) must share the model card's deep-wine glass, not use lifted ink")
                     }

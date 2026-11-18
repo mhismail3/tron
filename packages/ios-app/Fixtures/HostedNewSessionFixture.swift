@@ -156,15 +156,7 @@ private actor NewSessionFixtureGateway {
                     "display": projectModel == nil ? .null : .string("Project Pro"), "applied": .bool(true)])]),
                 "badges": .array([.object(["kind": .string("layer"), "label": .string(projectModel == nil ? "Tron default" : "Set in project")])]),
                 "projectSetting": projectModel == nil ? .null : .object(["file": .string("/fixture/original/.pi/settings.json"), "path": .string("defaultProvider + defaultModel")]),
-                "presentation": .object(["label": .string("Model"), "help": .string("The default for new chats in this project."),
-                    "sessionOverridable": .bool(true), "projectSettable": .bool(true), "editable": .bool(false),
-                    "order": .number(10), "importance": .string("essential"), "control": .string("catalog"),
-                    "optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])])
-            ])] + (scenario.hasPrefix("project-settings") ? [HostedSettingsReviewSchema.key("tools.active", "tools", "Tools",
-                .array(["read", "bash", "edit", "write", "fetch_content"].map(JSONValue.string)), "5 tools", "checklist",
-                help: "Tools selected by this repository.", essential: true, layer: "project")] : [])),
-            "sections": .array([.object(["id": .string("model"), "title": .string("Model"), "order": .number(10)]),
-                               .object(["id": .string("tools"), "title": .string("Tools"), "order": .number(30)])]),
+            ])] + (scenario.hasPrefix("project-settings") ? [HostedSettingsReviewSchema.key("tools.active", "tools", .array(["read", "bash", "edit", "write", "fetch_content"].map(JSONValue.string)), "5 tools", layer: "project")] : [])),
             "diagnostics": .array([])
         ])
     }
@@ -172,21 +164,7 @@ private actor NewSessionFixtureGateway {
     func handle(_ method: String, params: [String: JSONValue], replacement: Bool) async -> JSONValue? {
         switch method {
         case "settings.resolve":
-            if scenario == "project-settings-slow", params["target"]?.objectValue?["kind"]?.stringValue == "project" {
-                try? await Task.sleep(for: .seconds(2.5))
-            }
             return projectResolution()
-        case "settings.options":
-            if params["key"]?.stringValue == "tools.active" {
-                return .object(["key": .string("tools.active"), "source": .string("catalog.tools"),
-                    "dependsOn": .array([]), "options": .array(["read", "bash", "edit", "write", "fetch_content"].map {
-                        .object(["value": .string($0), "label": .string($0), "resource": .object([
-                            "name": .string($0), "description": .string("Repository tool details for \($0)."),
-                            "parameters": .object(["type": .string("object"), "properties": .object([:])])])])
-                    })])
-            }
-            return .object(["key": .string("model.ref[role=chat]"), "source": .string("catalog.models"), "dependsOn": .array([]),
-                            "options": .array([.object(["value": .object(["provider": .string("fixture"), "id": .string("project-pro")]), "label": .string("Project Pro")])])])
         case "trust.inspect": return .object(["requiresDecision": .bool(scenario.hasPrefix("trust-") && !trustResolved), "effectiveDecision": scenario.hasPrefix("trust-") && !trustResolved ? .null : .bool(false)])
         case "settings.change":
             if scenario.hasPrefix("project-") {

@@ -26,38 +26,6 @@ final class TronSheetThemePreviewUITests: XCTestCase {
         }
     }
 
-    func testMovedSettingsRemainReachableWithEditorsAndSources() {
-        let app = settings("dark")
-        defer { app.terminate() }
-        open(app, "settings-link-Agent Behavior")
-        expand(app, title: "Agent Behavior")
-        XCTAssertTrue(app.staticTexts["Transport"].firstMatch.waitForExistence(timeout: 5))
-        for _ in 0..<3 {
-            XCTAssertFalse(app.staticTexts["Advanced"].exists)
-            XCTAssertTrue(app.staticTexts["Thinking budgets"].exists, "Model controls share the consolidated Agent Behavior sheet")
-            XCTAssertFalse(app.staticTexts["Offered models"].exists)
-            XCTAssertFalse(app.staticTexts["Mac Terminal key"].exists)
-            app.swipeUp()
-        }
-        for _ in 0..<7 where !app.staticTexts["Retries"].isHittable { app.swipeUp() }
-        XCTAssertTrue(app.staticTexts["Retries"].isHittable)
-        close(app)
-        open(app, "settings-link-Agent Behavior")
-        expand(app, title: "Agent Behavior")
-        for label in ["Worker models", "Subagent models", "Thinking budgets", "Retries"] {
-            XCTAssertTrue(app.staticTexts[label].exists, "Missing combined-sheet setting: \(label)")
-        }
-        for _ in 0..<7 where !app.staticTexts["Retries"].isHittable { app.swipeUp() }
-        XCTAssertTrue(app.staticTexts["Retries"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Retries"].isHittable)
-        close(app)
-        open(app, "settings-link-Connections")
-        expand(app, title: "Connections")
-        open(app, "Details for Fixture")
-        expand(app, title: "Fixture")
-        capture(app, "regression-mac-key")
-    }
-
     private func settings(_ mode: String) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -124,10 +92,6 @@ final class TronSheetThemePreviewUITests: XCTestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 10), app.debugDescription)
         title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
-    }
-
-    private func close(_ app: XCUIApplication) {
-        app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last { $0.isHittable }?.tap()
     }
 
     private func capture(_ app: XCUIApplication, _ name: String) {
