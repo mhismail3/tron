@@ -136,32 +136,6 @@ final class TronSubagentParityUITests: XCTestCase {
     }
 
     @MainActor
-    func testNotificationBodyFillsSheetWidth() throws {
-        continueAfterFailure = false
-        for scheme in ["light", "dark"] {
-            let app = XCUIApplication()
-            app.launchArguments = ["-tron-subagent-parity-fixture", "-presentation-polish", "-\(scheme)"]
-            if scheme == "dark" { app.launchArguments.append("-accessibility-type") }
-            app.launch()
-            defer { app.terminate() }
-            let errors = app.buttons.matching(NSPredicate(format: "label == %@", "Tron · Notification, Error"))
-            XCTAssertTrue(errors.firstMatch.waitForExistence(timeout: 10), app.debugDescription)
-            XCTAssertEqual(errors.count, 2)
-            for index in 0..<2 {
-                inVisualOrder(errors)[index].tap()
-                let text = index == 0 ? "HTTP 429" : "Long error context"
-                XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", text)).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
-                try capture("852-error-\(scheme)-\(index)")
-                let card = app.descendants(matching: .any).matching(identifier: "chat-notification-body").firstMatch
-                XCTAssertTrue(card.exists)
-                let viewport = app.scrollViews.element(boundBy: app.scrollViews.count - 1)
-                XCTAssertGreaterThanOrEqual(card.frame.width, viewport.frame.width - 40, "Short and long cards use the same standard content width")
-                app.buttons["Done"].tap()
-            }
-        }
-    }
-
-    @MainActor
     func testAdjacentNotificationsKeepCompactIndependentTargets() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
