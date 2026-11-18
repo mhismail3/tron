@@ -3,30 +3,6 @@ import XCTest
 final class TronHomeTaskHistoryUITests: XCTestCase {
     @MainActor func testStructuredCheckinWhitespaceAndHistoryLight() { verify(dark: false) }
     @MainActor func testStructuredCheckinWhitespaceAndHistoryDark() { verify(dark: true) }
-    @MainActor func testDisableHomeIconIsDestructiveRedInBothAppearances() {
-        for dark in [false, true] {
-            let app = launch(dark: dark); defer { app.terminate() }
-            let settings = element(app, "home-manage-controls")
-            for _ in 0..<4 where !settings.isHittable { app.swipeUp() }
-            settings.tap()
-            let row = element(app, "home-manage-disable")
-            XCTAssertTrue(row.waitForExistence(timeout: 8), app.debugDescription)
-            for _ in 0..<12 where !row.isHittable { app.swipeUp() }
-            let image = XCUIScreen.main.screenshot().image.cgImage!
-            let scale = CGFloat(image.width) / app.frame.width
-            var area = row.frame; area.size.width = 50
-            let crop = image.cropping(to: area.applying(CGAffineTransform(scaleX: scale, y: scale)))!
-            var pixels = [UInt8](repeating: 0, count: crop.width * crop.height * 4)
-            CGContext(data: &pixels, width: crop.width, height: crop.height, bitsPerComponent: 8,
-                      bytesPerRow: crop.width * 4, space: CGColorSpaceCreateDeviceRGB(),
-                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-                .draw(crop, in: CGRect(x: 0, y: 0, width: crop.width, height: crop.height))
-            let red = stride(from: 0, to: pixels.count, by: 4).filter {
-                Double(pixels[$0]) > Double(pixels[$0 + 1]) * 1.4 && Double(pixels[$0]) > Double(pixels[$0 + 2]) * 1.4 && pixels[$0] > 60
-            }.count
-            XCTAssertGreaterThan(red, 20, "The decorative icon paints destructive red, not inherited green")
-        }
-    }
     @MainActor func testTaskFilterKeepsSupersededOperationsInHistoryOnly() {
         let app = launch(dark: false); defer { app.terminate() }
         open(app, "home-manage-tasks", ready: "home-task-active", done: "home-sheet-done-tasks")

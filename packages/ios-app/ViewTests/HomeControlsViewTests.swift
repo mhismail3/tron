@@ -20,6 +20,14 @@ final class HomeControlsViewTests: ShuffledTestCase {
                 }
                 XCTAssertTrue(app.window.bounds.contains(try XCTUnwrap(app.element("home-manage-disable")).accessibilityFrame),
                               "Disable Home is on screen\n\(app.tree())")
+                @MainActor func redCount() -> [Double]? {
+                    guard let row = app.element("home-manage-disable") else { return nil }
+                    var area = row.accessibilityFrame; area.size.width = 50
+                    guard let pixels = app.pixels(area) else { return nil }
+                    return [Double(pixels.filter { $0[0] > $0[1] * 1.4 && $0[0] > $0[2] * 1.4 && $0[0] > 60 }.count)]
+                }
+                let red = try await app.still("Disable Home's icon") { redCount() }
+                XCTAssertGreaterThan(red[0], 20, "The decorative icon paints destructive red, not inherited green")
                 @MainActor func half(_ top: Bool) -> CGRect? {
                     app.element("home-manage-disable").map { node in
                         let frame = node.accessibilityFrame
