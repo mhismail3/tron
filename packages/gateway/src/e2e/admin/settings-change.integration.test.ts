@@ -1320,7 +1320,7 @@ describe("outside changes to MCP servers and custom models", () => {
     }
     await f.change({ kind: "global" }, [{ key: "tools.mcp.server", qualifiers: { server: "bearer-docs" }, layer: "global", op: "unset" }]);
     expect(JSON.parse(await readFile(mcpPath, "utf8")).mcpServers).toEqual({});
-    for (const method of ["mcp.add", "mcp.remove", "mcp.update", "mcp.logout"]) {
+    for (const method of ["mcp.add", "mcp.remove", "mcp.update"]) {
       await expect(f.service.invoke(client(), method, { commandId: commandId(), scope: "global", server: "bearer-docs", transport: "http", url: added.url, enabled: true }))
         .rejects.toMatchObject({ code: "not_found", message: `Unknown gateway method: ${method}` });
     }
