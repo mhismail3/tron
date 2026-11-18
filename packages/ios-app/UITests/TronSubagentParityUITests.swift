@@ -267,8 +267,9 @@ final class TronSubagentParityUITests: XCTestCase {
             XCTAssertTrue(app.staticTexts["Stop Worker?"].waitForExistence(timeout: 5), app.debugDescription)
             Thread.sleep(forTimeInterval: 0.8)
             try capture("stop-subagent-confirmation-\(scheme)")
-            app.buttons["confirmation-cancel"].tap()
-            XCTAssertTrue(stop.waitForExistence(timeout: 5), "Cancel returns to the subagent sheet without stopping")
+            let cancel = app.buttons["confirmation-cancel"]
+            cancel.tap()
+            XCTAssertTrue(cancel.waitForNonExistence(timeout: 5), "Cancel dismisses the confirmation without stopping")
         }
     }
 
