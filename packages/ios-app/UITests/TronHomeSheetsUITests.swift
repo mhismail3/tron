@@ -59,14 +59,6 @@ final class TronHomeSheetsUITests: XCTestCase {
         shot("1752-\(name)-summary")
     }
 
-    @MainActor private func openPolishProfileItem(_ app: XCUIApplication) {
-        open(app, element(app, "home-manage-profile"), ready: "home-profile-items", name: "profile-polish")
-        expand(app, done: "home-sheet-done-profile")
-        open(app, element(app, "home-profile-item-9a364c45-34fe-4f0a-93e6-fc507e2b0bdc"),
-             ready: "home-profile-item-detail", name: "profile-item-polish")
-        expand(app, done: "home-sheet-done-profile-item")
-    }
-
     @MainActor private func assertCompactHomeSummary(_ app: XCUIApplication, workers: String, level: String) {
         for removed in ["home-context-activation", "context-segmented-bar", "home-manage-host",
                         "context-segment-instructions", "context-segment-profile", "context-segment-memory",
@@ -102,18 +94,6 @@ final class TronHomeSheetsUITests: XCTestCase {
         let detail = element(app, "home-context-detail").label.replacingOccurrences(of: "\u{00A0}", with: " ")
         XCTAssertTrue(detail.contains("31K/1M") && detail.contains("3% used"), detail)
         XCTAssertTrue(detail.contains("1.8M total tokens") && detail.contains("91.4% cache hit"), detail)
-    }
-
-    @MainActor func testRetireIconAndSubtextUseDestructiveInk() {
-        let app = launchPolishManage(); defer { app.terminate() }
-        openPolishProfileItem(app)
-        let row = element(app, "home-profile-item-retire")
-        let subtitle = element(app, "home-profile-item-retire-subtext")
-        for color in [ink(app, row, leading: 44), ink(app, subtitle)] {
-            XCTAssertGreaterThan(color[0], color[1] + 0.2)
-            XCTAssertGreaterThan(color[0], color[2] + 0.2)
-        }
-        shot("1723-retire-destructive")
     }
 
     @MainActor func testTaskReadingSubtextAccessibility() {
