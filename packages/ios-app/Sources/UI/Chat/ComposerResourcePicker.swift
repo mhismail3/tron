@@ -606,6 +606,7 @@ struct ComposerResourcePicker: View {
                             .font(TronTypography.settingsRowSubtext)
                             .foregroundStyle(Color.tronTextSecondary)
                             .lineLimit(1)
+                            .tronListMarker(.subtext)
                     }
                     Spacer(minLength: 8)
                 }
@@ -628,6 +629,7 @@ struct ComposerResourcePicker: View {
         .padding(.leading, 14)
         .padding(.trailing, 7)
         .padding(.vertical, 6)
+        .tronListMarkers("composer-resource-\(entry.id)")
     }
 }
 

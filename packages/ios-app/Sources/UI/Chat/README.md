@@ -215,7 +215,7 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
 - Disposable state (opening, imports, entrance ledger, floating displays) lives in
   `ChatSessionPresentation`; nothing here is persisted except drafts via State.
 - Dashboard row context and relative timestamps use the shared code caption typography,
-  independent of the reading family, including View All. `TronSessionRowClockUITests` checks
+  independent of the reading family, including View All. `TronMobileViewTests/SessionRowClockViewTests` checks
   their rendered glyph advances and caption metrics against shared code text references.
 - Reduce Motion removes spatial motion and never hides authoritative text.
 - Pause/Resume memory and Disable Home are `HomeControlsSection`, the last section of Home
@@ -297,7 +297,7 @@ Canonical transcript medium→large and fresh medium reset, shared presenter lif
 `TronDashboardHomeButtonUITests`, `TronNewSessionUITests`, `TronSubagentParityUITests`,
 `TronToolSheetsPolishUITests`, `TronChatDisplayStripUITests`, `TronChatAnnotationUITests`,
 `TronComposerUploadUITests`, `TronChatHapticsUITests`, `TronReadonlyAttachmentUITests`, `TronCameraCaptureUITests`,
-`TronSessionRowClockUITests`, and the Home, Manage Session and Ask User journeys in
+and the Home, Manage Session and Ask User journeys in
 `TronSmokeUITests` ([runbook](../../../docs/development.md#efficient-focused-tests)). Real
 boundaries: `scripts/ios-gateway-e2e-test run-ui` and `scripts/tron test gateway
 src/e2e/modules/home/home-session-catalog.e2e.test.ts src/e2e/sessions/home-activation.e2e.test.ts`. Motion,
