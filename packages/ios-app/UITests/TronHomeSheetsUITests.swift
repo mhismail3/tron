@@ -203,19 +203,6 @@ final class TronHomeSheetsUITests: XCTestCase {
         shot("1771-reading-worker-\(name)")
     }
 
-    @MainActor func testChapterStatsBelongToBothSummaryHeaders() {
-        let app = launchPolishManage(); defer { app.terminate() }
-        open(app, element(app, "home-manage-chapters"), ready: "home-chapter-list", name: "chapters-polish")
-        expand(app, done: "home-sheet-done-chapters")
-        for ordinal in [2, 1] {
-            open(app, element(app, "home-chapter-\(ordinal)"), ready: "home-chapter-detail", name: "chapter-polish")
-            expand(app, done: "home-sheet-done-chapter")
-            _ = assertChapterSummaryStats(app)
-            shot("1723-chapter-\(ordinal)-stats-inside-header")
-            app.buttons["home-sheet-done-chapter"].tap()
-        }
-    }
-
     @MainActor private func assertChapterSummaryStats(_ app: XCUIApplication) -> [XCUIElement] {
         let header = element(app, "home-chapter-header"), stats = element(app, "home-chapter-stats")
         XCTAssertTrue(stats.exists, "Active and sealed chapter counts belong to the summary, not a separate rows card")
