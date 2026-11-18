@@ -181,5 +181,4 @@ retains worker model/thinking and Session fence witnesses.
 
 - Home's learned profile store and task authorization: `src/modules/home/`.
 - Model fallback queue availability and routing: `src/providers/model-queue.ts`.
-- The iOS renderer: `packages/ios-app` (`SettingsRendererView`).
 - RPC dispatch: `src/transport/gateway-service.ts`.

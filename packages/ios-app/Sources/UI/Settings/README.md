@@ -133,13 +133,10 @@ scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronMCPServerSheetsUITests \
   --only-testing TronMobileUITests/TronProjectTrustUITests \
   --only-testing TronMobileUITests/TronDiagnosticsExportUITests \
-  --only-testing TronMobileUITests/TronSmokeUITests/testSettingsRowInspectionAndActionsStayIndependent \
   --only-testing TronMobileUITests/TronSmokeUITests/testIphoneDashboardPreferencesPersistAcrossRoutesAndRelaunch
 scripts/ios-gateway-e2e-test run-ui \
-  --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testRoutineEditorsDisappearAndExplicitGlobalValueResets \
-  --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testSessionSettingsOmitsInheritedRoutineEditors \
-  --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testGlobalSettingsServeExposedEditorsAndEditAtGlobalScope \
-  --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testProjectSettingsExposeReadOnlyOverrides
+  --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testOutsideMcpAdditionReachesTheOpenMcpScreen \
+  --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSourcesTextDoneAndRoutes
 ```
 
 Gateway `native-change.e2e.test.ts` owns agent numeric-map changes, next-Pi-session admission, spend-card
