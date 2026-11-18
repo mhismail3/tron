@@ -12,8 +12,8 @@ import { join } from "node:path";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeviceStore } from "../security/device-store.js";
-import { GatewayServer, HTTP_HEADERS_TIMEOUT_MS, HTTP_LISTENER_LIMITS } from "./server.js";
-import { LanEndpoint, lanPin, selfSignedCertificate } from "./lan-endpoint.js";
+import { GatewayServer, HTTP_LISTENER_LIMITS } from "./server.js";
+import { LanEndpoint, lanPin, selfSignedCertificate, type LanListenerLimits } from "./lan-endpoint.js";
 import type { LanAddress } from "../config.js";
 import { PROTOCOL_VERSION } from "../version.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
@@ -165,7 +165,7 @@ interface GatewayFixture {
   port: number;
 }
 
-async function gatewayFixture(options: { enabled?: boolean } = {}): Promise<GatewayFixture> {
+async function gatewayFixture(options: { enabled?: boolean; listenerLimits?: LanListenerLimits } = {}): Promise<GatewayFixture> {
   const home = await tempRoot("tron-lan-gateway-");
   const devices = new DeviceStore(home, "fixture-machine");
   await devices.initialize();
@@ -185,6 +185,7 @@ async function gatewayFixture(options: { enabled?: boolean } = {}): Promise<Gate
       lanAddresses: () => [...addresses],
       reconcileIntervalMs: 25,
     },
+    ...(options.listenerLimits ? { listenerLimits: options.listenerLimits } : {}),
   });
   await gateway.listen();
   cleanups.push(() => gateway.close());
@@ -456,7 +457,7 @@ describe("LAN endpoint", () => {
   });
 
   it("bounds a lane peer at the main listener's handshake and header limits", async () => {
-    const fixture = await gatewayFixture();
+    const fixture = await gatewayFixture({ listenerLimits: { ...HTTP_LISTENER_LIMITS, headersTimeout: 500, handshakeTimeout: 500, connectionsCheckingInterval: 50 } });
     await waitForRecord(fixture.log, "lan.listener", "state", "bound");
     const bare = createConnection({ host: "::1", port: fixture.port });
     cleanups.push(async () => { bare.destroy(); });
@@ -467,14 +468,13 @@ describe("LAN endpoint", () => {
       partial.once("error", reject);
     });
     partial.write("GET /health HTTP/1.1\r\nHost: localhost\r\n");
-    await awaitsWithin(Promise.all([once(bare, "close"), answered]),
-      "lane admission bound", HTTP_HEADERS_TIMEOUT_MS + 15_000);
+    await awaitsWithin(Promise.all([once(bare, "close"), answered]), "lane admission bound");
     expect(await answered).toContain("408");
     await waitFor(() => records(fixture.log, "http.connection-unused").length === 2, "both unused LAN peers recorded");
     const unused = records(fixture.log, "http.connection-unused");
     expect(unused.map(record => record.fields.code).sort()).toEqual(["ERR_HTTP_REQUEST_TIMEOUT", "ERR_TLS_HANDSHAKE_TIMEOUT"]);
     expect(unused.every(record => record.fields.transportEnd === "timeout")).toBe(true);
-  }, 45_000);
+  });
 
   it("dates a lane upgrade from the TCP accept, so the record shows the TLS handshake", async () => {
     const fixture = await gatewayFixture();
