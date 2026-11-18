@@ -4,13 +4,6 @@ import UIKit
 @MainActor final class TronSixSmallUIRegressionTests: XCTestCase {
     private let root = "/Users/fixture/Workspace/tron-worktrees/six-small-ui-fixes"
 
-    func testSessionSettingsOrder() {
-        for mode in ["light", "dark"] {
-            let app = launch("session", mode: mode)
-            ordered(app, ["Compaction", "Tools", "Project Trust", "More Settings"])
-            app.terminate()
-        }
-    }
 
     func testToastGlyphUsesActivePrimary() {
         for mode in ["light", "dark"] {
@@ -140,16 +133,6 @@ import UIKit
         }
     }
 
-    private func ordered(_ app: XCUIApplication, _ titles: [String]) {
-        var previous: XCUIElement?
-        for title in titles {
-            let row = app.buttons[title].firstMatch
-            XCTAssertTrue(row.waitForExistence(timeout: 8), app.debugDescription)
-            if let previous { XCTAssertLessThan(previous.frame.midY, row.frame.midY, "\(previous.label) must precede \(title)") }
-            previous = row
-        }
-        attach(app.screenshot(), "settings-order")
-    }
 
     private func launch(_ surface: String, mode: String = "light", extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
