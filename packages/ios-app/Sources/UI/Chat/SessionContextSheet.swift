@@ -208,6 +208,7 @@ struct SessionContextSheet: View {
                         }
                         Group {
                             SessionContextUsageCard(snapshot: snapshot, action: compactButton(snapshot))
+                            MCPSignInCard(sessionID: sessionID)
                             ManageModelConfigurationCard(sessionID: sessionID)
                             sessionSection(snapshot)
                         }

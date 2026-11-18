@@ -135,7 +135,8 @@ bracketed by the change path, never recorded as outside changes
 
 ## Sign-in relay
 
-`mcp.auth.start` accepts `{ sessionId, server, commandId }` and executes Pi's own
+The app starts sign-in from Manage Session, whose sign-in card lists the servers
+`mcp.list` reports as needing it. `mcp.auth.start` accepts `{ sessionId, server, commandId }` and executes Pi's own
 `/mcp login <server>` command through the session's regular prompt admission.
 `mcp.auth.cancel` accepts `{ operationId }`. Auth operations belong to the
 authenticated device and target `{ kind: "mcp", sessionId, server }`; auth
