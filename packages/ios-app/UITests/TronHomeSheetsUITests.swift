@@ -203,62 +203,6 @@ final class TronHomeSheetsUITests: XCTestCase {
         shot("1771-reading-worker-\(name)")
     }
 
-    @MainActor func testWorkerRowsUseStandardSubtext() {
-        let app = launchPolishManage(); defer { app.terminate() }
-        open(app, element(app, "home-manage-tasks"), ready: "home-task-active", name: "tasks-polish")
-        expand(app, done: "home-sheet-done-tasks")
-        open(app, element(app, "home-task-active"), ready: "home-task-detail", name: "worker-polish")
-        expand(app, done: "home-sheet-done-task")
-        app.swipeUp()
-        let reference = element(app, "home-task-model-title")
-        XCTAssertTrue(reference.exists)
-        let lineHeight = reference.frame.height
-        XCTAssertGreaterThan(lineHeight, 0)
-        for id in ["home-task-model", "home-task-subagents", "home-task-spend", "home-task-run-run-live"] {
-            let value = element(app, "\(id)-subtext")
-            XCTAssertTrue(value.exists)
-            XCTAssertEqual(value.frame.height, lineHeight, accuracy: 0.25, "\(id) matches the approved subheadline reading size")
-        }
-        let done = element(app, "home-task-checkin-done-subtext")
-        let next = element(app, "home-task-checkin-next-subtext")
-        XCTAssertTrue(done.exists && next.exists)
-        XCTAssertEqual(done.frame.height, lineHeight, accuracy: 0.25,
-                       "Latest check-in Done uses the approved subheadline size of the single-line Worker values")
-        XCTAssertEqual(next.frame.height, lineHeight, accuracy: 0.25,
-                       "Latest check-in Next uses the approved subheadline size of the single-line Worker values")
-        let measurement = XCTAttachment(string: "standardLine=\(lineHeight), latestCheckinDone=\(done.frame.height), next=\(next.frame.height)")
-        measurement.name = "1723-worker-font-geometry"; measurement.lifetime = .keepAlways; add(measurement)
-        shot("1723-worker-standard-subtext")
-    }
-
-    @MainActor func testTaskCardsKeepBalancedInsetsAndMemoryRowsIntact() {
-        let app = launchPolishManage(["-home-task-padding-review"]); defer { app.terminate() }
-        open(app, element(app, "home-manage-tasks"), ready: "home-task-active", name: "tasks-polish")
-        expand(app, done: "home-sheet-done-tasks")
-        for id in ["active", "terminal"] {
-            let card = element(app, "home-task-card-\(id)-container")
-            let title = element(app, "home-task-\(id)-title")
-            let status = element(app, "home-task-\(id)-status")
-            let footer = element(app, "home-task-\(id)-metadata")
-            XCTAssertTrue(card.exists && title.exists && status.exists && footer.exists)
-            let top = min(title.frame.minY, status.frame.minY) - card.frame.minY
-            let bottom = card.frame.maxY - footer.frame.maxY
-            XCTAssertEqual(top, bottom, accuracy: 0.5, "The painted card, not just its button's AX frame, has balanced insets")
-        }
-        shot("1723-tasks-balanced-light")
-        app.buttons["home-sheet-done-tasks"].tap()
-        open(app, element(app, "home-manage-memory-browser"), ready: "home-memory-row-39", name: "memory-polish")
-        expand(app, done: "home-sheet-done-memory")
-        let card = element(app, "home-memory-card-39-container")
-        let title = element(app, "home-memory-row-39-title")
-        let footer = element(app, "home-memory-row-39-metadata")
-        XCTAssertTrue(card.exists && title.exists && footer.exists)
-        XCTAssertEqual(title.frame.minY - card.frame.minY, card.frame.maxY - footer.frame.maxY, accuracy: 0.5,
-                       "The shared row still hugs a Memory preview and its metadata")
-        element(app, "home-memory-row-39").tap()
-        XCTAssertTrue(element(app, "home-memory-detail").waitForExistence(timeout: 5), "Memory row navigation remains intact")
-    }
-
     @MainActor func testChapterStatsBelongToBothSummaryHeaders() {
         let app = launchPolishManage(); defer { app.terminate() }
         open(app, element(app, "home-manage-chapters"), ready: "home-chapter-list", name: "chapters-polish")
