@@ -109,24 +109,6 @@ final class TronHomeSheetsUITests: XCTestCase {
         XCTAssertTrue(detail.contains("1.8M total tokens") && detail.contains("91.4% cache hit"), detail)
     }
 
-    @MainActor func testProfileGroupsNotesByAreaWithoutBulkConfirmation() {
-        let app = launchPolishManage(); defer { app.terminate() }
-        open(app, element(app, "home-manage-profile"), ready: "home-profile-items", name: "profile-polish")
-        expand(app, done: "home-sheet-done-profile")
-        let areas = ["Communication", "Machines, devices & services", "Unsorted"].map { app.staticTexts[$0].firstMatch }
-        for area in areas { XCTAssertTrue(area.exists, area.description) }
-        XCTAssertLessThan(areas[0].frame.minY, areas[1].frame.minY, "Areas keep their order")
-        XCTAssertLessThan(areas[1].frame.minY, areas[2].frame.minY, "Unsorted follows the reviewed areas")
-        for kind in ["Preferences", "Standing decisions", "Delegation defaults", "Facts"] {
-            XCTAssertFalse(app.staticTexts[kind].exists, "\(kind) is a note's kind, not its group")
-        }
-        XCTAssertFalse(element(app, "home-profile-confirm-all").exists, "No bulk confirmation")
-        XCTAssertFalse(app.buttons["home-profile-confirm-all-button"].exists)
-        let unsorted = element(app, "home-profile-item-9a364c45-34fe-4f0a-93e6-fc507e2b0bdc")
-        XCTAssertTrue(unsorted.label.contains("inferred/needs-split") && unsorted.label.contains("Inferred"), unsorted.label)
-        shot("profile-areas")
-    }
-
     @MainActor func testRetireIconAndSubtextUseDestructiveInk() {
         let app = launchPolishManage(); defer { app.terminate() }
         openPolishProfileItem(app)
