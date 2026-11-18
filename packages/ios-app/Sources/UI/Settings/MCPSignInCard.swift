@@ -5,6 +5,7 @@ struct MCPSignInCard: View {
     let sessionID: String
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var activity
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @PresentationState private var servers: [MCPServerList.Server] = []
     @PresentationState private var authOperationID: String?
     @PresentationState private var starting: String?
@@ -20,7 +21,7 @@ struct MCPSignInCard: View {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(needsSignIn) { server in
                             Button { Task { await start(server.name) } } label: {
-                                TronSettingsRow(icon: "person.badge.key", title: server.name, subtitle: "Needs sign-in", titleIsIdentifier: true,
+                                TronSettingsRow(icon: "person.badge.key", title: server.name, subtitle: "Needs sign-in", titleIsIdentifier: !dynamicTypeSize.isAccessibilitySize,
                                                 accent: .tronCyan) { TronInlineActionLabel("Sign In", accent: .tronCyan) }
                             }
                             .buttonStyle(.plain)
