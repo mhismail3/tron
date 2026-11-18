@@ -293,8 +293,7 @@ Classes under `TronMobileUITests/`: `TronHomeControlsUITests`, `TronHomeDashboar
 Workspace cover/uncover, Manage model writes and scoped Settings routes),
 `TronSubsheetReliabilityUITests` (fresh Profile item and Chapter first taps, reopen/foreground,
 Canonical transcript medium→large and fresh medium reset, shared presenter lifecycle/haptics),
-`TronDashboardHomeButtonUITests`, `TronSharedPrimaryAccentsUITests` (native usage, attributed
-source badges and history ink across primary themes in light/dark), `TronNewSessionUITests`, `TronSubagentParityUITests`,
+`TronDashboardHomeButtonUITests`, `TronNewSessionUITests`, `TronSubagentParityUITests`,
 `TronToolSheetsPolishUITests`, `TronChatDisplayStripUITests`, `TronChatAnnotationUITests`,
 `TronComposerUploadUITests`, `TronChatHapticsUITests`, `TronReadonlyAttachmentUITests`, `TronCameraCaptureUITests`,
 `TronSessionRowClockUITests`, and the Home, Manage Session and Ask User journeys in
