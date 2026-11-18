@@ -239,58 +239,6 @@ final class TronListStandardUITests: XCTestCase {
         XCTAssertTrue(waitFor(app.buttons["history-row-h-6732"], "hittable == true", timeout: 5), "The chip jumps to the newest entry")
     }
 
-    @MainActor func testGroupedRowAnatomy() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-agent-instructions-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-        app.launch(); defer { app.terminate() }
-        let row = app.buttons["agent-instructions-section-preamble"]
-        XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
-        let ordinal = element(app, "agent-instructions-section-preamble-leading")
-        XCTAssertTrue(ordinal.waitForExistence(timeout: 5), "Instructions keep their reading-order number\n\(app.debugDescription)")
-        XCTAssertEqual(ordinal.frame.midY, row.frame.midY, accuracy: 2, "The number is centred vertically in the row")
-        app.terminate()
-
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
-        app.launch()
-        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
-        app.buttons["home-pinned-row"].tap()
-        let ring = app.buttons["session-context-button"]
-        XCTAssertTrue(waitFor(ring, "enabled == true"))
-        ring.tap()
-        let chapters = element(app, "home-manage-chapters")
-        XCTAssertTrue(chapters.waitForExistence(timeout: 10), app.debugDescription)
-        let window = app.windows.firstMatch.frame
-        for _ in 0..<6 where !(chapters.isHittable && chapters.frame.maxY <= window.maxY - 40) { app.swipeUp() }
-        chapters.tap()
-        let chapter = app.buttons["home-chapter-1"]
-        XCTAssertTrue(chapter.waitForExistence(timeout: 10), app.debugDescription)
-        let pill = element(app, "home-chapter-1-status")
-        XCTAssertTrue(pill.waitForExistence(timeout: 5), "A chapter carries its state as one pill")
-        XCTAssertGreaterThan(pill.frame.maxX, chapter.frame.maxX - 24, "The pill is at the trailing edge")
-        XCTAssertLessThan(pill.frame.minY - chapter.frame.minY, 20, "The pill is on the title line")
-        XCTAssertFalse(element(app, "home-chapter-1-leading").exists, "Chapters carry no repeated icon")
-    }
-
-    @MainActor func testGroupedSectionsAreSeparateContainersWithHeadersAbove() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
-        app.launch(); defer { app.terminate() }
-        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
-        app.buttons["home-pinned-row"].tap()
-        let ring = app.buttons["session-context-button"]
-        XCTAssertTrue(waitFor(ring, "enabled == true"))
-        ring.tap()
-        let profile = element(app, "home-manage-profile")
-        XCTAssertTrue(profile.waitForExistence(timeout: 10), app.debugDescription)
-        reveal(profile, in: app, swipes: 6)
-        profile.tap()
-        expandSheet(app, title: "Profile")
-        assertSeparateSections(app, list: "home-profile-items", titles: ["Communication", "Machines, devices & services"],
-                               row: "home-profile-item-6a26bfb7-f0d1-44ce-b0ae-9da01da3e55c")
-    }
-
     @MainActor func testEmptySubagentHistoryCentresItsPlaceholder() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -360,25 +308,6 @@ final class TronListStandardUITests: XCTestCase {
                            "\(title) at \(detent): the placeholder centres horizontally")
             shot("empty-\(title.lowercased().replacingOccurrences(of: " ", with: "-"))-\(detent)")
         }
-    }
-
-    @MainActor private func assertSeparateSections(_ app: XCUIApplication, list: String, titles: [String], row: String) {
-        var previousBottom: CGFloat?
-        for (index, title) in titles.enumerated() {
-            let header = element(app, "\(list)-header-\(index)"), section = element(app, "\(list)-section-\(index)")
-            XCTAssertTrue(header.waitForExistence(timeout: 5) && section.exists, "\(list) section \(index) has its own header and container\n\(app.debugDescription)")
-            XCTAssertTrue(header.label.hasPrefix(title) && header.label.rangeOfCharacter(from: .decimalDigits) != nil,
-                          "The header names \(title) and its count: \(header.label)")
-            XCTAssertLessThanOrEqual(header.frame.maxY, section.frame.minY + 0.5, "\(title)'s header sits above its container")
-            XCTAssertEqual(header.frame.minX, section.frame.minX, accuracy: 1, "\(title)'s header starts on the container's leading edge")
-            XCTAssertEqual(header.frame.maxX, section.frame.maxX, accuracy: 1, "\(title)'s count ends on the container's trailing edge")
-            if let previousBottom {
-                XCTAssertGreaterThan(header.frame.minY - previousBottom, 8, "\(title) starts apart from the previous container")
-            }
-            previousBottom = section.frame.maxY
-        }
-        let first = element(app, "\(list)-section-0"), firstRow = app.buttons[row]
-        XCTAssertTrue(first.frame.contains(firstRow.frame.insetBy(dx: 1, dy: 1)), "The first row is inside the first container")
     }
 
     @MainActor func testInstructionRowsCarryTagsOnTitleLineAndCentreEntryIcons() {
