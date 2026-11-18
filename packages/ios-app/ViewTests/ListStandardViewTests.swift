@@ -54,9 +54,7 @@ final class ListStandardViewTests: ShuffledTestCase {
                 previousBottom = section.maxY
             }
             let first = app.element("\(list)-section-0")!.accessibilityFrame
-            let row = try XCTUnwrap(MountedFixture.elements(in: app.top).last {
-                MountedFixture.identifier($0) == rowID && $0.accessibilityTraits.contains(.button)
-            }, app.tree())
+            let row = try XCTUnwrap(button(app, rowID), app.tree())
             XCTAssertTrue(first.contains(row.accessibilityFrame.insetBy(dx: 1, dy: 1)), "The first row is inside the first container")
         }
     }
