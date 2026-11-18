@@ -288,7 +288,7 @@ describe("Home wakes on its own task results (#749)", () => {
       await (await dispatch(f, "successive-a")).completion;
       await waitAcknowledged(f, "successive-a");
       const firstAt = Date.now();
-      vi.useFakeTimers({ toFake: ["Date"], now: firstAt, shouldAdvanceTime: true });
+      vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
       vi.setSystemTime(firstAt + 90_000);
       holdNext = true;
       await (await dispatch(f, "successive-b")).completion;

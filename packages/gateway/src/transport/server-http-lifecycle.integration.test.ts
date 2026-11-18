@@ -210,7 +210,6 @@ describe("HTTP pending-work ownership", () => {
     const trickle = setInterval(() => peer.write("a"), 50);
     cleanups.push(async () => { clearInterval(trickle); });
     await awaitsWithin(closed, "whole-request body deadline");
-    clearInterval(trickle);
     const elapsedMs = Number(process.hrtime.bigint() - started) / 1_000_000;
     expect(elapsedMs, "open past the idle bound until the whole-request deadline").toBeGreaterThanOrEqual(limits.requestTimeout);
   });
