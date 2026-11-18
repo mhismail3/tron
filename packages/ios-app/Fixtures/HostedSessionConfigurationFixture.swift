@@ -135,7 +135,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
         (modelRequestCounts, modelRequestContinuation) = AsyncStream.makeStream(of: Int.self)
     }
     private static let scopeReviewCatalog = HostedSettingsReviewSchema.tools + (16...52).map { "tool_\($0)" }
-    private static func scopeReviewResolution(project: Bool) -> JSONValue {
+    private static func scopeReviewResolution() -> JSONValue {
         let thinking = HostedSettingsReviewSchema.additionalKeys.filter { $0.objectValue?["key"]?.stringValue == "model.thinking[role=chat]" }
         let keys = [
             HostedSettingsReviewSchema.key("model.ref[role=chat]", "model", .object(["provider": .string("anthropic"), "id": .string("claude-opus-5-5")]), "Claude Opus 5.5"),
@@ -148,16 +148,13 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
         }
         return .object(["keys": .array(keys.map { value in
             guard var row = value.objectValue else { return value }
-            let session = !project && row["layer"]?.stringValue == "session"
+            let session = row["layer"]?.stringValue == "session"
             if row["key"]?.stringValue == "model.contextWindow" {
                 row["qualifiers"] = .object(["model": .string("anthropic/claude-opus-5-5")])
             }
-            if project { row["layer"] = .string("global") }
             row["overridden"] = .bool(session)
             return .object(row)
-        }),
-            "diagnostics": .array([.object(["file": .string("/workspace/.pi/settings.json"), "layer": .string("project"),
-                "key": .string("tools.active"), "path": .string("defaultTools"), "reason": .string("project-forbidden")])])])
+        })])
     }
 
     func decisionSummary() -> String { decisions.isEmpty ? "none" : decisions.joined(separator: ",") }
@@ -187,7 +184,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                 "sessionId": .string(snapshot.sessionId), "payload": try JSONValue.encode(snapshot)]))
             result = .object(["aborted": .bool(true)])
         case "settings.resolve" where HostedSettingsReviewSchema.scopeReview:
-            result = Self.scopeReviewResolution(project: params["target"]?.objectValue?["kind"]?.stringValue == "project")
+            result = Self.scopeReviewResolution()
         case "settings.resolve":
             result = .object(["keys": .array([.object([
                 "key": .string("model.thinking[role=chat]"), "group": .string("model"),

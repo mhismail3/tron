@@ -50,33 +50,8 @@ struct SettingsProjectSource: Decodable, Equatable, Sendable {
     let path: String
 }
 
-struct SettingsProjectNotice: Decodable, Sendable {
-    let file: String
-    let message: String
-}
-
-struct SettingsProjectDiagnostic: Decodable, Sendable {
-    let file: String
-    let key: String
-    let path: String
-    let reason: String
-}
-
 struct SettingsResolution: Decodable, Sendable {
     let keys: [ResolvedSetting]
 
-    let projectNotice: SettingsProjectNotice?
-    let diagnostics: [SettingsProjectDiagnostic]
-    let diagnosticsTruncated: Bool
-    private enum CodingKeys: String, CodingKey { case keys, projectNotice, diagnostics, diagnosticsTruncated }
-
     func setting(_ key: String) -> ResolvedSetting? { keys.first { $0.key == key } }
-
-    init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        projectNotice = try container.decodeIfPresent(SettingsProjectNotice.self, forKey: .projectNotice)
-        diagnostics = try container.decodeIfPresent([SettingsProjectDiagnostic].self, forKey: .diagnostics) ?? []
-        diagnosticsTruncated = try container.decodeIfPresent(Bool.self, forKey: .diagnosticsTruncated) ?? false
-        keys = try container.decode([ResolvedSetting].self, forKey: .keys)
-    }
 }
