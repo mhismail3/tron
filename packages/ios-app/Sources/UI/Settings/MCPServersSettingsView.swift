@@ -219,34 +219,33 @@ struct MCPServersSettingsView: View {
             accent: statusColor(server),
             subtitleColor: statusColor(server)
         ) {
-            TronInlineMenu("Manage", accent: accent) {
-                if MCPServerPresentationPolicy.isNeedsAuth(server.state) {
-                    Button("Sign In", systemImage: "person.badge.key") { Task { await startAuth(server.name, destination: destination) } }
-                }
-                if let value = server.value {
-                    Button(server.enabled ? "Turn Off" : "Turn On", systemImage: "power") {
-                        Task { await changeServer(server.name, to: MCPServerPresentationPolicy.value(value, enabled: !server.enabled), destination: destination) }
+            if MCPServerPresentationPolicy.isNeedsAuth(server.state) || server.value != nil {
+                TronInlineMenu("Manage", accent: accent) {
+                    if MCPServerPresentationPolicy.isNeedsAuth(server.state) {
+                        Button("Sign In", systemImage: "person.badge.key") { Task { await startAuth(server.name, destination: destination) } }
                     }
-                    Picker("Exposure", selection: Binding(
-                        get: { MCPServerPresentationPolicy.exposureChoice(server.exposure) },
-                        set: { exposure in Task { await changeServer(server.name, to: MCPServerPresentationPolicy.value(value, exposure: exposure), destination: destination) } }
-                    )) {
-                        ForEach(MCPServerPresentationPolicy.exposures, id: \.value) { Text($0.title).tag($0.value) }
+                    if let value = server.value {
+                        Button(server.enabled ? "Turn Off" : "Turn On", systemImage: "power") {
+                            Task { await changeServer(server.name, to: MCPServerPresentationPolicy.value(value, enabled: !server.enabled), destination: destination) }
+                        }
+                        Picker("Exposure", selection: Binding(
+                            get: { MCPServerPresentationPolicy.exposureChoice(server.exposure) },
+                            set: { exposure in Task { await changeServer(server.name, to: MCPServerPresentationPolicy.value(value, exposure: exposure), destination: destination) } }
+                        )) {
+                            ForEach(MCPServerPresentationPolicy.exposures, id: \.value) { Text($0.title).tag($0.value) }
+                        }
+                        .pickerStyle(.menu)
+                        if value.objectValue?["url"] != nil {
+                            Button("Set Bearer Token", systemImage: "key") { tokenServer = server.name }
+                        }
                     }
-                    .pickerStyle(.menu)
-                    if value.objectValue?["url"] != nil {
-                        Button("Set Bearer Token", systemImage: "key") { tokenServer = server.name }
+                    if server.value != nil {
+                        Divider()
+                        Button("Remove", systemImage: "trash", role: .destructive) { Task { await changeServer(server.name, to: nil, destination: destination) } }
                     }
                 }
-                if !MCPServerPresentationPolicy.isNeedsAuth(server.state) {
-                    Button("Sign Out", systemImage: "rectangle.portrait.and.arrow.right") { Task { if await mutate("mcp.logout", ["server": .string(server.name)], destination: destination) != nil { generation &+= 1 } } }
-                }
-                if server.value != nil {
-                    Divider()
-                    Button("Remove", systemImage: "trash", role: .destructive) { Task { await changeServer(server.name, to: nil, destination: destination) } }
-                }
+                .disabled(working)
             }
-            .disabled(working)
         }
     }
 

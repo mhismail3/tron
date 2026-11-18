@@ -91,7 +91,7 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   it previews the change and shows the shared `ChangeReviewSheet` when the preview taps
   (add, enable, new address or bearer reference, wider visibility). A bearer token goes
   only to `mcp.token.set`, whose Keychain reference the change then carries. A server whose
-  configuration the change path cannot carry offers sign-in and sign-out only; it is edited in `mcp.json` on the Mac. Add and auth
+  configuration the change path cannot carry offers sign-in only when it needs it; it is edited in `mcp.json` on the Mac. Add and auth
   drafts and an approved change retain the exact destination and receipt owner. Jev is a provider credential, not a connection. Retired Connected
   Services, X OAuth/credits and Raindrop setup have no native route or consumer.
 - **Connections and devices.** Paired Macs then authorized devices, each opening its own detail

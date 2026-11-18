@@ -179,7 +179,12 @@ actor HostedIntegrationsGateway {
             let servers: [JSONValue] = scenario.hasPrefix("mcp-auth-") ? [.object([
                 "name": .string("fixture-auth-server"), "scope": .string("global"), "enabled": .bool(true),
                 "exposure": .string("direct"), "transport": .string("https://mcp.example.test"),
-                "state": .string("needs-auth"), "tools": .array([])])] : []
+                "state": .string("needs-auth"), "tools": .array([])])] : scenario == "mcp-unmanaged" ? ["fixture-managed", "fixture-unmanaged"].map { name in
+                var server: [String: JSONValue] = ["name": .string(name), "scope": .string("global"), "enabled": .bool(true),
+                    "exposure": .string("direct"), "transport": .string("stdio"), "state": .string("connected"), "tools": .array([])]
+                if name == "fixture-managed" { server["value"] = .object(["command": .string("fixture-mcp")]) }
+                return .object(server)
+            } : []
             return (.object(["servers": .array(servers), "errors": .number(0)]), nil)
         }
         if method == "mcp.auth.start" {
