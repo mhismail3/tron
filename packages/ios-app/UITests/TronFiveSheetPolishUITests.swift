@@ -121,8 +121,8 @@ import Vision
         app.launch()
         return app
     }
-    private func manage(_ mode: String, extra: [String] = []) -> XCUIApplication {
-        let app = launch(mode, fixture: "-tron-home-dashboard-fixture", extra: ["-home-shell-ready"] + extra)
+    private func manage(_ mode: String) -> XCUIApplication {
+        let app = launch(mode, fixture: "-tron-home-dashboard-fixture", extra: ["-home-shell-ready"])
         tap(app, "home-pinned-row")
         let context = app.buttons["session-context-button"]
         XCTAssertTrue(wait(context, "enabled == true"))

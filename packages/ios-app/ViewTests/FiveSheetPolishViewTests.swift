@@ -6,7 +6,9 @@ import XCTest
 final class FiveSheetPolishViewTests: ShuffledTestCase {
     func testToolsCountSharesHeaderLine() async throws {
         for mode in ["light", "dark"] {
-            try await manage(mode) { app in
+            try await mounted(["-tron-home-dashboard-fixture", "-home-shell-ready"] + (mode == "dark" ? ["-home-dark", "-settings-renderer-dark"] : []),
+                              theme: .burgundy) { app in
+                try await openManageHome(app)
                 _ = try await revealed(app, "home-manage-settings")
                 try await app.activate("home-manage-settings")
                 try await app.until("Home Settings opens") { app.navigationTitle("Home Settings") != nil }
@@ -26,21 +28,13 @@ final class FiveSheetPolishViewTests: ShuffledTestCase {
                 try await app.until("the tools editor") {
                     app.element("settings-tools-editor") != nil && app.element("Built-in") != nil && app.element("16 of 16 on") != nil
                 }
-                let title = app.element("Built-in")!.accessibilityFrame, count = app.element("16 of 16 on")!.accessibilityFrame
+                let titleNode = app.element("Built-in")!, countNode = app.element("16 of 16 on")!
+                XCTAssertFalse(titleNode.accessibilityTraits.contains(.button), "Built-in is static text")
+                XCTAssertFalse(countNode.accessibilityTraits.contains(.button), "The count is static text")
+                let title = titleNode.accessibilityFrame, count = countNode.accessibilityFrame
                 XCTAssertEqual(title.midY, count.midY, accuracy: 3, "Count belongs on the header's baseline")
                 XCTAssertGreaterThan(count.minX, title.maxX)
             }
-        }
-    }
-
-    private func manage(_ mode: String, _ body: (MountedFixture) async throws -> Void) async throws {
-        try await mounted(["-tron-home-dashboard-fixture", "-home-shell-ready"] + (mode == "dark" ? ["-home-dark", "-settings-renderer-dark"] : []),
-                          theme: .burgundy) { app in
-            try await app.activate("home-pinned-row")
-            try await app.activate("session-context-button")
-            try await app.until("Manage Home opens") { app.element("home-manage-state") != nil }
-            try await app.expandTopSheet()
-            try await body(app)
         }
     }
 }
