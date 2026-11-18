@@ -28,7 +28,7 @@ final class SheetLayoutViewTests: ShuffledTestCase {
             let row = app.element("settings-row-model.queue_role_worker_")!.accessibilityFrame
             let inside = MountedFixture.elements(in: app.top).filter { row.contains(CGPoint(x: $0.accessibilityFrame.midX, y: $0.accessibilityFrame.midY)) }
             XCTAssertTrue(inside.contains { $0.accessibilityLabel == "Overridden" }, app.tree())
-            XCTAssertTrue(inside.contains { (MountedFixture.identifier($0) ?? "").hasSuffix("-reset") }, app.tree())
+            XCTAssertTrue(inside.contains { (MountedFixture.identifier($0) ?? "").hasSuffix("-reset") && $0.accessibilityTraits.contains(.button) }, app.tree())
             let editor = try XCTUnwrap(inside.first { $0.accessibilityLabel == "Worker models" && $0.accessibilityTraits.contains(.button) }, app.tree())
             XCTAssertTrue(editor.accessibilityActivate())
             try await app.until("The existing deeper list editor still opens") { app.navigationTitle("Worker models") != nil }
@@ -48,7 +48,7 @@ final class SheetLayoutViewTests: ShuffledTestCase {
                     && app.element(caption) != nil && app.element("Repository Overrides") != nil
             }
             XCTAssertFalse(MountedFixture.elements(in: app.top).contains {
-                $0.accessibilityLabel == "Settings" && $0.accessibilityTraits.contains(.header)
+                $0.accessibilityLabel == "Settings" && !$0.accessibilityTraits.contains(.button)
             }, "No Settings heading above the session card")
             let tools = app.element("settings-section-tools-open")!.accessibilityFrame
             let trust = app.element("project-settings-trust")!.accessibilityFrame
