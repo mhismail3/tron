@@ -57,7 +57,7 @@ final class SharedPrimaryAccentsViewTests: ShuffledTestCase {
                 let areas = keys.compactMap { app.element($0).flatMap { ink(app, area($0.accessibilityFrame)) } }
                 return areas.count == keys.count ? title + areas.flatMap { $0 } : nil
             }
-        } catch is FixtureNotReady {
+        } catch let error as FixtureNotReady {
             for (index, key) in keys.enumerated() {
                 let frame = app.element(key).map { area($0.accessibilityFrame) } ?? .null
                 if app.element(key).flatMap({ ink(app, area($0.accessibilityFrame)) }) == nil {
@@ -67,7 +67,7 @@ final class SharedPrimaryAccentsViewTests: ShuffledTestCase {
             if app.navigationTitle(title).flatMap({ ink(app, $0.accessibilityFrame) }) == nil {
                 XCTFail("Missing primary title ink: \(name)")
             }
-            return
+            throw error
         }
         let image = app.render()
         guard let expected = app.navigationTitle(title).flatMap({ ink(app, $0.accessibilityFrame, image: image) }) else {
