@@ -153,8 +153,7 @@ final class MountedFixture {
         }
     }
 
-    func pixels(_ area: CGRect, image: UIImage? = nil,
-                space: CGColorSpace = CGColorSpaceCreateDeviceRGB()) -> [[Double]]? {
+    func pixels(_ area: CGRect, image: UIImage? = nil) -> [[Double]]? {
         let bounds = area.integral
         let image = image ?? render(bounds)
         let local = image.size == window.bounds.size ? area : area.offsetBy(dx: -bounds.minX, dy: -bounds.minY)
@@ -164,7 +163,7 @@ final class MountedFixture {
         let width = crop.width, height = crop.height
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
         guard let context = CGContext(data: &bytes, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
-                                      space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
         context.draw(crop, in: CGRect(x: 0, y: 0, width: width, height: height))
         return stride(from: 0, to: bytes.count, by: 4).map { [Double(bytes[$0]), Double(bytes[$0 + 1]), Double(bytes[$0 + 2])] }
     }
@@ -192,7 +191,9 @@ final class MountedFixture {
     }
 
     func labelled(_ prefix: String) -> NSObject? {
-        Self.elements(in: top).last { $0.isAccessibilityElement && $0.accessibilityLabel?.hasPrefix(prefix) == true }
+        Self.elements(in: top).last {
+            $0.isAccessibilityElement && $0.accessibilityTraits.contains(.button) && $0.accessibilityLabel?.hasPrefix(prefix) == true
+        }
     }
 
     func animations() -> [String] {

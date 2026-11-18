@@ -130,35 +130,35 @@ extension RealGatewayPairAndChatUITests {
         keepScreenshot(app, name: "2076-real-gateway-apps-empty-light")
     }
 
-    @MainActor func testCaptureAppsAndManageDark() throws { try captureAppsAndManage(scheme: "dark") }
+    @MainActor func testCaptureAppsAndManageDark() throws { try captureAppsAndManage() }
 
     @MainActor
-    private func captureAppsAndManage(scheme: String) throws {
+    private func captureAppsAndManage() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
-        let app = launchApp(additionalArguments: ["-appearanceMode", scheme])
+        let app = launchApp(additionalArguments: ["-appearanceMode", "dark"])
         defer { app.terminate() }
         try installProofApp(app, fixture)
         app.buttons["Back"].tap()
         openApps(app)
         let row = proofRow(app, "Persistence proof")
         XCTAssertTrue(row.waitForExistence(timeout: 30), app.debugDescription)
-        keepScreenshot(app, name: "apps-\(scheme)-list")
+        keepScreenshot(app, name: "apps-dark-list")
         row.tap()
         XCTAssertTrue(app.staticTexts["Count 0"].waitForExistence(timeout: 20), app.debugDescription)
         app.buttons["Add entry"].tap()
         XCTAssertTrue(app.staticTexts["Count 1"].waitForExistence(timeout: 10))
-        keepScreenshot(app, name: "apps-\(scheme)-runner")
+        keepScreenshot(app, name: "apps-dark-runner")
         closeRunner(app)
         manage(app, proofRow(app, "Persistence proof"))
         XCTAssertTrue(app.buttons["installed-app-manage-remove"].waitForExistence(timeout: 20))
-        keepScreenshot(app, name: "apps-\(scheme)-manage")
+        keepScreenshot(app, name: "apps-dark-manage")
         tapManage(app, "remove")
         XCTAssertTrue(app.buttons["Remove App"].waitForExistence(timeout: 15))
-        keepScreenshot(app, name: "apps-\(scheme)-remove-confirmation")
+        keepScreenshot(app, name: "apps-dark-remove-confirmation")
         confirm(app, "Remove App")
         XCTAssertTrue(app.descendants(matching: .any)["installed-apps-empty"].waitForExistence(timeout: 30), app.debugDescription)
-        keepScreenshot(app, name: "apps-\(scheme)-empty")
+        keepScreenshot(app, name: "apps-dark-empty")
     }
 
     @MainActor

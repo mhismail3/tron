@@ -7,12 +7,6 @@ final class TronSheetBackgroundUITests: XCTestCase {
             CFNotificationName(rawValue: "com.tron.mobile.fixture.home.release-task-list" as CFString), nil, nil, true)
     }
 
-    @MainActor private func capture(_ app: XCUIApplication, name: String) {
-        Thread.sleep(forTimeInterval: 1)
-        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = "1631-\(name)"; shot.lifetime = .keepAlways; add(shot)
-    }
-
     @MainActor func testSheetBackgroundContinuousInLight() { journey(dark: false) }
     @MainActor func testSheetBackgroundContinuousInDark() { journey(dark: true) }
 

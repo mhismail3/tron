@@ -42,7 +42,7 @@ final class TronAppsDesignUITests: XCTestCase {
         app.terminate()
     }
 
-    @MainActor private func review(dark: Bool, large: Bool, compareAutomations: Bool = true) {
+    @MainActor private func review(dark: Bool, large: Bool) {
         let suffix = "\(dark ? "dark" : "light")-\(large ? "xxxl" : "default")"
         let app = launch(dark: dark, large: large, expanded: true)
         openProposal(app)
@@ -60,8 +60,6 @@ final class TronAppsDesignUITests: XCTestCase {
             capture("manage-\(suffix)-continued")
         }
         app.terminate()
-
-        guard compareAutomations else { return }
 
         let automation = XCUIApplication()
         automation.launchArguments = arguments(large: large) + ["-tron-automation-fixture"] + (dark ? ["-automation-dark"] : [])

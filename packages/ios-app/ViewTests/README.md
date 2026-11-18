@@ -15,14 +15,15 @@ TEST_RUNNER_TRON_VIEW_TESTS_SEED=<seed> scripts/tron-ios-test run --only-testing
 - **Mounting.** `MountedFixture` sets `HostedLaunch.arguments`, the hosted fixtures' one source of
   launch arguments, and the theme, then mounts `HostedFixtureRoot`, the root an XCUITest launch
   renders, at the device's screen size with scene phase active and animations off (UIKit and SwiftUI
-  transactions). Closing restores both.
+  transactions). Closing restores the arguments, the theme and the dashboard filter.
 - **Acting.** Navigation activates accessibility elements (`accessibilityActivate`), as VoiceOver does.
   A UIKit menu's action is performed directly; the menu's own presentation is not under test.
 - **Waiting.** `until` re-checks its condition once per display frame while no presentation is in
-  transition and no finite Core Animation runs. `inked` waits until sampled pixels exist and are
-  unchanged across two frames. A wait that passes 600 frames fails with the accessibility tree.
+  transition and no finite, non-repeating Core Animation runs. `still` (and `inked`, its ink form)
+  waits until a sample exists and is unchanged across two frames. A wait that passes 600 frames fails with the accessibility tree.
 - **Colour.** `ink` averages the chromatic pixels (channel spread above 60 of 255) of a frame in the
-  rendered window; the assertions compare those averages, as the XCUITest twins compare screenshots.
+  rendered window; `chroma` averages per-pixel normalised chroma above a given channel spread and counts
+  the pixels. The assertions compare those values, as the XCUITest twins compared screenshots.
 - **Order.** Each class shuffles its tests and prints the seed; the seed variable above replays it.
 
 What stays in XCUITest: claims only a second process observes, such as real gestures, keyboard focus,

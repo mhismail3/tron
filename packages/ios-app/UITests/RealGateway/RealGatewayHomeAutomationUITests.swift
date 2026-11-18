@@ -4,14 +4,14 @@ import XCTest
 extension RealGatewayPairAndChatUITests {
     @MainActor
     func testHomeAutomationEditorAndAttributedMessageLight() throws {
-        try homeAutomationJourney(appearance: "light")
+        try homeAutomationJourney()
     }
 
     @MainActor
-    private func homeAutomationJourney(appearance: String) throws {
+    private func homeAutomationJourney() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
-        let app = launchApp(additionalArguments: ["-appearanceMode", appearance])
+        let app = launchApp(additionalArguments: ["-appearanceMode", "light"])
         defer { app.terminate() }
         open(fixture.invitationLink())
         completeFirstRunSetup(app, inWorkspace: fixture.workspace)
@@ -48,7 +48,7 @@ extension RealGatewayPairAndChatUITests {
         let save = app.buttons["Save Draft"]
         XCTAssertTrue(waitForEnabled(save, timeout: 30), app.debugDescription)
         XCTAssertFalse(app.switches["Invoke a resource"].exists, app.debugDescription)
-        keepScreenshot(app, name: "2094-home-automation-editor-\(appearance)")
+        keepScreenshot(app, name: "2094-home-automation-editor-light")
         save.tap()
         let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'automation-card.' AND label CONTAINS 'UI Home journey'")).firstMatch
         XCTAssertTrue(card.waitForExistence(timeout: 30), app.debugDescription)
@@ -65,9 +65,9 @@ extension RealGatewayPairAndChatUITests {
         home.tap()
         let chip = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Automation · UI Home journey'")).firstMatch
         XCTAssertTrue(chip.waitForExistence(timeout: 60), app.debugDescription)
-        keepScreenshot(app, name: "2094-home-automation-chip-\(appearance)")
+        keepScreenshot(app, name: "2094-home-automation-chip-light")
         chip.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Review the fixture queue. This message is not approval.'")).firstMatch.waitForExistence(timeout: 30), app.debugDescription)
-        keepScreenshot(app, name: "2094-home-automation-message-\(appearance)")
+        keepScreenshot(app, name: "2094-home-automation-message-light")
     }
 }
