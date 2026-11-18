@@ -74,6 +74,7 @@ struct HostedToolSheetsPolishFixture: View {
             }
             .tronSettingsLayout()
             .accessibilityIdentifier("picker-reference")
+            .tronListMarkers("picker-reference")
         }
         .padding(.horizontal, 16)
     }
