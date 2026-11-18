@@ -435,7 +435,6 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    @MainActor
     func testProviderModelRoutesAndRefreshAreIndependent() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -1575,7 +1574,6 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "1261-rename-committed")
     }
 
-    @MainActor
     @MainActor
     func testManageSessionSectionsAtAccessibilityTypeInLightAndDark() {
         continueAfterFailure = false
