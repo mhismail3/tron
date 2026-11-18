@@ -162,8 +162,7 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   shared primary-themed `ManageModelConfigurationCard` (catalog model/provider, Switch Model, Thinking and
   Context Window), read from `settings.resolve`, the model catalog and the session's thinking levels; writes
   and Revert go through `settings.change`; the shared approval sheet owns request review.
-  Tool selection uses the shared `AvailableToolsList`. Session
-  container: Workspace (`workspace-inspector.v1`), Instructions, Session
+  Session container: Workspace (`workspace-inspector.v1`), Instructions, Session
   History (`session-history-pages.v1`), Subagent History;
   Terminal and Export as HTML/JSON. Workspace gives its single-line horizontally scrolling path a full line above a
   horizontally scrolling status-pill row; status content stays clipped to that row. Manage Session, Manage Home and every sheet they open take

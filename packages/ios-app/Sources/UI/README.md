@@ -55,7 +55,7 @@ The feature folders under `UI/` are their own modules with their own READMEs: [C
   `tronPrimarySurface` glass tint. Home dashboard surfaces and the Home/settings sheet family
   consume those canonical roles; light Burgundy and other themes resolve both to the same ink.
   On iOS 27.2's native glass, Dark Burgundy primary ink has rendered contrast floors of
-  2.564:1 on Home usage and 2.505:1 in inherited Home Settings, explicit WCAG AA exceptions
+  2.564:1 on Home usage and 2.505:1 in inherited Home sheets, explicit WCAG AA exceptions
   for small primary-colored text; light retains 4.5:1.
   `TronSettingsVisualTheme` carries foreground and surface accents together through inherited
   destinations; an explicit semantic accent keeps its own surface unless one is supplied.
