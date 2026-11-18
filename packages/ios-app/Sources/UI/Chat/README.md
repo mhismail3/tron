@@ -273,7 +273,7 @@ authorization, receipt recovery and Stop proof.
 metrics and retained search/selection, workspace path/status separation at standard/narrow/accessibility
 sizes, and check-in receipt content.
 
-`TronHomeSummaryTypographyUITests` renders the production Home summary beside an independent
+`TronMobileViewTests/HomeSummaryTypographyViewTests` renders the production Home summary beside an independent
 `SessionSummaryTypography.usageValue` reference, comparing glyph/line metrics and Dynamic Type growth
 with distinct reading/code families through `HostedHomeSummaryTypographyFixture`.
 
