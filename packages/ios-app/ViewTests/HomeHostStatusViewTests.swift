@@ -59,6 +59,8 @@ final class HomeHostStatusViewTests: ShuffledTestCase {
             let detail = (app.element("home-context-detail")!.accessibilityLabel ?? "").replacingOccurrences(of: "\u{00A0}", with: " ")
             XCTAssertTrue(detail.contains("31K/1M") && detail.contains("3% used"), detail)
             XCTAssertTrue(detail.contains("1.8M total tokens") && detail.contains("91.4% cache hit"), detail)
+            XCTAssertFalse(MountedFixture.elements(in: app.top).contains { MountedFixture.identifier($0) == "chevron.right" },
+                           "Manage Home rows carry no trailing chevron")
         }
     }
 }

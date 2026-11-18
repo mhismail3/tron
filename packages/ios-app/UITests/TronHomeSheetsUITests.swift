@@ -90,9 +90,6 @@ final class TronHomeSheetsUITests: XCTestCase {
         let color = ink(app, pill)
         switch level {
         case "Normal": XCTAssertGreaterThan(color[1], color[0] + 0.1)
-        case "Elevated":
-            XCTAssertGreaterThan(color[0], color[2] + 0.15)
-            XCTAssertGreaterThan(color[1], color[2] + 0.1)
         default:
             XCTAssertGreaterThan(color[0], color[1] + 0.2)
             XCTAssertGreaterThan(color[0], color[2] + 0.2)
