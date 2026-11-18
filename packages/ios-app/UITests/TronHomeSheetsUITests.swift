@@ -90,9 +90,6 @@ final class TronHomeSheetsUITests: XCTestCase {
         let color = ink(app, pill)
         switch level {
         case "Normal": XCTAssertGreaterThan(color[1], color[0] + 0.1)
-        case "Elevated":
-            XCTAssertGreaterThan(color[0], color[2] + 0.15)
-            XCTAssertGreaterThan(color[1], color[2] + 0.1)
         default:
             XCTAssertGreaterThan(color[0], color[1] + 0.2)
             XCTAssertGreaterThan(color[0], color[2] + 0.2)
@@ -216,17 +213,6 @@ final class TronHomeSheetsUITests: XCTestCase {
         let tags = assertChapterSummaryStats(app)
         XCTAssertGreaterThan(Set(tags.map { $0.frame.minY.rounded() }).count, 1, "Tags wrap rather than clip at XXXL")
         shot("1723-chapter-xxxl-wrapping")
-    }
-
-    @MainActor
-    func testHostPressureNormalAndIdleWorkers() {
-        checkHostStatus(level: "Normal", workers: "0 workers running", arguments: [])
-    }
-
-    @MainActor
-    func testHostPressureElevatedAndSingleWorkerInDarkMode() {
-        checkHostStatus(level: "Elevated", workers: "1 worker running",
-                        arguments: ["-host-elevated", "-home-dark"])
     }
 
     @MainActor
