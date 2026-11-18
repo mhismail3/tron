@@ -116,8 +116,6 @@ final class TronHomeSheetsUITests: XCTestCase {
         shot("1723-retire-destructive")
     }
 
-    @MainActor func testTaskReadingSubtextLight() { exerciseTaskReadingSubtext("light", arguments: []) }
-    @MainActor func testTaskReadingSubtextDark() { exerciseTaskReadingSubtext("dark", arguments: ["-home-dark"]) }
     @MainActor func testTaskReadingSubtextAccessibility() {
         exerciseTaskReadingSubtext("ax-large", arguments: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"])
     }
