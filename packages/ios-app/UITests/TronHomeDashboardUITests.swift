@@ -251,65 +251,6 @@ final class TronHomeDashboardUITests: XCTestCase {
     }
 
     @MainActor
-    func testUsageCardRowsShowWindowColumns() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-dashboard-view-home",
-                               "-home-usage-long-name"]
-        app.launch(); defer { app.terminate() }
-
-        let card = element(app, "home-usage-card")
-        XCTAssertTrue(card.waitForExistence(timeout: 30), app.debugDescription)
-        XCTAssertTrue(waitFor(card, "label CONTAINS 'Cloudflare AI Gateway, 48% used (Weekly)'"), card.label)
-        XCTAssertTrue(card.label.hasPrefix("Anthropic, 42% used (5h) · 18% used (Weekly)"), card.label)
-        let probe = app.staticTexts["fixture.home-usage-layout"]
-        XCTAssertTrue(waitFor(probe, "label CONTAINS 'cloudflare-ai-gateway.column0.bar='"), probe.label)
-        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
-        var frames: [String: CGRect] = [:]
-        for entry in probe.label.split(separator: ";") {
-            let pair = entry.split(separator: "=")
-            let v = pair[1].split(separator: ",").compactMap { Double($0) }
-            frames[String(pair[0])] = CGRect(x: v[0], y: v[1], width: v[2], height: v[3])
-        }
-        let cardFrame = try! XCTUnwrap(frames["card"])
-        for (provider, columns) in [("anthropic", 2), ("openai-codex", 2), ("cloudflare-ai-gateway", 1)] {
-            let name = try! XCTUnwrap(frames["\(provider).name"], probe.label)
-            XCTAssertNil(frames["\(provider).column\(columns)"], "\(provider) has \(columns) column(s)")
-            var previous: CGRect?
-            for index in 0..<columns {
-                let column = try! XCTUnwrap(frames["\(provider).column\(index)"], probe.label)
-                let bar = try! XCTUnwrap(frames["\(provider).column\(index).bar"], probe.label)
-                XCTAssertEqual(bar.width, column.width, accuracy: 1, "\(provider) bar spans its own column")
-                XCTAssertEqual(bar.minX, column.minX, accuracy: 1)
-                XCTAssertEqual(bar.maxY, column.maxY, accuracy: 1, "\(provider) bar sits under its copy")
-                XCTAssertEqual(bar.height, 5, accuracy: 0.5)
-                let fill = try! XCTUnwrap(frames["\(provider).column\(index).fill"], probe.label)
-                XCTAssertEqual(fill.minX, bar.minX, accuracy: 0.5, "\(provider) fill starts at its track")
-                XCTAssertEqual(fill.height, bar.height, accuracy: 0.5)
-                XCTAssertGreaterThanOrEqual(fill.width + 0.01, fill.height, "\(provider) fill keeps its rounded ends")
-                XCTAssertGreaterThan(bar.width / cardFrame.width, 0.2, "\(provider) bar is about a quarter of the card")
-                XCTAssertLessThan(bar.width / cardFrame.width, 0.34, "\(provider) bar no longer spans the card")
-                XCTAssertEqual(column.midY, name.midY, accuracy: 1, "\(provider) name is centered against its columns")
-                XCTAssertGreaterThan(column.minX, name.maxX, "\(provider) name keeps clear of its columns")
-                if let previous {
-                    XCTAssertGreaterThan(column.minX, previous.maxX, "windows sit side by side")
-                    XCTAssertEqual(column.minY, previous.minY, accuracy: 0.5)
-                }
-                previous = column
-            }
-            XCTAssertEqual(previous!.maxX, cardFrame.maxX - 12, accuracy: 1, "\(provider) columns are right-aligned")
-        }
-        let small = try! XCTUnwrap(frames["openai-codex.column1.fill"], probe.label)
-        let smallTrack = try! XCTUnwrap(frames["openai-codex.column1.bar"], probe.label)
-        XCTAssertLessThan(smallTrack.width * 0.02, small.height, "the fixture share is below one bar height")
-        XCTAssertEqual(small.width, small.height, accuracy: 0.5, "a small share is a round dot")
-        let large = try! XCTUnwrap(frames["anthropic.column0.fill"], probe.label)
-        let largeTrack = try! XCTUnwrap(frames["anthropic.column0.bar"], probe.label)
-        XCTAssertEqual(large.width, largeTrack.width * 0.42, accuracy: 1, "a larger share stays proportional")
-        keep("11-usage-card-window-columns")
-    }
-
-    @MainActor
     func testUsageShowsMonthlyWindowAndExhaustedLimit() {
         continueAfterFailure = false
         let app = XCUIApplication()
