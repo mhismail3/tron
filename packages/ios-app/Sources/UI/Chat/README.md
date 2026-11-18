@@ -268,7 +268,7 @@ humanization.
 ask_user form over the hosted socket; the Gateway's `native-change.e2e.test.ts` owns
 authorization, receipt recovery and Stop proof.
 
-`TronMobileViewTests/SixSmallUIRegressionViewTests` checks Home and Session Settings row ordering and the
+`TronMobileViewTests/SixSmallUIRegressionViewTests` checks the
 model row's subtext and monospaced ID metrics against the shared row in-process.
 `TronSixSmallUIRegressionTests` keeps primary toast ink, model search selection, workspace path/status
 separation at standard/narrow/accessibility sizes, and check-in receipt content.
