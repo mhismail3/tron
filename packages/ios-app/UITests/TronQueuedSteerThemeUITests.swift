@@ -85,7 +85,6 @@ import UIKit
             let cancel = app.buttons["confirmation-cancel"]
             cancel.tap()
             XCTAssertTrue(cancel.waitForNonExistence(timeout: 5), "Cancel dismisses the confirmation and keeps the queue")
-            app.terminate()
         }
     }
 
