@@ -309,6 +309,7 @@ private actor HostedSubagentParitySocket: GatewaySocketConnection {
         } else if method == "session.processTranscript.open" {
             result = .object([
             "leaseId": object["params"]?.objectValue?["viewerId"] ?? .string("lease-worker"),
+            "canAbort": .bool(HostedLaunch.arguments.contains("-stoppable")),
             "processId": .string("worker"), "childSessionRef": .string("child-worker"), "revision": .string("child-1"),
             "page": .object(["items": .array([.object([
                 "id": .string("child-entry"), "presentationId": .string("child-entry"), "parentId": .null,
@@ -325,7 +326,8 @@ private actor HostedSubagentParitySocket: GatewaySocketConnection {
         guard !closed else { throw CancellationError() }
         if hello {
             hello = false
-            return Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":8,"minProtocolVersion":8,"machineId":"fixture-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":["sessions.v1","process-transcript.v2"]}"#.utf8)
+            let abort = HostedLaunch.arguments.contains("-stoppable") ? #","process-transcript-abort.v1""# : ""
+            return Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":8,"minProtocolVersion":8,"machineId":"fixture-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":["sessions.v1","process-transcript.v2"\#(abort)]}"#.utf8)
         }
         if !pending.isEmpty { return pending.removeFirst() }
         return try await withCheckedThrowingContinuation { receiver = $0 }

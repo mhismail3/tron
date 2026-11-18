@@ -127,7 +127,8 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   `tronConfirmation` and `tronTextEntrySheet` (including interpreted Swift apps' alerts), with a
   grey leading cancel. A short primary label stays in toolbar glass; a long, multi-line or
   accessibility-size label moves to the shared glass action container below the content.
-  Destructive roles stay red. Cancel and interactive dismissal never submit a domain command;
+  Destructive roles stay red, and each destructive confirmation shows its own action glyph through
+  `destructiveGlyph`. Cancel and interactive dismissal never submit a domain command;
   adapters close their exact presentation binding and capture the accepted action before clearing
   item-backed state. OS permission prompts, menus, document/photo pickers and terminal emulation
   stay platform-owned.

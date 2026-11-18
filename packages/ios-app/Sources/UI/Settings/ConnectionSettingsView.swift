@@ -672,7 +672,6 @@ struct GatewayConnectionDetailView: View {
                 title: presentation.title,
                 message: presentation.message,
                 confirmTitle: presentation.confirmTitle,
-                destructive: false,
                 centersTitle: presentation.centersTitle,
                 icon: "arrow.down.circle",
                 onConfirm: {
@@ -705,7 +704,7 @@ struct GatewayConnectionDetailView: View {
                 title: "Roll Back Tron Gateway?",
                 message: "The Gateway will restore the previous verified payload and reconnect automatically.",
                 confirmTitle: "Roll Back",
-                destructive: true,
+                destructiveGlyph: "trash",
                 icon: "arrow.uturn.backward.circle",
                 onConfirm: {
                     Task {
@@ -725,7 +724,7 @@ struct GatewayConnectionDetailView: View {
                 title: "Restart Tron Gateway?",
                 message: "Accepted agent runs finish before Tron restarts. Active terminal sessions must be closed first; the app reconnects automatically.",
                 confirmTitle: "Restart",
-                destructive: true,
+                destructiveGlyph: "trash",
                 icon: "arrow.clockwise",
                 onConfirm: {
                     Task {
@@ -745,7 +744,7 @@ struct GatewayConnectionDetailView: View {
                 title: "Restart Now?",
                 message: "The Gateway will stop waiting for accepted work to finish. Any work without a confirmed terminal receipt may have an unknown outcome.",
                 confirmTitle: "Restart Now",
-                destructive: true,
+                destructiveGlyph: "trash",
                 icon: "bolt.fill",
                 onConfirm: {
                     Task {
