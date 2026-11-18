@@ -436,7 +436,7 @@ struct ReadOnlySubagentSessionSheet: View {
             TronConfirmationSheet(
                 title: "Stop \(process.title)?",
                 message: "The subagent stops on the Mac. What it has done so far stays in its transcript.",
-                confirmTitle: "Stop Subagent", destructive: true, icon: "stop.fill",
+                confirmTitle: "Stop Subagent", destructiveGlyph: "stop.fill", icon: "stop.fill",
                 onConfirm: requestStop
             )
         }

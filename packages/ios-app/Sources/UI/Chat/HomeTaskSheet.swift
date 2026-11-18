@@ -93,7 +93,7 @@ struct HomeTaskSheet: View {
         .tronManagedSheet(item: $revoking, identity: { "home.\(profileID).revoke.\($0.id)" }) { pending in
             TronConfirmationSheet(
                 title: pending.target.title, message: pending.target.message, confirmTitle: "Revoke",
-                destructive: true, icon: "lock.slash",
+                destructiveGlyph: "trash", icon: "lock.slash",
                 onConfirm: { run(pending.target.command, pending.admission) }
             )
         }

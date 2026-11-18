@@ -197,7 +197,7 @@ struct PairedDeviceDetailView: View {
                 title: "Revoke \(displayedName)?",
                 message: "This removes the device's access to \(authorized.profileLabel) and its saved local install mapping.",
                 confirmTitle: "Revoke Device",
-                destructive: true,
+                destructiveGlyph: "trash",
                 icon: "trash",
                 onConfirm: { Task { await revoke() } }
             )

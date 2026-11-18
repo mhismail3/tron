@@ -265,7 +265,7 @@ struct ChatView: View {
             TronConfirmationSheet(
                 title: "Clear queue?",
                 message: "Every queued message is removed and will not be sent.",
-                confirmTitle: "Clear Queue", destructive: true, icon: "trash.slash",
+                confirmTitle: "Clear Queue", destructiveGlyph: "trash.slash", icon: "trash.slash",
                 onConfirm: { Task { await clearQueuedMessages() } }
             )
         }
