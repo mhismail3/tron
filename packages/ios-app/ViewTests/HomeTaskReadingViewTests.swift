@@ -10,11 +10,11 @@ final class HomeTaskReadingViewTests: ShuffledTestCase {
     private func exercise(_ arguments: [String]) async throws {
         try await mounted(["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-task-padding-review"] + arguments) { app in
             try await openManageHome(app)
-            _ = try await revealed(app, "home-manage-settings")
-            try await app.until("the Home Settings row markers") {
-                app.element("home-manage-settings-title") != nil && app.element("home-manage-settings-subtext") != nil
+            _ = try await revealed(app, "home-manage-controls")
+            try await app.until("the Controls row markers") {
+                app.element("home-manage-controls-title") != nil && app.element("home-manage-controls-subtext") != nil
             }
-            let metadata = app.element("home-manage-settings-subtext")!, settingsTitle = app.element("home-manage-settings-title")!
+            let metadata = app.element("home-manage-controls-subtext")!, settingsTitle = app.element("home-manage-controls-title")!
             let metadataHeight = metadata.accessibilityFrame.height
             XCTAssertGreaterThan(metadataHeight, 0)
             XCTAssertLessThan(metadataHeight, settingsTitle.accessibilityFrame.height, "Default shared-row callers keep their smaller metadata style")

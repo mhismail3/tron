@@ -10,9 +10,9 @@ final class HomeControlsViewTests: ShuffledTestCase {
                 try await openManageHome(app)
                 XCTAssertNil(app.element("home-manage-pause"), "Pause is not a Manage Home row")
                 XCTAssertNil(app.element("home-manage-disable"), "Disable is not a Manage Home row")
-                _ = try await revealed(app, "home-manage-settings")
-                try await app.activate("home-manage-settings")
-                try await app.until("Home Settings opens") { app.element("home-settings-controls") != nil }
+                _ = try await revealed(app, "home-manage-controls")
+                try await app.activate("home-manage-controls")
+                try await app.until("Controls opens") { app.element("home-settings-controls") != nil }
                 try await app.expandTopSheet()
                 for _ in 0..<8 {
                     let node = try await revealed(app, "home-manage-disable")

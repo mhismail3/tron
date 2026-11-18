@@ -80,6 +80,7 @@ extension HomeSheet {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(id)
+        .tronListMarkers(id)
     }
 
     func divider() -> some View {
