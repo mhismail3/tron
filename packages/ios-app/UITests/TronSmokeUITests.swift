@@ -1671,6 +1671,38 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
+    func testManageSessionSectionsAtAccessibilityTypeInLightAndDark() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", appearance,
+                                   "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+            app.launch()
+            XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+            app.buttons["Stop session"].tap()
+            XCTAssertTrue(app.descendants(matching: .any)["session-model-summary"].waitForExistence(timeout: 5), app.debugDescription)
+            keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-primary")
+            app.buttons["Release terminal settlement"].tap()
+            let reset = app.buttons["settings-row-model.thinking_role_chat_-reset"]
+            reveal(reset, in: app)
+            XCTAssertTrue(reset.isHittable, "The canonical Thinking reset must stay reachable at XXXL")
+            let compactNow = app.buttons["Compact Now"]
+            let compactTitle = app.descendants(matching: .any)["session-usage-detail"]
+            XCTAssertTrue(compactNow.waitForExistence(timeout: 5), app.debugDescription)
+            for _ in 0..<6 where !(compactNow.isHittable && compactTitle.isHittable) { app.swipeDown() }
+            keepScreenshot(named: "868-manage-session-\(appearance)-xxxl-compact-row")
+            assertStacked(compactNow, below: compactTitle, in: app)
+            let branchTitle = app.staticTexts["Workspace"]
+            let branchValue = app.staticTexts["Unavailable"]
+            XCTAssertTrue(branchValue.waitForExistence(timeout: 5), app.debugDescription)
+            for _ in 0..<6 where !(branchTitle.isHittable && branchValue.isHittable) { app.swipeUp() }
+            keepScreenshot(named: "868-manage-session-\(appearance)-xxxl-branch-row")
+            assertStacked(branchValue, below: branchTitle, in: app)
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testIphoneDashboardPreferencesPersistAcrossRoutesAndRelaunch() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -2800,5 +2832,15 @@ final class TronSmokeUITests: XCTestCase {
         app.launchArguments = ["--tron-reset-ui-test-state", "-ApplePersistenceIgnoreState", "YES"] + extraArguments
         app.launch()
         return app
+    }
+
+    @MainActor
+    private func assertStacked(_ control: XCUIElement, below title: XCUIElement, in app: XCUIApplication,
+                               file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(title.exists && control.exists, app.debugDescription, file: file, line: line)
+        XCTAssertGreaterThanOrEqual(control.frame.minY, title.frame.maxY,
+                                    "\(control.label) sits below \(title.label), not beside it", file: file, line: line)
+        XCTAssertEqual(control.frame.maxX, app.windows.firstMatch.frame.maxX - 32, accuracy: 1,
+                       "\(control.label) retains its container + standard row trailing inset", file: file, line: line)
     }
 }
