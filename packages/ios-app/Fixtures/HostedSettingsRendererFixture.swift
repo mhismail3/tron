@@ -59,45 +59,6 @@ struct HostedSettingsRendererFixture: View {
         }.tronNavigationTitle("Model Providers", accent: .tronPurple)
     }
 
-    private var controlsReview: some View {
-        ScrollView {
-            TronSettingsGroup("Mixed controls") {
-                TronSettingsRow(icon: "number", title: "Inherited value") {
-                    Button {} label: { TronInlineActionLabel("16,384 tokens") }.buttonStyle(.plain)
-                        .accessibilityIdentifier("alignment.inherited")
-                }
-                TronSettingsDivider()
-                TronSettingsRow(icon: "slider.horizontal.3", title: "Short value") {
-                    Button {} label: { TronInlineActionLabel("—") }.buttonStyle(.plain)
-                        .accessibilityIdentifier("alignment.short")
-                }
-                TronSettingsDivider()
-                TronSettingsRow(icon: "slider.horizontal.3", title: "Summary thinking", subtitle: "Value and reset remain independent targets.") {
-                    Button {} label: { TronInlineActionLabel("High") }.buttonStyle(.plain)
-                        .accessibilityIdentifier("alignment.revert-value")
-                }
-                .environment(\.tronSettingsRowAccessory, {
-                    AnyView(Button {} label: { TronInlineActionLabel("", icon: "arrow.uturn.backward", alignment: .leading) }
-                        .buttonStyle(.plain).accessibilityLabel("Revert")
-                        .accessibilityIdentifier("alignment.revert"))
-                })
-                TronSettingsDivider()
-                TronSettingsRow(icon: "number", title: "Optional override", subtitle: "Unset uses the same circular control geometry.") {
-                    Button {} label: { TronInlineActionLabel("16,384 tokens") }.buttonStyle(.plain)
-                        .accessibilityIdentifier("alignment.unset-value")
-                }
-                .environment(\.tronSettingsRowAccessory, {
-                    AnyView(Button {} label: { TronInlineActionLabel("", icon: "minus", alignment: .leading) }
-                        .buttonStyle(.plain).accessibilityLabel("Unset")
-                        .accessibilityIdentifier("alignment.unset"))
-                })
-            }
-            .padding(20)
-        }
-        .tronNavigationTitle("Shared controls")
-        .tronSettingsLayout()
-    }
-
     private var fixtureContent: some View {
         NavigationStack {
             if ready {
@@ -112,8 +73,6 @@ struct HostedSettingsRendererFixture: View {
                         } else {
                             HostedSixSmallUIFixture(surface: surface)
                         }
-                    } else if HostedLaunch.arguments.contains("-settings-controls-review") {
-                        controlsReview
                     } else if HostedLaunch.arguments.contains("-settings-ui-providers") {
                         providerReview
                     } else if HostedLaunch.arguments.contains("-settings-nested") {
@@ -126,9 +85,7 @@ struct HostedSettingsRendererFixture: View {
                     }
                 }
                 .safeAreaInset(edge: .bottom) {
-                    if !HostedLaunch.arguments.contains("-settings-alignment-review")
-                        && !HostedLaunch.arguments.contains("-settings-controls-review")
-                        && !HostedLaunch.arguments.contains("-six-ui-surface") {
+                    if !HostedLaunch.arguments.contains("-six-ui-surface") {
                     HStack {
                         Text("applied:\(applied)").accessibilityIdentifier("fixture.settings-renderer-applied")
                         Text("held:\(heldPreviews)").accessibilityIdentifier("fixture.settings-renderer-held")
@@ -272,18 +229,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 return .object(row)
             }
             return .object(["keys": .array(keys)])
-        }
-        if HostedLaunch.arguments.contains("-settings-alignment-review") {
-            let keys = [("inherited", "Inherited value", "16,384 tokens", false),
-                        ("short", "Short value", "—", false),
-                        ("revert", "Owned value", "High", true),
-                        ("unset", "Optional override", "16,384 tokens", true)].enumerated().map { index, item -> JSONValue in
-                var row = HostedSettingsReviewSchema.key("alignment.\(item.0)", "context", .string(item.2), item.2).objectValue!
-                row["overridden"] = .bool(item.3)
-                return .object(row)
-            }
-            return .object(["target": .object(["kind": .string("global")]), "layers": .array([.string("global")]),
-                "keys": .array(keys), "diagnostics": .array([])])
         }
         let keys: [JSONValue] = [
             key("model.ref", group: "model", value: .object(["provider": .string("fixture"), "id": .string(model)]), display: modelName,

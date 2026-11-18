@@ -3,7 +3,6 @@ import XCTest
 @MainActor
 final class TronSheetThemePreviewUITests: XCTestCase {
 
-
     func testWorkspaceControlsFollowThePresentingTheme() {
         for mode in ["light", "dark"] {
             let app = settings(mode)
