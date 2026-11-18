@@ -80,9 +80,9 @@ wire shape: at most 128 servers, each with `name`, `state`, `scope`, `enabled`,
 `exposure`, `transport`, at most 128 tool names, and an optional bounded `error`.
 Each string is capped at 256 characters (except `state`, capped at 64); `error`
 is stripped of control bytes and capped at 2,048 characters. Filesystem `source`
-paths are not exposed. Every bundled-CLI run the admin service makes (status) binds
+paths are not exposed. The bundled-CLI status run (`list --json`) binds
 `PI_CODING_AGENT_DIR` to the Gateway's agent directory at spawn, so the ambient process environment
-never selects which `mcp.json` or trust store a status read or mutation touches. Top-level `errors` is a count, not a copy of Pi diagnostic
+never selects which `mcp.json` or trust store a status read touches. Top-level `errors` is a count, not a copy of Pi diagnostic
 objects. The captured pinned CLI payload fixture and startup/config behavior are
 covered by `src/admin/mcp-admin-service.integration.test.ts`, which proves Pi's own
 loader accepts the written Keychain reference. It does not access the host Keychain;
