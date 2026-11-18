@@ -50,6 +50,18 @@ struct HostedSixSmallUIFixture: View {
 
     @ViewBuilder private var destination: some View {
         switch surface {
+        case "models":
+            ModelPicker(selection: $selection, models: Self.models)
+                .tronNavigationTitle("Models")
+                .safeAreaInset(edge: .bottom) {
+                    if HostedLaunch.arguments.contains("-six-ui-typography") {
+                        TronSettingsRow(icon: nil, title: "Shared row reference",
+                                        subtitle: "1M context · $0.30 / $1.20 · Sep 2026",
+                                        footnote: "opencode-go/deepseek-v4-pro", footnoteIsIdentifier: true) {}
+                            .tronListMarkers("six-ui-row-reference")
+                            .padding(.horizontal, 16)
+                    }
+                }
         case "workspace":
             WorkspaceInspectorSheet(sessionID: "fixture-chat")
                 .frame(maxWidth: HostedLaunch.arguments.contains("-six-ui-narrow") ? 320 : .infinity)
