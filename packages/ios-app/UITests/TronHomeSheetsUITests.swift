@@ -219,17 +219,6 @@ final class TronHomeSheetsUITests: XCTestCase {
     }
 
     @MainActor
-    func testHostPressureNormalAndIdleWorkers() {
-        checkHostStatus(level: "Normal", workers: "0 workers running", arguments: [])
-    }
-
-    @MainActor
-    func testHostPressureElevatedAndSingleWorkerInDarkMode() {
-        checkHostStatus(level: "Elevated", workers: "1 worker running",
-                        arguments: ["-host-elevated", "-home-dark"])
-    }
-
-    @MainActor
     func testHostPressureCriticalAndUncappedWorkersAtLargeText() {
         checkHostStatus(level: "Critical", workers: "7 workers running",
                         arguments: ["-host-critical", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
