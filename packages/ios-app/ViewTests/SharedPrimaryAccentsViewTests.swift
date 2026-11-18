@@ -51,10 +51,23 @@ final class SharedPrimaryAccentsViewTests: ShuffledTestCase {
     private func verify(_ app: MountedFixture, _ keys: [String], title: String, name: String,
                         area: (CGRect) -> CGRect = { $0 }) async throws {
         try await app.until("\(name) areas exist") { keys.allSatisfy { app.element($0) != nil } }
-        _ = try await app.still("\(name) inks") {
-            guard let title = app.navigationTitle(title).flatMap({ ink(app, $0.accessibilityFrame) }) else { return nil }
-            let areas = keys.compactMap { app.element($0).flatMap { ink(app, area($0.accessibilityFrame)) } }
-            return areas.count == keys.count ? title + areas.flatMap { $0 } : nil
+        do {
+            _ = try await app.still("\(name) inks") {
+                guard let title = app.navigationTitle(title).flatMap({ ink(app, $0.accessibilityFrame) }) else { return nil }
+                let areas = keys.compactMap { app.element($0).flatMap { ink(app, area($0.accessibilityFrame)) } }
+                return areas.count == keys.count ? title + areas.flatMap { $0 } : nil
+            }
+        } catch let error as FixtureNotReady {
+            for (index, key) in keys.enumerated() {
+                let frame = app.element(key).map { area($0.accessibilityFrame) } ?? .null
+                if app.element(key).flatMap({ ink(app, area($0.accessibilityFrame)) }) == nil {
+                    XCTFail("Missing rendered accent: \(name) area \(index) \(frame)")
+                }
+            }
+            if app.navigationTitle(title).flatMap({ ink(app, $0.accessibilityFrame) }) == nil {
+                XCTFail("Missing primary title ink: \(name)")
+            }
+            throw error
         }
         let image = app.render()
         guard let expected = app.navigationTitle(title).flatMap({ ink(app, $0.accessibilityFrame, image: image) }) else {

@@ -4,7 +4,10 @@ import UIKit
 final class TronChatProviderErrorStyleUITests: XCTestCase {
     @MainActor func testStandardErrorDetailsKeepSelectablePayload() {
         continueAfterFailure = false
-        let app = launch()
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-chat-haptics-fixture", "-chat-provider-errors", "-error-style-preview",
+                               "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
         defer { app.terminate() }
         let single = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-error-run-")).firstMatch
         XCTAssertTrue(single.waitForExistence(timeout: 20), app.debugDescription)
@@ -20,14 +23,6 @@ final class TronChatProviderErrorStyleUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Done"].exists)
         app.buttons["Done"].tap()
         XCTAssertTrue(single.waitForExistence(timeout: 10), "Done must return to the unchanged transcript")
-    }
-
-    @MainActor private func launch() -> XCUIApplication {
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-chat-haptics-fixture", "-chat-provider-errors", "-error-style-preview",
-                               "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-        app.launch()
-        return app
     }
 
     @MainActor private func keep(_ app: XCUIApplication, _ name: String) {
