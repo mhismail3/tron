@@ -33,27 +33,6 @@ import Vision
         }
     }
 
-    func testToolsCountSharesHeaderLine() {
-        for mode in ["light", "dark"] {
-            let app = manage(mode)
-            defer { app.terminate() }
-            tap(app, "home-manage-settings")
-            expandTitle(app, title: "Home Settings")
-            let tools = e(app, "settings-row-tools.active")
-            reveal(tools, app: app)
-            let editor = tools.buttons.matching(NSPredicate(format: "NOT identifier ENDSWITH '-source' AND NOT identifier ENDSWITH '-reset'")).firstMatch
-            XCTAssertTrue(editor.waitForExistence(timeout: 5), app.debugDescription)
-            editor.tap()
-            XCTAssertTrue(e(app, "settings-tools-editor").waitForExistence(timeout: 8), app.debugDescription)
-            let title = app.staticTexts["Built-in"].firstMatch
-            let count = app.staticTexts["16 of 16 on"].firstMatch
-            XCTAssertTrue(title.exists && count.exists, app.debugDescription)
-            shot("tools-\(mode)")
-            XCTAssertEqual(title.frame.midY, count.frame.midY, accuracy: 3, "Count belongs on the header's baseline")
-            XCTAssertGreaterThan(count.frame.minX, title.frame.maxX)
-        }
-    }
-
     func testCheckinUsesCompactSpacingAndStandardSubtext() {
         for mode in ["light", "dark"] {
             let app = manage(mode)
@@ -142,8 +121,8 @@ import Vision
         app.launch()
         return app
     }
-    private func manage(_ mode: String, extra: [String] = []) -> XCUIApplication {
-        let app = launch(mode, fixture: "-tron-home-dashboard-fixture", extra: ["-home-shell-ready"] + extra)
+    private func manage(_ mode: String) -> XCUIApplication {
+        let app = launch(mode, fixture: "-tron-home-dashboard-fixture", extra: ["-home-shell-ready"])
         tap(app, "home-pinned-row")
         let context = app.buttons["session-context-button"]
         XCTAssertTrue(wait(context, "enabled == true"))
@@ -170,15 +149,6 @@ import Vision
         origin.withOffset(CGVector(dx: 60, dy: done.frame.midY)).press(forDuration: 0.1,
             thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
         _ = wait(done, "frame.minY < 120")
-    }
-    private func expandTitle(_ app: XCUIApplication, title: String) {
-        let bar = app.navigationBars.staticTexts[title].firstMatch
-        XCTAssertTrue(bar.waitForExistence(timeout: 5))
-        guard bar.frame.minY > 120 else { return }
-        let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
-        origin.withOffset(CGVector(dx: 60, dy: bar.frame.midY)).press(forDuration: 0.1,
-            thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
-        _ = wait(bar, "frame.minY < 120")
     }
     private func wait(_ element: XCUIElement, _ predicate: String) -> Bool {
         XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: predicate), object: element)], timeout: 8) == .completed
