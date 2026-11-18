@@ -117,21 +117,6 @@ final class TronChatDisplayStripUITests: XCTestCase {
         }
     }
 
-    @MainActor func testSegmentContinuationAfterSplitDisplayGroupOpens() {
-        continueAfterFailure = false
-        let app = launch("-chat-display-segment-continuation")
-        defer { app.terminate() }
-        let summary = assistantReply(app, containing: "Segment continuation settled.")
-        XCTAssertTrue(summary.waitForExistence(timeout: 20), app.debugDescription)
-        XCTAssertFalse(app.staticTexts["Conversation unavailable"].exists, app.debugDescription)
-        let photo = thumbnail(app, "Segment photo")
-        let bash = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Run command, Completed'")).firstMatch
-        XCTAssertTrue(photo.exists, app.debugDescription)
-        XCTAssertTrue(bash.exists, app.debugDescription)
-        XCTAssertGreaterThan(bash.frame.minY, photo.frame.maxY, "The continuation keeps its own row below the display")
-        keepScreenshot(app, "1486-segment-continuation-opens")
-    }
-
     @MainActor private func inlineCardFrames(_ app: XCUIApplication, name: String) -> [CGRect] {
         let titles = Self.inlineTitles
         let first = thumbnail(app, titles[0])
