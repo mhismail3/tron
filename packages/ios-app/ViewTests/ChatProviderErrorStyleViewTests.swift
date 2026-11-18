@@ -40,7 +40,6 @@ final class ChatProviderErrorStyleViewTests: ShuffledTestCase {
         let bounds = frame.intersection(app.window.bounds).integral
         guard !bounds.isEmpty, let pixels = app.pixels(bounds) else { return nil }
         let width = Int(bounds.width * app.window.screen.scale)
-        guard width > 0 else { return nil }
         var left = width, right = -1
         for (index, rgb) in pixels.enumerated() {
             let r = rgb[0], g = rgb[1], b = rgb[2]

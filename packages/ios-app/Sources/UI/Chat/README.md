@@ -145,8 +145,9 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   breakdown and first/last times; native disclosures reveal each occurrence's metadata and
   selectable `ToolDetailCodeBlock` JSON (or verbatim text). Long payload cards use the shared
   static-surface policy instead of a tall backdrop filter.
-- **Error presentation.** `TronChatProviderErrorStyleUITests` captures actual hosted ChatView
-  error pills and native sheets in both appearances for visual review.
+- **Error presentation.** `TronMobileViewTests/ChatProviderErrorStyleViewTests` checks that hosted
+  ChatView error pills stay centred in both appearances; `TronChatProviderErrorStyleUITests` keeps the
+  standard error sheet's payload selectable (light).
 - **Haptics.** Live events only, through `TronHaptics`; `ChatLiveHapticLedger` tells live from restored.
 - **Extension interactions.** The mounted route is the sole sheet owner and presents pending
   interactions only after the first ready frame. Forms (one to four questions) keep a device-local

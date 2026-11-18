@@ -2,7 +2,6 @@ import XCTest
 import UIKit
 
 final class TronChatProviderErrorStyleUITests: XCTestCase {
-
     @MainActor func testStandardErrorDetailsKeepSelectablePayload() {
         continueAfterFailure = false
         let app = launch()

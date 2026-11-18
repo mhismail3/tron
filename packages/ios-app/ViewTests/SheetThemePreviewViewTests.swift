@@ -11,10 +11,12 @@ final class SheetThemePreviewViewTests: ShuffledTestCase {
                 for label in ["Rebuild from Source", "Restart", "Disable"] {
                     try await app.until("\(label) exists") { app.element(label) != nil }
                 }
-                _ = try await stillTitle(app, "Fixture")
+                _ = try await app.still("Fixture's title") {
+                    app.navigationTitle("Fixture").map { color(app, $0.accessibilityFrame, ink: true) }
+                }
                 let image = app.render()
                 for label in ["Rebuild from Source", "Restart", "Disable"] {
-                    assertColor(app, area: containerPatch(app.element(label)!.accessibilityFrame), title: "Fixture", ink: false, image: image)
+                    assertColor(app, area: containerPatch(app.element(label)!.accessibilityFrame), title: "Fixture", image: image)
                 }
                 let red = color(app, containerPatch(app.element("Forget Server")!.accessibilityFrame), ink: false, image: image)
                 XCTAssertGreaterThan(red[0], red[1] + 0.05, "Forget Server must remain red: \(red)")
@@ -41,20 +43,16 @@ final class SheetThemePreviewViewTests: ShuffledTestCase {
         try await app.expandTopSheet()
     }
 
-    private func stillTitle(_ app: MountedFixture, _ title: String) async throws -> [Double] {
-        try await app.still("\(title)'s title") { app.navigationTitle(title).map { color(app, $0.accessibilityFrame, ink: true) } }
-    }
-
     private func containerPatch(_ frame: CGRect) -> CGRect {
         CGRect(x: frame.midX - 2, y: frame.minY + 4, width: 5, height: 3)
     }
 
-    private func assertColor(_ app: MountedFixture, area: CGRect, title: String, ink: Bool, image: UIImage,
+    private func assertColor(_ app: MountedFixture, area: CGRect, title: String, image: UIImage,
                              file: StaticString = #filePath, line: UInt = #line) {
         let expected = chroma(color(app, app.navigationTitle(title)!.accessibilityFrame, ink: true, image: image))
-        let actual = chroma(color(app, area, ink: ink, image: image))
+        let actual = chroma(color(app, area, ink: false, image: image))
         XCTAssertLessThan(zip(expected, actual).map { abs($0 - $1) }.max() ?? 1, 0.28,
-                          "Rendered \(ink ? "ink" : "container") chroma \(actual) differs from sheet title \(expected)", file: file, line: line)
+                          "Rendered container chroma \(actual) differs from sheet title \(expected)", file: file, line: line)
     }
 
     private func chroma(_ rgb: [Double]) -> [Double] {
