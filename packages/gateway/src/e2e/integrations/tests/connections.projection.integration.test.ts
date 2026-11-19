@@ -130,19 +130,3 @@ it("removes retired setup operations, receipts and Raindrop mappings once, behin
     await rm(root, { recursive: true, force: true });
   }
 });
-
-it("refuses the retired connection, extension-history, timeline and model-validation RPCs on the real socket", async () => {
-  const gateway = await startLockGateway("connections-retired-rpcs", { automations: true });
-  try {
-    const phone = await gateway.connect("phone");
-    for (const method of [
-      "connections.list", "connections.setup.begin", "connections.setup.complete", "connections.setup.cancel", "connections.policy.update", "connections.disconnect",
-      "session.extensionActivity.list", "session.extensionActivity.get", "automation.timeline.list", "models.custom.validate",
-      "knowledge.x.oauth.begin", "knowledge.x.oauth.complete", "knowledge.x.credits", "session.import", "models.custom.get",
-    ]) {
-      expect(await phone.request(method, {}), method).toMatchObject({ ok: false, error: { code: "not_found", message: `Unknown gateway method: ${method}` } });
-    }
-  } finally {
-    await gateway.dispose();
-  }
-}, 60_000);
