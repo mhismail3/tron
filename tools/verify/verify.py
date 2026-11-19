@@ -815,7 +815,6 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
     declared_tests: set[str] = set()
     selected: set[str] = set()
     narrow: set[str] = set()
-    batch_tests: set[str] = set()
     deferred: set[str] = set()
     full_reasons: list[str] = []
     if mode == "full":
@@ -922,8 +921,7 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
                 } or filename.startswith("tsconfig"):
                     full_reasons.append(f"graph/toolchain/schema input {path}")
             if full_reasons:
-                batch_tests |= set(locks)
-                reasons.append(f"full batch required; widened to every lock ({len(locks)} files) in batch: {', '.join(full_reasons)}")
+                reasons.append(f"full tier: {', '.join(full_reasons)}")
         declared |= (chosen - narrow) & modules.keys()
     if mode != "update-locks":
         jobs, routes = ios_owner_jobs(modules, tracked)
@@ -947,20 +945,13 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
         deferred = (selected & nested) - set(touched) - immediate - declared_tests
         selected -= deferred
         if deferred:
-            batch_tests |= deferred
             full_reasons.append(f"{len(deferred)} unchanged serial nested test file(s)")
-            reasons.append(f"deferred to full batch: {len(deferred)} unchanged serial nested test file(s); changed tests still run now")
-    if full_reasons:
-        batch_tests |= set(locks) | (selected & nested_files()[0])
-    if batch_tests or full_reasons:
-        for module in modules.values():
-            for command in module.get("verify", []):
-                batch_tests |= declared_files(command, tracked)
+            reasons.append(f"deferred to land's --full run: {len(deferred)} unchanged serial nested test file(s); changed tests still run now")
     docs_only = mode == "changed" and len(docs) == len(touched)
     doc_inputs = mode in ("all", "full") or any(is_doc(path) or path.endswith(".module.json") for path in touched)
     tier = "none" if docs_only else "full" if mode in ("all", "full") or full_reasons else "partial"
     return {"mode": mode, "base": base, "modules": sorted(chosen), "touched": len(touched), "paths": touched,
-            "tier": tier, "fullReasons": full_reasons, "batchTests": sorted(batch_tests), "deferredTests": sorted(deferred), "reasons": reasons,
+            "tier": tier, "fullReasons": full_reasons, "deferredTests": sorted(deferred), "reasons": reasons,
             "tests": sorted(selected), "docsOnly": docs_only, "docInputs": doc_inputs}
 
 
@@ -1296,9 +1287,6 @@ def run_ios_shards(run: Run, shards: list[IosShard], labels: list[str], files: l
 
 
 def main(argv: list[str]) -> int:
-    if "--batch" in argv:
-        import batch
-        return batch.main([word for word in argv if word != "--batch"])
     parser = argparse.ArgumentParser(prog="scripts/tron verify")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--changed", action="store_true")
@@ -1390,7 +1378,7 @@ def main(argv: list[str]) -> int:
     print(f"verify --{name}{' ' + (args.module or args.update_locks) if args.module or args.update_locks else ''} at {sha[:12]}"
           f" (base {base[:12]}): {len(selection['tests'])} test file(s) selected", flush=True)
     print(f"  tier: {selection['tier']} — affected checks now" + (
-        "; full coverage deferred to explicit verify --batch after landing" if selection["tier"] == "full" and name not in ("all", "full") else ""), flush=True)
+        "; full coverage runs in land's --full validation" if selection["tier"] == "full" and name not in ("all", "full") else ""), flush=True)
     for reason in selection["reasons"]:
         print(f"  why: {reason}", flush=True)
     if change:
@@ -1479,8 +1467,7 @@ def main(argv: list[str]) -> int:
                           "deferredCommands": deferred_commands,
                           "iosJobs": args.ios_jobs,
                           "iosHost": args.ios_host,
-                          "iosLanes": [lane or "(this worktree's lane)" for lane in ios_phone_lanes()[:args.ios_jobs]] + [ios_pad_lane()] if "ios" in groups and "ios" not in skip else [],
-                          "batchCommand": [tron, "verify", "--batch"] if selection["tier"] == "full" else None}, indent=2))
+                          "iosLanes": [lane or "(this worktree's lane)" for lane in ios_phone_lanes()[:args.ios_jobs]] + [ios_pad_lane()] if "ios" in groups and "ios" not in skip else []}, indent=2))
         return 0
 
     runs_tests = any(group not in NOT_DRIVEN and not skipped_group(group) for group in groups) or bool(selection["deferredTests"])
@@ -1669,12 +1656,12 @@ def main(argv: list[str]) -> int:
         if passing == 0 and selection["docsOnly"]:
             return finish("passed", "Empty or documentation-only change: static/documentation checks are its evidence")
         if passing == 0 and selection["deferredTests"]:
-            return finish("passed", f"affected static checks passed; {len(selection['deferredTests'])} serial test file(s) deferred; full batch is not green")
+            return finish("passed", f"affected static checks passed; {len(selection['deferredTests'])} serial test file(s) deferred to land's --full run")
         if passing == 0:
             return finish("failed", "zero tests ran: an empty selection is not evidence")
         groups_run = len({step["name"].split()[1] for step in run.steps if step["name"].startswith("tests:") and step["status"] == "ok"})
         return finish("passed", f"{passing} passing test(s) across {groups_run} runner group(s)"
-                      + (f"; {len(selection['deferredTests'])} serial file(s) deferred to explicit batch" if selection["deferredTests"] else "")
+                      + (f"; {len(selection['deferredTests'])} serial file(s) deferred to land's --full run" if selection["deferredTests"] else "")
                       + (f"; skipped by request: {', '.join(sorted(skip))}" if skip else ""))
 
     except KeyboardInterrupt:

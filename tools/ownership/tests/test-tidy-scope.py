@@ -4,7 +4,7 @@
 Reuses the disposable checkout from test-tidy.py (real `scripts/tron`, real worktrees, a bare
 origin) and runs the command as a worker would:
 
-1. A detached-HEAD worktree belongs to the tool that made it (verify batch lanes, base
+1. A detached-HEAD worktree belongs to the tool that made it (land's merge worktree, base
    checks): it is reported but never pruned, even when merged, clean and idle.
 2. Scratch and evidence in a linked worktree with a live process, local changes or
    unknown ignored data are another worker's (as is every linked worktree when `lsof` is
@@ -62,7 +62,7 @@ class ScopeCase(unittest.TestCase):
 
 class OwnershipScopeTests(ScopeCase):
     def test_a_detached_worktree_is_never_pruned(self) -> None:
-        lane = self.detached("batch-lane", idle_days=10)
+        lane = self.detached("land-merge", idle_days=10)
         branchy = self.f.worktree("merged-idle", merged=True, idle_days=10)
         result = self.report("--prune")
         self.assertTrue(lane.exists(), json.dumps(result))

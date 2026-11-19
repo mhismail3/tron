@@ -70,8 +70,8 @@ Fresh worktrees prepare their own pinned Gateway development dependencies before
 Gateway checks; see [verify](../verify/README.md#worktree-dependencies). No shared
 install or global compiler substitutes. Affected checks run before
 [`scripts/tron land`](../verify/land.md), which validates Tiers 0 to 2 of the exact merge before it pushes main;
-iOS coverage and causal reverts belong to the asynchronous main batch
-([principles P2](../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-batch-signal-not-a-commit-gate)). Keep evidence under `test-results/`.
+iOS coverage belongs to the device checkpoints
+([principles P2](../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-landing-and-checkpoint-signal)). Keep evidence under `test-results/`.
 
 Mac, iOS and Gateway lifecycle contracts stay with their development guides.
 Nothing here installs, deploys, replaces, restarts or promotes Stable. Never add an

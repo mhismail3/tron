@@ -133,7 +133,7 @@ class MiniGatewayLane(unittest.TestCase):
         return subprocess.run(command, cwd=self.local / 'packages/gateway', env=options.get('env', self.env), text=True, capture_output=True, timeout=300)
 
     def reader(self):
-        """The shipped mini.py, imported, for the reader verify and the batch classify a lane with."""
+        """The shipped mini.py, imported, for the reader verify classifies a lane with."""
         spec = importlib.util.spec_from_file_location('mini_under_test', self.local / 'tools/verify/mini.py')
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -331,7 +331,7 @@ raise SystemExit(75 if '--incomplete' in sys.argv else 0)
         sha = self.commit('whole-verifier boundary fixture')
         main = self.git('rev-parse', 'HEAD^')
         self.git('update-ref', 'refs/remotes/origin/main', main)
-        for args in (['--batch'], ['--update-locks', 'owner']):
+        for args in (['--update-locks', 'owner'],):
             denied = self.lane('verify', *args)
             self.assertEqual(denied.returncode, NO_RESULT, denied.stdout + denied.stderr)
             self.assertIn('synchronous checks', denied.stderr)

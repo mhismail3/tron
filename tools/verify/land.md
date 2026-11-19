@@ -21,7 +21,7 @@ with a clean, committed tree on the task branch. It:
 There is no GitHub ruleset, status check, token or hosted CI, and no skip or override flag: the validation lives in
 the landing process. Not yet covered: Tier 3 (iOS) and the Mac integration tests, which the mini cannot sign, and
 `python-here`, which reads this Mac's session store. `verify --changed` remains the worker's own fast check before
-`land`; the async `verify --batch` still runs on landed main until its retirement.
+`land`.
 
 `tools/verify/tests/test-land.py` proves the behaviour end to end with the real `land.py`, `mini.py` and
 `host_lock.py`, a disposable origin and a stand-in mini.

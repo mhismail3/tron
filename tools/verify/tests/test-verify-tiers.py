@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real Git/CLI regressions for tier planning and local batch coverage."""
+"""Real Git/CLI regressions for tier planning and full coverage."""
 import importlib.util
 import json
 import os
@@ -209,7 +209,7 @@ class TierTests(fixture.VerifyCase):
         self.assertEqual((r.path / 'test-results/retirement-consumer').read_text(), 'executed')
         self.assertEqual(r.report()['passingTests'], 2)
 
-    def test_serial_nested_files_run_once_in_batch_unless_the_test_itself_changed(self):
+    def test_serial_nested_files_defer_to_full_coverage_unless_the_test_itself_changed(self):
         r = self.repo
         root = 'packages/gateway'
         nested = root + '/src/worker/nested.integration.test.ts'
@@ -229,15 +229,15 @@ class TierTests(fixture.VerifyCase):
         self.assertIn(ordinary, plan['selection']['tests'])
         self.assertNotIn(nested, plan['selection']['tests'])
         self.assertIn(nested, plan['selection']['deferredTests'])
-        batch = self.plan('--all')
-        self.assertIn(nested, batch['selection']['tests'])
+        covered = self.plan('--all')
+        self.assertIn(nested, covered['selection']['tests'])
         r.write(nested, '// A changed serial test must run before landing.\n')
         r.commit('serial test changes too')
         changed = self.plan()
         self.assertIn(nested, changed['selection']['tests'])
         self.assertNotIn(nested, changed['selection']['deferredTests'])
         self.assertIn(nested, self.plan('--all')['selection']['tests'],
-                      'batch integration must include changed serial tests too')
+                      'full coverage must include changed serial tests too')
         r.write(root + '/src/declaring/declaring.module.json', json.dumps({'layer': 'L2', 'owns': ['**'],
                 'verify': ['scripts/tron test gateway src/worker/nested.integration.test.ts']}))
         r.write(root + '/src/declaring/declaring.ts', 'export const value = 1;\n')

@@ -52,9 +52,8 @@ outcome. SIGINT/SIGTERM stops and joins every lane's process group.
 
 The existing runner owns lanes, leases, cleanup and the three host-wide slots; run one verify
 per worktree. Build, shards and scenario profiling use unbounded slot acquisition in ordinary
-runs and `--all` alike. No iOS acquisition result is deferred to batch. Build/test errors,
-unexpected acquisition refusals and zero-test runs fail. `verify --batch` explicitly requests
-three lanes for its full verifier and real-UI journeys.
+runs and `--all` alike.  Build/test errors,
+unexpected acquisition refusals and zero-test runs fail.
 
 ## Verify
 

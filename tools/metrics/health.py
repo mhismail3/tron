@@ -4,7 +4,7 @@
 Definitions, anchors and what each signal is validated for: docs/HEALTH.md. Read-only; never a gate (the
 exit status reflects only usage or Git errors). Diagnostics come from the commit's Git objects and history,
 so they are deterministic. Outcomes also read, only when asked: GitHub issues (`--github`, via `gh`),
-this Mac's retained verify/batch reports (`--evidence`), the Mac deploy log (`--deploy-log`) and the Home
+this Mac's retained verify reports (`--evidence`), the Mac deploy log (`--deploy-log`) and the Home
 session JSONL (`--home-sessions`). Those are local observations and are labelled as such.
 """
 from __future__ import annotations
@@ -242,19 +242,8 @@ def rework_after_landing(head: dict) -> str:
             f"by a fix {ratio(refixed, landed)}")
 
 
-def local_evidence(sha: str) -> list[str]:
-    """O4 batch verdicts and feedback latency from this Mac's retained verify and batch reports."""
-    common = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir").strip())
-    batches = []
-    for report in glob.glob(str(common / "verify" / "batches" / "*" / "report.json")):
-        name = Path(report).parent.name
-        batches.append((int(name.rsplit("-", 1)[-1]) // 10**9, json.loads(Path(report).read_text()).get("verdict"),
-                        name[:12]))
-    batches.sort()
-    heads = defaultdict(set)
-    for _, verdict, head in batches:
-        heads[head].add(verdict)
-    green = [b for b in batches if b[1] == "green"]
+def local_evidence() -> list[str]:
+    """D7 feedback latency from this Mac's retained verify reports."""
     lanes = defaultdict(list)
     for tree in (line[9:] for line in git("worktree", "list", "--porcelain").splitlines() if line.startswith("worktree ")):
         for report in glob.glob(f"{tree}/test-results/verify/*.json"):
@@ -265,12 +254,7 @@ def local_evidence(sha: str) -> list[str]:
             for step in steps:
                 if step.get("status") in ("ok", "failed") and (step.get("seconds") or 0) >= 1:
                     lanes[re.sub(r" \d+/\d+$", "", step["name"])].append(step["seconds"])
-    now = int(git("show", "-s", "--format=%ct", sha))
-    out = [f"  O4 batch runs {len(batches)}: " + ", ".join(f"{v} {n}" for v, n in sorted(Counter(b[1] for b in batches).items())),
-           f"  O4 last green batch {green[-1][2]}, {(now - green[-1][0]) / DAY:.1f} days before this commit" if green
-           else "  O4 no green batch retained",
-           f"  O4 batch heads both green and red: {sum(1 for v in heads.values() if {'green', 'red'} <= v)} of {len(heads)}",
-           "  D7 changed-module verify lane seconds p50 / p90 (n):"]
+    out = ["  D7 changed-module verify lane seconds p50 / p90 (n):"]
     out += [f"    {name}: {pct(v, 50):.0f} / {pct(v, 90):.0f} ({len(v)})" for name, v in sorted(lanes.items())
             if len(v) >= 3 and max(v) >= 10]
     return out
@@ -432,7 +416,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--days", type=int, default=DAYS, help="history window before each commit")
     parser.add_argument("--csv", metavar="DIR", type=Path, help="write files.csv, folders.csv and modules.csv")
     parser.add_argument("--github", action="store_true", help="O1/O3 bug intake and lead time via gh")
-    parser.add_argument("--evidence", action="store_true", help="O4/D7 from this Mac's verify and batch reports")
+    parser.add_argument("--evidence", action="store_true", help="D7 from this Mac's verify reports")
     parser.add_argument("--deploy-log", metavar="JSONL", type=Path, help="O3 from the Mac deploy log")
     parser.add_argument("--home-sessions", metavar="DIR", type=Path, help="O2 from the Home session directory")
     parser.add_argument("--backtest", metavar="T0", help="validate diagnostics at T0 against rework up to rev")
@@ -445,7 +429,7 @@ def main(argv: list[str]) -> int:
         lines += github_outcomes(head) if args.github else []
         lines += deploy_outcomes(args.deploy_log, head) if args.deploy_log else []
         lines += [attention(args.home_sessions, head)] if args.home_sessions else []
-        lines += local_evidence(head["sha"]) if args.evidence else []
+        lines += local_evidence() if args.evidence else []
         lines += [""] + backtest(args.backtest, head["sha"]) if args.backtest else []
     except (metrics.MetricsError, ownership.GitError, OSError, ValueError) as error:
         print(f"health: {error}", file=sys.stderr)

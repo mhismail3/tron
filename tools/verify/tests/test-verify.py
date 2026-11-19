@@ -621,7 +621,7 @@ class LedgerTests(VerifyCase):
         r.write('packages/gateway/package.json', '{"type":"module"}\n')
         r.write('packages/gateway/src/cases.test.ts', "import { test, expect } from 'vitest';\ntest('pass\u2028separator', () => expect(1).toBe(1));\ntest.skip('skip', () => {});\ntest('fail', () => expect(1).toBe(2));\n")
         r.commit('real Vitest cases')
-        result = subprocess.run([str(r.path / 'scripts/tron'), 'test', 'gateway', '--local', 'src/cases.test.ts'], cwd=r.path,
+        result = subprocess.run([str(r.path / 'scripts/tron'), 'test', 'gateway', 'src/cases.test.ts'], cwd=r.path,
                                 env=r.env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         path = Path(r.env['HOME']) / '.tron-maintenance/test-ledger/results.sqlite3'
@@ -649,14 +649,6 @@ class LedgerTests(VerifyCase):
         self.assertEqual(len(rows), 3)
         self.assertEqual({row[1] for row in rows}, {'passed', 'failed', 'skipped'})
         self.assertTrue(all(row[0].startswith('mods/alpha/ledger.test.mjs::') and row[2] >= 0 for row in rows))
-
-    def test_batch_fixture_keeps_synthetic_cases_out_of_the_callers_ledger(self) -> None:
-        inherited = Path(self.temp.name) / 'parent-ledger.sqlite3'
-        result = subprocess.run([sys.executable, str(ROOT / 'tools/verify/tests/test-verify-batch.py'),
-                                 'BatchTests.test_green_exact_range_repeat_and_read_only_plan'], cwd=ROOT,
-                                env={**self.repo.env, 'TRON_TEST_LEDGER': str(inherited)}, capture_output=True, text=True, timeout=90)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertFalse(inherited.exists(), 'synthetic batch cases escaped into the parent recording destination')
 
     def test_public_tooling_records_fixture_and_file_failures_without_inventing_empty_cases(self) -> None:
         r = self.repo
@@ -837,13 +829,13 @@ class SelectionTests(VerifyCase):
         r.commit("kernel change")
         result = r.verify("--changed", "--plan")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("widened to every lock", result.stdout)
+        self.assertIn("why: full tier: ", result.stdout)
         self.assertIn("repo/core (L1)", result.stdout)
         r.git("reset", "-q", "--hard", "base")
         r.write("stray/notes.py", "VALUE = 1\n")
         r.commit("unowned change")
         stray = r.verify("--changed", "--plan")
-        self.assertIn("widened to every lock", stray.stdout)
+        self.assertIn("why: full tier: ", stray.stdout)
         self.assertIn("unowned stray/notes.py", stray.stdout)
         self.assertIn("ownership FAILED", r.verify("--changed").stdout)
 
@@ -1036,7 +1028,7 @@ class FastPathTests(VerifyCase):
         r.write("mods/core/core.py", "VALUE = 'kernel change'\n")
         r.commit("core code and test")
         widened = r.verify("--changed", "--plan")
-        self.assertIn("widened to every lock", widened.stdout)
+        self.assertIn("why: full tier: ", widened.stdout)
         self.assertIn("repo/core: owns a changed path; its 2 owned test file(s)", widened.stdout)
 
 
@@ -1490,7 +1482,7 @@ class IosLaneTests(VerifyCase):
         self.assertEqual(report["passingTests"], 1)
         self.assertEqual(calls.read_text().splitlines(), [
             "build", "run --only-testing TronMobileUITests/FixtureLockTests"])
-        self.assertNotIn("widened to every lock", baseline.stdout)
+        self.assertNotIn("why: full tier: ", baseline.stdout)
         recording = r.verify("--update-locks", "ios-app/state", "--plan")
         self.assertEqual(recording.returncode, 0, recording.stderr)
         self.assertIn('"tests": []', recording.stdout)

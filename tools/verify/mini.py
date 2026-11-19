@@ -137,8 +137,8 @@ if status.stdout.strip():
 def local_main(args: list[str], lane: str = 'gateway') -> int:
     if os.environ.get('TRON_UPDATE_LOCKS'):
         return no_result('TRON_UPDATE_LOCKS would rewrite goldens in the mini checkout, not here; record locks locally')
-    if lane == 'verify' and any(word == '--batch' or word == '--update-locks' or word.startswith('--update-locks=') for word in args):
-        return no_result('mini verification accepts synchronous checks, not batch dispatch or golden recording')
+    if lane == 'verify' and any(word == '--update-locks' or word.startswith('--update-locks=') for word in args):
+        return no_result('mini verification accepts synchronous checks, not golden recording')
     if git('status', '--porcelain', '--untracked-files=normal'):
         return no_result('the worktree has uncommitted or untracked changes; the mini runs a commit, commit first')
     try:
