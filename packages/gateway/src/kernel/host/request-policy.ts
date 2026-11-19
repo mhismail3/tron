@@ -15,6 +15,7 @@ export interface RequestPolicy {
   readonly inputCancellation: { epoch: number };
   readonly responseTiming: ResponseTiming;
   admit(operationId: string, boundaryEntryId: string | null, systemBase: string, kind: "user" | "wake"): void;
+  promoteToUser(): void;
   settle(operationId: string | undefined): void;
   cancel(operationId: string | undefined): void;
   transferOperation(from: string | undefined, to: string): void;

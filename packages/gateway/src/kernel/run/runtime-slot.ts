@@ -2578,6 +2578,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
               ?? this.activeOperationId;
             if (operationId) this.ownToolSegment(operationId);
             const invocation = this.runInvocations.invocationForOperation(operationId);
+            if (invocation?.origin.kind === "user") this.homeRequestPolicy?.promoteToUser();
             if (operationId && invocation) {
               this.pendingInvocationUserMessages.set(event.message, {
                 operationId,

@@ -125,7 +125,7 @@ Composition supplies the same late K6 settings, Profile and raw model owners.
   `projects` is deferred: Home's default tools (`HOME_DEFAULT_TOOL_NAMES`) omit it and include `tool_search`, which loads it on
   demand; per-request recipe application keeps deferred tools `tool_search` loaded, and a new runtime starts without them.
   Rollover carries only directional authorization ceilings (e.g. images blocked until approved) and the explicit chapter window.
-  Settings counts enabled tools; every producer-owned input is a wake, on which `write`, `edit`, `bash`, `computer` and `agent_browser` stay declared and every call to them is refused.
+  Settings counts enabled tools; every producer-owned input is a wake, on which `write`, `edit`, `bash`, `computer` and `agent_browser` stay declared and every call to them is refused. A maintainer steer or follow-up delivered into a running wake makes that activation a maintainer turn from its next request; queued producer input never upgrades one.
   Only `HOME_TOOL_NAMES`; no MCP or subagent discovery
   (empty `session.resources` catalog), no compaction (`session.compact` refuses). Fixed physical
   model on its Gateway-runtime view; the profile owns explicit model admission and physical
