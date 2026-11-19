@@ -422,6 +422,7 @@ schemes:
         TronMobileUITests: [test]
         TronSwiftAppUITests: [test]
         TronMobileViewTests: [test]
+        TronMobileE2ETests: [test]
     run:
       config: Test
     test:
