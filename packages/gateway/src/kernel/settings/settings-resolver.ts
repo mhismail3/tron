@@ -50,6 +50,7 @@ export function readBinding(stores: SettingsStores, layer: StoreLayer, binding: 
     case "session": {
       const chat = stores.session;
       if (!chat) return undefined;
+      if ((binding.field === "model" || binding.field === "thinking") && !explicitChoice(chat, keyId)) return undefined;
       if (binding.field === "model") return qualifiedOnly ? undefined : chat.model;
       if (binding.field === "thinking") return chat.thinking;
       if (binding.field === "tools") return qualifiedOnly ? undefined : chat.tools;
@@ -75,6 +76,11 @@ export function readBinding(stores: SettingsStores, layer: StoreLayer, binding: 
     case "gateway":
       return qualifiedOnly || layer !== "global" ? undefined : readPath(stores.gateway, binding.path);
   }
+}
+
+function explicitChoice(chat: NonNullable<SettingsStores["session"]>, keyId: string | undefined): boolean {
+  const from = keyId === undefined ? undefined : chat.fixed?.[keyId]?.from;
+  return from === "session" || from === "delegate";
 }
 
 function nearestTrustDecision(decisions: Record<string, boolean>, project: string): boolean | undefined {
