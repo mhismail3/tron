@@ -11,6 +11,8 @@ canonical; the interpreter stays synchronous without transport or credentials.
 - `InstalledSwiftApps`: latest-request-fenced installed/pending catalog and opens, retained sessions and
   installation coordinators, confirmed Manage operations and explicit discard.
 - `SwiftAppInstallation`: one accepted install command/result across dismissal.
+- `SwiftAppExperiment`: the device's Run Swift files flag (`tron.experimental.swiftApps`), read by sheets
+  and changed by `DevicePreferenceCoordinator`.
 - `InstalledSwiftAppSession`: optimistic JSON, coalesced unsent keys and an immutable
   dispatched command; failed/uncertain work remains owned after its view closes.
 - `Sources/State/InstalledSwiftAppsGateway` composes existing pinned-connection

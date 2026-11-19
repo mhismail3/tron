@@ -325,7 +325,8 @@ struct PushConnectionIdentity: Equatable, Sendable {
     let profileID: String
     let machineID: String
     let runtimeEpoch: String
-    let admission: GatewayLifecycleCoordinator.Admission
+    let admissionGeneration: Int
+    let connectionID: Int?
 }
 
 struct PushRetryFence: Equatable, Sendable {
