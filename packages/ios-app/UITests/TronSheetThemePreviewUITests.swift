@@ -13,6 +13,7 @@ final class TronSheetThemePreviewUITests: XCTestCase {
             expand(app, title: "Fixture")
             open(app, "Configure source repository")
             XCTAssertTrue(app.buttons["Use current folder"].waitForExistence(timeout: 10))
+            expand(app, title: "/fixture/projects")
             let title = app.navigationBars.staticTexts["/fixture/projects"].firstMatch
             for label in ["Default", "Go Up", "New Folder", "Hidden"] {
                 let button = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", label)).allElementsBoundByIndex.last { $0.isHittable }!
