@@ -8,7 +8,7 @@ final class AppLogUploader {
         let id: Int
     }
 
-    private struct AppendRequest: Encodable {
+    private struct AppendRequest: Encodable, Sendable {
         let commandId: String
         let bootId: String
         let firstSequence: Int
@@ -80,7 +80,7 @@ final class AppLogUploader {
         }
     }
 
-    private func request<P: Encodable>(_ current: Connection, _ method: String, _ params: P) async throws -> AppLogHeldCursor {
+    private func request<P: Encodable & Sendable>(_ current: Connection, _ method: String, _ params: P) async throws -> AppLogHeldCursor {
         let value = try await current.client.requestValue(method, params, expectedEpochID: current.id)
         return try JSONDecoder().decode(AppLogHeldCursor.self, from: JSONEncoder().encode(value))
     }
