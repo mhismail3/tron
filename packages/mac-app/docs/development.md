@@ -73,8 +73,8 @@ xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac \
 Run test execution with scratch `HOME`/`TMPDIR`, but never carry them into the signed build or
 substitute ad-hoc signing. The suite holds only real-boundary tests: spawned processes and
 pipes (`SubprocessTests`, `CodeSignatureProbeTests`, `CuaProcessOwnerTests`,
-`MenuBarTerminationTests`, `SingleInstanceLockTests`), a loopback WebSocket
-(`MenuBarLogReaderTransportTests`), the built launcher and payload trees
+`MenuBarTerminationTests`, `SingleInstanceLockTests`), the menu-bar log tail
+(`MenuBarLogReaderTests`, from the Gateway's `logs/gateway.jsonl` segments), the built launcher and payload trees
 (`GatewayLauncherArgvTests`), the native host in a demand-launched Mach service
 (`NativeHostRetirementTests`), real files (`WizardProgressFilesystemTests`,
 `TronLogFilesystemTests`, `GatewayNetworkCacheFilesystemTests` for numeric version-1

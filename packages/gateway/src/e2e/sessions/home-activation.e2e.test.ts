@@ -1,4 +1,5 @@
 import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import { persistedLogRecords } from "../../../test-support/persisted-logs.js";
 import { settingsDependencies } from "../../../test-support/settings-dependencies.js";
 import { homeMemoryChange } from "../../../test-support/session-settings-change.js";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
@@ -682,7 +683,7 @@ describe("Tron Home activations end to end", () => {
     owner.unavailable = `${secret} ${f.root} ${slot.id}`;
     try { await expect(f.service.invoke(client, "home.open", {})).rejects.toMatchObject({ code: "conflict" }); }
     finally { owner.unavailable = undefined; }
-    const signals = new GatewayLogger(join(f.root, "home-signals.jsonl")).recent(100);
+    const signals = persistedLogRecords(join(f.root, "home-signals.jsonl"), 100);
     expect(signals.some(record => record.event === "home.route-bound" && record.category === "replay")).toBe(true);
     expect(signals.some(record => record.event === "home.chapter-recovery" && record.reason === "absent")).toBe(true);
     expect(signals.some(record => record.event === "home.chapter-refused" && record.reason === "hard-entries")).toBe(true);
@@ -1037,7 +1038,7 @@ describe("Tron Home activations end to end", () => {
     expect(invocationReceipts(branch, slot.id).filter(receipt => receipt.receiptKind === "terminal").at(-1)?.errorCode).toBe("chapter-limit");
     expect(providerCalls).toBe(1);
     expect(f.homeDiagnostics.some(record => record.outcome === "chapter-refused" && record.reason === "hard-entries")).toBe(false);
-    const persisted = new GatewayLogger(join(f.root, "home-signals.jsonl")).recent(100)
+    const persisted = persistedLogRecords(join(f.root, "home-signals.jsonl"), 100)
       .filter(record => record.event === "home.chapter-limit-stop");
     expect(persisted).toHaveLength(1);
     expect(persisted[0]).toMatchObject({ level: "warning", chapterOrdinal: 1, boundary: "hard-entries",
@@ -1947,8 +1948,7 @@ describe("Tron Home activations end to end", () => {
       await expect(pause(f)).resolves.toEqual(accepted);
       expect(await f.service.invoke(client, "home.status", {})).toMatchObject({ memory: { paused: false } });
       await expect(resume(f, "resume-not-stopped")).rejects.toMatchObject({ code: "conflict" });
-      const signals = f.homeLogger.recent(100).filter(row => row.event === "home.client-control");
-      expect(new GatewayLogger(join(f.root, "home-signals.jsonl")).recent(100).filter(row => row.event === "home.client-control")).toEqual(signals);
+      const signals = persistedLogRecords(join(f.root, "home-signals.jsonl"), 100).filter(row => row.event === "home.client-control");
       expect(signals.filter(row => row.operation === "pauseMemory")).toHaveLength(1);
       expect(signals.filter(row => row.operation === "resumeMemory")).toHaveLength(2);
       expect(signals.some(row => row.level === "warning" && row.reason === "conflict")).toBe(true);

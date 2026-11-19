@@ -14,8 +14,10 @@ package struct AppLogRecord: Codable, Equatable, Sendable {
     package let profileID: String?
     package let connectionID: Int?
     package let lifecycleGeneration: Int?
+    package let bootId: String?
+    package let sequence: Int?
 
-    package init(timestamp: String, level: String, event: String, source: String, message: String, process: String, requestID: String?, durationMs: Int?, outcome: String?, code: String?, profileID: String?, connectionID: Int?, lifecycleGeneration: Int?) {
+    package init(timestamp: String, level: String, event: String, source: String, message: String, process: String, requestID: String?, durationMs: Int?, outcome: String?, code: String?, profileID: String?, connectionID: Int?, lifecycleGeneration: Int?, bootId: String? = nil, sequence: Int? = nil) {
         self.timestamp = timestamp
         self.level = level
         self.event = event
@@ -29,7 +31,37 @@ package struct AppLogRecord: Codable, Equatable, Sendable {
         self.profileID = profileID
         self.connectionID = connectionID
         self.lifecycleGeneration = lifecycleGeneration
+        self.bootId = bootId
+        self.sequence = sequence
     }
+
+    func stamped(bootId: String, sequence: Int) -> AppLogRecord {
+        AppLogRecord(timestamp: timestamp, level: level, event: event, source: source, message: message, process: process,
+            requestID: requestID, durationMs: durationMs, outcome: outcome, code: code, profileID: profileID,
+            connectionID: connectionID, lifecycleGeneration: lifecycleGeneration, bootId: bootId, sequence: sequence)
+    }
+}
+
+package struct AppLogHeldCursor: Equatable, Sendable, Decodable {
+    package let bootId: String?
+    package let sequence: Int
+
+    package init(bootId: String?, sequence: Int) {
+        self.bootId = bootId
+        self.sequence = sequence
+    }
+}
+
+package struct AppLogUploadBatch: Equatable, Sendable {
+    package let bootId: String
+    package let firstSequence: Int
+    package let lines: [String]
+    package let gapFrom: Int?
+}
+
+private struct AppLogLineMark: Decodable {
+    let bootId: String?
+    let sequence: Int?
 }
 
 package actor AppLog {
@@ -39,6 +71,9 @@ package actor AppLog {
     static let maximumSegmentBytes = maximumFileBytes / 2
     static let flushInterval: Duration = .seconds(5)
     static let slowOperationThresholdMilliseconds = 250
+    package static let maximumUploadLines = 256
+    package static let maximumUploadBytes = 256 * 1_024
+    static let maximumLineBytes = 16 * 1_024
     nonisolated(unsafe) private static let timestampFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -53,8 +88,13 @@ package actor AppLog {
     private var recordStart = 0
     private var recordCount = 0
     private var recordBytes = 0
-    private var bufferedLines: [Data] = []
+    private var bufferedRecords: [AppLogRecord] = []
     private var bufferedBytes = 0
+    private var epoch = AppLog.newEpoch()
+    private var nextSequence = 1
+    private var unsentLines: [String] = []
+    private var unsentFirstSequence = 1
+    private var unsentBytes = 0
     private var flushTask: Task<Void, Never>?
     private var didRestore = false
 
@@ -112,9 +152,9 @@ package actor AppLog {
 
     package func flush() {
         restoreIfNeeded()
-        guard !bufferedLines.isEmpty else { return }
-        let lines = bufferedLines
-        bufferedLines.removeAll(keepingCapacity: true)
+        guard !bufferedRecords.isEmpty else { return }
+        let records = bufferedRecords
+        bufferedRecords.removeAll(keepingCapacity: true)
         bufferedBytes = 0
         do {
             try FileManager.default.createDirectory(
@@ -126,8 +166,8 @@ package actor AppLog {
             }
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
             let currentSize = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? Int) ?? 0
-            let batchSize = lines.reduce(0) { $0 + $1.count }
-            if currentSize + batchSize > maximumSegmentBytes {
+            var lines = encodedLines(records)
+            if currentSize + lines.reduce(0, { $0 + $1.count + 1 }) > maximumSegmentBytes {
                 let previousURL = fileURL.appendingPathExtension("1")
                 if FileManager.default.fileExists(atPath: previousURL.path) {
                     try FileManager.default.removeItem(at: previousURL)
@@ -136,17 +176,117 @@ package actor AppLog {
                     try FileManager.default.moveItem(at: fileURL, to: previousURL)
                 }
                 FileManager.default.createFile(atPath: fileURL.path, contents: nil, attributes: [.posixPermissions: 0o600])
+                startEpoch()
+                lines = encodedLines(records)
             }
             let handle = try FileHandle(forWritingTo: fileURL)
             try handle.seekToEnd()
-            for line in lines { try handle.write(contentsOf: line) }
+            for line in lines { try handle.write(contentsOf: line + Data([0x0A])) }
             try handle.close()
+            nextSequence += lines.count
+            for line in lines {
+                unsentLines.append(String(decoding: line, as: UTF8.self))
+                unsentBytes += line.count
+            }
+            while unsentLines.count > Self.maximumRecords || unsentBytes > Self.maximumBufferBytes {
+                unsentBytes -= unsentLines.removeFirst().utf8.count
+                unsentFirstSequence += 1
+            }
         } catch {
-            let pending = lines + bufferedLines
-            bufferedLines = Array(pending.suffix(Self.maximumRecords))
-            bufferedBytes = bufferedLines.reduce(0) { $0 + $1.count }
+            bufferedRecords = Array((records + bufferedRecords).suffix(Self.maximumRecords))
+            bufferedBytes = bufferedRecords.reduce(0) { $0 + estimatedBytes($1) }
+            startEpoch()
         }
     }
+
+    package func uploadBatch(after held: AppLogHeldCursor) -> AppLogUploadBatch? {
+        flush()
+        if held.bootId == epoch, held.sequence + 1 >= unsentFirstSequence {
+            let start = held.sequence + 1 - unsentFirstSequence
+            guard start < unsentLines.count else { return nil }
+            return Self.batch(bootId: epoch, firstSequence: held.sequence + 1, lines: unsentLines[start...], gapFrom: nil)
+        }
+        let epochs = fileEpochs()
+        if let bootId = held.bootId, let index = epochs.firstIndex(where: { $0.id == bootId }) {
+            let pending = Self.contiguous(epochs[index].lines, from: held.sequence + 1)
+            if !pending.isEmpty {
+                return Self.batch(bootId: bootId, firstSequence: held.sequence + 1, lines: pending[...], gapFrom: nil)
+            }
+            for next in epochs[(index + 1)...] {
+                let lines = Self.contiguous(next.lines, from: 1)
+                if !lines.isEmpty { return Self.batch(bootId: next.id, firstSequence: 1, lines: lines[...], gapFrom: nil) }
+            }
+            return nil
+        }
+        for next in epochs where next.id != held.bootId {
+            let lines = Self.contiguous(next.lines, from: 1)
+            if !lines.isEmpty {
+                return Self.batch(bootId: next.id, firstSequence: 1, lines: lines[...],
+                                  gapFrom: held.bootId == nil ? nil : held.sequence)
+            }
+        }
+        return nil
+    }
+
+    private func fileEpochs() -> [(id: String, lines: [Int: String])] {
+        var epochs: [(id: String, lines: [Int: String])] = []
+        for url in [fileURL.appendingPathExtension("1"), fileURL] {
+            guard let data = try? Data(contentsOf: url) else { continue }
+            for raw in data.split(separator: 0x0A, omittingEmptySubsequences: true) {
+                guard let mark = try? JSONDecoder().decode(AppLogLineMark.self, from: Data(raw)),
+                      let bootId = mark.bootId, let sequence = mark.sequence else { continue }
+                if epochs.last?.id != bootId { epochs.append((bootId, [:])) }
+                if epochs[epochs.count - 1].lines[sequence] == nil {
+                    epochs[epochs.count - 1].lines[sequence] = String(decoding: raw, as: UTF8.self)
+                }
+            }
+        }
+        return epochs
+    }
+
+    private static func contiguous(_ lines: [Int: String], from first: Int) -> [String] {
+        var result: [String] = []
+        var sequence = first
+        while result.count < maximumUploadLines, let line = lines[sequence] {
+            result.append(line)
+            sequence += 1
+        }
+        return result
+    }
+
+    private static func batch(bootId: String, firstSequence: Int, lines: ArraySlice<String>, gapFrom: Int?) -> AppLogUploadBatch {
+        var kept: [String] = []
+        var bytes = 0
+        for line in lines.prefix(maximumUploadLines) {
+            bytes += line.utf8.count
+            if !kept.isEmpty, bytes > maximumUploadBytes { break }
+            kept.append(line)
+        }
+        return AppLogUploadBatch(bootId: bootId, firstSequence: firstSequence, lines: kept, gapFrom: gapFrom)
+    }
+
+    private func encodedLines(_ records: [AppLogRecord]) -> [Data] {
+        records.enumerated().map { offset, record in
+            let stamped = record.stamped(bootId: epoch, sequence: nextSequence + offset)
+            if let data = try? JSONEncoder().encode(stamped), data.count <= Self.maximumLineBytes { return data }
+            let truncated = AppLogRecord(
+                timestamp: String(record.timestamp.prefix(64)), level: record.level, event: "log.record-truncated",
+                source: "", message: "", process: "ios", requestID: nil, durationMs: nil, outcome: nil, code: nil,
+                profileID: nil, connectionID: nil, lifecycleGeneration: nil, bootId: epoch, sequence: nextSequence + offset
+            )
+            return (try? JSONEncoder().encode(truncated)) ?? Data()
+        }
+    }
+
+    private func startEpoch() {
+        epoch = Self.newEpoch()
+        nextSequence = 1
+        unsentLines.removeAll()
+        unsentFirstSequence = 1
+        unsentBytes = 0
+    }
+
+    private static func newEpoch() -> String { UUID().uuidString.lowercased() }
 
     private func restoreIfNeeded() {
         guard !didRestore else { return }
@@ -191,12 +331,10 @@ package actor AppLog {
             code: record.code.map { bounded($0) }, profileID: record.profileID.map { bounded($0) },
             connectionID: record.connectionID, lifecycleGeneration: record.lifecycleGeneration
         )
-        guard let data = try? JSONEncoder().encode(admitted) else { return }
-        let line = data + Data([0x0A])
         appendToRing(admitted)
         if level != "debug" {
-            bufferedLines.append(line)
-            bufferedBytes += line.count
+            bufferedRecords.append(admitted)
+            bufferedBytes += estimatedBytes(admitted)
             if bufferedBytes >= Self.maximumBufferBytes { flush() }
             else if flushTask == nil {
                 flushTask = Task { [weak self] in

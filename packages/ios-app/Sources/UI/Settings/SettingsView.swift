@@ -42,10 +42,6 @@ struct SettingsView: View {
                         settingsLink("Setup", summary: "Import, session storage, telemetry, and prototypes", icon: "gearshape.2") {
                             SetupSettingsView()
                         }
-                        TronSettingsDivider()
-                        settingsLink("Logs", summary: "Diagnostics from this iPhone and your Macs", icon: "text.alignleft") {
-                            GatewayLogsSettingsView()
-                        }
                     }
                 }
                 .padding(.horizontal, 20)

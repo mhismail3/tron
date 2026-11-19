@@ -59,7 +59,6 @@ import type { GatewayLogger } from "./logger.js";
 import type { CommandReceiptBinding, CommandReceiptStore } from "./command-receipts.js";
 import { fitSessionSnapshot, safeJson } from "../kernel/projection/projection.js";
 import { ModelCatalogPager } from "./model-pagination.js";
-import { exportDiagnosticSnapshot } from "./diagnostic-export.js";
 import { SessionListPaginationStore } from "./session-list-pagination.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { AsyncMutex } from "../util/async-mutex.js";
@@ -220,7 +219,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 }
 
 const restartDrainMethods = new Set([
-  "system.info", "system.logs", "system.logs.export", "command.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.stop", "gateway.drain.status", "mac.replace.status", "home.status", "home.context", "home.open", "home.chapterList", "home.profileList", "home.taskStatus", "home.taskList", "home.taskHistory", "home.taskPermissions", "home.stopTask", "home.memory.view", "home.memory.evidence",
+  "system.info", "command.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.stop", "gateway.drain.status", "mac.replace.status", "home.status", "home.context", "home.open", "home.chapterList", "home.profileList", "home.taskStatus", "home.taskList", "home.taskHistory", "home.taskPermissions", "home.stopTask", "home.memory.view", "home.memory.evidence",
   "device.install.config.status", "device.install.status",
   "session.history.list", "session.history.entry",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
@@ -437,7 +436,6 @@ export class GatewayService {
         ...(process.env.TRON_GATEWAY_SUPERVISED === "1" ? ["restart-supervised.v1", "stop-supervised.v1"] : []),
         "sessions.v1",
         "device-label.v1",
-        "diagnostic-export.v1",
         "device-logs.v1",
         "session-export.v2",
         "auth.v1",
@@ -631,23 +629,6 @@ export class GatewayService {
           const server = mcpServerName(params);
           const reference = await this.requireMcpAdmin().storeBearer(server, string(params.token, "token", { min: 1, max: 16_384 }));
           return safeJson({ server, reference });
-        });
-      case "system.logs":
-        return safeJson({ records: this.dependencies.logger.recent(integer(params.limit ?? 200, "limit", 1, 1_000)) });
-      case "system.logs.export":
-        return this.mutation(client, method, params, async () => {
-          if (Object.keys(params).some((key) => !["commandId", "content"].includes(key))) {
-            throw new GatewayError("invalid_request", "Log export accepts only content and commandId");
-          }
-          const content = boundedText(params.content, "content", 512 * 1024);
-          const tronHome = this.dependencies.config.tronHome;
-          return safeJson(await exportDiagnosticSnapshot(
-            content,
-            this.dependencies.logger.debugTail(),
-            new Date(),
-            tronHomePath(tronHome, "logs/device-exports"),
-            client.identity,
-          ));
         });
       case "client.logs.cursor":
         rejectUnknownFields(params, [], method);

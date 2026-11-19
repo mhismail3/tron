@@ -141,6 +141,7 @@ proxy_script="$repo_root/scripts/fault-proxy/ios-gateway-fault-proxy.mjs"
 e2e_test_filters=(
   "TronMobileE2ETests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools"
   "TronMobileE2ETests/RealGatewayPiBoundaryTests/testSharedLinkUploadAndWebSocketLiveness"
+  "TronMobileE2ETests/RealGatewayPiBoundaryTests/testAppLogUploaderSendsAMarkerAndAdvancesTheGatewayCursor"
 )
 e2e_diagnostic_test_filters=(
   "TronMobileE2ETests/GatewayTimeoutDiagnosticTests/testBothRawTimeoutNamesProduceTheSameTransportDiagnostic"

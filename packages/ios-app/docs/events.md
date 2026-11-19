@@ -196,9 +196,14 @@ Signposts carry only result codes and counts. `GatewayClient` emits `gateway.rpc
 coarse path changes are bounded lifecycle incidents with loop IDs. A LAN/Tailscale race stamps
 `transport=lan|tailscale` and the losing lane's stage and reason (`lan_unreachable`,
 `lan_pin_mismatch`, `lan_denied`). Nothing records content, paths, credentials or payloads.
-`AppDiagnostics` owns the client ring and Export Diagnostics (`system.logs.export` with
-`diagnostic-export.v1`, else a local artifact); the export captures its profile/lifecycle
-destination before preparation and never dispatches to a replacement.
+`AppDiagnostics` owns the client incidents and Copy Logs (offline, no Gateway request). `AppLog` stamps each
+persisted line with a per-boot `bootId` and `sequence`; a new boot or a local segment rotation starts a new
+`bootId` at 1. `AppLogUploader` sends those lines to the Gateway device file (`client.logs.append`, at most
+256 lines and 256 KiB per batch) on connect, on background and every 60 s while connected, starting from the
+Gateway's `client.logs.cursor`; it persists no cursor of its own. When the held boot is no longer on the phone,
+the next boot's first batch names it as a `local-rotation` gap. A line over 16 KiB is replaced by a bounded
+`log.record-truncated` line at the same sequence. Free text is redacted on admission
+(`IOSClientDiagnosticBuffer.redactedMessage`); callers must not record credential values.
 
 ## Covered presentation surfaces
 

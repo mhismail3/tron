@@ -1645,12 +1645,6 @@ export class GatewayServer {
     const requestId = frame.id;
     const diagnosticID = diagnosticRequestID(requestId);
     const rpcStartedAt = performance.now();
-    if (frame.method === "system.logs.export") {
-      this.options.logger.log("info", "Logs Export RPC admitted", {
-        event: "rpc.received", source: "transport", method: frame.method,
-        requestID: diagnosticID, connectionId: connection.id, outcome: "admitted",
-      });
-    }
     const requestSpan = new RequestSpan();
     const inFlightRpc: InFlightRpc = {
       controller: requestController,

@@ -1,4 +1,5 @@
 import { TEST_SETTINGS_SCHEMA } from "../../../test-support/settings-schema.js";
+import { persistedLogRecords } from "../../../test-support/persisted-logs.js";
 import { displayOwnerOf, createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
@@ -22,7 +23,7 @@ import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import { PROTOCOL_VERSION } from "../../version.js";
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { GatewayService, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
-import { GatewayLogger, type LogRecord } from "../../transport/logger.js";
+import { GatewayLogger, type LogLevel, type LogRecord } from "../../transport/logger.js";
 import { GatewayServer } from "../../transport/server.js";
 import { RequestSpan, runInRequestSpan } from "../../util/request-span.js";
 import { waitFor } from "../../../test-support/wait-for.js";
@@ -67,8 +68,17 @@ function isSessionOpenCompletion(record: LogRecord): boolean {
   return record.event === "rpc.completed" && record.method === "session.open";
 }
 
-function completedOpens(logger: GatewayLogger): LogRecord[] {
-  return [...logger.debugTail(), ...logger.recent()].filter(isSessionOpenCompletion);
+class DebugCapturingLogger extends GatewayLogger {
+  readonly debug: LogRecord[] = [];
+
+  override log(level: LogLevel, message: string, metadata: Parameters<GatewayLogger["log"]>[2] = {}): void {
+    if (level === "debug") this.debug.push({ timestamp: new Date().toISOString(), level, message, ...metadata } as LogRecord);
+    super.log(level, message, metadata);
+  }
+}
+
+function completedOpens(logger: DebugCapturingLogger, logPath: string): LogRecord[] {
+  return [...logger.debug, ...persistedLogRecords(logPath)].filter(isSessionOpenCompletion);
 }
 
 function persistedRecords(path: string): Array<Record<string, unknown>> {
@@ -157,7 +167,7 @@ describe("cold session.open request span", () => {
     await devices.initialize();
     const localToken = JSON.parse(await readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken as string;
     const logPath = join(root, "logs", "gateway.jsonl");
-    const logger = new GatewayLogger(logPath);
+    const logger = new DebugCapturingLogger(logPath);
     const uploads = new UploadStore(root, 1_024);
     const auth = new AuthBroker(await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }), () => {});
     const service = new GatewayService({
@@ -197,7 +207,7 @@ describe("cold session.open request span", () => {
     const reports: Array<Record<string, unknown>> = [];
     const requestId = "cold-open";
     const completionOf = (): LogRecord | undefined =>
-      completedOpens(logger).find((record) => record.requestID === requestId);
+      completedOpens(logger, logPath).find((record) => record.requestID === requestId);
     socket.send(JSON.stringify({
       type: "request",
       id: requestId,
@@ -325,7 +335,7 @@ describe("settings.resolve request span", () => {
     await devices.initialize();
     const localToken = JSON.parse(await readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken as string;
     const logPath = join(root, "logs", "gateway.jsonl");
-    const logger = new GatewayLogger(logPath);
+    const logger = new DebugCapturingLogger(logPath);
     const uploads = new UploadStore(root, 1_024);
     const auth = new AuthBroker(await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }), () => {});
     const service = new GatewayService({
@@ -353,7 +363,7 @@ describe("settings.resolve request span", () => {
     const projectedSetting = successfulResponse.result?.keys?.find(setting => setting.key === "run.retry.maxRetries");
     expect(projectedSetting?.value).toBe(7);
     expect(projectedSetting?.layer).toBe("global");
-    const successfulCompletion = [...logger.debugTail(), ...logger.recent()].find(record => record.event === "rpc.completed" && record.requestID === successfulId);
+    const successfulCompletion = [...logger.debug, ...persistedLogRecords(logPath)].find(record => record.event === "rpc.completed" && record.requestID === successfulId);
     expect(successfulCompletion?.outcome).toBe("success");
     expect(successfulCompletion?.method).toBe("settings.resolve");
 

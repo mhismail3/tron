@@ -314,7 +314,7 @@ struct NewSessionSheet: View {
                     gitFailed = false
                 } else {
                     do {
-                        inspectedGit = try await model.gatewayDiagnostics.inspectGit(path: requestedWorkspace)
+                        inspectedGit = try await model.gitInspection.inspectGit(path: requestedWorkspace)
                         gitFailed = false
                     } catch {
                         inspectedGit = nil
