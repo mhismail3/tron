@@ -2417,7 +2417,7 @@
           }
         },
         {
-          "description": "Ask the user to retry this Mac's push registration on the iPhone that approves the exact native card. Nothing runs without that tap; the card names the iPhone.",
+          "description": "Ask the user to retry this Mac's push registration on the iPhone that approves the exact native card. Nothing runs without that tap; only the iPhone that approves it retries.",
           "name": "push_retry",
           "parameters": {
             "additionalProperties": false,

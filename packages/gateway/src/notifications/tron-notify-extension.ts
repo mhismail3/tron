@@ -87,7 +87,7 @@ export function createTronNotifyExtension(input: {
       name: "push_retry",
       annotations: { openWorldHint: false },
       label: "Retry push",
-      description: "Ask the user to retry this Mac's push registration on the iPhone that approves the exact native card. Nothing runs without that tap; the card names the iPhone.",
+      description: "Ask the user to retry this Mac's push registration on the iPhone that approves the exact native card. Nothing runs without that tap; only the iPhone that approves it retries.",
       promptSnippet: "Use push_retry only when push alerts are stopped and the user should retry registration on their iPhone.",
       promptGuidelines: ["push_retry shows a native card; approval retries registration on the approving iPhone only."],
       parameters: Type.Object({ reason: Type.String({ minLength: 1, maxLength: 2000 }) }, { additionalProperties: false }),
