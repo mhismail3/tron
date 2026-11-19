@@ -1481,13 +1481,26 @@ describe("outside changes to MCP servers and custom models", () => {
     await until("publication: outside secret-bearing subagents settings", async () => (await outsideEntries(f)).filter(entry => entry.key === "subagents.settings").length === 2);
     expect((await outsideEntries(f)).filter(entry => entry.key === "subagents.settings")[0]).toMatchObject({ redacted: true });
     await expect(f.settingsChanges.change(global, [settings], home)).rejects.toMatchObject({ code: "conflict" });
-    expect(JSON.stringify(await f.history())).not.toContain(token);
-    expect(await readFile(f.outside.path, "utf8")).not.toContain(token);
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()),
+      subagents: { agentOverrides: { worker: { systemPrompt: "Fetch https://user:pass1234word@example.com/x; password: hunter2hunter" } } } }));
+    await until("publication: outside URL-credential subagents settings", async () => (await outsideEntries(f)).filter(entry => entry.key === "subagents.settings").length === 3);
+    expect((await outsideEntries(f)).filter(entry => entry.key === "subagents.settings")[0]).toMatchObject({ redacted: true });
+    for (const secret of [token, "pass1234word", "hunter2hunter"]) {
+      expect(JSON.stringify(await f.history())).not.toContain(secret);
+      expect(await readFile(f.outside.path, "utf8")).not.toContain(secret);
+    }
 
     await mkdir(join(agentsDir, "folder.md"));
     await writeFile(join(agentsDir, "large.md"), `---\nname: large\ndescription: Large\n---\n\n${"x".repeat(70 * 1024)}\n`);
     await until("publication: large subagent beside a folder named .md", () => f.published("subagents.agent", ["agent", "large"]));
     expect(await f.published("subagents.agent", ["agent", "large"])).toBe(true);
+    await expect(f.settingsModel.resolve(global)).resolves.toMatchObject({ target: global });
+    const linkedTarget = join(f.root, "linked-agent.md");
+    await writeFile(linkedTarget, "---\nname: linked\ndescription: Linked in\n---\n\nLinked.\n");
+    await symlink(linkedTarget, join(agentsDir, "linked.md"));
+    await symlink(join(f.root, "missing-agent.md"), join(agentsDir, "dangling.md"));
+    await until("publication: symlinked subagent beside a dangling link", () => f.published("subagents.agent", ["agent", "linked"]));
+    expect(await f.published("subagents.agent", ["agent", "linked"])).toBe(true);
     await expect(f.settingsModel.resolve(global)).resolves.toMatchObject({ target: global });
     transcript.push({ case: "outside pi-subagents", detail: await outsideEntries(f) });
   });

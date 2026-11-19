@@ -1,11 +1,11 @@
 import { GatewayError } from "../../errors.js";
-import { redactCredentials } from "../../util/credential-redaction.js";
+import { redactCredentialPairs, redactCredentials, redactCredentialUrls } from "../../util/credential-redaction.js";
 
 export const SECRET_NAME = /(token|secret|password|passwd|api[-_]?key|apikey|credential|bearer|authorization)/iu;
 
 export function carriesSecret(value: unknown): boolean {
   const text = JSON.stringify(value) ?? "";
-  if (redactCredentials(text) !== text) return true;
+  if (redactCredentials(text) !== text || redactCredentialUrls(text) !== text || redactCredentialPairs(text) !== text) return true;
   const named = (node: unknown): boolean => !!node && typeof node === "object"
     && Object.entries(node).some(([name, child]) => (!Array.isArray(node) && SECRET_NAME.test(name)) || named(child));
   return named(value);

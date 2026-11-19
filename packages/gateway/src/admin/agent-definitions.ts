@@ -1,4 +1,4 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { durableAtomicWriteText, durableRemove } from "../foundation/durable-json.js";
 
@@ -15,13 +15,14 @@ export async function setAgentDefinition(agentDir: string, name: string, text: s
 }
 
 export async function agentDefinitions(agentDir: string): Promise<Record<string, string> | undefined> {
-  let entries;
-  try { entries = await readdir(agentDefinitionsDirectory(agentDir), { withFileTypes: true }); }
+  let names: string[];
+  try { names = await readdir(agentDefinitionsDirectory(agentDir)); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
   const definitions: Record<string, string> = {};
-  for (const entry of entries.filter(item => item.isFile() && item.name.endsWith(".md") && !item.name.endsWith(".chain.md"))
-    .sort((left, right) => left.name.localeCompare(right.name))) {
-    definitions[entry.name.slice(0, -".md".length)] = await readFile(join(agentDefinitionsDirectory(agentDir), entry.name), "utf8");
+  for (const name of names.filter(item => item.endsWith(".md") && !item.endsWith(".chain.md")).sort((left, right) => left.localeCompare(right))) {
+    const path = join(agentDefinitionsDirectory(agentDir), name);
+    if (!(await stat(path).then(info => info.isFile(), () => false))) continue;
+    definitions[name.slice(0, -".md".length)] = await readFile(path, "utf8");
   }
   return definitions;
 }
