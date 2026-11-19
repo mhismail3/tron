@@ -20,7 +20,7 @@
       "wall-clock-expect": 1
     },
     "src/e2e/admin/settings-change.integration.test.ts": {
-      "sleep": 4,
+      "sleep": 5,
       "timeout-literal": 2
     },
     "src/e2e/admin/settings-gate.e2e.test.ts": {

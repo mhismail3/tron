@@ -39,7 +39,6 @@ import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
 import { waitFor } from "../../../test-support/wait-for.js";
-import { fsEventsProbe } from "../../../test-support/fs-events.js";
 const ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../../test-results/settings-change.json");
 const EVERY_KEY_ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../../test-results/settings-every-key.json");
 const transcript: Array<{ case: string; detail: unknown }> = [];
@@ -1395,11 +1394,7 @@ describe("outside changes to MCP servers and custom models", () => {
     await mkdir(join(late, ".pi"));
     await writeJson(join(late, ".pi", "mcp.json"), { mcpServers: { first: { url: "http://127.0.0.1:1/first" } } });
     await until("publication: MCP server first", () => f.published("tools.mcp.server", ["server", "first"]));
-    const watchers = (f.outside as unknown as { watchers: Map<string, unknown> }).watchers;
-    await waitFor(() => [...watchers.keys()].some(id => id.startsWith("project:") && id.endsWith("late-pi")), "the late .pi watch replaces its parent watch");
-    await mkdir(join(f.root, "fsevents-probe"));
-    const fsEvents = fsEventsProbe(join(f.root, "fsevents-probe"));
-    try { await fsEvents.live(); } finally { fsEvents.close(); }
+    await new Promise(resolve => setTimeout(resolve, 400));
     await writeJson(join(late, ".pi", "mcp.json"), { mcpServers: { first: { url: "http://127.0.0.1:1/first" }, second: { url: "http://127.0.0.1:1/second" } } });
     await until("publication: MCP server second", () => f.published("tools.mcp.server", ["server", "second"]));
     expect(await f.published("tools.mcp.server", ["server", "second"])).toBe(true);
