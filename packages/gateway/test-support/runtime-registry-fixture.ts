@@ -50,6 +50,7 @@ export async function createColdRegistryFixture(registries: RuntimeRegistry[], l
   artifactDiscoveryTruncated?: (counts: ExtensionArtifactDiscoveryCounts) => void;
   runtimeDisposeTimeout?: (graceMs: number) => void;
   delegatedRoot?: string;
+  watchArtifactRoot?: NonNullable<ConstructorParameters<typeof RuntimeRegistry>[0]["watchArtifactRoot"]>;
   beforeInitialize?: (sessionFile: string, registry: RuntimeRegistry) => Promise<void>;
   notifications?: NotificationService;
   resources?: ResourceRecorder;
@@ -81,6 +82,7 @@ export async function createColdRegistryFixture(registries: RuntimeRegistry[], l
     ...(options.workRegistry !== undefined ? { workRegistry: options.workRegistry } : {}),
     modelRuntimeFactory: runtimeFactory,
     ...(delegatedRoot ? { delegatedArtifactRoot: delegatedRoot } : {}),
+    ...(options.watchArtifactRoot ? { watchArtifactRoot: options.watchArtifactRoot } : {}),
     ...(options.artifactDiscoveryTruncated ? { artifactDiscoveryTruncated: options.artifactDiscoveryTruncated } : {}),
     trust: new TrustService(agentDir),
     broadcast: (_sessionId, topic, payload) => events.push({ topic, payload }),

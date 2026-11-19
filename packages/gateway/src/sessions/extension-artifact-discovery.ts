@@ -37,7 +37,7 @@ export interface ExtensionArtifactRootWatchRequest {
   onReset(): void;
 }
 
-interface ExtensionArtifactRootWatchHandle {
+export interface ExtensionArtifactRootWatchHandle {
   close(): void;
 }
 
