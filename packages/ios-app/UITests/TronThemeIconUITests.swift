@@ -4,7 +4,7 @@ import XCTest
     func testThemeSelectionAppliesBundledIconsAndRestoresSilently() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-theme-icon-boundary"]
+        app.launchArguments = ["-tron-settings-fixture", "-theme-icon-boundary"]
         app.launch()
         let initial = readNative(app)
         XCTAssertTrue(initial.contains("primary=AppIconBeta"), initial)

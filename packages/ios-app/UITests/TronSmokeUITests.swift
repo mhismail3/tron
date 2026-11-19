@@ -438,7 +438,7 @@ final class TronSmokeUITests: XCTestCase {
     func testProviderModelRoutesAndRefreshAreIndependent() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-provider-actions"]
+        app.launchArguments = ["-tron-settings-fixture", "-settings-provider-actions"]
         app.launch(); defer { app.terminate() }
         let operations = app.staticTexts["fixture.provider-operations"]
         XCTAssertTrue(app.buttons["settings-link-Model Providers"].waitForExistence(timeout: 10))
@@ -1466,7 +1466,7 @@ final class TronSmokeUITests: XCTestCase {
     func testSheetCaptionTextMatchesRowSubtitleSize() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture",
+        app.launchArguments = ["-tron-settings-fixture",
                                "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]
         app.launch()
         defer { app.terminate() }
@@ -1536,7 +1536,7 @@ final class TronSmokeUITests: XCTestCase {
     @MainActor
     func testProviderUsageWrapsWithoutStackingDetails() {
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-ui-providers"]
+        app.launchArguments = ["-tron-settings-fixture", "-settings-ui-providers"]
         app.launch(); defer { app.terminate() }
         let two = app.buttons["Details for OpenAI Codex"], three = app.buttons["Details for Opencode Go"]
         XCTAssertTrue(three.waitForExistence(timeout: 10), app.debugDescription)

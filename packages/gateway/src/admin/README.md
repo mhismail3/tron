@@ -13,7 +13,7 @@ custom models, Gateway updates, iOS installs, Mac replacement and diagnostics.
 |---|---|
 | Settings declarations and binding admission | [kernel schema](../kernel/settings/settings-schema.ts) (`createSettingsSchema`, `KEYS`, `RECORD_SUBJECTS`), [kernel scope resolution](../kernel/settings/scope-resolution.ts) (binding admission from `sessionOverridable`/`projectSettable`); value validation, formatting and vocabulary: [kernel settings](../kernel/settings/README.md) |
 | SDK scope admission and operational model selection | [kernel SDK storage admission](../kernel/settings/settings-sdk-manager.ts), [kernel operational admission](../kernel/settings/settings-admission.ts) |
-| Store/options adapter and presentation | `settings-model.ts` (`SettingsStoreAdapter`), `settings-presentation.ts`; [kernel resolver and diagnostics](../kernel/settings/README.md) |
+| Store/options adapter and history presentation | `settings-model.ts` (`SettingsStoreAdapter`), [kernel history presentation](../kernel/settings/history-presentation.ts); [kernel resolver and diagnostics](../kernel/settings/README.md) |
 | Project reader, store appliers and outside writers | `project-settings-writer.ts` (read-only Project layer and git state), [kernel trust owner](../kernel/resources/trust-service.ts), `settings-outside.ts` (`OutsideChanges`), `inert-pi-fields-migration.ts` (`scripts/tron migrate inert-pi-fields`: one-shot R10 removal of `theme` and `hideThinkingBlock` from `agent/settings.json` through the locked JSON writer, backup first, never at startup), `observed-git-residue-migration.ts` (`scripts/tron migrate observed-git-residue`: one-shot #2602 removal of the retired `staged`/`head` fields from `observed.json`, backup first, refuses a live Gateway, never at startup) |
 | The agents' `settings` tool and web mark | `tron-settings-extension.ts` |
 | Provider auth and model catalog | `auth-broker.ts`, `model-config-service.ts`, `global-provider-resources.ts` |
@@ -41,7 +41,7 @@ writes apply and log. Required native reviews use the dedicated built-in change
 interaction and typed paired-native callback, never generic forms. Dry run has no
 effects; Stop cancels only before acceptance. Accepted callbacks settle inside the
 canonical response receipt. There is no pending-request store, expiry or outcome outbox.
-`settings-presentation.ts` owns the profile audit-value formatter. History need
+The kernel's `history-presentation.ts` owns the profile audit-value formatter. History need
 not load Home's profile implementation; Home calls the same formatter for its
 stale-edit answer. Profile admission, records and mutation policy stay Home-owned.
 

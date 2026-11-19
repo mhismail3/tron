@@ -117,7 +117,7 @@ import Vision
         continueAfterFailure = true
         let app = XCUIApplication()
         app.launchArguments = [fixture, "-themeColor", "burgundy", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + extra
-        if mode == "dark" { app.launchArguments += ["-home-dark", "-settings-renderer-dark"] }
+        if mode == "dark" { app.launchArguments += ["-home-dark", "-settings-dark"] }
         app.launch()
         return app
     }
