@@ -547,7 +547,9 @@ export class HomeTaskDispatcher {
       const fixedAt = (value: unknown, field: "model" | "thinking"): FixedSetting => ({ value,
         from: "delegate", at: new Date().toISOString(), ref: randomUUID(), ...input.provenance?.[field] });
       const model = choice.model ?? (input.provenance ? slot.snapshot().model ?? undefined : undefined);
-      if (model) await slot.setModel(model.provider, model.id, undefined, undefined, fixedAt(model, "model"));
+      const seeded = input.provenance !== undefined && input.provenance.model?.via !== "home-explicit";
+      const projectModel = slot.settingsSessionLayer().fixed?.["model.ref[role=chat]"]?.from === "project";
+      if (model && !(seeded && projectModel)) await slot.setModel(model.provider, model.id, undefined, undefined, fixedAt(model, "model"));
       const requestedThinking = choice.thinking ?? deferredThinking;
       const definition = model ? slot.modelRuntime.getModel(model.provider, model.id) : undefined;
       const thinking = requestedThinking !== undefined && definition ? clampThinkingLevel(definition, requestedThinking) : requestedThinking;
