@@ -1,54 +1,54 @@
 {
- "packetHash": "18d2afbb3ccd6a1c",
+ "packetHash": "29e72683e031aeb1",
  "tier": "high-stakes",
- "date": "2026-11-10",
+ "date": "2026-11-19",
  "writer": {
-  "agent": "parent",
-  "model": "anthropic/claude-fable-5-2"
+  "agent": "settings worker (R14 d683f8843, #2619 306b1a702)",
+  "model": "anthropic/claude-opus-5-5"
  },
  "reviewer": {
-  "agent": "law-reviewer (runs b126a428, 42c2f2e7)",
-  "model": "anthropic/claude-haiku-5-5",
-  "session": "2026-11-10T15-22-45-384Z_01a1c60d-f308-763e-83f4-9c25d4edb092/a1270f0d-7e53-46f7-9f5b-6626542a1c51/run-0/session.jsonl"
+  "agent": "law-reviewer (Home task, session 01a1f51b)",
+  "model": "anthropic/claude-sonnet-5-5",
+  "session": "2026-11-19T18-40-01-253Z_01a1f51b-c8e5-74f7-8923-09439f639cc9.jsonl"
  },
  "laws": {
   "S1 admission": {
    "verdict": "ACCEPT",
-   "notes": "The four Admitted equations match the English: Global always, Home and Session on sessionOverridable, Project on projectSettable."
+   "notes": "Admitted is unchanged by R14: Global always, Home and Session on sessionOverridable, Project on projectSettable. Matches the English and scope-resolution's scopeAdmitted."
   },
   "R1 winner": {
    "verdict": "ACCEPT",
-   "notes": "Over folds lowest first, so the highest live layer sets the shown token, and the premise is satisfiable."
+   "notes": "Rank is now Global 1 < Project 2 < Home 3 < Session 4 and Resolve folds Over Global, Project, Home, Session, so the highest live layer by Rank sets the layer and an ordinary value. The English (Session beats Home, Home beats Project, Project beats Global) matches Rank, Resolve and Steps; the premise is satisfiable."
   },
   "R2 default": {
    "verdict": "ACCEPT",
-   "notes": "With no live layer every Over returns the below value, which is the default from FromDefault."
+   "notes": "With no live layer every Over returns the below value, so Resolve gives the default from FromDefault. Unaffected by the reorder."
   },
   "R3 compose": {
    "verdict": "ACCEPT",
-   "notes": "The Compose chain over live layers, lowest first, equals Folded over LiveTokens."
+   "notes": "LiveTokens and Steps both list Global, Project, Home, Session, so the composed chain equals Folded over LiveTokens; the reordered proof (g + p + h + se) matches."
   },
   "R4 untrusted-inert": {
    "verdict": "ACCEPT",
-   "notes": "An unapplied layer feeds only Shown and Visible, and Over ignores non-applied shown values."
+   "notes": "An unapplied layer feeds only Shown and Visible and Over ignores unapplied shown values, so value and origin are independent of it at any rank."
   },
   "R5 higher-scope-wins": {
    "verdict": "ACCEPT",
-   "notes": "For an ordinary setting the premise fixes every layer at rank l or above, so the highest live layer and its value do not change."
+   "notes": "The premise fixes every layer with Rank >= l, so under the new ranks a Session or Home value is not changed by Project or Global content. The English (scope outranks specificity) still holds."
   },
   "R6 shown": {
    "verdict": "ACCEPT",
-   "notes": "ShownOf is Shown exactly when Visible, with the token, the qualified flag and the applied flag as stated."
+   "notes": "ShownOf is Shown exactly when Visible, with the token, qualified flag and applied flag as stated; order-independent."
   },
   "R7 not-applied": {
    "verdict": "ACCEPT",
-   "notes": "Top makes the highest visible layer decide, so an unapplied one is reported and the origin falls below it."
+   "notes": "Top now decides in the order Session, Home, Project, Global, i.e. the highest visible layer by the new Rank; an unapplied Project is reported only when no Home or Session value is visible, which is the intended behaviour once Session and Home outrank Project. The origin falls below it."
   },
   "R8 below": {
    "verdict": "ACCEPT",
-   "notes": "The Below PlainOver chain with its strictly-below flags equals BelowTokens folded over the default in rank order."
+   "notes": "BelowTokens and Below both fold Global, Project, Home in rank order with strict-below flags (Home below only Session, Project below Home and Session, Global below all but itself); Session is below nothing. Matches composedBelow in the shell."
   }
  },
  "acceptedMutants": {},
- "general": "Re-review after the only change since the review at 911143e0ddecbcd7: mutate.json lost its empty \"oracles\" list (the mutation tool's oracle path was deleted). All nine laws ACCEPT at 18d2afbb3ccd6a1c by reading statements and definitions, without a Dafny re-run. Residual risks: real-traffic replay is still required for the high-stakes window, and A1 and A2 are shell contracts."
+ "general": "Review of the block at 29e72683e031aeb1, covering R14 (d683f8843: Rank reordered to Global < Project < Home < Session, decision D23 replacing H1) and the A2 wording (306b1a702, #2619), which landed without a law review. Diff read from 55914d305 to 306b1a702: Block.dfy and the laws change only the layer order in Rank, Resolve, Top, Steps, Below, LiveTokens, BelowTokens and the matching proofs, plus the comments. Proof check passes (35 verified, 0 errors); mutation report PASS 103/103 valid mutants killed at this hash (55 stillborn, 34.8%, under the 40% cap), none accepted. Mutants of Resolve are credited to R1 through its helper ResolveSteps, so R2 to R6 show no kills of their own; they are consequences of that kill set and the reordered proofs, as in the earlier review. A2 is honest about the shell: settings-resolver.ts readBinding (session store, model and thinking fields) returns no value unless explicitChoice(fixed) holds (from session or delegate), and runtime-slot.ts uses the same function, so an inherited launch or runtime value does not enter the Session entry. A2 says nothing about the session's tools and context-window fields, which that guard does not cover; the laws do not depend on it. Residual risks: A1 and A2 are shell contracts proven only by shell tests, and real-traffic replay is still required for the high-stakes window."
 }

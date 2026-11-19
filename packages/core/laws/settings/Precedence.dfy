@@ -35,7 +35,9 @@ abstract module SettingsPrecedenceLaws {
   // compares or combines values, so whether two tokens stand for equal values changes no decision.
   // Assumption A2: an entry's qualified token is the layer's value for the chat's model (a per-model value),
   // its plain token the layer's ordinary value, both read by the shell from the layer's store; `applied` is
-  // false only for the Project layer of an untrusted project.
+  // false only for the Project layer of an untrusted project. A chat's model and thinking enter the Session entry
+  // only as an explicit choice (its stored fixed setting comes from the session or a delegation; the shell's one
+  // owner of that rule is `explicitChoice` in tool-contract.ts); an inherited launch or runtime value does not.
 
   // Rank: the precedence order, Global 1 < Project 2 < Home 3 < Session 4: the most specific explicit choice wins,
   // so a chat's or Home's own override beats a checked-in project value (decision D23, replacing H1); the default is
