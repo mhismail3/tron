@@ -490,7 +490,7 @@ class DriverProtocol(unittest.TestCase):
     def test_a_driver_protocol_that_drifts_from_the_contract_is_refused(self) -> None:
         sys.path.insert(0, str(ROOT / "scripts"))
         import gateway_protocol_contract as contract
-        self.assertEqual(contract.verify_source_contract(ROOT).protocol_version, 8)
+        self.assertEqual(contract.verify_source_contract(ROOT).protocol_version, 9)
         with tempfile.TemporaryDirectory(prefix="tron-driver-protocol-") as temporary:
             copy = Path(temporary)
             for relative in self.CONTRACT_INPUTS:
@@ -498,10 +498,10 @@ class DriverProtocol(unittest.TestCase):
                 shutil.copy2(ROOT / relative, copy / relative)
             driver = copy / "scripts/tron-profile-gateway-driver.mjs"
             source = driver.read_text()
-            self.assertIn("\nconst PROTOCOL_VERSION = 8;\n", source)
-            driver.write_text(source.replace("\nconst PROTOCOL_VERSION = 8;\n", "\nconst PROTOCOL_VERSION = 9;\n"))
+            self.assertIn("\nconst PROTOCOL_VERSION = 9;\n", source)
+            driver.write_text(source.replace("\nconst PROTOCOL_VERSION = 9;\n", "\nconst PROTOCOL_VERSION = 10;\n"))
             with self.assertRaisesRegex(contract.ProtocolContractError,
-                                        r"profiling driver protocol 9 does not match the contract's 8"):
+                                        r"profiling driver protocol 10 does not match the contract's 9"):
                 contract.verify_source_contract(copy)
 
     def test_every_settings_layer_the_driver_writes_is_one_the_gateway_accepts(self) -> None:
@@ -810,7 +810,7 @@ server.on("connection", (socket) => {
     try { frame = JSON.parse(data.toString("utf8")); } catch { return; }
     if (frame.type === "hello") {
       clientId = frame.clientId ?? null;
-      return socket.send(JSON.stringify({ type: "hello", protocolVersion: 8, gatewayVersion: "stub" }));
+      return socket.send(JSON.stringify({ type: "hello", protocolVersion: 9, gatewayVersion: "stub" }));
     }
     if (frame.type !== "request") return;
     const reply = (result) => socket.send(JSON.stringify({ type: "response", id: frame.id, ok: true, result }));

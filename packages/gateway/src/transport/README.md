@@ -28,7 +28,7 @@ liveness), [execution](../sessions/execution.md), [catalog](../sessions/catalog.
 
 **Protocol versions.** One protocol range is projected from the repository manifest
 into Gateway payload, Mac app and iOS metadata; validators require one exact range.
-A major step (v7, then v8, which replaced per-setting RPCs with `settings.change`)
+A major step (v7; v8, which replaced per-setting RPCs with `settings.change`; then v9, which closed `ChangeReview.intent` to `push-registration-retry` and `provider-api-key`, whose approving answer carries the typed key once)
 has no older runtime path: the deployed update helper cannot promote a strictly newer
 candidate, so it goes through the manual local Mac Release reinstall (Mac first, then
 the iPhone app). Never widen the advertised minimum or allow a mixed pair to bypass

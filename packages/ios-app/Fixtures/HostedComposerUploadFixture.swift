@@ -213,7 +213,7 @@ private actor ComposerUploadSocket: GatewaySocketConnection {
     private var closed = false
     init(gateway: ComposerUploadGateway) {
         self.gateway = gateway
-        inbound = [Data("{\"type\":\"hello\",\"gatewayVersion\":\"fixture\",\"piVersion\":\"fixture\",\"protocolVersion\":8,\"minProtocolVersion\":8,\"machineId\":\"upload-machine\",\"machineName\":\"Fixture\",\"gatewayChannel\":\"stable\",\"capabilities\":[\"sessions.v1\"]}".utf8)]
+        inbound = [Data("{\"type\":\"hello\",\"gatewayVersion\":\"fixture\",\"piVersion\":\"fixture\",\"protocolVersion\":9,\"minProtocolVersion\":9,\"machineId\":\"upload-machine\",\"machineName\":\"Fixture\",\"gatewayChannel\":\"stable\",\"capabilities\":[\"sessions.v1\"]}".utf8)]
     }
     func send(_ data: Data) async throws {
         guard !closed else { throw CancellationError() }

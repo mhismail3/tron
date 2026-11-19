@@ -58,7 +58,7 @@ describe("gateway/protocol wire contract locks", () => {
     expect(eventShapePaths("response", info.result)).toEqual(supervisedPaths(baseline.methods.find((entry) => entry.method === "system.info")!.response));
   });
 
-  it("protocol 8: handshake, refusal and the method shapes clients use", async () => {
+  it("protocol 9: handshake, refusal and the method shapes clients use", async () => {
     vi.stubEnv("TRON_GATEWAY_SOURCE_REVISION", "");
     vi.stubEnv("TRON_GATEWAY_BUILD_FINGERPRINT", "");
     vi.stubEnv("TRON_GATEWAY_RUNTIME_EPOCH", "");

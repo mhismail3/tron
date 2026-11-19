@@ -166,7 +166,7 @@ private actor MacTerminalFixtureSocket: GatewaySocketConnection {
     init(gateway: MacTerminalFixtureGateway, answers: Bool) {
         self.gateway = gateway
         closed = !answers
-        inbound = !answers ? [] : [Data("{\"type\":\"hello\",\"gatewayVersion\":\"fixture\",\"piVersion\":\"fixture\",\"protocolVersion\":8,\"minProtocolVersion\":8,\"machineId\":\"mac-terminal-machine\",\"machineName\":\"Fixture\",\"gatewayChannel\":\"stable\",\"capabilities\":[\"sessions.v1\"]}".utf8)]
+        inbound = !answers ? [] : [Data("{\"type\":\"hello\",\"gatewayVersion\":\"fixture\",\"piVersion\":\"fixture\",\"protocolVersion\":9,\"minProtocolVersion\":9,\"machineId\":\"mac-terminal-machine\",\"machineName\":\"Fixture\",\"gatewayChannel\":\"stable\",\"capabilities\":[\"sessions.v1\"]}".utf8)]
         if answers { Task { await gateway.attach(self) } }
     }
 

@@ -259,7 +259,7 @@ actor HostedIntegrationsSocket: GatewaySocketConnection {
         self.gateway = gateway
         inbound = [try! JSONEncoder.gateway.encode(JSONValue.object([
             "type": .string("hello"), "gatewayVersion": .string("fixture"), "piVersion": .string("fixture"),
-            "protocolVersion": .number(8), "minProtocolVersion": .number(8), "machineId": .string(machineID),
+            "protocolVersion": .number(9), "minProtocolVersion": .number(9), "machineId": .string(machineID),
             "machineName": .string("Studio server"), "machineGroupID": .string(machineGroupID ?? machineID), "gatewayChannel": .string("stable"), "capabilities": .array([])]))]
         Task { await gateway.attach(self) }
     }

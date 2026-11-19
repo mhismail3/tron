@@ -84,7 +84,7 @@ struct HostedAccessibilityFixtureView: View {
     }
 
     private static let info = GatewayInfo(
-        gatewayVersion: "1", piVersion: "2", protocolVersion: 8, minProtocolVersion: 8,
+        gatewayVersion: "1", piVersion: "2", protocolVersion: 9, minProtocolVersion: 9,
         machineId: "machine", machineName: "Mac", capabilities: ["gateway-update.v1", "restart-supervised.v1"],
         sourceRevision: "source-revision", runtimeEpoch: "runtime-epoch"
     )
@@ -102,7 +102,7 @@ struct HostedAccessibilityFixtureView: View {
             currentStep: nil,
             steps: [
                 MacReplacementStep(name: "preflight", title: "Preflight", state: "done",
-                                   detail: "clean a07c51470, 982 GiB free, helper registered, protocol 8 → 8", durationSeconds: 1.2),
+                                   detail: "clean a07c51470, 982 GiB free, helper registered, protocol 9 → 9", durationSeconds: 1.2),
                 MacReplacementStep(name: "build", title: "Build signed app", state: "done", detail: "built a07c51470", durationSeconds: 412),
                 MacReplacementStep(name: "verify-signature", title: "Verify signature", state: "done",
                                    detail: "team MYGKXH6TY4, cdhash 308b4a4fce42", durationSeconds: 38.4),
@@ -117,7 +117,7 @@ struct HostedAccessibilityFixtureView: View {
             ],
             error: MacReplacementError(step: "start", message: "the Gateway did not answer within 300s (unreachable: connect ECONNREFUSED 127.0.0.1:9847)",
                                        log: "~/.tron-maintenance/replace/3f2a/logs/start.log"),
-            rollback: MacReplacementRollback(state: "restored", detail: "previous app restored; Gateway cbb9006d2 answering on protocol 8"),
+            rollback: MacReplacementRollback(state: "restored", detail: "previous app restored; Gateway cbb9006d2 answering on protocol 9"),
             logPath: "~/.tron-maintenance/replace/3f2a/journal.log"
         ),
         workers: [
