@@ -8,7 +8,7 @@ import { arrayOfStrings, boolean, integer, object, oneOf, string, text } from ".
 
 
 
-export type ObservedStore = { kind: "global" } | { kind: "trust" } | { kind: "mcp" } | { kind: "models" }
+export type ObservedStore = { kind: "global" } | { kind: "trust" } | { kind: "mcp" } | { kind: "models" } | { kind: "agents" }
   | { kind: "project"; root: string } | { kind: "project-mcp"; root: string };
 
 export interface PlannedWrite { store: ObservedStore; instance: string; changeId: string; value: unknown }
@@ -127,6 +127,7 @@ export interface ValueType {
   summary?(value: unknown): string;
   compose?(below: unknown, value: unknown): unknown;
   encode?(value: unknown, below: unknown, current: unknown): unknown;
+  onDisk?(value: unknown, label: string): void;
   options?: readonly { value: unknown; label: string; detail?: string }[];
   range?: { min: number; max: number; step?: number; unit?: string };
 }
