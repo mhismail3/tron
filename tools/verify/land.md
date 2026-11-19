@@ -14,7 +14,9 @@ with a clean, committed tree on the task branch. It:
 4. Pushes that merge to `main` only when the report passed. A red refuses (exit 1) and a missing or foreign report
    is no result (exit 75); main is unchanged either way. Push is a plain fast-forward, never forced.
 5. If `main` moved while it validated, the push is refused by Git; land merges the branch onto the new main and
-   validates that new merge before pushing it. A merge validated on an older main never lands.
+   validates that new merge before pushing it. A merge validated on an older main never lands. If the fetch that
+   confirms the push fails, land exits 75 without knowing the outcome: main may already hold the merge, so read
+   `git ls-remote origin refs/heads/main` before acting, and never land the same merge blindly again.
 
 There is no GitHub ruleset, status check, token or hosted CI, and no skip or override flag: the validation lives in
 the landing process. Not yet covered: Tier 3 (iOS) and the Mac integration tests, which the mini cannot sign, and

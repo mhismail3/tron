@@ -3,8 +3,8 @@
 
 A disposable checkout lands a task branch onto its own bare origin. The mini is a disposable home reached through
 the `ssh` stand-in of test-mini.py, and the commit's own `tools/verify/verify.py` there is a stand-in that records
-the commit it validated and fails when the tree holds a planted `RED`. The cases check that a red merge is refused
-and main is unchanged; that a main moved during validation is merged again and validated again, and only that new
+the commit it validated and fails when the tree holds a planted `RED`. The cases check that a red merge, a conflict,
+a report naming another commit, a passed report with a nonzero exit and a refused push each leave main unchanged; that a main moved during validation is merged again and validated again, and only that new
 merge lands; and that two concurrent lands wait in arrival order, the second validated on top of the first.
 """
 from __future__ import annotations
@@ -36,11 +36,12 @@ if (home / 'hold').exists():
     while (home / 'hold').exists():
         time.sleep(0.05)
 red = (root / 'RED').exists()
+named = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD^'], text=True).strip() if (home / 'foreign').exists() else sha
 out = root / 'test-results/verify'
 out.mkdir(parents=True, exist_ok=True)
-(out / f'{sha}.json').write_text(json.dumps({'commit': sha, 'verdict': 'failed' if red else 'passed', 'args': sys.argv[1:],
+(out / f'{sha}.json').write_text(json.dumps({'commit': named, 'verdict': 'failed' if red else 'passed', 'args': sys.argv[1:],
                                               'message': 'planted RED' if red else 'Tiers 0 to 2 passed'}))
-sys.exit(1 if red else 0)
+sys.exit(1 if red else 3 if (home / 'exit').exists() else 0)
 '''
 
 
@@ -140,7 +141,47 @@ class Land(unittest.TestCase):
         self.assertEqual(code, 0, output)
         self.assertEqual(self.runs(), [self.main()], 'main is exactly the validated commit')
         self.assertEqual(self.parents(self.main()), [self.base, head], 'a --no-ff merge whose first parent is the old main')
-        self.assertTrue((self.local / 'test-results/land' / self.main() / 'verify.json').is_file(), output)
+        report = json.loads((self.local / 'test-results/land' / self.main() / 'verify.json').read_text())
+        self.assertIn('--base', report['args'])
+        self.assertEqual(report['args'][report['args'].index('--base') + 1], self.base, 'validated against the main it merged onto')
+
+    def test_a_conflict_is_refused_and_main_stays(self) -> None:
+        self.write('.gitignore', 'branch side\n')
+        self.commit('branch side')
+        other = self.temporary / 'other'
+        self.git('clone', '-q', str(self.origin), str(other))
+        self.write('.gitignore', 'main side\n', other)
+        moved = self.commit('main side', other)
+        self.git('push', '-q', 'origin', 'HEAD:main', cwd=other)
+        code, output = self.finish(self.land())
+        self.assertEqual(code, 2, output)
+        self.assertIn('does not merge cleanly', output)
+        self.assertEqual(self.main(), moved)
+        self.assertEqual(self.runs(), [], 'nothing is validated')
+
+    def test_a_report_for_another_commit_or_a_nonzero_exit_is_no_result_and_main_stays(self) -> None:
+        self.write('feature.txt', 'feature\n')
+        self.commit('green change')
+        for marker in ('foreign', 'exit'):
+            with self.subTest(marker):
+                (self.mini / marker).write_text('')
+                code, output = self.finish(self.land())
+                (self.mini / marker).unlink()
+                self.assertEqual(code, 75, output)
+                self.assertIn('no result', output)
+                self.assertEqual(self.main(), self.base)
+
+    def test_a_refused_push_is_no_result_and_main_stays(self) -> None:
+        self.write('feature.txt', 'feature\n')
+        self.commit('green change')
+        hook = self.origin / 'hooks/pre-receive'
+        hook.write_text('#!/bin/sh\necho refused by fixture >&2\nexit 1\n')
+        hook.chmod(0o755)
+        code, output = self.finish(self.land())
+        self.assertEqual(code, 75, output)
+        self.assertIn('main is unchanged', output)
+        self.assertEqual(self.main(), self.base)
+        self.assertEqual(len(self.runs()), 1, 'validated once, never looped')
 
     def test_a_main_moved_during_validation_is_merged_and_validated_again(self) -> None:
         self.write('feature.txt', 'feature\n')

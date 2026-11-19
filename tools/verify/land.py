@@ -89,7 +89,8 @@ def land(head: str, message: str) -> int:
             say(f"validating {sha[:12]}: {head[:12]} --no-ff onto main {main[:12]}, Tiers 0 to 2 on the mini")
             verdict, report, kept = validate(tree, sha, main)
             if verdict != "passed":
-                raise Refused(f"{sha[:12]} {verdict}: {report.get('message') or 'no verify report for this commit'}; "
+                why = report.get("message") if report.get("commit") == sha else "no verify report for this commit"
+                raise Refused(f"{sha[:12]} {verdict}: {why or 'its report gives no reason'}; "
                               f"evidence {kept}; main stays {main[:12]}", 1 if verdict == "failed" else 75)
             pushed = subprocess.run(["git", "-C", str(ROOT), "push", "--quiet", "origin", f"{sha}:refs/heads/main"],
                                     capture_output=True, text=True)
