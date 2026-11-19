@@ -243,6 +243,13 @@ export class HomeRequestPolicy {
     this.expectedNonSystemMessages = undefined;
   }
 
+  promoteToUser(): void {
+    const activation = this.activation;
+    if (!activation || activation.kind === "user") return;
+    activation.kind = "user";
+    activation.system = undefined;
+  }
+
   settle(operationId: string | undefined): void {
     if (!operationId) return;
     const activation = this.activation;

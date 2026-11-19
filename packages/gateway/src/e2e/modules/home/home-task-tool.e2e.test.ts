@@ -224,7 +224,7 @@ describe("Home's task tool on the wire (#961)", () => {
     const settingsDefinition = wire.requests[0]!.tools!.find(tool => tool.name === "settings")!;
     const settingsSchema = settingsDefinition.input_schema as { properties: Record<string, { description?: string; enum?: string[] }>; required: string[] };
     expect(Object.keys(settingsSchema.properties).sort()).toEqual(["action", "changeId", "changes", "cursor", "dryRun", "key", "keys", "limit", "reason", "source", "taskId", "version"]);
-    expect(settingsSchema.properties.action!.enum).toEqual(["resolve", "change", "history", "undo", "inventory", "update"]);
+    expect(settingsSchema.properties.action!.enum).toEqual(["resolve", "change", "history", "undo", "applyAgain", "inventory", "update"]);
     expect(settingsSchema.required).toEqual(["action"]);
     for (const [field, property] of Object.entries(settingsSchema.properties)) expect(property.description, field).toBeTruthy();
     evidence.push({ definition, settingsDefinition });
@@ -260,6 +260,9 @@ describe("Home's task tool on the wire (#961)", () => {
     expect(row.sessionId).toEqual(expect.any(String));
     expect(row.operationId).toMatch(/^task-/u);
     expect(listed.json().host.heavy).toEqual({ "wire-worker": "unavailable" });
+    const early = await homeCalls("task", { action: "report", taskId: "wire-worker" });
+    expect(early.isError, early.text).toBe(false);
+    expect(early.json()).toMatchObject({ taskId: "wire-worker", settled: false, control: { state: "running" }, next: expect.stringMatching(/wakes Home by itself: end this turn now/u) });
     await sweep.sweep();
     expect((await homeCalls("task", { action: "list" })).json().host.heavy).toEqual({ "wire-worker": [] });
     const workerSession = row.sessionId as string;
