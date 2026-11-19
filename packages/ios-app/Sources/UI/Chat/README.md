@@ -158,8 +158,9 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   Its newest-first caption has eight points of extra top breathing room beneath the sheet chrome.
   A child transcript is a read-only `ReadOnlySubagentSessionStore` lease whose only mutation is the
   capability-gated stop (`process-transcript-abort.v1`).
-- **Manage Session.** Usage card (tokens left over the used line, Compact Now trailing), then the
-  shared primary-themed `ManageModelConfigurationCard` (catalog model/provider, Switch Model, Thinking and
+- **Manage Session.** Usage card (tokens left over the used line, Compact Now trailing), then
+  `MCPSignInCard` (only while an MCP server reported by `mcp.list` needs sign-in; Sign In starts
+  `mcp.auth.start` for this session and opens `MCPAuthSheet`), then the shared primary-themed `ManageModelConfigurationCard` (catalog model/provider, Switch Model, Thinking and
   Context Window), read from `settings.resolve`, the model catalog and the session's thinking levels; writes
   and Revert go through `settings.change`; the shared approval sheet owns request review.
   Session container: Workspace (`workspace-inspector.v1`), Instructions, Session

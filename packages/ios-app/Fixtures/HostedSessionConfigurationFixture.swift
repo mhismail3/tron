@@ -305,6 +305,12 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                 nodes: [SessionTreeNode(id: "fixture-prompt", parentId: nil, timestamp: "2026-01-01T00:00:00Z",
                     kind: "message", label: bookmarkLabel, preview: "Nested history prompt", role: .user,
                     depth: 0, childCount: 0, isCurrentPath: true)], older: nil, newer: nil, totalEntries: 1))
+        case "mcp.list":
+            let needsAuth = HostedLaunch.arguments.contains("-mcp-needs-auth")
+            result = .object(["servers": .array([.object(["name": .string("fixture-mcp"), "scope": .string("global"), "enabled": .bool(true),
+                "exposure": .string("direct"), "transport": .string("https://mcp.example.test"),
+                "state": .string(needsAuth ? "needs-auth" : "connected"), "tools": .array([])])]), "errors": .number(0)])
+        case "mcp.auth.start": result = .object(["operationId": .string("fixture-mcp-auth")])
         case "model.list": result = try JSONValue.wire(ModelPage(models: Self.models).encode())
         case "provider.list": result = .object(["providers": .array([])])
         case "session.workspace.inspect": result = .object(["cwd": .string("/workspace"), "exists": .bool(true), "isGitRepository": .bool(false)])
