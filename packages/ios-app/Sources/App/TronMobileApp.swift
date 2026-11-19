@@ -77,8 +77,6 @@ struct HostedFixtureRoot: View {
                 HostedSnapshotCacheFixture()
             } else if HostedLaunch.arguments.contains("-tron-session-configuration-fixture") {
                 HostedSessionConfigurationFixture()
-            } else if HostedLaunch.arguments.contains("-tron-diagnostics-export-fixture") {
-                HostedDiagnosticsExportFixture()
             } else if HostedLaunch.arguments.contains("-tron-project-trust-fixture") {
                 HostedProjectTrustFixture()
             } else if HostedLaunch.arguments.contains("-tron-subagent-parity-fixture") {

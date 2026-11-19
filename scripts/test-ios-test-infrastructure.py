@@ -4892,10 +4892,11 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
                   "TronMobileE2ETests/GatewayTimeoutDiagnosticTests/testBothRawTimeoutNamesProduceTheSameTransportDiagnostic"]
         self.assertEqual(self.boundary_selection_run("check", owners), owners)
 
-    def test_boundary_default_still_runs_both_owned_methods_in_order(self) -> None:
+    def test_boundary_default_runs_every_owned_method_in_order(self) -> None:
         self.assertEqual(self.boundary_selection_run("run", []), [
             "TronMobileE2ETests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools",
             "TronMobileE2ETests/RealGatewayPiBoundaryTests/testSharedLinkUploadAndWebSocketLiveness",
+            "TronMobileE2ETests/RealGatewayPiBoundaryTests/testAppLogUploaderSendsAMarkerAndAdvancesTheGatewayCursor",
         ])
 
     def test_boundary_selector_survives_lease_reexec_and_runs_only_requested_method(self) -> None:
