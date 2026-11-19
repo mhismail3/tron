@@ -1018,9 +1018,11 @@ describe("outside changes", () => {
     const outside = (await outsideEntries(f)).find(entry => entry.key === "run.retry.maxRetries")!;
     const tools: Array<{ execute: (...args: unknown[]) => Promise<{ details: { status: string } }> }> = [];
     const actor = { kind: "home" as const, id: "home-session", sessionId: "home-session" };
+    const handlers: string[] = [];
     createTronSettingsExtension(() => ({
       applyAgain: (changeId, input) => f.settingsChanges.applyAgain(changeId, { actor: { ...actor, toolCallId: input.toolCallId }, reason: input.reason }),
-    }) as never, async () => undefined)({ registerTool: tool => { tools.push(tool as never); } } as never);
+    }) as never, async () => undefined)({ registerTool: tool => { tools.push(tool as never); }, on: (event: string) => { handlers.push(event); } } as never);
+    expect(handlers).toEqual(["tool_call"]);
     const result = await tools[0]!.execute("apply-again", { action: "applyAgain", changeId: outside.changeId, reason: "Maintainer wants Tron's value back" },
       new AbortController().signal, () => {}, { hasUI: true });
     expect(result.details).toMatchObject({ status: "applied" });
@@ -1276,7 +1278,9 @@ describe("outside changes to MCP servers and custom models", () => {
         reason: input.reason, ...(input.confirm ? { confirm: input.confirm } : {}),
       }),
     }), async ({ apply }) => apply({ deviceId: "device:phone", commandId: "command-mcp-tool" }));
-    settingsExtension({ registerTool: tool => { tools.push(tool as never); } } as never);
+    const handlers: string[] = [];
+    settingsExtension({ registerTool: tool => { tools.push(tool as never); }, on: (event: string) => { handlers.push(event); } } as never);
+    expect(handlers).toEqual(["tool_call"]);
     const [tool] = tools;
     const requests = [{ key: "tools.mcp.server", qualifiers: { server: "home-docs" }, layer: "global", op: "set", value: { command: "npx", args: ["-y", "@acme/docs-mcp"] } }];
     const result = await tool!.execute("call-mcp", { action: "change", changes: requests, reason: "Maintainer asked for the docs server" },
