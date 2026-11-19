@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { RequestSpan, runInRequestSpan } from "../../util/request-span.js";
-import { chmod, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, realpath, rename, symlink, writeFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt, getSystemMessageText, type TranscriptContext } from "@earendil-works/pi-ai";
@@ -102,6 +103,9 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     vi.stubEnv("PI_CODING_AGENT_DIR", f.agentDir);
     await writeFile(join(f.agentDir, "mcp.json"), "{\"mcpServers\":{}}\n");
     await writeFile(join(f.agentDir, "auth.json"), "{}\n");
+    const linkedTrust = join(f.root, "linked-trust.json");
+    await rename(join(f.agentDir, "trust.json"), linkedTrust);
+    await symlink(linkedTrust, join(f.agentDir, "trust.json"));
     const files = ["settings.json", "mcp.json", "trust.json", "auth.json"];
     const before = await Promise.all(files.map(name => readFile(join(f.agentDir, name), "utf8")));
     const slot = await f.create();
@@ -112,6 +116,8 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
       fauxToolCall("edit", { path: join(f.agentDir, "mcp.json"), edits: [{ oldText: "{}", newText: "{\"x\":1}" }] }, { id: "edit-mcp" }),
       fauxToolCall("write", { path: join(f.agentDir, ".", "trust.json"), content: "{}" }, { id: "write-trust" }),
       fauxToolCall("read", { path: relative }, { id: "read-auth" }),
+      fauxToolCall("write", { path: pathToFileURL(join(f.agentDir, "settings.json")).href, content: "{}" }, { id: "write-file-url" }),
+      fauxToolCall("write", { path: linkedTrust, content: "{}" }, { id: "write-trust-target" }),
       fauxToolCall("write", { path: join(f.cwd, "notes.json"), content: "{}" }, { id: "write-project" }),
     ];
     let results: Array<{ toolCallId: string; isError: boolean; text: string }> = [];
@@ -122,7 +128,7 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     }]);
     await slot.prompt("Edit the agent configuration directly");
     await waitFor(() => results.length === calls.length, "every file tool result reaches the provider");
-    expect(results.filter(result => result.isError).map(result => result.toolCallId)).toEqual(["write-settings", "edit-mcp", "write-trust", "read-auth"]);
+    expect(results.filter(result => result.isError).map(result => result.toolCallId)).toEqual(["write-settings", "edit-mcp", "write-trust", "read-auth", "write-file-url", "write-trust-target"]);
     for (const result of results.filter(result => result.isError)) expect(result.text).toContain("only through the settings tool");
     expect(await Promise.all(files.map(name => readFile(join(f.agentDir, name), "utf8")))).toEqual(before);
     expect(await readFile(join(f.cwd, "notes.json"), "utf8")).toBe("{}");
