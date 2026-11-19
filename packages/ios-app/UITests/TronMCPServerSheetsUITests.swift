@@ -78,7 +78,8 @@ final class TronMCPServerSheetsUITests: XCTestCase {
         XCUIDevice.shared.press(.home); app.activate()
         XCTAssertTrue(counters(app, owner: "original", contain: "authResumes:1"))
         let code = app.textFields["Fixture code"]
-        XCTAssertTrue(code.waitForExistence(timeout: 10)); code.tap(); code.typeText("fixture-only-code")
+        XCTAssertTrue(code.waitForExistence(timeout: 10)); expand(app, title: "MCP Sign In")
+        code.tap(); code.typeText("fixture-only-code")
         app.buttons["Complete Login"].tap()
         XCTAssertTrue(counters(app, owner: "original", contain: "answers:1"))
         let completing = app.descendants(matching: .any)["sheet-loading"]
@@ -148,6 +149,13 @@ final class TronMCPServerSheetsUITests: XCTestCase {
         let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.buttons["Cancel"])
         XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 10), .completed)
         XCTAssertTrue(app.buttons["Add Server"].waitForExistence(timeout: 10))
+    }
+
+    @MainActor private func expand(_ app: XCUIApplication, title: String) {
+        let title = app.navigationBars.staticTexts[title].firstMatch
+        XCTAssertTrue(title.waitForExistence(timeout: 10), app.debugDescription)
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
     }
 
     @MainActor private func openAuth(_ app: XCUIApplication, expectedStarts: Int = 1) {

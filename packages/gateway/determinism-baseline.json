@@ -44,9 +44,6 @@
     "src/e2e/display/display-image-lifetime.integration.test.ts": {
       "timeout-literal": 2
     },
-    "src/e2e/integrations/tests/connections.projection.integration.test.ts": {
-      "timeout-literal": 1
-    },
     "src/e2e/kernel/delegation/codemode-nested-delegation.integration.test.ts": {
       "sleep": 1
     },
@@ -67,7 +64,7 @@
       "timeout-literal": 2
     },
     "src/e2e/kernel/delegation/managed-subagents.transform.integration.test.ts": {
-      "timeout-literal": 4
+      "timeout-literal": 3
     },
     "src/e2e/kernel/delegation/managed-workflow-children.integration.test.ts": {
       "timeout-literal": 2
@@ -98,7 +95,7 @@
       "timeout-literal": 5
     },
     "src/e2e/modules/apps/swift-app-store.integration.test.ts": {
-      "timeout-literal": 8
+      "timeout-literal": 7
     },
     "src/e2e/modules/home/home-context-data.e2e.test.ts": {
       "timeout-literal": 9
@@ -173,7 +170,7 @@
       "timeout-literal": 1
     },
     "src/e2e/notifications/notifications-queue.lock.integration.test.ts": {
-      "timeout-literal": 7
+      "timeout-literal": 6
     },
     "src/e2e/protocol/client-event-schemas.lock.integration.test.ts": {
       "timeout-literal": 1

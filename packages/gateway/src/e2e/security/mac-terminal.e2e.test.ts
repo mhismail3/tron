@@ -164,7 +164,7 @@ describe("Mac Terminal", () => {
     const port = await freePort();
     const native = new MacTerminalService({ root: join(tronHome, "state/mac-terminal"), port, launchAgentDirectory: join(root, "agents") });
     try {
-      let { service, pair, devices } = await gateway(tronHome, port);
+      let { service, pair, devices, settingsChanges } = await gateway(tronHome, port);
       const phone = await pair("Fixture iPhone");
       const key = JSON.parse(await run(probe, ["keygen"])) as { privateKeyPEM: string; publicKey: string };
 
@@ -192,7 +192,7 @@ describe("Mac Terminal", () => {
       expect(bytes.subarray(0, handWritten.length).equals(handWritten)).toBe(true);
       const line = bytes.subarray(handWritten.length).toString("utf8").trimEnd();
       expect(line).toBe(`from="${MAC_TERMINAL_SOURCES}",no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-user-rc ${key.publicKey} tron-mac-terminal:${phone} Tron Mac Terminal key for one paired iPhone; delete this line to revoke it`);
-      const history = await service.invoke(client(phone), "settings.history", { limit: 10 }) as unknown as { entries: Array<Record<string, unknown>> };
+      const history = await settingsChanges.history({ limit: 10 }, { kind: "ui", id: "device:phone" }) as unknown as { entries: Array<Record<string, unknown>> };
       expect(history.entries[0]).toMatchObject({ key: "permissions.macTerminalKey", qualifiers: { device: phone }, status: "applied", actor: { kind: "ui", id: phone } });
       expect((await service.invoke(client(phone), "macTerminal.status", {}))).toMatchObject({ enrolled: true, enrolledKey: key.publicKey });
       transcript.push({ case: "enrolled", detail: { line, record: history.entries[0] } });
@@ -293,7 +293,7 @@ describe("Mac Terminal", () => {
       expect((await devices.listDevices()).map(device => device.id)).not.toContain(phone);
       expect((await readFile(authorizedKeys)).equals(surviving)).toBe(true);
       expect(await connect(endpoint, key.privateKeyPEM)).toMatchObject({ outcome: "error", error: "authenticationRefused" });
-      const deviceHistory = await service.invoke(client(otherPhone), "settings.history", { limit: 1 }) as unknown as { entries: Array<Record<string, unknown>> };
+      const deviceHistory = await settingsChanges.history({ limit: 1 }, { kind: "ui", id: "device:phone" }) as unknown as { entries: Array<Record<string, unknown>> };
       expect(deviceHistory.entries[0]).toMatchObject({ key: "permissions.macTerminalKey", status: "applied", reason: "The paired device was revoked" });
       transcript.push({ case: "revoked-with-device", detail: deviceHistory.entries[0] });
       await maintainerChange(service, client(otherPhone), "settings.undo", { commandId: commandId(), changeId: enabled.changes[0]!.changeId });

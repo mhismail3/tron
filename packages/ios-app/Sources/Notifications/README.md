@@ -39,7 +39,7 @@ notification inbox.
   anything changed. The Gateway request is then only "requested"; registration success is not claimed. Nothing
   is persisted: an app death or a lost response after acceptance loses the effect (best effort, no replay).
   Duplicate approvals are refused at the answer boundary and never rotate. The approved attempt does not
-  re-arm the automatic budget. The key is per iPhone, so the card names the other paired Macs.
+  re-arm the automatic budget. The key is per iPhone, so the card says every paired Mac uses the new key at its next registration.
 - **State.** There is no Push screen. Every registration stage change is recorded as a `push.registration`
   app-log event (outcome = stage label), which reaches the uploaded diagnostics log; retry after a stop is
   the agent's `push_retry` card.

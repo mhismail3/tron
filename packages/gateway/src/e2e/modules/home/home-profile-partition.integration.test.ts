@@ -63,6 +63,7 @@ it("Profile keeps a linked claim, refuses unanchored revisions and undoes throug
   expect(await knowledge!.read(wrong.id, wrong.revisionId)).toEqual(wrong);
   expect((await knowledge!.read(correction.saved[0]!.id))!.relations).toContainEqual({ type: "corrects", recordId: wrong.id, revisionId: wrong.revisionId });
   await expect(knowledge!.read(wrong.id, unanchored)).rejects.toMatchObject({ code: "conflict", details: { kind: "profile_revision_unavailable", id: wrong.id, revisionId: unanchored } });
+  expect(await fs.readFile(join((await resource.describe()).root, "files", "Profile.json"), "utf8"), "no unanchored historical body is retained").not.toContain("Intermediate revised fixture statement");
   await f.settings.settingsChanges.undo(second.changes[0]!.changeId, { actor, commandId: "one-file-shared-undo" });
   expect((await knowledge!.read(wrong.id))!.content.title).toBe("Intermediate revised fixture statement");
   expect(await knowledge!.read(wrong.id, wrong.revisionId)).toEqual(wrong);

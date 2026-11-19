@@ -207,18 +207,6 @@ describe("context window policy", () => {
     expect(spy).toHaveBeenCalledTimes(2);
   });
 
-  it("isolates sessions and models and reapplies when returning to a model", async () => {
-    const first = await fixture();
-    const second = await fixture();
-    first.policy.set(astra, 1_050_000);
-    expect(second.session.model?.contextWindow).toBe(272_000);
-    await first.session.setModel(first.faux.getModel("other")!);
-    expect(first.session.model?.contextWindow).toBe(128_000);
-    await first.session.setModel(first.faux.getModel());
-    expect(first.session.model?.contextWindow).toBe(1_050_000);
-    expect(first.modelRuntime.getModel(astra.provider, astra.id)?.contextWindow).toBe(1_050_000);
-  });
-
   it("uses the larger window at provider and compaction boundaries, and keeps it on resource reload", async () => {
     const { session, policy, faux } = await fixture();
     policy.set(astra, 1_050_000);

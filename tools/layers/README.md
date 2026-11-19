@@ -63,10 +63,11 @@ compiler resolved them.
 - **Units left by earlier builds** for files no longer tracked are ignored.
 - **Coverage gaps are ratcheted, not hidden.** Owned `.swift` files the
   stamped build does not index count as `unindexed <module>` entries in the
-  same shrink-only baseline. Today that is 18 files: `ProfilingTests` (12) and
-  `E2ETests` (2), whose targets the UI Validation build does not compile, and
-  the `MacTerminalSSH` package (4, including `Package.swift`), which is
-  compiled as a module without index records. Their references are **not**
+  same shrink-only baseline. Today that is 15 files: `ProfilingTests` (12),
+  whose target the UI Validation build does not compile, and the
+  `MacTerminalSSH` package (3), which is compiled as a module without index
+  records. The UI Validation scheme builds `TronMobileE2ETests` (not in its
+  test plan) so those files are indexed. Their references are **not**
   checked.
 
 ## Rules

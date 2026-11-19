@@ -147,7 +147,8 @@ final class PushRegistrationRetryTests: XCTestCase {
             profileID: profile.id,
             machineID: profile.machineId,
             runtimeEpoch: epoch,
-            admission: GatewayLifecycleCoordinator.Admission(generation: admission, connectionID: admission)
+            admissionGeneration: admission,
+            connectionID: admission
         )
     }
 

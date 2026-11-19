@@ -147,6 +147,7 @@ export interface Fixture {
   captured: Captured[];
   service: GatewayService;
   record: SettingsChangeRecord;
+  settingsChanges: SettingsChangePath;
   broadcasts: Array<{ topic: string; payload: unknown }>;
   pushes: Array<{ title: string; message: string }>;
 }
@@ -209,7 +210,7 @@ export async function fixture(label: string): Promise<Fixture> {
   const designation = await homeOwnerOf(registry).designate({ model: MODEL }, () => MODEL);
   await setHomeMemoryModels(registry, [MEMORY_MODEL]);
   const slot = await registry.acquire(designation.sessionId);
-  const state: Fixture = { registry, knowledge, store, workspace: registry.moduleHost.contract(workspaceModule), project, sessionId: designation.sessionId, slot, home: [], worker: [], captured: [], service, record, broadcasts, pushes };
+  const state: Fixture = { registry, knowledge, store, workspace: registry.moduleHost.contract(workspaceModule), project, sessionId: designation.sessionId, slot, home: [], worker: [], captured: [], service, record, settingsChanges, broadcasts, pushes };
   faux.setResponses(Array.from({ length: 256 }, () => async (context: TranscriptContext) => {
     const systemPrompt = getCurrentSystemPrompt(context.messages);
     const messages = context.messages as unknown as Array<Record<string, unknown>>;
@@ -336,7 +337,7 @@ export async function history(f: Fixture): Promise<HistoryEntry[]> {
   const entries: HistoryEntry[] = [];
   let cursor: string | undefined;
   do {
-    const page = await f.service.invoke(maintainer, "settings.history", { key: "home.profile.item", limit: 200, ...(cursor ? { cursor } : {}) }) as unknown as { entries: HistoryEntry[]; nextCursor?: string };
+    const page = await f.settingsChanges.history({ key: "home.profile.item", limit: 200, ...(cursor ? { cursor } : {}) }, { kind: "ui", id: "maintainer" }) as unknown as { entries: HistoryEntry[]; nextCursor?: string };
     entries.push(...page.entries);
     cursor = page.nextCursor;
   } while (cursor);

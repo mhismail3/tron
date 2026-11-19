@@ -13,7 +13,7 @@ const CHANGE = Type.Object({
 }, { additionalProperties: false });
 
 const PARAMETERS = Type.Object({
-  action: StringEnum(["resolve", "change", "history", "undo", "applyAgain", "inventory", "update"] as const, { description: "resolve: read current values and scopes. inventory: read-only hooks by event and extension, packages, Tron modules, configured MCP servers and custom model providers (id, base URL host, API, model ids) for this chat's directory (configured or disabled; nothing is started or probed; credentials masked). history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. applyAgain: restore the value Tron wrote that an outside edit replaced, by that outside change's changeId from history, under the same rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card. update (Tron Home only): install one exact npm version or full git commit SHA of one configured package behind the native install card; the card shows any configured pin change; never undoable." }),
+  action: StringEnum(["resolve", "change", "history", "undo", "applyAgain", "inventory", "update"] as const, { description: "resolve: read current values and scopes. inventory: read-only hooks by event and extension, packages, Tron modules, configured MCP servers and custom model providers (id, base URL host, API, model ids) for this chat's directory (configured or disabled; nothing is started or probed; credentials masked). history: page durable audit records with their display labels, optionally filtered by key, status, actor, layer or section. undo: reverse a change by changeId under the same writer and native-tap rules. applyAgain: restore the value Tron wrote that an outside edit replaced, by that outside change's changeId from history, under the same rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card. update (Tron Home only): install one exact npm version or full git commit SHA of one configured package behind the native install card; the card shows any configured pin change; never undoable." }),
   keys: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 200 }), { maxItems: 200, description: "resolve: the key ids to read; omit for every key." })),
   taskId: Type.Optional(Type.String({ minLength: 1, maxLength: 160,
     description: "Tron Home only: the delegated task (from task list) whose worker session to read or change instead of this chat." })),
@@ -21,6 +21,10 @@ const PARAMETERS = Type.Object({
   key: Type.Optional(Type.String({ minLength: 1, maxLength: 200, description: "history: include only this key." })),
   cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 200, description: "history: nextCursor from the previous page." })),
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200, description: "history: maximum records per page (default 50)." })),
+  status: Type.Optional(Type.String({ minLength: 1, maxLength: 40, description: "history: include only this status, e.g. applied." })),
+  actor: Type.Optional(Type.String({ minLength: 1, maxLength: 40, description: "history: include only this requester: agents (every non-UI requester), ui, home, worker, agent or outside." })),
+  layer: Type.Optional(Type.String({ minLength: 1, maxLength: 40, description: "history: include only this layer: session, project or global." })),
+  section: Type.Optional(Type.String({ minLength: 1, maxLength: 40, description: "history: include only keys in this settings section, e.g. run or workers." })),
   changeId: Type.Optional(Type.String({ minLength: 1, maxLength: 200, description: "undo/applyAgain (required): changeId from history." })),
   reason: Type.Optional(Type.String({ minLength: 1, maxLength: 2_000, description: "change/undo/applyAgain (required): why, for the maintainer." })),
   dryRun: Type.Optional(Type.Boolean({ description: "change: validate and return exact before/after without applying." })),
@@ -30,23 +34,26 @@ const PARAMETERS = Type.Object({
 
 type SettingsCall =
   | { action: "resolve"; keys?: string[]; taskId?: string }
-  | { action: "history"; key?: string; cursor?: string; limit?: number }
+  | { action: "history"; key?: string; cursor?: string; limit?: number; status?: string; actor?: string; layer?: string; section?: string }
   | { action: "inventory" }
   | { action: "undo"; changeId: string; reason: string }
   | { action: "applyAgain"; changeId: string; reason: string }
   | { action: "change"; changes: ChangeRequest[]; reason: string; dryRun?: boolean; taskId?: string }
   | { action: "update"; source: string; version: string; reason: string };
 
-function admitSettingsCall(input: { action: "resolve" | "change" | "history" | "undo" | "applyAgain" | "inventory" | "update"; keys?: string[]; taskId?: string; changes?: unknown[]; reason?: string; dryRun?: boolean; key?: string; cursor?: string; limit?: number; changeId?: string; source?: string; version?: string }): SettingsCall {
+function admitSettingsCall(input: { action: "resolve" | "change" | "history" | "undo" | "applyAgain" | "inventory" | "update"; keys?: string[]; taskId?: string; changes?: unknown[]; reason?: string; dryRun?: boolean; key?: string; cursor?: string; limit?: number; status?: string; actor?: string; layer?: string; section?: string; changeId?: string; source?: string; version?: string }): SettingsCall {
   const fields = {
     resolve: ["keys", "taskId"], change: ["changes", "reason", "dryRun", "taskId"],
-    history: ["key", "cursor", "limit"], undo: ["changeId", "reason"], applyAgain: ["changeId", "reason"], inventory: [] as string[], update: ["source", "version", "reason"],
+    history: ["key", "cursor", "limit", "status", "actor", "layer", "section"], undo: ["changeId", "reason"], applyAgain: ["changeId", "reason"], inventory: [] as string[], update: ["source", "version", "reason"],
   }[input.action];
   for (const [field, value] of Object.entries(input)) {
     if (field !== "action" && value !== undefined && !fields.includes(field)) throw new Error(`settings ${input.action}: "${field}" is not used by this action`);
   }
   if (input.action === "inventory") return { action: "inventory" };
-  if (input.action === "history") return { action: "history", ...(input.key ? { key: input.key } : {}), ...(input.cursor ? { cursor: input.cursor } : {}), ...(input.limit !== undefined ? { limit: input.limit } : {}) };
+  if (input.action === "history") {
+    const { action: _action, ...query } = input;
+    return { action: "history", ...Object.fromEntries(Object.entries(query).filter(([, value]) => value !== undefined)) };
+  }
   if (input.action === "update") {
     if (!input.source?.trim()) throw new Error("settings update: source is required (the configured package source)");
     if (!input.version?.trim()) throw new Error("settings update: version is required (an exact npm version)");

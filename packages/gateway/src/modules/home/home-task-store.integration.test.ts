@@ -246,6 +246,8 @@ describe("HomeTaskStore durable namespace", () => {
       { ...task(), spend: { sourceDigest: "a".repeat(64), inputTokens: -1, outputTokens: 0 } },
       { ...task(), spend: { sourceDigest: "a".repeat(64), inputTokens: 1, outputTokens: 0, unpriced: true } },
       { ...task(), spend: { sourceDigest: "a".repeat(64), inputTokens: 1, outputTokens: 0, cacheReadTokens: 2 } },
+      { ...task(), surprise: true },
+      { ...terminalTask("task-terminal"), wake: { ...terminalTask("task-terminal").wake!, state: "cancelled-before-admission" } },
     ];
     for (const record of invalid) await expect(f.store.put(record as HomeTaskRecord, null)).rejects.toMatchObject({ code: "invalid-record" });
     expect(await bytes(f.directory)).toEqual(before);
@@ -271,53 +273,6 @@ describe("HomeTaskStore durable namespace", () => {
     await expect(f.store.put({ ...final, reportRef }, null)).resolves.toMatchObject({ lifecycle: "terminal", reportRef });
   });
 
-  it("refuses a wake state the inbox no longer writes, so no record can carry it", async () => {
-    const f = await fixture(); await f.store.initialize();
-    const terminal = terminalTask("task-terminal");
-    await expect(f.store.put({ ...terminal, wake: { ...terminal.wake!, state: "cancelled-before-admission" as never } }, null))
-      .rejects.toMatchObject({ code: "invalid-record" });
-    expect(await f.store.read("task-terminal")).toBeUndefined();
-  });
-
-  it("refuses a task record that carries a deleted field, on write and on read", async () => {
-    const f = await fixture(); await f.store.initialize();
-    await f.store.put(task(), null);
-    const path = await f.taskPath();
-    const valid = await readFile(path, "utf8");
-    const current = JSON.parse(valid) as Record<string, unknown>;
-    const deleted = {
-      workerProfile: { workerProfile: "home-task-v1" },
-      policyRevision: { policyRevision: 1 },
-      controllerGeneration: { controllerGeneration: null },
-      "intent.revision": { intent: { revision: 1, text: task().intent.text } },
-    } as const;
-    for (const [name, extra] of Object.entries(deleted)) {
-      await expect(f.store.put({ ...task(), revision: 2, ...extra } as HomeTaskWrite, 1), `put ${name}`).rejects.toMatchObject({ code: "invalid-record" });
-      await writeFile(path, JSON.stringify({ ...current, ...extra }), { mode: 0o600 });
-      await expect(collectRecords(f.store), `read ${name}`).rejects.toMatchObject({ code: "invalid-record" });
-    }
-    await writeFile(path, valid, { mode: 0o600 });
-    expect(await collectRecords(f.store)).toHaveLength(1);
-  });
-
-  it("refuses an authorization request or grant that carries a deleted binding field", async () => {
-    const f = await fixture(); await f.store.initialize();
-    const epoch = await f.store.restoreEpoch();
-    await issueGrant(authorization(f.store), { ...request, restoreEpoch: epoch }, { decisionId: "decision-1", expiresAt: 2_000 });
-    const valid = await readFile(f.authPath, "utf8");
-    const current = JSON.parse(valid) as { requests: Array<{ request: Record<string, unknown> }>; grants: Array<Record<string, unknown>> };
-    const deleted = ["workerProfile", "policyRevision", "intentRevision"] as const;
-    for (const field of deleted) {
-      const badRequest = { ...current, requests: current.requests.map(pending => ({ ...pending, request: { ...pending.request, [field]: 1 } })) };
-      await writeFile(f.authPath, JSON.stringify(badRequest), { mode: 0o600 });
-      await expect(f.store.authorization.load(), `request ${field}`).rejects.toMatchObject({ code: "invalid-record" });
-      const badGrant = { ...current, grants: current.grants.map(candidate => ({ ...candidate, [field]: 1 })) };
-      await writeFile(f.authPath, JSON.stringify(badGrant), { mode: 0o600 });
-      await expect(f.store.authorization.load(), `grant ${field}`).rejects.toMatchObject({ code: "invalid-record" });
-    }
-    await writeFile(f.authPath, valid, { mode: 0o600 });
-    expect(await f.store.authorization.load()).toMatchObject({ grants: [{ decisionId: "decision-1" }] });
-  });
 
   it("lists pendingGrant only for the undecided request matching the task's intent digest and target", async () => {
     const f = await fixture(); await f.store.initialize();

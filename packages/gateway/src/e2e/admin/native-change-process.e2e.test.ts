@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { BACKGROUND_MODEL, SCRIPTED_MODEL, SCRIPTED_PROVIDER, startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../../test-support/gateway-process.js";
+import { settingsRecordEntries } from "../../../test-support/settings-record-entries.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 
 const gateways: GatewayProcess[] = [];
@@ -53,7 +54,7 @@ describe("the shared change card across the client socket of a real Gateway proc
   it("refuses local, wrong-digest, retired and stale answers without effect, then applies one tap once (#2232)", async () => {
     const { gateway, phone, mac, homeId, budgetChange } = await homeWithBudget();
     const budget = async () => (await ok(phone, "settings.resolve", { target: { kind: "home" }, keys: [KEY] })).keys[0].value;
-    const history = async () => (await ok(phone, "settings.history", { key: KEY })).entries as Array<Record<string, any>>;
+    const history = async () => await settingsRecordEntries(gateway.tronHome, KEY) as unknown as Array<Record<string, any>>;
     expect(await budget()).toEqual({ outputTokens: 100 });
     const historyBefore = await history();
 
@@ -105,7 +106,7 @@ describe("the shared change card across the client socket of a real Gateway proc
   it("a declined card applies nothing and refuses a late tap (#2232)", async () => {
     const { gateway, phone, homeId, budgetChange } = await homeWithBudget();
     const budget = async () => (await ok(phone, "settings.resolve", { target: { kind: "home" }, keys: [KEY] })).keys[0].value;
-    const historyBefore = (await ok(phone, "settings.history", { key: KEY })).entries;
+    const historyBefore = await settingsRecordEntries(gateway.tronHome, KEY);
     const { card } = await budgetChange(300, "declined");
     expect(card).toMatchObject({ method: "change", review: { requiresTap: true } });
     const respond = (approved: boolean, commandId: string) => phone.request("extension.respond", { commandId, sessionId: homeId,
@@ -117,7 +118,7 @@ describe("the shared change card across the client socket of a real Gateway proc
     }, "the declined turn settled");
     expect(settled.extensionPresentation.pendingInteractions).toEqual([]);
     expect(await budget()).toEqual({ outputTokens: 100 });
-    expect((await ok(phone, "settings.history", { key: KEY })).entries).toEqual(historyBefore);
+    expect(await settingsRecordEntries(gateway.tronHome, KEY)).toEqual(historyBefore);
     const late = await respond(true, "tap-late");
     expect(late.ok, JSON.stringify(late)).toBe(false);
     expect(late.error.code).toBe("not_found");

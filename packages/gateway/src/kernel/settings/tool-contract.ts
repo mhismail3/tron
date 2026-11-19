@@ -141,6 +141,10 @@ export interface SettingsHistoryQuery {
   key?: string;
   cursor?: string;
   limit?: number;
+  status?: string;
+  actor?: string;
+  layer?: string;
+  section?: string;
 }
 
 export interface SettingsInventory {

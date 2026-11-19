@@ -92,7 +92,7 @@ would remove. Test-tooling signals are rows of the
 | `devices/` | 4 × 5 MiB per paired device | Each device's own uploaded app-log lines; the oldest segment is dropped on rotation |
 | `device-exports/` | 10 bundles | The newest exports; older ones are deleted at write time |
 | `state/model-usage.json` (the providers counters ledger) | 8 MiB, 10,000 rows, 30 days; oldest first on startup/completion | Local background/summarizer call counters only, included in backups; no wire/export path ([providers](../src/providers/README.md)) |
-| `state/settings/changes/` (the settings change record) | None: kept forever ([change path](settings-contract.md#change-path)) | One entry per settings key changed, a few hundred bytes each, in segments of 500 entries named in `index.json`; `settings.history` reads one segment per page. Its size on disk is the growth signal. **Not yet measured** |
+| `state/settings/changes/` (the settings change record) | None: kept forever ([change path](settings-contract.md#change-path)) | One entry per settings key changed, a few hundred bytes each, in segments of 500 entries named in `index.json`; the Settings tool's `history` action reads one segment per page. Its size on disk is the growth signal. **Not yet measured** |
 
 Change a cap only if it holds less than 14 days on the Mac or 7 days on the phone at
 measured volume; measurements are kept in issues, not here.

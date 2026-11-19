@@ -128,7 +128,7 @@ also compares the layout with `root.module.json` at the merge base with
 `origin/main`: an entry this change added to either list is refused (put the file
 where it belongs instead), and so is removing a frozen path together with its entry.
 Without `origin/main` that comparison cannot run and the CLI exits 2. In-process
-readers of one revision (verify selection, docs, layers, the batch) check the tree
+readers of one revision (verify selection, docs, layers) check the tree
 without the comparison. A repository without `layout` gets ownership checks only.
 
 ## Workspace hygiene
@@ -159,7 +159,7 @@ local changes or unknown ignored data, or in any linked worktree without `lsof`:
 that is another worker's), bytecode, branches merged into `origin/main` (not
 merely into a local main) that no worktree has checked out (printing `git branch <name> <sha>`
 to restore each), and merged worktrees on a branch (a detached worktree belongs to the tool that
-made it, such as a verify batch lane) with no untracked, modified or
+made it, such as land's merge worktree) with no untracked, modified or
 non-regenerable ignored file (an ignored `.env.local` keeps it), no process whose
 working directory is inside, no HEAD activity for 3 days, and no `test-results/` file the primary checkout lacks
 byte for byte while that folder is unexpired (such a worktree is kept, counted as a decision, and the

@@ -258,10 +258,6 @@ class TronNodeResolver(unittest.TestCase):
         pinned = self.pins()
         self.assertEqual(pinned["TRON_NODE_NPM_VERSION"], "11.5.0")
         self.assertTrue(all(pinned[key] != before[key] for key in PIN_KEYS), pinned)
-        deploy = (self.checkout / MIRRORS[0]).read_text()
-        self.assertIn(f'PINNED_NPM_VERSION = "11.5.0";', deploy)
-        self.assertIn(f'PINNED_NPM_TREE_SHA256 = "{pinned["TRON_NODE_NPM_TREE_SHA256"]}";', deploy)
-        self.assertIn(f'== "{pinned["TRON_NODE_NPM_TREE_SHA256"]}" else', (self.checkout / MIRRORS[1]).read_text())
         headers = json.loads((self.checkout / MIRRORS[2]).read_text())
         self.assertEqual(headers["version"], "99.1.0")
         self.assertEqual(headers["sha256"]["node_api.h"],

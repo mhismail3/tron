@@ -142,8 +142,12 @@ export class DeviceLogStore {
     });
   }
 
-  append(deviceId: string, admission: number, input: unknown): Promise<DeviceLogCursor> {
-    return this.mutex.run(() => this.appendLocked(deviceId, admission, parseDeviceLogAppend(input)));
+  append(deviceId: string, admission: number, input: unknown, revoked: () => boolean): Promise<DeviceLogCursor> {
+    const append = parseDeviceLogAppend(input);
+    return this.mutex.run(() => {
+      if (revoked()) throw new GatewayError("unauthenticated", "This device is no longer authorized");
+      return this.appendLocked(deviceId, admission, append);
+    });
   }
 
   private appendLocked(deviceId: string, admission: number, append: DeviceLogAppend): DeviceLogCursor {

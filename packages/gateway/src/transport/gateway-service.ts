@@ -20,10 +20,9 @@ import type { ChangeContext, SessionAppliers, SettingsChangePath } from "../kern
 import type { SessionSettingsSource, SettingsModel } from "../kernel/settings/settings-model.js";
 import { type ChangeOutcome, type ChangeRequest, type SettingsTarget, QUALIFIER_NAMES, type Qualifiers } from "../kernel/settings/tool-contract.js";
 import type { Actor, ChangeEntry } from "../kernel/settings/settings-record.js";
-import { SECTIONS, recordSubject } from "../kernel/settings/settings-schema.js";
+import { recordSubject } from "../kernel/settings/settings-schema.js";
 import { HOME_PROFILE_KINDS, HOME_PROFILE_MAINTAINER_ACTIONS, HomeProfileItems, type HomeProfileRequest } from "../modules/home/home-profile.js";
 import { profilePath } from "../modules/home/profile-placement.js";
-import { presentHistoryEntry } from "../admin/settings-presentation.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, rejectUnknownFields, string, text as boundedText } from "../util/validation.js";
 import type { DeviceStore } from "../security/device-store.js";
 import type { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
@@ -658,7 +657,7 @@ export class GatewayService {
         if (client.isLocal) throw new GatewayError("auth_required", "Device logs accept only paired device connections");
         return this.mutation(client, method, params, async () => {
           rejectUnknownFields(params, ["commandId", "bootId", "firstSequence", "lines", "gapFrom", "reason"], method);
-          return safeJson(await this.deviceLogStore().append(client.identity, client.admission, params));
+          return safeJson(await this.deviceLogStore().append(client.identity, client.admission, params, () => client.isRevoked()));
         });
       case "uploads.status":
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Upload status accepts no parameters");
@@ -1778,20 +1777,6 @@ export class GatewayService {
             ...(homeChapter ? { homeChapter } : {}),
           }));
         });
-      case "settings.history": {
-        rejectUnknownFields(params, ["cursor", "limit", "key", "status", "actor", "layer", "section"], method);
-        const page = await this.dependencies.settingsChanges.history({
-          ...(params.actor === undefined ? {} : { actor: oneOf(params.actor, "actor", ["agents", "ui", "home", "worker", "agent", "outside"] as const) }),
-          ...(params.layer === undefined ? {} : { layer: oneOf(params.layer, "layer", ["session", "project", "global"] as const) }),
-          ...(params.section === undefined ? {} : { section: oneOf(params.section, "section", SECTIONS.map(section => section.id)) }),
-          ...(params.cursor === undefined ? {} : { cursor: string(params.cursor, "cursor", { max: 40 }) }),
-          ...(params.limit === undefined ? {} : { limit: integer(params.limit, "limit", 1, 200) }),
-          ...(params.key === undefined ? {} : { key: string(params.key, "key", { max: 200 }) }),
-          ...(params.status === undefined ? {} : { status: string(params.status, "status", { max: 40 }) }),
-        }, { kind: "ui", id: client.identity });
-        return safeJson({ ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
-          entries: page.entries.map(entry => presentHistoryEntry(this.dependencies.settingsModel.schema, entry)) });
-      }
       case "trust.inspect":
         return safeJson(await this.dependencies.trust.inspect(string(params.cwd, "cwd", { max: 4_096 })));
       case "models.refresh": {

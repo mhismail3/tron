@@ -110,7 +110,7 @@ describe("typed changes and exact native acceptance", () => {
       return [{ key: "tools.mcp.server", qualifiers: { server: "fixture-docs" }, layer: "global", op: "set",
         value: { command: process.execPath, args: [script, marker], exposure: "direct" } }];
     }, true, "Add the docs server");
-    const { home, prompting, interaction, answer, service, signals, faux, agentDir, registry, cwd } = native;
+    const { home, prompting, interaction, answer, service, signals, faux, agentDir, registry, cwd, settings } = native;
     if (interaction.method !== "change") throw new Error("Expected the shared change card");
     expect(interaction.review).toMatchObject({ requiresTap: true, items: [{ label: "MCP server", after: `${process.execPath} ${script} ${marker}, exposure direct` }] });
     const ordinary = await registry.create(cwd);
@@ -120,7 +120,7 @@ describe("typed changes and exact native acceptance", () => {
     await prompting;
     expect(JSON.parse(await readFile(join(agentDir, "mcp.json"), "utf8")).mcpServers["fixture-docs"])
       .toEqual({ command: process.execPath, args: [script, marker], exposure: "direct" });
-    const history = await service.invoke(phone, "settings.history", { key: "tools.mcp.server" }) as { entries: Array<{ changeId: string; status: string }> };
+    const history = await settings.settingsChanges.history({ key: "tools.mcp.server" }, { kind: "ui", id: "device:phone" }) as { entries: Array<{ changeId: string; status: string }> };
     expect(history.entries).toEqual([expect.objectContaining({ status: "applied" })]);
     await waitFor(() => signals.some(event => event.outcome === "resources-reload" && event.reason === "completed" && event.sessionId === ordinary.id), "the idle ordinary session reloads the MCP change");
     await waitFor(async () => (await readFile(marker, "utf8").catch(() => "")).includes("tools/list") || undefined, "the docs server lists its tools");
@@ -144,7 +144,7 @@ describe("typed changes and exact native acceptance", () => {
     expect(home.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === "mcp-secret"))
       .toMatchObject({ type: "message", message: { role: "toolResult", isError: true } });
     expect(home.snapshot().extensionPresentation.pendingInteractions).toHaveLength(0);
-    expect(JSON.stringify(await service.invoke(phone, "settings.history", { key: "tools.mcp.server" }))).not.toContain("secret-value");
+    expect(JSON.stringify(await settings.settingsChanges.history({ key: "tools.mcp.server" }, { kind: "ui", id: "device:phone" }))).not.toContain("secret-value");
   });
 
   it("configures numeric maps through the agent and keeps a task-budget raise behind the shared card", async () => {
@@ -391,7 +391,7 @@ describe("typed changes and exact native acceptance", () => {
     const undone = await settingsTurn(f, home, { action: "undo", changeId: changeIdOf(globalChange), reason: "Home restores the backoff" }, "home-undo-global");
     expect(undone.isError).not.toBe(true);
     expect(await valueOf({ kind: "global" }, "run.retry.baseDelayMs")).toEqual(baseBefore);
-    const history = (await service.invoke(phone, "settings.history", { key: "run.retry.baseDelayMs" })) as unknown as { entries: Array<{ changeId: string; undoOf?: string; actor: { kind: string }; before?: unknown; after?: unknown }> };
+    const history = (await f.settings.settingsChanges.history({ key: "run.retry.baseDelayMs" }, { kind: "ui", id: "device:phone" })) as unknown as { entries: Array<{ changeId: string; undoOf?: string; actor: { kind: string }; before?: unknown; after?: unknown }> };
     const original = history.entries.find(entry => entry.changeId === changeIdOf(globalChange))!;
     const inverse = history.entries.find(entry => entry.undoOf === changeIdOf(globalChange))!;
     expect(inverse).toMatchObject({ actor: { kind: "home" }, status: "applied", before: original.after });
@@ -415,7 +415,7 @@ describe("typed changes and exact native acceptance", () => {
     expect(undone.isError).not.toBe(true);
     expect(await valueOf(target)).toEqual(otherBefore);
     expect(await valueOf({ kind: "home" })).toEqual(homeBefore);
-    const history = (await service.invoke(phone, "settings.history", { key: "run.retry.maxRetries" })) as unknown as { entries: Array<{ changeId: string; undoOf?: string; actor: { kind: string }; target: unknown; before?: unknown; after?: unknown; status: string }> };
+    const history = (await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" }, { kind: "ui", id: "device:phone" })) as unknown as { entries: Array<{ changeId: string; undoOf?: string; actor: { kind: string }; target: unknown; before?: unknown; after?: unknown; status: string }> };
     const original = history.entries.find(entry => entry.changeId === change.changes[0]!.changeId)!;
     expect(history.entries.find(entry => entry.undoOf === original.changeId)).toMatchObject({ actor: { kind: "home" }, status: "applied", target, before: 8 });
     expect(history.entries.find(entry => entry.undoOf === original.changeId)!.after ?? null).toEqual(original.before ?? null);
@@ -440,7 +440,7 @@ describe("typed changes and exact native acceptance", () => {
     expect(undone.isError).not.toBe(true);
     expect(await valueOf(target)).toEqual(workerBefore);
     expect(await valueOf({ kind: "home" })).toEqual(homeBefore);
-    const history = (await service.invoke(phone, "settings.history", { key: "run.retry.maxRetries" })) as unknown as { entries: Array<{ changeId: string; undoOf?: string; actor: { kind: string }; target: unknown; before?: unknown; after?: unknown; status: string }> };
+    const history = (await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" }, { kind: "ui", id: "device:phone" })) as unknown as { entries: Array<{ changeId: string; undoOf?: string; actor: { kind: string }; target: unknown; before?: unknown; after?: unknown; status: string }> };
     const original = history.entries.find(entry => entry.changeId === changeIdOf(change))!;
     const inverse = history.entries.find(entry => entry.undoOf === changeIdOf(change))!;
     expect(inverse).toMatchObject({ actor: { kind: "home" }, status: "applied", target, before: original.after });

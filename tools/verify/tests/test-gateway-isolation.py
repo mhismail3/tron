@@ -87,7 +87,7 @@ test('HOME resolution and filesystem writes stay outside caller HOME',()=>{
 
 class GatewayTestScratchCleanup(unittest.TestCase):
     def test_a_group_sigterm_mid_run_removes_the_scratch_root(self) -> None:
-        """What verify, batch, probe and mutate send first: the root goes, so nothing needs a reaper."""
+        """What verify, probe and mutate send first: the root goes, so nothing needs a reaper."""
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary).resolve()
             verify = base / "tools/verify"

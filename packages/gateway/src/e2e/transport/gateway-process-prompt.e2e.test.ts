@@ -5,6 +5,7 @@ import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../../test-support/gateway-process.js";
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
+import { settingsRecordEntries } from "../../../test-support/settings-record-entries.js";
 import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
 
 const gateways: GatewayProcess[] = [];
@@ -207,10 +208,9 @@ describe("Run Swift files device preference through the production Gateway proce
     expect(applied.result).toMatchObject({ status: "applied" });
     const changeId = applied.result.changes[0].changeId as string;
 
-    const history = await local.request("settings.history", { key, limit: 10 });
-    expect(history.ok, JSON.stringify(history)).toBe(true);
-    expect(history.result.entries).toHaveLength(1);
-    expect(history.result.entries[0]).toMatchObject({ changeId, status: "applied", actor: { kind: "ui" }, layer: "global", before: true, after: false, qualifiers: device });
+    const history = await settingsRecordEntries(gateway.tronHome, key);
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({ changeId, status: "applied", actor: { kind: "ui" }, layer: "global", before: true, after: false, qualifiers: device });
 
     const undoing = local.request("settings.undo", { commandId: randomUUID(), changeId });
     await serve([

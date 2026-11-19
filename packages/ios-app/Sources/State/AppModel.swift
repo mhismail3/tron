@@ -217,7 +217,8 @@ final class AppModel {
             profileID: profile.id,
             machineID: profile.machineId,
             runtimeEpoch: runtimeEpoch,
-            admission: admission
+            admissionGeneration: admission.generation,
+            connectionID: admission.connectionID
         )
     }
     private var sessionCatalog = SessionCatalogCoordinator()

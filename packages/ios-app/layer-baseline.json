@@ -22,7 +22,6 @@
     "upward ios-app/state (L2) -> ios-app/terminal (L4)"
   ],
   "unindexed": {
-    "ios-app/e2e-tests": 2,
     "ios-app/mac-terminal-ssh": 3,
     "ios-app/profiling": 12
   }
