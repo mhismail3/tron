@@ -34,8 +34,8 @@ candidate, so it goes through the manual local Mac Release reinstall (Mac first,
 the iPhone app). Never widen the advertised minimum or allow a mixed pair to bypass
 that handoff. Same-major updates use the owned Gateway update flow.
 
-**Logging.** `GatewayLogger` is the one writer; it persists info and above to `gateway.jsonl`,
-and debug lives only in a bounded memory buffer. Records carry `timestamp`, `level`, `event`, `source`, a
+**Logging.** `GatewayLogger` is the one writer; it persists info and above to `gateway.jsonl`
+and drops debug; readers read that file. Records carry `timestamp`, `level`, `event`, `source`, a
 redacted `message` and the writer-stamped `process`, `runtimeEpoch`, `payloadVersion`;
 call sites add correlation as fields (`sessionId`, `connectionId`, `commandId`,
 `requestID`, `method`, `outcome`, `code`, `reason`, `durationMs`, `step`) and pass a

@@ -13,14 +13,14 @@ is collected for an incident.
 ## Level policy
 
 The level answers "who needs to look, and when". Only debug stays out of files:
-it lives in a bounded in-memory buffer that exports include.
+the Gateway logger drops it.
 
 | Level | Meaning | Persisted | Examples |
 | --- | --- | --- | --- |
 | error | Something failed that a user sees, work was lost, or an invariant broke. Someone should look | Yes | `gateway.fatal-startup`, `gateway.shutdown-failed`, `gateway.stop-drain.failed`, `process.uncaught-exception`, `connection.write-error`, `launcher.candidate-rolled-back` |
 | warning | Degraded or abnormal but handled: retries, fallbacks, bounds hit, slow operations over a named threshold, notable rejections | Yes | `gateway.event-loop-delay`, `connection.superseded`, `gateway.restart-drain.stalled`, `extension.artifact-rejected` |
 | info | Lifecycle and state transitions, one line per boundary; enough to reconstruct a timeline | Yes | `gateway.started`, `connection.opened` for a paired device, `session.compaction.completed`, `deploy.ready`, drain progress |
-| debug | Per-request detail useful only while diagnosing | No, memory buffer only | fast successful `rpc.completed` with its stage breakdown, connection open and close for the Mac app's local probes |
+| debug | Per-request detail useful only while diagnosing | No, dropped | fast successful `rpc.completed` with its stage breakdown, connection open and close for the Mac app's local probes |
 
 - The level is fixed per event in code and listed in its Signals row; there
   are no runtime log-level settings. A level varies only with a named threshold
