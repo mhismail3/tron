@@ -530,8 +530,8 @@ server.on("connection", (ws, request) => {
   if (request.headers.authorization !== "Bearer fixture-token") return ws.close(1008, "bad token");
   ws.on("message", raw => {
     const frame = JSON.parse(raw);
-    if (frame.type === "hello" && frame.protocolVersion === 8) {
-      return ws.send(JSON.stringify({ type: "hello", protocolVersion: 8, minProtocolVersion: 8 }));
+    if (frame.type === "hello" && frame.protocolVersion === 9) {
+      return ws.send(JSON.stringify({ type: "hello", protocolVersion: 9, minProtocolVersion: 9 }));
     }
     fs.appendFileSync(process.argv[1], frame.method + "\n");
     if (frame.type === "request" && frame.method === "gateway.drain.status") {
@@ -545,7 +545,7 @@ server.on("connection", (ws, request) => {
     if (scenario === "timeout") return;
     if (scenario === "handshake-error") return ws.send(JSON.stringify({ type: "error", error: { code: "unauthorized", message: "fixture handshake refused" } }));
     if (scenario === "error") return ws.send(JSON.stringify({ type: "response", id: frame.id, ok: false, error: { code: "conflict", message: "fixture task list refused" } }));
-    // The installed protocol-8 Gateway returns history even when nothing is
+    // The installed protocol-9 Gateway returns history even when nothing is
     // active. Make stdout backpressure inevitable, including multibyte text.
     const items = Array.from({ length: 50 }, (_, i) => ({ taskId: `task-${i}`, sessionId: `session-${i}`,
       lifecycle: "terminal", title: "history 🦊 ".repeat(4096) + `tail-${i}` }));
@@ -557,7 +557,7 @@ server.on("connection", (ws, request) => {
 
 
 def rpc_journey():
-    """Real Node child/stdout pipe and protocol-8 socket, never the live install."""
+    """Real Node child/stdout pipe and protocol-9 socket, never the live install."""
     evidence, started, passed = [], time.time(), False
     report = REPO / 'test-results/mac-replace-rpc-e2e.json'
     try:
@@ -587,7 +587,7 @@ def rpc_journey():
                             return 'fixture-token'
 
                         def protocol(self):
-                            return 8
+                            return 9
 
                         def endpoints(self):
                             return [f'ws://127.0.0.1:{port}/v1/socket']

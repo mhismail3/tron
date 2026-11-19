@@ -1270,7 +1270,7 @@ private actor HostedHomeShellSocket: GatewaySocketConnection {
         Task {
             let caps = await gateway.capabilities()
             let data = try! JSONEncoder.gateway.encode(JSONValue.object(["type": .string("hello"), "gatewayVersion": .string("fixture"),
-                "piVersion": .string("fixture"), "protocolVersion": .number(8), "minProtocolVersion": .number(8),
+                "piVersion": .string("fixture"), "protocolVersion": .number(9), "minProtocolVersion": .number(9),
                 "machineId": .string(machineID), "machineName": .string("Home fixture"),
                 "gatewayChannel": .string("stable"), "capabilities": .array(caps.map(JSONValue.string))]))
             await deliver(data)
@@ -1335,7 +1335,7 @@ private actor HostedChatDisplaySocket: GatewaySocketConnection {
         guard !closed else { throw CancellationError() }
         if hello {
             hello = false
-            return Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":8,"minProtocolVersion":8,"machineId":"fixture-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
+            return Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":9,"minProtocolVersion":9,"machineId":"fixture-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
         }
         if !inbound.isEmpty { return inbound.removeFirst() }
         return try await withCheckedThrowingContinuation { receiver = $0 }

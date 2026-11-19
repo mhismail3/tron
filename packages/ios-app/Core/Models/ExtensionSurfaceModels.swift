@@ -223,6 +223,7 @@ package struct ChangeReview: Codable, Hashable, Sendable {
     }
     package enum Intent: String, Codable, Hashable, Sendable {
         case pushRegistrationRetry = "push-registration-retry"
+        case providerApiKey = "provider-api-key"
     }
     package let digest: String
     package let title: String

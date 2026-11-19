@@ -121,7 +121,7 @@ export interface ChangeResult {
   summary?: string;
 }
 
-export type ConfirmChange = <T>(review: ChangeReview, apply: (acceptance: NativeChangeAcceptance) => Promise<T>) => Promise<T | undefined>;
+export type ConfirmChange = <T>(review: ChangeReview, apply: (acceptance: NativeChangeAcceptance, secret?: string) => Promise<T>) => Promise<T | undefined>;
 
 export interface TaskWorkerSettingsState {
   running: boolean;
