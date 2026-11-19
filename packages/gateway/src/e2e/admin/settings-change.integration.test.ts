@@ -1552,7 +1552,7 @@ describe("outside changes to MCP servers and custom models", () => {
     const provider = { baseUrl: "https://keyed-models.invalid/v1", api: "openai-completions", models: [{ id: "m" }] };
     const set = (value: unknown) => ({ key: "accounts.models.provider", qualifiers: { provider: "keyed" }, layer: "global" as const, op: "set" as const, value });
     const home = { actor: { kind: "home" as const, id: "home" }, reason: "Add the keyed endpoint" };
-    for (const apiKey of [{ ...reference, account: "tron-provider-other" }, { ...reference, format: "bearer" }, { source: "1password", reference: "op://v/i/f" }, typed]) {
+    for (const apiKey of [{ ...reference, account: "tron-provider-other" }, { ...reference, format: "bearer" }, typed]) {
       await expect(f.settingsChanges.change(global, [set({ ...provider, apiKey })], home)).rejects.toMatchObject({ code: "invalid_request" });
     }
     const keyed = { ...provider, apiKey: reference };
@@ -1593,6 +1593,42 @@ describe("outside changes to MCP servers and custom models", () => {
     expect((await f.history()).filter(entry => entry.commandId === "provider-keychain-refuses").map(entry => entry.failure))
       .not.toContainEqual(expect.stringContaining("Not rolled back"));
     expect(f.providerKeys).toHaveLength(1);
+  });
+  caseIt("adds a provider API key as a 1Password op:// reference behind a plain card, with no typed key, and a later switch to the Keychain asks for one", async owner => {
+    const f = await fixture(owner);
+    const global = { kind: "global" as const };
+    const modelsPath = join(f.agentDir, "models.json");
+    const op = { source: "1password", reference: "op://Private/Acme models/credential" };
+    const provider = { baseUrl: "https://op-models.invalid/v1", api: "openai-completions", models: [{ id: "m" }] };
+    const set = (value: unknown) => ({ key: "accounts.models.provider", qualifiers: { provider: "opref" }, layer: "global" as const, op: "set" as const, value });
+    const home = { actor: { kind: "home" as const, id: "home" }, reason: "Add the 1Password-keyed endpoint" };
+    for (const apiKey of [{ ...op, format: "bearer" }, { ...op, executable: "/bin/sh" }, { source: "1password", reference: "op://only-two" }, { source: "1password", reference: "op://v/sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789/f" }]) {
+      await expect(f.settingsChanges.change(global, [set({ ...provider, apiKey })], home)).rejects.toMatchObject({ code: "invalid_request" });
+    }
+    const referenced = { ...provider, apiKey: op };
+    const review = await f.settingsChanges.change(global, [set(referenced)], home);
+    expect(review).toMatchObject({ status: "review", review: { requiresTap: true, items: [{ after: expect.stringContaining("1Password API key op://Private/Acme models/credential") }] } });
+    expect(review.review!.intent).toBeUndefined();
+    expect(await f.settingsChanges.change(global, [set(referenced)], { ...home, actor: { kind: "ui", id: "device:phone" }, confirmationDigest: review.review!.digest }))
+      .toMatchObject({ status: "applied", changes: [{ after: referenced }] });
+    expect(JSON.parse(await readFile(modelsPath, "utf8")).providers.opref).toEqual(referenced);
+    expect(f.modelRuntime.getModel("opref", "m")).toBeDefined();
+    expect(f.providerKeys).toEqual([]);
+    const keychain = { ...provider, apiKey: { source: "keychain", service: "tron.provider", account: "tron-provider-opref" } };
+    expect(await f.settingsChanges.change(global, [set(keychain)], home)).toMatchObject({ status: "review", review: { requiresTap: true, intent: "provider-api-key" } });
+    expect(await f.settingsChanges.change(global, [set(keychain)], { ...home,
+      confirm: (shown, apply) => { expect(shown.intent).toBe("provider-api-key"); return apply({ deviceId: "device:phone", commandId: "op-to-keychain" }, "sk-typed-switch"); } }))
+      .toMatchObject({ status: "applied" });
+    expect(f.providerKeys).toEqual([["tron-provider-opref", "sk-typed-switch"]]);
+    const back = await f.settingsChanges.change(global, [set(referenced)], { ...home, reason: "Back to 1Password" });
+    expect(back).toMatchObject({ status: "review", review: { requiresTap: true } });
+    expect(back.review!.intent).toBeUndefined();
+    expect(await f.settingsChanges.change(global, [set(referenced)], { ...home, reason: "Back to 1Password", actor: { kind: "ui", id: "device:phone" }, confirmationDigest: back.review!.digest }))
+      .toMatchObject({ status: "applied" });
+    expect(f.providerKeys).toHaveLength(1);
+    const renamed = await f.settingsChanges.change(global, [set({ ...referenced, name: "Op" })], home);
+    expect(renamed).toMatchObject({ status: "applied" });
+    expect(JSON.stringify(await f.history())).toContain("op://Private/Acme models/credential");
   });
   caseIt("refuses a provider write while models.json holds an unrelated invalid entry, and never persists or reports it applied", async owner => {
     const f = await fixture(owner);
