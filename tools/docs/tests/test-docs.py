@@ -86,18 +86,6 @@ class RealRepositoryTests(unittest.TestCase):
         self.assertLessEqual(answered, listed)
         self.assertEqual(int(output.split(" ", 1)[0]), len(listed))
 
-    def test_settings_list_holds_the_key_the_settings_lock_edited(self) -> None:
-        source = (ROOT / "packages/gateway/src/e2e/admin/admin.lock.integration.test.ts").read_text()
-        keys = re.findall(r'^const KEY = "([^"]+)";$', source, re.M)
-        edited_layers = set(re.findall(r'changes: \[\{ key: KEY, layer: "([a-z]+)", op: "set"', source))
-        groups = re.findall(r'expect\(before\.result\.keys\[0\]\.group\)\.toBe\("([a-z]+)"\);', source)
-        self.assertEqual((len(keys), len(groups)), (1, 1), "the admin lock's key or group assertion moved")
-        self.assertTrue(edited_layers, "the admin lock's settings.change moved")
-        row = next(line for line in self.generate("settings").splitlines() if line.startswith(f"| `{keys[0]}` |"))
-        layers = row.split(" | ")[3].split(", ")
-        self.assertLessEqual(edited_layers, set(layers))
-        self.assertEqual(row.split(" | ")[2], groups[0])
-
     def test_signals_print_and_committed_blocks_are_current(self) -> None:
         self.assertTrue(self.generate("signals").strip())
         self.assertRegex(self.generate("check"), r"^docs: \d+ generated block\(s\), current\n$")

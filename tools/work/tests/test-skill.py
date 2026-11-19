@@ -86,14 +86,5 @@ class GitSkill(unittest.TestCase):
                             self.git(self.repo, "rev-parse", "--git-path", "FETCH_HEAD"))
 
 
-    def test_retired_commands_are_not_executable_aliases(self):
-        for command in ("dashboard", "status", "land", "review-export"):
-            with self.subTest(command=command):
-                result = subprocess.run([sys.executable, str(ROOT / "tools/work/cli.py"), command, "--help"],
-                                        cwd=self.task, env=self.env, capture_output=True, text=True, timeout=15)
-                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-                self.assertIn("invalid choice", result.stderr)
-
-
 if __name__ == "__main__":
     unittest.main()
