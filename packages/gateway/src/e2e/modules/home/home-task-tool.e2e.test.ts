@@ -260,6 +260,9 @@ describe("Home's task tool on the wire (#961)", () => {
     expect(row.sessionId).toEqual(expect.any(String));
     expect(row.operationId).toMatch(/^task-/u);
     expect(listed.json().host.heavy).toEqual({ "wire-worker": "unavailable" });
+    const early = await homeCalls("task", { action: "report", taskId: "wire-worker" });
+    expect(early.isError, early.text).toBe(false);
+    expect(early.json()).toMatchObject({ taskId: "wire-worker", settled: false, control: { state: "running" }, next: expect.stringMatching(/wakes Home by itself: end this turn now/u) });
     await sweep.sweep();
     expect((await homeCalls("task", { action: "list" })).json().host.heavy).toEqual({ "wire-worker": [] });
     const workerSession = row.sessionId as string;
