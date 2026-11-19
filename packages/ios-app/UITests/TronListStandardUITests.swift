@@ -237,6 +237,10 @@ final class TronListStandardUITests: XCTestCase {
         XCTAssertFalse(app.buttons["history-row-h-6732"].isHittable)
         chip.tap()
         XCTAssertTrue(waitFor(app.buttons["history-row-h-6732"], "hittable == true", timeout: 5), "The chip jumps to the newest entry")
+        let thousandth = app.buttons["history-row-h-5733"]
+        swipes = 0
+        while !thousandth.exists && swipes < 400 { app.swipeUp(velocity: .fast); swipes += 1 }
+        XCTAssertTrue(thousandth.exists, "1,000 entries auto-load by scrolling alone")
     }
 
     @MainActor func testTaskFeedRetriesAndEnds() {

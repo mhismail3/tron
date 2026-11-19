@@ -91,8 +91,7 @@ struct HostedAutomationFixtureView: View {
             AutomationPresentationFixture.record(activation: "enabled"),
         ]
         let names = ["Daily workspace review", "Daily reminder", "Project report", "A paused digest", "Zeta enabled check"]
-        let large = arguments.contains("-automation-large")
-        let records = try! (large ? (0..<400).map { base[$0 % base.count] } : base).enumerated().map { index, record in
+        let records = try! base.enumerated().map { index, record in
             var fields = try JSONValue.encode(record).objectValue!
             if index == 0, arguments.contains("-automation-expiry") {
                 fields["activation"] = .string("expired")
@@ -101,7 +100,7 @@ struct HostedAutomationFixtureView: View {
                 fields["lastRun"] = .null
             }
             fields["id"] = .string("automation-\(index)")
-            fields["name"] = .string(large ? "\(names[index % names.count]) \(index)" : names[index])
+            fields["name"] = .string(names[index])
             return try JSONValue.object(fields).decode(GatewayAutomationRecord.self)
         }
         dateControlsSelection = AutomationSummarySelection(profileID: profile.id,
