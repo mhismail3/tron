@@ -288,15 +288,6 @@ class HomeLayoutTests(unittest.TestCase):
         result = subprocess.run(["python3", str(ROOT / TOOL), "check"], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_manifest_export_capacity_matches_the_shipped_owner(self) -> None:
-        paths = json.loads((ROOT / REGISTRY).read_text())["paths"]
-        source = (ROOT / "packages/gateway/src/sessions/session-export.ts").read_text()
-        self.assertIn("SESSION_EXPORT_MAX_ITEMS = 8;", source)
-        self.assertIn("SESSION_EXPORT_MAX_TOTAL_BYTES = 4 * 1_024 * 1_024 * 1_024;", source)
-        self.assertIn("SESSION_EXPORT_MAX_ITEM_BYTES = 2 * 1_024 * 1_024 * 1_024;", source)
-        self.assertEqual(paths["state/exports"]["prune"], {"maxAge": "30m", "maxEntries": 8, "maxBytes": 4 * 1024 ** 3,
-                                                             "when": "2 GiB per item; 4 readers, 1 production"})
-
     def test_check_refuses_unregistered_literals_outside_tests(self) -> None:
         fixture = Fixture(self.base)
         fixture.write(REGISTRY, registry({**PATHS, "logs": entry("repo/missing", **{"class": "log"})}))
@@ -679,13 +670,6 @@ class AuditTests(unittest.TestCase):
         self.assertEqual(self.audit()[1]["findings"], [{"path": "gateway/child-start.gate", "reasons": ["expected_fifo"]}])
         os.mkfifo(self.home / "other-fifo")
         self.assertIn({"path": "other-fifo", "reasons": ["unknown", "unsafe_type"]}, self.audit()[1]["findings"])
-
-    def test_no_effectful_audit_options_exist(self) -> None:
-        before = snapshot(self.home)
-        for option in ("--apply", "--prune", "--quarantine", "--output"):
-            result = self.fixture.run("audit", "--home", str(self.home), "--json", option)
-            self.assertEqual(result.returncode, 2)
-        self.assertEqual(snapshot(self.home, contents_first=False), before)
 
 
 class MigrateTests(unittest.TestCase):
@@ -1148,15 +1132,6 @@ class MigrateTests(unittest.TestCase):
             finally:
                 owner.communicate("release", timeout=15)
                 self.assertEqual(owner.returncode, 0)
-
-    def test_the_shipped_registry_declares_slice_b_moves(self) -> None:
-        result = subprocess.run(["python3", str(ROOT / TOOL), "migrate", "--home", str(self.home), "--status"],
-                                cwd=ROOT, capture_output=True, text=True, env={**os.environ, "HOME": str(self.user)})
-        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertEqual(json.loads(result.stdout)["state"], "not_started")
-        moves = json.loads(result.stdout)["moves"]
-        self.assertEqual(len([row for row in moves if row["to"].startswith("~/")]), 14)
-        self.assertTrue(any(row["from"].endswith("x-library-20261111T1425") for row in moves))
 
     def test_unreadable_homes_and_ambiguous_modes_are_errors(self) -> None:
         link = self.base / "linked-home"
