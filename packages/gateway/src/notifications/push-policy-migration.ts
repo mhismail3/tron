@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveAgentDir } from "../config.js";
 import { GatewayError } from "../errors.js";
-import { syncDurably } from "../foundation/durable-json.js";
+import { durableRemove, syncDurably } from "../foundation/durable-json.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
 import { acquireAgentRuntimeLock } from "../sessions/agent-runtime-lock.js";
 import { validateNotificationDocument } from "./grant-store.js";
@@ -241,7 +241,7 @@ export async function restorePushPolicyMigration(tronHome: string, agentDir: str
     let restored = false;
     for (const action of [...actions].reverse()) {
       if (action.action === "keep") continue;
-      if (action.action === "remove") await rm(action.path, { force: true });
+      if (action.action === "remove") await durableRemove(action.path);
       else await publish(action.path, action.bytes!, action.expected);
       restored = true;
     }
