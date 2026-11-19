@@ -121,7 +121,7 @@ describe("ambient extension artifact discovery change detection", () => {
     const count = 1_500;
     await terminalRuns(runsRoot, count, Date.now() - 60_000);
     const { slots } = recordingSlot(new Set());
-    const owner = discovery(slots, { delegatedArtifactRoot: delegatedRoot });
+    const owner = discovery(slots, { delegatedArtifactRoot: delegatedRoot, watchArtifactRoot: silentWatcher().watchArtifactRoot });
     const startup = await countFilesystemRequests(async () => {
       expect(await owner.runPass()).toMatchObject({ entries: 1_025, statusReads: 1_024 });
       expect(await owner.runPass()).toBeUndefined();
