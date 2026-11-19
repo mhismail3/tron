@@ -161,8 +161,8 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   trailing edge and 14-point inset without overlapping hit regions.
 - **Overrides.** Inherited values have no source affordance. Session/Home overrides show the
   shared Overridden status pill beside the row title (the value's trailing room is the same with
-  or without it) and Revert before the rightmost value pill. An applied Project value replaces the editor with a
-  read-only value and a shared Project pill opening file/key information. Absent non-secret values
+  or without it) and Revert before the rightmost value pill. A value that comes from Project keeps the editor
+  enabled, since a Session choice beats Project. Absent non-secret values
   render a dash. Values, pills and resets remain independent sibling targets, not nested buttons;
   the Overridden pill and a tool selection's "N of M tools" count never truncate. At
   accessibility sizes, or when the cluster would leave the title less than a 96-point column,
