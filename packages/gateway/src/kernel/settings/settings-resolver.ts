@@ -6,7 +6,7 @@ import { canonicalSettingsTarget, scopeAdmitted, scopeForStore, instanceId } fro
 import { projectSettingPath, projectSettingsDiagnostics } from "./settings-project-diagnostics.js";
 import { core as precedence, type Entry, type Layer, type Opt, type Value } from "../../core/settings/precedence/facade.js";
 
-const BOTTOM_UP: readonly StoreLayer[] = ["default", "global", "home", "session", "project"];
+const BOTTOM_UP: readonly StoreLayer[] = ["default", "global", "project", "home", "session"];
 
 export function readPath(document: unknown, path: readonly string[]): unknown {
   let current: unknown = document;
@@ -250,7 +250,6 @@ function resolveInstance(
   const localBinding = key.layers[localLayer];
   const localValue = !scopeAdmitted(key, localLayer) ? undefined : localBinding?.store === "session-settings" ? readPath(stores.session?.settings, localBinding.path)
     : localBinding ? readBinding(stores, localLayer, localBinding, qualifiers, localBinding.store === "pi" && !!localBinding.qualified && !!qualifiers.model, key.id) : undefined;
-  const projectValue = shown.find(entry => entry.layer === "project" && entry.applied);
   const binding = key.layers.project;
   const projectPath = binding?.store === "pi-model-ref" ? "defaultProvider + defaultModel" : binding?.store === "pi"
     ? projectSettingPath((shown.some(entry => entry.layer === "project" && entry.qualified) ? binding.qualified! : binding.path)
@@ -268,7 +267,7 @@ function resolveInstance(
     badges,
     ...(fixedAt ? { fixedAt } : {}),
     overridden: localValue !== undefined,
-    ...(projectValue && projectPath && stores.project ? { projectSetting: { file: join(stores.project.root, ".pi", "settings.json"), path: projectPath } } : {}),
+    ...(layer === "project" && projectPath && stores.project ? { projectSetting: { file: join(stores.project.root, ".pi", "settings.json"), path: projectPath } } : {}),
     layers: layerValues,
   };
 }
@@ -329,6 +328,6 @@ export function targetLayers(target: SettingsTarget, options: { home?: boolean; 
     case "home": return ["home", "global", "default"];
     case "session": return options.home
       ? ["home", "global", "default"]
-      : options.project === false ? ["session", "global", "default"] : ["project", "session", "global", "default"];
+      : options.project === false ? ["session", "global", "default"] : ["session", "project", "global", "default"];
   }
 }
