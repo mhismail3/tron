@@ -256,7 +256,7 @@ export class SettingsStoreAdapter {
         return {};
       case "models":
         await this.modelConfig().setProvider(qualifiers.provider!, unset ? undefined : value as ModelProviderValue,
-          context.secret ?? (context.undoOf || context.applyAgainOf ? null : undefined));
+          value !== plan.after || context.undoOf || context.applyAgainOf ? null : context.secret);
         return {};
       case "agents":
         await setAgentDefinition(this.dependencies.agentDir, qualifiers.agent!, unset ? undefined : value as string);

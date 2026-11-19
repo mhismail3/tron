@@ -383,7 +383,10 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
   const mcpAdmin = new McpAdminService(agentDir, join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js"),
     { async store(_account: string, token: string) { keychain.push(token); } });
   const providerKeys: Array<[string, string]> = [];
-  const modelConfig = new ModelConfigService(agentDir, { async store(account: string, secret: string) { providerKeys.push([account, secret]); } });
+  const modelConfig = new ModelConfigService(agentDir, { async store(account: string, secret: string) {
+    if (secret === "keychain-refuses") throw new Error("Keychain refused the fixture key");
+    providerKeys.push([account, secret]);
+  } });
   const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: privateService, mcpAdmin, modelConfig }));
   const record = new SettingsChangeRecord(tronHome, options.segmentEntries);
   const outside = new OutsideChanges(TEST_SETTINGS_SCHEMA, tronHome, agentDir, record, settingsModel.owner.observedReaders);
@@ -1574,6 +1577,21 @@ describe("outside changes to MCP servers and custom models", () => {
       confirm: (shown, apply) => { expect(shown.intent).toBeUndefined(); return apply({ deviceId: "device:phone", commandId: "provider-restore-tap" }); } });
     expect(restored).toMatchObject({ status: "applied" });
     expect(JSON.parse(await readFile(modelsPath, "utf8")).providers.keyed).toEqual({ ...keyed, name: "Keyed" });
+    expect(f.providerKeys).toHaveLength(1);
+    const second = { ...provider, baseUrl: "https://second-models.invalid/v1", apiKey: { ...reference, account: "tron-provider-second" } };
+    const third = { ...provider, baseUrl: "https://third-models.invalid/v1", apiKey: { ...reference, account: "tron-provider-third" } };
+    const named = (id: string, value: unknown) => ({ ...set(value), qualifiers: { provider: id } });
+    await expect(f.settingsChanges.change(global, [named("second", second), named("third", third)], home))
+      .rejects.toMatchObject({ code: "invalid_request", message: expect.stringContaining("one provider API key") });
+    const bundle = [{ key: "accounts.models.provider", qualifiers: { provider: "keyed" }, layer: "global" as const, op: "unset" as const }, named("second", second)];
+    const failed = await f.settingsChanges.change(global, bundle, { ...home,
+      confirm: (_shown, apply) => apply({ deviceId: "device:phone", commandId: "provider-keychain-refuses" }, "keychain-refuses") }).catch((caught: unknown) => caught);
+    expect(failed).toMatchObject({ code: "internal" });
+    const after = JSON.parse(await readFile(modelsPath, "utf8")).providers;
+    expect(after.keyed).toEqual({ ...keyed, name: "Keyed" });
+    expect(after.second).toBeUndefined();
+    expect((await f.history()).filter(entry => entry.commandId === "provider-keychain-refuses").map(entry => entry.failure))
+      .not.toContainEqual(expect.stringContaining("Not rolled back"));
     expect(f.providerKeys).toHaveLength(1);
   });
   caseIt("refuses a provider write while models.json holds an unrelated invalid entry, and never persists or reports it applied", async owner => {

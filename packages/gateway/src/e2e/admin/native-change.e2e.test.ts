@@ -969,9 +969,9 @@ describe("push registration retry card is a typed native intent", () => {
       for (const value of [{ digest: review.digest, approved: true }, { digest: review.digest, approved: true, secret: "" }, { digest: review.digest, approved: true, secret: "two\nlines" }]) {
         expect(() => answer(value, "missing-key")).toThrow(expect.objectContaining({ code: "invalid_request" }) as never);
       }
-      expect(JSON.stringify(broker.interactions())).not.toContain(typed);
       await answer({ digest: review.digest, approved: true, secret: typed }, "typed-tap");
       expect(await requested).toBe("stored");
+      expect(JSON.stringify([broker.interactions(), broker.state()])).not.toContain(typed);
       expect(applied).toEqual([{ commandId: "typed-tap", secret: typed }]);
       const retry = pushRetryReview({ sessionId: "session-retry", toolCallId: "call-secret", reason: "Alerts stopped" });
       const other = broker.requestChange({ review: retry, apply: async () => "requested" });
