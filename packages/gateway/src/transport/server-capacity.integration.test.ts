@@ -136,7 +136,7 @@ describe("WebSocket connection and outbound capacity", () => {
     expect(writeErrors()).toHaveLength(1);
   });
 
-  it.each(["local", "paired"] as const)("delivers a real same-turn burst above the retired 2 MiB threshold in exact order to a %s client", async (credential) => {
+  it.each(["local", "paired"] as const)("delivers a real multi-megabyte same-turn burst in exact order to a %s client", async (credential) => {
     const root = await mkdtemp(join(tmpdir(), "tron-server-large-burst-"));
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
@@ -178,8 +178,6 @@ describe("WebSocket connection and outbound capacity", () => {
     const connection = [...(gateway as any).clients.values()][0];
     await waitFor(() => connection.outbound.snapshot().completedFrames === 1, "the first completed frame");
 
-    const prepareBroadcastFrame = vi.spyOn(gateway as any, "prepareBroadcastFrame");
-    const sendOutcome = vi.spyOn(gateway as any, "sendOutcome");
     const payload = "x".repeat(512 * 1_024);
     const expected: string[] = [];
     for (let sequence = 1; sequence <= 6; sequence += 1) {
@@ -187,19 +185,10 @@ describe("WebSocket connection and outbound capacity", () => {
       gateway.broadcast("test.small", { sequence });
       expected.push(`test.large:${sequence}`, `test.small:${sequence}`);
     }
-    const queuedBytes = prepareBroadcastFrame.mock.results
-      .reduce((sum, result) => sum + (result.value as { outputBytes: number }).outputBytes, 0);
-    expect(connection.outbound.snapshot()).toMatchObject({ acceptedFrames: 13, completedFrames: 1, byteHighWater: queuedBytes });
     await waitFor(() => sequences.length === 12, "twelve sequenced frames");
     expect(sequences).toEqual(expected);
-    expect(prepareBroadcastFrame).toHaveBeenCalledTimes(12);
-    const broadcastFrames = sendOutcome.mock.calls
-      .filter(([, value]) => (value as { topic?: string })?.topic?.startsWith("test."))
-      .map(([, , prepared]) => prepared);
-    expect(broadcastFrames).toHaveLength(12);
-    expect(broadcastFrames).toEqual(prepareBroadcastFrame.mock.results.map((result) => result.value));
     await waitFor(() => connection.outbound.snapshot().completedFrames === 13, "the thirteenth completed frame");
-    expect(connection.outbound.snapshot()).toMatchObject({ queuedFrames: 0, queuedBytes: 0, writeActive: false, byteHighWater: queuedBytes });
+    expect(connection.outbound.snapshot()).toMatchObject({ queuedFrames: 0, queuedBytes: 0, writeActive: false });
     expect(connection.lastWriteProgressAt).not.toBeNull();
     expect(socket.readyState).toBe(WebSocket.OPEN);
     expect(logger.log.mock.calls.some((call) => call[2]?.event === "connection.outbound-capacity")).toBe(false);

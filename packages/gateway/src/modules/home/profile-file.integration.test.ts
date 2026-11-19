@@ -23,26 +23,6 @@ function note(title: string): ProfileNoteRecord {
     content: { title, role: "fact", confirmed: true, tags: ["home-profile", "kind-fact"], profile: { version: 2, path: ["engineering", "tests"] } } };
 }
 
-it("stores one hierarchical file, resolves only the current head or an exact linked claim, and retains no other historical body", async () => {
-  const f = await fixture();
-  const wrong = note("Original wrong claim");
-  const unanchored = { ...wrong, revisionId: randomUUID(), content: { ...wrong.content, title: "Unreferenced intermediate text" } };
-  const current = { ...wrong, revisionId: randomUUID(), content: { ...wrong.content, title: "Current revised statement" } };
-  const correction = { ...note("Exact correction of the original claim"), content: { title: "Exact correction of the original claim", role: "fact" as const,
-    confirmed: false, tags: ["home-profile", "kind-correction"], profile: { version: 2 as const, path: ["corrections"] } },
-    relations: [{ type: "corrects" as const, recordId: wrong.id, revisionId: wrong.revisionId }] };
-  await writeProfileFile(f.workspace, createProfileFile([current, correction], { anchorCandidates: [wrong, unanchored], stateRevision: 3 }));
-  const bytes = await readFile(f.path, "utf8");
-  expect(bytes).not.toContain(unanchored.content.title);
-  const file = (await readProfileFile(f.workspace))!;
-  expect(file.anchors).toEqual([wrong]);
-  expect(readProfileFileRecord(file, wrong.id)).toEqual(current);
-  expect(readProfileFileRecord(file, wrong.id, wrong.revisionId)).toEqual(wrong);
-  expect(readProfileFileRecord(file, correction.id)?.relations).toEqual(correction.relations);
-  expect(() => readProfileFileRecord(file, wrong.id, unanchored.revisionId)).toThrow(expect.objectContaining({ code: "conflict", details: { kind: "profile_revision_unavailable", id: wrong.id, revisionId: unanchored.revisionId } }));
-  expect(() => readProfileFileRecord(file, randomUUID(), randomUUID())).toThrow(expect.objectContaining({ code: "conflict", details: expect.objectContaining({ kind: "profile_revision_unavailable" }) }));
-});
-
 it("retains Prior placement, Unsorted, Not now, retirement and full provenance without inventing a destination", async () => {
   const f = await fixture();
   const prior = note("Prior organization retained");

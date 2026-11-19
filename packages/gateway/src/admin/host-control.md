@@ -150,5 +150,4 @@ not the worker session being resumed.
   `processTerminal` proof.
 
 Verify: `exit-after-shutdown.e2e.test.ts`,
-`administrative-drain-snapshot.integration.test.ts`,
 `node --test scripts/gateway-payload-deploy.test.mjs`, signed `MacQuitGatewayTests`.

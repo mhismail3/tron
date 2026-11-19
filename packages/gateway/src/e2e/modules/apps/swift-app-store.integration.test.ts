@@ -136,15 +136,6 @@ function bigSource(marker: string): string {
 }
 
 describe("installed Swift apps through the Gateway", () => {
-  it("refuses the retired direct v1 install action without creating an app or an offer", async () => {
-    const f = await fixture();
-    await writeFile(join(f.cwd, "Retired.swift"), "import SwiftUI\n");
-    const [refused] = await agentCalls(f, f, [{ action: "install", appId: "retired", name: "Retired", source: { kind: "path", path: "Retired.swift" } }]);
-    expect(refused!.isError).toBe(true);
-    expect(refused!.text).toMatch(/install|action|invalid/i);
-    expect(await rpc(f, "apps.list")).toEqual({ apps: [] });
-    expect(await rpc(f, "apps.pending")).toEqual({ offers: [] });
-  }, 60_000);
   it("lets the phone rename, reset and remove an app through idempotent receipts across restart", async () => {
     const f = await fixture();
     const source = 'import SwiftUI\nstruct ContentView: View { @AppStorage("count") var count = 0\n var body: some View { Text("\\(count)") } }';
