@@ -45,7 +45,7 @@ package enum GatewayResponseDecoding {
         }
         let admittedMethod = String(method.prefix(maximumMethodCharacters))
         let path = admittedPath(diagnosis.path)
-        let message = "The Gateway response for \(admittedMethod) \(diagnosis.summary) at \(path). Try again; if it continues, tap View Logs for details and update Tron on iPhone and the Gateway together."
+        let message = "The Gateway response for \(admittedMethod) \(diagnosis.summary) at \(path). Try again; if it continues, tap Copy Logs in Connections for details and update Tron on iPhone and the Gateway together."
         return GatewayFailure(
             code: "invalid_response",
             message: message,

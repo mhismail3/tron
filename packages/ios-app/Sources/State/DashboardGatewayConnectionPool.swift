@@ -246,11 +246,6 @@ final class DashboardGatewayConnectionPool {
         return await client.info
     }
 
-    func diagnostics(for profileID: String) -> GatewayDiagnosticsService? {
-        guard let client = entries[profileID]?.client else { return nil }
-        return GatewayDiagnosticsService(client: client)
-    }
-
     func notificationInbox(
         for profileID: String,
         filter: NotificationInboxFilter,

@@ -14,8 +14,6 @@ const UNIT_MS: Record<string, number> = { s: 1_000, m: 60_000, h: 3_600_000, d: 
 const MAX_STREAM_BYTES = 1_024 * 1_024;
 const MAX_LOGS_SECTION_BYTES = 4 * 1_024 * 1_024;
 const MAX_SECTION_BYTES = 256 * 1_024;
-const MAX_DEVICE_EXPORT_BYTES = 512 * 1_024;
-const MAX_DEVICE_EXPORTS = 3;
 const LOG_SHOW_TIMEOUT_MS = 90_000;
 const MAC_VERIFY_TIMEOUT_MS = 180_000;
 const TAILSCALE_TIMEOUT_MS = 15_000;
@@ -164,33 +162,6 @@ async function logsSection(logsDirectory: string, windowStartMs: number): Promis
     written += Buffer.byteLength(lines.join("\n"));
   }
   return { name: "logs", lines };
-}
-
-async function deviceExportsSection(logsDirectory: string): Promise<Section> {
-  const directory = join(logsDirectory, "device-exports");
-  let entries: string[];
-  try {
-    entries = await readdir(directory);
-  } catch {
-    return { name: "device-exports", lines: [`no device export directory at ${directory}`] };
-  }
-  const files: Array<{ path: string; name: string; mtimeMs: number }> = [];
-  for (const entry of entries) {
-    const path = join(directory, entry);
-    const info = await lstat(path).catch(() => undefined);
-    if (info?.isFile()) files.push({ path, name: entry, mtimeMs: info.mtimeMs });
-  }
-  files.sort((left, right) => right.mtimeMs - left.mtimeMs);
-  if (files.length === 0) return { name: "device-exports", lines: [`no device exports in ${directory}`] };
-  const lines: string[] = [];
-  for (const file of files.slice(0, MAX_DEVICE_EXPORTS)) {
-    const stream = await readBoundedFile(file.path, MAX_DEVICE_EXPORT_BYTES);
-    if (!stream) continue;
-    lines.push(`### ${file.name} (${formatBytes(stream.bytes)}${stream.truncated ? ", newest kept" : ""})`);
-    lines.push(...stream.text.split("\n").filter((line) => line.trim() !== ""));
-  }
-  if (files.length > MAX_DEVICE_EXPORTS) lines.push(`(${files.length - MAX_DEVICE_EXPORTS} older exports omitted)`);
-  return { name: "device-exports", lines };
 }
 
 async function payloadSelectionSection(payloadsDirectory: string): Promise<Section> {
@@ -370,7 +341,6 @@ async function collectDiagnosticBundle(options: DiagnosticBundleOptions = {}): P
   const readHealth = options.readHealth ?? readHealthBounded;
   const logsDirectory = tronHomePath(tronHome, "logs");
   const logs = await logsSection(logsDirectory, windowStartMs);
-  const deviceExports = await deviceExportsSection(logsDirectory);
   const payloadSelection = await payloadSelectionSection(tronHomePath(tronHome, "state/payloads"));
   const processes = await processesSection(tronHome, runCommand);
   const launchd = await launchdSection(since, runCommand);
@@ -385,7 +355,7 @@ async function collectDiagnosticBundle(options: DiagnosticBundleOptions = {}): P
     `collector: node ${process.version}`,
   ];
   const path = options.out ?? join(tmpdir(), `tron-diagnose-${now.toISOString().replace(/[:.]/gu, "-")}.txt`);
-  const bundle = renderBundle(header, [logs, deviceExports, payloadSelection, processes.section, launchd, tailscale.section, health, macVerify]);
+  const bundle = renderBundle(header, [logs, payloadSelection, processes.section, launchd, tailscale.section, health, macVerify]);
   try {
     await writeFile(path, bundle, { encoding: "utf8", flag: "wx", mode: 0o600 });
   } catch (error) {

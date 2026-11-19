@@ -103,7 +103,7 @@ Host-wide exports have a 2 GiB budget, so trace a product scenario with `--itera
 
 ### Always-on diagnostics
 
-What iOS records: [observability](../../gateway/docs/observability.md); export it from **Settings → Logs**.
+What iOS records: [observability](../../gateway/docs/observability.md); copy it with **Copy Logs** in **Settings → Connections**; the phone uploads its app log to the Mac every 60 s while connected.
 
 ## Efficient focused tests
 
@@ -343,10 +343,6 @@ and uploads through Xcode Organizer.
 ## Privacy
 
 Local-network and camera usage only. Provider credentials never enter fixtures, defaults or logs.
-
-### Diagnostic source identity
-
-`TronBuildIdentity.json` stamps the app's commit and dirty state into exports.
 
 ## Moved sections
 
