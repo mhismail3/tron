@@ -566,4 +566,38 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     evidence.push({ case: `worker ${mode} admission Project precedence`, observed, projectModel: f.model.id });
     expect(observed).toEqual([mode === "explicit" ? TASK_REASONING_MODEL_ID : f.model.id]);
   });
+
+  it.each(["seed", "explicit"])("Project thinking and the Home worker's %s thinking at the first real request: the seed loses, an explicit Home thinking wins", async mode => {
+    const f = await setup();
+    const taskId = `three-layer-${mode}-worker-thinking`;
+    const reasoning = { provider: f.model.provider, id: TASK_REASONING_MODEL_ID };
+    await f.project({ defaultProvider: reasoning.provider, defaultModel: reasoning.id, defaultThinkingLevel: "low" });
+    await setModelQueue(f.dependencies, "background", [f.model]);
+    await setModelQueue(f.dependencies, "worker", [reasoning]);
+    await f.service.invoke(f.client, "settings.change", { commandId: randomUUID(), target: { kind: "home" },
+      changes: [{ key: "model.thinking[role=worker]", layer: "session", op: "set", value: "high" }] });
+    const observed: unknown[] = [];
+    const workerTurn = (context: TranscriptContext) => context.messages.some(message => message.role === "system"
+      && getSystemMessageText(message).includes("This is a finite Home task"));
+    f.faux.setResponses(Array.from({ length: 4 }, () => (context, options) => {
+      if (workerTurn(context)) {
+        observed.push(options?.reasoning);
+        return fauxAssistantMessage([reportCall("three-layer-worker-thinking")], { stopReason: "toolUse" });
+      }
+      const messages = droppingAnyTurnFrame(context.messages);
+      const current = messages.slice(messages.findLastIndex(message => message.role === "user"));
+      return current.some(message => message.role === "toolResult" && message.toolName === "delegate")
+        ? fauxAssistantMessage("Delegation accepted")
+        : fauxAssistantMessage([fauxToolCall("delegate", {
+          taskId, intent: "Finite thinking precedence check", target: f.cwd,
+          ...(mode === "explicit" ? { model: reasoning, thinking: "medium", reason: "Test explicit task thinking against Project" } : {}),
+        })], { stopReason: "toolUse" });
+    }));
+    const home = await f.registry.acquire(f.home.sessionId);
+    await home.prompt("Delegate the thinking precedence check");
+    await waitFor(() => home.snapshot().configurationBlocker === null, "Home delegation turn settled");
+    await waitFor(async () => (await homeOwnerOf(f.registry).taskStatus(taskId)).lifecycle === "terminal", "worker terminal");
+    evidence.push({ case: `worker ${mode} thinking Project precedence`, observed });
+    expect(observed).toEqual([mode === "explicit" ? "medium" : "low"]);
+  });
 });

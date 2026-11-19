@@ -546,12 +546,15 @@ export class HomeTaskDispatcher {
       await slot.setHomeTaskModelQueues(input.modelQueues ?? await this.policy.modelQueues());
       const fixedAt = (value: unknown, field: "model" | "thinking"): FixedSetting => ({ value,
         from: "delegate", at: new Date().toISOString(), ref: randomUUID(), ...input.provenance?.[field] });
+      const fixed = slot.settingsSessionLayer().fixed ?? {};
+      const projectWins = (field: "model" | "thinking", key: string) => input.provenance !== undefined
+        && input.provenance[field]?.via !== "home-explicit" && fixed[key]?.from === "project";
       const model = choice.model ?? (input.provenance ? slot.snapshot().model ?? undefined : undefined);
-      const seeded = input.provenance !== undefined && input.provenance.model?.via !== "home-explicit";
-      const projectModel = slot.settingsSessionLayer().fixed?.["model.ref[role=chat]"]?.from === "project";
-      if (model && !(seeded && projectModel)) await slot.setModel(model.provider, model.id, undefined, undefined, fixedAt(model, "model"));
-      const requestedThinking = choice.thinking ?? deferredThinking;
-      const definition = model ? slot.modelRuntime.getModel(model.provider, model.id) : undefined;
+      const applyModel = model && !projectWins("model", "model.ref[role=chat]");
+      if (applyModel) await slot.setModel(model.provider, model.id, undefined, undefined, fixedAt(model, "model"));
+      const running = applyModel ? model : slot.snapshot().model ?? undefined;
+      const requestedThinking = projectWins("thinking", "model.thinking[role=chat]") ? undefined : choice.thinking ?? deferredThinking;
+      const definition = running ? slot.modelRuntime.getModel(running.provider, running.id) : undefined;
       const thinking = requestedThinking !== undefined && definition ? clampThinkingLevel(definition, requestedThinking) : requestedThinking;
       const clamped = thinking !== requestedThinking ? `${requestedThinking} clamped to ${thinking}` : undefined;
       if (thinking !== undefined) {

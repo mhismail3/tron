@@ -280,5 +280,6 @@ A key's canonical type, validation and runtime clamping apply to every change.
 `dryRun` returns per-key errors and the immutable review. Changes is permanent history,
 not a pending-request inbox. Global writes Global, Session the Session scope, Home its saved settings;
 Project is inspection only. Session/Home reuse Global's renderer and editors; a row whose value comes
-from Project names its file and key and stays editable as a Session override, explicit overrides have Overridden/Revert,
+from Project stays editable as a Session override (its file and key, `projectSetting`, are served to the
+`settings` tool only; the app does not show them), explicit overrides have Overridden/Revert,
 and the app has no Changes entry: audit history and Undo are the `settings` tool's. Hand-built screens remain only for guided flows and viewers.
