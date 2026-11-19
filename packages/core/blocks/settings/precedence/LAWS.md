@@ -6,7 +6,7 @@ Block hash: `29e72683e031aeb1` (over `blocks/settings/precedence/Block.dfy`, `la
 | Gate | Status |
 |---|---|
 | Proof (pinned Dafny, --verify-included-files) | PASS: blocks/settings/precedence/Block.dfy: Dafny program verifier finished with 35 verified, 0 errors;  |
-| Independent review | NOT ACCEPTED: STALE (reviewed 18d2afbb3ccd6a1c, current 29e72683e031aeb1); reviewer transcript never mentions the current block hash (it did not review this version) |
+| Independent review | ACCEPT by law-reviewer (Home task, session 01a1f51b) (anthropic/claude-sonnet-5-5, transcript-verified); writer settings worker (R14 d683f8843, #2619 306b1a702) (anthropic/claude-opus-5-5); 2026-11-19 |
 | Mutation check | PASS: 103 valid mutants, 103 killed by laws, 0 survived, 0 accepted (blocks/settings/precedence/MUTATION.json) |
 | Cut over | the only implementation: `packages/gateway/src/core/settings/precedence` runs this block's compiled core (scripts/tron proof facade) |
 
@@ -23,7 +23,7 @@ lemma S1Admission(k: Key)
 
 **Mutation results.** kills 1 of 103 valid mutants; 1 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: The four Admitted equations match the English: Global always, Home and Session on sessionOverridable, Project on projectSettable.
+**Reviewer notes.** ACCEPT: Admitted is unchanged by R14: Global always, Home and Session on sessionOverridable, Project on projectSettable. Matches the English and scope-resolution's scopeAdmitted.
 
 ## R1 winner
 
@@ -56,7 +56,7 @@ lemma ShownOfSpec(k: Key, ls: Layers, l: Layer)
 
 **Mutation results.** kills 52 of 103 valid mutants; 48 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: Over folds lowest first, so the highest live layer sets the shown token, and the premise is satisfiable.
+**Reviewer notes.** ACCEPT: Rank is now Global 1 < Project 2 < Home 3 < Session 4 and Resolve folds Over Global, Project, Home, Session, so the highest live layer by Rank sets the layer and an ordinary value. The English (Session beats Home, Home beats Project, Project beats Global) matches Rank, Resolve and Steps; the premise is satisfiable.
 
 ## R2 default
 
@@ -70,7 +70,7 @@ lemma R2Default(k: Key, ls: Layers)
 
 **Mutation results.** kills 0 of 103 valid mutants; 0 killed by this law alone. Kills nothing here: implied by other laws or by the world model; the reviewer must say which.
 
-**Reviewer notes.** ACCEPT: With no live layer every Over returns the below value, which is the default from FromDefault.
+**Reviewer notes.** ACCEPT: With no live layer every Over returns the below value, so Resolve gives the default from FromDefault. Unaffected by the reorder.
 
 ## R3 compose
 
@@ -84,7 +84,7 @@ lemma R3Compose(k: Key, ls: Layers)
 
 **Mutation results.** kills 0 of 103 valid mutants; 0 killed by this law alone. Kills nothing here: implied by other laws or by the world model; the reviewer must say which.
 
-**Reviewer notes.** ACCEPT: The Compose chain over live layers, lowest first, equals Folded over LiveTokens.
+**Reviewer notes.** ACCEPT: LiveTokens and Steps both list Global, Project, Home, Session, so the composed chain equals Folded over LiveTokens; the reordered proof (g + p + h + se) matches.
 
 ## R4 untrusted-inert
 
@@ -100,7 +100,7 @@ lemma R4UntrustedInert(k: Key, ls: Layers, ls2: Layers, l: Layer)
 
 **Mutation results.** kills 0 of 103 valid mutants; 0 killed by this law alone. Kills nothing here: implied by other laws or by the world model; the reviewer must say which.
 
-**Reviewer notes.** ACCEPT: An unapplied layer feeds only Shown and Visible, and Over ignores non-applied shown values.
+**Reviewer notes.** ACCEPT: An unapplied layer feeds only Shown and Visible and Over ignores unapplied shown values, so value and origin are independent of it at any rank.
 
 ## R5 higher-scope-wins
 
@@ -115,7 +115,7 @@ lemma R5HigherScopeWins(k: Key, ls: Layers, ls2: Layers, l: Layer)
 
 **Mutation results.** kills 0 of 103 valid mutants; 0 killed by this law alone. Kills nothing here: implied by other laws or by the world model; the reviewer must say which.
 
-**Reviewer notes.** ACCEPT: For an ordinary setting the premise fixes every layer at rank l or above, so the highest live layer and its value do not change.
+**Reviewer notes.** ACCEPT: The premise fixes every layer with Rank >= l, so under the new ranks a Session or Home value is not changed by Project or Global content. The English (scope outranks specificity) still holds.
 
 ## R6 shown
 
@@ -130,7 +130,7 @@ lemma R6Shown(k: Key, ls: Layers, l: Layer)
 
 **Mutation results.** kills 0 of 103 valid mutants; 0 killed by this law alone. Kills nothing here: implied by other laws or by the world model; the reviewer must say which.
 
-**Reviewer notes.** ACCEPT: ShownOf is Shown exactly when Visible, with the token, the qualified flag and the applied flag as stated.
+**Reviewer notes.** ACCEPT: ShownOf is Shown exactly when Visible, with the token, qualified flag and applied flag as stated; order-independent.
 
 ## R7 not-applied
 
@@ -146,7 +146,7 @@ lemma R7NotApplied(k: Key, ls: Layers, l: Layer)
 
 **Mutation results.** kills 18 of 103 valid mutants; 16 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: Top makes the highest visible layer decide, so an unapplied one is reported and the origin falls below it.
+**Reviewer notes.** ACCEPT: Top now decides in the order Session, Home, Project, Global, i.e. the highest visible layer by the new Rank; an unapplied Project is reported only when no Home or Session value is visible, which is the intended behaviour once Session and Home outrank Project. The origin falls below it.
 
 ## R8 below
 
@@ -168,7 +168,7 @@ lemma FoldedPlain(k: Key, ls: Layers, m: Layer, l: Layer, v: Value)
 
 **Mutation results.** kills 32 of 103 valid mutants; 31 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: The Below PlainOver chain with its strictly-below flags equals BelowTokens folded over the default in rank order.
+**Reviewer notes.** ACCEPT: BelowTokens and Below both fold Global, Project, Home in rank order with strict-below flags (Home below only Session, Project below Home and Session, Global below all but itself); Session is below nothing. Matches composedBelow in the shell.
 
 ## Proof helpers (statements only; not laws, but part of what is proven)
 
@@ -397,4 +397,4 @@ ghost predicate PlainLive(k: Key, ls: Layers, m: Layer, l: Layer) {
 
 ## Reviewer: general notes
 
-Re-review after the only change since the review at 911143e0ddecbcd7: mutate.json lost its empty "oracles" list (the mutation tool's oracle path was deleted). All nine laws ACCEPT at 18d2afbb3ccd6a1c by reading statements and definitions, without a Dafny re-run. Residual risks: real-traffic replay is still required for the high-stakes window, and A1 and A2 are shell contracts.
+Review of the block at 29e72683e031aeb1, covering R14 (d683f8843: Rank reordered to Global < Project < Home < Session, decision D23 replacing H1) and the A2 wording (306b1a702, #2619), which landed without a law review. Diff read from 55914d305 to 306b1a702: Block.dfy and the laws change only the layer order in Rank, Resolve, Top, Steps, Below, LiveTokens, BelowTokens and the matching proofs, plus the comments. Proof check passes (35 verified, 0 errors); mutation report PASS 103/103 valid mutants killed at this hash (55 stillborn, 34.8%, under the 40% cap), none accepted. Mutants of Resolve are credited to R1 through its helper ResolveSteps, so R2 to R6 show no kills of their own; they are consequences of that kill set and the reordered proofs, as in the earlier review. A2 is honest about the shell: settings-resolver.ts readBinding (session store, model and thinking fields) returns no value unless explicitChoice(fixed) holds (from session or delegate), and runtime-slot.ts uses the same function, so an inherited launch or runtime value does not enter the Session entry. A2 says nothing about the session's tools and context-window fields, which that guard does not cover; the laws do not depend on it. Residual risks: A1 and A2 are shell contracts proven only by shell tests, and real-traffic replay is still required for the high-stakes window.
