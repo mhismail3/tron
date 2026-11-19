@@ -289,6 +289,41 @@ def flakes(tree: str | None = None) -> list[dict]:
         return [{**dict(row), 'failure_rate': row['failures'] / (row['passes'] + row['failures'])} for row in rows]
 
 
+def budget_use(threshold: float) -> list[dict]:
+    """Gateway tests whose slowest uncontended committed pass, of a test file identical to HEAD's, used more than `threshold` of its real-time bounds."""
+    import budgets
+    connection = database()
+    if connection is None:
+        return []
+    with closing(connection):
+        runs = connection.execute('SELECT test_id, commit_sha, host, seconds FROM results WHERE dirty = 0 AND contended = 0 AND outcome = \'passed\' AND lane IN (\'gateway\', \'gateway-nested\')').fetchall()
+    files = budgets.budgets(ROOT)
+    pairs = sorted({(run['commit_sha'], run['test_id'].partition('::')[0]) for run in runs if run['test_id'].partition('::')[0] in files})
+    names = [f'{commit}:{path}' for commit, path in pairs] + [f'HEAD:{path}' for path in files]
+    blobs = subprocess.run(['git', '-C', str(ROOT), 'cat-file', '--batch-check=%(objectname)'], input='\n'.join(names) + '\n',
+                           capture_output=True, text=True, check=True).stdout.split('\n')
+    current = dict(zip(files, blobs[len(pairs):]))
+    same = {pair for pair, blob in zip(pairs, blobs) if blob == current[pair[1]]}
+    grouped: dict[tuple[str, str], list[float]] = {}
+    for run in runs:
+        if (run['commit_sha'], run['test_id'].partition('::')[0]) in same:
+            grouped.setdefault((run['test_id'], run['host']), []).append(run['seconds'])
+    rows = [{'test_id': test, 'host': host, 'runs': len(seconds), 'fastest': min(seconds), 'slowest': max(seconds)}
+            for (test, host), seconds in grouped.items()]
+    found = {}
+    for row in rows:
+        path, _, name = row['test_id'].partition('::')
+        case = budgets.budget_of(files[path], name)
+        timeout_use = row['slowest'] * 1000 / case['timeoutMs']
+        wait_ceiling = row['slowest'] * 1000 / case['waitMs'] if case['waitMs'] else 0
+        use = max(timeout_use, min(wait_ceiling, 1))
+        if use > threshold and use > found.get(row['test_id'], {}).get('use', 0):
+            found[row['test_id']] = {'test_id': row['test_id'], 'host': row['host'], 'runs': row['runs'], 'fastest': row['fastest'],
+                                     'slowest': row['slowest'], 'timeout_seconds': case['timeoutMs'] / 1000, 'timeout_use': timeout_use,
+                                     'wait_seconds': case['waitMs'] and case['waitMs'] / 1000, 'wait_ceiling': wait_ceiling, 'use': use}
+    return sorted(found.values(), key=lambda item: (-item['timeout_use'], -item['wait_ceiling']))
+
+
 def main(arguments: list[str]) -> int:
     if arguments[:1] == ['python']:
         return python_main(arguments[1:])
@@ -297,7 +332,20 @@ def main(arguments: list[str]) -> int:
     parser = argparse.ArgumentParser(prog='scripts/tron flakes')
     parser.add_argument('--tree')
     parser.add_argument('--json', action='store_true')
+    parser.add_argument('--budgets', type=float, nargs='?', const=0.25, metavar='FRACTION')
     args = parser.parse_args(arguments)
+    if args.budgets is not None:
+        rows = budget_use(args.budgets)
+        if args.json:
+            print(json.dumps(rows, indent=2))
+            return 0
+        print(f'Test ledger: {destination()}')
+        print(f'Gateway tests whose slowest uncontended committed pass used over {args.budgets:.0%} of their test timeout, or whose whole')
+        print('duration exceeds that share of the smallest wait bound they await (a ceiling: one wait spans at most the whole test):')
+        for row in rows:
+            wait = f"wait={row['wait_seconds']:g}s ({row['wait_ceiling']:.0%} ceiling)" if row['wait_seconds'] else 'wait=-'
+            print(f"timeout {row['timeout_use']:4.0%} of {row['timeout_seconds']:g}s  {wait}  {row['fastest']:.2f}-{row['slowest']:.2f}s  runs={row['runs']}  host={row['host']}  {row['test_id']}")
+        return 0
     rows = flakes(args.tree)
     if args.json:
         print(json.dumps(rows, indent=2))

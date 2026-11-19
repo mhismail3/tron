@@ -736,6 +736,28 @@ class LedgerTests(VerifyCase):
         self.assertIn('outside repositories and ~/.tron', refused.stderr)
         self.assertFalse((r.path / 'ledger.sqlite3').exists())
 
+    def test_budgets_flags_a_gateway_test_whose_slowest_pass_nears_its_wait_bound_on_the_unchanged_file(self) -> None:
+        r = self.repo
+        r.write('packages/gateway/test-support/wait-for.ts', 'const x = declared > 0 ? declared : 12_000;\nexport const HOOK_HANG_BOUND_MS = 5_000;\n')
+        r.write('packages/gateway/vitest.config.ts', 'testTimeout: 15_000,\n')
+        for config in ('vitest.nested.config.ts', 'vitest.mac-terminal.config.ts'):
+            r.write(f'packages/gateway/{config}', 'testTimeout: 300_000,\n')
+        path = 'packages/gateway/src/a.integration.test.ts'
+        r.write(path, 'it("waits", async () => {\n  await waitFor(() => ok, "edit", { boundMs: 4_000 });\n});\n'
+                      'it("long", async () => {\n  await work();\n}, 60_000);\n')
+        r.commit('gateway tests')
+        ledger = Path(r.env['HOME']) / '.tron-maintenance/test-ledger/results.sqlite3'
+        ledger.parent.mkdir(parents=True)
+        rows = [(r.git('rev-parse', 'HEAD'), 'waits', 1.5), (r.git('rev-parse', 'HEAD'), 'long', 6.0), ('0' * 40, 'long', 50.0)]
+        with sqlite3.connect(ledger) as connection:
+            connection.execute('CREATE TABLE results (run_id TEXT, test_id TEXT, commit_sha TEXT, tree_hash TEXT, dirty INTEGER, outcome TEXT, seconds REAL, lane TEXT, host TEXT, cpu_idle_percent REAL, memory_free_percent REAL, measured_at TEXT, seen_at TEXT, contended INTEGER)')
+            connection.executemany("INSERT INTO results VALUES ('r', ?, ?, 't', 0, 'passed', ?, 'gateway', 'mini', 50, 50, 'm', 's', 0)",
+                                   [(f'{path}::{title}', commit, seconds) for commit, title, seconds in rows])
+        query = subprocess.run([str(r.path / 'scripts/tron'), 'flakes', '--budgets', '--json'], cwd=r.path, env=r.env, capture_output=True, text=True)
+        self.assertEqual(query.returncode, 0, query.stderr)
+        self.assertEqual([(row['test_id'], row['slowest'], row['wait_seconds'], row['timeout_seconds']) for row in json.loads(query.stdout)],
+                         [(f'{path}::waits', 1.5, 4.0, 15.0)])
+
 
 class SelectionTests(VerifyCase):
     def test_one_module_change_runs_only_its_tests_and_a_failure_fails_loudly(self) -> None:

@@ -186,6 +186,13 @@ prompts or failure payloads; raw logs stay with their existing owners.
 `scripts/tron flakes [--tree HASH] [--json]` ranks tests that both passed and failed on the same
 tree, with pass/fail counts, failure rate, lanes, hosts and last seen. Always-failing tests are broken,
 not flaky, and are not listed by this query.
+`scripts/tron flakes --budgets [FRACTION] [--json]` lists Gateway tests drifting toward a real-time
+bound before they fail: the slowest uncontended committed pass of each test, counting only runs whose
+test file is byte-identical to HEAD's, against the test's Vitest timeout (config `testTimeout` or its
+own literal) and the smallest `waitFor`/`awaitsWithin` bound it or its file's helpers await
+(`tools/verify/budgets.py` reads both from source). It flags a test above FRACTION (default 0.25) of
+its timeout, or whose whole duration exceeds that share of its smallest wait bound; one wait spans at
+most the whole test, so the wait figure is a ceiling. It reads the ledger only and runs in under a second.
 Different trees are never pooled. Dirty-tree runs retain their HEAD tree and an explicit dirty
 marker, but are excluded from flake classification because that hash cannot prove their source.
 Set `TRON_TEST_CONTENDED=1` for a known contended run: its raw outcomes and host readings remain
