@@ -1,20 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { GatewayError } from "../errors.js";
 import type { JsonValue } from "../protocol/types.js";
+import type { DevicePreferenceRead, DevicePreferenceWrite } from "../kernel/settings/settings-types.js";
 
-export const DEVICE_PREFERENCE_REQUEST_TOPIC = "device.preference.request";
-export const DEVICE_PREFERENCE_DEADLINE_MS = 10_000;
-export const DEVICE_PREFERENCE_CAPABILITY = "device-preference";
+const DEVICE_PREFERENCE_REQUEST_TOPIC = "device.preference.request";
+const DEVICE_PREFERENCE_DEADLINE_MS = 10_000;
+const DEVICE_PREFERENCE_CAPABILITY = "device-preference";
 
-export type DevicePreferenceRead = { status: "value"; value: unknown } | { status: "unavailable" } | { status: "unknown" };
-export type DevicePreferenceWrite = { status: "applied" } | { status: "conflict"; current: unknown } | { status: "unavailable" } | { status: "unknown" };
 type Outcome = DevicePreferenceRead | DevicePreferenceWrite;
 
 export interface DevicePreferenceBridgeOptions {
   pairedDevices(): Promise<readonly string[]>;
   newestReadyConnection(deviceId: string, capability: string): string | undefined;
   send(connectionId: string, topic: string, payload: JsonValue): boolean;
-  deadlineMs?: number;
 }
 
 interface Pending {
@@ -29,12 +27,9 @@ export interface DevicePreferenceCaller { id: string; identity: string; isLocal:
 
 export class DevicePreferenceBridge {
   private readonly pending = new Map<string, Pending>();
-  private readonly deadlineMs: number;
   private disposed = false;
 
-  constructor(private readonly options: DevicePreferenceBridgeOptions) {
-    this.deadlineMs = options.deadlineMs ?? DEVICE_PREFERENCE_DEADLINE_MS;
-  }
+  constructor(private readonly options: DevicePreferenceBridgeOptions) {}
 
   async devices(): Promise<readonly string[]> {
     return this.options.pairedDevices();
@@ -75,7 +70,7 @@ export class DevicePreferenceBridge {
     if (connectionId === undefined) return Promise.resolve({ status: "unavailable" });
     const requestId = randomUUID();
     return new Promise<Outcome>((resolve) => {
-      const timer = setTimeout(() => this.settle(requestId, undefined), this.deadlineMs);
+      const timer = setTimeout(() => this.settle(requestId, undefined), DEVICE_PREFERENCE_DEADLINE_MS);
       this.pending.set(requestId, { action, deviceId, connectionId, resolve, timer });
       let sent = false;
       try {

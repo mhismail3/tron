@@ -7,5 +7,8 @@
     "gateway/host",
     "gateway/pi",
     "gateway/run"
+  ],
+  "verify": [
+    "scripts/tron test gateway src/e2e/sessions/home-research-tools.integration.test.ts"
   ]
 }
