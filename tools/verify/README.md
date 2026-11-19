@@ -23,7 +23,6 @@ scripts/tron test ios checkpoint --only-testing TronMobileUITests/<Class>/<metho
 scripts/tron verify ... --ios-jobs 3             # more simulator lanes (1|2|3; default 1), only when the brief permits
 scripts/tron verify ... --skip ios,mac,relay    # accept, explicitly, selections this run will not run
 scripts/tron verify ... --skip python-here           # only that host-bound group (python still runs)
-scripts/tron verify ... --gateway-host local    # override the test-host pool: run the Gateway Vitest lanes here
 ```
 
 ## System-section consumers
@@ -92,12 +91,10 @@ the lock's one owner; the runner and `mutate` import it.
 Migration fixtures seed explicit historical JSON; they never copy the invoking
 user's settings or profile. Test input and output must not depend on live stores.
 
-## Gateway and Python lanes on the test-host pool
+## Gateway and Python lanes on the mini
 
-The Gateway Vitest lanes (`gateway`, `gateway-nested`) of `verify` and `scripts/tron test gateway`, and verify's Python group (not `python-here`), run on the pool {the Mac mini, this Mac}:
-`mini.py`'s `choose_host` picks the mini when it is configured, the tree is committed and an ssh probe (5 s to
-connect, 30 s in all) finds it set up with its job lock free, and otherwise this Mac. Each run prints which host
-ran its lanes and why; verify records it (`gatewayHostReason`). `--gateway-host local|mini` (for both kinds of lane; `test gateway --local|--mini`) overrides the pool; `--update-locks` always runs here, and the pool runs a lane here when its arguments name a path outside the checkout (a relative one resolved against `packages/gateway`). The Gateway `node-gateway` lane (`node --test` files) runs on this Mac under the pool and under `--gateway-host local`, and on the mini only when `--gateway-host mini` names it explicitly; the pool never probes the mini for a node-only selection. Verify's node-gateway lane is not part of `scripts/tron test gateway`, which forwards Vitest arguments only.
+The Gateway Vitest lanes (`gateway`, `gateway-nested`), the Gateway `node-gateway` lane and verify's Python group (not `python-here`) run on this Mac by default.
+`--gateway-host mini` (`scripts/tron test gateway --mini`) runs them on the mini under its lease, with no local fallback; `--update-locks` always runs here. Each run prints which host ran its lanes and why; verify records it (`gatewayHostReason`). Verify's node-gateway lane is not part of `scripts/tron test gateway`, which forwards Vitest arguments only.
 On the mini, `mini.py` refuses a dirty tree, or a HEAD other than the commit verify records, and pushes HEAD to the mini's `~/tron-ci/tron.git` under a nonce-owned `refs/tron-jobs/submissions/<nonce>`; concurrent submissions never update the same ref.
 The remote removes only its own ref, with its expected SHA. A session that returns no exit also attempts
 that cleanup from the caller; an unreachable cleanup is reported as unresolved, not silently successful. One job at a time
@@ -236,31 +233,6 @@ with a mini outage remaining no-result rather than local fallback. Direct `scrip
 recorder. The canonical iOS and real-Gateway journey runners and the Mac test owner record their
 native test results, so verify, batch and direct invocations share one ledger, not separate histories.
 
-## Repeat-suite hunt
-
-`scripts/tron verify --hunt --rounds 20 --hours 8` repeats all registered default Gateway,
-nested Gateway, portable Python, root Node and Gateway Node suites, serially on the mini.
-It never selects Apple-hosted, relay or shell groups or falls back to this Mac. `--plan`
-previews the selected files without running them. Preflight refusals, including an unavailable
-origin read, exit 2 before any lane starts; plan mode also needs the origin read. Execution requires
-a clean checkout whose HEAD equals live `origin/main`; that fence is checked before every lane and after the last.
-Run from a checkout containing the hunt tooling at that main commit, not a feature branch.
-The normal mini lease has zero wait, so a busy lease or other no-result stops the hunt without
-queuing or retrying. Honor Home's resource order before invoking it.
-
-The hours limit bounds admission: an in-flight lane finishes normally, then no further lane
-starts after the budget expires. The first SIGINT/SIGTERM fences repeated stop signals while
-verify's existing runner stops and joins the one owned lane; finalization then saves its receipt.
-The plan exposes explicit contention marking. Each invocation retains unique logs and an atomically updated
-`test-results/hunt/<sha>-<time>/summary.json` with selection, elapsed time, completed rounds,
-raw step exits, the first red's log and the ledger's same-tree flake ranking. A later pass never
-erases an earlier red: completed hunts exit 1 if any lane failed, otherwise 0. Budget expiry,
-source drift, no-result or an undriven lane exits 75 with partial evidence, or 1 if a prior lane
-already failed; interruption stays 130/143. After admission, remote-read errors are no-result,
-not evidence that source changed. Cleanup/ranking errors are retained and make an otherwise successful hunt exit 1,
-without replacing earlier nonzero verdicts. These repetitions measure variability, not retry-to-green verification. Zero ranked
-flakes is not proof of absence, especially for partial hunts or always-failing cases.
-
 ## Static checks (existing tools only)
 1. `scripts/tron ownership`, including the repository layout
 2. `scripts/tron tidy --here --landing`: no untracked file or ignored path without a named writer
@@ -394,7 +366,7 @@ Runners are the existing ones:
 |---|---|
 | `gateway` / `gateway-nested` | Gateway vitest, main or `vitest.nested.config.ts` |
 | `node-gateway` / `node` | `node --test` |
-| `python` / `python-here` / `shell` | `python3` / `bash` per file; `python-here` (`PYTHON_HERE`: tests reading this Mac's Pi session store) runs on this Mac, never the pool |
+| `python` / `python-here` / `shell` | `python3` / `bash` per file; `python-here` (`PYTHON_HERE`: tests reading this Mac's Pi session store) runs on this Mac, never the mini |
 | `ios` | `scripts/tron-ios-test run --only-testing <target>/<class>/<test>` shards: the UIValidation targets |
 | `ios-journeys` | `scripts/ios-gateway-e2e-test run-ui --only-testing <journey>`: the real-UI journeys |
 | `ios-boundary` | `scripts/ios-gateway-e2e-test check --only-testing <method>`: the Gateway E2E target, with its own build and private fixture |

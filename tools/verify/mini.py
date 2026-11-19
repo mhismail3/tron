@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Run Gateway, Python, Node, iOS or whole-verifier jobs under the Mac mini lease and return their native results.
 
-The test-host pool is {the mini, this Mac}: `choose_host` picks the mini when it is configured, reachable and idle,
-and otherwise this Mac, always with its reason; `mini.py pool [vitest args]` runs one lane on the chosen host.
 `mini.py python <command>` runs verify's per-file Python command in the mini checkout, its stderr merged into
 stdout in order, since verify counts each file's unittest summary after that file's marker. `mini.py node <file>...`
 runs the Gateway's `node --test` files on the mini's pinned Node, its TAP output streamed back for verify to count.
@@ -44,7 +42,6 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Sequence
 
 ROOT = Path(__file__).resolve().parents[2] if '__file__' in globals() else None
 BASE = 'tron-ci'
@@ -104,54 +101,6 @@ def ssh_command() -> list[str]:
     identity = config('tron.verify.miniIdentity')
     return ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=4',
             *(['-i', os.path.expanduser(identity)] if identity else []), destination]
-
-
-def outside_paths(args: Sequence[str]) -> list[str]:
-    """Arguments naming a path outside this checkout (output files aside): the mini cannot read them. A relative
-    word resolves against the Gateway package, the lane's working directory."""
-    words = [word.split('=', 1)[1] if word.startswith('--') and '=' in word else word for word in args if not word.startswith(OUTPUT_OPTION)]
-    package, root = ROOT / 'packages/gateway', ROOT.resolve()
-    return [word for word in words if not word.startswith('-') and not (package / word).resolve().is_relative_to(root)]
-
-
-def choose_host(args: Sequence[str] = ()) -> tuple[str, str]:
-    """('mini' or 'local', why). The mini is the default; this Mac runs the lane only when the mini cannot."""
-    if os.environ.get('TRON_UPDATE_LOCKS'):
-        return 'local', 'recording goldens writes this checkout'
-    if outside := outside_paths(args):
-        return 'local', f'an argument names {outside[0]}, outside this checkout'
-    if not config('tron.verify.mini'):
-        return 'local', 'no mini is configured'
-    if git('status', '--porcelain', '--untracked-files=normal'):
-        return 'local', 'uncommitted changes; the mini runs a commit'
-    ssh = ssh_command()
-    ssh[ssh.index('ConnectTimeout=10')] = 'ConnectTimeout=5'
-    try:
-        probe = subprocess.run([*ssh, shlex.join(['/usr/bin/python3', '-c', Path(__file__).read_text(), 'status'])],
-                               stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
-    except subprocess.TimeoutExpired:
-        return 'local', f'the mini {ssh[-1]} is unreachable: no answer within 30 s'
-    try:
-        status = json.loads(probe.stdout.strip().splitlines()[-1]) if probe.returncode == 0 else None
-        busy, ready, load = bool(status['busy']), bool(status['ready']), float(status['load'])
-    except (ValueError, IndexError, KeyError, TypeError):
-        detail = ((probe.stderr if probe.returncode else probe.stdout).strip().splitlines() or ['no output'])[-1]
-        return 'local', f'the mini {ssh[-1]} is unreachable: {detail}' if probe.returncode else f'the mini {ssh[-1]} answered no status: {detail}'
-    if not ready:
-        return 'local', f'the mini is not set up: no ~/{BASE}/tron.git'
-    if busy:
-        return 'local', 'the mini is busy with another job'
-    return 'mini', f'reachable and idle, load {load:.1f}'
-
-
-def pool_main(args: list[str]) -> int:
-    host, reason = choose_host(args)
-    destination = config('tron.verify.mini')
-    print(f'gateway lane: on the Mac mini {destination} ({reason})' if host == 'mini' else f'gateway lane: on this Mac ({reason})',
-          file=sys.stderr, flush=True)
-    if host == 'mini':
-        return local_main(args)
-    os.execvp('python3', ['python3', str(ROOT / 'tools/verify/gateway.py'), *args])
 
 
 def outputs(args: list[str]) -> tuple[list[str], list[str]]:
@@ -293,21 +242,6 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
     missing = [paths[index] for index in range(len(paths)) if index not in received]
     print(f'mini: lane exit {code} after {time.time() - started:.1f}s' + (f'; it wrote no {", ".join(missing)}' if missing else ''), flush=True)
     return code
-
-
-def remote_status() -> int:
-    """Whether the mini is set up, whether a job holds its job lock, and its load: the pool's availability probe."""
-    lock_path = Path.home() / BASE / 'jobs/gateway.lock'
-    busy = False
-    if lock_path.is_file():
-        with open(lock_path, 'a+') as lock:
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                fcntl.flock(lock, fcntl.LOCK_UN)
-            except BlockingIOError:
-                busy = True
-    print(json.dumps({'busy': busy, 'ready': (Path.home() / BASE / 'tron.git/HEAD').is_file(), 'load': os.getloadavg()[0]}), flush=True)
-    return 0
 
 
 def signal_group(pgid: int, signum: int) -> bool:
@@ -566,13 +500,9 @@ def remote_main(job: dict) -> int:
 if __name__ == '__main__':
     if sys.argv[1:2] == ['remote']:
         sys.exit(remote_main(json.loads(sys.argv[2])))
-    if sys.argv[1:2] == ['status']:
-        sys.exit(remote_status())
     try:
         if sys.argv[1:2] == ['python'] and len(sys.argv) != 3:
             sys.exit('usage: mini.py python <command>')
-        if sys.argv[1:2] == ['pool']:
-            sys.exit(pool_main(sys.argv[2:]))
         if sys.argv[1:2] == ['ios']:
             parser = argparse.ArgumentParser(add_help=False)
             parser.add_argument('--ios-host', choices=('mini', 'local'), default='mini')

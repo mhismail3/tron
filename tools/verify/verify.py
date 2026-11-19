@@ -26,7 +26,7 @@ sys.path.insert(0, str(ROOT / "tools" / "layers"))
 import swift_index  # noqa: E402  (the one authority on a fresh iOS index and build stamp)
 sys.path.insert(0, str(ROOT / "tools" / "verify"))
 import vitest_configs  # noqa: E402  (the one reader of the Gateway's listing Vitest configs)
-import mini  # noqa: E402  (the test-host pool's one owner)
+import mini  # noqa: E402
 import swift_source
 import ledger
 
@@ -1299,16 +1299,12 @@ def main(argv: list[str]) -> int:
     if "--batch" in argv:
         import batch
         return batch.main([word for word in argv if word != "--batch"])
-    if "--hunt" in argv:
-        import hunt
-        return hunt.main([word for word in argv if word != "--hunt"])
     parser = argparse.ArgumentParser(prog="scripts/tron verify")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--changed", action="store_true")
     mode.add_argument("--module", metavar="ID")
     mode.add_argument("--all", action="store_true")
     mode.add_argument("--full", action="store_true", help="every test file in every group: land's suite")
-    mode.add_argument("--hunt", action="store_true", help="repeat mini suites on unchanged origin/main; --hunt --help for bounds")
     mode.add_argument("--update-locks", metavar="ID")
     parser.add_argument("--base", default="origin/main")
     parser.add_argument("--ios-host", choices=("local", "mini"), default="local",
@@ -1317,10 +1313,8 @@ def main(argv: list[str]) -> int:
                         help="maximum concurrent iOS shards and real-UI journey lanes (default: 1)")
     parser.add_argument("--skip", default="", help=f"comma-separated runner groups to skip explicitly: {', '.join(SKIPPABLE)}")
     parser.add_argument("--plan", action="store_true", help="print the selection and steps without running them")
-    parser.add_argument("--gateway-host", choices=("pool", "local", "mini"), default="pool",
-                        help="where the Gateway Vitest and Python test lanes run: the test-host pool (the Mac mini when reachable and idle, "
-                             "else this Mac), this Mac, or the mini (tools/verify/mini.py); the Gateway node lane runs on this Mac "
-                             "unless the mini is named")
+    parser.add_argument("--gateway-host", choices=("local", "mini"), default="local",
+                        help="where the Gateway Vitest, Python and Gateway node test lanes run: this Mac, or the mini (tools/verify/mini.py)")
     args = parser.parse_args(argv)
     on_mini = args.ios_host == "mini" or os.environ.get("TRON_VERIFY_EXECUTION_HOST") == "mini"
     if args.update_locks and on_mini:
@@ -1328,7 +1322,6 @@ def main(argv: list[str]) -> int:
     gateway_host = "local" if args.update_locks else args.gateway_host
     gateway_reason = "--update-locks records goldens here" if args.update_locks else f"--gateway-host {gateway_host}"
     node_host = "mini" if gateway_host == "mini" else "local"
-    node_reason = gateway_reason if node_host == "mini" or gateway_host != "pool" else "the default; --gateway-host mini moves it to the mini"
     skip = {item for item in args.skip.split(",") if item}
     if skip - set(SKIPPABLE):
         parser.error(f"--skip accepts only {', '.join(SKIPPABLE)}")
@@ -1413,13 +1406,11 @@ def main(argv: list[str]) -> int:
     for group, files in sorted(groups.items()):
         print(f"  {group}: {len(files)} file(s){' (skipped by --skip)' if skipped_group(group) else ''}", flush=True)
     if any(group.startswith("gateway") or group == "python" for group in groups if not skipped_group(group)) or selection["deferredTests"]:
-        if gateway_host == "pool":
-            gateway_host, gateway_reason = mini.choose_host()
         print(f"  gateway and python lanes: {'on the Mac mini' if gateway_host == 'mini' else 'on this Mac'} ({gateway_reason})", flush=True)
     else:
         gateway_host, gateway_reason = "local", "no Gateway or Python lane selected"
     if any(group in groups and not skipped_group(group) for group in ('node', 'node-gateway')):
-        print(f"  node lane: {'on the Mac mini' if node_host == 'mini' else 'on this Mac'} ({node_reason})", flush=True)
+        print(f"  node lane: {'on the Mac mini' if node_host == 'mini' else 'on this Mac'} ({gateway_reason})", flush=True)
     if "python-here" in groups and not skipped_group("python-here"):
         print("  python-here lane: on this Mac (its tests read this Mac's Pi session store)", flush=True)
     if "mac-terminal" in groups and not skipped_group("mac-terminal"):
