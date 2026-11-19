@@ -137,7 +137,9 @@ are installed; schema access never evaluates their late-bound service getter.
 - Change/Undo: kernel `SettingsChangePath.change`, `undo`, `applyAgain`.
 - Learned profile: Home `HomeProfileItems.change` / `undo` under `SettingsChangePath.auditSubject`.
 - Outside detection: `OutsideChanges` (`reconcile`, `dispose`).
-- Agent tool and web mark: `tron-settings-extension.ts`.
+- Agent tool, web mark and file-tool guard: `tron-settings-extension.ts`. Its `tool_call` hook refuses `read`,
+  `write` and `edit` of `settings.json`, `mcp.json`, `trust.json` and `auth.json` directly in the agent directory
+  (resolved against the chat's cwd, symlinks and case folded); bash is not guarded.
 
 ## Signals
 
