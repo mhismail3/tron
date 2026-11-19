@@ -127,6 +127,7 @@ export interface ValueType {
   summary?(value: unknown): string;
   compose?(below: unknown, value: unknown): unknown;
   encode?(value: unknown, below: unknown, current: unknown): unknown;
+  onDisk?(value: unknown, label: string): void;
   options?: readonly { value: unknown; label: string; detail?: string }[];
   range?: { min: number; max: number; step?: number; unit?: string };
 }

@@ -16,6 +16,7 @@ import { instanceId } from "../kernel/settings/scope-resolution.js";
 import { formatStoredSetting } from "../kernel/settings/settings-types.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
 import { agentDefinitions, agentDefinitionsDirectory } from "./agent-definitions.js";
+import { carriesSecret } from "../kernel/settings/secret-free.js";
 
 type ProjectObservedStore = Extract<ObservedStore, { root: string }>;
 const isProjectStore = (store: ObservedStore): store is ProjectObservedStore => store.kind === "project" || store.kind === "project-mcp";
@@ -109,6 +110,8 @@ async function projectRemoved(root: string): Promise<boolean> {
 
 const digestOf = (text: string | undefined) => text === undefined ? "" : createHash("sha256").update(text).digest("hex");
 
+const observedValue = (key: string, qualifiers: Qualifiers, value: unknown): ObservedValue => ({ key, ...(Object.keys(qualifiers).length ? { qualifiers } : {}),
+  ...(carriesSecret(value) ? { hash: digestOf(JSON.stringify(value)) } : { value }) });
 const fingerprint = (value: ObservedValue | undefined) => value === undefined ? null : value.hash ?? JSON.stringify(value.value ?? null);
 const subjectOf = (store: ObservedStore) => store.kind === "mcp" || store.kind === "project-mcp" ? "tools.mcp.server"
   : store.kind === "models" ? "accounts.models.provider" : store.kind === "agents" ? "subagents.agent" : undefined;
@@ -155,7 +158,7 @@ export class OutsideChanges {
     const values = new Map<string, ObservedValue>();
     const add = (key: KeyDeclaration, qualifiers: Qualifiers, value: unknown) => {
       if (value === undefined) return;
-      values.set(instanceId(key.id, qualifiers), { key: key.id, ...(Object.keys(qualifiers).length ? { qualifiers } : {}), value });
+      values.set(instanceId(key.id, qualifiers), observedValue(key.id, qualifiers, value));
     };
     for (const key of this.schema.KEYS) {
       const binding = key.layers[layer];
@@ -342,10 +345,10 @@ export class OutsideChanges {
     }
   }
 
-  private async raw(store: ObservedStore): Promise<string | undefined> {
+  private async raw(store: ObservedStore): Promise<string | undefined | null> {
     if (store.kind === "agents") {
-      const definitions = await agentDefinitions(this.agentDir);
-      return definitions === undefined ? undefined : JSON.stringify({ agents: definitions });
+      const definitions = await agentDefinitions(this.agentDir).catch(() => null);
+      return definitions === null ? null : definitions === undefined ? undefined : JSON.stringify({ agents: definitions });
     }
     const path = observedFile(store, this.agentDir);
     try { return await readFile(path, "utf8"); }
@@ -381,6 +384,7 @@ export class OutsideChanges {
       return [];
     }
     const text = await this.raw(store);
+    if (text === null) return [];
     const digest = digestOf(text);
     const at = this.now().toISOString();
     let state = document.stores[id];
@@ -405,7 +409,7 @@ export class OutsideChanges {
       const after = current.get(instance);
       const write = planned?.get(instance);
       if (write) {
-        const landed = write.value === undefined ? after === undefined : after !== undefined && fingerprint(after) === fingerprint(recordSubject(after.key) ? { key: after.key, hash: digestOf(JSON.stringify(write.value)) } : { key: after.key, value: write.value });
+        const landed = write.value === undefined ? after === undefined : after !== undefined && fingerprint(after) === fingerprint(recordSubject(after.key) ? { key: after.key, hash: digestOf(JSON.stringify(write.value)) } : observedValue(after.key, {}, write.value));
         const recorded = applied?.get(write.changeId);
         if (landed && recorded) {
           state.tron[instance] = recorded.changeId;
@@ -432,7 +436,7 @@ export class OutsideChanges {
     replaced: string | undefined, git: { head: string | null; branch: string | null; root: string; path: string } | undefined, at: string): ChangeEntry {
     const subject = recordSubject(value.key);
     const qualifiers = value.qualifiers ?? {};
-    const redacted = subject !== undefined;
+    const redacted = subject !== undefined || before?.hash !== undefined || after?.hash !== undefined;
     const file = observedFile(store, this.agentDir);
     return {
       changeId: randomUUID(), at, actor: { kind: "outside", id: file },

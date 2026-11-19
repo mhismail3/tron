@@ -35,7 +35,10 @@ setting and is not an approval queue.
   changed address or API taps).
 - `subagents-value.ts`: the typed `subagents.settings` value (the closed set of pi-subagents fields in
   `settings.json`) and the `subagents.agent` value (one agent Markdown file whose frontmatter names the
-  qualifier); both refuse credential shapes and secret-named fields.
+  qualifier and that has a description). Values are checked field by field against what pi-subagents accepts
+  (overrides, model scope, watchdog, machines with no local env); both refuse credential shapes and secret-named
+  fields, and refuse to change a stored value that carries one (`onDisk`), so no secret reaches history. An outside
+  value that carries one is observed and recorded by digest only.
 - `secret-free.ts`: the shared secret-shape refusals (credential detection, secret-named query and token names,
   URL checks) that the MCP and provider values both use, with each owner's hint.
 - `settings-record.ts`: durable, byte/row-bounded segments, index recovery and

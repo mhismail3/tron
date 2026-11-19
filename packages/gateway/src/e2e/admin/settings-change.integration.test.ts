@@ -1444,9 +1444,9 @@ describe("outside changes to MCP servers and custom models", () => {
     await until("publication: outside subagent edit", async () => (await outsideEntries(f)).filter(entry => entry.key === "subagents.agent").length === 2);
 
     const home = { actor: { kind: "home" as const, id: "home" }, reason: "Add a reviewer subagent" };
-    const reviewer = { key: "subagents.agent", qualifiers: { agent: "reviewer" }, layer: "global" as const, op: "set" as const, value: "---\nname: reviewer\n---\n\nReview.\n" };
+    const reviewer = { key: "subagents.agent", qualifiers: { agent: "reviewer" }, layer: "global" as const, op: "set" as const, value: "---\nname: reviewer\ndescription: Reviews changes\n---\n\nReview.\n" };
     await expect(f.settingsChanges.change(global, [reviewer], { actor: { kind: "agent", id: "chat" }, reason: "Try" })).rejects.toMatchObject({ code: "invalid_request" });
-    for (const value of ["no frontmatter", "---\nname: other\n---\n", "---\nname: reviewer\napiKey: x\n---\n"]) {
+    for (const value of ["no frontmatter", "---\nname: other\ndescription: d\n---\n", "---\nname: reviewer\ndescription: d\napiKey: x\n---\n", "---\nname: reviewer\n---\n\nReview.\n"]) {
       await expect(f.settingsChanges.change(global, [{ ...reviewer, value }], home)).rejects.toMatchObject({ code: "invalid_request" });
     }
     const review = await f.settingsChanges.change(global, [reviewer], home);
@@ -1456,7 +1456,10 @@ describe("outside changes to MCP servers and custom models", () => {
     expect(await readFile(join(agentsDir, "reviewer.md"), "utf8")).toBe(reviewer.value);
     const settings = { key: "subagents.settings", layer: "global" as const, op: "set" as const, value: { disableBuiltins: false, defaultThinking: "low" } };
     await expect(f.settingsChanges.change(global, [{ ...settings, value: { agentOverrides: { worker: { env: { API_TOKEN: "x" } } } } }], home)).rejects.toMatchObject({ code: "invalid_request" });
-    await expect(f.settingsChanges.change(global, [{ ...settings, value: { unknownField: 1 } }], home)).rejects.toMatchObject({ code: "invalid_request" });
+    for (const value of [{ unknownField: 1 }, { agentOverrides: { worker: "x" } }, { agentOverrides: { worker: { tools: "all" } } },
+      { machines: { mini: { env: { HOME: "/x" } } } }, { watchdog: { unknown: 1 } }, { modelScope: { enforce: true } }]) {
+      await expect(f.settingsChanges.change(global, [{ ...settings, value }], home)).rejects.toMatchObject({ code: "invalid_request" });
+    }
     const settingsReview = await f.settingsChanges.change(global, [settings], home);
     await f.settingsChanges.change(global, [settings], { ...home, actor: { kind: "ui", id: "device:phone" }, confirmationDigest: settingsReview.review!.digest });
     expect((await f.macDocument()).subagents).toEqual(settings.value);
@@ -1467,6 +1470,25 @@ describe("outside changes to MCP servers and custom models", () => {
     const created = (await f.history()).find(entry => entry.key === "subagents.agent" && entry.qualifiers?.agent === "reviewer" && entry.status === "applied")!;
     expect(await f.settingsChanges.undo(created.changeId, { actor: { kind: "ui", id: "device:phone" }, reason: "Remove the reviewer" })).toMatchObject({ status: "applied" });
     expect(existsSync(join(agentsDir, "reviewer.md"))).toBe(false);
+
+    const token = "sk-handwrittensecret0123456789";
+    await writeFile(join(agentsDir, "hand.md"), `---\nname: hand\ndescription: Hand written\n---\n\nUse ${token}.\n`);
+    await until("publication: hand-written subagent", () => f.published("subagents.agent", ["agent", "hand"]));
+    const clean = { ...reviewer, qualifiers: { agent: "hand" }, value: "---\nname: hand\ndescription: Hand written\n---\n\nClean.\n" };
+    await expect(f.settingsChanges.change(global, [clean], home)).rejects.toMatchObject({ code: "conflict" });
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()),
+      subagents: { agentOverrides: { worker: { systemPrompt: `Use ${token}` } } } }));
+    await until("publication: outside secret-bearing subagents settings", async () => (await outsideEntries(f)).filter(entry => entry.key === "subagents.settings").length === 2);
+    expect((await outsideEntries(f)).filter(entry => entry.key === "subagents.settings")[0]).toMatchObject({ redacted: true });
+    await expect(f.settingsChanges.change(global, [settings], home)).rejects.toMatchObject({ code: "conflict" });
+    expect(JSON.stringify(await f.history())).not.toContain(token);
+    expect(await readFile(f.outside.path, "utf8")).not.toContain(token);
+
+    await mkdir(join(agentsDir, "folder.md"));
+    await writeFile(join(agentsDir, "large.md"), `---\nname: large\ndescription: Large\n---\n\n${"x".repeat(70 * 1024)}\n`);
+    await until("publication: large subagent beside a folder named .md", () => f.published("subagents.agent", ["agent", "large"]));
+    expect(await f.published("subagents.agent", ["agent", "large"])).toBe(true);
+    await expect(f.settingsModel.resolve(global)).resolves.toMatchObject({ target: global });
     transcript.push({ case: "outside pi-subagents", detail: await outsideEntries(f) });
   });
 

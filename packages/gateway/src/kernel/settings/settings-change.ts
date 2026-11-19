@@ -588,6 +588,7 @@ export class SettingsChangePath {
       : binding.store === "trust" ? stores.trust[qualifiers.project!]
       : device ? (device.status === "value" ? device.value : undefined)
       : readBinding(stores, store, binding, qualifiers, qualifiedWrite(binding, qualifiers), key.id);
+    if (before !== undefined) key.type.onDisk?.(before, key.label);
     if (request.expected !== undefined && !deepEqual(request.expected, before ?? null)) {
       throw new GatewayError("conflict", `${key.label} changed since it was read; refresh and try again`, false, {
         current: (before ?? null) as never,

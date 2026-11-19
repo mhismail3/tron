@@ -3,6 +3,14 @@ import { redactCredentials } from "../../util/credential-redaction.js";
 
 export const SECRET_NAME = /(token|secret|password|passwd|api[-_]?key|apikey|credential|bearer|authorization)/iu;
 
+export function carriesSecret(value: unknown): boolean {
+  const text = JSON.stringify(value) ?? "";
+  if (redactCredentials(text) !== text) return true;
+  const named = (node: unknown): boolean => !!node && typeof node === "object"
+    && Object.entries(node).some(([name, child]) => (!Array.isArray(node) && SECRET_NAME.test(name)) || named(child));
+  return named(value);
+}
+
 export function refuseSetting(label: string, reason: string): never {
   throw new GatewayError("invalid_request", `${label} ${reason}`);
 }
