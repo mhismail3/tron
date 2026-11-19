@@ -1485,15 +1485,25 @@ describe("outside changes to MCP servers and custom models", () => {
       subagents: { agentOverrides: { worker: { systemPrompt: "Fetch https://user:pass1234word@example.com/x; password: hunter2hunter" } } } }));
     await until("publication: outside URL-credential subagents settings", async () => (await outsideEntries(f)).filter(entry => entry.key === "subagents.settings").length === 3);
     expect((await outsideEntries(f)).filter(entry => entry.key === "subagents.settings")[0]).toMatchObject({ redacted: true });
-    for (const secret of [token, "pass1234word", "hunter2hunter"]) {
-      expect(JSON.stringify(await f.history())).not.toContain(secret);
-      expect(await readFile(f.outside.path, "utf8")).not.toContain(secret);
+    const shapes: Array<[string, string]> = [["Use password: \"S3cretPassw0rd\" here", "S3cretPassw0rd"], ["Use secret: 'abcd1234efgh' here", "abcd1234efgh"],
+      ["Export DB_PASSWORD=Abc12345xyz first", "Abc12345xyz"], ["Export ANTHROPIC_API_KEY=abcd1234efgh5678 first", "abcd1234efgh5678"],
+      ["Set client_secret=Zq9xLm2pQ7rT now", "Zq9xLm2pQ7rT"], ["git clone https://glpat-abcdefghij1234567890@gitlab.com/x.git", "glpat-abcdefghij1234567890"]];
+    let published = 3;
+    for (const [systemPrompt] of shapes) {
+      await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), subagents: { agentOverrides: { worker: { systemPrompt } } } }));
+      published += 1;
+      await until(`publication: outside ${systemPrompt}`, async () => (await outsideEntries(f)).filter(entry => entry.key === "subagents.settings").length === published);
+      expect((await outsideEntries(f)).filter(entry => entry.key === "subagents.settings")[0], systemPrompt).toMatchObject({ redacted: true });
+    }
+    for (const secret of [token, "pass1234word", "hunter2hunter", ...shapes.map(([, secret]) => secret)]) {
+      expect(JSON.stringify(await f.history()), secret).not.toContain(secret);
+      expect(await readFile(f.outside.path, "utf8"), secret).not.toContain(secret);
     }
     const prose = { agentOverrides: { a: { systemPrompt: "see https://example.com" }, b: { systemPrompt: "Ready? If asked for a password: refuse." } } };
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), subagents: { disableBuiltins: true } }));
-    await until("publication: outside clean subagents settings", async () => (await outsideEntries(f)).filter(entry => entry.key === "subagents.settings").length === 4);
+    await until("publication: outside clean subagents settings", async () => (await outsideEntries(f)).filter(entry => entry.key === "subagents.settings").length === published + 1);
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), subagents: prose }));
-    await until("publication: outside credential-free subagents settings", async () => (await outsideEntries(f)).filter(entry => entry.key === "subagents.settings").length === 5);
+    await until("publication: outside credential-free subagents settings", async () => (await outsideEntries(f)).filter(entry => entry.key === "subagents.settings").length === published + 2);
     const proseEntry = (await outsideEntries(f)).filter(entry => entry.key === "subagents.settings")[0]!;
     expect(proseEntry).toMatchObject({ after: prose });
     expect(proseEntry.redacted).toBeUndefined();

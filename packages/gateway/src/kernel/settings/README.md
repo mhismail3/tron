@@ -38,7 +38,7 @@ setting and is not an approval queue.
   qualifier and that has a description). Values are checked field by field against what pi-subagents accepts
   (overrides, model scope, watchdog, machines with no local env). `secret-free.ts` `carriesSecret` detects what
   the shared `redactCredentials` detects (known token formats, `Bearer` values, private keys) plus URL userinfo
-  (`user:pass@`), a secret-named URL query parameter, and a `password:`/`secret=`-style pair whose value is at least
+  (`user@` or `user:pass@`), a secret-named URL query parameter, and a `password:`/`secret=`-style pair whose value is at least
   8 characters with a digit, each matched within one string value (never across fields), and secret-named fields; both values refuse such content, refuse to change a
   stored value that carries it (`onDisk`), and an outside value that carries it is observed and recorded by digest
   only. A secret in a shape none of these detect is not recognised.

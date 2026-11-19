@@ -97,8 +97,8 @@ export const subagentSettingsType: ValueType = {
 };
 
 const frontmatterOf = (text: string) => /^---\n([\s\S]*?)\n---(?:\n|$)/u.exec(text)?.[1];
-const agentSecret = (text: string) => carriesSecret(text)
-  || [...(frontmatterOf(text) ?? "").matchAll(/^\s*([A-Za-z0-9_-]+)\s*:/gmu)].some(field => SECRET_NAME.test(field[1]!));
+const secretNamedField = (text: string) => [...(frontmatterOf(text) ?? "").matchAll(/^\s*([A-Za-z0-9_-]+)\s*:/gmu)].some(field => SECRET_NAME.test(field[1]!));
+const agentSecret = (text: string) => carriesSecret(text) || secretNamedField(text);
 
 function validateAgentDefinition(raw: unknown, label: string, name: string | undefined): string {
   if (typeof raw !== "string") throw new GatewayError("invalid_request", `${label} must be the agent's Markdown text`);
@@ -106,7 +106,7 @@ function validateAgentDefinition(raw: unknown, label: string, name: string | und
   if (frontmatter === undefined) refuse(label, "must open with YAML frontmatter between --- lines");
   if (!new RegExp(`^name:\\s*${(name ?? "").replace(/[.]/gu, "\\.")}\\s*$`, "mu").test(frontmatter)) refuse(label, `frontmatter must declare name: ${name}`);
   if (!/^description:\s*\S/mu.test(frontmatter)) refuse(label, "frontmatter must declare a description; pi-subagents skips an agent without one");
-  if (agentSecret(raw)) refuse(label, `carries a credential or a secret-named field; ${HINT}`);
+  if (secretNamedField(raw)) refuse(label, `carries a credential or a secret-named field; ${HINT}`);
   refuseSecret(raw, label);
   return raw;
 }

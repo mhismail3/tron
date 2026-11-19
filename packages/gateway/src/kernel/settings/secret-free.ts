@@ -3,9 +3,9 @@ import { redactCredentials } from "../../util/credential-redaction.js";
 
 export const SECRET_NAME = /(token|secret|password|passwd|api[-_]?key|apikey|credential|bearer|authorization)/iu;
 
-const URL_USERINFO = /\b[a-z][a-z0-9+.-]*:\/\/[^\s/@]+:[^\s/@]+@/iu;
+const URL_USERINFO = /\b[a-z][a-z0-9+.-]*:\/\/[^\s/@]+(?::[^\s/@]+)?@/iu;
 const URL_SECRET_QUERY = /\b[a-z][a-z0-9+.-]*:\/\/[^\s?#]*\?(?:[^\s#]*&)?[^\s=&#]*(?:token|secret|password|passwd|api[-_]?key|apikey|credential|bearer|authorization)[^\s=&#]*=/iu;
-const SECRET_PAIR = /\b(?:authorization|api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|password|secret)\s*[:=]\s*(?=[^\s,;'"]*\d)[^\s,;'"]{8,}/iu;
+const SECRET_PAIR = /(?<![a-z0-9])(?:authorization|api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|password|secret)\s*[:=]\s*["']?(?=[^\s,;'"]*\d)[^\s,;'"]{8,}/iu;
 
 function textCarriesSecret(text: string): boolean {
   return redactCredentials(text) !== text || URL_USERINFO.test(text) || URL_SECRET_QUERY.test(text) || SECRET_PAIR.test(text);
