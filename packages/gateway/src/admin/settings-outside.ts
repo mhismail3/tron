@@ -8,7 +8,7 @@ import { durableAtomicWriteJson } from "../foundation/durable-json.js";
 import { readJsonDocument } from "../foundation/json.js";
 import { gitHeadState, projectSettingsPath, type GitHeadState } from "./project-settings-writer.js";
 import type { ChangeEntry, SettingsChangeRecord } from "../kernel/settings/settings-record.js";
-import { type GitResult, type Qualifiers } from "../kernel/settings/tool-contract.js";
+import { type Qualifiers } from "../kernel/settings/tool-contract.js";
 import type { OutsideMark, ObservedStore, PlannedWrite } from "../kernel/settings/settings-types.js";
 import { recordSubject, type SettingsSchema, type Binding, type KeyDeclaration } from "../kernel/settings/settings-schema.js";
 import { readPath } from "../kernel/settings/settings-resolver.js";
@@ -277,7 +277,7 @@ export class OutsideChanges {
     });
   }
 
-  async end(writes: readonly PlannedWrite[], applied: ReadonlyMap<string, { git?: GitResult; changeId: string }>): Promise<void> {
+  async end(writes: readonly PlannedWrite[], applied: ReadonlyMap<string, { changeId: string }>): Promise<void> {
     const entries: ChangeEntry[] = [];
     await this.mutex.run(async () => {
       const byStore = new Map<string, { store: ObservedStore; writes: PlannedWrite[] }>();
@@ -358,7 +358,7 @@ export class OutsideChanges {
     return document === undefined ? undefined : this.piInstances(document, "project");
   }
 
-  private async compare(document: ObservedDocument, store: ObservedStore, planned?: ReadonlyMap<string, PlannedWrite>, applied?: ReadonlyMap<string, { git?: GitResult; changeId: string }>,
+  private async compare(document: ObservedDocument, store: ObservedStore, planned?: ReadonlyMap<string, PlannedWrite>, applied?: ReadonlyMap<string, { changeId: string }>,
     knownHead?: GitHeadState, headKnown = false): Promise<ChangeEntry[]> {
     const id = storeId(store);
     if (isProjectStore(store) && await projectRemoved(store.root)) {
@@ -370,9 +370,9 @@ export class OutsideChanges {
     const digest = digestOf(text);
     const at = this.now().toISOString();
     let state = document.stores[id];
+    if (state && !planned && state.digest === digest) return [];
     const head = !isProjectStore(store) ? undefined : headKnown ? knownHead : await gitHeadState(store.root);
     const git = head && store.kind === "project-mcp" ? { ...head, path: join(dirname(head.path), "mcp.json") } : head;
-    if (state && !planned && state.digest === digest) return [];
     const current = await this.values(store, text);
     if (!current) return [];
     this.changed = true;

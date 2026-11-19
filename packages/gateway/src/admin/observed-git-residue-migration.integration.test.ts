@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { acquireAgentRuntimeLock } from "../sessions/agent-runtime-lock.js";
 import { applyObservedGitResidue, planObservedGitResidue, restoreObservedGitResidue } from "./observed-git-residue-migration.js";
 
 const roots: string[] = [];
@@ -29,7 +30,7 @@ describe("observed settings git residue migration", () => {
     expect(plan.stores).toBe(2);
     expect(await readFile(path)).toEqual(original);
     const backup = join(home, "backup");
-    expect(await applyObservedGitResidue(plan, backup)).toBe(true);
+    expect(await applyObservedGitResidue(plan, backup, join(home, "agent"))).toBe(true);
     const migrated = JSON.parse(await readFile(path, "utf8")) as { version: number; stores: Record<string, Record<string, unknown>> };
     expect(migrated).toEqual({ version: 1, stores: {
       global: STORES.global,
@@ -38,16 +39,37 @@ describe("observed settings git residue migration", () => {
     } });
     expect(await readFile(join(backup, "observed.json"))).toEqual(original);
     expect((await planObservedGitResidue(home)).stores).toBe(0);
-    expect(await restoreObservedGitResidue(backup)).toBe(true);
+    expect(await restoreObservedGitResidue(backup, join(home, "agent"))).toBe(true);
     expect(await readFile(path)).toEqual(original);
-    expect(await restoreObservedGitResidue(backup)).toBe(false);
+    expect(await restoreObservedGitResidue(backup, join(home, "agent"))).toBe(false);
   });
 
   it("refuses a non-empty backup directory and leaves the store untouched", async () => {
     const { home, path, original } = await seed();
     const backup = join(home, "backup");
     await mkdir(backup); await writeFile(join(backup, "other"), "x");
-    await expect(applyObservedGitResidue(await planObservedGitResidue(home), backup)).rejects.toThrow("is not empty");
+    await expect(applyObservedGitResidue(await planObservedGitResidue(home), backup, join(home, "agent"))).rejects.toThrow("is not empty");
+    expect(await readFile(path)).toEqual(original);
+  });
+
+  it("refuses apply and restore while a Gateway owns the agent directory, leaving the store untouched", async () => {
+    const { home, path, original } = await seed();
+    const agentDir = join(home, "agent");
+    const backup = join(home, "backup");
+    const plan = await planObservedGitResidue(home);
+    let release = await acquireAgentRuntimeLock(agentDir);
+    try {
+      await expect(applyObservedGitResidue(plan, backup, agentDir)).rejects.toThrow("Another Tron Gateway");
+      expect(await readFile(path)).toEqual(original);
+    } finally { await release(); }
+    expect(await applyObservedGitResidue(plan, backup, agentDir)).toBe(true);
+    const migrated = await readFile(path);
+    release = await acquireAgentRuntimeLock(agentDir);
+    try {
+      await expect(restoreObservedGitResidue(backup, agentDir)).rejects.toThrow("Another Tron Gateway");
+      expect(await readFile(path)).toEqual(migrated);
+    } finally { await release(); }
+    expect(await restoreObservedGitResidue(backup, agentDir)).toBe(true);
     expect(await readFile(path)).toEqual(original);
   });
 });

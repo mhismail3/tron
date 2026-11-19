@@ -22,10 +22,8 @@ export type Qualifiers = Partial<Record<QualifierName, string>>;
 export type ChangeStatus = "started" | "applied" | "failed" | "outside";
 
 export interface GitResult {
-  root: string | null;
+  root: string;
   path: string;
-  reason?: string;
-  warning?: string;
   head?: string;
   branch?: string;
 }
@@ -106,7 +104,6 @@ export interface ChangeOutcome {
   layer: LayerId;
   status: ChangeStatus;
   revision?: number;
-  git?: GitResult;
   confirm?: string;
   result?: unknown;
   error?: { code: string; message: string };

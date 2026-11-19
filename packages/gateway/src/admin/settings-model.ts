@@ -1,4 +1,4 @@
-import { type SettingsTarget, type GitResult, type ChangeResult, type ConfirmChange } from "../kernel/settings/tool-contract.js";
+import { type SettingsTarget, type ChangeResult, type ConfirmChange } from "../kernel/settings/tool-contract.js";
 import type { MacTerminalService } from "../security/mac-terminal-service.js";
 import { setPath, unsetPath, qualifiedWrite, fillPath, type SessionSettingsSource } from "../kernel/settings/settings-model.js";
 import type { ChangeContext, SettingsWriters, Planned } from "../kernel/settings/settings-change.js";
@@ -217,7 +217,7 @@ export class SettingsStoreAdapter {
     await assertNewModelChoice(runtime, ref.provider, ref.id);
   }
 
-  async applyStore(bundleTarget: SettingsTarget, stores: SettingsStores, plan: Planned, value: unknown, bundleContext: ChangeContext, writers: Pick<SettingsWriters, "setTrust">, current: unknown): Promise<{ revision?: number; git?: GitResult; result?: unknown }> {
+  async applyStore(bundleTarget: SettingsTarget, stores: SettingsStores, plan: Planned, value: unknown, bundleContext: ChangeContext, writers: Pick<SettingsWriters, "setTrust">, current: unknown): Promise<{ revision?: number; result?: unknown }> {
     const { binding, qualifiers } = plan;
     const target = plan.target ?? bundleTarget;
     const context = plan.session ? { ...bundleContext, session: plan.session } : bundleContext;

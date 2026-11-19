@@ -358,8 +358,8 @@ export class GatewayService {
     dependencies.settingsModel?.owner.outsideChanges?.observe({
       providerFilesChanged: () => dependencies.globalProviderResources.requestReload(),
       outside: async (entries) => {
-        const outside = entries.filter(entry => entry.status === "outside" && !recordSubject(entry.key));
-        this.recordSubjectsChangedOutside(entries.filter(entry => entry.status === "outside" && recordSubject(entry.key)));
+        const outside = entries.filter(entry => !recordSubject(entry.key));
+        this.recordSubjectsChangedOutside(entries.filter(entry => recordSubject(entry.key)));
         for (const file of new Set(outside.map(entry => entry.actor.id))) {
           const group = outside.filter(entry => entry.actor.id === file);
           await this.settingsChanged(group[0]!.target, group.map(entry => ({
