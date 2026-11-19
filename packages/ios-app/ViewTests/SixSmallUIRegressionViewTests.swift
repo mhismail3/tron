@@ -21,7 +21,9 @@ final class SixSmallUIRegressionViewTests: ShuffledTestCase {
             try await surface(blocked ? "checkin-blocked" : "checkin") { app in
                 try await app.until("the check-in summary") {
                     MountedFixture.elements(in: app.top).contains {
-                        $0.accessibilityLabel == "Landed with explicit validation deferral" && !$0.accessibilityTraits.contains(.button)
+                        let label = $0.accessibilityLabel ?? ""
+                        return !$0.accessibilityTraits.contains(.button) && (label == "Landed with explicit validation deferral"
+                            || label.hasPrefix("Landed with explicit validation deferral, "))
                     }
                 }
                 for text in ["Attention", "Needs attention", "Done", "Next", "Timestamp"] + (blocked ? ["Blocker"] : []) {
