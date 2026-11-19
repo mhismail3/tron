@@ -23,31 +23,43 @@ enum MenuBarLogReader {
         for index in 0..<segmentCount where newestFirst.count < limit {
             let url = logs.appendingPathComponent(index == 0 ? gatewayLogName : "\(gatewayLogName).\(index)")
             guard FileManager.default.fileExists(atPath: url.path) else { continue }
-            guard let lines = tailLines(of: url) else {
+            guard appendNewest(of: url, into: &newestFirst, limit: limit) else {
                 return .failure(.unreadableOutput("The Gateway log could not be read."))
-            }
-            for line in lines.reversed() {
-                guard let entry = try? JSONDecoder().decode(RecentLogEntry.self, from: line) else { continue }
-                newestFirst.append(entry)
-                if newestFirst.count == limit { break }
             }
         }
         return .success(format(Array(newestFirst.reversed())))
     }
 
-    private static func tailLines(of url: URL) -> [Data]? {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+    private static func appendNewest(of url: URL, into newestFirst: inout [RecentLogEntry], limit: Int) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
         defer { try? handle.close() }
-        guard let end = try? handle.seekToEnd() else { return nil }
+        guard var end = try? handle.seekToEnd() else { return false }
         let window = UInt64(tailBytesPerSegment)
-        let start = end > window ? end - window : 0
-        guard (try? handle.seek(toOffset: start)) != nil, let data = try? handle.readToEnd() else { return nil }
-        var body = data[...]
-        if start > 0 {
-            guard let newline = body.firstIndex(of: 0x0A) else { return [] }
-            body = body[body.index(after: newline)...]
+        var carry = Data()
+        while newestFirst.count < limit, end > 0 {
+            let start = end > window ? end - window : 0
+            guard (try? handle.seek(toOffset: start)) != nil,
+                  let chunk = try? handle.read(upToCount: Int(end - start)) else { return false }
+            var body = chunk + carry
+            if start > 0 {
+                guard let newline = body.firstIndex(of: 0x0A) else {
+                    carry = body
+                    end = start
+                    continue
+                }
+                carry = Data(body[..<newline])
+                body = Data(body[body.index(after: newline)...])
+            } else {
+                carry = Data()
+            }
+            for line in body.split(separator: 0x0A, omittingEmptySubsequences: true).reversed() {
+                guard let entry = try? JSONDecoder().decode(RecentLogEntry.self, from: Data(line)) else { continue }
+                newestFirst.append(entry)
+                if newestFirst.count == limit { break }
+            }
+            end = start
         }
-        return body.split(separator: 0x0A, omittingEmptySubsequences: true).map { Data($0) }
+        return true
     }
 
     static func format(_ records: [RecentLogEntry]) -> String {
