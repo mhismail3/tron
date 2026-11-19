@@ -20,6 +20,7 @@ import type { McpServerValue } from "../kernel/settings/mcp-server-value.js";
 import type { LessonMoveValue } from "../kernel/settings/lesson-move-value.js";
 import type { ModelProviderValue } from "../kernel/settings/model-provider-value.js";
 import type { ModelConfigService } from "./model-config-service.js";
+import { agentDefinition, setAgentDefinition } from "./agent-definitions.js";
 import type { TrustService } from "../kernel/resources/trust-service.js";
 import { targetLayers } from "../kernel/settings/settings-resolver.js";
 import type { SettingsSchema } from "../kernel/settings/settings-schema.js";
@@ -76,6 +77,7 @@ export class SettingsStoreAdapter {
       case "tools.mcp.server": return this.mcp().server(instance);
       case "accounts.models.provider": return this.modelConfig().provider(instance);
       case "context.lesson": return this.lessonMoves().value(instance);
+      case "subagents.agent": return agentDefinition(this.dependencies.agentDir, instance);
       default: throw new GatewayError("unsupported", `${subject} has no record owner`);
     }
   }
@@ -138,7 +140,7 @@ export class SettingsStoreAdapter {
     if (target.kind === "session" && !session) throw new GatewayError("invalid_request", "A session target needs its session");
     const cwd = target.kind === "project" ? target.cwd : target.kind === "session" && !session!.home ? session!.cwd : undefined;
     const inspection = cwd === undefined ? undefined : await stage("settings.store.trust-inspection", () => this.dependencies.trust.inspect(cwd));
-    const observed: ObservedStore[] = [{ kind: "global" }, { kind: "trust" }, { kind: "mcp" }, { kind: "models" },
+    const observed: ObservedStore[] = [{ kind: "global" }, { kind: "trust" }, { kind: "mcp" }, { kind: "models" }, { kind: "agents" },
       ...(inspection ? projectStores(inspection.projectDir) : [])];
     const head = storeState && inspection
       ? await stage("settings.store.project-git-head", () => gitHeadState(inspection.projectDir))
@@ -254,6 +256,9 @@ export class SettingsStoreAdapter {
         return {};
       case "models":
         await this.modelConfig().setProvider(qualifiers.provider!, unset ? undefined : value as ModelProviderValue);
+        return {};
+      case "agents":
+        await setAgentDefinition(this.dependencies.agentDir, qualifiers.agent!, unset ? undefined : value as string);
         return {};
       case "lesson":
         await this.lessonMoves().set(qualifiers.lesson!, unset ? undefined : value as LessonMoveValue, plan.changeId);

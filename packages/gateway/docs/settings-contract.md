@@ -50,7 +50,7 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 ## Keys
 
 <!-- tron docs settings -->
-51 keys, declared in `packages/gateway/src/kernel/settings/settings-schema.ts` (`KEYS`).
+52 keys, declared in `packages/gateway/src/kernel/settings/settings-schema.ts` (`KEYS`).
 
 | Key | Qualifier | Group | Layers | Home layers | Timing | Effect | Native tap |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -102,6 +102,7 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 | `sources.themes` | — | sources | project, global | as allowed | fixed | reload | — |
 | `sources.packages` | — | sources | project, global | as allowed | fixed | reload | install |
 | `sources.npmCommand` | — | sources | global | as allowed | live | next-change | trust |
+| `subagents.settings` | — | workers | global | as allowed | live | next-request | trust |
 | `notifications.push.inputNeeded` | — | notifications | global | none | live | next-request | privacy |
 | `notifications.push.finished` | — | notifications | global | none | live | next-request | privacy |
 | `notifications.push.waiting` | — | notifications | global | none | live | next-request | privacy |
@@ -113,6 +114,7 @@ Record subjects (`RECORD_SUBJECTS`), changed per instance through the same path:
 | `tools.mcp.server` | tools | server |
 | `accounts.models.provider` | accounts | provider |
 | `context.lesson` | context | lesson |
+| `subagents.agent` | workers | agent |
 <!-- /tron docs -->
 
 Install telemetry is not a setting: `gateway-main.ts` sets `PI_TELEMETRY=0` before any SDK work, so a hand-written `enableInstallTelemetry` cannot re-enable it; the pin also removes provider attribution headers and is inherited by child processes the Gateway starts.
@@ -123,6 +125,7 @@ Other schema fields: `subgroup`, `type`, `options` or `optionsSource` (`catalog.
 fields (`label`, `help`, `order`, `importance`, `control`,
 `confirm`, `entry`). Record subjects compare by digest. `tools.mcp.server` is writable through this path at the Global layer only, with writers `ui` and `home` (agents other than Home are refused): its value is `{command, args?}` or `{url, headers?}` plus optional `enabled` and `exposure`. `headers` holds only `Authorization`: this server's Keychain bearer reference `{source: "keychain", service: "tron.mcp", account: "tron-mcp-<server>", format: "bearer"}`, which Pi resolves at connection; the token itself is stored only by `mcp.token.set`. Other secret-bearing fields (env, other headers, oauth, credentials in a URL or argument) are refused without echo; an existing record with fields outside that set is refused for change, and edited by hand. Command text, args and URLs are refused when they carry a credential shape (the shared `redactCredentials` detector) or a secret-named token. Adding or enabling a server, changing its command or address, adding its bearer reference, or raising its visibility (hidden, then codemode or deferred, then direct, the order Pi uses for which tools the model is shown) taps; disabling, removing or lowering visibility applies. Absent exposure means codemode. Its effect is `reload`: the freshness owner marks live sessions stale and reloads them at idle.
 `accounts.models.provider` is writable through this path at the Global layer only, with writers `ui` and `home`: its value is `{baseUrl, api, name?, models?}` and each model is `{id, name?, reasoning?, input?, contextWindow?, maxTokens?}`; credentials (`apiKey`, `headers`, `authHeader`), `oauth`, `compat` and `modelOverrides` are refused without echo, and so is an existing provider that carries any of them, which is edited in `models.json` or the app. Adding a provider or changing its address or API taps; other changes apply. Its effect is `next-request`: the shared runtime refreshes before the change returns, so the model list reflects it at once.
+`subagents.settings` is the `subagents` block of the Mac `settings.json` that pi-subagents reads (default model, provider and thinking, agent overrides, scan and exclude directories, machines, model scope, watchdog); it is Global-only with writers `ui` and `home`, closed to those fields, and refused when it carries a credential shape or a secret-named field. Setting it taps; unsetting applies. `subagents.agent` (qualifier `agent`) is one user subagent file `agents/<agent>.md` in the agent directory: Markdown whose frontmatter declares `name: <agent>`, at most 64 KiB, with no credential shape or secret-named frontmatter field. Adding or changing one taps; removing applies. Both take effect at the next subagent launch (`next-request`). Hand or pi-subagents edits of either reach history as outside changes; definitions compare by digest.
 
 ## Timing
 
@@ -213,11 +216,11 @@ acceptance; supported edits announce through the existing fenced worker steer.
 
 `OutsideChanges` (`settings-outside.ts`) compares stores with the values last observed
 (`<tronHome>/state/settings/observed.json`) on every read and on debounced directory events:
-the Mac `settings.json`, `trust.json`, `mcp.json`, `models.json` and each known project's `.pi/`
+the Mac `settings.json`, `trust.json`, `mcp.json`, `models.json`, the user subagent definitions in `agents/*.md` and each known project's `.pi/`
 files; first sight is the baseline. Known projects have no count bound: a project leaves
 observed state only when its root no longer exists on disk. A comparison that changed nothing but the
 read instant writes nothing, so reads never queue behind a durable write. Each differing instance is one `outside`
-entry (with `HEAD` and branch for repository files); MCP servers and custom providers
+entry (with `HEAD` and branch for repository files); MCP servers, custom providers and subagent definitions
 compare by digest and report only added/changed/removed, then `mcp.changed` or `settings.changed`. Tron's own `mcp.json` writes are bracketed (`begin`/`end`); a provider written through the change path is bracketed the same way and refreshes the runtime before the change returns.
 
 ## Project git state

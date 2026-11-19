@@ -15,6 +15,7 @@ import { readPath } from "../kernel/settings/settings-resolver.js";
 import { instanceId } from "../kernel/settings/scope-resolution.js";
 import { formatStoredSetting } from "../kernel/settings/settings-types.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
+import { agentDefinitions, agentDefinitionsDirectory } from "./agent-definitions.js";
 
 type ProjectObservedStore = Extract<ObservedStore, { root: string }>;
 const isProjectStore = (store: ObservedStore): store is ProjectObservedStore => store.kind === "project" || store.kind === "project-mcp";
@@ -57,6 +58,7 @@ function observedFile(store: ObservedStore, agentDir: string): string {
     case "trust": return join(agentDir, "trust.json");
     case "mcp": return join(agentDir, "mcp.json");
     case "models": return join(agentDir, "models.json");
+    case "agents": return agentDefinitionsDirectory(agentDir);
     case "project": return projectSettingsPath(store.root);
     case "project-mcp": return join(store.root, ".pi", "mcp.json");
   }
@@ -67,6 +69,7 @@ export function observedInstance(key: KeyDeclaration, layer: string, binding: Bi
   const fixed = key.fixed ?? {};
   if (binding.store === "mcp") return layer === "global" ? { store: { kind: "mcp" }, instance: instanceId(key.id, qualifiers) } : undefined;
   if (binding.store === "models") return layer === "global" ? { store: { kind: "models" }, instance: instanceId(key.id, qualifiers) } : undefined;
+  if (binding.store === "agents") return layer === "global" ? { store: { kind: "agents" }, instance: instanceId(key.id, qualifiers) } : undefined;
   if (binding.store === "trust") {
     return qualifiers.project === undefined ? undefined : { store: { kind: "trust" }, instance: instanceId(key.id, { ...fixed, project: qualifiers.project }) };
   }
@@ -107,7 +110,8 @@ async function projectRemoved(root: string): Promise<boolean> {
 const digestOf = (text: string | undefined) => text === undefined ? "" : createHash("sha256").update(text).digest("hex");
 
 const fingerprint = (value: ObservedValue | undefined) => value === undefined ? null : value.hash ?? JSON.stringify(value.value ?? null);
-const subjectOf = (store: ObservedStore) => store.kind === "mcp" || store.kind === "project-mcp" ? "tools.mcp.server" : store.kind === "models" ? "accounts.models.provider" : undefined;
+const subjectOf = (store: ObservedStore) => store.kind === "mcp" || store.kind === "project-mcp" ? "tools.mcp.server"
+  : store.kind === "models" ? "accounts.models.provider" : store.kind === "agents" ? "subagents.agent" : undefined;
 
 export class OutsideChanges {
   private readonly mutex = new AsyncMutex();
@@ -199,6 +203,7 @@ export class OutsideChanges {
       const document = await this.load();
       for (const store of stores) {
         if (isProjectStore(store)) this.watchProject(store.root);
+        if (store.kind === "agents") this.watchAgents();
         if ((this.writing.get(storeId(store)) ?? 0) > 0) continue;
         entries.push(...await this.compare(document, store, undefined, undefined, isProjectStore(store) ? heads?.get(store.root) : undefined, isProjectStore(store) && heads?.has(store.root)));
       }
@@ -213,7 +218,8 @@ export class OutsideChanges {
     if (this.disposal) throw new Error("Outside settings comparison is disposed");
     this.watching = true;
     this.failed = failed;
-    this.watchDirectory("agent", this.agentDir, () => true, [{ kind: "global" }, { kind: "trust" }, { kind: "mcp" }, { kind: "models" }]);
+    this.watchDirectory("agent", this.agentDir, () => true, [{ kind: "global" }, { kind: "trust" }, { kind: "mcp" }, { kind: "models" }, { kind: "agents" }]);
+    this.watchAgents();
     this.watchDirectory("auth", this.agentDir, name => name === "auth.json", [], () => this.observer?.providerFilesChanged?.());
   }
 
@@ -234,6 +240,10 @@ export class OutsideChanges {
       if (errors.length) throw new AggregateError(errors, "Outside settings reconciliation failed during disposal");
     })();
     return this.disposal;
+  }
+
+  private watchAgents(): void {
+    if (this.watching && !this.watchers.has("agents")) this.watchDirectory("agents", agentDefinitionsDirectory(this.agentDir), name => name.endsWith(".md"), [{ kind: "agents" }]);
   }
 
   private watchProject(root: string): void {
@@ -333,6 +343,10 @@ export class OutsideChanges {
   }
 
   private async raw(store: ObservedStore): Promise<string | undefined> {
+    if (store.kind === "agents") {
+      const definitions = await agentDefinitions(this.agentDir);
+      return definitions === undefined ? undefined : JSON.stringify({ agents: definitions });
+    }
     const path = observedFile(store, this.agentDir);
     try { return await readFile(path, "utf8"); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }

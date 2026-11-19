@@ -8,7 +8,7 @@ import { arrayOfStrings, boolean, integer, object, oneOf, string, text } from ".
 
 
 
-export type ObservedStore = { kind: "global" } | { kind: "trust" } | { kind: "mcp" } | { kind: "models" }
+export type ObservedStore = { kind: "global" } | { kind: "trust" } | { kind: "mcp" } | { kind: "models" } | { kind: "agents" }
   | { kind: "project"; root: string } | { kind: "project-mcp"; root: string };
 
 export interface PlannedWrite { store: ObservedStore; instance: string; changeId: string; value: unknown }

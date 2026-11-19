@@ -33,6 +33,9 @@ setting and is not an approval queue.
   so no credential (`apiKey`, `headers`, `authHeader`), `oauth`, `compat` or `modelOverrides` can enter the
   record; the on-disk projection refuses an existing provider it cannot carry, and the tap rule (a new provider or a
   changed address or API taps).
+- `subagents-value.ts`: the typed `subagents.settings` value (the closed set of pi-subagents fields in
+  `settings.json`) and the `subagents.agent` value (one agent Markdown file whose frontmatter names the
+  qualifier); both refuse credential shapes and secret-named fields.
 - `secret-free.ts`: the shared secret-shape refusals (credential detection, secret-named query and token names,
   URL checks) that the MCP and provider values both use, with each owner's hint.
 - `settings-record.ts`: durable, byte/row-bounded segments, index recovery and

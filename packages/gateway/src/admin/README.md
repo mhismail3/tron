@@ -108,7 +108,8 @@ are installed; schema access never evaluates their late-bound service getter.
   indexed audit/groups refuse rather than restoring partial state.
 - Tron's own writes are bracketed (`begin`/`end`) and never reported as
   outside changes; Tron never re-applies a value on its own.
-- Any agent-directory event prompts the existing coalesced four-store digest scan:
+- Any agent-directory event prompts the existing coalesced digest scan of `settings.json`, `trust.json`,
+  `mcp.json`, `models.json` and `agents/*.md` (the `agents` folder has its own watch):
   native filenames may omit the changed settings file. Unchanged digests skip their
   canonical readers and emit no audit or push; accepted scans and observers are
   joined by `dispose`.

@@ -1427,6 +1427,49 @@ describe("outside changes to MCP servers and custom models", () => {
     expect(await providers()).toEqual({ "hand-provider": { ...provider, baseUrl: "https://hand-models.invalid/v1", apiKey: secret } });
     transcript.push({ case: "outside mcp and models", detail: await outsideEntries(f) });
   });
+  caseIt("audits outside pi-subagents settings and agent files, and writes them through the typed change path", async owner => {
+    const f = await stagedFixture(owner);
+    const global = { kind: "global" as const };
+    const agentsDir = join(f.agentDir, "agents");
+    const scout = "---\nname: scout\ndescription: Fast recon\n---\n\nRead before you write.\n";
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), subagents: { disableBuiltins: true } }));
+    await until("publication: outside subagents settings", () => f.published("subagents.settings"));
+    expect((await outsideEntries(f)).find(entry => entry.key === "subagents.settings")).toMatchObject({ op: "set", after: { disableBuiltins: true }, actor: { kind: "outside" } });
+    await mkdir(agentsDir, { recursive: true });
+    await writeFile(join(agentsDir, "scout.md"), scout);
+    await until("publication: outside subagent definition", () => f.published("subagents.agent", ["agent", "scout"]));
+    expect((await outsideEntries(f)).find(entry => entry.key === "subagents.agent")).toMatchObject({ qualifiers: { agent: "scout" }, added: true, redacted: true,
+      presentation: { label: "Subagent definition scout", section: "workers" } });
+    await writeFile(join(agentsDir, "scout.md"), scout.replace("Read before", "Always read before"));
+    await until("publication: outside subagent edit", async () => (await outsideEntries(f)).filter(entry => entry.key === "subagents.agent").length === 2);
+
+    const home = { actor: { kind: "home" as const, id: "home" }, reason: "Add a reviewer subagent" };
+    const reviewer = { key: "subagents.agent", qualifiers: { agent: "reviewer" }, layer: "global" as const, op: "set" as const, value: "---\nname: reviewer\n---\n\nReview.\n" };
+    await expect(f.settingsChanges.change(global, [reviewer], { actor: { kind: "agent", id: "chat" }, reason: "Try" })).rejects.toMatchObject({ code: "invalid_request" });
+    for (const value of ["no frontmatter", "---\nname: other\n---\n", "---\nname: reviewer\napiKey: x\n---\n"]) {
+      await expect(f.settingsChanges.change(global, [{ ...reviewer, value }], home)).rejects.toMatchObject({ code: "invalid_request" });
+    }
+    const review = await f.settingsChanges.change(global, [reviewer], home);
+    expect(review).toMatchObject({ status: "review", review: { requiresTap: true } });
+    expect(await f.settingsChanges.change(global, [reviewer], { ...home, actor: { kind: "ui", id: "device:phone" }, confirmationDigest: review.review!.digest }))
+      .toMatchObject({ status: "applied" });
+    expect(await readFile(join(agentsDir, "reviewer.md"), "utf8")).toBe(reviewer.value);
+    const settings = { key: "subagents.settings", layer: "global" as const, op: "set" as const, value: { disableBuiltins: false, defaultThinking: "low" } };
+    await expect(f.settingsChanges.change(global, [{ ...settings, value: { agentOverrides: { worker: { env: { API_TOKEN: "x" } } } } }], home)).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(f.settingsChanges.change(global, [{ ...settings, value: { unknownField: 1 } }], home)).rejects.toMatchObject({ code: "invalid_request" });
+    const settingsReview = await f.settingsChanges.change(global, [settings], home);
+    await f.settingsChanges.change(global, [settings], { ...home, actor: { kind: "ui", id: "device:phone" }, confirmationDigest: settingsReview.review!.digest });
+    expect((await f.macDocument()).subagents).toEqual(settings.value);
+    await f.settingsModel.resolve(global);
+    const outside = await outsideEntries(f);
+    expect(outside.filter(entry => entry.key === "subagents.agent" && entry.qualifiers?.agent === "reviewer")).toEqual([]);
+    expect(outside.filter(entry => entry.key === "subagents.settings")).toHaveLength(1);
+    const created = (await f.history()).find(entry => entry.key === "subagents.agent" && entry.qualifiers?.agent === "reviewer" && entry.status === "applied")!;
+    expect(await f.settingsChanges.undo(created.changeId, { actor: { kind: "ui", id: "device:phone" }, reason: "Remove the reviewer" })).toMatchObject({ status: "applied" });
+    expect(existsSync(join(agentsDir, "reviewer.md"))).toBe(false);
+    transcript.push({ case: "outside pi-subagents", detail: await outsideEntries(f) });
+  });
+
   caseIt("refuses a provider write while models.json holds an unrelated invalid entry, and never persists or reports it applied", async owner => {
     const f = await fixture(owner);
     const global = { kind: "global" as const };
@@ -1487,6 +1530,7 @@ describe("every key at every allowed layer", () => {
       if (valueKind === "stringList") return ["sample-entry"];
       if (valueKind === "packages") return ["npm:sample-package"];
       if (valueKind === "text") return "sample-text";
+      if (valueKind === "subagentSettings") return { defaultThinking: "low" };
       throw new Error(`No generic sample for ${row.key} (${valueKind})`);
     };
     const stored = async (key: KeyDeclaration, layer: string, qualifiers: Record<string, string>) => {
