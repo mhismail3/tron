@@ -189,6 +189,24 @@ class MiniGatewayLane(unittest.TestCase):
         self.assertNotIn('pushing', dirty.stdout)
         self.assertFalse(report.exists())
 
+    def test_a_read_only_directory_a_job_left_in_the_checkout_is_cleaned_for_the_next_job(self) -> None:
+        report, args = self.report_args()
+        first = self.lane(*args)
+        self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+        payload = (self.mini / 'tron-ci/jobs/gateway').resolve() / 'packages/mac-app/Sources/Resources/Gateway'
+        payload.mkdir(parents=True)
+        (payload / 'manifest.json').write_text('{}')
+        (payload / 'manifest.json').chmod(0o444)
+        payload.chmod(0o555)
+        self.addCleanup(lambda: payload.exists() and subprocess.run(['chmod', '-R', 'u+w', str(payload)]))
+        self.write('README', 'next job\n')
+        self.commit('next')
+        report.unlink()
+        second = self.lane(*args)
+        self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+        self.assertTrue(report.is_file())
+        self.assertFalse(payload.exists(), 'the read-only residue is cleaned')
+
     def test_concurrent_transfers_run_each_exact_commit_without_shared_ref_races(self) -> None:
         repository = self.mini / 'tron-ci/tron.git'
         hook = repository / 'hooks/pre-receive'

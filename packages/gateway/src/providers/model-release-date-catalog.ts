@@ -41,7 +41,6 @@ export class ModelReleaseDateCatalog {
     providers: () => Iterable<string>;
     log: Log;
     broadcast?: () => void;
-    workRegistry?: { runtimeEpoch: string; begin(input: { kind: string; hostEpoch: string; cancellation?: () => void }): { settle(): void } };
   }) {
     this.path = tronHomePath(options.tronHome, "cache/model-release-dates.json");
     this.aliases = options.aliases ?? aliases;
@@ -132,9 +131,7 @@ export class ModelReleaseDateCatalog {
     signal?.addEventListener("abort", abort, { once: true });
     const timeout = setTimeout(() => controller.abort(new Error("model release-date request timed out")), REQUEST_TIMEOUT_MS);
     timeout.unref();
-    let work: { settle(): void } | undefined;
     try {
-      work = this.options.workRegistry?.begin({ kind: "administrative-provider-package-operation", hostEpoch: this.options.workRegistry.runtimeEpoch, cancellation: () => controller.abort() });
       const headers: Record<string, string> = {};
       const hasCoverage = [...providers].every(provider => this.coveredProviders.has(provider));
       if (hasCoverage) {
@@ -189,7 +186,6 @@ export class ModelReleaseDateCatalog {
     } finally {
       clearTimeout(timeout);
       signal?.removeEventListener("abort", abort);
-      work?.settle();
       if (this.activeController === controller) this.activeController = undefined;
     }
   }

@@ -413,7 +413,8 @@ def remote_main(job: dict) -> int:
 
             prepared = time.time()
             if (checkout / '.git').exists():
-                steps = [('git', '-C', str(checkout), 'checkout', '--quiet', '--detach', '--force', sha),
+                steps = [('chmod', '-R', 'u+w', str(checkout)),
+                         ('git', '-C', str(checkout), 'checkout', '--quiet', '--detach', '--force', sha),
                          ('git', '-C', str(checkout), 'clean', '-ffdxq', '-e', '/packages/gateway/node_modules',
                           '-e', '/packages/push-relay/node_modules', '-e', '/packages/ios-app/TronMobile.xcodeproj')]
             else:
