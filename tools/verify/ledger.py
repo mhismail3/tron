@@ -310,18 +310,25 @@ def budget_use(threshold: float) -> list[dict]:
             grouped.setdefault((run['test_id'], run['host']), []).append(run['seconds'])
     rows = [{'test_id': test, 'host': host, 'runs': len(seconds), 'fastest': min(seconds), 'slowest': max(seconds)}
             for (test, host), seconds in grouped.items()]
-    found = {}
+    found, unknown = {}, {}
     for row in rows:
         path, _, name = row['test_id'].partition('::')
         case = budgets.budget_of(files[path], name)
-        timeout_use = row['slowest'] * 1000 / case['timeoutMs']
+        if case is None:
+            unknown[row['test_id']] = {'test_id': row['test_id'], 'host': row['host'], 'runs': row['runs'], 'fastest': row['fastest'],
+                                       'slowest': max(row['slowest'], unknown.get(row['test_id'], {}).get('slowest', 0)), 'budget': 'unknown'}
+            continue
+        bound = case['timeoutMs'] + case['hookMs']
+        timeout_use = row['slowest'] * 1000 / bound
         wait_ceiling = row['slowest'] * 1000 / case['waitMs'] if case['waitMs'] else 0
         use = max(timeout_use, min(wait_ceiling, 1))
         if use > threshold and use > found.get(row['test_id'], {}).get('use', 0):
             found[row['test_id']] = {'test_id': row['test_id'], 'host': row['host'], 'runs': row['runs'], 'fastest': row['fastest'],
-                                     'slowest': row['slowest'], 'timeout_seconds': case['timeoutMs'] / 1000, 'timeout_use': timeout_use,
-                                     'wait_seconds': case['waitMs'] and case['waitMs'] / 1000, 'wait_ceiling': wait_ceiling, 'use': use}
-    return sorted(found.values(), key=lambda item: (-item['timeout_use'], -item['wait_ceiling']))
+                                     'slowest': row['slowest'], 'timeout_seconds': case['timeoutMs'] / 1000, 'hook_seconds': case['hookMs'] / 1000,
+                                     'timeout_use': timeout_use, 'wait_seconds': case['waitMs'] and case['waitMs'] / 1000,
+                                     'wait_ceiling': wait_ceiling, 'use': use}
+    return sorted(found.values(), key=lambda item: (-item['timeout_use'], -item['wait_ceiling'])) \
+        + sorted(unknown.values(), key=lambda item: -item['slowest'])
 
 
 def main(arguments: list[str]) -> int:
@@ -340,11 +347,16 @@ def main(arguments: list[str]) -> int:
             print(json.dumps(rows, indent=2))
             return 0
         print(f'Test ledger: {destination()}')
-        print(f'Gateway tests whose slowest uncontended committed pass used over {args.budgets:.0%} of their test timeout, or whose whole')
-        print('duration exceeds that share of the smallest wait bound they await (a ceiling: one wait spans at most the whole test):')
+        print(f'Gateway tests whose slowest uncontended committed pass used over {args.budgets:.0%} of their test timeout plus enclosing')
+        print('beforeEach/afterEach timeouts (Vitest times hooks inside the test), or whose whole duration exceeds that share of the')
+        print('smallest wait bound they await (a ceiling: one wait spans at most the whole test); then tests whose budget is unknown:')
         for row in rows:
+            if row.get('budget') == 'unknown':
+                print(f"budget unknown  {row['fastest']:.2f}-{row['slowest']:.2f}s  runs={row['runs']}  host={row['host']}  {row['test_id']}")
+                continue
             wait = f"wait={row['wait_seconds']:g}s ({row['wait_ceiling']:.0%} ceiling)" if row['wait_seconds'] else 'wait=-'
-            print(f"timeout {row['timeout_use']:4.0%} of {row['timeout_seconds']:g}s  {wait}  {row['fastest']:.2f}-{row['slowest']:.2f}s  runs={row['runs']}  host={row['host']}  {row['test_id']}")
+            hook = f"+{row['hook_seconds']:g}s hooks" if row['hook_seconds'] else ''
+            print(f"timeout {row['timeout_use']:4.0%} of {row['timeout_seconds']:g}s{hook}  {wait}  {row['fastest']:.2f}-{row['slowest']:.2f}s  runs={row['runs']}  host={row['host']}  {row['test_id']}")
         return 0
     rows = flakes(args.tree)
     if args.json:

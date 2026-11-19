@@ -744,19 +744,26 @@ class LedgerTests(VerifyCase):
             r.write(f'packages/gateway/{config}', 'testTimeout: 300_000,\n')
         path = 'packages/gateway/src/a.integration.test.ts'
         r.write(path, 'it("waits", async () => {\n  await waitFor(() => ok, "edit", { boundMs: 4_000 });\n});\n'
-                      'it("long", async () => {\n  await work();\n}, 60_000);\n')
+                      'it("long", async () => {\n  await work();\n}, 60_000);\n'
+                      'it.each(["a", "b"])("each at %s", async () => {\n  await work();\n}, 60_000);\n'
+                      'describe("hooked", () => {\n  beforeEach(async () => {\n    await prepare();\n  }, 60_000);\n'
+                      '  it("after a slow hook", async () => {\n    await work();\n  });\n});\n'
+                      'for (const name of names) it(name, async () => {\n  await work();\n});\n')
         r.commit('gateway tests')
         ledger = Path(r.env['HOME']) / '.tron-maintenance/test-ledger/results.sqlite3'
         ledger.parent.mkdir(parents=True)
-        rows = [(r.git('rev-parse', 'HEAD'), 'waits', 1.5), (r.git('rev-parse', 'HEAD'), 'long', 6.0), ('0' * 40, 'long', 50.0)]
+        head = r.git('rev-parse', 'HEAD')
+        rows = [(head, 'waits', 1.5), (head, 'long', 6.0), ('0' * 40, 'long', 50.0), (head, 'each at a', 6.0),
+                (head, 'hooked after a slow hook', 18.0), (head, 'dynamic name', 2.0)]
         with sqlite3.connect(ledger) as connection:
             connection.execute('CREATE TABLE results (run_id TEXT, test_id TEXT, commit_sha TEXT, tree_hash TEXT, dirty INTEGER, outcome TEXT, seconds REAL, lane TEXT, host TEXT, cpu_idle_percent REAL, memory_free_percent REAL, measured_at TEXT, seen_at TEXT, contended INTEGER)')
             connection.executemany("INSERT INTO results VALUES ('r', ?, ?, 't', 0, 'passed', ?, 'gateway', 'mini', 50, 50, 'm', 's', 0)",
                                    [(f'{path}::{title}', commit, seconds) for commit, title, seconds in rows])
         query = subprocess.run([str(r.path / 'scripts/tron'), 'flakes', '--budgets', '--json'], cwd=r.path, env=r.env, capture_output=True, text=True)
         self.assertEqual(query.returncode, 0, query.stderr)
-        self.assertEqual([(row['test_id'], row['slowest'], row['wait_seconds'], row['timeout_seconds']) for row in json.loads(query.stdout)],
-                         [(f'{path}::waits', 1.5, 4.0, 15.0)])
+        self.assertEqual([(row['test_id'], row['slowest'], row.get('wait_seconds'), row.get('timeout_seconds', row.get('budget')))
+                          for row in json.loads(query.stdout)],
+                         [(f'{path}::waits', 1.5, 4.0, 15.0), (f'{path}::dynamic name', 2.0, None, 'unknown')])
 
 
 class SelectionTests(VerifyCase):
