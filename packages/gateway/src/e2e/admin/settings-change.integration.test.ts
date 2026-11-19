@@ -22,6 +22,7 @@ import { maintainerChange } from "../../../test-support/native-change.js";
 import { OutsideChanges } from "../../admin/settings-outside.js";
 import { McpAdminService } from "../../admin/mcp-admin-service.js";
 import { createTronSettingsExtension } from "../../admin/tron-settings-extension.js";
+import { settingsGuidePath, writeSettingsGuide } from "../../kernel/settings/settings-guide.js";
 import { settingsInventorySource } from "../../../test-support/settings-dependencies.js";
 import { ModelConfigService } from "../../admin/model-config-service.js";
 import { AuthBroker } from "../../admin/auth-broker.js";
@@ -455,6 +456,24 @@ async function gitProject(root: string, name: string) {
   git(project, "commit", "-q", "-m", "init");
   return project;
 }
+
+describe("settings guide", () => {
+  caseIt("the guide the Gateway writes under the Tron home lists every key and record subject with its writers and tap", async owner => {
+    const f = await fixture(owner);
+    await writeSettingsGuide(f.tronHome, TEST_SETTINGS_SCHEMA);
+    const guide = await readFile(settingsGuidePath(f.tronHome), "utf8");
+    expect(settingsGuidePath(f.tronHome)).toBe(join(f.tronHome, "state", "settings", "guide.md"));
+    const entries = new Map(guide.split("\n### ").slice(1).map(entry => [entry.slice(0, entry.indexOf("\n")), entry]));
+    for (const key of KEYS) {
+      const entry = entries.get(`\`${key.id}\`: ${key.label}`);
+      expect(entry, key.id).toBeDefined();
+      expect(entry, key.id).toContain(`- Writers: ${key.writers.join(", ")}`);
+      expect(entry, key.id).toContain(`- Native tap: ${key.tap ?? "none"}`);
+    }
+    for (const subject of TEST_SETTINGS_SCHEMA.RECORD_SUBJECTS) expect(guide, subject.id).toContain(`### \`${subject.id}\`: ${subject.label}`);
+    for (const action of ["resolve", "change", "history", "undo", "applyAgain", "inventory", "update"]) expect(guide).toContain(`\`${action}\``);
+  });
+});
 
 describe("settings.change", () => {
   caseIt("persists a schema numeric map and rejects unoffered fields without erasing the current store", async owner => {
@@ -1021,7 +1040,7 @@ describe("outside changes", () => {
     const handlers: string[] = [];
     createTronSettingsExtension(() => ({
       applyAgain: (changeId, input) => f.settingsChanges.applyAgain(changeId, { actor: { ...actor, toolCallId: input.toolCallId }, reason: input.reason }),
-    }) as never, async () => undefined)({ registerTool: tool => { tools.push(tool as never); }, on: (event: string) => { handlers.push(event); } } as never);
+    }) as never, async () => undefined, settingsGuidePath(f.tronHome))({ registerTool: tool => { tools.push(tool as never); }, on: (event: string) => { handlers.push(event); } } as never);
     expect(handlers).toEqual(["tool_call"]);
     const result = await tools[0]!.execute("apply-again", { action: "applyAgain", changeId: outside.changeId, reason: "Maintainer wants Tron's value back" },
       new AbortController().signal, () => {}, { hasUI: true });
@@ -1277,7 +1296,7 @@ describe("outside changes to MCP servers and custom models", () => {
         actor: { kind: "home", id: "home-session", sessionId: "home-session", toolCallId: input.toolCallId },
         reason: input.reason, ...(input.confirm ? { confirm: input.confirm } : {}),
       }),
-    }), async ({ apply }) => apply({ deviceId: "device:phone", commandId: "command-mcp-tool" }));
+    }), async ({ apply }) => apply({ deviceId: "device:phone", commandId: "command-mcp-tool" }), settingsGuidePath(f.tronHome));
     const handlers: string[] = [];
     settingsExtension({ registerTool: tool => { tools.push(tool as never); }, on: (event: string) => { handlers.push(event); } } as never);
     expect(handlers).toEqual(["tool_call"]);

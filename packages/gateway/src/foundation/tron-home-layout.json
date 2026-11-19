@@ -49,6 +49,7 @@
     "state/settings": {"owner": "gateway/settings", "container": true},
     "state/settings/changes": {"owner": "gateway/settings", "subtree": true},
     "state/settings/observed.json": {"owner": "gateway/admin"},
+    "state/settings/guide.md": {"owner": "gateway/settings", "class": "rebuild"},
     "state/settings/gateway.json": {"owner": "gateway/admin"},
     "state/model-usage.json": {"owner": "gateway/providers", "prune": {"maxAge": "30d", "maxEntries": 10000, "maxBytes": 8388608}},
     "state/model-queue.json": {"owner": "gateway/providers", "class": "rebuild"},
