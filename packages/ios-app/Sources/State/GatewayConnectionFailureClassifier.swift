@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 struct GatewayConnectionFailureClassifier: Sendable {
     private(set) var consecutiveNeverOpened = 0
