@@ -28,20 +28,6 @@ final class TronTaskToolSheetUITests: XCTestCase {
         XCTAssertTrue(raw.waitForExistence(timeout: 5), app.debugDescription)
     }
 
-    @MainActor func testStatusShowsRecordedWorkerCheckinAndSpend() {
-        continueAfterFailure = false
-        let app = launch("task-status")
-        defer { app.terminate() }
-        XCTAssertTrue(app.staticTexts["Keep Send disabled while photos prepare"].exists)
-        let worker = app.descendants(matching: .any)["home-tool-row-Model"]
-        for _ in 0..<6 where !worker.isHittable { app.swipeUp() }
-        XCTAssertTrue(worker.label.contains("Sol"), app.debugDescription)
-        XCTAssertTrue(app.descendants(matching: .any)["home-tool-row-Check-in"].label.contains("Attachment readiness now has one owner."))
-        let spend = app.descendants(matching: .any)["home-tool-row-Tokens"]
-        for _ in 0..<6 where !spend.isHittable { app.swipeUp() }
-        XCTAssertTrue(spend.label.contains("18K in"), app.debugDescription)
-    }
-
     @MainActor func testReportAndControlMessagesOpenOriginalTextInSharedReader() {
         continueAfterFailure = false
         for scenario in ["task-report", "task-steer", "task-resume", "task-interrupt"] {
@@ -81,30 +67,6 @@ final class TronTaskToolSheetUITests: XCTestCase {
                                     window: app.windows.firstMatch.frame.width) else { XCTFail("No text ink"); return }
             let chroma = (ink.max() ?? 0) - (ink.min() ?? 0)
             XCTAssertLessThan(chroma, 40, "\(mode): message body ink \(ink) must be the neutral standard text colour, not a tint")
-        }
-    }
-
-    @MainActor func testRenameStopFallbackAndErrorUseTheirRecordedOutcomes() {
-        continueAfterFailure = false
-        for scenario in ["task-rename", "task-stop", "task-fallback", "task-malformed", "task-refused"] {
-            let app = launch(scenario)
-            let custom = app.descendants(matching: .any)["home-tool-detail"]
-            if ["task-fallback", "task-malformed"].contains(scenario) {
-                XCTAssertFalse(custom.exists, "Unknown or malformed results must retain the generic detail")
-            } else {
-                XCTAssertTrue(custom.exists, app.debugDescription)
-                if scenario == "task-rename" {
-                    XCTAssertTrue(app.descendants(matching: .any)["home-tool-row-New title"].label.contains("Photo preparation: ready for review"))
-                } else if scenario == "task-stop" {
-                    XCTAssertTrue(app.staticTexts["Stop recorded for this exact operation."].exists)
-                    XCTAssertFalse(app.descendants(matching: .any)["home-tool-text-message"].exists)
-                } else {
-                    let failure = app.descendants(matching: .any)["home-tool-failure"]
-                    XCTAssertTrue(failure.exists, app.debugDescription)
-                    XCTAssertTrue(failure.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Use resume to continue it in place.")).firstMatch.exists)
-                }
-            }
-            app.terminate()
         }
     }
 

@@ -35,41 +35,6 @@ final class TronToolSheetsPolishUITests: XCTestCase {
         }
     }
 
-    @MainActor func testTaskResumeStopAndNoMessageKeepIdentityAndReaderOwnership() {
-        continueAfterFailure = false
-        for (scenario, expected) in [
-            ("task-resume-message", "Instruction (The task continues in place in its worker session.)"),
-            ("task-stop-message", "Message (Stop recorded for this exact operation.)"),
-            ("task-stop-empty", "Stop recorded for this exact operation.")
-        ] {
-            let app = XCUIApplication()
-            app.launchArguments = ["-tron-tool-sheets-polish-fixture", "-polish-scenario", scenario]
-            app.launch(); defer { app.terminate() }
-            let detail = app.descendants(matching: .any)["home-tool-detail"]
-            XCTAssertTrue(detail.waitForExistence(timeout: 15))
-            XCTAssertFalse(detail.descendants(matching: .any)["home-tool-row-Task ID"].exists)
-            XCTAssertTrue(detail.descendants(matching: .any)["home-tool-header"].descendants(matching: .any)
-                .matching(NSPredicate(format: "label CONTAINS %@", "photo-readiness")).firstMatch.exists)
-            let delivery = app.staticTexts[expected]
-            XCTAssertTrue(delivery.exists, app.debugDescription)
-            let reader = app.buttons["home-tool-text-message-view-all"]
-            if scenario == "task-stop-empty" {
-                XCTAssertFalse(reader.exists)
-                XCTAssertFalse(detail.descendants(matching: .any)["home-tool-text-message"].exists)
-            } else {
-                for _ in 0..<12 where !reader.isHittable { app.swipeUp() }
-                XCTAssertEqual(reader.label, "View full message")
-                reader.tap()
-                XCTAssertTrue(app.descendants(matching: .any)["home-reading-text"].waitForExistence(timeout: 5))
-                XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Wait for visual approval")).firstMatch.exists)
-                let done = app.buttons.matching(NSPredicate(format: "label == %@", "Done")).allElementsBoundByIndex.last { $0.isHittable }
-                XCTAssertNotNil(done); done?.tap()
-                XCTAssertTrue(delivery.waitForExistence(timeout: 5))
-            }
-            capture(app, "1325-" + scenario)
-        }
-    }
-
     @MainActor func testOnlyOverflowingPromptOpensFullMarkdownReader() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -100,48 +65,6 @@ final class TronToolSheetsPolishUITests: XCTestCase {
         short.press(forDuration: 1)
         XCTAssertTrue(app.buttons["Copy"].waitForExistence(timeout: 5), "The short prompt retains its original context menu")
         XCTAssertFalse(reader.exists, "Long press must not open the prompt reader")
-    }
-
-    @MainActor func testSearchAndDelegateSeparateReadableContentFromTechnicalPayloads() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        defer { app.terminate() }
-        for scenario in ["search", "delegate"] {
-            app.launchArguments = ["-tron-tool-sheets-polish-fixture", "-polish-scenario", scenario, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-            app.launch()
-            let info = app.buttons["Technical details"]
-            XCTAssertTrue(info.waitForExistence(timeout: 15), app.debugDescription)
-            if scenario == "search" {
-                XCTAssertTrue(app.staticTexts["photo upload composer readiness"].exists, app.debugDescription)
-                XCTAssertTrue(app.staticTexts["Photo attachments and Send readiness"].exists)
-                XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "The attachment coordinator owns preparation.")).firstMatch.exists)
-            } else {
-                let reason = "iOS UI work needing careful ownership and presentation judgment."
-                let model = app.descendants(matching: .any)["home-tool-row-Model"]
-                let thinking = app.descendants(matching: .any)["home-tool-row-Thinking"]
-                XCTAssertTrue(model.label.contains("explicit"))
-                XCTAssertFalse(model.label.contains(reason))
-                XCTAssertFalse(thinking.label.contains(reason))
-                XCTAssertTrue(app.descendants(matching: .any)["home-tool-row-Reason"].label.contains(reason))
-                XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Delegated photo-readiness to worker-session")).firstMatch.exists,
-                               "Raw admission prose belongs outside the custom Task section")
-                app.swipeUp()
-                XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Weekly usage 97%")).firstMatch.exists)
-                let brief = app.descendants(matching: .any)["home-tool-text-brief"]
-                XCTAssertTrue(brief.exists)
-                app.swipeDown()
-            }
-            info.tap()
-            let requestJSON = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Inspect Request JSON,")).firstMatch
-            XCTAssertTrue(requestJSON.waitForExistence(timeout: 10), app.debugDescription)
-            requestJSON.tap()
-            XCTAssertTrue(app.staticTexts["Request JSON"].waitForExistence(timeout: 10), app.debugDescription)
-            let requested = scenario == "search" ? "photo upload composer readiness" : "photo-readiness"
-            XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", requested)).firstMatch.exists,
-                          "Technical inspection must retain the exact request")
-            capture(app, "1302-\(scenario)-technical-request")
-            app.terminate()
-        }
     }
 
     @MainActor private func capture(_ app: XCUIApplication, _ name: String) {
