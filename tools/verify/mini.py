@@ -200,7 +200,7 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
     expected = os.environ.get('TRON_VERIFY_COMMIT')
     if expected and expected != sha:
         return no_result(f'HEAD is {sha[:12]}, not the commit under verification {expected[:12]}')
-    main = git('merge-base', 'origin/main', 'HEAD') if lane == 'verify' else None
+    main = git('merge-base', args[args.index('--base') + 1] if '--base' in args[:-1] else 'origin/main', 'HEAD') if lane == 'verify' else None
     mapped, paths = outputs(args) if lane == 'gateway' else (args, [])
     nonce = uuid.uuid4().hex
     incoming = f'refs/tron-jobs/submissions/{nonce}'
@@ -415,7 +415,7 @@ def remote_main(job: dict) -> int:
             if (checkout / '.git').exists():
                 steps = [('git', '-C', str(checkout), 'checkout', '--quiet', '--detach', '--force', sha),
                          ('git', '-C', str(checkout), 'clean', '-ffdxq', '-e', '/packages/gateway/node_modules',
-                          '-e', '/packages/ios-app/TronMobile.xcodeproj')]
+                          '-e', '/packages/push-relay/node_modules', '-e', '/packages/ios-app/TronMobile.xcodeproj')]
             else:
                 steps = [('git', '-C', str(repository), 'worktree', 'prune'),
                          ('git', '-C', str(repository), 'worktree', 'add', '--quiet', '--detach', str(checkout), sha)]
@@ -454,18 +454,20 @@ def remote_main(job: dict) -> int:
             say(f'checkout {sha[:12]} ready; Node v{version} ({digest[:12]}) npm {npm}, macOS {platform.mac_ver()[0]}, '
                 f'Python {platform.python_version()}')
 
-            inputs = run('git', '-C', str(checkout), 'rev-parse', *(f'HEAD:packages/gateway/{path}' for path in
-                                                                   ('package.json', 'package-lock.json', 'third_party'))).stdout
-            install = hashlib.sha256(f'{inputs}{digest}'.encode()).hexdigest()
-            stamp = checkout / 'packages/gateway/node_modules/.tron-mini-install'
-            if not stamp.is_file() or stamp.read_text() != install:
-                say('Gateway dependencies changed; npm ci')
-                installed = stream(str(checkout / 'scripts/tron-node'), 'exec', 'npm', '--prefix', 'packages/gateway', 'ci', '--include=dev',
-                                   cwd=checkout)
-                if installed:
-                    return refuse(f'npm ci failed (exit {installed})')
-                stamp.parent.mkdir(exist_ok=True)
-                stamp.write_text(install)
+            for package, names in (('gateway', ('package.json', 'package-lock.json', 'third_party')), ('push-relay', ('package.json', 'package-lock.json'))):
+                if package != 'gateway' and (job['lane'] != 'verify' or not (checkout / f'packages/{package}/package-lock.json').is_file()):
+                    continue
+                inputs = run('git', '-C', str(checkout), 'rev-parse', *(f'HEAD:packages/{package}/{path}' for path in names)).stdout
+                install = hashlib.sha256(f'{inputs}{digest}'.encode()).hexdigest()
+                stamp = checkout / f'packages/{package}/node_modules/.tron-mini-install'
+                if not stamp.is_file() or stamp.read_text() != install:
+                    say(f'{package} dependencies changed; npm ci')
+                    installed = stream(str(checkout / 'scripts/tron-node'), 'exec', 'npm', '--prefix', f'packages/{package}', 'ci', '--include=dev',
+                                       cwd=checkout)
+                    if installed:
+                        return refuse(f'npm ci in packages/{package} failed (exit {installed})')
+                    stamp.parent.mkdir(exist_ok=True)
+                    stamp.write_text(install)
             say(f'prepared in {time.time() - prepared:.1f}s; running the lane, load {os.getloadavg()[0]:.1f}')
             if cancelled.is_set():
                 return refuse('stopped before the lane started')

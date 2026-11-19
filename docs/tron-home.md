@@ -241,7 +241,7 @@ The entrypoint may append a fatal-startup diagnostic, but initializes no second 
 `tools/home-layout/operator_cutover.py` is the inert source template for the
 maintainer-only #2500 cutover packet, not a Gateway command or automated deployment.
 Its empty `REVISION` and `REVIEWED_TREE` refuse execution. After source verification
-and non-author review, land the source with a plain no-ff merge. Copy the template
+and non-author review, land the source with `scripts/tron land`. Copy the template
 to that merge's clean checkout at `test-results/2500-resume4/operator-cutover.py`,
 and bind only those two literals to the exact merge SHA and its Git tree. Review
 that exact bound packet before handing its `apply` command to the maintainer.

@@ -277,8 +277,7 @@ Existing upward and two-way pairs live in the shrink-only
 always allowed.
 [Layer rules](../tools/layers/README.md).
 
-Run affected checks before landing with the merge procedure in the
-[Git/gh skill](../.agents/skills/tron-work/SKILL.md); the post-land batch owns broader coverage ([principles P2](PRINCIPLES.md#p2-whole-system-health-is-a-batch-signal-not-a-commit-gate)).
+Run affected checks, then land with `scripts/tron land` ([land](../tools/verify/land.md), [Git/gh skill](../.agents/skills/tron-work/SKILL.md)); it validates Tiers 0 to 2 of the exact merge, and the post-land batch owns broader coverage ([principles P2](PRINCIPLES.md#p2-whole-system-health-is-a-batch-signal-not-a-commit-gate)).
 Markdown-only changes need static/docs evidence. [Verify](../tools/verify/README.md)
 owns selection and `test-results/verify/<sha>.json`; the [oracle policy](../tools/verify/test-oracles.md)
 owns fail-before/pass-after in the owning test, consolidation, and test changes with independent ACCEPT. Reds need

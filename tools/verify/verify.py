@@ -1307,7 +1307,7 @@ def main(argv: list[str]) -> int:
     mode.add_argument("--changed", action="store_true")
     mode.add_argument("--module", metavar="ID")
     mode.add_argument("--all", action="store_true")
-    mode.add_argument("--full", action="store_true", help="every test file in every group: the shadow queue's suite")
+    mode.add_argument("--full", action="store_true", help="every test file in every group: land's suite")
     mode.add_argument("--hunt", action="store_true", help="repeat mini suites on unchanged origin/main; --hunt --help for bounds")
     mode.add_argument("--update-locks", metavar="ID")
     parser.add_argument("--base", default="origin/main")

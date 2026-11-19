@@ -76,13 +76,12 @@ Commands:
                                     now, full coverage in the async main batch.
                                     --plan includes dirty paths and exact commands.
                                     Live logs and partial test-results/verify/<sha>.json;
-                                    no empty test passes, queue or landing gate.
+                                    no empty test passes; land, not verify, gates main.
   verify --full [--base <ref>] [--skip ...]
-                                    Every test file in every group: the shadow
-                                    queue's suite (tools/verify/queue.md)
-  queue run [--since <sha>] | install | uninstall | ledger [--mini]
-                                    Shadow landing queue on the Mac mini: verify --full on
-                                    every landing on main into an append-only ledger; gates nothing
+                                    Every test file in every group: land's suite
+  land [-m <message>]               Merge this branch --no-ff onto fetched main, run Tiers 0-2
+                                    on that exact merge on the mini, push it only if it passed;
+                                    one land at a time per host (tools/verify/land.md)
   verify --hunt [--rounds N] [--hours H] [--plan]
                                     Repeat unchanged-main non-Apple suites on mini; zero-wait lease,
                                     unique logs, partial receipts and first-red retention.
@@ -341,8 +340,8 @@ case "$cmd" in
   verify)
     exec python3 "$ROOT/tools/verify/verify.py" "$@"
     ;;
-  queue)
-    exec python3 "$ROOT/tools/verify/landing_queue.py" "$@"
+  land)
+    exec python3 "$ROOT/tools/verify/land.py" "$@"
     ;;
   mutate)
     exec python3 "$ROOT/tools/verify/mutate.py" "$@"
