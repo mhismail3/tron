@@ -85,6 +85,7 @@ export interface LockGateway {
   readonly tronHome: string;
   readonly cwd: string;
   readonly registry: RuntimeRegistry;
+  readonly settingsChanges: SettingsChangePath;
   readonly normalization: TraceNormalization;
   readonly socketUrl: string;
   readonly token: string;
@@ -286,7 +287,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   let frameCounter = 0;
 
   const gateway: LockGateway = {
-    root, agentDir, tronHome, cwd, registry, normalization, notifications, runtimeLifecycle, lifecycleRequests,
+    root, agentDir, tronHome, cwd, registry, settingsChanges, normalization, notifications, runtimeLifecycle, lifecycleRequests,
     socketUrl: `ws://127.0.0.1:${port}/v1/socket`, token: paired.token,
     script(steps) {
       faux.setResponses([

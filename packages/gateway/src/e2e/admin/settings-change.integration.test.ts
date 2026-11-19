@@ -422,7 +422,7 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
     const entries: ChangeEntry[] = [];
     let cursor: string | undefined;
     do {
-      const page = await service.invoke(client(), "settings.history", { limit: 50, ...filter, ...(cursor ? { cursor } : {}) }) as unknown as { entries: ChangeEntry[]; nextCursor?: string };
+      const page = await settingsChanges.history({ limit: 50, ...filter, ...(cursor ? { cursor } : {}) }, { kind: "ui", id: "device:phone" }) as unknown as { entries: ChangeEntry[]; nextCursor?: string };
       entries.push(...page.entries);
       cursor = page.nextCursor;
     } while (cursor);
@@ -647,6 +647,19 @@ describe("settings.change", () => {
     expect(JSON.stringify(await f.history({ key: "run.retry.maxRetries" }))).not.toContain("sk-flagged");
     const otherView = entriesOf(await turn(other, { action: "history", limit: 200 })).map(entry => entry.changeId);
     expect(otherView).toEqual([otherGlobalId, otherSessionId]);
+    const presented = entriesOf(await turn(other, { action: "history", key: "run.retry.baseDelayMs" }));
+    expect(presented).toEqual([expect.objectContaining({ changeId: otherGlobalId,
+      presentation: { label: expect.any(String), section: "run", actor: "A chat's agent", layer: "Global", display: { before: expect.any(String), after: expect.any(String) } } })]);
+    const filtered = async (input: Record<string, unknown>) => entriesOf(await turn(other, { action: "history", ...input })).map(entry => entry.changeId);
+    expect(await filtered({ layer: "session" })).toEqual([otherSessionId]);
+    expect(await filtered({ layer: "global", section: "run", actor: "agent", status: "applied" })).toEqual([otherGlobalId]);
+    expect(await filtered({ actor: "agents", section: "run" })).toEqual([otherGlobalId, otherSessionId]);
+    expect(await filtered({ actor: "ui" })).toEqual([]);
+    for (const [field, value] of [["actor", "unknown"], ["layer", "everywhere"], ["section", "unknown"], ["section", "advanced"]] as const) {
+      const refused = await turn(other, { action: "history", [field]: value });
+      expect(refused.isError).toBe(true);
+      expect(refused.content.map(part => part.type === "text" ? part.text : "").join("")).toContain(`${field} must be one of`);
+    }
   });
 
   caseIt("an agent undoes only its own settings changes and refuses another chat's session change with the exact message", async owner => {
@@ -930,7 +943,7 @@ describe("settings.change", () => {
     expect(await ids({ actor: "ui" })).toHaveLength(1);
     expect(await ids({})).toHaveLength(4);
     for (const filter of [{ actor: "unknown" }, { layer: "everywhere" }, { section: "unknown" }, { section: "advanced" }]) {
-      await expect(f.service.invoke(client(), "settings.history", filter)).rejects.toMatchObject({ code: "invalid_request" });
+      await expect(f.settingsChanges.history(filter, { kind: "ui", id: "device:phone" })).rejects.toMatchObject({ code: "invalid_request" });
     }
     transcript.push({ case: "Changes filters", detail: await f.history({ actor: "agents" }) });
   });
@@ -944,13 +957,13 @@ describe("settings.change", () => {
       await f.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value }]);
     }
     const query = { key: "run.transport", limit: 50 };
-    const newest = await f.service.invoke(client(), "settings.history", query) as unknown as { entries: ChangeEntry[]; nextCursor?: string };
+    const newest = await f.settingsChanges.history(query, { kind: "ui", id: "device:phone" }) as unknown as { entries: ChangeEntry[]; nextCursor?: string };
     expect(newest.entries).toEqual([]);
     expect(newest.nextCursor).toBeDefined();
-    const middle = await f.service.invoke(client(), "settings.history", { ...query, cursor: newest.nextCursor }) as unknown as { entries: ChangeEntry[]; nextCursor?: string };
+    const middle = await f.settingsChanges.history({ ...query, cursor: newest.nextCursor! }, { kind: "ui", id: "device:phone" }) as unknown as { entries: ChangeEntry[]; nextCursor?: string };
     expect(middle.entries).toEqual([]);
     expect(middle.nextCursor).toBeDefined();
-    const oldest = await f.service.invoke(client(), "settings.history", { ...query, cursor: middle.nextCursor }) as unknown as { entries: ChangeEntry[]; nextCursor?: string };
+    const oldest = await f.settingsChanges.history({ ...query, cursor: middle.nextCursor! }, { kind: "ui", id: "device:phone" }) as unknown as { entries: ChangeEntry[]; nextCursor?: string };
     expect(oldest.entries.map(entry => entry.changeId)).toEqual([first.changes[0]!.changeId]);
     expect(oldest.nextCursor).toBeUndefined();
     expect((await f.history(query)).map(entry => entry.changeId)).toEqual([first.changes[0]!.changeId]);
@@ -966,7 +979,7 @@ describe("settings.change", () => {
     const seen: string[] = [];
     let cursor: string | undefined;
     do {
-      const page = await f.service.invoke(client(), "settings.history", { limit: 4, ...(cursor ? { cursor } : {}) }) as unknown as { entries: ChangeEntry[]; nextCursor?: string };
+      const page = await f.settingsChanges.history({ limit: 4, ...(cursor ? { cursor } : {}) }, { kind: "ui", id: "device:phone" }) as unknown as { entries: ChangeEntry[]; nextCursor?: string };
       pages.push(page.entries.length);
       seen.push(...page.entries.map(entry => entry.changeId));
       cursor = page.nextCursor;

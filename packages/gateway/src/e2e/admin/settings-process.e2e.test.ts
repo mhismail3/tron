@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { SCRIPTED_MODEL, SCRIPTED_PROVIDER, startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../../test-support/gateway-process.js";
+import { settingsRecordEntries } from "../../../test-support/settings-record-entries.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 
 const gateways: GatewayProcess[] = [];
@@ -60,14 +61,14 @@ describe("a settings change reaches the next operation of a real Gateway process
     expect(await prompt(other)).toBe(SCRIPTED_MODEL);
     expect(await resolved(other)).toMatchObject({ value: DEFAULT, layer: "global" });
 
-    const historyBefore = (await ok(phone, "settings.history", { key: KEY })).entries;
+    const historyBefore = await settingsRecordEntries(gateway.tronHome, KEY);
     const stale = await phone.request("settings.change", { commandId: "settings-stale-change", target: { kind: "session", sessionId: changed },
       fence: await fence(changed), changes: [{ key: KEY, layer: "session", op: "set", value: DEFAULT, expected: { provider: SCRIPTED_PROVIDER, id: "a-value-never-read" } }] });
     expect(stale.ok, JSON.stringify(stale)).toBe(false);
     expect(stale.error, JSON.stringify(stale)).toMatchObject({ code: "conflict", message: expect.stringContaining("changed since it was read"),
       details: { current: ALTERNATE } });
     expect(await resolved(changed)).toMatchObject({ value: ALTERNATE, layer: "session" });
-    expect((await ok(phone, "settings.history", { key: KEY })).entries).toEqual(historyBefore);
+    expect(await settingsRecordEntries(gateway.tronHome, KEY)).toEqual(historyBefore);
     expect(await prompt(changed)).toBe(ALTERNATE.id);
 
     expect(change).toMatchObject({ status: "applied", changes: [{ key: KEY, layer: "session", status: "applied", before: null, after: ALTERNATE }] });

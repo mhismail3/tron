@@ -104,7 +104,6 @@ describe("gateway/protocol wire contract locks", () => {
     await call("settings.resolve", { target: { kind: "global" }, keys: ["run.retry.maxRetries"] });
     await call("settings.change", { commandId: gateway.commandId(), target: { kind: "global" }, reason: "Wire contract",
       changes: [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 5 }] });
-    await call("settings.history", { limit: 5 });
     await call("session.archive.set", { commandId: gateway.commandId(), sessionId, archived: true });
     await call("session.prompt", { commandId: gateway.commandId(), sessionId: "missing-session", text: "refused" });
     await call("no.such.method", {});

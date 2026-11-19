@@ -399,7 +399,7 @@ describe("settings renderer contract", () => {
     await change("queue-two", queue, [first, second]);
     const configured = await resolve();
     expect(row(configured, queue)).toMatchObject({ display: "2 models", value: [first, second], group: "workers" });
-    const history = await f.service.invoke(subscribed(), "settings.history", { key: queue }) as unknown as { entries: ChangeEntry[] };
+    const history = await f.settingsChanges.history({ key: queue }, { kind: "ui", id: "device:phone" }) as unknown as { entries: ChangeEntry[] };
     expect(history.entries[0]).toMatchObject({ after: [first, second],
       presentation: { section: "workers", display: { after: `${first} → ${second}` } } });
     await change("queue-one", queue, [second]);
@@ -516,7 +516,7 @@ describe("settings renderer contract", () => {
     expect(row(await resolve(), key)).toMatchObject({ value: false, overridden: true });
     const reset = await maintainerChange(f, [{ key, layer: "global", op: "unset" }]);
     expect(row(await resolve(), key)).toMatchObject({ value: true, overridden: false });
-    const history = await f.service.invoke(subscribed(), "settings.history", { key }) as unknown as { entries: ChangeEntry[] };
+    const history = await f.settingsChanges.history({ key }, { kind: "ui", id: "device:phone" }) as unknown as { entries: ChangeEntry[] };
     expect(history.entries.some(entry => entry.before === false)).toBe(true);
     await f.service.invoke(subscribed(), "settings.undo", { commandId: commandId(), changeId: reset.changes[0]!.changeId });
     expect(row(await resolve(), key)).toMatchObject({ value: false, overridden: true });
@@ -532,7 +532,7 @@ describe("settings renderer contract", () => {
     expect(dryRun).toMatchObject({ dryRun: true, changes: [{ key: "run.retry.maxRetries", layer: "global", status: "failed",
       error: { code: "invalid_request", message: expect.stringContaining("run.retry.maxRetries must be an integer from 0 through 20") } }] });
     expect(await readFile(settingsFile, "utf8")).toBe(beforeFile);
-    const history = await f.service.invoke(subscribed(), "settings.history", { limit: 50 }) as unknown as { entries: ChangeEntry[] };
+    const history = await f.settingsChanges.history({ limit: 50 }, { kind: "ui", id: "device:phone" }) as unknown as { entries: ChangeEntry[] };
     expect(history.entries).toEqual([]);
     transcript.push({ case: "dry run refused", response: dryRun });
   });

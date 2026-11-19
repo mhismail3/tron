@@ -159,7 +159,7 @@ Outcomes name key, layer, status and `before`/`after`; `review` includes the
 exact digest-bound before/after projection and whether a native tap is required. A chat's own Session scope
 changes only while idle; Home Chat compaction values are
 refused. **Record:** `<tronHome>/state/settings/changes/`, append-only 500-entry segments
-listed in `index.json`, kept forever, paged by `settings.history` (the maintainer's full view) or the tool's `history`
+listed in `index.json`, kept forever, paged by the tool's `history`
 action (optional key filter, cursor and limit 1–200; a page may be empty with a
 `nextCursor`); entries hold actor, target, key, `before`/`after` (never credentials; reads return values only for a declared key or record subject not flagged redacted, so a retired or unknown key's values never leave the Gateway), reason,
 status, git result and `undoOf`/`applyAgainOf`. Scope: an agent's history and Undo cover only its own
