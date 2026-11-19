@@ -13,6 +13,7 @@ import { TrustService } from "./kernel/resources/trust-service.js";
 import { FilesystemService } from "./machine/filesystem-service.js";
 import { UploadStore } from "./machine/upload-store.js";
 import { createGatewaySettingsSchema } from "./main/settings-schema.js";
+import { writeSettingsGuide } from "./kernel/settings/settings-guide.js";
 import { SettingsStoreAdapter } from "./admin/settings-model.js";
 import { SettingsChangePath } from "./kernel/settings/settings-change.js";
 import { SettingsModel } from "./kernel/settings/settings-model.js";
@@ -177,6 +178,7 @@ await macTerminalKeys.restore().catch(error => {
   logger.log("warning", "Private SSH startup failed", { event: "mac-terminal.startup-failed", error: String(error) });
 });
 const settingsSchema = createGatewaySettingsSchema();
+await writeSettingsGuide(config.tronHome, settingsSchema);
 const mcpAdmin = new McpAdminService(
   config.agentDir,
   piCliBundle(),

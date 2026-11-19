@@ -43,6 +43,9 @@ setting and is not an approval queue.
   8 characters with a digit, each matched within one string value (never across fields), and secret-named fields; both values refuse such content, refuse to change a
   stored value that carries it (`onDisk`), and an outside value that carries it is observed and recorded by digest
   only. A secret in a shape none of these detect is not recognised.
+- `settings-guide.ts`: renders the settings guide from the schema (the tool's actions, then every key by section
+  with its layers, writers, timing, effect and native tap, then every record subject) and writes it at Gateway start to
+  `<tronHome>/state/settings/guide.md`; the `settings` tool's prompt snippet names that path.
 - `secret-free.ts`: the shared secret-shape refusals (credential detection, secret-named query and token names,
   URL checks) that the MCP and provider values both use, with each owner's hint.
 - `settings-record.ts`: durable, byte/row-bounded segments, index recovery and

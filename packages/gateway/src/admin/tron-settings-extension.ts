@@ -114,14 +114,14 @@ function agentConfigFile(raw: unknown, cwd: string): boolean {
   return AGENT_CONFIG_FILES.some(name => canonical(join(directory, name)) === real);
 }
 
-export function createTronSettingsExtension(access: () => SettingsToolAccess | undefined, requestChange: NativeChangeRequest): ExtensionFactory {
+export function createTronSettingsExtension(access: () => SettingsToolAccess | undefined, requestChange: NativeChangeRequest, guidePath: string): ExtensionFactory {
   return pi => {
     pi.on("tool_call", (event, context) => FILE_TOOLS.has(event.toolName) && agentConfigFile((event.input as { path?: unknown }).path, context.cwd)
       ? { block: true, reason: AGENT_CONFIG_REFUSAL } : undefined);
     pi.registerTool({
       name: "settings", label: "Settings",
       description: "Read and change Tron settings through typed writes. Reversible changes apply and are logged. Read durable audit records with history; reverse a change with undo and its changeId. Tron Home alone can update (action update) one configured package to an exact npm version or git commit SHA behind the native install card, which shows any pin change; that is never undoable. Only irreversible effects, trust/authority, privacy expansion, spend and installs need the exact shared native tap. dryRun validates and returns before/after without effects. Home may target its task worker; running workers adopt from the next model request and are signalled.",
-      promptSnippet: "Change settings with the settings tool, never by editing settings files.",
+      promptSnippet: `Change settings with the settings tool, never by editing settings files; read the settings guide at ${guidePath} before changing a setting you have not used before.`,
       promptGuidelines: [
         "Use settings to read or change model, context, tools, permissions and run settings; never edit settings.json, .pi/ or trust files directly.",
         "Give every change a reason. Do not use generic forms to authorize effects; native change cards bind their exact before/after.",
