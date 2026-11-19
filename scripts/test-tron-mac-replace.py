@@ -587,7 +587,7 @@ def rpc_journey():
                             return 'fixture-token'
 
                         def protocol(self):
-                            return 8
+                            return 9
 
                         def endpoints(self):
                             return [f'ws://127.0.0.1:{port}/v1/socket']
