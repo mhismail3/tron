@@ -112,10 +112,6 @@ struct EnvironmentSetup: Sendable {
         )
     }
 
-    func resolvedTailscaleHost() async -> String? {
-        await TailscaleHostResolution.resolveLive(probe: probeTailscale, cache: readTailscaleIPFromSettings)
-    }
-
     static let live = makeLive(profile: .stable)
     static let debug = makeDebugObserver()
 

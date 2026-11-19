@@ -3,10 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GatewayError } from "../errors.js";
 import { readJson, updateJsonLocked } from "../foundation/json.js";
-import { modelProviderOnDisk, type ModelProviderValue } from "../kernel/settings/model-provider-value.js";
+import { addsProviderKey, modelProviderOnDisk, providerKeyReference, type ModelProviderValue } from "../kernel/settings/model-provider-value.js";
 import type { SettingsInventory } from "../kernel/settings/tool-contract.js";
 import { ModelRuntime } from "../kernel/pi/coding-agent.js";
 import { redactCredentials } from "../util/credential-redaction.js";
+import type { CredentialOwner } from "./mcp-admin-service.js";
 
 const MODEL_CONFIG_MAX_BYTES = 768 * 1_024;
 const MODEL_CONFIG_MAX_DEPTH = 64;
@@ -91,7 +92,7 @@ function withProvider(current: Record<string, unknown>, id: string, value: Model
 export class ModelConfigService {
   private readonly path: string;
 
-  constructor(agentDir: string) {
+  constructor(agentDir: string, private readonly credentials?: CredentialOwner) {
     this.path = join(agentDir, "models.json");
   }
 
@@ -116,10 +117,15 @@ export class ModelConfigService {
     return raw === undefined ? undefined : modelProviderOnDisk(id, raw);
   }
 
-  async setProvider(id: string, value: ModelProviderValue | undefined): Promise<void> {
+  async setProvider(id: string, value: ModelProviderValue | undefined, apiKey?: string | null): Promise<void> {
     const current = await this.read();
     const next = withProvider(current, id, value);
     await this.validateDocument(next);
+    if (apiKey !== null && addsProviderKey(providersOf(current)[id], value)) {
+      if (apiKey === undefined) throw new GatewayError("invalid_request", "A provider API key is entered on its iPhone card; nothing was changed");
+      if (!this.credentials) throw new GatewayError("unsupported", "Provider credential storage is unavailable");
+      await this.credentials.store(providerKeyReference(id).account, apiKey);
+    }
     const checked = JSON.stringify(current);
     try {
       await updateJsonLocked<Record<string, unknown>>(this.path, { providers: {} }, (latest) => {

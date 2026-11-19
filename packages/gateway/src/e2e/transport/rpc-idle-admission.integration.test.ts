@@ -97,8 +97,6 @@ async function fixture(options: {
 
   const diagnosticLogger = {
     log: (level: string, message: string, metadata: Record<string, unknown> = {}) => logRecords.push({ level, message, metadata }),
-    recent: () => [],
-    debugTail: () => [],
   };
   let server: GatewayServer | undefined;
   const trust = new TrustService(agentDir);
@@ -194,7 +192,7 @@ async function fixture(options: {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await waitFor(() => socket.readyState === WebSocket.OPEN, "socket open");
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 8 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 9 }));
     await waitFor(() => frames.some((frame) => frame.type === "hello"), "hello");
     return {
       frames,
@@ -488,32 +486,6 @@ describe("device log append RPC boundary", () => {
     expect(files).toHaveLength(2);
     expect(files.map((file) => file.name).every((name) => /^[a-f0-9]{32}\.jsonl$/.test(name))).toBe(true);
     expect(files.map((file) => sequencesOf(file.text).length).sort()).toEqual([1, 2]);
-  });
-});
-
-describe("diagnostic export RPC boundary", () => {
-  it("records bounded authenticated ingress and completion without export content", async () => {
-    const fixtureValue = await fixture();
-    const client = await fixtureValue.connect();
-    const requestID = "ad8d4b12-4392-467e-b7ef-39a8198e8b12";
-    const privateContent = "synthetic-private-diagnostic-body";
-    const response = await client.request(requestID, "system.logs.export", {
-      commandId: "synthetic-command-identifier",
-      content: privateContent,
-    });
-    expect(response.ok, JSON.stringify(response)).toBe(true);
-    const records = fixtureValue.logRecords.filter(({ metadata }) => metadata.event === "rpc.received" || metadata.event === "rpc.completed");
-    const ingressRecords = records.filter(({ metadata }) => metadata.event === "rpc.received");
-    expect(ingressRecords).toHaveLength(1);
-    expect(records).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        message: "Logs Export RPC admitted",
-        metadata: expect.objectContaining({ event: "rpc.received", requestID, method: "system.logs.export", outcome: "admitted" }),
-      }),
-    ]));
-    expect(records.some(({ metadata }) => metadata.event === "rpc.completed" && metadata.requestID === requestID && metadata.outcome === "success")).toBe(true);
-    expect(JSON.stringify(records)).not.toContain(privateContent);
-    expect(JSON.stringify(ingressRecords)).not.toContain("synthetic-command-identifier");
   });
 });
 

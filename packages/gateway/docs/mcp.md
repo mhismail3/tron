@@ -10,7 +10,7 @@ trust decision for that root admits it. Its stdio servers start in the root. Ses
 `mcp`, `codemode`, and `tool-search` factories from the same Gateway-owned list.
 MCP logs remain under the Pi agent directory; OAuth credentials are managed by
 Pi's built-in credential store. Static bearer tokens entered through Tron are
-stored by the Mac Keychain owner (service `tron.mcp`, account `tron-mcp-<server>`),
+stored by the Mac Keychain owner `MacKeychainCredentialOwner` (service `tron.mcp`, account `tron-mcp-<server>`; custom model provider keys use the same owner with service `tron.provider`),
 with only Pi's Keychain credential reference
 (`{"source":"keychain","service":"tron.mcp","account":"tron-mcp-<server>","format":"bearer"}`)
 as the server's `Authorization` header in `mcp.json`; Pi resolves it with direct

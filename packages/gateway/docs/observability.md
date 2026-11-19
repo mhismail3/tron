@@ -7,21 +7,20 @@ section of the owning module's README; `scripts/tron docs signals` prints them a
 table ([docs indexes](../../../tools/docs/README.md)). A new signal, including an
 incident's one-step diagnosing signal, gets its row there, beside its code.
 
-The Gateway README owns the reader contracts (`system.logs` and `system.logs.export`)
-and its [Diagnostic bundle](../README.md#diagnostic-bundle) section owns how one bundle
+The Gateway README's [Diagnostic bundle](../README.md#diagnostic-bundle) section owns how one bundle
 is collected for an incident.
 
 ## Level policy
 
 The level answers "who needs to look, and when". Only debug stays out of files:
-it lives in a bounded in-memory buffer that exports include.
+the Gateway logger drops it.
 
 | Level | Meaning | Persisted | Examples |
 | --- | --- | --- | --- |
 | error | Something failed that a user sees, work was lost, or an invariant broke. Someone should look | Yes | `gateway.fatal-startup`, `gateway.shutdown-failed`, `gateway.stop-drain.failed`, `process.uncaught-exception`, `connection.write-error`, `launcher.candidate-rolled-back` |
 | warning | Degraded or abnormal but handled: retries, fallbacks, bounds hit, slow operations over a named threshold, notable rejections | Yes | `gateway.event-loop-delay`, `connection.superseded`, `gateway.restart-drain.stalled`, `extension.artifact-rejected` |
 | info | Lifecycle and state transitions, one line per boundary; enough to reconstruct a timeline | Yes | `gateway.started`, `connection.opened` for a paired device, `session.compaction.completed`, `deploy.ready`, drain progress |
-| debug | Per-request detail useful only while diagnosing | No, memory buffer only | fast successful `rpc.completed` with its stage breakdown, connection open and close for the Mac app's local probes |
+| debug | Per-request detail useful only while diagnosing | No, dropped | fast successful `rpc.completed` with its stage breakdown, connection open and close for the Mac app's local probes |
 
 - The level is fixed per event in code and listed in its Signals row; there
   are no runtime log-level settings. A level varies only with a named threshold
@@ -47,7 +46,7 @@ stderr, because the launcher has already redirected stderr to
 
 | Stream | Writer | Rotation owner | Caps |
 | --- | --- | --- | --- |
-| `gateway.jsonl` | Gateway logger, `packages/gateway/src/transport/logger.ts` | Gateway logger | Eight 5 MB numbered segments (`gateway.jsonl`, `.1` … `.7`), 40 MB total; size tracked in memory; debug kept in a 4,000-record / 2 MB memory buffer; the newest 1,000 persisted records are served by `system.logs` |
+| `gateway.jsonl` | Gateway logger, `packages/gateway/src/transport/logger.ts` | Gateway logger | Eight 5 MB numbered segments (`gateway.jsonl`, `.1` … `.7`), 40 MB total; size tracked in memory |
 | `requests.jsonl` | Gateway request record, `packages/gateway/src/kernel/run/request-record.ts`, through `transport/rotating-jsonl.ts` | Gateway | Sixteen 5 MB numbered segments, 80 MB total; sizes, keyed hashes and provider usage only ([run signals](../src/kernel/run/README.md#signals)) |
 | `observations/` | Gateway observation counts, `packages/gateway/src/transport/observation-counts.ts` | Gateway, when a new UTC day opens | One JSON file per UTC day of content-free counts per request kind ([run signals](../src/kernel/run/README.md#signals)); the newest 30 days are kept; the directory is 0700 and each file 0600 |
 | `deploy.jsonl` | Deploy helper, `scripts/gateway-payload-deploy.mjs`; the C launcher appends its own `launcher.*` records | Deploy helper, once at operation start (`DEPLOY_LOG_MAX_BYTES`) | 1 MB plus one `deploy.jsonl.1`; each launcher record is one `O_APPEND` write of at most 4 KB |
@@ -56,7 +55,6 @@ stderr, because the launcher has already redirected stderr to
 | `Library/Caches/Logs/app.jsonl` (iOS container) | iOS `AppLog` actor, `packages/ios-app/Core/Support/AppLog.swift` | iOS `AppLog` | 10 MiB total across `app.jsonl` and one prior segment of half each; info and above only, batched and flushed every 5 s, when the batch reaches the memory-ring bound, on backgrounding and on any error; a 2,000-record / 512 KiB memory ring holds every level |
 | iOS incident store (the container's `UserDefaults` key `tron.diagnostics.incidents.v1`) | `IOSClientDiagnosticStore`, `packages/ios-app/Core/Support/IOSClientDiagnostics.swift` | The store actor | 96 records, 96 KiB, 7 days; the first cause of each of the 8 newest incidents is reserved alongside the newest window. It holds catalog, connection, client-work, lifecycle and MetricKit records; `AppLog` is the always-on timeline and does not duplicate them |
 | `devices/` | Gateway device log store, `packages/gateway/src/transport/device-logs.ts`, written by `client.logs.append` | Gateway device log store | Per paired device: four 5 MiB segments (`<device-hash>.jsonl`, `.1` … `.3`); records are the device's own JSON lines, held once per boot and sequence |
-| `device-exports/` | Gateway export store, `packages/gateway/src/transport/diagnostic-export.ts`, written by `system.logs.export` | Gateway export store | One bundle is at most 512 KiB plus a 1 MB debug section; the phone's payload is 1,000 JSON lines inside that byte bound and keeps its newest records, but first reserves the identifying header plus the retained chat interaction trace (at most 256 records, `ChatInteractionTrace.maximumRecords`), so the byte envelope cannot drop the evidence for chat opening/scroll failures; the newest 10 bundles are kept; the directory is 0700 and each file 0600 |
 
 Mac `TronLog` redacts before applying its 2,000-byte UTF-8 message bound; clipped text
 keeps its longest valid scalar prefix. The phone's performance signposts are
@@ -90,7 +88,6 @@ would remove. Test-tooling signals are rows of the
 | `Library/Caches/Logs/app.jsonl` | 10 MiB (the user's chosen cap) | **Not yet measured:** the build that writes this stream is not installed on the phone |
 | iOS incident store | 96 KiB, 7 days | Bounded incident history, independent of the app log's cap |
 | `devices/` | 4 × 5 MiB per paired device | Each device's own uploaded app-log lines; the oldest segment is dropped on rotation |
-| `device-exports/` | 10 bundles | The newest exports; older ones are deleted at write time |
 | `state/model-usage.json` (the providers counters ledger) | 8 MiB, 10,000 rows, 30 days; oldest first on startup/completion | Local background/summarizer call counters only, included in backups; no wire/export path ([providers](../src/providers/README.md)) |
 | `state/settings/changes/` (the settings change record) | None: kept forever ([change path](settings-contract.md#change-path)) | One entry per settings key changed, a few hundred bytes each, in segments of 500 entries named in `index.json`; the Settings tool's `history` action reads one segment per page. Its size on disk is the growth signal. **Not yet measured** |
 
@@ -157,8 +154,8 @@ has one:
 
 Run `scripts/tron diagnose` (default window 2h) and read
 [Diagnostic bundle](../README.md#diagnostic-bundle) in the Gateway README for
-the command, the bounds and the redaction rules. Its eight sections are `logs`,
-`device-exports`, `payload-selection`, `processes`, `launchd`, `tailscale`,
+the command, the bounds and the redaction rules. Its seven sections are `logs`,
+`payload-selection`, `processes`, `launchd`, `tailscale`,
 `health` and `mac-verify`. The command is
 read-only and its output is the intended starting point for an incident; this
 file exists so its content can be interpreted, not so it can be described twice.

@@ -22,7 +22,7 @@ requests, cancellation, receipts, ordered delivery and liveness. Methods:
   upgrade answers retryable `busy` meanwhile), `POST /v1/pair` (rate-limited one-time
   enrollment), `POST|DELETE|GET /v1/uploads[/:id]` ([uploads](../machine/uploads.md)),
   `GET /v1/blobs/:id`, `GET /v1/sessions/:id/display-artifacts/:id` and the live-view
-  routes ([display](../display/README.md)), `GET /v1/socket` (protocol 8 WebSocket).
+  routes ([display](../display/README.md)), `GET /v1/socket` (protocol 9 WebSocket).
 - `upload-http.ts` owns the three upload exchanges; its synchronous dispatcher returns
   no work for other paths, so live-view open/frame keep their credential cut without
   an inserted await.
@@ -68,7 +68,7 @@ on every hello. No unauthenticated route names the lane.
 
 ## Hello and identity
 
-Every socket starts with `{"type":"hello","protocolVersion":8}`. Hello, pairing and
+Every socket starts with `{"type":"hello","protocolVersion":9}`. Hello, pairing and
 `system.info` carry `machineId` (per Tron home), `gatewayChannel` (`stable` or `dev`;
 `TRON_GATEWAY_CHANNEL` is validated, absence means `stable`) and `machineGroupID`
 (one physical Mac across homes; a connection-group hint only, clients fall back to
@@ -184,10 +184,7 @@ connection cannot start a boot after a newer one. `client.logs.cursor` returns t
 a torn tail recovers to the last complete envelope (a record is bounded at 16 KiB as stored). Revoking a device
 deletes its log files; an append still in flight is refused (`unauthenticated`) under the store's lock, so it
 cannot recreate them. Capability `device-logs.v1`.
-`system.logs.export` accepts only a bounded redacted client snapshot and command ID,
-appends the newest debug records (≤ 1 MB) and writes
-`~/.tron/logs/device-exports/<device-hash>-<timestamp>.jsonl` (0600 in 0700, newest
-ten kept); it never takes a client path or reads session content. RPC records keep
+RPC records keep
 `method`, `requestID`, `outcome`, `code`, `durationMs`; catalog stages add a
 process-local `workID`; reasons are fixed codes, never exception text or parameters.
 

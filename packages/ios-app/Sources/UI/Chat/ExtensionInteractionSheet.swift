@@ -18,6 +18,7 @@ struct ExtensionInteractionSheet: View {
     @PresentationState private var submitting = false
     @PresentationState private var submissionError: String?
     @PresentationState private var currentDate = Date()
+    @PresentationState private var secretKey = ""
     @FocusState private var textFocused: Bool
 
     private var isExpired: Bool {
@@ -42,7 +43,9 @@ struct ExtensionInteractionSheet: View {
                 VStack(alignment: .leading, spacing: 16) {
                     if interaction.method == .change, let review = interaction.review {
                         ChangeReviewCard(review: review, submitting: submitting,
-                            approve: { respond(value: .object(["digest": .string(review.digest), "approved": .bool(true)]), approval: pushRetryGate(for: review)) },
+                            secret: review.intent == .providerApiKey ? $secretKey : nil,
+                            approve: { respond(value: .object(["digest": .string(review.digest), "approved": .bool(true)]
+                                .merging(review.intent == .providerApiKey ? ["secret": .string(secretKey)] : [:]) { $1 }), approval: pushRetryGate(for: review)) },
                             cancel: { respond(value: .object(["digest": .string(review.digest), "approved": .bool(false)])) })
                     } else {
                         promptCard

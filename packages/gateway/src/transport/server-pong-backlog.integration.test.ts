@@ -48,7 +48,7 @@ async function pongAgainstBacklog(): Promise<{ backlogBeforePong: number; pendin
     sessions: { unsubscribeClient: vi.fn() } as never,
     auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as never,
     service: {
-      info: () => ({ protocolVersion: 8 }),
+      info: () => ({ protocolVersion: 9 }),
 
       releaseClient: vi.fn(),
       invoke: vi.fn(),
@@ -73,7 +73,7 @@ async function pongAgainstBacklog(): Promise<{ backlogBeforePong: number; pendin
   });
   socket.on("pong", () => { backlogBeforePong = backlogTopicsInOrder.length; });
   await new Promise<void>((resolve, reject) => { socket.once("open", () => resolve()); socket.once("error", reject); });
-  socket.send(JSON.stringify({ type: "hello", protocolVersion: 8, diagnostics: { clientId: "client-pong", attemptId: "initial", epoch: "1" } }));
+  socket.send(JSON.stringify({ type: "hello", protocolVersion: 9, diagnostics: { clientId: "client-pong", attemptId: "initial", epoch: "1" } }));
   await waitFor(() => connection()?.ready === true, "hello");
 
   const transport = (socket as unknown as { _socket: { pause(): void; resume(): void } })._socket;

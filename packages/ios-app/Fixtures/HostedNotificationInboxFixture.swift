@@ -216,7 +216,7 @@ private actor NotificationInboxSocket: GatewaySocketConnection {
 
     init(gateway: NotificationInboxGateway) {
         self.gateway = gateway
-        inbound = [Data("{\"type\":\"hello\",\"gatewayVersion\":\"fixture\",\"piVersion\":\"fixture\",\"protocolVersion\":8,\"minProtocolVersion\":8,\"machineId\":\"inbox-studio-machine\",\"machineName\":\"Studio Mac\",\"gatewayChannel\":\"stable\",\"capabilities\":[\"sessions.v1\"]}".utf8)]
+        inbound = [Data("{\"type\":\"hello\",\"gatewayVersion\":\"fixture\",\"piVersion\":\"fixture\",\"protocolVersion\":9,\"minProtocolVersion\":9,\"machineId\":\"inbox-studio-machine\",\"machineName\":\"Studio Mac\",\"gatewayChannel\":\"stable\",\"capabilities\":[\"sessions.v1\"]}".utf8)]
         Task { await gateway.attach(self) }
     }
 

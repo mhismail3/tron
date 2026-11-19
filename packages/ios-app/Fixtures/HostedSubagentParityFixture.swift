@@ -327,7 +327,7 @@ private actor HostedSubagentParitySocket: GatewaySocketConnection {
         if hello {
             hello = false
             let abort = HostedLaunch.arguments.contains("-stoppable") ? #","process-transcript-abort.v1""# : ""
-            return Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":8,"minProtocolVersion":8,"machineId":"fixture-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":["sessions.v1","process-transcript.v2"\#(abort)]}"#.utf8)
+            return Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":9,"minProtocolVersion":9,"machineId":"fixture-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":["sessions.v1","process-transcript.v2"\#(abort)]}"#.utf8)
         }
         if !pending.isEmpty { return pending.removeFirst() }
         return try await withCheckedThrowingContinuation { receiver = $0 }
