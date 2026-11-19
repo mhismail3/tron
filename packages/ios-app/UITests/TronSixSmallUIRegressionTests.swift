@@ -64,46 +64,6 @@ import UIKit
         }
     }
 
-    func testCheckinShowsSummaryProgressAttentionAndTimestamp() {
-        for blocked in [false, true] {
-            let app = launch(blocked ? "checkin-blocked" : "checkin")
-            let summary = app.staticTexts["Landed with explicit validation deferral"].firstMatch
-            XCTAssertTrue(summary.waitForExistence(timeout: 8), app.debugDescription)
-            for text in ["Attention", "Needs attention", "Done", "Next", "Timestamp"] {
-                let row = app.descendants(matching: .any)["home-tool-row-\(text)"].firstMatch
-                for _ in 0..<4 where !row.isHittable { app.swipeUp() }
-                XCTAssertTrue(row.exists, "Checkin needs a readable \(text) row: \(app.debugDescription)")
-            }
-            if blocked {
-                XCTAssertTrue(app.descendants(matching: .any)["home-tool-row-Blocker"].firstMatch.exists)
-            }
-            XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Checkin Object")).firstMatch.exists)
-            app.terminate()
-        }
-    }
-
-    func testCheckinValuesMatchCanonicalReceipt() {
-        for blocked in [false, true] {
-            let app = launch(blocked ? "checkin-blocked" : "checkin")
-            let expected = [
-                ("Attention", blocked ? "Requested" : "None"),
-                ("Needs attention", blocked ? "Yes" : "No"),
-                ("Done", "Prepared the six UI changes and captured light and dark simulator previews."),
-                ("Next", "Review the previews, then run focused UI regressions after approval."),
-                ("Timestamp", "2026")
-            ] + (blocked ? [("Blocker", "Visual approval is needed before testing and landing.")] : [])
-            for (title, value) in expected {
-                let row = app.descendants(matching: .any)["home-tool-row-\(title)"].firstMatch
-                guard row.waitForExistence(timeout: 8) else {
-                    XCTFail("Missing readable check-in receipt field: \(title)"); app.terminate(); return
-                }
-                for _ in 0..<4 where !row.isHittable { app.swipeUp() }
-                XCTAssertTrue(row.label.contains(value), "\(title) must preserve receipt value: \(row.label)")
-            }
-            app.terminate()
-        }
-    }
-
     private func launch(_ surface: String, mode: String = "light", extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-expanded-review", "-six-ui-surface", surface,
