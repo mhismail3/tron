@@ -44,6 +44,11 @@ Commands:
                                     One-shot #2327 removal of retired connection setup
                                     operations, receipts and Raindrop collection mappings;
                                     dry run unless --apply; never at startup
+  migrate observed-git-residue --tron-home <dir> [--apply --backup <new dir>]
+  migrate observed-git-residue --restore --backup <dir>
+                                    One-shot R11 removal of the retired staged/head project-git
+                                    fields from state/settings/observed.json; dry run unless
+                                    --apply; never at startup
   migrate push-policy --restore --tron-home <dir>
                                     Rollback to a pre-v3 build: restores the two stores from
                                     state/migrations/push-policy-v3. Refuses while a Gateway owns
@@ -254,6 +259,14 @@ case "$cmd" in
           echo "Prepare it first: scripts/tron build gateway" >&2; exit 66;
         }
         exec node "$GATEWAY/dist/integrations/connections-residue-migration.js" "$@"
+        ;;
+      observed-git-residue)
+        shift
+        use_pinned_node
+        [[ -f "$GATEWAY/dist/admin/observed-git-residue-migration.js" ]] || {
+          echo "Prepare it first: scripts/tron build gateway" >&2; exit 66;
+        }
+        exec node "$GATEWAY/dist/admin/observed-git-residue-migration.js" "$@"
         ;;
       push-policy)
         shift

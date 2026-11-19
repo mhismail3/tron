@@ -6,7 +6,7 @@ import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { durableAtomicWriteJson } from "../foundation/durable-json.js";
 import { readJsonDocument } from "../foundation/json.js";
-import { gitHeadState, projectSettingsPath, stagedBlob, type GitHeadState } from "./project-settings-writer.js";
+import { gitHeadState, projectSettingsPath, type GitHeadState } from "./project-settings-writer.js";
 import type { ChangeEntry, SettingsChangeRecord } from "../kernel/settings/settings-record.js";
 import { type GitResult, type Qualifiers } from "../kernel/settings/tool-contract.js";
 import type { OutsideMark, ObservedStore, PlannedWrite } from "../kernel/settings/settings-types.js";
@@ -20,7 +20,6 @@ type ProjectObservedStore = Extract<ObservedStore, { root: string }>;
 const isProjectStore = (store: ObservedStore): store is ProjectObservedStore => store.kind === "project" || store.kind === "project-mcp";
 
 const PROJECT_FILES = new Set(["settings.json", "mcp.json"]);
-const STAGED_LIMIT = 20;
 
 interface ObservedValue { key: string; qualifiers?: Qualifiers; value?: unknown; hash?: string }
 
@@ -29,8 +28,6 @@ interface StoreState {
   values: Record<string, ObservedValue>;
   tron: Record<string, string>;
   outside: Record<string, OutsideMark>;
-  staged?: Array<{ changeId: string; path: string; blob: string }>;
-  head?: string | null;
 }
 
 interface ObservedDocument { version: 1; stores: Record<string, StoreState> }
@@ -375,14 +372,13 @@ export class OutsideChanges {
     let state = document.stores[id];
     const head = !isProjectStore(store) ? undefined : headKnown ? knownHead : await gitHeadState(store.root);
     const git = head && store.kind === "project-mcp" ? { ...head, path: join(dirname(head.path), "mcp.json") } : head;
-    if (state && !planned && state.digest === digest && (!git || git.head === (state.head ?? null))) return [];
+    if (state && !planned && state.digest === digest) return [];
     const current = await this.values(store, text);
     if (!current) return [];
     this.changed = true;
     if (!state) {
       document.stores[id] = {
         digest, values: Object.fromEntries(current), tron: {}, outside: {},
-        ...(git ? { head: git.head, staged: [] } : {}),
       };
       if (!planned) return [];
       state = document.stores[id]!;
@@ -400,10 +396,6 @@ export class OutsideChanges {
         if (landed && recorded) {
           state.tron[instance] = recorded.changeId;
           delete state.outside[instance];
-          if (store.kind === "project" && recorded.git?.staged && recorded.git.blob) {
-            state.staged = [...(state.staged ?? []).filter(item => item.changeId !== recorded.changeId),
-              { changeId: recorded.changeId, path: recorded.git.path, blob: recorded.git.blob }].slice(-STAGED_LIMIT);
-          }
         }
         continue;
       }
@@ -419,10 +411,6 @@ export class OutsideChanges {
     }
     state.values = Object.fromEntries(current);
     state.digest = digest;
-    if (git) {
-      if (git.head !== (state.head ?? null) && store.kind === "project") entries.push(...await this.committed(store, state, git.head, at));
-      state.head = git.head;
-    }
     return entries;
   }
 
@@ -444,24 +432,8 @@ export class OutsideChanges {
       }),
       status: "outside",
       ...(replaced ? { refersTo: replaced } : {}),
-      ...(git ? { git: { root: git.root, path: git.path, staged: false, ...(git.head ? { head: git.head } : {}), ...(git.branch ? { branch: git.branch } : {}) } } : {}),
+      ...(git ? { git: { root: git.root, path: git.path, ...(git.head ? { head: git.head } : {}), ...(git.branch ? { branch: git.branch } : {}) } } : {}),
     };
   }
 
-  private async committed(store: Extract<ObservedStore, { kind: "project" }>, state: StoreState, head: string | null, at: string): Promise<ChangeEntry[]> {
-    if (!head || !state.staged?.length) return [];
-    const facts: ChangeEntry[] = [];
-    const remaining: NonNullable<StoreState["staged"]> = [];
-    for (const item of state.staged) {
-      const blob = await stagedBlob(store.root, `HEAD:${item.path}`);
-      const found = blob === item.blob ? await this.record.entry(item.changeId) : undefined;
-      if (!found) { remaining.push(item); continue; }
-      facts.push({
-        ...found.entry, changeId: randomUUID(), at, status: "committed", refersTo: item.changeId,
-        git: { ...(found.entry.git ?? { root: store.root, path: item.path, staged: true }), head },
-      });
-    }
-    state.staged = remaining;
-    return facts;
-  }
 }

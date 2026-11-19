@@ -367,10 +367,6 @@ export class GatewayService {
             layer: entry.layer, status: entry.status,
           })), { actor: group[0]!.actor });
         }
-        const committed = entries.filter(entry => entry.status === "committed");
-        if (committed.length) dependencies.broadcast("settings.changed", safeJson({
-          changeIds: committed.map(entry => entry.changeId), keys: [...new Set(committed.map(entry => entry.key))], layer: "project", target: committed[0]!.target,
-        }));
       },
     });
   }

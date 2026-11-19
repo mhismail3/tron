@@ -13,20 +13,18 @@ export function splitModelRef(value: string): { provider: string; id: string } |
   return separator > 0 && separator < value.length - 1 ? { provider: value.slice(0, separator), id: value.slice(separator + 1) } : undefined;
 }
 
-export const QUALIFIER_NAMES = ["role", "model", "provider", "tool", "project", "connection", "key", "direction", "server", "note", "device", "lesson"] as const;
+export const QUALIFIER_NAMES = ["role", "model", "provider", "project", "key", "server", "note", "device", "lesson"] as const;
 
 export type QualifierName = typeof QUALIFIER_NAMES[number];
 
 export type Qualifiers = Partial<Record<QualifierName, string>>;
 
-export type ChangeStatus = "started" | "applied" | "failed" | "outside" | "committed";
+export type ChangeStatus = "started" | "applied" | "failed" | "outside";
 
 export interface GitResult {
   root: string | null;
   path: string;
-  staged: boolean;
   reason?: string;
-  blob?: string;
   warning?: string;
   head?: string;
   branch?: string;

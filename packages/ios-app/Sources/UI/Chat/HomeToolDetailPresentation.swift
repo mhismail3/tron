@@ -167,14 +167,13 @@ extension HomeToolDetailPresentation {
         case "superseded": "Superseded"
         case "failed": "Failed"
         case "outside": "Changed outside Tron"
-        case "committed": "Committed"
         default: status.capitalized
         }
     }
 
     private static func tone(forStatus status: String) -> Tone {
         switch status {
-        case "applied", "approved", "committed": .success
+        case "applied", "approved": .success
         case "pending": .pending
         case "declined", "expired", "failed": .failure
         default: .neutral
