@@ -36,18 +36,12 @@ struct ResolvedSetting: Decodable, Equatable, Sendable, Identifiable {
     }
     let layers: [Layer]
     var overridden: Bool? = nil
-    var projectSetting: SettingsProjectSource? = nil
 
     var id: String { settingIdentity(key: key, qualifiers: qualifiers) }
 
     func badge(_ kind: String) -> SettingsBadge? { badges.first { $0.kind == kind } }
 
     func value(at layer: String) -> JSONValue? { layers.first { $0.layer == layer }?.value }
-}
-
-struct SettingsProjectSource: Decodable, Equatable, Sendable {
-    let file: String
-    let path: String
 }
 
 struct SettingsResolution: Decodable, Sendable {

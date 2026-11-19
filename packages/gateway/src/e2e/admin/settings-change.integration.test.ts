@@ -1628,11 +1628,6 @@ describe("every key at every allowed layer", () => {
         const scope = layer === "home" ? "session" : layer;
         const request = [{ key: key.id, layer: scope, op: "set", value, ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) }];
         const extra = layer === "session" ? { fence: fence() } : {};
-        if (row.projectSetting && layer === "session") {
-          await expect(f.change(targets[layer]!, request, extra, client([slot.id]))).rejects.toThrow("edit its Project key instead");
-          report.push({ ...instance, result: "verified masked by Project" });
-          continue;
-        }
         const homeKey = keyForHome(key, layer === "home");
         const binding = homeKey.layers[layer as "global"];
         if (layer === "project" || !scopeAdmitted(homeKey, layer as "global") || !key.writers.includes("ui") || !binding || binding.store === "session-launch") {
@@ -1672,7 +1667,7 @@ describe("every key at every allowed layer", () => {
     transcript.push({ case: `every key: ${only}`, detail: report.filter(entry => entry.layer === only) });
     await mkdir(dirname(EVERY_KEY_ARTIFACT), { recursive: true });
     await writeFile(EVERY_KEY_ARTIFACT, `${JSON.stringify(report, null, 2)}\n`);
-    const gaps = report.filter(entry => entry.layer === only && !["round-trip", "verified read-only", "verified masked by Project", "verified unserved: no writer", "verified unserved: no paired iPhone", "native mutation: real sshd Gateway round trips"].includes(String(entry.result)) && !String(entry.result).startsWith("Home applier"));
+    const gaps = report.filter(entry => entry.layer === only && !["round-trip", "verified read-only", "verified unserved: no writer", "verified unserved: no paired iPhone", "native mutation: real sshd Gateway round trips"].includes(String(entry.result)) && !String(entry.result).startsWith("Home applier"));
     expect(gaps).toEqual([]);
   }, 60_000);
 });

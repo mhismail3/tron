@@ -20,7 +20,7 @@ The settings tool's `update` action (Tron Home only) installs one exact version 
   authority, privacy or spend, and any install or irreversible effect, require an exact paired-native
   tap through the dedicated [native review](#native-review), never a generic form.
   In a `sources.*` path list, adding an entry or removing a `-`/`!` exclusion widens.
-- **F4 Scopes.** Top wins: **Project > Session/Home override > Global**, among the scopes
+- **F4 Scopes.** Top wins: **Session/Home override > Project > Global** (the most specific explicit choice), among the scopes
   the target has and the key's grants allow. One resolver takes the topmost applied scope with
   a value; the effective value is computed, never stored.
 
@@ -32,10 +32,14 @@ The settings tool's `update` action (Tron Home only) installs one exact version 
 | Session/Home override | Session JSONL for ordinary chats and workers; `<tronHome>/state/home/profile.json` for Home's bounded durable recipe | Settings change path; the runtime lane owns SDK effects |
 | Global | Agent and Gateway defaults, trust, notifications and SDK/schema defaults | Gateway and the underlying SDK stores; hand edits are outside writers |
 
-Precedence is Project > Session/Home override > Global, admitted by
-`projectSettable` and `sessionOverridable`. Home has no Project and no separate chapter
-override. Project masks a stored Session choice without deleting it; removing Project
-reactivates that choice. Workers inherit only the bounded queue/model, thinking,
+Precedence is Session/Home override > Project > Global, admitted by
+`projectSettable` and `sessionOverridable` (proof block `settings/precedence`, decision D23). Home has no
+Project and no separate chapter override. A chat's model and thinking count as a Session value only when
+they are an explicit choice (`fixed.from` is `session` or `delegate`); an inherited launch or runtime model
+is not, so a project's model still applies to a chat that never chose one and an unavailable Project model
+is still refused. A Home task worker's model taken from the worker queue is a seed, not an explicit choice:
+a Project model beats it, while a model Home names explicitly beats the Project. Session edits over a
+Project value apply; `projectSetting` (file and key) is served only when the Project layer wins. Workers inherit only the bounded queue/model, thinking,
 subagent-queue and task-budget recipe. The Project store is
 `.pi/` at the worktree root (`TrustInspection.projectDir`, pi's `projectDir`;
 [project root](../src/machine/README.md#project-root)). Trust is the Global key
@@ -278,6 +282,7 @@ name their file and never make a Session editor look Project-owned.
 A key's canonical type, validation and runtime clamping apply to every change.
 `dryRun` returns per-key errors and the immutable review. Changes is permanent history,
 not a pending-request inbox. Global writes Global, Session the Session scope, Home its saved settings;
-Project is inspection only. Session/Home reuse Global's renderer and editors; Project-owned rows
-have a read-only value and separate Project info pill, explicit overrides have Overridden/Revert,
+Project is inspection only. Session/Home reuse Global's renderer and editors; a row whose value comes
+from Project stays editable as a Session override (its file and key, `projectSetting`, are served to the
+`settings` tool only; the app does not show them), explicit overrides have Overridden/Revert,
 and the app has no Changes entry: audit history and Undo are the `settings` tool's. Hand-built screens remain only for guided flows and viewers.
