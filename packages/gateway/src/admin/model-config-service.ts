@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GatewayError } from "../errors.js";
 import { readJson, updateJsonLocked } from "../foundation/json.js";
-import { addsProviderKey, modelProviderOnDisk, type ModelProviderValue } from "../kernel/settings/model-provider-value.js";
+import { addsProviderKey, modelProviderOnDisk, providerKeyReference, type ModelProviderValue } from "../kernel/settings/model-provider-value.js";
 import type { SettingsInventory } from "../kernel/settings/tool-contract.js";
 import { ModelRuntime } from "../kernel/pi/coding-agent.js";
 import { redactCredentials } from "../util/credential-redaction.js";
@@ -124,7 +124,7 @@ export class ModelConfigService {
     if (apiKey !== null && addsProviderKey(providersOf(current)[id], value)) {
       if (apiKey === undefined) throw new GatewayError("invalid_request", "A provider API key is entered on its iPhone card; nothing was changed");
       if (!this.credentials) throw new GatewayError("unsupported", "Provider credential storage is unavailable");
-      await this.credentials.store(value!.apiKey!.account, apiKey);
+      await this.credentials.store(providerKeyReference(id).account, apiKey);
     }
     const checked = JSON.stringify(current);
     try {

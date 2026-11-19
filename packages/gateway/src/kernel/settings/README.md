@@ -30,10 +30,10 @@ setting and is not an approval queue.
   carries its `write` declaration; `schema.recordKey()` builds the change-path declaration from it.
 - `model-provider-value.ts`: the typed `accounts.models.provider` value (`baseUrl`, `api`, optional `name`
   and `models`: `id`, `name?`, `reasoning?`, `input?`, `contextWindow?`, `maxTokens?`; `apiKey` only as this
-  provider's `tron.provider` Keychain reference), closed to those fields so no credential (an inline key, `headers`,
+  provider's `tron.provider` Keychain reference or a 1Password `op://` reference), closed to those fields so no credential (an inline key, `headers`,
   `authHeader`), `oauth`, `compat` or `modelOverrides` can enter the record; the on-disk projection refuses an existing
   provider it cannot carry, and the tap rule (a new provider, a changed address or API, or an added key taps; an added
-  key makes the card's intent `provider-api-key`, whose answer carries the typed key to the Keychain owner).
+  Keychain key makes the card's intent `provider-api-key`, whose answer carries the typed key to the Keychain owner; a 1Password reference taps with no intent and no typed key).
 - `subagents-value.ts`: the typed `subagents.settings` value (the closed set of pi-subagents fields in
   `settings.json`) and the `subagents.agent` value (one agent Markdown file whose frontmatter names the
   qualifier and that has a description). Values are checked field by field against what pi-subagents accepts
