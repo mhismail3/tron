@@ -29,10 +29,11 @@ setting and is not an approval queue.
   records it cannot carry, and the widen/narrow rule that decides the native tap. `RECORD_SUBJECTS`
   carries its `write` declaration; `schema.recordKey()` builds the change-path declaration from it.
 - `model-provider-value.ts`: the typed `accounts.models.provider` value (`baseUrl`, `api`, optional `name`
-  and `models`: `id`, `name?`, `reasoning?`, `input?`, `contextWindow?`, `maxTokens?`), closed to those fields
-  so no credential (`apiKey`, `headers`, `authHeader`), `oauth`, `compat` or `modelOverrides` can enter the
-  record; the on-disk projection refuses an existing provider it cannot carry, and the tap rule (a new provider or a
-  changed address or API taps).
+  and `models`: `id`, `name?`, `reasoning?`, `input?`, `contextWindow?`, `maxTokens?`; `apiKey` only as this
+  provider's `tron.provider` Keychain reference), closed to those fields so no credential (an inline key, `headers`,
+  `authHeader`), `oauth`, `compat` or `modelOverrides` can enter the record; the on-disk projection refuses an existing
+  provider it cannot carry, and the tap rule (a new provider, a changed address or API, or an added key taps; an added
+  key makes the card's intent `provider-api-key`, whose answer carries the typed key to the Keychain owner).
 - `subagents-value.ts`: the typed `subagents.settings` value (the closed set of pi-subagents fields in
   `settings.json`) and the `subagents.agent` value (one agent Markdown file whose frontmatter names the
   qualifier and that has a description). Values are checked field by field against what pi-subagents accepts

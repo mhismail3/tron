@@ -48,11 +48,11 @@ interface PendingInteraction {
   reject: (error: Error) => void;
   timer?: NodeJS.Timeout;
   cleanupAbort?: () => void;
-  apply?: (acceptance: NativeChangeAcceptance) => Promise<unknown>;
+  apply?: (acceptance: NativeChangeAcceptance, secret?: string) => Promise<unknown>;
 }
 
 interface InteractionRequestOptions {
-  apply?: (acceptance: NativeChangeAcceptance) => Promise<unknown>;
+  apply?: (acceptance: NativeChangeAcceptance, secret?: string) => Promise<unknown>;
   signal?: AbortSignal;
   timeout?: number;
   expired?: () => void;
@@ -162,15 +162,20 @@ export class SemanticUIBroker {
       throw new GatewayError("conflict", "Extension interaction scope is stale; refresh the session", true);
     }
     if (pending.wire.method === "change" && !cancelled) {
-      const answer = value as { digest?: unknown; approved?: unknown } | null;
+      const answer = value as { digest?: unknown; approved?: unknown; secret?: unknown } | null;
       if (!acceptance || !pending.apply || !answer || typeof answer !== "object" || Array.isArray(answer)
-        || Object.keys(answer).some(key => key !== "digest" && key !== "approved")
+        || Object.keys(answer).some(key => key !== "digest" && key !== "approved" && key !== "secret")
         || typeof answer.approved !== "boolean" || answer.digest !== pending.wire.review.digest) {
+        throw new GatewayError("invalid_request", "Native change response does not match its exact review");
+      }
+      const secret = answer.secret;
+      const wantsSecret = answer.approved && pending.wire.review.intent === "provider-api-key";
+      if (wantsSecret ? typeof secret !== "string" || !secret || Buffer.byteLength(secret) > 16_384 || /[\r\n\0]/u.test(secret) : secret !== undefined) {
         throw new GatewayError("invalid_request", "Native change response does not match its exact review");
       }
       this.finish(pending);
       if (!answer.approved) { pending.resolve(undefined); return; }
-      return Promise.resolve().then(() => pending.apply!(acceptance)).then(result => { pending.resolve(result); }, error => {
+      return Promise.resolve().then(() => pending.apply!(acceptance, secret as string | undefined)).then(result => { pending.resolve(result); }, error => {
         pending.reject(error instanceof Error ? error : new Error(String(error)));
         throw error;
       });
@@ -205,7 +210,7 @@ export class SemanticUIBroker {
     pending.resolve(resolved);
   }
 
-  requestChange<T>(input: { review: ChangeReview; apply: (acceptance: NativeChangeAcceptance) => Promise<T>; signal?: AbortSignal }): Promise<T | undefined> {
+  requestChange<T>(input: { review: ChangeReview; apply: (acceptance: NativeChangeAcceptance, secret?: string) => Promise<T>; signal?: AbortSignal }): Promise<T | undefined> {
     const review = structuredClone(input.review);
     if (!review.requiresTap || !/^[a-f0-9]{64}$/.test(review.digest) || !review.title || review.items.length < 1 || review.items.length > 50
       || encodedBytes(review) > MAX_MESSAGE_BYTES) return Promise.reject(new GatewayError("invalid_request", "Native change review is invalid"));

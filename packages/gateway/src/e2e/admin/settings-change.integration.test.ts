@@ -382,7 +382,8 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
   const keychain: string[] = [];
   const mcpAdmin = new McpAdminService(agentDir, join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js"),
     { async store(_account: string, token: string) { keychain.push(token); } });
-  const modelConfig = new ModelConfigService(agentDir);
+  const providerKeys: Array<[string, string]> = [];
+  const modelConfig = new ModelConfigService(agentDir, { async store(account: string, secret: string) { providerKeys.push([account, secret]); } });
   const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: privateService, mcpAdmin, modelConfig }));
   const record = new SettingsChangeRecord(tronHome, options.segmentEntries);
   const outside = new OutsideChanges(TEST_SETTINGS_SCHEMA, tronHome, agentDir, record, settingsModel.owner.observedReaders);
@@ -438,7 +439,7 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
     }
     return false;
   };
-  return { root, tronHome, agentDir, trust, macTerminalKeys, registry, service, record, settingsModel, settingsChanges, broadcasts, pushes, published, outside, change, agentChange, history, macDocument, faux, modelRuntime, keychain };
+  return { root, tronHome, agentDir, trust, macTerminalKeys, registry, service, record, settingsModel, settingsChanges, broadcasts, pushes, published, outside, change, agentChange, history, macDocument, faux, modelRuntime, keychain, providerKeys };
 }
 
 async function gitProject(root: string, name: string) {
@@ -1539,6 +1540,36 @@ describe("outside changes to MCP servers and custom models", () => {
     transcript.push({ case: "outside pi-subagents", detail: await outsideEntries(f) });
   });
 
+  caseIt("adds a provider API key only through its exact iPhone card: the typed key goes to the Keychain owner and models.json, review, result and history hold only the reference", async owner => {
+    const f = await fixture(owner);
+    const global = { kind: "global" as const };
+    const modelsPath = join(f.agentDir, "models.json");
+    const typed = "sk-typed-on-the-iphone-only";
+    const reference = { source: "keychain", service: "tron.provider", account: "tron-provider-keyed" };
+    const provider = { baseUrl: "https://keyed-models.invalid/v1", api: "openai-completions", models: [{ id: "m" }] };
+    const set = (value: unknown) => ({ key: "accounts.models.provider", qualifiers: { provider: "keyed" }, layer: "global" as const, op: "set" as const, value });
+    const home = { actor: { kind: "home" as const, id: "home" }, reason: "Add the keyed endpoint" };
+    for (const apiKey of [{ ...reference, account: "tron-provider-other" }, { ...reference, format: "bearer" }, { source: "1password", reference: "op://v/i/f" }, typed]) {
+      await expect(f.settingsChanges.change(global, [set({ ...provider, apiKey })], home)).rejects.toMatchObject({ code: "invalid_request" });
+    }
+    const keyed = { ...provider, apiKey: reference };
+    const review = await f.settingsChanges.change(global, [set(keyed)], home);
+    expect(review).toMatchObject({ status: "review", review: { requiresTap: true, intent: "provider-api-key", items: [{ after: expect.stringContaining("Keychain API key") }] } });
+    await expect(f.settingsChanges.change(global, [set(keyed)], { ...home, actor: { kind: "ui", id: "device:phone" }, confirmationDigest: review.review!.digest }))
+      .rejects.toMatchObject({ code: "invalid_request", message: expect.stringContaining("iPhone card") });
+    expect(f.providerKeys).toEqual([]);
+    const applied = await f.settingsChanges.change(global, [set(keyed)], { ...home,
+      confirm: (shown, apply) => apply({ deviceId: "device:phone", commandId: "provider-key-tap" }, shown.digest === review.review!.digest ? typed : "stale") });
+    expect(applied).toMatchObject({ status: "applied", changes: [{ after: keyed }] });
+    expect(f.providerKeys).toEqual([["tron-provider-keyed", typed]]);
+    expect(JSON.parse(await readFile(modelsPath, "utf8")).providers.keyed).toEqual(keyed);
+    expect(f.modelRuntime.getModel("keyed", "m")).toBeDefined();
+    expect(JSON.stringify([review, applied, await f.history(), await readFile(modelsPath, "utf8")])).not.toContain(typed);
+    const renamed = await f.settingsChanges.change(global, [set({ ...keyed, name: "Keyed" })], home);
+    expect(renamed).toMatchObject({ status: "applied" });
+    expect(renamed.review!.intent).toBeUndefined();
+    expect(f.providerKeys).toHaveLength(1);
+  });
   caseIt("refuses a provider write while models.json holds an unrelated invalid entry, and never persists or reports it applied", async owner => {
     const f = await fixture(owner);
     const global = { kind: "global" as const };

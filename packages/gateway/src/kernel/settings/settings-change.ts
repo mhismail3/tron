@@ -10,6 +10,7 @@ import { HOME_PROFILE_SUBJECT, SECTIONS, hasSessionSettingsApplier, keyForHome, 
 import { changeReview, formatStoredSetting, LAYER_LABELS, type ModelRefValue, type SettingsStores, type PlannedWrite } from "./settings-types.js";
 import { presentHistoryEntry } from "./settings-presentation.js";
 import { canonicalSettingsTarget, scopeAdmitted, storeForScope } from "./scope-resolution.js";
+import { addsProviderKey } from "./model-provider-value.js";
 import { SettingsModel, declaredKey, deepEqual, setPath, unsetPath, qualifiedWrite, type SessionSettingsSource, type SettingsReadOwner } from "./settings-model.js";
 
 export interface SessionAppliers {
@@ -35,6 +36,7 @@ export interface ChangeContext {
   dryRun?: boolean;
   confirmationDigest?: string;
   confirm?: ConfirmChange;
+  secret?: string;
   session?: SessionSettingsSource & { appliers: SessionAppliers };
   homeChapter?: SessionSettingsSource & {
     sessionId: string;
@@ -159,10 +161,10 @@ export class SettingsChangePath {
     const result = await operation(context);
     if (result.status !== "review" || !context.confirm || context.dryRun) return result;
     const review = result.review!;
-    return await context.confirm(review, acceptance => {
+    return await context.confirm(review, (acceptance, secret) => {
       const { confirm: _confirm, ...current } = context;
       return operation({ ...current, actor: { kind: "ui", id: acceptance.deviceId },
-        commandId: acceptance.commandId, confirmationDigest: review.digest });
+        commandId: acceptance.commandId, confirmationDigest: review.digest, ...(secret === undefined ? {} : { secret }) });
     }) ?? { status: "declined", changes: [] };
   }
 
@@ -183,6 +185,7 @@ export class SettingsChangePath {
     const review = changeReview({ target, undoOf: context.undoOf, applyAgainOf: context.applyAgainOf, planned: planned.map(plan => ({
       key: plan.key.id, layer: plan.request.layer, qualifiers: plan.qualifiers, op: plan.request.op, before: plan.before ?? null, after: plan.after ?? null })) },
       { title: planned.map(plan => plan.key.label).join(", "), requiresTap, ...(context.reason ? { reason: context.reason } : {}),
+        ...(planned.some(plan => plan.binding.store === "models" && addsProviderKey(plan.before, plan.after)) ? { intent: "provider-api-key" } : {}),
         items: planned.map(plan => ({ label: plan.key.label, before: formatStoredSetting(plan.key.type, plan.before),
           after: formatStoredSetting(plan.key.type, plan.after),
           detail: [LAYER_LABELS[plan.request.layer] + " stored value", target.kind === "session" ? target.sessionId : target.kind === "project" ? target.cwd : target.kind, plan.key.confirm].filter(Boolean).join("\n"),

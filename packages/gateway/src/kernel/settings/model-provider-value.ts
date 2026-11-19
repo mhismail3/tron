@@ -4,8 +4,8 @@ import { refuseSetting as refuse, secretFreeText, secretFreeUrl } from "./secret
 import type { Direction } from "./tool-contract.js";
 import type { ValueType } from "./settings-types.js";
 
-const HINT = "provider credentials and request options are set in models.json or the app, never through settings";
-const FIELDS = ["baseUrl", "api", "name", "models"] as const;
+const HINT = "a provider API key is entered on the iPhone card and stored in the Keychain; other credentials and request options are set in models.json, never through settings";
+const FIELDS = ["baseUrl", "api", "name", "models", "apiKey"] as const;
 const MODEL_FIELDS = ["id", "name", "reasoning", "input", "contextWindow", "maxTokens"] as const;
 const MODALITIES = ["text", "image"] as const;
 const MAX_MODELS = 500;
@@ -21,11 +21,22 @@ interface ModelProviderModel {
   maxTokens?: number;
 }
 
+export interface ProviderKeyReference { source: "keychain"; service: "tron.provider"; account: string }
+
 export interface ModelProviderValue {
   baseUrl: string;
   api: string;
   name?: string;
   models?: ModelProviderModel[];
+  apiKey?: ProviderKeyReference;
+}
+
+export function providerKeyReference(provider: string): ProviderKeyReference {
+  return { source: "keychain", service: "tron.provider", account: `tron-provider-${provider}` };
+}
+
+export function addsProviderKey(before: unknown, after: unknown): boolean {
+  return (after as ModelProviderValue | undefined)?.apiKey !== undefined && (before as ModelProviderValue | undefined)?.apiKey === undefined;
 }
 
 function validateModel(raw: unknown, label: string): ModelProviderModel {
@@ -52,7 +63,7 @@ function validateModel(raw: unknown, label: string): ModelProviderModel {
   return result;
 }
 
-function validateModelProviderValue(value: unknown, label: string): ModelProviderValue {
+function validateModelProviderValue(value: unknown, label: string, provider?: string): ModelProviderValue {
   const raw = object(value, label);
   if (Object.keys(raw).some(name => !(FIELDS as readonly string[]).includes(name))) {
     refuse(label, `carries a field that is not a provider setting here; ${HINT}`);
@@ -68,12 +79,21 @@ function validateModelProviderValue(value: unknown, label: string): ModelProvide
     if (new Set(models.map(model => model.id)).size !== models.length) refuse(label, "models must have unique ids");
     result.models = models;
   }
+  if (raw.apiKey !== undefined) {
+    const expected = providerKeyReference(provider ?? "");
+    const reference = raw.apiKey;
+    if (!reference || typeof reference !== "object" || Array.isArray(reference)
+      || JSON.stringify(Object.entries(reference).sort()) !== JSON.stringify(Object.entries(expected).sort())) {
+      refuse(label, `apiKey holds only this provider's Keychain reference; ${HINT}`);
+    }
+    result.apiKey = expected;
+  }
   return result;
 }
 
 export function modelProviderOnDisk(id: string, raw: unknown): ModelProviderValue {
   try {
-    return validateModelProviderValue(raw, `Custom model provider ${id}`);
+    return validateModelProviderValue(raw, `Custom model provider ${id}`, id);
   } catch (error) {
     const reason = error instanceof Error ? error.message.replace(/^Custom model provider \S+ /u, "") : "cannot be read";
     throw new GatewayError("conflict", `Custom model provider ${id} cannot be changed here: its configuration ${reason}; edit models.json or use the app`);
@@ -85,15 +105,15 @@ export function modelProviderDirection(before: unknown, after: unknown): Directi
   if (before === undefined) return "widen";
   const was = before as ModelProviderValue;
   const now = after as ModelProviderValue;
-  return was.baseUrl === now.baseUrl && was.api === now.api ? "narrow" : "widen";
+  return was.baseUrl === now.baseUrl && was.api === now.api && !addsProviderKey(was, now) ? "narrow" : "widen";
 }
 
 export const modelProviderType: ValueType = {
   kind: "modelProvider",
-  validate: validateModelProviderValue,
+  validate: (value, label, context) => validateModelProviderValue(value, label, context?.instance),
   format: value => {
     const provider = value as ModelProviderValue;
     const models = provider.models ? `${provider.models.length} model${provider.models.length === 1 ? "" : "s"}` : undefined;
-    return [provider.name, provider.baseUrl, provider.api, models].filter(Boolean).join(", ");
+    return [provider.name, provider.baseUrl, provider.api, models, provider.apiKey ? "Keychain API key" : undefined].filter(Boolean).join(", ");
   },
 };
