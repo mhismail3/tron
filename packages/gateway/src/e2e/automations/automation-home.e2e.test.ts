@@ -2,7 +2,7 @@ import { readFile, mkdir, writeFile, rm, open } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { fauxAssistantMessage, getSystemMessageText, fauxToolCall, type FauxResponseFactory } from "@earendil-works/pi-ai";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { startLockGateway, type LockGateway, type LockGatewayOptions } from "../../../test-support/gateway-lock-harness.js";
 import { NotificationService } from "../../notifications/notification-service.js";
 import { NotificationGrantStore } from "../../notifications/grant-store.js";
@@ -16,8 +16,8 @@ import { droppingAnyTurnFrame } from "../../../test-support/turn-frame.js";
 
 const owned: LockGateway[] = [];
 const retainedRoots = new Set<string>();
+beforeEach(async () => { await mkdir("test-results/2094", { recursive: true }); });
 afterEach(async () => { try {
-  await mkdir("test-results/2094", { recursive: true });
   await writeFile("test-results/2094/latest-home-automation-trace.json", JSON.stringify(owned.map(gateway => gateway.record()), null, 2));
 } finally {
   try { for (const gateway of owned.splice(0).reverse()) await gateway.dispose(); }
@@ -143,10 +143,8 @@ it("real Gateway: retains each Home automation firing while paused, batches on r
     const requests = gateway.record().providerRequests;
     expect(JSON.stringify(requests)).toContain("[from: automation; kind: trigger; authority: task]");
     expect(JSON.stringify(requests)).not.toContain("not maintainer authority");
-    await mkdir("test-results/2094", { recursive: true });
     await writeFile("test-results/2094/home-automation-e2e.json", JSON.stringify({ runIds, messages, requests }, null, 2));
   } catch (error) {
-    await mkdir("test-results/2094", { recursive: true });
     await writeFile("test-results/2094/home-automation-failure.json", JSON.stringify({
       status: await phone.request("home.status", {}), automation: await phone.request("automation.get", { automationId }),
       requests: gateway.record(), files: await gateway.tree(join(gateway.tronHome, "state")),
@@ -245,7 +243,6 @@ it("real Gateway: busy firings cannot interleave; the 60-second cooldown is per 
     for (const runId of cooling) expect((await phone.request("automation.run.get", { automationId: first.id, runId })).result.state).toBe("succeeded");
     const messages = (await gateway.registry.acquire(sessionId)).canonicalSessionEntries().filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-trigger.v1");
     expect(messages).toHaveLength(6);
-    await mkdir("test-results/2094", { recursive: true });
     await writeFile("test-results/2094/home-automation-cooldown.json", JSON.stringify({ batch, cooling, independent, messages, requests: gateway.record().providerRequests }, null, 2));
   } finally { release(); }
 });
@@ -517,7 +514,6 @@ it("real Gateway: paused crash claims and a partial canonical batch recover exac
     expect(relayRequests[0].path).toBe("/v3/notifications");
     const notificationAfter = JSON.parse(await readFile(`${gateway.tronHome}/state/notifications.json`, "utf8"));
     expect(notificationAfter.receipts).toEqual(notificationBefore.receipts);
-    await mkdir("test-results/2094", { recursive: true });
     await writeFile("test-results/2094/push-crash-restart-trace.json", JSON.stringify({ survivingIds, messagesBefore, messagesAfter, recovered, relayRequests, receipts: notificationAfter.receipts }, null, 2));
   } finally { for (const owner of notifications) owner.dispose(); }
 });
@@ -578,7 +574,6 @@ it("real Gateway: a singleton partial input resumes with one model turn and push
     expect(gateway.record().providerRequests).toHaveLength(0);
     expect(pushes).toHaveLength(1);
     expect((await gateway.registry.acquire(sessionId)).canonicalSessionEntries().filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-trigger.v1")).toEqual(messages);
-    await mkdir("test-results/2094", { recursive: true });
     await writeFile("test-results/2094/singleton-crash-restart-trace.json", JSON.stringify({ messages, pushes, final: gateway.record() }, null, 2));
   } finally { for (const owner of owners) owner.dispose(); }
 });
