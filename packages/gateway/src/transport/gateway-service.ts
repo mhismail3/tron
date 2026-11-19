@@ -350,7 +350,6 @@ export class GatewayService {
         this.modelCatalogPages.invalidate();
         dependencies.broadcast("models.catalogChanged", {});
       },
-      ...(this.workRegistry ? { workRegistry: this.workRegistry } : {}),
     });
     dependencies.settingsChanges?.observe({
       applied: (target, changes, context) => this.settingsChanged(target, changes, context),
