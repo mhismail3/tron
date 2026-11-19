@@ -6,14 +6,15 @@ struct ChangeReviewCard: View {
     let reason: String?
     let items: [ChangeReview.Item]
     var submitting: Bool
+    var secret: Binding<String>?
     var approve: (() -> Void)?
     var cancel: (() -> Void)?
     var undo: (() -> Void)?
 
-    init(review: ChangeReview, submitting: Bool = false, approve: (() -> Void)? = nil,
+    init(review: ChangeReview, submitting: Bool = false, secret: Binding<String>? = nil, approve: (() -> Void)? = nil,
          cancel: (() -> Void)? = nil, undo: (() -> Void)? = nil) {
         title = review.title; reason = review.reason; items = review.items
-        self.submitting = submitting; self.approve = approve; self.cancel = cancel; self.undo = undo
+        self.submitting = submitting; self.secret = secret; self.approve = approve; self.cancel = cancel; self.undo = undo
     }
 
     init(title: String, reason: String?, before: String, after: String) {
@@ -53,6 +54,19 @@ struct ChangeReviewCard: View {
                 }
                 .accessibilityElement(children: .contain)
             }
+            if let secret {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("API key").font(TronTypography.bodySM).foregroundStyle(Color.tronTextMuted)
+                    SecureField("Paste API key", text: secret)
+                        .textContentType(.password).textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .tronTextEntryDone().padding(12)
+                        .tronGlassSurface(accent: .tronPrimary, tintOpacity: 0.04)
+                        .accessibilityIdentifier("change-review-secret")
+                    Text("Sent once to your Mac and stored in its Keychain. It is never shown again.")
+                        .font(TronTypography.bodySM).foregroundStyle(Color.tronTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
             if approve != nil || cancel != nil || undo != nil {
                 HStack {
                     if let cancel {
@@ -65,6 +79,7 @@ struct ChangeReviewCard: View {
                         Button(action: approve) {
                             if submitting { TronPulseLoadingIndicator(size: 18) } else { Text("Approve") }
                         }.buttonStyle(TronActionButtonStyle(role: .primary, accent: .tronPrimary))
+                            .disabled(secret.map { $0.wrappedValue.isEmpty } ?? false)
                             .accessibilityLabel("Approve")
                             .accessibilityIdentifier("change-review-approve")
                     }

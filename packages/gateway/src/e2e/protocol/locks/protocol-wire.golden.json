@@ -3,8 +3,8 @@
   "declared": {
     "gatewayProtocol": {
       "schema": 1,
-      "protocolVersion": 8,
-      "minProtocolVersion": 8
+      "protocolVersion": 9,
+      "minProtocolVersion": 9
     },
     "connectionContract": {
       "serverHeartbeatInterval": {
@@ -60,13 +60,13 @@
           "type:string"
         ]
       ],
-      "protocolVersion": 8
+      "protocolVersion": 9
     },
     "refused": {
       "frames": [],
       "close": {
         "code": 4006,
-        "reason": "{\"code\":\"protocol_mismatch\",\"gatewayProtocol\":8,\"minProtocol\":8}"
+        "reason": "{\"code\":\"protocol_mismatch\",\"gatewayProtocol\":9,\"minProtocol\":9}"
       }
     }
   },

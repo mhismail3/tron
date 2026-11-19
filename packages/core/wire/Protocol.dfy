@@ -936,6 +936,10 @@ module Protocol {
       exact: Option<string>
     )
 
+  /// Typed native card behaviors; a provider-api-key approval carries the typed key once, never in the review.
+  // @wire enum
+  datatype ChangeReviewIntent = {:wire "push-registration-retry"} pushRegistrationRetry | {:wire "provider-api-key"} providerApiKey
+
   /// The shared before/after projection; values are display text, never secret material.
   // @wire
   datatype ChangeReview = ChangeReview(
@@ -943,7 +947,7 @@ module Protocol {
       title: string,
       requiresTap: bool,
       reason: Option<string>,
-      intent: Option<string>,
+      intent: Option<ChangeReviewIntent>,
       items: seq<ChangeReviewItemsItem>
     )
 

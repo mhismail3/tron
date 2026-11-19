@@ -76,6 +76,32 @@ index 5c6aa7d86d71cd9634fd0efff10f8784de84fb00..6b453902ac4a32ea7dafae6fc023d34e
  ### Inspect or change a server
  
  `/mcp` lists configured servers with their state, tool count, exposure, and configuration source. Servers that need attention appear first. Select a server to inspect its tools and connection details, reconnect, sign in or out, change exposure, or enable and disable it.
+diff --git a/packages/coding-agent/docs/models-configuration.md b/packages/coding-agent/docs/models-configuration.md
+index f028a8e0bf22ae52e9b36018bc4b9b1e252cba72..31bc3f471e65b884098f4fff93f7de4e74eab037 100644
+--- a/packages/coding-agent/docs/models-configuration.md
++++ b/packages/coding-agent/docs/models-configuration.md
+@@ -14,7 +14,7 @@ Each key under `providers` is a provider ID. A built-in provider ID changes that
+ |---|---|---|---|
+ | `name` | string |  | Display name. |
+ | `baseUrl` | string |  | API base URL. Also applies to the provider's built-in models. |
+-| `apiKey` | string |  | Literal key, "$NAME" environment interpolation, or "!command" output. |
++| `apiKey` | `string \| object` |  | Literal key, "$NAME" environment interpolation, "!command" output, or a Keychain or 1Password credential reference resolved at request time. |
+ | `api` | string |  | API for the provider's models, such as "openai-completions", "openai-responses", "anthropic-messages", or "google-generative-ai". |
+ | `oauth` | `"radius"` |  | OAuth login flow. Requires baseUrl. |
+ | `headers` | object |  | Request headers. Values resolve like apiKey. |
+diff --git a/packages/coding-agent/docs/models.md b/packages/coding-agent/docs/models.md
+index 803458a8b54a6e2350e3b24bed1f3612c3637279..3daccb7945f50df42d088da364bba7e4d8721324 100644
+--- a/packages/coding-agent/docs/models.md
++++ b/packages/coding-agent/docs/models.md
+@@ -62,7 +62,7 @@ Use [`models.json`](configuration.md#agent-directory) when an endpoint speaks an
+ }
+ ```
+ 
+-The dummy key makes the model available to Pi; Ollama ignores it. For an authenticated endpoint, `apiKey` and header values can use `$NAME` or `${NAME}` environment interpolation, a literal value, or a leading `!command`. `$$` and `$!` produce a literal `$` and `!`. Commands in `models.json` run at request time and are not cached by Pi.
++The dummy key makes the model available to Pi; Ollama ignores it. For an authenticated endpoint, `apiKey` and header values can use `$NAME` or `${NAME}` environment interpolation, a literal value, or a leading `!command`. `$$` and `$!` produce a literal `$` and `!`. Commands in `models.json` run at request time and are not cached by Pi. `apiKey` also accepts the credential references MCP uses, such as `{ "source": "keychain", "service": "tools", "account": "default" }` or `{ "source": "1password", "reference": "op://vault/item/field" }`; Pi reads them with `/usr/bin/security` or `op` at request time, never through a shell.
+ 
+ Opening `/model` reloads the file. A `models` entry adds or replaces a model with the same ID on that provider. Use `modelOverrides` to change metadata for an existing built-in or extension-provided model without replacing the provider's model list. Unknown override IDs are ignored.
+ 
 diff --git a/packages/coding-agent/docs/sdk.md b/packages/coding-agent/docs/sdk.md
 index 7d0883b3ff7926c077414ccce9b4f7aa31f7065b..e5dd2e899b9979586a4e1567d77f940ce1bb74e7 100644
 --- a/packages/coding-agent/docs/sdk.md
@@ -628,6 +654,43 @@ index 002cf56f519490522d81ab1f1f09fc8cc3d304f9..ca3dce659d3703719734a926894367c5
  }
  
  /** A server an extension registered with `pi.registerMcpServer()`. */
+diff --git a/packages/coding-agent/src/core/model-config.ts b/packages/coding-agent/src/core/model-config.ts
+index 200cdeec0e18d6c0cc461bb93153cea6535f2ba8..c15ca7c40b4ea7f920e208a75264a3a94ed49e3e 100644
+--- a/packages/coding-agent/src/core/model-config.ts
++++ b/packages/coding-agent/src/core/model-config.ts
+@@ -16,6 +16,7 @@ import {
+ 	ProviderCompatSchema,
+ 	ThinkingLevelMapSchema,
+ } from "./pi-ai-schemas.ts";
++import { isCredentialReference } from "./resolve-config-value.ts";
+ 
+ const SamplingParamsSchema = Type.Record(Type.String(), Type.Unknown());
+ const SamplingParamsByThinkingLevelSchema = Type.Object(
+@@ -93,10 +94,20 @@ const ProviderConfigSchema = Type.Object({
+ 		Type.String({ minLength: 1, description: "API base URL. Also applies to the provider's built-in models." }),
+ 	),
+ 	apiKey: Type.Optional(
+-		Type.String({
+-			minLength: 1,
+-			description: 'Literal key, "$NAME" environment interpolation, or "!command" output.',
+-		}),
++		Type.Union(
++			[
++				Type.String({ minLength: 1 }),
++				Type.Refine(
++					Type.Object({ source: Type.Union([Type.Literal("keychain"), Type.Literal("1password")]) }),
++					isCredentialReference,
++					() => "must be a Keychain or 1Password credential reference",
++				),
++			],
++			{
++				description:
++					'Literal key, "$NAME" environment interpolation, "!command" output, or a Keychain or 1Password credential reference resolved at request time.',
++			},
++		),
+ 	),
+ 	api: Type.Optional(
+ 		Type.String({
 diff --git a/packages/coding-agent/src/core/model-runtime.ts b/packages/coding-agent/src/core/model-runtime.ts
 index ff5f42b3984a289c665855fe3ec676265bc8c4b9..c1dc062d30b29d74b366c3051045c395453cd68e 100644
 --- a/packages/coding-agent/src/core/model-runtime.ts
@@ -813,6 +876,82 @@ index 5fd93754ec14ac0a3a93872629cb830853cd75da..9c772632cc35c5c190467e82314b92e2
  		}
  		if (scope === "user") {
  			return this.agentDir;
+diff --git a/packages/coding-agent/src/core/provider-composer.ts b/packages/coding-agent/src/core/provider-composer.ts
+index 9bbde0aad86ebd113597ae292d3084dd8dce63f2..3a5d17243cc6f79c0641ab07a3947ee31ab9f926 100644
+--- a/packages/coding-agent/src/core/provider-composer.ts
++++ b/packages/coding-agent/src/core/provider-composer.ts
+@@ -30,10 +30,12 @@ import { getApiProvider } from "@earendil-works/pi-ai/compat";
+ import { classifierErrorResult, imageErrorResult } from "@earendil-works/pi-ai/utils/model-operations";
+ import type { ModelConfig, ModelsJsonModel, ModelsJsonModelOverride, ModelsJsonProvider } from "./model-config.ts";
+ import {
++	type ConfigValue,
+ 	clearConfigValueCache,
+ 	getConfigValueEnvVarNames,
+ 	isCommandConfigValue,
+ 	isConfigValueConfigured,
++	resolveConfigValueAsync,
+ 	resolveConfigValueOrThrow,
+ 	resolveHeadersOrThrow,
+ } from "./resolve-config-value.ts";
+@@ -111,7 +113,14 @@ export interface ProviderConfigInput {
+ 
+ export type AuthStatus = {
+ 	configured: boolean;
+-	source?: "stored" | "runtime" | "environment" | "fallback" | "models_json_key" | "models_json_command";
++	source?:
++		| "stored"
++		| "runtime"
++		| "environment"
++		| "fallback"
++		| "models_json_key"
++		| "models_json_command"
++		| "models_json_reference";
+ 	label?: string;
+ };
+ 
+@@ -393,8 +402,8 @@ function withConfiguredAuth(
+ function configuredApiKey(
+ 	config: ModelsJsonProvider | undefined,
+ 	extension: ProviderConfigInput | undefined,
+-): string | undefined {
+-	return extension?.apiKey ?? config?.apiKey;
++): ConfigValue | undefined {
++	return (extension?.apiKey ?? config?.apiKey) as ConfigValue | undefined;
+ }
+ 
+ function configuredHeaders(
+@@ -448,7 +457,8 @@ function composeApiKeyAuth(
+ 				return resolved ? { type: "api_key", source: resolved.source } : undefined;
+ 			}
+ 			if (rawKey !== undefined) {
+-				if (isCommandConfigValue(rawKey)) return { type: "api_key", source: "configured API key" };
++				if (typeof rawKey !== "string" || isCommandConfigValue(rawKey))
++					return { type: "api_key", source: "configured API key" };
+ 				const envNames = getConfigValueEnvVarNames(rawKey);
+ 				for (const name of envNames) {
+ 					if ((await input.ctx.env(name)) === undefined) return undefined;
+@@ -468,8 +478,11 @@ function composeApiKeyAuth(
+ 						? { auth: { apiKey: input.credential.key }, env: input.credential.env, source: "stored credential" }
+ 						: undefined;
+ 			} else if (rawKey !== undefined) {
+-				const env = await configContextEnv([rawKey], input.ctx);
+-				const key = resolveConfigValueOrThrow(rawKey, `API key for provider "${providerId}"`, env);
++				const description = `API key for provider "${providerId}"`;
++				const key =
++					typeof rawKey === "string"
++						? resolveConfigValueOrThrow(rawKey, description, await configContextEnv([rawKey], input.ctx))
++						: await resolveConfigValueAsync(rawKey, { signal: input.signal }, description);
+ 				result = inherited
+ 					? await inherited.resolve({ ...input, credential: { type: "api_key", key } })
+ 					: { auth: { apiKey: key }, source: "configured API key" };
+@@ -734,6 +747,7 @@ export function configuredRequestAuthStatus(
+ ): AuthStatus | undefined {
+ 	const value = configuredApiKey(config, extension);
+ 	if (value === undefined) return undefined;
++	if (typeof value !== "string") return { configured: true, source: "models_json_reference" };
+ 	if (isCommandConfigValue(value)) return { configured: true, source: "models_json_command" };
+ 	const names = getConfigValueEnvVarNames(value);
+ 	if (names.length > 0) {
 diff --git a/packages/coding-agent/src/core/resolve-config-value.ts b/packages/coding-agent/src/core/resolve-config-value.ts
 index 6d75b001e7c9e796484c1d09d59a5c81816397b3..8f6e2dbe9ca115eaba1fa1f985ff081338914572 100644
 --- a/packages/coding-agent/src/core/resolve-config-value.ts
@@ -2762,6 +2901,92 @@ index 1b22e32fd7bc5d56930fa9be9b84fca7ea992dce..d7352ce4bd2ea03344f6336e9b34ea32
  	it("shortens descriptions to fit the size limit", () => {
  		const servers = Array.from({ length: 40 }, (_, index) => server(`server${index}`, "x".repeat(400)));
  		const section = renderServersSection(servers) ?? "";
+diff --git a/packages/coding-agent/test/model-registry.test.ts b/packages/coding-agent/test/model-registry.test.ts
+index 13586226f347d183a176e4fd86991b106d5d84c2..fcebd18f063b6e2ef467a418633a7c306d86050a 100644
+--- a/packages/coding-agent/test/model-registry.test.ts
++++ b/packages/coding-agent/test/model-registry.test.ts
+@@ -1,4 +1,6 @@
+-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
++import childProcess from "node:child_process";
++import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
++import { syncBuiltinESMExports } from "node:module";
+ import { tmpdir } from "node:os";
+ import { join } from "node:path";
+ import { normalizeContext } from "@earendil-works/pi-ai";
+@@ -1568,7 +1570,7 @@ describe("ModelRegistry", () => {
+ 
+ 	describe("API key resolution", () => {
+ 		/** Create provider config with custom apiKey */
+-		function providerWithApiKey(apiKey: string) {
++		function providerWithApiKey(apiKey: unknown) {
+ 			return {
+ 				baseUrl: "https://example.com/v1",
+ 				apiKey,
+@@ -1598,6 +1600,64 @@ describe("ModelRegistry", () => {
+ 			expect(apiKey).toBe("test-api-key-from-command");
+ 		});
+ 
++		test.skipIf(process.platform !== "darwin")(
++			"apiKey Keychain reference resolves through security argv only at request time",
++			async () => {
++				const executable = join(tempDir, "security.cjs");
++				const recorded = join(tempDir, "argv.json");
++				writeFileSync(
++					executable,
++					`#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(recorded)}, JSON.stringify(process.argv.slice(2)));\nprocess.stdout.write('keychain-api-key\\n');\n`,
++				);
++				chmodSync(executable, 0o700);
++				const realSpawn = childProcess.spawn;
++				vi.spyOn(childProcess, "spawn").mockImplementation((command, args, options) => {
++					expect(command).toBe("/usr/bin/security");
++					return realSpawn(executable, args, options);
++				});
++				syncBuiltinESMExports();
++				try {
++					writeRawModelsJson({
++						"custom-provider": providerWithApiKey({
++							source: "keychain",
++							service: "tron.provider",
++							account: "custom-provider ; $()",
++						}),
++					});
++					const registry = await createModelRegistry(authStorage, modelsJsonPath);
++					expect(registry.getError()).toBeUndefined();
++					expect(registry.getProviderAuthStatus("custom-provider")).toEqual({
++						configured: true,
++						source: "models_json_reference",
++					});
++					expect(registry.getAvailable().some((model) => model.provider === "custom-provider")).toBe(true);
++					expect(existsSync(recorded)).toBe(false);
++					expect(await registry.getApiKeyForProvider("custom-provider")).toBe("keychain-api-key");
++					expect(JSON.parse(readFileSync(recorded, "utf8"))).toEqual([
++						"find-generic-password",
++						"-s",
++						"tron.provider",
++						"-a",
++						"custom-provider ; $()",
++						"-w",
++					]);
++					writeRawModelsJson({
++						"custom-provider": providerWithApiKey({
++							source: "keychain",
++							service: "tron.provider",
++							account: "custom-provider",
++							executable: "/bin/sh",
++						}),
++					});
++					const refused = await createModelRegistry(authStorage, modelsJsonPath);
++					expect(refused.getError()).toContain("providers.custom-provider.apiKey");
++				} finally {
++					vi.restoreAllMocks();
++					syncBuiltinESMExports();
++				}
++			},
++		);
++
+ 		test("apiKey with ! prefix trims whitespace from command output", async () => {
+ 			writeRawModelsJson({
+ 				"custom-provider": providerWithApiKey("!echo '  spaced-key  '"),
 diff --git a/packages/coding-agent/test/model-runtime-credential-sync.test.ts b/packages/coding-agent/test/model-runtime-credential-sync.test.ts
 index 8f38a9c18bb0913166a6d1cadb5ccb78a7451615..c7a052681b80d1a40de4c786d819544d5e84cd09 100644
 --- a/packages/coding-agent/test/model-runtime-credential-sync.test.ts

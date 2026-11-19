@@ -16,7 +16,7 @@ import { SettingsChangePath } from "../kernel/settings/settings-change.js";
 import { SettingsChangeRecord } from "../kernel/settings/settings-record.js";
 import { SettingsStoreAdapter } from "./settings-model.js";
 import { OutsideChanges } from "./settings-outside.js";
-import { MacKeychainMcpCredentialOwner, McpAdminService } from "./mcp-admin-service.js";
+import { MacKeychainCredentialOwner, McpAdminService } from "./mcp-admin-service.js";
 
 function piCliPath(): string {
   let directory = dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")));
@@ -67,7 +67,7 @@ function callWithAmbientAgentDir<T>(ambientRoot: string, call: () => Promise<T>)
 describe("McpAdminService", () => {
   it("quotes interactive Keychain commands and rejects line-breaking secrets without exposing argv", async () => {
     let invocation: { command: string; args: string[]; input?: string } | undefined;
-    const owner = new MacKeychainMcpCredentialOwner(async (command, args, options) => {
+    const owner = new MacKeychainCredentialOwner("tron.mcp", async (command, args, options) => {
       invocation = { command, args, input: options.input };
       return { code: 0, stdout: "", stderr: "" };
     });

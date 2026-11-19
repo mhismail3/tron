@@ -108,7 +108,7 @@ async function fixture() {
     socket.on("open", () => { opened = true; });
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await waitFor(() => opened, "the phone socket to open");
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 8, clientRole: "mobile", capabilities }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 9, clientRole: "mobile", capabilities }));
     await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
     let ids = 0;
     const requests = (action?: string): PhoneRequest[] => frames

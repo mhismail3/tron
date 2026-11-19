@@ -117,7 +117,7 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   status, paged reports and receipts; unknown shapes stay generic. Check-ins lead with the step/summary,
   then standard Attention, Progress and timestamp/reference rows; raw receipt fields stay in Technical details. Worker reports render their invocation’s outcome, Markdown summary and acceptance evidence through shared Home sections; opaque receipts stay in Technical details. Report/check-in sheets use `tronPrimary`. `ToolDetailPresentation` owns one name/icon catalog for transcript, nested calls, sheets and resource tools; unknown extension/MCP names are humanized without changing invocation identity. Task reports/messages use `PromptTextPreview` and the full reader; absent fields are not inferred.
 - **Native change reviews.** An agent's change that needs the maintainer's tap arrives as the
-  native `change` interaction and presents `ChangeReviewCard` in the interaction sheet; generic
+  native `change` interaction and presents `ChangeReviewCard` in the interaction sheet (a `provider-api-key` review adds its secure key field); generic
   forms and ask_user never authorize effects. Historical settings-outcome contexts use the
   ordinary context viewer. `ChatTranscriptSheetRoutes` owns transcript sheets
   above lazy rows, including push review, so scrolling cannot dismiss them. Positive status uses

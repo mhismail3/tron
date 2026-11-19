@@ -3,7 +3,7 @@ import type { ConfirmChange } from "../settings/tool-contract.js";
 
 export type NativeChangeRequest = <T>(input: {
   review: import("../../protocol/types.js").ChangeReview;
-  apply: (acceptance: import("../../protocol/types.js").NativeChangeAcceptance) => Promise<T>;
+  apply: (acceptance: import("../../protocol/types.js").NativeChangeAcceptance, secret?: string) => Promise<T>;
   signal?: AbortSignal;
 }) => Promise<T | undefined>;
 

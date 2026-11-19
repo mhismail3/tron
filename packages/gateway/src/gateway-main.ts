@@ -24,7 +24,7 @@ import { SettingsInventoryReader } from "./admin/settings-inventory.js";
 import { ScopeToolCatalog } from "./admin/tool-catalog.js";
 import { HookResources } from "./admin/hook-resources.js";
 import { AuthBroker } from "./admin/auth-broker.js";
-import { MacKeychainMcpCredentialOwner, McpAdminService } from "./admin/mcp-admin-service.js";
+import { MacKeychainCredentialOwner, McpAdminService } from "./admin/mcp-admin-service.js";
 import { GlobalProviderResources } from "./admin/global-provider-resources.js";
 import { RuntimeRegistry } from "./kernel/session/runtime-registry.js";
 import { startGatewayModules } from "./main/modules.js";
@@ -180,10 +180,10 @@ const settingsSchema = createGatewaySettingsSchema();
 const mcpAdmin = new McpAdminService(
   config.agentDir,
   piCliBundle(),
-  new MacKeychainMcpCredentialOwner(),
+  new MacKeychainCredentialOwner("tron.mcp"),
   (level, message, event, fields) => logger.log(level, message, { event, source: "mcp", ...fields }),
 );
-const modelConfig = new ModelConfigService(config.agentDir);
+const modelConfig = new ModelConfigService(config.agentDir, new MacKeychainCredentialOwner("tron.provider"));
 const devicePreferences = new DevicePreferenceBridge({
   pairedDevices: async () => (await devices.listDevices()).map((device) => device.id),
   newestReadyConnection: (deviceId, capability) => transport?.newestReadyDeviceConnection(deviceId, capability),

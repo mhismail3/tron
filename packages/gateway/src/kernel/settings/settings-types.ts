@@ -92,6 +92,7 @@ function disclosed(text: string): string {
 export function changeReview(identity: unknown, input: Omit<ChangeReview, "digest">): ChangeReview {
   const review = { title: disclosed(input.title), requiresTap: input.requiresTap,
     ...(input.reason === undefined ? {} : { reason: disclosed(input.reason) }),
+    ...(input.intent === undefined ? {} : { intent: input.intent }),
     items: input.items.map(item => Object.freeze({ label: disclosed(item.label), before: disclosed(item.before), after: disclosed(item.after),
       ...(item.detail === undefined ? {} : { detail: disclosed(item.detail) }), ...(item.exact === undefined ? {} : { exact: disclosed(item.exact) }) })) };
   const result = { ...review, digest: createHash("sha256").update(JSON.stringify({ identity, review })).digest("hex") };

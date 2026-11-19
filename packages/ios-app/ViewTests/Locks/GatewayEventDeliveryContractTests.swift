@@ -420,7 +420,7 @@ private actor EventLockPeer: GatewaySocketConnection {
     func receive() async throws -> Data {
         if !hello {
             hello = true
-            return Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":8,"minProtocolVersion":8,"machineId":"fixture-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            return Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":9,"minProtocolVersion":9,"machineId":"fixture-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":[]}"#.utf8)
         }
         if !frames.isEmpty { return frames.removeFirst() }
         if closed || Task.isCancelled { throw CancellationError() }

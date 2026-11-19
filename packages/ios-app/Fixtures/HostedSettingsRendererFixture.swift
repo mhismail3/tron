@@ -312,7 +312,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             let capabilities = HostedLaunch.arguments.contains("-settings-sheet-theme-review")
                 ? #"["sessions.v1","gateway-update.v1","restart-supervised.v1"]"# : #"["sessions.v1"]"#
             return Data("""
-                {"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":8,"minProtocolVersion":8,"machineId":"fixture-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":\(capabilities)}
+                {"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":9,"minProtocolVersion":9,"machineId":"fixture-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":\(capabilities)}
                 """.utf8)
         }
         if !pending.isEmpty { return pending.removeFirst() }

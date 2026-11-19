@@ -14,27 +14,27 @@ export type McpScope = { scope: "global" } | { scope: "project"; cwd: string; tr
 export interface McpServerStatus { name: string; state: string; scope: "global" | "project"; enabled: boolean; exposure: string; transport: string; tools: string[]; error?: string; value?: McpServerValue }
 export interface McpListing { servers: McpServerStatus[]; errors: number }
 
-export interface McpCredentialOwner {
-  store(account: string, token: string): Promise<void>;
+export interface CredentialOwner {
+  store(account: string, secret: string): Promise<void>;
 }
 
 function quoteSecurityArgument(value: string): string {
   return `"${value.replace(/["\\]/gu, "\\$&")}"`;
 }
 
-export class MacKeychainMcpCredentialOwner implements McpCredentialOwner {
-  constructor(private readonly run: typeof runProcess = runProcess) {}
+export class MacKeychainCredentialOwner implements CredentialOwner {
+  constructor(private readonly service: "tron.mcp" | "tron.provider", private readonly run: typeof runProcess = runProcess) {}
 
-  async store(account: string, token: string): Promise<void> {
-    if (!token || Buffer.byteLength(token) > 16_384 || /[\r\n\0]/u.test(token)) {
-      throw new GatewayError("invalid_request", "MCP bearer token is invalid");
+  async store(account: string, secret: string): Promise<void> {
+    if (!secret || Buffer.byteLength(secret) > 16_384 || /[\r\n\0]/u.test(secret)) {
+      throw new GatewayError("invalid_request", "The credential is invalid");
     }
-    const command = ["add-generic-password", "-U", "-s", "tron.mcp", "-a", account, "-w", token]
+    const command = ["add-generic-password", "-U", "-s", this.service, "-a", account, "-w", secret]
       .map(quoteSecurityArgument).join(" ");
     const result = await this.run("/usr/bin/security", ["-i"], {
       cwd: process.cwd(), timeoutMs: CLI_TIMEOUT_MS, input: `${command}\n`,
     });
-    if (result.code !== 0) throw new GatewayError("internal", "Could not store the MCP bearer token in Keychain");
+    if (result.code !== 0) throw new GatewayError("internal", "Could not store the credential in Keychain");
   }
 }
 
@@ -127,7 +127,7 @@ export interface McpConfiguration { servers: McpConfiguredServer[]; errors: numb
 type McpAdminLog = (level: "warning", message: string, event: string, fields: Record<string, string>) => void;
 
 export class McpAdminService {
-  constructor(private readonly agentDir: string, private readonly cliPath: string, private readonly credentials?: McpCredentialOwner,
+  constructor(private readonly agentDir: string, private readonly cliPath: string, private readonly credentials?: CredentialOwner,
     private readonly log: McpAdminLog = () => {}, private readonly cliTimeoutMs = CLI_TIMEOUT_MS) {}
 
   private get configPath(): string {

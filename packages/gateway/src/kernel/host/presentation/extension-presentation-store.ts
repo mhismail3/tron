@@ -59,7 +59,7 @@ function nativeReview(value: unknown): boolean {
   const review = value as Record<string, unknown>;
   return Object.keys(review).every(key => ["digest", "title", "requiresTap", "reason", "intent", "items"].includes(key))
     && typeof review.digest === "string" && /^[a-f0-9]{64}$/.test(review.digest)
-    && (review.intent === undefined || review.intent === "push-registration-retry")
+    && (review.intent === undefined || review.intent === "push-registration-retry" || review.intent === "provider-api-key")
     && review.requiresTap === true && boundedSafe(review.title, 4 * 1024, true)
     && (review.reason === undefined || boundedSafe(review.reason, 32 * 1024, true))
     && Array.isArray(review.items) && review.items.length > 0 && review.items.length <= 50

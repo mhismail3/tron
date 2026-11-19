@@ -952,4 +952,34 @@ describe("push registration retry card is a typed native intent", () => {
       expect(pushRetryReview({ sessionId: "session-other", toolCallId: "call-retry", reason: "Alerts stopped" }).digest).not.toBe(review.digest);
     } finally { broker.retire(); }
   });
+
+  it("a provider-api-key card takes the typed key only in its approving answer and hands it to apply, never to the projection", async () => {
+    expect(() => decodeChangeReview({ ...JSON.parse(encodeChangeReview(pushRetryReview({ sessionId: "s", toolCallId: "c", reason: "r" }))), intent: "unknown-intent" })).toThrow();
+    const typed = "sk-typed-key-fixture";
+    const review = changeReview({ provider: "keyed" }, { title: "Custom model provider", requiresTap: true, intent: "provider-api-key",
+      items: [{ label: "Custom model provider", before: "(not set)", after: "https://keyed.invalid/v1, Keychain API key" }] });
+    expect(decodeChangeReview(JSON.parse(encodeChangeReview(review)))).toEqual(review);
+    const broker = new SemanticUIBroker(new ExtensionPresentationStore(() => {}));
+    const applied: Array<{ commandId: string; secret?: string }> = [];
+    try {
+      const requested = broker.requestChange({ review, apply: async (acceptance, secret) => { applied.push({ commandId: acceptance.commandId, ...(secret === undefined ? {} : { secret }) }); return "stored"; } });
+      const interaction = broker.interactions()[0]!;
+      if (interaction.method !== "change") throw new Error("not a change review");
+      const answer = (value: unknown, commandId: string) => broker.respond(interaction.id, interaction.hostEpoch, interaction.presentationRevision, value, false, { deviceId: phone.identity, commandId });
+      for (const value of [{ digest: review.digest, approved: true }, { digest: review.digest, approved: true, secret: "" }, { digest: review.digest, approved: true, secret: "two\nlines" }]) {
+        expect(() => answer(value, "missing-key")).toThrow(expect.objectContaining({ code: "invalid_request" }) as never);
+      }
+      await answer({ digest: review.digest, approved: true, secret: typed }, "typed-tap");
+      expect(await requested).toBe("stored");
+      expect(JSON.stringify([broker.interactions(), broker.state()])).not.toContain(typed);
+      expect(applied).toEqual([{ commandId: "typed-tap", secret: typed }]);
+      const retry = pushRetryReview({ sessionId: "session-retry", toolCallId: "call-secret", reason: "Alerts stopped" });
+      const other = broker.requestChange({ review: retry, apply: async () => "requested" });
+      const card = broker.interactions()[0]!;
+      expect(() => broker.respond(card.id, card.hostEpoch, card.presentationRevision, { digest: retry.digest, approved: true, secret: typed }, false,
+        { deviceId: phone.identity, commandId: "secret-on-retry" })).toThrow(expect.objectContaining({ code: "invalid_request" }) as never);
+      await broker.respond(card.id, card.hostEpoch, card.presentationRevision, { digest: retry.digest, approved: false }, false, { deviceId: phone.identity, commandId: "decline" });
+      expect(await other).toBeUndefined();
+    } finally { broker.retire(); }
+  });
 });
