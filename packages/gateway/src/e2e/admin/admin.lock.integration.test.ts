@@ -32,7 +32,7 @@ describe("gateway/admin kernel locks", () => {
       `${key.key}=${String(key.value)} (${key.display}) @${key.layer} [${key.layers.map((layer) => `${layer.layer}:${String(layer.value ?? "-")}`).join(" ")}]${key.overridden ? " overridden" : ""}`);
     expect(resolved(before)).toEqual([`${KEY}=4 (4 retries) @global [global:4] overridden`]);
     expect(resolved(after)).toEqual([`${KEY}=6 (6 retries) @global [global:6] overridden`]);
-    expect(resolved(chat)).toEqual([`${KEY}=6 (6 retries) @global [project:- session:- global:6]`]);
+    expect(resolved(chat)).toEqual([`${KEY}=6 (6 retries) @global [session:- project:- global:6]`]);
     expect(before.result.keys[0].group).toBe("run");
     expect(changed.result).toMatchObject({ status: "applied",
       changes: [{ key: KEY, layer: "global", before: 4, after: 6, status: "applied", changeId: expect.any(String) }],

@@ -155,7 +155,6 @@ private actor NewSessionFixtureGateway {
                     "value": projectModel.map { .object(["provider": .string("fixture"), "id": .string($0)]) } ?? .null,
                     "display": projectModel == nil ? .null : .string("Project Pro"), "applied": .bool(true)])]),
                 "badges": .array([.object(["kind": .string("layer"), "label": .string(projectModel == nil ? "Tron default" : "Set in project")])]),
-                "projectSetting": projectModel == nil ? .null : .object(["file": .string("/fixture/original/.pi/settings.json"), "path": .string("defaultProvider + defaultModel")]),
             ])] + (scenario.hasPrefix("project-settings") ? [HostedSettingsReviewSchema.key("tools.active", "tools", .array(["read", "bash", "edit", "write", "fetch_content"].map(JSONValue.string)), "5 tools", layer: "project")] : [])),
             "diagnostics": .array([])
         ])

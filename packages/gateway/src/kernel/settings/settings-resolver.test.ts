@@ -11,39 +11,55 @@ const options = { format: { modelName: () => undefined }, options: { clamp: (_so
 const stores = (extra: Partial<SettingsStores>, project = true): SettingsStores =>
   ({ layers: targetLayers(session, { project }), gateway: {}, trust: {}, macTerminal: {}, global, ...extra });
 const project = (applied: boolean) => ({ root: "/work/app", document: { modelThinkingLevels: { [MODEL]: "high" }, defaultTools: ["+grep"] }, applied });
-const chat = { thinking: "minimal", tools: ["+web", "-bash"], settings: {} };
+const EXPLICIT = { from: "session" as const, at: "2026-11-19T00:00:00.000Z", ref: "explicit" };
+const chat = { thinking: "minimal", tools: ["+web", "-bash"], settings: {}, fixed: { "model.thinking[role=chat]": { ...EXPLICIT, value: "minimal" } } };
 const row = (given: SettingsStores, key: string) => resolveSettings(TEST_SETTINGS_SCHEMA, session, given, options).keys.find(candidate => candidate.key === key)!;
 const THINKING = "model.thinking[role=chat]";
 const FOR_MODEL = { kind: "scope", label: `For ${MODEL}`, detail: MODEL };
 
 describe("settings resolution around the precedence block", () => {
-  it("an untrusted project's per-model value is shown as not applied and the chat's own value stands", () => {
+  it("an untrusted project's per-model value is shown as not applied only where it would win; a chat's explicit choice stands above it", () => {
     expect(row(stores({ project: project(false), session: chat }), THINKING)).toMatchObject({
-      value: "minimal", display: "Minimal", layer: "session", applied: false, reason: "untrusted", overridden: true,
-      qualifiers: { role: "chat", model: MODEL },
-      badges: [FOR_MODEL, { kind: "state", label: "Not applied (untrusted)", detail: "Project: High", action: { kind: "reviewTrust", label: "Review trust" } }],
+      value: "minimal", display: "Minimal", layer: "session", applied: true, overridden: true,
+      qualifiers: { role: "chat", model: MODEL }, badges: [FOR_MODEL],
       layers: [
-        { layer: "project", value: "high", display: "High", applied: false, reason: "untrusted" },
         { layer: "session", value: "minimal", display: "Minimal", applied: true },
+        { layer: "project", value: "high", display: "High", applied: false, reason: "untrusted" },
         { layer: "global", value: "low", display: "Low", applied: true },
       ],
     });
-    expect(row(stores({ project: project(false), session: chat }), THINKING)).not.toHaveProperty("projectSetting");
+    expect(row(stores({ project: project(false), session: chat }), THINKING)).not.toHaveProperty("reason");
+    expect(row(stores({ project: project(false), session: { settings: {} } }), THINKING)).toMatchObject({
+      value: "low", display: "Low", layer: "global", applied: false, reason: "untrusted", overridden: false,
+      badges: [FOR_MODEL, { kind: "state", label: "Not applied (untrusted)", detail: "Project: High", action: { kind: "reviewTrust", label: "Review trust" } }],
+      layers: [
+        { layer: "session", applied: true },
+        { layer: "project", value: "high", display: "High", applied: false, reason: "untrusted" },
+        { layer: "global", value: "low", display: "Low", applied: true },
+      ],
+    });
+    expect(row(stores({ project: project(false), session: { settings: {} } }), THINKING)).not.toHaveProperty("projectSetting");
   });
 
-  it("a trusted project's value beats the chat's, and its row names the per-model path it came from", () => {
-    const resolved = row(stores({ project: project(true), session: chat }), THINKING);
-    expect(resolved).toMatchObject({
+  it("a chat's explicit choice beats a trusted project; without one the project's value wins and its row names the per-model path", () => {
+    const explicit = row(stores({ project: project(true), session: chat }), THINKING);
+    expect(explicit).toMatchObject({
+      value: "minimal", layer: "session", applied: true, badges: [FOR_MODEL],
+      layers: [{ layer: "session", value: "minimal", applied: true }, { layer: "project", value: "high", applied: true }, { layer: "global", value: "low", applied: true }],
+    });
+    expect(explicit).not.toHaveProperty("projectSetting");
+    const inherited = row(stores({ project: project(true), session: { settings: {} } }), THINKING);
+    expect(inherited).toMatchObject({
       value: "high", layer: "project", applied: true, badges: [FOR_MODEL],
       projectSetting: { file: "/work/app/.pi/settings.json", path: `modelThinkingLevels["${MODEL}"]` },
-      layers: [{ layer: "project", value: "high", applied: true }, { layer: "session", value: "minimal", applied: true }, { layer: "global", value: "low", applied: true }],
+      layers: [{ layer: "session", applied: true }, { layer: "project", value: "high", applied: true }, { layer: "global", value: "low", applied: true }],
     });
-    expect(resolved).not.toHaveProperty("reason");
+    expect(inherited).not.toHaveProperty("reason");
   });
 
   it("scope outranks specificity: a Global per-model value loses to the chat's plain value, and wins over Global's plain one", () => {
     const perModel = { ...global, modelThinkingLevels: { [MODEL]: "high" } };
-    expect(row(stores({ global: perModel, session: { thinking: "minimal", settings: {} } }, false), THINKING)).toMatchObject({
+    expect(row(stores({ global: perModel, session: { thinking: "minimal", settings: {}, fixed: { [THINKING]: { ...EXPLICIT, value: "minimal" } } } }, false), THINKING)).toMatchObject({
       value: "minimal", layer: "session", applied: true, overridden: true,
       layers: [{ layer: "session", value: "minimal", applied: true }, { layer: "global", value: "high", applied: true }],
     });
@@ -72,13 +88,16 @@ describe("settings resolution around the precedence block", () => {
     const tools = keyForHome(TEST_SETTINGS_SCHEMA.schemaKey("tools.active"), false);
     const given = stores({ project: project(true), session: chat });
     expect(composedBelow(given, tools, {}, "global")).toEqual(["read", "bash", "edit", "write"]);
+    expect(composedBelow(given, tools, {}, "project")).toEqual(["read", "bash", "edit"]);
     expect(composedBelow(given, tools, {}, "session")).toEqual(["read", "bash", "edit"]);
-    expect(composedBelow(given, tools, {}, "project")).toEqual(["read", "edit", "web"]);
     const thinking = keyForHome(TEST_SETTINGS_SCHEMA.schemaKey(THINKING), false);
     const perModel = stores({ global: { ...global, modelThinkingLevels: { [MODEL]: "high" } }, project: project(true), session: chat });
     expect(composedBelow(perModel, thinking, { role: "chat", model: MODEL }, "global")).toBe("medium");
+    expect(composedBelow(perModel, thinking, { role: "chat", model: MODEL }, "project")).toBe("low");
     expect(composedBelow(perModel, thinking, { role: "chat", model: MODEL }, "session")).toBe("low");
-    expect(composedBelow(perModel, thinking, { role: "chat", model: MODEL }, "project")).toBe("minimal");
+    const plainProject = stores({ project: { root: "/work/app", document: { defaultThinkingLevel: "high" }, applied: true }, session: chat });
+    expect(composedBelow(plainProject, thinking, { role: "chat", model: MODEL }, "session")).toBe("high");
+    expect(composedBelow(plainProject, thinking, { role: "chat", model: MODEL }, "project")).toBe("low");
   });
 
   it("Home is the layer above Global for the Home chat: its value wins under the Session scope, and below it lies Global alone", () => {

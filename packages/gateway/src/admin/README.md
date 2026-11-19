@@ -56,10 +56,10 @@ In short:
 - **One key, declared once on the Gateway** (F1). The schema holds type,
   group, allowed layers, timing, effect point, native-tap classification, writers and
   display. iOS renders keys generically; a new key needs no iOS release.
-- **Three scopes** (F4): **Project > Session/Home override > Global**, gated by
-  registry grants. Home has no Project or separate chapter override. Private store
-  bindings are not scopes. Effective values are computed; canonical fixed evidence
-  retains explicit/delegated choices while Project masks them. Home SDK adoption
+- **Three scopes** (F4): **Session/Home override > Project > Global** (proof block order
+  Global < Project < Home < Session, D23), gated by registry grants. Home has no Project or
+  separate chapter override. Private store bindings are not scopes. Effective values are
+  computed; canonical fixed evidence records explicit/delegated choices, which beat Project. Home SDK adoption
   holds the runtime lane before recipe publication and records one logical edit.
 - **Each store is the truth** (F2). The change record is audit and undo only.
 - **One change path** (F3): routine apply/log/Undo; exact native taps only for widening
@@ -123,9 +123,8 @@ are installed; schema access never evaluates their late-bound service getter.
   `auth.json` has a coalesced change-only watch requesting the same owner: it is
   never read, hashed, recorded or projected by the outside comparison.
 - Tron never writes Project settings; the repository owns them.
-- Changing a model or thinking never persists a default. A masked Chat write
-  refuses without replacing the stored choice. Operational Project selections
-  preserve that inactive choice through cold resume and Project removal.
+- Changing a model or thinking never persists a default. A Chat write over a Project value
+  applies and wins; an explicit choice keeps winning through cold resume and Project removal.
 - Kernel settings SDK construction filters Project bindings at the public storage seam before
   tools/resources are admitted; writes preserve ignored fields in the same
   locked canonical document. Compaction consumes this registry's resolver.
