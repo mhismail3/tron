@@ -658,7 +658,7 @@ export class GatewayService {
         if (client.isLocal) throw new GatewayError("auth_required", "Device logs accept only paired device connections");
         return this.mutation(client, method, params, async () => {
           rejectUnknownFields(params, ["commandId", "bootId", "firstSequence", "lines", "gapFrom", "reason"], method);
-          return safeJson(await this.deviceLogStore().append(client.identity, client.admission, params));
+          return safeJson(await this.deviceLogStore().append(client.identity, client.admission, params, () => client.isRevoked()));
         });
       case "uploads.status":
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Upload status accepts no parameters");

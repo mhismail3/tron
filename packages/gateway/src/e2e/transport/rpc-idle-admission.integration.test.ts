@@ -11,6 +11,7 @@ import { TrustService } from "../../kernel/resources/trust-service.js";
 import { DeviceStore } from "../../security/device-store.js";
 import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
+import { DeviceLogStore } from "../../transport/device-logs.js";
 import { GatewayService } from "../../transport/gateway-service.js";
 import { GatewayServer } from "../../transport/server.js";
 import { settingsDependencies } from "../../../test-support/settings-dependencies.js";
@@ -383,6 +384,37 @@ describe("device log append RPC boundary", () => {
     const left = await deviceFiles(fixtureValue.root);
     expect(left).toHaveLength(1);
     expect(sequencesOf(left[0]!.text)).toEqual([1]);
+  });
+
+  it("refuses an append still in flight when its device is unpaired, so no log file is recreated", async () => {
+    const fixtureValue = await fixture();
+    const phone = await fixtureValue.connect();
+    const second = await fixtureValue.connect(await fixtureValue.pairDevice("Revoked phone"));
+    await second.request("doomed-first", "client.logs.append", { commandId: "doomed-first-0001", bootId: "boot-doomed-0001", firstSequence: 1, lines: batch(1, 1) });
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    let reached!: () => void;
+    const inFlight = new Promise<void>(resolve => { reached = resolve; });
+    const append = DeviceLogStore.prototype.append;
+    let settled: Promise<unknown> | undefined;
+    const spy = vi.spyOn(DeviceLogStore.prototype, "append").mockImplementation(function (this: DeviceLogStore, ...args) {
+      reached();
+      const run = held.then(() => append.apply(this, args));
+      settled = run;
+      return run;
+    });
+    const late = second.request("doomed-late", "client.logs.append", { commandId: "doomed-late-0001", bootId: "boot-doomed-0002", firstSequence: 1, lines: batch(1, 1) });
+    await inFlight;
+    spy.mockRestore();
+    const devices = await phone.request("list-revoked", "device.list", {});
+    const target = (devices.result.devices as Array<{ id: string; name: string }>).find((device) => device.name === "Revoked phone")!.id;
+    expect((await phone.request("revoke-doomed", "device.revoke", { commandId: "revoke-doomed-0001", deviceId: target })).result).toEqual({ revoked: true });
+    expect(await deviceFiles(fixtureValue.root)).toEqual([]);
+    release();
+    const outcome = await settled!.then(() => undefined, (error: unknown) => error);
+    void late.catch(() => undefined);
+    expect(await deviceFiles(fixtureValue.root)).toEqual([]);
+    expect(outcome).toMatchObject({ code: "unauthenticated" });
   });
 
   it("bounds the batch and keeps four 5 MiB segments per device", async () => {
