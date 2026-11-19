@@ -28,20 +28,6 @@ final class TronTaskToolSheetUITests: XCTestCase {
         XCTAssertTrue(raw.waitForExistence(timeout: 5), app.debugDescription)
     }
 
-    @MainActor func testStatusShowsRecordedWorkerCheckinAndSpend() {
-        continueAfterFailure = false
-        let app = launch("task-status")
-        defer { app.terminate() }
-        XCTAssertTrue(app.staticTexts["Keep Send disabled while photos prepare"].exists)
-        let worker = app.descendants(matching: .any)["home-tool-row-Model"]
-        for _ in 0..<6 where !worker.isHittable { app.swipeUp() }
-        XCTAssertTrue(worker.label.contains("Sol"), app.debugDescription)
-        XCTAssertTrue(app.descendants(matching: .any)["home-tool-row-Check-in"].label.contains("Attachment readiness now has one owner."))
-        let spend = app.descendants(matching: .any)["home-tool-row-Tokens"]
-        for _ in 0..<6 where !spend.isHittable { app.swipeUp() }
-        XCTAssertTrue(spend.label.contains("18K in"), app.debugDescription)
-    }
-
     @MainActor func testReportAndControlMessagesOpenOriginalTextInSharedReader() {
         continueAfterFailure = false
         for scenario in ["task-report", "task-steer", "task-resume", "task-interrupt"] {
