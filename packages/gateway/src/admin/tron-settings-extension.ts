@@ -1,7 +1,10 @@
 import { type SettingsToolAccess, type ChangeRequest, type ChangeResult } from "../kernel/settings/tool-contract.js";
 import { nativeChangeConfirmer, type NativeChangeRequest } from "../kernel/host/native-change.js";
 import { StringEnum, Type } from "../kernel/pi/ai.js";
-import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
+import { realpathSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
+import { homedir } from "node:os";
+import { getAgentDir, type ExtensionFactory } from "../kernel/pi/coding-agent.js";
 
 const CHANGE = Type.Object({
   key: Type.String({ minLength: 1, maxLength: 200, description: "A key id from resolve, e.g. run.retry.maxRetries." }),
@@ -83,8 +86,27 @@ function signalText(result: ChangeResult): string {
   return ` Stored now and used from the worker's next model request, but the signal to worker ${signal.taskId} was refused (${signal.error.code}: ${signal.error.message}).`;
 }
 
+const AGENT_CONFIG_FILES = ["settings.json", "mcp.json", "trust.json", "auth.json"];
+const FILE_TOOLS = new Set(["read", "write", "edit"]);
+export const AGENT_CONFIG_REFUSAL = "Agent configuration files (settings.json, mcp.json, trust.json, auth.json in the agent directory) are changed only through the settings tool; file tools refuse them.";
+
+function canonical(path: string): string {
+  try { return realpathSync.native(path); }
+  catch { return join(canonical(dirname(path)), basename(path)); }
+}
+
+function agentConfigFile(raw: unknown, cwd: string): boolean {
+  if (typeof raw !== "string") return false;
+  const path = raw.replace(/^@/u, "").replace(/^~(?=$|\/)/u, homedir());
+  const target = canonical(resolve(cwd, path));
+  const directory = canonical(getAgentDir());
+  return dirname(target) === directory && AGENT_CONFIG_FILES.includes(basename(target).toLowerCase());
+}
+
 export function createTronSettingsExtension(access: () => SettingsToolAccess | undefined, requestChange: NativeChangeRequest): ExtensionFactory {
   return pi => {
+    pi.on("tool_call", (event, context) => FILE_TOOLS.has(event.toolName) && agentConfigFile((event.input as { path?: unknown }).path, context.cwd)
+      ? { block: true, reason: AGENT_CONFIG_REFUSAL } : undefined);
     pi.registerTool({
       name: "settings", label: "Settings",
       description: "Read and change Tron settings through typed writes. Reversible changes apply and are logged. Read durable audit records with history; reverse a change with undo and its changeId. Tron Home alone can update (action update) one configured package to an exact npm version or git commit SHA behind the native install card, which shows any pin change; that is never undoable. Only irreversible effects, trust/authority, privacy expansion, spend and installs need the exact shared native tap. dryRun validates and returns before/after without effects. Home may target its task worker; running workers adopt from the next model request and are signalled.",

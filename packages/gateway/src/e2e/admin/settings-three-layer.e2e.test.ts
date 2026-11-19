@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { RequestSpan, runInRequestSpan } from "../../util/request-span.js";
 import { chmod, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt, getSystemMessageText, type TranscriptContext } from "@earendil-works/pi-ai";
 import { disposeFixtures, fixture, reportCall, TASK_REASONING_MODEL_ID } from "../../../test-support/home-task-fixture.js";
 import { setModelQueue } from "../../../test-support/settings-dependencies.js";
@@ -96,6 +96,37 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     await waitFor(() => slot.runtime.session.settingsManager.getImageAutoResize() === true, "explicit Session snapshot reapplied during SDK reload");
     expect((await f.resolve(slot, ["context.images.autoResize"])).keys[0]!.value).toBe(true);
     evidence.push({ case: "snapshot-reload-shell-prefix", sessionId: slot.id, output });
+  });
+  it("file tools refuse the agent directory's settings, mcp, trust and auth files and leave them unchanged", async () => {
+    const f = await setup();
+    vi.stubEnv("PI_CODING_AGENT_DIR", f.agentDir);
+    await writeFile(join(f.agentDir, "mcp.json"), "{\"mcpServers\":{}}\n");
+    await writeFile(join(f.agentDir, "auth.json"), "{}\n");
+    const files = ["settings.json", "mcp.json", "trust.json", "auth.json"];
+    const before = await Promise.all(files.map(name => readFile(join(f.agentDir, name), "utf8")));
+    const slot = await f.create();
+    await slot.setTools(["read", "write", "edit"]);
+    const relative = join("..", "agent", "AUTH.json");
+    const calls = [
+      fauxToolCall("write", { path: join(f.agentDir, "settings.json"), content: "{}" }, { id: "write-settings" }),
+      fauxToolCall("edit", { path: join(f.agentDir, "mcp.json"), edits: [{ oldText: "{}", newText: "{\"x\":1}" }] }, { id: "edit-mcp" }),
+      fauxToolCall("write", { path: join(f.agentDir, ".", "trust.json"), content: "{}" }, { id: "write-trust" }),
+      fauxToolCall("read", { path: relative }, { id: "read-auth" }),
+      fauxToolCall("write", { path: join(f.cwd, "notes.json"), content: "{}" }, { id: "write-project" }),
+    ];
+    let results: Array<{ toolCallId: string; isError: boolean; text: string }> = [];
+    f.faux.setResponses([fauxAssistantMessage(calls, { stopReason: "toolUse" }), context => {
+      results = context.messages.filter(message => message.role === "toolResult").map(message => ({ toolCallId: message.toolCallId, isError: message.isError,
+        text: JSON.stringify(message.content) }));
+      return fauxAssistantMessage("done");
+    }]);
+    await slot.prompt("Edit the agent configuration directly");
+    await waitFor(() => results.length === calls.length, "every file tool result reaches the provider");
+    expect(results.filter(result => result.isError).map(result => result.toolCallId)).toEqual(["write-settings", "edit-mcp", "write-trust", "read-auth"]);
+    for (const result of results.filter(result => result.isError)) expect(result.text).toContain("only through the settings tool");
+    expect(await Promise.all(files.map(name => readFile(join(f.agentDir, name), "utf8")))).toEqual(before);
+    expect(await readFile(join(f.cwd, "notes.json"), "utf8")).toBe("{}");
+    evidence.push({ case: "agent-config-path-guard", sessionId: slot.id, results });
   });
   it("switches global and project AGENTS.md per Session, loads project rules only when trusted, and never reads SYSTEM.md or APPEND_SYSTEM.md", async () => {
     const f = await setup();
