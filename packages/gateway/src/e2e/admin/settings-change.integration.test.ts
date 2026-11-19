@@ -1499,7 +1499,7 @@ describe("outside changes to MCP servers and custom models", () => {
       expect(JSON.stringify(await f.history()), secret).not.toContain(secret);
       expect(await readFile(f.outside.path, "utf8"), secret).not.toContain(secret);
     }
-    const prose = { agentOverrides: { a: { systemPrompt: "see https://example.com" }, b: { systemPrompt: "Ready? If asked for a password: refuse." } } };
+    const prose = { agentOverrides: { a: { systemPrompt: "see https://example.com" }, b: { systemPrompt: "Ready? If asked for a password: refuse." }, c: { systemPrompt: "Book at https://example.com?email=me@x.com today" } } };
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), subagents: { disableBuiltins: true } }));
     await until("publication: outside clean subagents settings", async () => (await outsideEntries(f)).filter(entry => entry.key === "subagents.settings").length === published + 1);
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), subagents: prose }));
