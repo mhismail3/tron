@@ -22,7 +22,7 @@ final class SheetTintViewTests: ShuffledTestCase {
 
     func testNestedSessionsRetentionOpensAndPersistsInLightAndDark() async throws {
         for dark in [false, true] {
-            try await mounted(["-tron-mac-settings-fixture", "-settings-nested"] + (dark ? ["-settings-renderer-dark"] : [])) { app in
+            try await mounted(["-tron-mac-settings-fixture", "-settings-nested"] + (dark ? ["-settings-dark"] : [])) { app in
                 try await app.activate("Open Settings")
                 _ = try await revealed(app, "settings-link-Appearance")
                 try await app.activate("settings-link-Appearance")

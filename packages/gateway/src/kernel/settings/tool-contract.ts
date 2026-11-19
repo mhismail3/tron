@@ -44,6 +44,10 @@ export interface FixedSetting {
   reason?: string;
 }
 
+export function explicitChoice(setting: FixedSetting | undefined): boolean {
+  return setting?.from === "session" || setting?.from === "delegate";
+}
+
 export interface Badge { kind: string; label: string; detail?: string; action?: { kind: string; label: string; changeId?: string } }
 
 export interface LayerValue {

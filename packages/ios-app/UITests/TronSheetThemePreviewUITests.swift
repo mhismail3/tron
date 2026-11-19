@@ -30,8 +30,8 @@ final class TronSheetThemePreviewUITests: XCTestCase {
     private func settings(_ mode: String) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-nested", "-settings-expanded-review", "-settings-sheet-theme-review"]
-        if mode == "dark" { app.launchArguments.append("-settings-renderer-dark") }
+        app.launchArguments = ["-tron-settings-fixture", "-settings-nested", "-settings-expanded-review", "-settings-sheet-theme-review"]
+        if mode == "dark" { app.launchArguments.append("-settings-dark") }
         app.launch()
         XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 15))
         app.buttons["Open Settings"].tap()

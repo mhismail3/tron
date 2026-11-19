@@ -13,7 +13,7 @@ custom models, Gateway updates, iOS installs, Mac replacement and diagnostics.
 |---|---|
 | Settings declarations and binding admission | [kernel schema](../kernel/settings/settings-schema.ts) (`createSettingsSchema`, `KEYS`, `RECORD_SUBJECTS`), [kernel scope resolution](../kernel/settings/scope-resolution.ts) (binding admission from `sessionOverridable`/`projectSettable`); value validation, formatting and vocabulary: [kernel settings](../kernel/settings/README.md) |
 | SDK scope admission and operational model selection | [kernel SDK storage admission](../kernel/settings/settings-sdk-manager.ts), [kernel operational admission](../kernel/settings/settings-admission.ts) |
-| Store/options adapter and presentation | `settings-model.ts` (`SettingsStoreAdapter`), `settings-presentation.ts`; [kernel resolver and diagnostics](../kernel/settings/README.md) |
+| Store/options adapter and history presentation | `settings-model.ts` (`SettingsStoreAdapter`), [kernel history presentation](../kernel/settings/history-presentation.ts); [kernel resolver and diagnostics](../kernel/settings/README.md) |
 | Project reader, store appliers and outside writers | `project-settings-writer.ts` (read-only Project layer and git state), [kernel trust owner](../kernel/resources/trust-service.ts), `settings-outside.ts` (`OutsideChanges`), `inert-pi-fields-migration.ts` (`scripts/tron migrate inert-pi-fields`: one-shot R10 removal of `theme` and `hideThinkingBlock` from `agent/settings.json` through the locked JSON writer, backup first, never at startup), `observed-git-residue-migration.ts` (`scripts/tron migrate observed-git-residue`: one-shot #2602 removal of the retired `staged`/`head` fields from `observed.json`, backup first, refuses a live Gateway, never at startup) |
 | The agents' `settings` tool and web mark | `tron-settings-extension.ts` |
 | Provider auth and model catalog | `auth-broker.ts`, `model-config-service.ts`, `global-provider-resources.ts` |
@@ -41,7 +41,7 @@ writes apply and log. Required native reviews use the dedicated built-in change
 interaction and typed paired-native callback, never generic forms. Dry run has no
 effects; Stop cancels only before acceptance. Accepted callbacks settle inside the
 canonical response receipt. There is no pending-request store, expiry or outcome outbox.
-`settings-presentation.ts` owns the profile audit-value formatter. History need
+The kernel's `history-presentation.ts` owns the profile audit-value formatter. History need
 not load Home's profile implementation; Home calls the same formatter for its
 stale-edit answer. Profile admission, records and mutation policy stay Home-owned.
 
@@ -67,7 +67,7 @@ In short:
 
 RPCs (shapes in the [Gateway README](../../README.md)): `settings.resolve`,
 `settings.change` (with `dryRun`), `settings.undo`,
-`settings.applyAgain`, plus `home.profileChange` for learned-profile notes.
+plus `home.profileChange` for learned-profile notes.
 Broadcasts: `settings.changed`, `trust.changed`, `mcp.changed`. Agents reach the same path through the `settings` tool
 (a thin client of resolve, change, history, undo, applyAgain, inventory and Home-only package update, each carrying the calling chat's actor; history and undo are
 scoped by that actor as the kernel contract defines). `inventory` is read-only: it projects the hook registrations (by extension and by event), configured packages, Tron modules, configured MCP servers (`configured` or `disabled`; never probed) and custom model providers for the chat's directory. Providers come from `ModelConfigService.configured`, which reads raw models.json entries and projects only id, base URL host, API and model ids (credentials are never resolved or projected); an unreadable models.json is one error, not a failed inventory. Hooks and packages come from `HookResources` and `PackageService`, which load extension definitions for a trusted project as the settings inventory reads them (code loading, a residual risk; not a probe). MCP comes from `McpAdminService.configured` through the SDK's public, non-executing `loadMcpConfig` owner, with explicit agent directory, project trust and a 256 KiB per-file read limit. The SDK alone validates and merges global/project entries and restricted overrides; invalid entries contribute only an error count, never raw diagnostics. Inventory never runs `pi mcp` (which connects servers and resolves `!command` credentials), so no MCP server is started and no credential is resolved. Only name, effective scope, enabled state, exposure and transport kind are projected; commands, headers, URLs and paths are excluded. Every string is sanitized through credential redaction. An undecided project fails with `trust_required`. Home's tool may target a delegated worker by `taskId`.
