@@ -1568,6 +1568,12 @@ describe("outside changes to MCP servers and custom models", () => {
     const renamed = await f.settingsChanges.change(global, [set({ ...keyed, name: "Keyed" })], home);
     expect(renamed).toMatchObject({ status: "applied" });
     expect(renamed.review!.intent).toBeUndefined();
+    const removed = await f.settingsChanges.change(global, [{ key: "accounts.models.provider", qualifiers: { provider: "keyed" }, layer: "global", op: "unset" }], home);
+    expect(JSON.parse(await readFile(modelsPath, "utf8")).providers.keyed).toBeUndefined();
+    const restored = await f.settingsChanges.undo(removed.changes[0]!.changeId, { ...home, reason: "Restore the keyed endpoint",
+      confirm: (shown, apply) => { expect(shown.intent).toBeUndefined(); return apply({ deviceId: "device:phone", commandId: "provider-restore-tap" }); } });
+    expect(restored).toMatchObject({ status: "applied" });
+    expect(JSON.parse(await readFile(modelsPath, "utf8")).providers.keyed).toEqual({ ...keyed, name: "Keyed" });
     expect(f.providerKeys).toHaveLength(1);
   });
   caseIt("refuses a provider write while models.json holds an unrelated invalid entry, and never persists or reports it applied", async owner => {

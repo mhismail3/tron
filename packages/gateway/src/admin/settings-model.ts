@@ -255,7 +255,8 @@ export class SettingsStoreAdapter {
         await this.mcp().setServer(qualifiers.server!, unset ? undefined : value as McpServerValue);
         return {};
       case "models":
-        await this.modelConfig().setProvider(qualifiers.provider!, unset ? undefined : value as ModelProviderValue, context.secret);
+        await this.modelConfig().setProvider(qualifiers.provider!, unset ? undefined : value as ModelProviderValue,
+          context.secret ?? (context.undoOf || context.applyAgainOf ? null : undefined));
         return {};
       case "agents":
         await setAgentDefinition(this.dependencies.agentDir, qualifiers.agent!, unset ? undefined : value as string);

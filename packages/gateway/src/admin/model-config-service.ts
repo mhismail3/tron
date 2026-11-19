@@ -117,11 +117,11 @@ export class ModelConfigService {
     return raw === undefined ? undefined : modelProviderOnDisk(id, raw);
   }
 
-  async setProvider(id: string, value: ModelProviderValue | undefined, apiKey?: string): Promise<void> {
+  async setProvider(id: string, value: ModelProviderValue | undefined, apiKey?: string | null): Promise<void> {
     const current = await this.read();
     const next = withProvider(current, id, value);
     await this.validateDocument(next);
-    if (addsProviderKey(providersOf(current)[id], value)) {
+    if (apiKey !== null && addsProviderKey(providersOf(current)[id], value)) {
       if (apiKey === undefined) throw new GatewayError("invalid_request", "A provider API key is entered on its iPhone card; nothing was changed");
       if (!this.credentials) throw new GatewayError("unsupported", "Provider credential storage is unavailable");
       await this.credentials.store(value!.apiKey!.account, apiKey);
