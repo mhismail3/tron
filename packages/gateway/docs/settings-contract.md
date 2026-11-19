@@ -176,7 +176,7 @@ change, applied to the target session's own store. **Undo** (`settings.undo`) wr
 `before` back, refused with `conflict` when the store moved; redacted entries are **Not
 undoable**. Consumption is derived from permanent history, checked with the current-after
 value under the same stripe. Grouped Undo requires every unique member with a consistent
-size; corrupt indexed segments refuse rather than restoring a partial group. **Apply again** (`settings.applyAgain`) restores Tron's value over an outside one.
+size; corrupt indexed segments refuse rather than restoring a partial group. **Apply again** (the `settings` tool's `applyAgain` action) restores Tron's value over an outside one.
 
 ## Native review
 
@@ -200,7 +200,7 @@ canonical `extension.respond` mutation receipt. Before acceptance, Stop/cancella
 means no effects. After acceptance, retirement cannot falsely decline accepted work
 or cause replay. An uncertain receipt requires inspection.
 
-The maintainer's own `settings.change`, `settings.undo` and `settings.applyAgain`
+The maintainer's own `settings.change` and `settings.undo`
 apply directly: his tap is the authority. A renderer that shows a key's review card
 may bind that tap to it with `confirmationDigest`; a changed store refuses it as stale.
 Project creation uses the `projects` tool with its own exact native review, revalidating the

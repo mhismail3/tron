@@ -1746,18 +1746,6 @@ export class GatewayService {
           }, session);
           return safeJson(result);
         });
-      case "settings.applyAgain":
-        return this.mutation(client, method, params, async workToken => {
-          rejectUnknownFields(params, ["commandId", "changeId"], method);
-          const changeId = string(params.changeId, "changeId", { max: 100 });
-          const entry = await this.dependencies.settingsChanges.record.find(changeId);
-          const homeChapter = entry?.target.kind === "home" ? await this.settingsHomeChapter(workToken) : undefined;
-          return safeJson(await this.dependencies.settingsChanges.applyAgain(changeId, {
-            actor: { kind: "ui", id: client.identity },
-            commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
-            ...(homeChapter ? { homeChapter } : {}),
-          }));
-        });
       case "trust.inspect":
         return safeJson(await this.dependencies.trust.inspect(string(params.cwd, "cwd", { max: 4_096 })));
       case "models.refresh": {
