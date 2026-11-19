@@ -26,7 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import verify  # noqa: E402  (selection and runners)
-from host_lock import HELD_BY_CALLER, wait_for_full_gateway_lock  # noqa: E402  (the one host lock owner)
+from host_lock import FULL_GATEWAY_LOCK, HELD_BY_CALLER, wait_for_lock  # noqa: E402  (the one host lock owner)
 
 OPERATORS = [(r"===", "!=="), (r"!==", "==="), (r" && ", " || "), (r" \|\| ", " && "), (r"\btrue\b", "false"),
              (r"\bfalse\b", "true"), (r" < ", " >= "), (r" > ", " <= "), (r" <= ", " > "), (r" >= ", " < "),
@@ -67,7 +67,7 @@ def main(argv: list[str]) -> int:
     report_path.parent.mkdir(parents=True, exist_ok=True)
     command = ["python3", str(verify.ROOT / "tools/verify/gateway.py"), "--reporter=json",
                f"--outputFile={report_path}", *[test[len(verify.GATEWAY) + 1:] for test in tests]]
-    held = wait_for_full_gateway_lock({"pid": os.getpid(), "worktree": str(verify.ROOT), "purpose": f"mutate {args.file}"},
+    held = wait_for_lock(FULL_GATEWAY_LOCK, {"pid": os.getpid(), "worktree": str(verify.ROOT), "purpose": f"mutate {args.file}"},
                                       lambda line: print(f"mutate: {line}", file=sys.stderr, flush=True))
 
     def run_locks(timeout: float | None) -> dict | str | None:

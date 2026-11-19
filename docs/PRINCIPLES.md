@@ -22,7 +22,7 @@ boundary check in #2316 T2.9 adds them.
 
 ## P2 Whole-system health is a batch signal, not a commit gate
 
-**Rule.** The full suite and the core E2E journeys (prompt/reply, delegate/result, approval tap,
+**Rule.** `scripts/tron land` gates main on Tiers 0 to 2 of the exact merge it pushes. The iOS suite and the core E2E journeys (prompt/reply, delegate/result, approval tap,
 settings change, Home wake, reconnect/restart; [map](../tools/verify/core-journeys.md)) run as a
 batch on landed main and at device checkpoints. A red is filed against the module that owns it,
 which fixes it at the root or reverts its change. A retry that passes is evidence of

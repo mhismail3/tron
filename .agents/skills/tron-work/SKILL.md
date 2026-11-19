@@ -34,22 +34,14 @@ Prepare pinned Gateway dependencies only when selected checks need them. Review 
 
 ## Publish
 
-After affected evidence passes, land a merge whose first parent is the fetched main, so
-main's first-parent chain stays its integration history (the batch bisects it). The branch
-already contains `FETCH_HEAD`, so this merge is conflict-free with the tested tree:
-
-```bash
-BRANCH=$(git branch --show-current)
-git checkout --detach FETCH_HEAD
-git merge --no-ff --no-edit "$BRANCH"
-git diff --quiet "$BRANCH" HEAD && git push origin HEAD:main
-git checkout "$BRANCH"
-```
+After affected evidence passes, run `scripts/tron land` from the task branch
+([land](../../../tools/verify/land.md)). It waits its turn on this host, merges `--no-ff` onto
+fetched main, validates that exact merge (Tiers 0 to 2 on the mini) and pushes it only if
+green; when main moved meanwhile it merges and validates again. Never push main by hand.
 
 If you pushed the task branch, delete it on origin once main contains it
 (`git push origin --delete <branch>`); `refs/archive/*` keeps anything abandoned.
-A non-fast-forward refusal preserves your candidate. Fetch/integrate again;
-rerun tests only if integration changed their dependencies. An uncertain network
+A red or conflict refusal leaves main and your branch unchanged: fix, commit, land again. An uncertain network
 result is not a failed write: inspect `git ls-remote origin refs/heads/main` and
 ancestry before acting. Never force-push main or automatically replay uncertain writes.
 Do not run full suites after landing: the asynchronous main batch owns that coverage and

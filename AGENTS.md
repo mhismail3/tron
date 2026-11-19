@@ -96,13 +96,13 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 
 ## Validation and landing
 [Principles](docs/PRINCIPLES.md) own delivery policy: a commit is gated by the local tests of the modules
-it touches (P1); the full suite and E2E journeys are batch and checkpoint signals (P2). No merge queue.
+it touches (P1); `scripts/tron land` gates main on Tiers 0 to 2 of the exact merge it lands; iOS and E2E journeys are batch and checkpoint signals (P2).
 1. Commit in your own worktree; enable rerere. Fetch main into private `FETCH_HEAD` and merge
    deliberately (see [Git/gh skill](.agents/skills/tron-work/SKILL.md)); never rewrite foreign work.
    Every commit is gated by `scripts/tron verify --changed` (the changed modules' tests) plus the E2E journeys that prove any behaviour you delete; add partial
    or full checks as needed; serial or long checks run once per batch. Obtain required ACCEPTs. Never retry-to-green.
-2. Land a `--no-ff` merge onto fetched main (main stays first parent) with plain Git `git push origin HEAD:main`; never
-   force-push. On a race, fetch/merge and rerun only evidence invalidated by integration. Landing bar: no worse than fetched main — every remaining red also fails on main and has a filed issue; never a new red. A batch red is filed
+2. Land only with `scripts/tron land` ([land](tools/verify/land.md)): it merges `--no-ff` onto fetched main, validates
+   that exact merge and pushes it only if green, revalidating when main moved; never push main by hand or force-push. Landing bar: no worse than fetched main — every remaining red also fails on main and has a filed issue; never a new red. A batch red is filed
    against its owning module, which root-fixes it or reverts its change.
 3. Close the issue with the change, what it deleted or retired, actual commands and results, and residual risk; link long logs (`test-results/`, internal workspace).
    Incidents also name the one-step diagnosing signal, added to its owning test and a row in its module README Signals (`packages/gateway/docs/observability.md`).

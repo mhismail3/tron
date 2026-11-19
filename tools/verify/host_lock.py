@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The host's one full-Gateway run at a time: the lock local Gateway Vitest runs (`gateway.py`) and `mutate` share."""
+"""First-come first-served host locks: the one full-Gateway run at a time (`gateway.py`, `mutate`) and the one landing at a time (`land`)."""
 from pathlib import Path
 import fcntl
 import json
@@ -7,11 +7,12 @@ import os
 import time
 
 FULL_GATEWAY_LOCK = '/tmp/tron-full-gateway.lock'
+LAND_LOCK = '/tmp/tron-land.lock'
 HELD_BY_CALLER = 'TRON_FULL_GATEWAY_LOCK_HELD'
 
 
-def wait_for_full_gateway_lock(record, announce):
-    """The open full-Gateway lock file, exclusively locked once every earlier live waiter has had it.
+def wait_for_lock(path, record, announce):
+    """The open lock file at `path`, exclusively locked once every earlier live waiter has had it.
 
     Waiters take the lock in arrival order: each queues a numbered ticket beside the lock and
     holds that ticket's flock while it waits, so a waiter that dies (even by SIGKILL) gives up
@@ -20,7 +21,7 @@ def wait_for_full_gateway_lock(record, announce):
     directory's flock serializes numbering and pruning. Never interrupts the holder, and waits
     indefinitely.
     """
-    queue = Path(FULL_GATEWAY_LOCK + '.queue')
+    queue = Path(path + '.queue')
     queue.mkdir(exist_ok=True)
 
     def guarded(action):
@@ -53,7 +54,7 @@ def wait_for_full_gateway_lock(record, announce):
 
     ticket = guarded(enqueue)
     mine = Path(ticket.name)
-    handle = open(FULL_GATEWAY_LOCK, 'a+')
+    handle = open(path, 'a+')
     announced = False
     try:
         try:
@@ -68,7 +69,7 @@ def wait_for_full_gateway_lock(record, announce):
                 handle.seek(0)
                 line = f"holder: {handle.read(512).strip() or 'unrecorded'}; earlier waiters: [{', '.join(earlier)}]"
                 if not announced:
-                    announce(f'waiting for {FULL_GATEWAY_LOCK} ({line})')
+                    announce(f'waiting for {path} ({line})')
                     announced = True
                 time.sleep(0.2)
         finally:

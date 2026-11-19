@@ -14,7 +14,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from host_lock import HELD_BY_CALLER, wait_for_full_gateway_lock  # noqa: E402  (the one host lock owner)
+from host_lock import FULL_GATEWAY_LOCK, HELD_BY_CALLER, wait_for_lock  # noqa: E402  (the one host lock owner)
 import vitest_configs  # noqa: E402  (the one reader of the listing Vitest configs)
 import ledger
 
@@ -24,7 +24,7 @@ def hold_full_gateway_lock():
     if os.environ.get(HELD_BY_CALLER) == '1':
         return None
     record = {'pid': os.getpid(), 'worktree': str(ROOT), 'purpose': 'gateway vitest ' + ' '.join(sys.argv[1:])[:200]}
-    return wait_for_full_gateway_lock(record, lambda line: print(f'gateway tests: {line}', file=sys.stderr, flush=True))
+    return wait_for_lock(FULL_GATEWAY_LOCK, record, lambda line: print(f'gateway tests: {line}', file=sys.stderr, flush=True))
 
 
 VALUE_OPTIONS = {'--config', '-c', '--project', '--reporter', '--outputFile', '-t', '--testNamePattern', '--root', '-r', '--dir', '--shard',
