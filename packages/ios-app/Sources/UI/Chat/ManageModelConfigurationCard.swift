@@ -82,7 +82,6 @@ struct ManageModelConfigurationCard: View {
                     SettingsModelPicker(setting: setting, target: target, title: "Models", selectionAvailability: availability,
                                         onReset: setting.overridden == true ? { change(setting, nil) } : nil) { change(setting, $0) }
                 } label: { TronInlineActionLabel("Switch Model") }
-                .disabled(setting.projectSetting != nil)
                 .accessibilityIdentifier("manage-model-switch")
                 .accessibilityValue(availability.accessibilityValue)
             }
@@ -109,13 +108,13 @@ struct ManageModelConfigurationCard: View {
     private func choiceRow(_ setting: ResolvedSetting, title: String, icon: String) -> some View {
         let options = choiceOptions(for: setting)
         return HStack(spacing: 0) {
-            if options.isEmpty || setting.projectSetting != nil {
+            if options.isEmpty {
                 TronSettingsRow(icon: icon, title: title) { TronInlineActionLabel(setting.display, accent: .tronPrimary) }
             } else {
                 SettingsChoiceSelectionRow(title: title, icon: icon, value: setting.value ?? .null, display: setting.display,
                                            options: options, onChange: { change(setting, $0) })
             }
-            if setting.overridden == true && setting.projectSetting == nil { resetButton(setting).padding(.trailing, 12) }
+            if setting.overridden == true { resetButton(setting).padding(.trailing, 12) }
         }
         .disabled(!availability.canSelect)
         .accessibilityElement(children: .contain)
@@ -123,7 +122,7 @@ struct ManageModelConfigurationCard: View {
     }
 
     private func resetAccessory(_ setting: ResolvedSetting) -> (@MainActor @Sendable () -> AnyView)? {
-        guard setting.overridden == true, setting.projectSetting == nil else { return nil }
+        guard setting.overridden == true else { return nil }
         let button = AnyView(resetButton(setting))
         return { button }
     }

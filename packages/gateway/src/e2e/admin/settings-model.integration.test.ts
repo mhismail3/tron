@@ -257,11 +257,11 @@ describe("settings.resolve", () => {
     const slot = await registry.create(project);
     expect(slot.sessionFile?.startsWith(join(agentDir, "sessions"))).toBe(true);
     const session = await resolve({ kind: "session", sessionId: slot.id }, subscribed([slot.id]));
-    expect(session.layers).toEqual(["project", "session", "global"]);
+    expect(session.layers).toEqual(["session", "project", "global"]);
     const context = await slot.context() as { activeTools: string[] };
     const snapshot = slot.snapshot();
-    expect(row(session, "model.ref[role=chat]")).toMatchObject({ value: { provider: model.provider, id: model.id }, layer: "session" });
-    expect(row(session, "model.ref[role=chat]").layer).toBe("session");
+    expect(row(session, "model.ref[role=chat]")).toMatchObject({ value: { provider: model.provider, id: model.id }, layer: "global" });
+    expect(row(session, "model.ref[role=chat]").layer).toBe("global");
     expect(snapshot.model).toEqual(row(trusted, "model.ref[role=chat]").value);
     expect(row(session, "model.thinking[role=chat]", { model: modelKey }).value).toBe(snapshot.thinkingLevel);
     expect(snapshot.thinkingLevel).toBe(row(trusted, "model.thinking[role=chat]").value);

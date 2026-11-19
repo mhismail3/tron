@@ -1486,7 +1486,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       const value = binding.store === "session-settings" ? row.value
         : binding.field === "contextWindow" ? context?.effective : actual[binding.field];
       if (value === undefined) continue;
-      const from = binding.store === "session" && binding.field === "model" && row.value !== undefined && JSON.stringify(value) !== JSON.stringify(row.value)
+      const from = binding.store === "session" && binding.field === "model" && row.layer !== "project" && row.value !== undefined && JSON.stringify(value) !== JSON.stringify(row.value)
         ? "session" : row.layer;
       fixed[row.key] = { value, from, at: new Date().toISOString(), ref: randomUUID(), ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) };
     }

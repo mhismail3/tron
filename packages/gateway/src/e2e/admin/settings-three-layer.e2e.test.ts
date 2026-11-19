@@ -230,14 +230,16 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     expect(failure).toMatchObject({ code: "conflict", details: { outcomeUnknown: true } });
   });
 
-  it("Project beats a stored Session override in both RPC resolution and actual provider retries", async () => {
+  it("a stored Session override beats Project in both RPC resolution and actual provider retries; its Revert inherits Project", async () => {
     const f = await setup();
     const slot = await f.create();
     await f.retryChange(slot, "set", 0);
     await f.project({ retry: { maxRetries: 2 } });
-    const observed = { effective: retryValue(await f.resolve(slot, ["run.retry.maxRetries"])), requests: await f.attempts(slot) };
-    evidence.push({ case: "project precedence", observed });
-    expect(observed).toEqual({ effective: 2, requests: 3 });
+    const override = { effective: retryValue(await f.resolve(slot, ["run.retry.maxRetries"])), requests: await f.attempts(slot) };
+    await f.retryChange(slot, "unset");
+    const inherited = { effective: retryValue(await f.resolve(slot, ["run.retry.maxRetries"])), requests: await f.attempts(slot) };
+    evidence.push({ case: "session over project precedence", observed: { override, inherited } });
+    expect({ override, inherited }).toEqual({ override: { effective: 0, requests: 1 }, inherited: { effective: 2, requests: 3 } });
   });
 
   it("a trusted Project cannot replace the Global tool-permission loadout during SDK admission", async () => {
@@ -252,33 +254,36 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     expect(resolved?.value).toContain("read");
   });
 
-  it("refuses edits masked by Project without mutating the inactive canonical Session override", async () => {
+  it("a Session edit over a Project value applies and wins, leaving the Project file untouched", async () => {
     const f = await setup();
     const slot = await f.create();
     await f.retryChange(slot, "set", 0);
     await f.project({ retry: { maxRetries: 2 } });
-    let refusal: { code?: string; message?: string } | undefined;
-    try { await f.retryChange(slot, "set", 1); } catch (error) { refusal = error as typeof refusal; }
+    await f.retryChange(slot, "set", 1);
     const stored = slot.settingsSessionLayer().settings;
-    evidence.push({ case: "masked mutation", refusal, stored });
-    expect(refusal?.code).toBe("conflict");
-    expect(stored).toMatchObject({ retry: { maxRetries: 0 } });
+    evidence.push({ case: "session edit over project", stored });
+    expect(stored).toMatchObject({ retry: { maxRetries: 1 } });
+    expect(retryValue(await f.resolve(slot, ["run.retry.maxRetries"]))).toBe(1);
+    expect(JSON.parse(await readFile(join(f.cwd, ".pi", "settings.json"), "utf8"))).toEqual({ retry: { maxRetries: 2 } });
   });
 
-  it("reactivates the retained override after Project removal, then Revert inherits Global", async () => {
+  it("the Session override holds while Project is added and removed, then Revert inherits Project and then Global", async () => {
     const f = await setup();
     const slot = await f.create();
     await f.retryChange(slot, "set", 0);
     await f.project({ retry: { maxRetries: 2 } });
-    const projectValue = retryValue(await f.resolve(slot, ["run.retry.maxRetries"]));
+    const withProject = retryValue(await f.resolve(slot, ["run.retry.maxRetries"]));
     await f.project({});
-    const activeOverride = retryValue(await f.resolve(slot, ["run.retry.maxRetries"]));
+    const withoutProject = retryValue(await f.resolve(slot, ["run.retry.maxRetries"]));
+    await f.project({ retry: { maxRetries: 2 } });
     await f.retryChange(slot, "unset");
+    const revertedToProject = retryValue(await f.resolve(slot, ["run.retry.maxRetries"]));
+    await f.project({});
     const inherited = retryValue(await f.resolve(slot, ["run.retry.maxRetries"]));
     const requests = await f.attempts(slot);
-    const observed = { projectValue, activeOverride, inherited, requests };
-    evidence.push({ case: "inactive override and revert", observed });
-    expect(observed).toEqual({ projectValue: 2, activeOverride: 0, inherited: 1, requests: 2 });
+    const observed = { withProject, withoutProject, revertedToProject, inherited, requests };
+    evidence.push({ case: "override across project and revert", observed });
+    expect(observed).toEqual({ withProject: 0, withoutProject: 0, revertedToProject: 2, inherited: 1, requests: 2 });
     expect(slot.settingsSessionLayer().settings).not.toHaveProperty("retry.maxRetries");
   });
 
@@ -293,22 +298,22 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     expect(observed).toEqual({ effective: 1, requests: 2 });
   });
 
-  it("serves read-only recovery scope, inactive override and exact Project path from real resolution", async () => {
+  it("serves the override, the exact Project path when Project wins, and Global, from real resolution", async () => {
     const f = await setup();
     const slot = await f.create();
     await f.retryChange(slot, "set", 0);
     await f.project({ retry: { maxRetries: 2 } });
     const read = async () => f.service.invoke(f.client, "settings.resolve", {
       target: { kind: "session", sessionId: slot.id }, keys: ["run.retry.maxRetries"],
-    }) as Promise<{ keys: Array<{ value: unknown; overridden: boolean; projectSetting?: { file: string; path: string } }> }>;
-    const masked = (await read()).keys[0]!;
-    expect(masked).toMatchObject({ value: 2, overridden: true,
+    }) as Promise<{ keys: Array<{ value: unknown; layer: string; overridden: boolean; projectSetting?: { file: string; path: string } }> }>;
+    const overriding = (await read()).keys[0]!;
+    expect(overriding).toMatchObject({ value: 0, layer: "session", overridden: true });
+    expect(overriding.projectSetting).toBeUndefined();
+    await f.retryChange(slot, "unset");
+    const fromProject = (await read()).keys[0]!;
+    expect(fromProject).toMatchObject({ value: 2, layer: "project", overridden: false,
       projectSetting: { file: join(await realpath(f.cwd), ".pi", "settings.json"), path: "retry.maxRetries" } });
     await f.project({});
-    const active = (await read()).keys[0]!;
-    expect(active).toMatchObject({ value: 0, overridden: true });
-    expect(active.projectSetting).toBeUndefined();
-    await f.retryChange(slot, "unset");
     const inherited = (await read()).keys;
     expect(inherited).toHaveLength(1);
     expect(inherited[0]).toMatchObject({ value: 1, layer: "global", overridden: false });
@@ -449,20 +454,25 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     expect(rows.find(row => row.key === "context.images.block")?.value).toBe(true);
   });
 
-  it("Project compaction budget reaches both the real SDK threshold and operation projection", async () => {
+  it("a Session compaction budget beats Project, and after its unset the Project budget reaches both the real SDK threshold and operation projection", async () => {
     const f = await setup();
     const slot = await f.create();
-    await f.service.invoke(f.client, "settings.change", {
+    const reserve = (op: "set" | "unset") => f.service.invoke(f.client, "settings.change", {
       commandId: randomUUID(), target: { kind: "session", sessionId: slot.id },
       fence: { runtimeGeneration: slot.snapshot().runtimeGeneration, model: slot.snapshot().model },
-      changes: [{ key: "context.compaction.reserveTokens", layer: "session", op: "set", value: 2048 }],
+      changes: [{ key: "context.compaction.reserveTokens", layer: "session", op, ...(op === "set" ? { value: 2048 } : {}) }],
     });
+    await reserve("set");
     await f.project({ compaction: { reserveTokens: 4096 } });
     await f.attempts(slot);
-    const observed = { sdk: slot.runtime.session.settingsManager.getCompactionSettings().reserveTokens,
-      projected: slot.snapshot().compactionPolicy?.next.reserveTokens };
-    evidence.push({ case: "single compaction precedence", observed });
-    expect(observed).toEqual({ sdk: 4096, projected: 4096 });
+    const read = () => ({ sdk: slot.runtime.session.settingsManager.getCompactionSettings().reserveTokens,
+      projected: slot.snapshot().compactionPolicy?.next.reserveTokens });
+    const overriding = read();
+    await reserve("unset");
+    await f.attempts(slot);
+    const inherited = read();
+    evidence.push({ case: "single compaction precedence", observed: { overriding, inherited } });
+    expect({ overriding, inherited }).toEqual({ overriding: { sdk: 2048, projected: 2048 }, inherited: { sdk: 4096, projected: 4096 } });
   });
 
   it("SDK Project writes preserve ignored fields without admitting them", async () => {
@@ -499,7 +509,7 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     evidence.push({ case: "unavailable Project model refused" });
   });
 
-  it("retains a model override through masking and cold resume, then reactivates it after Project removal", async () => {
+  it("an explicit model override beats the Project model before and after cold resume, and after Project removal", async () => {
     const f = await setup();
     const slot = await f.create();
     await f.service.invoke(f.client, "settings.change", {
@@ -523,10 +533,10 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     await resumed.prompt("Read the retained Session override");
     await waitFor(() => resumed.snapshot().configurationBlocker === null, "unmasked model request settled");
     evidence.push({ case: "cold inactive model override", observed });
-    expect(observed).toEqual([f.model.id, f.model.id, TASK_REASONING_MODEL_ID]);
+    expect(observed).toEqual([TASK_REASONING_MODEL_ID, TASK_REASONING_MODEL_ID, TASK_REASONING_MODEL_ID]);
   });
 
-  it.each(["seed", "explicit"])("Project model beats the Home worker %s at the first real request", async mode => {
+  it.each(["seed", "explicit"])("Project model and the Home worker %s at the first real request: the seed loses, an explicit Home model wins", async mode => {
     const f = await setup();
     const taskId = `three-layer-${mode}-worker`;
     await f.project({ defaultProvider: f.model.provider, defaultModel: f.model.id });
@@ -554,6 +564,40 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     await waitFor(() => home.snapshot().configurationBlocker === null, "Home delegation turn settled");
     await waitFor(async () => (await homeOwnerOf(f.registry).taskStatus(taskId)).lifecycle === "terminal", "worker terminal");
     evidence.push({ case: `worker ${mode} admission Project precedence`, observed, projectModel: f.model.id });
-    expect(observed).toEqual([f.model.id]);
+    expect(observed).toEqual([mode === "explicit" ? TASK_REASONING_MODEL_ID : f.model.id]);
+  });
+
+  it.each(["seed", "explicit"])("Project thinking and the Home worker's %s thinking at the first real request: the seed loses, an explicit Home thinking wins", async mode => {
+    const f = await setup();
+    const taskId = `three-layer-${mode}-worker-thinking`;
+    const reasoning = { provider: f.model.provider, id: TASK_REASONING_MODEL_ID };
+    await f.project({ defaultProvider: reasoning.provider, defaultModel: reasoning.id, defaultThinkingLevel: "low" });
+    await setModelQueue(f.dependencies, "background", [f.model]);
+    await setModelQueue(f.dependencies, "worker", [reasoning]);
+    await f.service.invoke(f.client, "settings.change", { commandId: randomUUID(), target: { kind: "home" },
+      changes: [{ key: "model.thinking[role=worker]", layer: "session", op: "set", value: "high" }] });
+    const observed: unknown[] = [];
+    const workerTurn = (context: TranscriptContext) => context.messages.some(message => message.role === "system"
+      && getSystemMessageText(message).includes("This is a finite Home task"));
+    f.faux.setResponses(Array.from({ length: 4 }, () => (context, options) => {
+      if (workerTurn(context)) {
+        observed.push(options?.reasoning);
+        return fauxAssistantMessage([reportCall("three-layer-worker-thinking")], { stopReason: "toolUse" });
+      }
+      const messages = droppingAnyTurnFrame(context.messages);
+      const current = messages.slice(messages.findLastIndex(message => message.role === "user"));
+      return current.some(message => message.role === "toolResult" && message.toolName === "delegate")
+        ? fauxAssistantMessage("Delegation accepted")
+        : fauxAssistantMessage([fauxToolCall("delegate", {
+          taskId, intent: "Finite thinking precedence check", target: f.cwd,
+          ...(mode === "explicit" ? { model: reasoning, thinking: "medium", reason: "Test explicit task thinking against Project" } : {}),
+        })], { stopReason: "toolUse" });
+    }));
+    const home = await f.registry.acquire(f.home.sessionId);
+    await home.prompt("Delegate the thinking precedence check");
+    await waitFor(() => home.snapshot().configurationBlocker === null, "Home delegation turn settled");
+    await waitFor(async () => (await homeOwnerOf(f.registry).taskStatus(taskId)).lifecycle === "terminal", "worker terminal");
+    evidence.push({ case: `worker ${mode} thinking Project precedence`, observed });
+    expect(observed).toEqual([mode === "explicit" ? "medium" : "low"]);
   });
 });

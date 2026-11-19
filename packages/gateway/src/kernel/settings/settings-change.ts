@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from "node:crypto";
-import { join } from "node:path";
 import type { ModelRuntime } from "../pi/coding-agent.js";
 import { asUncertainOutcome, GatewayError } from "../../errors.js";
 import { RequestSpanLane } from "../../util/request-span.js";
@@ -540,12 +539,6 @@ export class SettingsChangePath {
       const chatModel = stores.session?.model;
       if (request.layer === "session" && chatModel) qualifiers.model = `${chatModel.provider}/${chatModel.id}`;
       else throw new GatewayError("invalid_request", `${key.label} needs a model qualifier`);
-    }
-    const projectBinding = key.layers.project;
-    if (request.layer === "session" && key.projectSettable && projectBinding && stores.project?.applied) {
-      const value = readBinding(stores, "project", projectBinding, qualifiers, true, key.id)
-        ?? readBinding(stores, "project", projectBinding, qualifiers, false, key.id);
-      if (value !== undefined) throw new GatewayError("conflict", `${key.label} is set by ${join(stores.project.root, ".pi", "settings.json")}; edit its Project key instead. The Session override is retained inactive.`);
     }
     if (binding.store === "session-launch") throw new GatewayError("invalid_request", "Delegation launch inputs are read-only");
     if (binding.store === "session-settings" && !hasSessionSettingsApplier(key)) {

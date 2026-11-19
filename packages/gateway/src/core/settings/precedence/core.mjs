@@ -70,8 +70,8 @@ let SettingsPrecedence = (function() {
       let _1_h = SettingsPrecedence.__default.ShownOf(k, ls, SettingsPrecedence.Layer.create_Home());
       let _2_s = SettingsPrecedence.__default.ShownOf(k, ls, SettingsPrecedence.Layer.create_Session());
       let _3_p = SettingsPrecedence.__default.ShownOf(k, ls, SettingsPrecedence.Layer.create_Project());
-      let _4_won = SettingsPrecedence.__default.Over(k, _3_p, SettingsPrecedence.Layer.create_Project(), SettingsPrecedence.__default.Over(k, _2_s, SettingsPrecedence.Layer.create_Session(), SettingsPrecedence.__default.Over(k, _1_h, SettingsPrecedence.Layer.create_Home(), SettingsPrecedence.__default.Over(k, _0_g, SettingsPrecedence.Layer.create_Global(), SettingsPrecedence.Won.create_Won(SettingsPrecedence.Value.create_Default(), SettingsPrecedence.Origin.create_FromDefault())))));
-      return SettingsPrecedence.Resolution.create_Resolution((_4_won).dtor_value, (_4_won).dtor_layer, SettingsPrecedence.__default.Top(_3_p, SettingsPrecedence.Layer.create_Project(), SettingsPrecedence.__default.Top(_2_s, SettingsPrecedence.Layer.create_Session(), SettingsPrecedence.__default.Top(_1_h, SettingsPrecedence.Layer.create_Home(), SettingsPrecedence.__default.Top(_0_g, SettingsPrecedence.Layer.create_Global(), SettingsPrecedence.Unapplied.create_AllApplied())))), SettingsPrecedence.Shows.create_Shows(_0_g, _1_h, _2_s, _3_p));
+      let _4_won = SettingsPrecedence.__default.Over(k, _2_s, SettingsPrecedence.Layer.create_Session(), SettingsPrecedence.__default.Over(k, _1_h, SettingsPrecedence.Layer.create_Home(), SettingsPrecedence.__default.Over(k, _3_p, SettingsPrecedence.Layer.create_Project(), SettingsPrecedence.__default.Over(k, _0_g, SettingsPrecedence.Layer.create_Global(), SettingsPrecedence.Won.create_Won(SettingsPrecedence.Value.create_Default(), SettingsPrecedence.Origin.create_FromDefault())))));
+      return SettingsPrecedence.Resolution.create_Resolution((_4_won).dtor_value, (_4_won).dtor_layer, SettingsPrecedence.__default.Top(_2_s, SettingsPrecedence.Layer.create_Session(), SettingsPrecedence.__default.Top(_1_h, SettingsPrecedence.Layer.create_Home(), SettingsPrecedence.__default.Top(_3_p, SettingsPrecedence.Layer.create_Project(), SettingsPrecedence.__default.Top(_0_g, SettingsPrecedence.Layer.create_Global(), SettingsPrecedence.Unapplied.create_AllApplied())))), SettingsPrecedence.Shows.create_Shows(_0_g, _1_h, _2_s, _3_p));
     };
     static PlainOver(k, ls, m, below, v) {
       let _0_e = SettingsPrecedence.__default.At(ls, m);
@@ -94,7 +94,7 @@ let SettingsPrecedence = (function() {
       }
     };
     static Below(k, ls, l) {
-      return SettingsPrecedence.__default.PlainOver(k, ls, SettingsPrecedence.Layer.create_Session(), (l).is_Project, SettingsPrecedence.__default.PlainOver(k, ls, SettingsPrecedence.Layer.create_Home(), ((l).is_Session) || ((l).is_Project), SettingsPrecedence.__default.PlainOver(k, ls, SettingsPrecedence.Layer.create_Global(), !((l).is_Global), SettingsPrecedence.Value.create_Default())));
+      return SettingsPrecedence.__default.PlainOver(k, ls, SettingsPrecedence.Layer.create_Home(), (l).is_Session, SettingsPrecedence.__default.PlainOver(k, ls, SettingsPrecedence.Layer.create_Project(), ((l).is_Home) || ((l).is_Session), SettingsPrecedence.__default.PlainOver(k, ls, SettingsPrecedence.Layer.create_Global(), !((l).is_Global), SettingsPrecedence.Value.create_Default())));
     };
     static At(ls, l) {
       let _source0 = l;

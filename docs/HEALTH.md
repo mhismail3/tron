@@ -147,7 +147,7 @@ proxy targets are not created alongside it.
 4. **Proofs for recurring bugs** (Dafny; ranked): approval decide/apply exactly once (141 commits,
    27 fixes since Oct 1; #2050, #2015, #2159); task stop/resume/settle with uncertain create (H10,
    #2319, #2238, #2256); exactly-once Home wake (#2213, #1620, #1518); settings precedence with
-   Project on top (H1) and order-preserving tool selection (H6, #2318); wire v8 receipts and ordered
+   explicit Session over Project (D23, replacing H1) and order-preserving tool selection (H6, #2318); wire v8 receipts and ordered
    outbound queue (#1729, #2186); Home memory summary coverage (#2311, #2314, #2228); then
    automations, notification delivery, drain, and a template law for the next migration.
    Workspace `REPORT.md` names the tests each proof would shrink.
