@@ -53,7 +53,7 @@ document holds no policy.
   digest over session and tool call). The Gateway writes nothing: approval resolves the request with
   `requested` and the approving iPhone alone rotates its rejected App Attest key and registers again, after
   its own connection, device and generation fences. A duplicate approval is refused at the answer boundary and
-  never rotates. The App Attest key is per iPhone and its card names the other paired Macs. The result is
+  never rotates. The App Attest key is per iPhone, so its card says every paired Mac uses the new key at its next registration. The result is
   "requested", never "registered"; nothing is persisted, so an app death after acceptance is best effort.
 - **Automatic keys.** `notifications.push.inputNeeded|finished|waiting` are privacy-tapped: turning one on is
   a widening that needs the native card, turning it off is routine.

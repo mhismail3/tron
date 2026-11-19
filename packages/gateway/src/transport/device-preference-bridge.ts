@@ -9,7 +9,7 @@ const DEVICE_PREFERENCE_CAPABILITY = "device-preference";
 
 type Outcome = DevicePreferenceRead | DevicePreferenceWrite;
 
-export interface DevicePreferenceBridgeOptions {
+interface DevicePreferenceBridgeOptions {
   pairedDevices(): Promise<readonly string[]>;
   newestReadyConnection(deviceId: string, capability: string): string | undefined;
   send(connectionId: string, topic: string, payload: JsonValue): boolean;
@@ -23,7 +23,7 @@ interface Pending {
   timer: ReturnType<typeof setTimeout>;
 }
 
-export interface DevicePreferenceCaller { id: string; identity: string; isLocal: boolean }
+interface DevicePreferenceCaller { id: string; identity: string; isLocal: boolean }
 
 export class DevicePreferenceBridge {
   private readonly pending = new Map<string, Pending>();
