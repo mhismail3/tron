@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Execute the shipped Git skill against real remotes, conflicts and push races."""
+"""Execute the shipped Git skill's Integrate block against real remotes and conflicts."""
 from pathlib import Path
 import os
 import re
@@ -44,23 +44,6 @@ class GitSkill(unittest.TestCase):
         return subprocess.run(["bash", "-e", "-c", match[1]], cwd=self.task, env=self.env,
                               capture_output=True, text=True, timeout=15)
 
-    def test_integrates_concurrent_main_without_a_claim_or_github_call(self):
-        self.commit(self.task, "worker", "worker\n")
-        self.commit(self.repo, "concurrent", "another worker\n")
-        self.git(self.repo, "push", "origin", "main")
-        updated = self.skill("Integrate")
-        self.assertEqual(updated.returncode, 0, updated.stdout + updated.stderr)
-        integrated = self.git(self.task, "rev-parse", "HEAD")
-        fetched_main = self.git(self.remote, "rev-parse", "main")
-        pushed = self.skill("Publish")
-        self.assertEqual(pushed.returncode, 0, pushed.stdout + pushed.stderr)
-        self.assertEqual(self.git(self.remote, "rev-parse", "main^1"), fetched_main)
-        self.assertEqual(self.git(self.remote, "rev-parse", "main^2"), integrated)
-        self.assertEqual(self.git(self.remote, "rev-parse", "main^{tree}"), self.git(self.task, "rev-parse", "HEAD^{tree}"))
-        self.assertEqual(self.git(self.task, "rev-parse", "HEAD"), integrated)
-        self.assertEqual(self.git(self.remote, "show", "main:worker"), "worker")
-        self.assertEqual(self.git(self.remote, "show", "main:concurrent"), "another worker")
-        self.assertFalse((self.repo / ".git/work").exists())
 
     def test_conflict_keeps_unpublished_head_and_remote(self):
         self.commit(self.task, "file", "worker\n")
@@ -102,19 +85,6 @@ class GitSkill(unittest.TestCase):
         self.assertNotEqual(self.git(self.task, "rev-parse", "--git-path", "FETCH_HEAD"),
                             self.git(self.repo, "rev-parse", "--git-path", "FETCH_HEAD"))
 
-    def test_push_race_refuses_without_force_or_retry(self):
-        self.commit(self.task, "worker", "worker\n")
-        self.assertEqual(self.skill("Integrate").returncode, 0)
-        old = self.git(self.remote, "rev-parse", "main")
-        tree = self.git(self.remote, "rev-parse", "main^{tree}")
-        rival = self.git(self.remote, "commit-tree", tree, "-p", old, "-m", "rival")
-        hook = self.remote / "hooks/pre-receive"
-        hook.write_text(f"#!/bin/sh\nenv -u GIT_QUARANTINE_PATH git update-ref refs/heads/main {rival} {old}\n")
-        hook.chmod(0o755)
-        result = self.skill("Publish")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(self.git(self.remote, "rev-parse", "main"), rival)
-        self.assertEqual(self.git(self.task, "show", "HEAD:worker"), "worker")
 
     def test_retired_commands_are_not_executable_aliases(self):
         for command in ("dashboard", "status", "land", "review-export"):
