@@ -32,6 +32,11 @@ whose caller stopped waiting cannot still be writing there.
 launch, holds startup attention recovery's last marker read so a client reaches
 the Gateway inside the post-listen recovery window.
 
+`fs-events.ts` arms a probe `fs.watch` and waits until it delivers an event: macOS starts
+the process FSEvents stream asynchronously after a new watch, so a write in the first
+tens of milliseconds can be missed. A test that edits a file under a newly armed watch
+awaits `live()` first instead of sleeping.
+
 `native-exec-stall-capture.ts` runs a native engine fixture binary through
 `execFileSync` with stdin input, unchanged, while a separate process group watches it:
 past 5 s it writes host load, the parent and child, the child's stdio endpoints and a
