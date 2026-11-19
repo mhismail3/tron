@@ -18,7 +18,7 @@ struct ExtensionInteractionSheet: View {
     @PresentationState private var submitting = false
     @PresentationState private var submissionError: String?
     @PresentationState private var currentDate = Date()
-    @State private var secretKey = ""
+    @PresentationState private var secretKey = ""
     @FocusState private var textFocused: Bool
 
     private var isExpired: Bool {
