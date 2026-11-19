@@ -196,7 +196,8 @@ final class AppModel {
     private let devicePreference: DevicePreferenceCoordinator
     let composerDrafts: ComposerDraftCoordinator
     let extensionInteractionDrafts: ExtensionInteractionDraftStore
-    let gatewayDiagnostics: GatewayDiagnosticsService
+    let gitInspection: GatewayGitInspection
+    private let logUploader: AppLogUploader
     let workspaceInspection: WorkspaceInspectionService
     let installedApps: InstalledSwiftApps
     private let diagnostics: AppDiagnostics
@@ -539,7 +540,12 @@ final class AppModel {
             },
             admitsLifecycleGeneration: { lifecycle.admits(.init(generation: $0, connectionID: nil)) }
         )
-        let gatewayDiagnostics = GatewayDiagnosticsService(client: client)
+        let gitInspection = GatewayGitInspection(client: client)
+        let logUploader = AppLogUploader(log: appLog) {
+            guard let id = lifecycle.connectionID,
+                  lifecycle.gatewayInfo?.capabilities.contains(AppLogUploader.capability) == true else { return nil }
+            return AppLogUploader.Connection(client: lifecycle.client, id: id)
+        }
         let chatInteractionTrace = ChatInteractionTrace()
         let automationCatalog = AutomationCatalogCoordinator(endpoints: { @MainActor in
             profiles.profiles.filter { $0.isEnabled && (try? profiles.token(for: $0)) != nil }.compactMap { profile in
@@ -619,7 +625,8 @@ final class AppModel {
         self.devicePreference = devicePreference
         self.composerDrafts = composerDrafts
         self.extensionInteractionDrafts = extensionInteractionDrafts
-        self.gatewayDiagnostics = gatewayDiagnostics
+        self.gitInspection = gitInspection
+        self.logUploader = logUploader
         self.workspaceInspection = workspaceInspection
         self.installedApps = installedApps
         self.chatMedia = chatMedia
@@ -636,10 +643,7 @@ final class AppModel {
         self.chatInteractionTrace = chatInteractionTrace
         self.diagnostics = AppDiagnostics(
             lifecycle: lifecycle,
-            dashboardConnections: dashboardConnections,
-            gatewayDiagnostics: gatewayDiagnostics,
             appLog: appLog,
-            exportArtifacts: exportArtifacts,
             chatInteractionTrace: chatInteractionTrace,
             diagnosticStore: diagnosticStore
         )
@@ -1303,6 +1307,7 @@ extension AppModel {
     func start(scenePhase: AppScenePhase = .active) async {
         seedLaunchScenePhase(scenePhase)
         await client.installAppLog(appLog)
+        logUploader.start()
         let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
         await appLog.recordCausal(
@@ -1387,6 +1392,7 @@ extension AppModel {
 
     @discardableResult
     func enteredBackground() -> Task<Void, Never> {
+        logUploader.nudge()
         recordSceneTransition(to: .background, flush: true)
         homeStatus.suspendForBackground()
         sceneAllowsCatalogRefresh = false
@@ -2272,21 +2278,8 @@ extension AppModel {
         }
     }
 
-    func loadGatewayLogsResult(limit: Int = 1_000, includeRemote: Bool = true) async -> GatewayLogsLoadResult {
-        await diagnostics.loadGatewayLogsResult(limit: limit, includeRemote: includeRemote, diagnosticsAreReady: { self.diagnosticsAreReady })
-    }
-
-    @discardableResult
-    func exportDiagnostics(_ text: String, destination: KnowledgeDestinationIdentity) async throws -> DiagnosticExportResult {
-        try await diagnostics.exportDiagnostics(
-            text, destination: destination,
-            diagnosticsAreReady: { self.diagnosticsAreReady },
-            currentDestination: { self.knowledgeDestinationIdentity }
-        )
-    }
-
-    func writeLocalDiagnosticArtifact(_ text: String) async throws -> URL {
-        try await diagnostics.writeLocalDiagnosticArtifact(text)
+    func offlineLogText() async -> String {
+        await diagnostics.offlineLogText()
     }
 
     func loadAuthorizedDevices() async throws -> [GatewayAuthorizedDevice] {
@@ -4770,6 +4763,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         }
         diagnosticsReadinessGeneration &+= 1
         diagnosticsAreReady = true
+        logUploader.nudge()
     }
 
     func lifecycleRestoreMountedPresentation(
@@ -4843,6 +4837,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         completed = true
         diagnosticsReadinessGeneration &+= 1
         diagnosticsAreReady = true
+        logUploader.nudge()
     }
 
     func lifecycleRetireProjection(final: Bool) async {

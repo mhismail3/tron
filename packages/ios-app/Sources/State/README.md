@@ -35,7 +35,7 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
 | `PresentationActivityCoordinator`, `PresentationRefreshPolicy`, `ManagedSheetPresentation`, `PresentationScopedState` | Foremost read demand, native sheet graphs, binding leases and presentation-lifetime state ([parity](../../docs/presentation-parity.md#presentation-activity)). |
 | `InAppNoticeCenter` | The one in-app notice queue. |
 | `SnapshotCache` | Disposable session-summary cache. |
-| `AppDiagnostics`, `IOSMetricKitDiagnostics`, `GatewayDiagnosticsService` | Client log ring, Logs collection and export, MetricKit summaries, Git/log reads. |
+| `AppDiagnostics`, `AppLogUploader`, `IOSMetricKitDiagnostics`, `GatewayGitInspection` | Client incidents and the offline Copy Logs text, the app-log upload to the Gateway device file, MetricKit summaries, Git reads. |
 
 ## Contract
 
@@ -136,7 +136,7 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
 |---|---|---|
 | `gateway.catalog` | info, or warning/error as the call site marks it | Catalog admission and terminal decisions with generations, failure, page, revision and retry budget |
 | `model.catalog.rejected` | error | A model page refused: page, schema path and finite reason, never values |
-| iOS client ring | memory | 200 in-memory records (including typed decode failures) merged into Logs as `iOS client` |
+| iOS client ring | memory | 200 in-memory records (including typed decode failures) included by Copy Logs |
 | `app.started` | info | Once per launch: version, build, OS, sampled `launchScene`, recorded `scene`, `sceneTransitionObserved`, `catalogReadsAllowed` and `pushNavigationReady`. Compare with `scene.active` and catalog admission to diagnose startup versus a failed list RPC. |
 | `scene.resign-active` | info | The scene resigned active from a foreground phase and the buffer flushed: `sceneAt`, `from` |
 | `scene.foreground` | info | The scene left the background (a resume's inactive phase): `sceneAt`, `from=background` |
@@ -146,7 +146,7 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
 | `pairing.result` | info on success; warning on failure | A pairing attempt settled: `outcome`, failure `code` |
 | `session.open.failure` | warning | Opening a session failed: `code` (`transport` only when the Gateway was never reached), `gatewayCode` (the Gateway's own code, `none` when minted locally), `profileID`, `connectionID`, `lifecycleGeneration` |
 | `session.sync.failure` | warning | A mounted projection could not resynchronize: `code`, `profileID`, `connectionID`, `lifecycleGeneration` |
-| `diagnostics.upload-failed` | warning | The export upload failed and the share sheet took over: `code` |
+| `logs.upload` | warning | An app-log upload pass to the Gateway device file failed: `code`; the next pass resumes from the Gateway cursor |
 | `gateway.attempt` | info | One finished connect attempt per profile, from the selected lifecycle or a dashboard pool entry: `owner` (`selected`, `pool`), `attemptId`, `retry`, `stageReached`, `reason`, `interfaces`, `pathSatisfied`, `delayBeforeMs`, `foreground`, `durationMs`, `outcome`; an unreachable pool profile writes about one per five minutes |
 | `connection.episode` | info | An admitted loss ended (`endedBy` `connected`, `background`, `stopped`): `startedAt`, `endedAt`, `attempts`, `causes`, `foregroundMs`, `maxGapBetweenAttemptsMs`, `durationMs` |
 | `reconnect.stalled` | error | A foreground episode spent `RECONNECT_STALL_BOUND` (20 s) with no attempt in flight or scheduled; at most once per episode: `guard`, `heldForMs`, `silentForMs`, `attempts`, `boundMs` |

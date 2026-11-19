@@ -3,17 +3,9 @@ import Foundation
 
 @MainActor
 enum MenuBarFeedbackAction {
-    static func present(snapshot: ServerStatusSnapshot, setup: EnvironmentSetup, token: String?) async {
+    static func present(snapshot: ServerStatusSnapshot, setup: EnvironmentSetup) async {
         let logs: String
-        guard let host = await setup.resolvedTailscaleHost() else {
-            logs = "Log capture failed: \(MenuBarLogReadError.serverUnavailable.message)"
-            return await presentIssue(snapshot: snapshot, logs: logs)
-        }
-        switch await MenuBarLogReader.fetchRecentLogs(
-            host: host,
-            port: setup.serverPort,
-            token: token
-        ) {
+        switch await MenuBarLogReader.fetchRecentLogs(tronHome: setup.tronHome) {
         case .success(let value):
             logs = value
         case .failure(let error):

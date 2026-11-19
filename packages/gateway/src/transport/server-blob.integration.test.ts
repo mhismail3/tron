@@ -1,4 +1,5 @@
 import { request } from "node:http";
+import { persistedLogRecords } from "../../test-support/persisted-logs.js";
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -140,7 +141,7 @@ describe("Gateway blob HTTP leases", () => {
         expect(Buffer.byteLength(diagnostic.error.details, "utf8")).toBeLessThanOrEqual(1_000);
         expect(diagnostic.error.details).not.toContain("\uFFFD");
         expect(response.body.toString("utf8")).not.toContain("details-only-rollback-marker");
-        const restored = new GatewayLogger(diagnosticPath).recent().find(record => record.event === "http.error");
+        const restored = persistedLogRecords(diagnosticPath).find(record => record.event === "http.error");
         expect(restored?.error?.details).toBe(diagnostic.error.details);
       } else {
         expect(diagnostic.error.message).toContain(missing);
@@ -159,7 +160,7 @@ describe("Gateway blob HTTP leases", () => {
     const response = await download(port, "fixture");
     expect(response.status).toBe(500);
     expect(JSON.parse(response.body.toString("utf8")).error).toEqual({ code: "internal", message: "Unexpected gateway failure", retryable: false });
-    const diagnostic = new GatewayLogger(diagnosticPath).recent().find(record => record.event === "http.error");
+    const diagnostic = persistedLogRecords(diagnosticPath).find(record => record.event === "http.error");
     expect(diagnostic?.error?.details).toBe("[Unserializable or oversized internal details]");
   });
 

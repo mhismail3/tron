@@ -16,14 +16,14 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   `PairedDeviceDetailView`, `MacReplacementSheet`.
 - Trust: `TrustSettingsView`.
 - This iPhone and diagnostics: `AppearanceSettingsView`, `AppLocalBehaviorSettings`,
-  `NotificationInboxView`, `GatewayLogsSettingsView`.
+  `NotificationInboxView`.
 
 ## Contract
 
 - **Layout.** The gear opens one sheet: This iPhone (primary: Appearance, one sheet: Dashboard, Subagent Activity, Color Mode, Theme color, Text Font and Code Font),
   Accounts (primary: Connections, Model Providers),
   Agent & Tools (MCP Servers),
-  System (steel blue: Mac Terminal, Setup, Logs). Every category destination
+  System (steel blue: Mac Terminal, Setup). Every category destination
   inherits its group tint for chrome, containers and icons; semantic statuses retain their colors.
   Primary groups use the selected theme's `tronPrimary`; System uses `tronSteel`, not the neutral `tronSlate` role.
   The `trust` group has no Global view; the
@@ -100,8 +100,8 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   Server** first). Rebuild is user-initiated only: agents never press it or submit its RPC. Status
   polling is command-bound and stops at terminal state, reconnect or disappearance. Maintenance
   action containers inherit the sheet theme; Forget Server keeps semantic red.
-- **Logs.** Gateway records are fetched only while Logs is presented, merged with the iOS client
-  ring, refreshed every 15 s while visible, and exported through Export Diagnostics.
+- **Logs.** **Copy Logs** in Connections copies the newest redacted app-log records, client incidents and
+  the chat trace from this iPhone. It makes no Gateway request, so it works offline.
 - **Reloads.** Visible reads include `foregroundReconciliationGeneration` in their task identity,
   so foreground replaces stale offline errors without retrying or replaying mutations.
 
@@ -125,7 +125,6 @@ scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronIntegrationSheetsUITests \
   --only-testing TronMobileUITests/TronMCPServerSheetsUITests \
   --only-testing TronMobileUITests/TronProjectTrustUITests \
-  --only-testing TronMobileUITests/TronDiagnosticsExportUITests \
   --only-testing TronMobileUITests/TronSmokeUITests/testIphoneDashboardPreferencesPersistAcrossRoutesAndRelaunch
 scripts/ios-gateway-e2e-test run-ui \
   --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testOutsideMcpAdditionReachesTheOpenMcpScreen \

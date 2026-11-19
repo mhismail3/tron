@@ -44,9 +44,7 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
     queuedPayloadBytes: 0, queueHighWaterBytes: 0,
     scheduleOverflows: 0, dispatchedRPCs: 0, settledRPCs: 0,
     originalAuthority: null, heartbeatRoundTripMilliseconds: [],
-    logsExportRequestBytes: null, logsExportResponseBytes: null,
   };
-  const logsExportRequestIDs = new Set();
   const outstandingClientPings = [];
   let clientPingSequence = 0;
   let bridgeSequence = 0;
@@ -343,11 +341,6 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
             data = Buffer.from(JSON.stringify(frame));
             signalInterception();
           }
-          if (frame.type === "request" && frame.method === "system.logs.export") {
-            linkStats.logsExportRequestBytes = data.length;
-            if (logsExportRequestIDs.size >= 16) logsExportRequestIDs.delete(logsExportRequestIDs.values().next().value);
-            logsExportRequestIDs.add(frame.id);
-          }
           if (((policy.mode === "invalid-physical-model-limit" || policy.mode === "invalid-virtual-model-limit") && frame.method === "model.list")
             || (policy.mode === "hold-open" && frame.method === "session.open")
             || (policy.mode === "hold-sync" && frame.method === "session.sync")
@@ -378,7 +371,6 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
             signalInterception();
           }
         }
-        if (frame.type === "response" && logsExportRequestIDs.delete(frame.id)) linkStats.logsExportResponseBytes = data.length;
         if (policy.mode === "drop-prompt-response" && frame.type === "response" && frame.id === targetID) {
           policy = { mode: "pass" };
           if (frame.ok === true) { terminate(); return; }

@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
+import { persistedLogRecords } from "../../test-support/persisted-logs.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -20,7 +21,7 @@ async function logsDirectory(): Promise<string> {
 const lines = async (path: string) => (await readFile(path, "utf8")).trimEnd().split("\n").map((line) => JSON.parse(line) as { message?: string; n?: number });
 
 describe("Gateway log streams on disk", () => {
-  it("rotates the Gateway log at its segment bound and reloads the newest records across segments in order", async () => {
+  it("rotates the Gateway log at its segment bound and reads back the newest records across segments in order", async () => {
     vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1");
     const directory = await logsDirectory();
     const path = join(directory, "gateway.jsonl");
@@ -46,7 +47,7 @@ describe("Gateway log streams on disk", () => {
     expect(active.at(-1)!.message!.startsWith(`${written - 1} `)).toBe(true);
     expect(active.length).toBeLessThan(1_000);
 
-    const reloaded = new GatewayLogger(path).recent(1_000).map((record) => Number(record.message.split(" ")[0]));
+    const reloaded = persistedLogRecords(path, 1_000).map((record) => Number(record.message.split(" ")[0]));
     expect(reloaded).toEqual(Array.from({ length: 1_000 }, (_unused, index) => written - 1_000 + index));
   });
 
