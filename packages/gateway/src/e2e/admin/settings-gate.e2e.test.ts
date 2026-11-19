@@ -164,7 +164,7 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
       value: { digest: card.review.digest, approved } });
   };
   const settle = (results: Array<{ tool: string; details?: Record<string, unknown> }>) => results.find(result => result.tool === "settings")!.details!;
-  const history = async () => (await service.invoke(phone(), "settings.history", { limit: 200 }) as unknown as { entries: ChangeEntry[] }).entries;
+  const history = async () => (await settingsChanges.history({ limit: 200 }, { kind: "ui", id: "device:phone" }) as unknown as { entries: ChangeEntry[] }).entries;
   const approveProjectChange = async (changes: Parameters<typeof settingsChanges.change>[1]) => {
     const result = await settingsChanges.change({ kind: "project", cwd: project }, changes,
       { actor: { kind: "agent", id: "repository-agent" }, reason: "Choose repository defaults" });

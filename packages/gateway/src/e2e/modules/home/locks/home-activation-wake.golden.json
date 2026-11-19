@@ -1211,7 +1211,7 @@
             "additionalProperties": false,
             "properties": {
               "action": {
-                "description": "resolve: read current values and scopes. inventory: read-only hooks by event and extension, packages, Tron modules, configured MCP servers and custom model providers (id, base URL host, API, model ids) for this chat's directory (configured or disabled; nothing is started or probed; credentials masked). history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. applyAgain: restore the value Tron wrote that an outside edit replaced, by that outside change's changeId from history, under the same rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card. update (Tron Home only): install one exact npm version or full git commit SHA of one configured package behind the native install card; the card shows any configured pin change; never undoable.",
+                "description": "resolve: read current values and scopes. inventory: read-only hooks by event and extension, packages, Tron modules, configured MCP servers and custom model providers (id, base URL host, API, model ids) for this chat's directory (configured or disabled; nothing is started or probed; credentials masked). history: page durable audit records with their display labels, optionally filtered by key, status, actor, layer or section. undo: reverse a change by changeId under the same writer and native-tap rules. applyAgain: restore the value Tron wrote that an outside edit replaced, by that outside change's changeId from history, under the same rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card. update (Tron Home only): install one exact npm version or full git commit SHA of one configured package behind the native install card; the card shows any configured pin change; never undoable.",
                 "enum": [
                   "resolve",
                   "change",
@@ -1221,6 +1221,12 @@
                   "inventory",
                   "update"
                 ],
+                "type": "string"
+              },
+              "actor": {
+                "description": "history: include only this requester: agents (every non-UI requester), ui, home, worker, agent or outside.",
+                "maxLength": 40,
+                "minLength": 1,
                 "type": "string"
               },
               "changeId": {
@@ -1316,6 +1322,12 @@
                 "maxItems": 200,
                 "type": "array"
               },
+              "layer": {
+                "description": "history: include only this layer: session, project or global.",
+                "maxLength": 40,
+                "minLength": 1,
+                "type": "string"
+              },
               "limit": {
                 "description": "history: maximum records per page (default 50).",
                 "maximum": 200,
@@ -1328,9 +1340,21 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "section": {
+                "description": "history: include only keys in this settings section, e.g. run or workers.",
+                "maxLength": 40,
+                "minLength": 1,
+                "type": "string"
+              },
               "source": {
                 "description": "update (required): the configured package source exactly as in sources.packages, e.g. npm:name.",
                 "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+              },
+              "status": {
+                "description": "history: include only this status, e.g. applied.",
+                "maxLength": 40,
                 "minLength": 1,
                 "type": "string"
               },
@@ -1918,7 +1942,7 @@
             "additionalProperties": false,
             "properties": {
               "action": {
-                "description": "resolve: read current values and scopes. inventory: read-only hooks by event and extension, packages, Tron modules, configured MCP servers and custom model providers (id, base URL host, API, model ids) for this chat's directory (configured or disabled; nothing is started or probed; credentials masked). history: page durable audit records, optionally filtered by key. undo: reverse a change by changeId under the same writer and native-tap rules. applyAgain: restore the value Tron wrote that an outside edit replaced, by that outside change's changeId from history, under the same rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card. update (Tron Home only): install one exact npm version or full git commit SHA of one configured package behind the native install card; the card shows any configured pin change; never undoable.",
+                "description": "resolve: read current values and scopes. inventory: read-only hooks by event and extension, packages, Tron modules, configured MCP servers and custom model providers (id, base URL host, API, model ids) for this chat's directory (configured or disabled; nothing is started or probed; credentials masked). history: page durable audit records with their display labels, optionally filtered by key, status, actor, layer or section. undo: reverse a change by changeId under the same writer and native-tap rules. applyAgain: restore the value Tron wrote that an outside edit replaced, by that outside change's changeId from history, under the same rules. change: apply/log reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card. update (Tron Home only): install one exact npm version or full git commit SHA of one configured package behind the native install card; the card shows any configured pin change; never undoable.",
                 "enum": [
                   "resolve",
                   "change",
@@ -1928,6 +1952,12 @@
                   "inventory",
                   "update"
                 ],
+                "type": "string"
+              },
+              "actor": {
+                "description": "history: include only this requester: agents (every non-UI requester), ui, home, worker, agent or outside.",
+                "maxLength": 40,
+                "minLength": 1,
                 "type": "string"
               },
               "changeId": {
@@ -2023,6 +2053,12 @@
                 "maxItems": 200,
                 "type": "array"
               },
+              "layer": {
+                "description": "history: include only this layer: session, project or global.",
+                "maxLength": 40,
+                "minLength": 1,
+                "type": "string"
+              },
               "limit": {
                 "description": "history: maximum records per page (default 50).",
                 "maximum": 200,
@@ -2035,9 +2071,21 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "section": {
+                "description": "history: include only keys in this settings section, e.g. run or workers.",
+                "maxLength": 40,
+                "minLength": 1,
+                "type": "string"
+              },
               "source": {
                 "description": "update (required): the configured package source exactly as in sources.packages, e.g. npm:name.",
                 "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+              },
+              "status": {
+                "description": "history: include only this status, e.g. applied.",
+                "maxLength": 40,
                 "minLength": 1,
                 "type": "string"
               },

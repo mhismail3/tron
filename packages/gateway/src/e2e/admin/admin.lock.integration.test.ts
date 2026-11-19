@@ -24,9 +24,9 @@ describe("gateway/admin kernel locks", () => {
     });
     const after = await phone.request("settings.resolve", { target: { kind: "global" }, keys: [KEY] });
     const chat = await phone.request("settings.resolve", { target: { kind: "session", sessionId }, keys: [KEY] });
-    const history = await phone.request("settings.history", { limit: 10 });
+    const history = { result: await gateway.settingsChanges.history({ limit: 10 }, { kind: "ui", id: "device:phone" }) };
 
-    for (const response of [before, changed, after, chat, history]) expect(response.ok, JSON.stringify(response)).toBe(true);
+    for (const response of [before, changed, after, chat]) expect(response.ok, JSON.stringify(response)).toBe(true);
     const resolved = (response: { result?: any }) => response.result.keys.map((key: { key: string; value: unknown; display: string; layer: string;
       overridden: boolean; layers: Array<{ layer: string; value?: unknown; applied: boolean }> }) =>
       `${key.key}=${String(key.value)} (${key.display}) @${key.layer} [${key.layers.map((layer) => `${layer.layer}:${String(layer.value ?? "-")}`).join(" ")}]${key.overridden ? " overridden" : ""}`);

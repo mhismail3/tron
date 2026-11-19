@@ -47,6 +47,7 @@
     "test-support/native-change.ts",
     "test-support/native-change-crash-child.ts",
     "test-support/native-exec-stall-capture.ts",
+    "test-support/settings-record-entries.ts",
     "test-support/settings-schema.ts",
     "test-support/tron-home-environment-guard.ts",
     "test-support/tron-home-environment-preflight.mjs",

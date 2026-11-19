@@ -3,11 +3,13 @@ import { join } from "node:path";
 import type { ModelRuntime } from "../pi/coding-agent.js";
 import { asUncertainOutcome, GatewayError } from "../../errors.js";
 import { RequestSpanLane } from "../../util/request-span.js";
-import { type ConfirmChange, type ChangeRequest, type SettingsSignal, type ChangeOutcome, type ChangeResult, type ChangeStatus, type FixedSetting, type SettingsTarget, type Direction, type LayerId, type Qualifiers } from "./tool-contract.js";
-import type { Actor, ActorKind, ChangeEntry, SettingsChangeRecord } from "./settings-record.js";
+import { oneOf } from "../../util/validation.js";
+import { type ConfirmChange, type ChangeRequest, type SettingsSignal, type ChangeOutcome, type ChangeResult, type ChangeStatus, type FixedSetting, type SettingsTarget, type Direction, type LayerId, type Qualifiers, type SettingsHistoryQuery } from "./tool-contract.js";
+import type { Actor, ChangeEntry, SettingsChangeRecord } from "./settings-record.js";
 import { composedBelow, devicePreferenceRead, readBinding, resolveSettings } from "./settings-resolver.js";
-import { HOME_PROFILE_SUBJECT, hasSessionSettingsApplier, keyForHome, recordSubject, type Binding, type KeyDeclaration, type SettingsSchema } from "./settings-schema.js";
+import { HOME_PROFILE_SUBJECT, SECTIONS, hasSessionSettingsApplier, keyForHome, recordSubject, type Binding, type KeyDeclaration, type SettingsSchema } from "./settings-schema.js";
 import { changeReview, formatStoredSetting, LAYER_LABELS, type ModelRefValue, type SettingsStores, type PlannedWrite } from "./settings-types.js";
+import { presentHistoryEntry } from "./settings-presentation.js";
 import { canonicalSettingsTarget, scopeAdmitted, storeForScope } from "./scope-resolution.js";
 import { SettingsModel, declaredKey, deepEqual, setPath, unsetPath, qualifiedWrite, type SessionSettingsSource, type SettingsReadOwner } from "./settings-model.js";
 
@@ -97,6 +99,8 @@ const STORE_ORDER: Record<Binding["store"], number> = {
 };
 
 type StoreApplyResult = { revision?: number; result?: unknown };
+
+const HISTORY_ACTORS = ["agents", "ui", "home", "worker", "agent", "outside"] as const;
 
 export function historyVisible(viewer: Actor, entry: ChangeEntry): boolean {
   if (viewer.kind === "home" || viewer.kind === "ui") return true;
@@ -365,7 +369,13 @@ export class SettingsChangePath {
     }], { ...context, applyAgainOf: changeId, ...(session ? { session } : {}) });
   }
 
-  async history(input: { cursor?: string; limit?: number; key?: string; status?: string; actor?: ActorKind | "agents"; layer?: LayerId; section?: string }, viewer: Actor) {
+  async history(query: SettingsHistoryQuery, viewer: Actor) {
+    const input = {
+      ...query,
+      ...(query.actor === undefined ? {} : { actor: oneOf(query.actor, "actor", HISTORY_ACTORS) }),
+      ...(query.layer === undefined ? {} : { layer: oneOf(query.layer, "layer", ["session", "project", "global"] as const) }),
+      ...(query.section === undefined ? {} : { section: oneOf(query.section, "section", SECTIONS.map(section => section.id)) }),
+    };
     const page = await this.record.page({
       ...(input.cursor ? { cursor: input.cursor } : {}), ...(input.limit ? { limit: input.limit } : {}),
       filter: entry => historyVisible(viewer, entry) && (!input.key || entry.key === input.key) && (!input.status || entry.status === input.status)
@@ -373,7 +383,7 @@ export class SettingsChangePath {
         && (!input.layer || entry.layer === input.layer)
         && (!input.section || this.model.schema.auditSubject(entry.key)?.group === input.section),
     });
-    return { ...page, entries: page.entries.map(entry => publicHistoryEntry(this.model.schema, entry)) };
+    return { ...page, entries: page.entries.map(entry => presentHistoryEntry(this.model.schema, publicHistoryEntry(this.model.schema, entry))) };
   }
 
   private async announce(changes: readonly ChangeOutcome[], context: ChangeContext): Promise<SettingsSignal | undefined> {
