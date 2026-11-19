@@ -446,6 +446,16 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
   return { root, tronHome, agentDir, trust, macTerminalKeys, registry, service, record, settingsModel, settingsChanges, broadcasts, pushes, published, outside, change, agentChange, history, macDocument, faux, modelRuntime, keychain, providerKeys };
 }
 
+async function applyAgainTool(f: Awaited<ReturnType<typeof fixture>>, changeId: string) {
+  const tools: Array<{ execute: (...args: unknown[]) => Promise<{ details: { status: string } }> }> = [];
+  const actor = { kind: "home" as const, id: "home-session", sessionId: "home-session" };
+  createTronSettingsExtension(() => ({
+    applyAgain: (id, input) => f.settingsChanges.applyAgain(id, { actor: { ...actor, toolCallId: input.toolCallId }, reason: input.reason }),
+  }) as never, async () => undefined)({ registerTool: tool => { tools.push(tool as never); }, on: () => {} } as never);
+  return (await tools[0]!.execute("apply-again", { action: "applyAgain", changeId, reason: "Restore Tron's value" },
+    new AbortController().signal, () => {}, { hasUI: true })).details;
+}
+
 async function gitProject(root: string, name: string) {
   const project = join(root, name);
   await mkdir(join(project, ".pi"), { recursive: true });
@@ -1071,12 +1081,12 @@ describe("outside changes", () => {
     expect(changed.action).toMatchObject({ kind: "applyAgain", changeId: first.find(entry => entry.key === "run.retry.maxRetries")!.changeId });
     expect(label(await row(f, { kind: "global" }, "run.transport"), "Changed outside Tron")!.action).toBeUndefined();
 
-    const again = await f.service.invoke(client(), "settings.applyAgain", { commandId: commandId(), changeId: changed.action!.changeId }) as unknown as { status: string; changes: Array<{ changeId: string }> };
+    const again = await applyAgainTool(f, changed.action!.changeId);
     expect(again.status).toBe("applied");
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 6 });
-    expect((await f.history())[0]).toMatchObject({ applyAgainOf: changed.action!.changeId, after: 6, actor: { kind: "ui" } });
+    expect((await f.history())[0]).toMatchObject({ applyAgainOf: changed.action!.changeId, after: 6, actor: { kind: "home" } });
     expect(label(await row(f, { kind: "global" }, "run.retry.maxRetries"), "Changed outside Tron")).toBeUndefined();
-    await expect(f.service.invoke(client(), "settings.applyAgain", { commandId: commandId(), changeId: changed.action!.changeId })).rejects.toMatchObject({ code: "conflict" });
+    await expect(applyAgainTool(f, changed.action!.changeId)).rejects.toMatchObject({ code: "conflict" });
 
     const temporary = join(f.agentDir, "settings.json.swp");
     await writeFile(temporary, JSON.stringify({ ...(await f.macDocument()), retry: { maxRetries: 2 } }));
@@ -1265,7 +1275,7 @@ describe("outside changes to MCP servers and custom models", () => {
     expect(JSON.stringify(await f.history())).not.toContain("outside-secret");
     await expect(f.service.invoke(client(), "settings.undo", { commandId: commandId(), changeId: added.changeId }))
       .rejects.toMatchObject({ code: "conflict", message: "This change is not undoable; inspect it with its owner" });
-    await expect(f.service.invoke(client(), "settings.applyAgain", { commandId: commandId(), changeId: added.changeId }))
+    await expect(applyAgainTool(f, added.changeId))
       .rejects.toMatchObject({ code: "conflict", message: "A hidden value cannot be applied again: it was never recorded" });
     expect(await readFile(f.outside.path, "utf8")).not.toContain("outside-secret");
     expect(await servers(f, { scope: "global" })).toEqual(["global:hand-added", "global:tron-added"]);
