@@ -3,6 +3,20 @@ import { redactCredentials } from "../../util/credential-redaction.js";
 
 export const SECRET_NAME = /(token|secret|password|passwd|api[-_]?key|apikey|credential|bearer|authorization)/iu;
 
+const URL_USERINFO = /\b[a-z][a-z0-9+.-]*:\/\/[^\s/?#@]+(?::[^\s/?#@]+)?@/iu;
+const URL_SECRET_QUERY = /\b[a-z][a-z0-9+.-]*:\/\/[^\s?#]*\?(?:[^\s#]*&)?[^\s=&#]*(?:token|secret|password|passwd|api[-_]?key|apikey|credential|bearer|authorization)[^\s=&#]*=/iu;
+const SECRET_PAIR = /(?<![a-z0-9])(?:authorization|api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|password|secret)\s*[:=]\s*["']?(?=[^\s,;'"]*\d)[^\s,;'"]{8,}/iu;
+
+function textCarriesSecret(text: string): boolean {
+  return redactCredentials(text) !== text || URL_USERINFO.test(text) || URL_SECRET_QUERY.test(text) || SECRET_PAIR.test(text);
+}
+
+export function carriesSecret(value: unknown): boolean {
+  if (typeof value === "string") return textCarriesSecret(value);
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value).some(([name, child]) => (!Array.isArray(value) && SECRET_NAME.test(name)) || carriesSecret(child));
+}
+
 export function refuseSetting(label: string, reason: string): never {
   throw new GatewayError("invalid_request", `${label} ${reason}`);
 }

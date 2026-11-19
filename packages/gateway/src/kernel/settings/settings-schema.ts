@@ -6,6 +6,7 @@ import type { StoreLayer } from "./settings-types.js";
 import { mcpServerDirection, mcpServerType } from "./mcp-server-value.js";
 import { lessonMoveDirection, lessonMoveType } from "./lesson-move-value.js";
 import { modelProviderDirection, modelProviderType } from "./model-provider-value.js";
+import { agentDefinitionDirection, agentDefinitionType, subagentSettingsType } from "./subagents-value.js";
 
 interface SectionDeclaration { id: string; title: string; description: string; order: number; note?: string; chatInline?: boolean }
 
@@ -37,6 +38,7 @@ export type Binding =
   | { store: "mcp" }
   | { store: "models" }
   | { store: "lesson" }
+  | { store: "agents" }
   | { store: "device-preference" };
 
 export type TimingDeclaration = Timing | { widen: Timing; narrow: Timing };
@@ -482,6 +484,13 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       entry: { hint: "One word per value: the program first (npm, pnpm or bun), then any arguments.", example: "pnpm" },
     },
     {
+      tap: "trust", id: "subagents.settings", sessionOverridable: false, projectSettable: false, group: "workers", type: subagentSettingsType,
+      layers: { global: pi("subagents") }, timing: "live", effect: "next-request", direction: (_b, a) => a === undefined ? "narrow" : "widen",
+      writers: ["ui", "home"], label: "Subagent settings", order: 70, importance: "advanced",
+      help: "The subagents block of settings.json: default model and thinking, agent overrides, scan directories, machines and watchdog.",
+      confirm: "Subagent settings choose the models, tools and extensions every subagent runs with.",
+    },
+    {
       tap: "privacy", id: "notifications.push.inputNeeded", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "notifications", type: types.boolean(),
       layers: { global: { store: "gateway", path: ["notifications", "push", "inputNeeded"] } }, defaultValue: true, timing: "live", effect: "next-request", direction: grants,
       writers: ANY_ACTOR, label: "Input needed", help: "Send a push when Tron needs an answer or approval.", order: 10, importance: "essential",
@@ -545,7 +554,7 @@ export function hasSessionSettingsApplier(key: KeyDeclaration): boolean {
 }
 
 export interface RecordWrite {
-  store: "mcp" | "models" | "lesson";
+  store: "mcp" | "models" | "lesson" | "agents";
   writers: readonly Writer[];
   tap: NonNullable<KeyDeclaration["tap"]>;
   type: ValueType;
@@ -579,6 +588,10 @@ const RECORD_SUBJECTS: readonly RecordSubject[] = [
     write: { store: "lesson", writers: ["home", "ui"], tap: "trust", type: lessonMoveType, direction: lessonMoveDirection, effect: "reload", timing: "live",
       help: "Moves a lesson from Profile notes into a global rule or skill description and retires the notes.",
       confirm: "Applying changes the instructions every chat and worker reads. Undo restores the file and the notes." } },
+  { id: "subagents.agent", label: "Subagent definition", group: "workers", container: "agents", qualifier: "agent", pattern: /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u,
+    write: { store: "agents", writers: ["ui", "home"], tap: "trust", type: agentDefinitionType, direction: agentDefinitionDirection, effect: "next-request", timing: "live",
+      help: "A user subagent: one Markdown file in the agent directory's agents folder, frontmatter first, then its system prompt.",
+      confirm: "Adding or changing a subagent sets the tools, extensions and instructions it runs with." } },
 ];
 
 export function recordSubject(id: string): RecordSubject | undefined {

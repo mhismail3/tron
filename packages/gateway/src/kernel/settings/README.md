@@ -33,6 +33,15 @@ setting and is not an approval queue.
   so no credential (`apiKey`, `headers`, `authHeader`), `oauth`, `compat` or `modelOverrides` can enter the
   record; the on-disk projection refuses an existing provider it cannot carry, and the tap rule (a new provider or a
   changed address or API taps).
+- `subagents-value.ts`: the typed `subagents.settings` value (the closed set of pi-subagents fields in
+  `settings.json`) and the `subagents.agent` value (one agent Markdown file whose frontmatter names the
+  qualifier and that has a description). Values are checked field by field against what pi-subagents accepts
+  (overrides, model scope, watchdog, machines with no local env). `secret-free.ts` `carriesSecret` detects what
+  the shared `redactCredentials` detects (known token formats, `Bearer` values, private keys) plus URL userinfo
+  (`user@` or `user:pass@`), a secret-named URL query parameter, and a `password:`/`secret=`-style pair whose value is at least
+  8 characters with a digit, each matched within one string value (never across fields), and secret-named fields; both values refuse such content, refuse to change a
+  stored value that carries it (`onDisk`), and an outside value that carries it is observed and recorded by digest
+  only. A secret in a shape none of these detect is not recognised.
 - `secret-free.ts`: the shared secret-shape refusals (credential detection, secret-named query and token names,
   URL checks) that the MCP and provider values both use, with each owner's hint.
 - `settings-record.ts`: durable, byte/row-bounded segments, index recovery and
