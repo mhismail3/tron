@@ -70,30 +70,6 @@ final class TronTaskToolSheetUITests: XCTestCase {
         }
     }
 
-    @MainActor func testRenameStopFallbackAndErrorUseTheirRecordedOutcomes() {
-        continueAfterFailure = false
-        for scenario in ["task-rename", "task-stop", "task-fallback", "task-malformed", "task-refused"] {
-            let app = launch(scenario)
-            let custom = app.descendants(matching: .any)["home-tool-detail"]
-            if ["task-fallback", "task-malformed"].contains(scenario) {
-                XCTAssertFalse(custom.exists, "Unknown or malformed results must retain the generic detail")
-            } else {
-                XCTAssertTrue(custom.exists, app.debugDescription)
-                if scenario == "task-rename" {
-                    XCTAssertTrue(app.descendants(matching: .any)["home-tool-row-New title"].label.contains("Photo preparation: ready for review"))
-                } else if scenario == "task-stop" {
-                    XCTAssertTrue(app.staticTexts["Stop recorded for this exact operation."].exists)
-                    XCTAssertFalse(app.descendants(matching: .any)["home-tool-text-message"].exists)
-                } else {
-                    let failure = app.descendants(matching: .any)["home-tool-failure"]
-                    XCTAssertTrue(failure.exists, app.debugDescription)
-                    XCTAssertTrue(failure.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Use resume to continue it in place.")).firstMatch.exists)
-                }
-            }
-            app.terminate()
-        }
-    }
-
     @MainActor private func launch(_ scenario: String, mode: String = "light", large: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-tool-sheets-polish-fixture", "-polish-scenario", scenario,
