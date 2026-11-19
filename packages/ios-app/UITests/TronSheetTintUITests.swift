@@ -8,7 +8,7 @@ final class TronSheetTintUITests: XCTestCase {
         for appearance in ["light", "dark"] {
             let app = XCUIApplication()
             app.launchArguments = ["-tron-mac-settings-fixture", "-settings-nested"]
-            if appearance == "dark" { app.launchArguments.append("-settings-renderer-dark") }
+            if appearance == "dark" { app.launchArguments.append("-settings-dark") }
             app.launch(); defer { app.terminate() }
             XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 10))
             app.buttons["Open Settings"].tap()

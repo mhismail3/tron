@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { profilePath, type ProfileMetadata } from "./profile-placement.js";
 import { changeReview } from "../../kernel/settings/settings-types.js";
 import type { ChangeReview } from "../../protocol/types.js";
-import { formatProfileValue } from "../../kernel/settings/settings-presentation.js";
+import { formatProfileValue } from "../../kernel/settings/history-presentation.js";
 import type { SettingsChangePath, SubjectContext, SubjectWrite, ChangeContext } from "../../kernel/settings/settings-change.js";
 import type { ChangeEntry } from "../../kernel/settings/settings-record.js";
 import type { ChangeResult, ConfirmChange } from "../../kernel/settings/tool-contract.js";

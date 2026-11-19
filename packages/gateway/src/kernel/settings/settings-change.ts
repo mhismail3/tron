@@ -8,7 +8,7 @@ import type { Actor, ChangeEntry, SettingsChangeRecord } from "./settings-record
 import { composedBelow, devicePreferenceRead, readBinding, resolveSettings } from "./settings-resolver.js";
 import { HOME_PROFILE_SUBJECT, SECTIONS, hasSessionSettingsApplier, keyForHome, recordSubject, type Binding, type KeyDeclaration, type SettingsSchema } from "./settings-schema.js";
 import { changeReview, formatStoredSetting, LAYER_LABELS, type ModelRefValue, type SettingsStores, type PlannedWrite } from "./settings-types.js";
-import { presentHistoryEntry } from "./settings-presentation.js";
+import { presentHistoryEntry } from "./history-presentation.js";
 import { canonicalSettingsTarget, scopeAdmitted, storeForScope } from "./scope-resolution.js";
 import { addsProviderKey } from "./model-provider-value.js";
 import { SettingsModel, declaredKey, deepEqual, setPath, unsetPath, qualifiedWrite, type SessionSettingsSource, type SettingsReadOwner } from "./settings-model.js";

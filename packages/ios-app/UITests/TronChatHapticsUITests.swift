@@ -141,7 +141,7 @@ final class TronChatHapticsUITests: XCTestCase {
 
     @MainActor private func launchSettings(_ extra: [String]) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + extra
+        app.launchArguments = ["-tron-settings-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + extra
         app.launch()
         return app
     }

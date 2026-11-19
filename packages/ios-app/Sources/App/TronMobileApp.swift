@@ -133,15 +133,15 @@ struct HostedFixtureRoot: View {
                     .tronSettingsLayout()
                     .preferredColorScheme(.light)
             } else if HostedLaunch.arguments.contains("-tron-mac-settings-fixture") {
-                HostedSettingsRendererFixture()
+                HostedSettingsFixture()
             } else if HostedLaunch.arguments.contains("-tron-extension-widgets-fixture") {
                 HostedExtensionWidgetsFixtureView()
             } else if HostedLaunch.arguments.contains("-tron-agent-instructions-fixture") {
                 HostedAgentInstructionsFixtureView()
             } else if HostedLaunch.arguments.contains("-tron-mac-terminal-fixture") {
                 HostedMacTerminalFixture()
-            } else if HostedLaunch.arguments.contains("-tron-settings-renderer-fixture") {
-                HostedSettingsRendererFixture()
+            } else if HostedLaunch.arguments.contains("-tron-settings-fixture") {
+                HostedSettingsFixture()
             } else {
                 HostedProductionScene(model: hostedModel)
             }

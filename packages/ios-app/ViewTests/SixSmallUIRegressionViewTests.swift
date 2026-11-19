@@ -56,7 +56,7 @@ final class SixSmallUIRegressionViewTests: ShuffledTestCase {
     }
 
     private func surface(_ name: String, extra: [String] = [], _ body: (MountedFixture) async throws -> Void) async throws {
-        try await mounted(["-tron-settings-renderer-fixture", "-settings-expanded-review", "-six-ui-surface", name] + extra,
+        try await mounted(["-tron-settings-fixture", "-settings-expanded-review", "-six-ui-surface", name] + extra,
                           theme: .burgundy) { app in
             try await app.until("the surface") { app.element("Done") != nil }
             try await body(app)

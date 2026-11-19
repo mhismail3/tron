@@ -66,9 +66,9 @@ import UIKit
 
     private func launch(_ surface: String, mode: String = "light", extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-expanded-review", "-six-ui-surface", surface,
+        app.launchArguments = ["-tron-settings-fixture", "-settings-expanded-review", "-six-ui-surface", surface,
                                "-themeColor", "burgundy", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + extra
-        if mode == "dark" { app.launchArguments.append("-settings-renderer-dark") }
+        if mode == "dark" { app.launchArguments.append("-settings-dark") }
         app.launch()
         XCTAssertTrue(app.buttons["Done"].firstMatch.waitForExistence(timeout: 15), app.debugDescription)
         return app

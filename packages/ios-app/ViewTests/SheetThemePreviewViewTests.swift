@@ -29,8 +29,8 @@ final class SheetThemePreviewViewTests: ShuffledTestCase {
     }
 
     private func settings(_ mode: String, _ body: (MountedFixture) async throws -> Void) async throws {
-        try await mounted(["-tron-settings-renderer-fixture", "-settings-nested", "-settings-expanded-review", "-settings-sheet-theme-review"]
-                          + (mode == "dark" ? ["-settings-renderer-dark"] : [])) { app in
+        try await mounted(["-tron-settings-fixture", "-settings-nested", "-settings-expanded-review", "-settings-sheet-theme-review"]
+                          + (mode == "dark" ? ["-settings-dark"] : [])) { app in
             try await app.activate("Open Settings")
             try await app.until("Global Settings opens") { app.navigationTitle("Global Settings") != nil }
             try await app.expandTopSheet()

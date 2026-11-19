@@ -5,7 +5,7 @@ final class TronAppearanceBehaviorUITests: XCTestCase {
     func testThemeSelectionPersistsAcrossProcessRelaunch() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-nested", "-settings-expanded-review"]
+        app.launchArguments = ["-tron-settings-fixture", "-settings-nested", "-settings-expanded-review"]
         app.launch()
         openAppearance(app)
         for theme in ["burgundy", "oliveGold", "emerald"] {

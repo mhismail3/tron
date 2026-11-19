@@ -3,7 +3,7 @@ import SwiftUI
 import TronMobileCore
 
 @MainActor
-struct HostedSettingsRendererFixture: View {
+struct HostedSettingsFixture: View {
     @State private var model: AppModel
     @State private var ready = false
     @State private var activity = PresentationActivityCoordinator()
@@ -12,13 +12,13 @@ struct HostedSettingsRendererFixture: View {
     @State private var error: String?
     @State private var applied = 0
     @State private var providerOperations = ""
-    private let socket = HostedSettingsRendererSocket()
+    private let socket = HostedSettingsSocket()
     private let profile: GatewayProfile
 
     init() {
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
-        profile = GatewayProfile(id: "settings-renderer-fixture", label: "Fixture", host: "gateway.test", port: 9847,
+        profile = GatewayProfile(id: "settings-fixture", label: "Fixture", host: "gateway.test", port: 9847,
             machineId: "fixture-machine", deviceId: "fixture-device")
         try! profiles.save(profile, token: "fixture-token")
         if HostedLaunch.arguments.contains("-settings-expanded-review") {
@@ -34,13 +34,13 @@ struct HostedSettingsRendererFixture: View {
         }
         let model = AppModel(client: GatewayClient(socketFactory: GatewaySocketFactory { [socket] _ in socket }),
             profiles: profiles,
-            cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: "settings-renderer-fixture")))
+            cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: "settings-fixture")))
         model.defaultWorkspace = "/fixture/projects"
         _model = State(initialValue: model)
     }
 
     var body: some View {
-        TronPresentationSurface(id: "fixture.settings-renderer") { fixtureContent }
+        TronPresentationSurface(id: "fixture.settings-screen") { fixtureContent }
             .environment(\.tronPresentationActivityCoordinator, activity)
     }
 
@@ -87,7 +87,7 @@ struct HostedSettingsRendererFixture: View {
                 .safeAreaInset(edge: .bottom) {
                     if !HostedLaunch.arguments.contains("-six-ui-surface") {
                     HStack {
-                        Text("applied:\(applied)").accessibilityIdentifier("fixture.settings-renderer-applied")
+                        Text("applied:\(applied)").accessibilityIdentifier("fixture.settings-screen-applied")
                         Text("haptics:\(TronHapticsProbe.shared.summary)").accessibilityIdentifier("fixture.haptics")
                         if HostedLaunch.arguments.contains("-settings-provider-actions") {
                             Text(providerOperations).accessibilityIdentifier("fixture.provider-operations")
@@ -105,7 +105,7 @@ struct HostedSettingsRendererFixture: View {
             }
         }
         .environment(model)
-        .preferredColorScheme(HostedLaunch.arguments.contains("-settings-renderer-dark") ? .dark : .light)
+        .preferredColorScheme(HostedLaunch.arguments.contains("-settings-dark") ? .dark : .light)
         .tronPresentation()
         .tronSettingsLayout()
         .task {
@@ -124,7 +124,7 @@ struct HostedSettingsRendererFixture: View {
     }
 }
 
-private actor HostedSettingsRendererSocket: GatewaySocketConnection {
+private actor HostedSettingsSocket: GatewaySocketConnection {
 
     private var hello = true
     private var receiver: CheckedContinuation<Data, Error>?

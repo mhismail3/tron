@@ -27,7 +27,7 @@ final class DashboardHeadersViewTests: ShuffledTestCase {
 
     func testGlobalSettingsGroupHeaders() async throws {
         for dark in [false, true] {
-            try await mounted(["-tron-settings-renderer-fixture", "-settings-nested", "-settings-expanded-review",
+            try await mounted(["-tron-settings-fixture", "-settings-nested", "-settings-expanded-review",
                                "-fixture-appearance", dark ? "dark" : "light"]) { app in
                 try await app.activate("Open Settings")
                 try await app.until("Appearance") { app.element("Appearance") != nil }
