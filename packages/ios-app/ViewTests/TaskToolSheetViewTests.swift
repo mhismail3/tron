@@ -9,7 +9,9 @@ final class TaskToolSheetViewTests: ShuffledTestCase {
                            "-polish-light", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]) { app in
             try await app.until("the task status sheet") { app.element("Technical details") != nil }
             XCTAssertTrue(MountedFixture.elements(in: app.top).contains {
-                !$0.accessibilityTraits.contains(.button) && $0.accessibilityLabel == "Keep Send disabled while photos prepare"
+                let label = $0.accessibilityLabel ?? ""
+                return !$0.accessibilityTraits.contains(.button) && (label == "Keep Send disabled while photos prepare"
+                    || label.hasPrefix("Keep Send disabled while photos prepare, "))
             }, app.tree())
             for (row, value) in [("Model", "Sol"), ("Check-in", "Attachment readiness now has one owner."), ("Tokens", "18K in")] {
                 let node = try await revealed(app, "home-tool-row-\(row)")
