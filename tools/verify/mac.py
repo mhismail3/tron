@@ -2,7 +2,7 @@
 """Build and run the Mac integration tests (TronMacIntegrationTests) under an owned temporary HOME and TMPDIR.
 
 `scripts/tron test mac [Class or Class/method ...]` runs those tests, or the whole target. `verify`'s
-`mac` group and `verify --batch`'s Mac integration lane both run this one command."""
+`mac` group runs this one command."""
 from __future__ import annotations
 
 import os

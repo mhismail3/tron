@@ -84,7 +84,7 @@ Commands:
   verify [--changed] [--base <ref>] | --module <id> | --all | --update-locks <id> [--skip ios,mac,relay] [--plan]
          [--gateway-host local|mini] [--ios-host local|mini]
                                     Mechanical none/partial/full tier; affected checks
-                                    now, full coverage in the async main batch.
+                                    now, full coverage in land's --full validation.
                                     --plan includes dirty paths and exact commands.
                                     Live logs and partial test-results/verify/<sha>.json;
                                     no empty test passes; land, not verify, gates main.
@@ -93,15 +93,6 @@ Commands:
   land [-m <message>]               Merge this branch --no-ff onto fetched main, run Tiers 0-2
                                     on that exact merge on the mini, push it only if it passed;
                                     one land at a time per host (tools/verify/land.md)
-  verify --batch [--base <main-anchor> | --repeat] [--plan]
-                                    Async full-main batch, run in a linked worktree (never
-                                    the primary checkout); first use needs --base, then
-                                    raw last-green owns coverage. Proves a red's culprit
-                                    with fresh exact-case controls, prepares its revert;
-                                    publishes only after review, once
-                                    `git config tron.verify.revertRemote origin`.
-  verify --batch --review <culprit> --decision ACCEPT|BLOCK --reviewer <id> --binding <digest>
-                                    Record a non-author decision on one bound request.
   mutate <gateway-src-file> [--count N] [--seed S] [--timeout SECONDS]
                                     Seeded sampled mutation of one file against the tests
                                     verify selects for it (lock sensitivity, plan 6.6);

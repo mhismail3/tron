@@ -20,16 +20,16 @@ modules whose untyped code imports a changed file.
 **Not yet enforced:** the public-interface rule and the deleted-behaviour E2E proof. The
 boundary check in #2316 T2.9 adds them.
 
-## P2 Whole-system health is a batch signal, not a commit gate
+## P2 Whole-system health is a landing and checkpoint signal
 
-**Rule.** `scripts/tron land` gates main on Tiers 0 to 2 of the exact merge it pushes. The iOS suite and the core E2E journeys (prompt/reply, delegate/result, approval tap,
-settings change, Home wake, reconnect/restart; [map](../tools/verify/core-journeys.md)) run as a
-batch on landed main and at device checkpoints. A red is filed against the module that owns it,
+**Rule.** `scripts/tron land` gates main on Tiers 0 to 2 of the exact merge it pushes (`verify --full`, which
+includes every Gateway E2E journey). The iOS suite and the real-UI core journeys (prompt/reply, delegate/result, approval tap,
+settings change, Home wake, reconnect/restart; [map](../tools/verify/core-journeys.md)) run at
+device checkpoints. A red is filed against the module that owns it,
 which fixes it at the root or reverts its change. A retry that passes is evidence of
 nondeterminism, not a fix.
-**Evidence.** The full canonical batch takes 45–55 minutes. Each journey's remaining gaps are
-tracked as #2230–#2235.
-**Enforced by** `scripts/tron verify --batch` and the checkpoint device smoke.
+**Evidence.** Each journey's remaining gaps are tracked as #2230–#2235.
+**Enforced by** `scripts/tron land` and the checkpoint device smoke.
 
 ## P3 Clear owners, clean modules
 
@@ -97,7 +97,7 @@ instead of sleeps. Each test run records its identity, commit/tree, outcome, dur
 CPU idle/free-memory reading in the external [test ledger](../tools/verify/README.md#test-ledger).
 A test is flaky only when it both passes and fails on the same committed tree; an always-failing
 test is broken. Mark known contention with `TRON_TEST_CONTENDED=1`: flake ranking excludes those
-records, while verify and batch retain raw verdicts. Host readings inform that annotation;
+records, while verify retains raw verdicts. Host readings inform that annotation;
 concurrency or a load threshold does not classify it automatically. Use `scripts/tron flakes` to
 triage same-tree evidence, preserve first failures and measure repeat counts before and after a fix.
 A flake is its module's bug: it gets one timeboxed root-cause attempt, then shipped logging

@@ -18,7 +18,7 @@ misleads, and the counter-metric that catches that.
 | O1 | **Escaped defects**: what reaches him works | `kind:bug` issues opened per landed change (`--github`), plus a hand-labelled sample of 40 of his Home messages per re-score (share that report a defect) | bugs are not filed, filed as `kind:maintenance`, or closed as duplicates; fewer changes land | O2 defect-report share (he notices what is not filed); O4 rework after landing |
 | O2 | **Maintainer attention**, the scarcest resource | his typed Home messages per landed change, and the share that chase status (`--home-sessions`; the regex gives 15%, a hand check 17.5%) | Home batches questions; landing many trivial commits inflates the denominator | O3 lead time; the sample's share of process steering (he redesigns how agents work) |
 | O3 | **Lead time** from his ask to a working build | bug opened → closed (`--github`); landed → next Mac deploy and deploy failures (`--deploy-log`). The iPhone build has no mechanical timestamp yet | issues opened late or closed early; deploys skipped | O1 (fast but broken); O4 |
-| O4 | **Verdict trust**: red means a real fault, green holds | share of red/flake issues that a commit naming them fixed in production code (`--github`, a lower bound); batch verdicts and same-head green+red flips (`--evidence`); landed merges, older than three days, whose issue a later commit or fix names again | reds are closed "not planned" without a cause; tests are deleted to stop reds | O1 escapes; mutation kill rate on hotspots (`scripts/tron mutate`) |
+| O4 | **Verdict trust**: red means a real fault, green holds | share of red/flake issues that a commit naming them fixed in production code (`--github`, a lower bound); landed merges, older than three days, whose issue a later commit or fix names again | reds are closed "not planned" without a cause; tests are deleted to stop reds | O1 escapes; mutation kill rate on hotspots (`scripts/tron mutate`) |
 
 Diagnostics, with their validation status (backtest below). "Validated" means it predicted later
 rework on Tron's history better than chance in both backtests; it is still not proof of cause.
@@ -138,8 +138,7 @@ re-encodes the UI; **taste** = visual iteration.
 Ranked by outcome gap first, then hotspot, and re-ranked at each re-score. Epics with their own
 proxy targets are not created alongside it.
 
-1. **Verdict trust (O4).** Run the batch on main daily again and record why each red closes
-   (product, test, harness). Convert whole-trace goldens with prompt-hash pins into behaviour checks
+1. **Verdict trust (O4).** Record why each `land` red closes (product, test, harness). Convert whole-trace goldens with prompt-hash pins into behaviour checks
    (#2279). Measure mutation kills on the top-5 hotspots before and after.
 2. **Split the mirrors.** Split `TronSmokeUITests.swift` per journey, and give the hosted fixture one
    owner per screen, so a UI change touches one test file.

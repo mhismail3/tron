@@ -1,7 +1,6 @@
 # Verify
 
-`scripts/tron verify` runs the fast affected checks before merge; `verify --batch` runs full
-coverage asynchronously on landed main and causally reverts a proven culprit. The manifests (owners, `verify`
+`scripts/tron verify` runs the fast affected checks before merge. The manifests (owners, `verify`
 declarations and `dynamicEdges`) are the selection authority. No hosted CI or GitHub gate is involved;
 [`scripts/tron land`](land.md) runs `--full` Tiers 0 to 2 on the exact merge it pushes to main and is the only landing route. A previous test pass never substitutes for
 this change's affected checks; only stamped build products are reused. See the
@@ -14,9 +13,6 @@ scripts/tron verify --changed [--base <ref>]   # explicit diff selection, also u
 scripts/tron verify --module <id>               # scoped baseline: owner tests + declarations + launching UI locks
 scripts/tron verify --all                       # all locks + serial files deferred by this base..HEAD diff
 scripts/tron verify --full --base <ref>         # every test file in every group: land's suite
-scripts/tron verify --batch --base <main-anchor> # initialize coverage in a clean linked worktree (git worktree add --detach <path> origin/main)
-scripts/tron verify --batch [--repeat] [--plan] # next pinned batch, or rerun every lane at the green HEAD
-scripts/tron verify --batch --review <culprit> --decision ACCEPT|BLOCK --reviewer <id> --binding <digest>
 scripts/tron verify --update-locks <id>         # rewrite <id>'s goldens (lock or approved migration slices)
 scripts/tron verify ... --gateway-host mini --ios-host mini # Tron heavy checks: queued mini execution, no local fallback
 scripts/tron test ios checkpoint --only-testing TronMobileUITests/<Class>/<method> # mini by default, build then selected tests
@@ -32,7 +28,7 @@ lock as verification. That lock observes both the runtime system-section preview
 persisted child replay: workspace core instructions, resource instruction assembly, runtime
 projection and the pinned SDK artifact can each change it without changing the lock file.
 These declarations keep that consumer in affected checks with its nested runner rather than
-deferring it to the full batch. Other unchanged serial tests remain batch-selected. The
+deferring it to land's `--full` run. Other unchanged serial tests are deferred there. The
 selection regression calls the shipped planner against the actual ownership graph and each
 producer path; it does not mirror the dependency list in a fixture graph.
 
@@ -68,7 +64,7 @@ stateful journey declares `shuffle: false`. `gateway.py` resolves pinned develop
 one test process its own temporary HOME, TMPDIR, Tron data directory and agent
 resource directory, under `/tmp` rather than the caller's TMPDIR, so fixture and socket path
 lengths do not depend on who runs the suite. It waits for Vitest before removing those directories, also
-forwarding cancellation to the owned child. Every tool that stops it (verify, batch, mutate) sends
+forwarding cancellation to the owned child. Every tool that stops it (verify, mutate) sends
 SIGTERM first and SIGKILL only after a grace (mutate 10 s, the others 30 s), so a root is left behind
 only by an outside SIGKILL or by a Vitest still tearing down when the grace ends.
 It never installs this checkout's missing packages.
@@ -107,7 +103,7 @@ live; the Vitest output files come back with paths rewritten to this checkout, a
 unreachable mini, a failed push, an off-pin toolchain, a job lock still held when the caller's `TRON_MINI_JOB_WAIT_SECONDS` runs out, or a session without a result exits 75 with a last `mini: no result: <reason>` line, never falling back here (a lane that itself exits 75 stays a lane result); verify records that step as `no result` with its reason and the run as `incomplete`, not failed. Stopping verify, or killing
 its whole process group, ends the session and SIGTERMs the mini job's child. Setup: `git config tron.verify.mini <user@host>` and
 `tron.verify.miniIdentity <key file>`, and a bare `~/tron-ci/tron.git` on the mini; until the pinned Node and Dafny are
-installed there, a job refuses with the `scripts/tron-node install` or (Python lanes) `scripts/tron proof bootstrap` command for its checkout. `verify --batch` runs every Gateway and Python run it starts on the mini, except the `mac-terminal` and `python-here` groups, which need this host ([batch](batch.md)); `mutate` runs its lanes here.
+installed there, a job refuses with the `scripts/tron-node install` or (Python lanes) `scripts/tron proof bootstrap` command for its checkout. `mutate` runs its lanes here.
 
 ## iOS checks on the mini
 
@@ -122,10 +118,6 @@ iOS work, the existing group routing remains in effect. A mini invocation refuse
 `python-here` or `mac-terminal` before starting runners: those checks belong to their Mac's stores/SSH
 service. This includes `--all`; select a supported affected scope instead, never fall back to a local
 simulator run. Golden recording is local-only and cannot be combined with remote verification.
-
-The existing batch Apple path is not migrated by this flag. Its serial mini routing, explicit host-bound
-split and SHA-addressed asynchronous result retrieval are tracked in #2530. Do not launch that still-local
-Apple path as agent heavy-test evidence on this Mac.
 
 `scripts/tron test ios [--ios-host mini|local] <runner arguments>` defaults to the mini and invokes
 that commit's `scripts/tron-ios-test` there. A fresh source needs `checkpoint` (build and selected tests)
@@ -172,7 +164,7 @@ added and removed (tests include fixtures, support and goldens), added and delet
 each new or renamed-in test file beside an existing test of the same stem, and each added source line naming
 legacy, compat, shim or deprecated code. It never fails a run; the reviewer ACCEPTs against it
 ([oracle policy](test-oracles.md)). Repeating a selection at one SHA overwrites this local
-report; batch evidence is copied separately before another run. The `resultDigest` covers the
+report. The `resultDigest` covers the
 selection, each step's outcome and test count, and the verdict, but not timing,
 so two runs of one commit against one base can be compared (a reused iOS build compares equal to
 the build that stamped it). The iOS shards count as one entry there (their status, passing count and
@@ -200,8 +192,8 @@ Set `TRON_TEST_CONTENDED=1` for a known contended run: its raw outcomes and host
 recorded, but it counts as neither red nor green in flake ranking. This is evidence annotation,
 not a retry, timeout change or load-admission mechanism. The caller annotates known contention from
 host evidence; neither concurrency nor a numeric host threshold automatically changes that flag.
-Verify and batch do not annotate their own overlapping lanes: without a caller-set flag, even
-same-Mac batch overlap remains unannotated in the ledger. Raw runner verdicts are unchanged.
+Verify does not annotate its own overlapping lanes: without a caller-set flag, even
+same-Mac overlap remains unannotated in the ledger. Raw runner verdicts are unchanged.
 
 Gateway Vitest, Python unittest, Node test and XCTest runners append one result per test identity,
 including failed and skipped cases. Vitest uses native result callbacks without replacing caller
@@ -231,7 +223,7 @@ SIGTERM/SIGINT and preserve stdout/stderr bytes, including CR and invalid UTF-8,
 Root Node and Gateway Node groups use `--gateway-host` alike; `mini` queues both under its lease,
 with a mini outage remaining no-result rather than local fallback. Direct `scripts/tron test tooling` uses the same Python
 recorder. The canonical iOS and real-Gateway journey runners and the Mac test owner record their
-native test results, so verify, batch and direct invocations share one ledger, not separate histories.
+native test results, so verify, land and direct invocations share one ledger, not separate histories.
 
 ## Static checks (existing tools only)
 1. `scripts/tron ownership`, including the repository layout
@@ -291,7 +283,7 @@ explicitly unavailable. Missing coverage is not a clean bill or a provider measu
 ### No exemptions
 
 There is no known-failure registry, quarantine, waiver, expiry or qualified verdict
-([P2](../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-batch-signal-not-a-commit-gate)). Every
+([P2](../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-landing-and-checkpoint-signal)). Every
 executed failure is `failed` (exit 1); it is fixed at its root or causally reverted.
 
 ## Selection
@@ -305,8 +297,8 @@ base). Each module contributes its owned tests:
 
 Recorders under `test-fixtures/` are never run. A change is gated by its own
 modules' tests ([principles P1](../../docs/PRINCIPLES.md#p1-a-module-owns-its-code-and-its-tests)):
-`--changed` and `--module` add no `dependsOn` consumer's tests; those run in the
-batch. The one consumer added is a module whose `dynamicEdges` name a selected
+`--changed` and `--module` add no `dependsOn` consumer's tests; those run in
+`land`'s `--full` run. The one consumer added is a module whose `dynamicEdges` name a selected
 module (today only the iOS UI tests' spawn edges to the hosted app): its locks are
 that module's rendered tests. `--changed` also adds the importers no compiler checks: a changed
 source file's Python importers (`import`/`from` by module name, or its path handed to
@@ -335,28 +327,28 @@ A Swift or Gateway string edit is code: its tests and locks run (locks compare l
 |---|---|---|
 | **none** | Empty diff or documentation only | Static/documentation checks; no executable tests |
 | **partial** | Tests/goldens only, or ordinary owned code (including Swift UI) | Changed tests; golden owner's locks; otherwise owner tests, owner declarations and launching UI locks |
-| **full** | Production changes in L0–L2, `gateway/package`, `gateway/test-support`, `gateway/pi-sdk`; declared kernel/contracts/persistence/security/lifecycle/mac-installer risk; manifest/layer-baseline/toolchain/project configuration; unknown ownership | The same affected checks **now**, plus all-lock/full-lane coverage in the next batch |
+| **full** | Production changes in L0–L2, `gateway/package`, `gateway/test-support`, `gateway/pi-sdk`; declared kernel/contracts/persistence/security/lifecycle/mac-installer risk; manifest/layer-baseline/toolchain/project configuration; unknown ownership | The same affected checks **now**, plus every test file in `land`'s `--full` run of the merge |
 
 Test/golden-only narrowing precedes module risk; a manifest/configuration edit still
-requires a full batch. Unchanged files in the existing serial `gateway-nested` list
+requires the full tier. Unchanged files in the existing serial `gateway-nested` list
 are deferred, never dropped, unless explicitly declared as owner verification evidence;
 declared tests run immediately. Production changes selecting undeclared serial tests need
 a full tier.
 A changed serial test file and locks selected by a golden edit run immediately.
-`--all --base <green>` includes every serial file selected by that covered diff,
+`--all --base <ref>` includes every serial file selected by that covered diff,
 including changed tests already run before landing: later integration may affect
 them too. It is not limited to the one nested lock. Explicit `--module` baselines still run
 the complete scoped set. A serial-only selection may pass its affected static checks
-while explicitly reporting deferred tests; it is not a test pass or a green batch. `ios-ui` risk alone does not widen beyond the affected UI build
+while explicitly reporting deferred tests; it is not a test pass. `ios-ui` risk alone does not widen beyond the affected UI build
 and journeys. Renames include both paths; deleted paths use base ownership. Retired
 owners retain risk, but cannot declare commands. Risk is read
 from each changed producer's manifest, not inferred from every reverse consumer.
 An unowned tracked path still fails ownership, not a green partial run. A new module
 without executable evidence still fails; a tier never turns missing evidence into a pass.
 
-`--plan` prints `selection.tier`, paths, reasons, immediate tests, `batchTests`, and
+`--plan` prints `selection.tier`, paths, reasons, immediate tests, and
 commands/cwds, `deferredTests` and their exact commands. A successful **full-tier** ordinary run proves affected checks only;
-it does not claim the full batch passed. Locks are `*.lock.integration.test.ts`, the
+it does not claim the `--full` run passed. Locks are `*.lock.integration.test.ts`, the
 Pi trace/persisted-state corpus and `UITests/Locks/` and `ViewTests/Locks/`. `ios-app/ui-tests` declares
 `spawn` edges to the hosted app modules, selecting their affected UI locks.
 
@@ -370,8 +362,8 @@ Runners are the existing ones:
 | `ios` | `scripts/tron-ios-test run --only-testing <target>/<class>/<test>` shards: the UIValidation targets |
 | `ios-journeys` | `scripts/ios-gateway-e2e-test run-ui --only-testing <journey>`: the real-UI journeys |
 | `ios-boundary` | `scripts/ios-gateway-e2e-test check --only-testing <method>`: the Gateway E2E target, with its own build and private fixture |
-| `relay` | the relay's Vitest: `npm test` in `packages/push-relay`, as `verify --batch`'s relay lane |
-| `mac` / `mac-terminal` | `scripts/tron test mac <class>...` (`tools/verify/mac.py`, also the batch's Mac integration lane; Mac Swift sources declare it) / `vitest.mac-terminal.config.ts`, on this Mac |
+| `relay` | the relay's Vitest: `npm test` in `packages/push-relay` |
+| `mac` / `mac-terminal` | `scripts/tron test mac <class>...` (`tools/verify/mac.py`; Mac Swift sources declare it) / `vitest.mac-terminal.config.ts`, on this Mac |
 | `ios-lanes:<owner>:<entry>` | module-owned Python validation command, after the joined phone/Pad matrix |
 | `ios-scenarios:<owner>` | the profiler's functional scenarios for the declared ProfilingTests classes, after the joined phone/Pad matrix ([below](#owner-declared-profiling-scenarios)) |
 | `ios-lanes` | undeclared legacy harnesses, not driven by verify (including ProfilingTests classes no owner declares) |
@@ -388,7 +380,7 @@ when no surviving journey file changed. `--module` and full
 selections stay complete. An empty ownership set or a discovered test absent from the harness's
 `ui_owned_journeys` fails selection (exit 2). They run
 through the harness, which takes its own host slots, on one lane by default or up to `--ios-jobs`
-(`TRON_IOS_E2E_UI_LANES`); `verify --batch` explicitly requests 3 lanes for both shards and journeys. A journey passes only with a
+(`TRON_IOS_E2E_UI_LANES`). A journey passes only with a
 `report.json` whose `report.sha256` matches, `journey_status` is 0, `evidence_complete` is true and
 `source` is this commit, clean; the step's `journeyReports` records each report's path, sha256,
 status and revision. `--skip ios` skips them.
@@ -429,7 +421,7 @@ excluded by this mechanism. Existing undeclared legacy harnesses retain their in
 
 Selected classes use one owner job per declaration, not ordinary shards. Selecting the declaring
 module also selects its classes, including test-only validator edits; `--all` includes every owner
-job, so the batch's full-verify lane uses the same route. Lock-only recording stays lock-only.
+job, so `--full` uses the same route. Lock-only recording stays lock-only.
 Jobs execute serially after the ordinary phone/Pad matrix joins, and after any real-UI journey group.
 The validator owns its fresh leased runs and artifact assertions; verification adds no callbacks or
 runtime evidence format. It must exit 0 and emit actual successful unittest suites with no skips or
@@ -478,7 +470,7 @@ other command forms fail selection (exit 2). Harnessed classes keep their
 `ios-journeys` or `ios-lanes` classification. There is no implicit install or alternate runner.
 
 Changed/module selection includes the declarations of the selected modules (and of a
-launching module); full batch coverage and `--all` include every declaration.
+launching module); `--full` and `--all` include every declaration.
 Markdown/test-only narrowing and lock-only `--update-locks` remain unchanged.
 Files are deduplicated across ownership and declarations, then use normal
 counts, explicit skips and incomplete verdicts. A zero-test Python suite fails
@@ -489,12 +481,6 @@ even beside another passing suite. `--plan` shows selection, not test evidence.
 `--all`, `ios` tests, or a changed `ios-app/` module runs the iOS lane unless `--skip ios`:
 source policy, a stamped build, `layers ios`, then the selected UI test methods packed into runner
 processes on concurrent lanes. Its contract is in [ios.md](ios.md).
-
-## Asynchronous full-main batches
-
-`verify --batch` runs every required lane on landed main after merge and causally
-reverts a proven culprit once enabled; its contract, enable step and review command
-are in [batch.md](batch.md).
 
 ## Mutation sampling
 
@@ -516,10 +502,10 @@ deferred until a known-kill probe proves activation with pinned Vitest.
 
 ## Verify
 
-`scripts/tron test tooling tools/verify/tests/test-verify.py tools/verify/tests/test-verify-tiers.py tools/verify/tests/test-verify-batch.py`
+`scripts/tron test tooling tools/verify/tests/test-verify.py tools/verify/tests/test-verify-tiers.py tools/verify/tests/test-host-lock.py`
 drives real Git/CLI fixtures: affected selection, known-bad small changes, zero-test
-refusal, reproducible digests, dirty planning, unnamed ignored residue failing the run, descendant cleanup, batch ranges/overlap,
-bisection, causal revert publication and refused issue authority. The iOS stand-in compiles real Swift indexes
+refusal, reproducible digests, dirty planning, unnamed ignored residue failing the run, descendant cleanup and the
+full-Gateway host lock's arrival order. The iOS stand-in compiles real Swift indexes
 and stamps, exercises real `layers ios`, and emits XCTest-style summaries: locks-only
 selection, reuse, extensions, empty/failing runs, default serial lanes and failed acquisition. Every Gateway case
 failure is a raw red; deleted non-Markdown docs pass static checks while zero-test code still fails.
@@ -527,4 +513,3 @@ Hardware-free
 `scripts/test-ios-test-infrastructure.py HostSlotFixture RunnerFixture.test_run_forwards_bounded_host_slot_wait_before_simulator_work RunnerFixture.test_run_waits_for_a_host_slot_while_all_are_held`
 proves bounded acquisition cleanup, forwarding, the unchanged cap and default waiting.
 A fake Gateway runner covers `mutate` timeout/interrupt and a second interrupt during the grace; logs: `test-results/verify-cli/`.
-Batch fixtures are listed in [batch.md](batch.md#verify); logs: `test-results/verify-batch/`.
