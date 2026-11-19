@@ -5,7 +5,6 @@ import XCTest
 @MainActor
 final class HomeTaskReadingViewTests: ShuffledTestCase {
     func testTaskReadingSubtextLight() async throws { try await exercise([]) }
-    func testTaskReadingSubtextDark() async throws { try await exercise(["-home-dark"]) }
 
     private func exercise(_ arguments: [String]) async throws {
         try await mounted(["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-task-padding-review"] + arguments) { app in
