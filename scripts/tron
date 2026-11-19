@@ -55,6 +55,10 @@ Commands:
                                     fields from state/settings/observed.json; refuses while a
                                     Gateway owns the agent directory; dry run unless --apply;
                                     never at startup
+  migrate test-ledger-contended [--apply --backup <new dir>]
+                                    One-shot #2592 removal of the never-set contended column from
+                                    the test ledger (~/.tron-maintenance/test-ledger) after a backup;
+                                    refuses if any row is marked; dry run unless --apply
   migrate push-policy --restore --tron-home <dir>
                                     Rollback to a pre-v3 build: restores the two stores from
                                     state/migrations/push-policy-v3. Refuses while a Gateway owns
@@ -267,6 +271,10 @@ case "$cmd" in
           echo "Prepare it first: scripts/tron build gateway" >&2; exit 66;
         }
         exec node "$GATEWAY/dist/admin/observed-git-residue-migration.js" "$@"
+        ;;
+      test-ledger-contended)
+        shift
+        exec python3 "$ROOT/tools/verify/ledger.py" migrate-contended "$@"
         ;;
       push-policy)
         shift

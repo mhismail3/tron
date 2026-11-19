@@ -298,10 +298,10 @@ raise SystemExit(9 if 'fail' in sys.argv else 0)
                     self.assertIn('deliberate red', (artifacts / 'ios/test.log').read_text())
         self.assertTrue(Path(self.env['TRON_TEST_LEDGER']).is_file(), 'native records return to the caller, not a second mini ledger')
         with sqlite3.connect(self.env['TRON_TEST_LEDGER']) as connection:
-            rows = connection.execute('SELECT test_id, commit_sha, outcome, host, contended FROM results').fetchall()
+            rows = connection.execute('SELECT test_id, commit_sha, outcome, host FROM results').fetchall()
         self.assertEqual(len(rows), 3, 'one record per intact probe spool; artifact refusal retains cases but an untrusted ledger imports no rows')
         self.assertEqual([row[2] for row in rows], ['passed', 'failed', 'passed'])
-        self.assertTrue(all(row[0] == 'tools/probe.py::Probe.test_case' and row[1] == sha and row[3] and row[4] == 0 for row in rows))
+        self.assertTrue(all(row[0] == 'tools/probe.py::Probe.test_case' and row[1] == sha and row[3] for row in rows))
         with open(self.mini / 'tron-ci/jobs/gateway.lock') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         self.assertEqual(self.git('rev-parse', 'refs/tron-jobs/incoming', cwd=repository), foreign)

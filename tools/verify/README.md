@@ -188,12 +188,8 @@ tree, with pass/fail counts, failure rate, lanes, hosts and last seen. Always-fa
 not flaky, and are not listed by this query.
 Different trees are never pooled. Dirty-tree runs retain their HEAD tree and an explicit dirty
 marker, but are excluded from flake classification because that hash cannot prove their source.
-Set `TRON_TEST_CONTENDED=1` for a known contended run: its raw outcomes and host readings remain
-recorded, but it counts as neither red nor green in flake ranking. This is evidence annotation,
-not a retry, timeout change or load-admission mechanism. The caller annotates known contention from
-host evidence; neither concurrency nor a numeric host threshold automatically changes that flag.
-Verify does not annotate its own overlapping lanes: without a caller-set flag, even
-same-Mac overlap remains unannotated in the ledger. Raw runner verdicts are unchanged.
+Host readings are recorded beside each outcome; neither concurrency nor a numeric host threshold
+changes a verdict or the flake ranking. Raw runner verdicts are unchanged.
 
 Gateway Vitest, Python unittest, Node test and XCTest runners append one result per test identity,
 including failed and skipped cases. Vitest uses native result callbacks without replacing caller

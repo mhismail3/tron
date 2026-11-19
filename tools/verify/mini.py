@@ -168,7 +168,7 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
     print(f'mini: pushed in {time.time() - started:.1f}s', flush=True)
     wait = os.environ.get('TRON_MINI_JOB_WAIT_SECONDS')
     job = json.dumps({'sha': sha, 'main': main, 'lane': lane, 'args': mapped, 'outputs': len(paths), 'nonce': nonce, 'localRoot': str(ROOT),
-                      'lockWaitSeconds': float(wait) if wait else None, 'contended': os.environ.get('TRON_TEST_CONTENDED', '0'),
+                      'lockWaitSeconds': float(wait) if wait else None,
                       'requester': {'host': platform.node(), 'worktree': str(ROOT), 'pid': os.getpid()}})
     source = Path(__file__).read_text()
     remote = shlex.join(['/usr/bin/python3', '-c', source, 'remote', job])
@@ -409,7 +409,6 @@ def remote_main(job: dict) -> int:
 
             results.mkdir(parents=True, exist_ok=True)
             clean['TRON_TEST_LEDGER'] = str(results / 'ledger.sqlite3')
-            clean['TRON_TEST_CONTENDED'] = job.get('contended', '0')
             if job['lane'] in ('ios', 'verify'):
                 results.mkdir(parents=True, exist_ok=True)
                 archive = results.with_suffix('.tar.gz')

@@ -45,7 +45,7 @@ def database(write: bool = False):
     connection.row_factory = sqlite3.Row
     if write:
         connection.execute('PRAGMA journal_mode=WAL')
-        connection.execute('CREATE TABLE IF NOT EXISTS results (run_id TEXT NOT NULL, test_id TEXT NOT NULL, commit_sha TEXT NOT NULL, tree_hash TEXT NOT NULL, dirty INTEGER NOT NULL, outcome TEXT NOT NULL, seconds REAL NOT NULL, lane TEXT NOT NULL, host TEXT NOT NULL, cpu_idle_percent REAL, memory_free_percent REAL, measured_at TEXT NOT NULL, seen_at TEXT NOT NULL, contended INTEGER NOT NULL)')
+        connection.execute('CREATE TABLE IF NOT EXISTS results (run_id TEXT NOT NULL, test_id TEXT NOT NULL, commit_sha TEXT NOT NULL, tree_hash TEXT NOT NULL, dirty INTEGER NOT NULL, outcome TEXT NOT NULL, seconds REAL NOT NULL, lane TEXT NOT NULL, host TEXT NOT NULL, cpu_idle_percent REAL, memory_free_percent REAL, measured_at TEXT NOT NULL, seen_at TEXT NOT NULL)')
     return connection
 
 
@@ -53,13 +53,13 @@ def append(records: list[dict]) -> None:
     if not records:
         return
     with closing(database(write=True)) as connection, connection:
-        connection.executemany('INSERT INTO results VALUES (:runId, :testId, :commit, :tree, :dirty, :outcome, :seconds, :lane, :host, :cpuIdlePercent, :memoryFreePercent, :measuredAt, :seenAt, :contended)', records)
+        connection.executemany('INSERT INTO results VALUES (:runId, :testId, :commit, :tree, :dirty, :outcome, :seconds, :lane, :host, :cpuIdlePercent, :memoryFreePercent, :measuredAt, :seenAt)', records)
 
 
 def append_rows(rows: list[list]) -> None:
     if rows:
         with closing(database(write=True)) as connection, connection:
-            connection.executemany('INSERT INTO results VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', rows)
+            connection.executemany('INSERT INTO results VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', rows)
 
 
 def reading() -> dict:
@@ -93,7 +93,7 @@ class Capture:
         revisions = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD', 'HEAD^{tree}'], text=True, env=environment).splitlines()
         dirty = bool(subprocess.check_output(['git', '-C', str(root), 'status', '--porcelain', '--untracked-files=normal'], text=True, env=environment).strip())
         self.context = {'runId': uuid.uuid4().hex, 'commit': revisions[0], 'tree': revisions[1], 'dirty': int(dirty),
-                        'lane': lane, 'contended': int(os.environ.get('TRON_TEST_CONTENDED') == '1'), **reading()}
+                        'lane': lane, **reading()}
 
     def record(self, identity: str, outcome: str, seconds: float, host_reading: dict | None = None) -> dict:
         return {**self.context, **(host_reading or {}), 'testId': identity, 'outcome': outcome, 'seconds': max(0, float(seconds)),
@@ -285,11 +285,61 @@ def flakes(tree: str | None = None) -> list[dict]:
     if connection is None:
         return []
     with closing(connection):
-        rows = connection.execute('SELECT test_id, tree_hash, SUM(outcome = \'passed\') AS passes, SUM(outcome = \'failed\') AS failures, MAX(seen_at) AS last_seen, GROUP_CONCAT(DISTINCT lane) AS lanes, GROUP_CONCAT(DISTINCT host) AS hosts FROM results WHERE dirty = 0 AND contended = 0 AND outcome IN (\'passed\', \'failed\') AND (? IS NULL OR tree_hash = ?) GROUP BY test_id, tree_hash HAVING passes > 0 AND failures > 0 ORDER BY CAST(failures AS REAL) / (passes + failures) DESC, failures DESC, last_seen DESC', (tree, tree)).fetchall()
+        rows = connection.execute('SELECT test_id, tree_hash, SUM(outcome = \'passed\') AS passes, SUM(outcome = \'failed\') AS failures, MAX(seen_at) AS last_seen, GROUP_CONCAT(DISTINCT lane) AS lanes, GROUP_CONCAT(DISTINCT host) AS hosts FROM results WHERE dirty = 0 AND outcome IN (\'passed\', \'failed\') AND (? IS NULL OR tree_hash = ?) GROUP BY test_id, tree_hash HAVING passes > 0 AND failures > 0 ORDER BY CAST(failures AS REAL) / (passes + failures) DESC, failures DESC, last_seen DESC', (tree, tree)).fetchall()
         return [{**dict(row), 'failure_rate': row['failures'] / (row['passes'] + row['failures'])} for row in rows]
 
 
+def migrate_contended(arguments: list[str]) -> int:
+    """One-shot #2592 slice 7 removal of the never-set `contended` column, after a backup into a new directory."""
+    parser = argparse.ArgumentParser(prog='scripts/tron migrate test-ledger-contended')
+    parser.add_argument('--apply', action='store_true')
+    parser.add_argument('--backup', type=Path)
+    args = parser.parse_args(arguments)
+    if args.apply != bool(args.backup):
+        parser.error('--apply and --backup <new dir> go together')
+    path = destination()
+    if not path.is_file():
+        print(f'no ledger at {path}: nothing to migrate')
+        return 0
+    with closing(sqlite3.connect(str(path), timeout=30)) as connection:
+        columns = [row[1] for row in connection.execute('PRAGMA table_info(results)')]
+        if 'contended' not in columns:
+            print(f'{path}: already migrated ({len(columns)} columns)')
+            return 0
+        rows, marked = connection.execute('SELECT COUNT(*), COALESCE(SUM(contended != 0), 0) FROM results').fetchone()
+        print(f'{path}: {rows} rows, {marked} marked contended, {len(columns)} columns')
+        if marked:
+            print('refused: rows are marked contended; dropping the column would lose them', file=sys.stderr)
+            return 2
+        if not args.apply:
+            print('dry run: pass --apply --backup <new dir> to drop the column')
+            return 0
+        args.backup.mkdir(parents=True)
+        copy = args.backup / path.name
+        connection.execute('VACUUM INTO ?', (str(copy),))
+        with closing(sqlite3.connect(copy.as_uri() + '?mode=ro', uri=True)) as target:
+            if target.execute('SELECT COUNT(*) FROM results').fetchone()[0] != rows:
+                print(f'refused: backup {copy} does not hold {rows} rows', file=sys.stderr)
+                return 1
+        connection.execute('BEGIN IMMEDIATE')
+        if connection.execute('SELECT COUNT(*) FROM results').fetchone()[0] != rows:
+            connection.rollback()
+            print('refused: rows were appended after the backup; run it again', file=sys.stderr)
+            return 75
+        connection.execute('ALTER TABLE results DROP COLUMN contended')
+        after = connection.execute('SELECT COUNT(*) FROM results').fetchone()[0]
+        if after != rows:
+            connection.rollback()
+            print(f'refused: {after} rows after the drop, {rows} before', file=sys.stderr)
+            return 1
+        connection.commit()
+        print(f'migrated: {after} rows, {len(columns) - 1} columns; backup {copy} (restore: copy it over {path} with no test running)')
+    return 0
+
+
 def main(arguments: list[str]) -> int:
+    if arguments[:1] == ['migrate-contended']:
+        return migrate_contended(arguments[1:])
     if arguments[:1] == ['python']:
         return python_main(arguments[1:])
     if arguments[:1] == ['exec']:
@@ -303,7 +353,7 @@ def main(arguments: list[str]) -> int:
         print(json.dumps(rows, indent=2))
     else:
         print(f'Test ledger: {destination()}')
-        print('Same-tree flakes (uncontended committed runs only):')
+        print('Same-tree flakes (committed runs only):')
         for row in rows:
             print(f"{row['failures']}/{row['passes'] + row['failures']} failed ({row['failure_rate']:.1%})  pass={row['passes']}  tree={row['tree_hash'][:12]}  last={row['last_seen']}  lanes={row['lanes']}  hosts={row['hosts']}  {row['test_id']}")
         if not rows:

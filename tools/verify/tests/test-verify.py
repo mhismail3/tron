@@ -650,6 +650,44 @@ class LedgerTests(VerifyCase):
         self.assertEqual({row[1] for row in rows}, {'passed', 'failed', 'skipped'})
         self.assertTrue(all(row[0].startswith('mods/alpha/ledger.test.mjs::') and row[2] >= 0 for row in rows))
 
+    def test_contended_migration_backs_up_then_drops_only_an_unmarked_column(self) -> None:
+        live = Path(self.temp.name) / 'maintenance/results.sqlite3'
+        live.parent.mkdir()
+        columns = ('run_id, test_id, commit_sha, tree_hash, dirty, outcome, seconds, lane, host, cpu_idle_percent, '
+                   'memory_free_percent, measured_at, seen_at')
+        with sqlite3.connect(live) as connection:
+            connection.execute('CREATE TABLE results (run_id TEXT NOT NULL, test_id TEXT NOT NULL, commit_sha TEXT NOT NULL, tree_hash TEXT NOT NULL, '
+                               'dirty INTEGER NOT NULL, outcome TEXT NOT NULL, seconds REAL NOT NULL, lane TEXT NOT NULL, host TEXT NOT NULL, '
+                               'cpu_idle_percent REAL, memory_free_percent REAL, measured_at TEXT NOT NULL, seen_at TEXT NOT NULL, contended INTEGER NOT NULL)')
+            connection.executemany('INSERT INTO results VALUES (?, ?, ?, ?, 0, ?, 1.0, ?, ?, 50.0, 50.0, ?, ?, ?)',
+                                   [(f'run-{i}', f'a.py::T.test_{i}', 'c', 't', 'passed', 'python', 'h', 'm', 's', marked) for i, marked in enumerate((0, 0, 1))])
+
+        def migrate(*args: str) -> subprocess.CompletedProcess:
+            return subprocess.run([sys.executable, str(ROOT / 'tools/verify/ledger.py'), 'migrate-contended', *args],
+                                  env={**self.repo.env, 'TRON_TEST_LEDGER': str(live)}, capture_output=True, text=True)
+        refused = migrate('--apply', '--backup', str(Path(self.temp.name) / 'refused'))
+        self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
+        self.assertIn('1 marked contended', refused.stdout)
+        self.assertFalse((Path(self.temp.name) / 'refused').exists(), 'a refused migration writes no backup')
+        with sqlite3.connect(live) as connection:
+            connection.execute('DELETE FROM results WHERE contended = 1')
+        dry = migrate()
+        self.assertEqual(dry.returncode, 0, dry.stdout + dry.stderr)
+        self.assertIn('2 rows, 0 marked contended, 14 columns', dry.stdout)
+        backup = Path(self.temp.name) / 'backup'
+        applied = migrate('--apply', '--backup', str(backup))
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        with sqlite3.connect(backup / 'results.sqlite3') as connection:
+            self.assertEqual(connection.execute('SELECT COUNT(*), SUM(contended) FROM results').fetchone(), (2, 0))
+        with sqlite3.connect(live) as connection:
+            self.assertNotIn('contended', [row[1] for row in connection.execute('PRAGMA table_info(results)')])
+            self.assertEqual(connection.execute(f'SELECT {columns} FROM results ORDER BY run_id').fetchall(),
+                             [(f'run-{i}', f'a.py::T.test_{i}', 'c', 't', 0, 'passed', 1.0, 'python', 'h', 50.0, 50.0, 'm', 's') for i in (0, 1)])
+        again = migrate('--apply', '--backup', str(Path(self.temp.name) / 'again'))
+        self.assertEqual(again.returncode, 0, again.stdout + again.stderr)
+        self.assertIn('already migrated', again.stdout)
+        self.assertFalse((Path(self.temp.name) / 'again').exists())
+
     def test_public_tooling_records_fixture_and_file_failures_without_inventing_empty_cases(self) -> None:
         r = self.repo
         sources = {
@@ -725,9 +763,6 @@ class LedgerTests(VerifyCase):
         other = subprocess.run([str(r.path / 'scripts/tron'), 'test', 'tooling', 'mods/alpha/test-alpha.py'], cwd=r.path,
                                env={**r.env, 'LEDGER_FIXTURE_FAIL': '1', 'LEDGER_OTHER_TREE_FAIL': '1'}, capture_output=True, text=True)
         self.assertEqual(other.returncode, 1)
-        contended = subprocess.run([str(r.path / 'scripts/tron'), 'test', 'tooling', 'mods/alpha/test-alpha.py'], cwd=r.path,
-                                  env={**r.env, 'TRON_TEST_CONTENDED': '1'}, capture_output=True, text=True)
-        self.assertEqual(contended.returncode, 1)
         query = subprocess.run([str(r.path / 'scripts/tron'), 'flakes', '--json'], cwd=r.path, env=r.env, capture_output=True, text=True)
         self.assertEqual(json.loads(query.stdout), flakes)
         refused = subprocess.run([str(r.path / 'scripts/tron'), 'test', 'tooling', 'mods/alpha/test-alpha.py'], cwd=r.path,

@@ -96,9 +96,8 @@ Gateway refusing a mismatched client.
 instead of sleeps. Each test run records its identity, commit/tree, outcome, duration and execution-host
 CPU idle/free-memory reading in the external [test ledger](../tools/verify/README.md#test-ledger).
 A test is flaky only when it both passes and fails on the same committed tree; an always-failing
-test is broken. Mark known contention with `TRON_TEST_CONTENDED=1`: flake ranking excludes those
-records, while verify retains raw verdicts. Host readings inform that annotation;
-concurrency or a load threshold does not classify it automatically. Use `scripts/tron flakes` to
+test is broken. Host readings are evidence; concurrency or a load threshold does not classify a
+test automatically. Use `scripts/tron flakes` to
 triage same-tree evidence, preserve first failures and measure repeat counts before and after a fix.
 A flake is its module's bug: it gets one timeboxed root-cause attempt, then shipped logging
 that catches the next occurrence, and then the case is deleted with a non-author ACCEPT that names
