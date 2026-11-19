@@ -43,7 +43,24 @@ describe("inert Pi settings fields migration", () => {
     expect(await readFile(path)).toEqual(original);
     const plan = await planInertPiFields(agentDir);
     await writeFile(path, JSON.stringify({ ...SETTINGS, defaultProvider: "anthropic" }, null, 2));
-    await expect(applyInertPiFields(plan, join(agentDir, "..", "late"))).rejects.toThrow();
+    await expect(applyInertPiFields(plan, join(agentDir, "..", "late"))).rejects.toThrow("changed while it was backed up");
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ ...SETTINGS, defaultProvider: "anthropic" });
+  });
+
+  it("restores the backup bytes exactly, and refuses a file changed after the migration or a missing file, leaving it untouched", async () => {
+    const { agentDir, path, original } = await seed();
+    const backup = join(agentDir, "..", "backup");
+    await applyInertPiFields(await planInertPiFields(agentDir), backup);
+    const migrated = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    await writeFile(path, JSON.stringify({ ...migrated, defaultProvider: "anthropic" }));
+    const changed = await readFile(path);
+    await expect(restoreInertPiFields(backup)).rejects.toThrow("changed after the migration");
+    expect(await readFile(path)).toEqual(changed);
+    await rm(path);
+    await expect(restoreInertPiFields(backup)).rejects.toThrow("is missing");
+    await expect(readFile(path)).rejects.toMatchObject({ code: "ENOENT" });
+    await writeFile(path, JSON.stringify(migrated));
+    expect(await restoreInertPiFields(backup)).toBe(true);
+    expect(await readFile(path)).toEqual(original);
   });
 });

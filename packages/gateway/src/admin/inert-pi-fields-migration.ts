@@ -4,6 +4,8 @@ import { copyFile, lstat, mkdir, readdir, readFile, writeFile } from "node:fs/pr
 import { isDeepStrictEqual } from "node:util";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import lockfile from "proper-lockfile";
+import { durableAtomicWriteText } from "../foundation/durable-json.js";
 import { updateJsonLocked } from "../foundation/json.js";
 
 const SETTINGS_MAX_BYTES = 4 * 1_048_576;
@@ -12,7 +14,7 @@ const digest = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex
 type Settings = Record<string, unknown>;
 
 export interface InertPiFieldsPlan { path: string; fields: string[]; before?: Settings }
-interface Manifest { version: 1; path: string; before: string; removed: Settings }
+interface Manifest { version: 1; path: string; before: string }
 
 function parse(bytes: Buffer, path: string): Settings {
   const value = JSON.parse(bytes.toString("utf8")) as unknown;
@@ -44,8 +46,7 @@ export async function applyInertPiFields(plan: InertPiFieldsPlan, backup: string
   await copyFile(plan.path, original, constants.COPYFILE_EXCL);
   const saved = await readFile(original);
   if (!isDeepStrictEqual(parse(saved, original), plan.before)) throw new Error(`${plan.path} changed while it was backed up; rerun with a new backup directory`);
-  const removed = Object.fromEntries(plan.fields.map(field => [field, plan.before![field]]));
-  const manifest: Manifest = { version: 1, path: plan.path, before: digest(saved), removed };
+  const manifest: Manifest = { version: 1, path: plan.path, before: digest(saved) };
   await writeFile(join(backup, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600, flag: "wx" });
   await updateJsonLocked<Settings>(plan.path, {}, current => {
     if (!isDeepStrictEqual(current, plan.before)) throw new Error(`${plan.path} changed since it was read; rerun with a new backup directory`);
@@ -60,15 +61,19 @@ export async function restoreInertPiFields(backup: string): Promise<boolean> {
   const original = await readFile(join(backup, "settings.json"));
   if (digest(original) !== manifest.before) throw new Error("The backup does not match its manifest");
   const before = parse(original, manifest.path);
-  let restored = false;
-  await updateJsonLocked<Settings>(manifest.path, {}, current => {
-    if (isDeepStrictEqual(current, before)) return current;
+  const release = await lockfile.lock(manifest.path, { realpath: false, retries: { retries: 10, minTimeout: 20, maxTimeout: 100 } });
+  try {
+    const info = await lstat(manifest.path).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return undefined; throw error; });
+    if (!info?.isFile() || info.size > SETTINGS_MAX_BYTES) throw new Error(`${manifest.path} is missing or not a bounded regular file; restore it by hand from ${backup}`);
+    const current = parse(await readFile(manifest.path), manifest.path);
+    if (isDeepStrictEqual(current, before)) return false;
     if (!isDeepStrictEqual(current, without(before))) throw new Error(`${manifest.path} changed after the migration; restore it by hand from ${backup}`);
-    restored = true;
-    return before;
-  }, SETTINGS_MAX_BYTES);
-  await verify(manifest.path, before);
-  return restored;
+    await durableAtomicWriteText(manifest.path, original.toString("utf8"));
+    if (!(await readFile(manifest.path)).equals(original)) throw new Error(`${manifest.path} does not hold the backup bytes after the write`);
+    return true;
+  } finally {
+    await release();
+  }
 }
 
 async function verify(path: string, expected: Settings): Promise<void> {
