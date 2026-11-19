@@ -223,8 +223,7 @@ compare by digest and report only added/changed/removed, then `mcp.changed` or `
 ## Project git state
 
 Tron never writes `.pi/`. Badges: matches `HEAD` → Project; else **Staged** or
-**Uncommitted**; **Local only** outside a repository or when ignored. A commit holding a
-historical Tron-staged blob appends `committed`.
+**Uncommitted**; **Local only** outside a repository or when ignored.
 
 ## Home profile
 

@@ -358,8 +358,8 @@ export class GatewayService {
     dependencies.settingsModel?.owner.outsideChanges?.observe({
       providerFilesChanged: () => dependencies.globalProviderResources.requestReload(),
       outside: async (entries) => {
-        const outside = entries.filter(entry => entry.status === "outside" && !recordSubject(entry.key));
-        this.recordSubjectsChangedOutside(entries.filter(entry => entry.status === "outside" && recordSubject(entry.key)));
+        const outside = entries.filter(entry => !recordSubject(entry.key));
+        this.recordSubjectsChangedOutside(entries.filter(entry => recordSubject(entry.key)));
         for (const file of new Set(outside.map(entry => entry.actor.id))) {
           const group = outside.filter(entry => entry.actor.id === file);
           await this.settingsChanged(group[0]!.target, group.map(entry => ({
@@ -367,10 +367,6 @@ export class GatewayService {
             layer: entry.layer, status: entry.status,
           })), { actor: group[0]!.actor });
         }
-        const committed = entries.filter(entry => entry.status === "committed");
-        if (committed.length) dependencies.broadcast("settings.changed", safeJson({
-          changeIds: committed.map(entry => entry.changeId), keys: [...new Set(committed.map(entry => entry.key))], layer: "project", target: committed[0]!.target,
-        }));
       },
     });
   }

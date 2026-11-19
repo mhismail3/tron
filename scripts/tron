@@ -49,6 +49,12 @@ Commands:
                                     One-shot R10 removal of the inert Pi fields theme and
                                     hideThinkingBlock from agent/settings.json through its locked
                                     writer; dry run unless --apply; never at startup
+  migrate observed-git-residue --tron-home <dir> [--apply --backup <new dir>]
+  migrate observed-git-residue --tron-home <dir> --restore --backup <dir>
+                                    One-shot #2602 removal of the retired staged/head project-git
+                                    fields from state/settings/observed.json; refuses while a
+                                    Gateway owns the agent directory; dry run unless --apply;
+                                    never at startup
   migrate push-policy --restore --tron-home <dir>
                                     Rollback to a pre-v3 build: restores the two stores from
                                     state/migrations/push-policy-v3. Refuses while a Gateway owns
@@ -267,6 +273,14 @@ case "$cmd" in
           echo "Prepare it first: scripts/tron build gateway" >&2; exit 66;
         }
         exec node "$GATEWAY/dist/admin/inert-pi-fields-migration.js" "$@"
+        ;;
+      observed-git-residue)
+        shift
+        use_pinned_node
+        [[ -f "$GATEWAY/dist/admin/observed-git-residue-migration.js" ]] || {
+          echo "Prepare it first: scripts/tron build gateway" >&2; exit 66;
+        }
+        exec node "$GATEWAY/dist/admin/observed-git-residue-migration.js" "$@"
         ;;
       push-policy)
         shift

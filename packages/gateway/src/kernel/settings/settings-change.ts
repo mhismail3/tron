@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { ModelRuntime } from "../pi/coding-agent.js";
 import { asUncertainOutcome, GatewayError } from "../../errors.js";
 import { RequestSpanLane } from "../../util/request-span.js";
-import { type ConfirmChange, type ChangeRequest, type SettingsSignal, type ChangeOutcome, type ChangeResult, type ChangeStatus, type GitResult, type FixedSetting, type SettingsTarget, type Direction, type LayerId, type Qualifiers } from "./tool-contract.js";
+import { type ConfirmChange, type ChangeRequest, type SettingsSignal, type ChangeOutcome, type ChangeResult, type ChangeStatus, type FixedSetting, type SettingsTarget, type Direction, type LayerId, type Qualifiers } from "./tool-contract.js";
 import type { Actor, ActorKind, ChangeEntry, SettingsChangeRecord } from "./settings-record.js";
 import { composedBelow, devicePreferenceRead, readBinding, resolveSettings } from "./settings-resolver.js";
 import { HOME_PROFILE_SUBJECT, hasSessionSettingsApplier, keyForHome, recordSubject, type Binding, type KeyDeclaration, type SettingsSchema } from "./settings-schema.js";
@@ -70,7 +70,7 @@ interface SettingsChangeOwner extends SettingsReadOwner {
   contextWindowValue(runtime: ModelRuntime, qualifier: string | undefined, value: unknown): number;
   defaultContextWindow(runtime: ModelRuntime, qualifier: string): number | undefined;
   observedWrites(planned: readonly Planned[], projectRoot: string | undefined): PlannedWrite[];
-  readonly outsideChanges: { begin(writes: readonly PlannedWrite[]): Promise<void>; end(writes: readonly PlannedWrite[], landed: ReadonlyMap<string, { git?: GitResult; changeId: string }>): Promise<void> } | undefined;
+  readonly outsideChanges: { begin(writes: readonly PlannedWrite[]): Promise<void>; end(writes: readonly PlannedWrite[], landed: ReadonlyMap<string, { changeId: string }>): Promise<void> } | undefined;
   applyStore(target: SettingsTarget, stores: SettingsStores, plan: Planned, value: unknown, context: ChangeContext, writers: Pick<SettingsWriters, "setTrust">, current: unknown): Promise<StoreApplyResult>;
   recordValue(subject: string, instance: string): Promise<unknown>;
 }
@@ -96,7 +96,7 @@ const STORE_ORDER: Record<Binding["store"], number> = {
   "pi": 0, "pi-model-ref": 0, "trust": 1, "mac-terminal": 1, "mac-terminal-service": 1, "mcp": 1, "models": 1, "lesson": 1, "device-preference": 1, "home": 3, "gateway": 4, "session": 5, "session-settings": 5, "session-launch": 5,
 };
 
-type StoreApplyResult = { revision?: number; git?: GitResult; result?: unknown };
+type StoreApplyResult = { revision?: number; result?: unknown };
 
 export function historyVisible(viewer: Actor, entry: ChangeEntry): boolean {
   if (viewer.kind === "home" || viewer.kind === "ui") return true;
@@ -397,11 +397,11 @@ export class SettingsChangePath {
       const ordered = [...planned, ...adoptions].sort((a, b) => STORE_ORDER[a.binding.store] - STORE_ORDER[b.binding.store]);
       const outside = this.model.owner.outsideChanges;
       const writes = this.model.owner.observedWrites(planned, stores.project?.root);
-      const landed = new Map<string, { git?: GitResult; changeId: string }>();
+      const landed = new Map<string, { changeId: string }>();
       await outside?.begin(writes);
       try {
         const result = await this.applyBracketed(target, stores, ordered, context);
-        for (const done of result.filter(done => !done.plan.target)) landed.set(done.plan.changeId, { ...(done.git ? { git: done.git } : {}), changeId: done.plan.changeId });
+        for (const done of result.filter(done => !done.plan.target)) landed.set(done.plan.changeId, { changeId: done.plan.changeId });
         return result;
       } finally {
         try { await outside?.end(writes, landed); }
@@ -451,7 +451,7 @@ export class SettingsChangePath {
   }
 
   private async applyBracketed(target: SettingsTarget, stores: SettingsStores, ordered: readonly Planned[], context: ChangeContext) {
-    const applied: Array<{ plan: Planned; revision?: number; git?: GitResult; result?: unknown }> = [];
+    const applied: Array<{ plan: Planned; revision?: number; result?: unknown }> = [];
     let failure: { plan: Planned; error: GatewayError } | undefined;
     for (const plan of ordered) {
       try {
@@ -475,18 +475,18 @@ export class SettingsChangePath {
         .catch(error => { throw asUncertainOutcome(error, "Settings failed after effects and its audit could not be published"); });
       throw applied.length ? asUncertainOutcome(failure.error, "Settings effects required compensation; inspect before retrying") : failure.error;
     }
-    const entries = applied.filter(done => !done.plan.target).map(done => this.entry(target, done.plan, context, "applied", undefined, done.git));
+    const entries = applied.filter(done => !done.plan.target).map(done => this.entry(target, done.plan, context, "applied"));
     await this.record.append(entries).catch(error => {
       throw asUncertainOutcome(error, "Settings applied but history publication failed");
     });
     return applied.map(done => ({ ...done, changeId: entries.find(entry => entry.changeId === done.plan.changeId || entry.refersTo === done.plan.changeId)!.changeId }));
   }
 
-  private outcomes(applied: ReadonlyArray<{ plan: Planned; changeId: string; revision?: number; git?: GitResult; result?: unknown }>): ChangeOutcome[] {
-    return applied.map(({ plan, changeId, revision, git, result }) => ({
+  private outcomes(applied: ReadonlyArray<{ plan: Planned; changeId: string; revision?: number; result?: unknown }>): ChangeOutcome[] {
+    return applied.map(({ plan, changeId, revision, result }) => ({
       changeId, key: plan.key.id, ...(Object.keys(plan.qualifiers).length ? { qualifiers: plan.qualifiers } : {}),
       layer: plan.request.layer, status: "applied", ...outcomeValues(plan.before, plan.after),
-      ...(revision === undefined ? {} : { revision }), ...(git ? { git } : {}),
+      ...(revision === undefined ? {} : { revision }),
       ...(result === undefined ? {} : { result }),
     }));
   }
@@ -608,14 +608,14 @@ export class SettingsChangePath {
     };
   }
 
-  private entry(target: SettingsTarget, plan: Planned, context: ChangeContext, status: ChangeStatus, failure?: string, git?: GitResult): ChangeEntry {
+  private entry(target: SettingsTarget, plan: Planned, context: ChangeContext, status: ChangeStatus, failure?: string): ChangeEntry {
     return { changeId: plan.changeId, at: this.now().toISOString(), actor: context.actor, target,
       ...(context.commandId ? { commandId: context.commandId } : {}), key: plan.key.id, layer: plan.request.layer, op: plan.request.op,
       ...(Object.keys(plan.qualifiers).length ? { qualifiers: plan.qualifiers } : {}),
       ...(plan.fixedAt ? { fixedAt: plan.fixedAt } : {}),
       ...(plan.before === undefined ? {} : { before: plan.before }), ...(plan.after === undefined ? {} : { after: plan.after }),
       ...(context.reason ? { reason: context.reason } : {}), status,
-      ...(failure ? { failure } : {}), ...(git ? { git } : {}),
+      ...(failure ? { failure } : {}),
       ...(context.undoOf ? { undoOf: context.undoOf } : {}), ...(context.applyAgainOf ? { applyAgainOf: context.applyAgainOf } : {}) };
   }
 }

@@ -47,11 +47,6 @@ export async function gitHeadState(root: string): Promise<GitHeadState | undefin
   return { ...state, head: null, branch: unborn.ok && unborn.stdout.trim() ? unborn.stdout.trim() : null };
 }
 
-export async function stagedBlob(root: string, spec: string): Promise<string | undefined> {
-  const blob = await git(root, ["rev-parse", "--verify", "-q", spec]);
-  return blob.ok ? blob.stdout.trim() : undefined;
-}
-
 export async function projectGitState(root: string, known?: GitHeadState | null): Promise<ProjectGitState> {
   const state = known === undefined ? await gitHeadState(root) : known ?? undefined;
   if (!state) return { kind: "local", reason: "not in a git repository" };
