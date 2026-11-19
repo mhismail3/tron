@@ -1,3 +1,4 @@
+import { watch } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { execFileSync } from "node:child_process";
@@ -12,6 +13,22 @@ import { SettingsChangeRecord } from "../kernel/settings/settings-record.js";
 import { OutsideChanges, projectStores } from "./settings-outside.js";
 
 const roots: string[] = [];
+
+function fsEventsProbe(directory: string): { live(): Promise<void>; close(): void } {
+  let probe = 0;
+  const seen = new Set<string>();
+  const watcher = watch(directory, { persistent: false }, (_event, name) => { if (name !== null) seen.add(String(name)); });
+  return {
+    live: () => {
+      seen.clear();
+      return waitFor(async () => {
+        await writeFile(join(directory, `fsevents-probe-${probe += 1}`), "");
+        return seen.size > 0;
+      }, "the process FSEvents stream rescheduled after the latest watch delivers events").then(() => undefined);
+    },
+    close: () => watcher.close(),
+  };
+}
 afterEach(async () => { await disposeFixtures(); for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 
 it("persists observed state only when a comparison changed it", async () => {
@@ -73,11 +90,15 @@ it("applies outside MCP and trust edits to live sessions and refreshes provider 
     broadcast: () => {}, globalProviderResources: { requestReload: () => { refreshes += 1; } },
   } as unknown as GatewayServiceDependencies);
   let settingsReads: NodeJS.Timeout | undefined;
+  let fsEvents: ReturnType<typeof fsEventsProbe> | undefined;
   try {
     await f.trust.set(f.cwd, true);
     const slot = await f.registry.create(f.cwd);
     await outside.reconcile([{ kind: "mcp" }, { kind: "trust" }, { kind: "models" }]);
     outside.startWatching(error => { throw error; });
+    await mkdir(join(f.root, "fsevents-probe"));
+    fsEvents = fsEventsProbe(join(f.root, "fsevents-probe"));
+    await fsEvents.live();
     settingsReads = setInterval(() => { void f.settings.settingsModel.owner.observedReaders.global(); }, 25);
     await writeFile(join(f.agentDir, "mcp.json"), JSON.stringify({ mcpServers: { outside: { url: `http://127.0.0.1:${address.port}/mcp`, exposure: "direct" } } }));
     await waitFor(() => slot.runtime.session.getAllTools().some(tool => tool.name === "mcp__outside__outside_tool"), "outside MCP edit reaches the same idle session").catch(error => {
@@ -90,6 +111,7 @@ it("applies outside MCP and trust edits to live sessions and refreshes provider 
     const other = await f.registry.create(otherProject);
     await mkdir(join(f.cwd, ".pi"), { recursive: true });
     await outside.reconcile(projectStores(await f.trust.canonicalDirectory(f.cwd)));
+    await fsEvents.live();
     const beforeProject = f.signals.length;
     await writeFile(join(f.cwd, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { local: { url: `http://127.0.0.1:${address.port}/mcp`, exposure: "direct" } } }));
     await waitFor(() => slot.runtime.session.getAllTools().some(tool => tool.name === "mcp__local__outside_tool"), "project MCP reaches its live session");
@@ -114,6 +136,7 @@ it("applies outside MCP and trust edits to live sessions and refreshes provider 
     await waitFor(() => f.signals.slice(beforeRules).some(event => event.outcome === "resources-reload" && event.reason === "completed" && event.sessionId === f.home.sessionId), "global AGENTS invalidates the live Home slot");
   } finally {
     clearInterval(settingsReads);
+    fsEvents?.close();
     await outside.dispose();
     service.dispose();
     try { await disposeFixtures(); }
