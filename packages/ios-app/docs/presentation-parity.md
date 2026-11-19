@@ -193,7 +193,7 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 ## Exact review presentation
 
 `ChangeReviewCard` (`UI/Components/ChangeReviewCard.swift`) is the one plaintext before/after
-card; `ChangeReviewSheet` presents it. An agent, Home or worker change arrives as the native
+card; `ChangeReviewSheet` presents it. A review with intent `provider-api-key` adds one `SecureField` for the provider's API key; Approve stays disabled until it holds text, and the approving answer alone carries it (`secret`), never shown again. An agent, Home or worker change arrives as the native
 `change` interaction (`ExtensionInteractionSheet`); renderer rows whose dry run requires a tap
 present the same sheet. Approve retires the
 sheet at the tap and answers the typed owner once with the review's digest through the receipt executor; Cancel and native

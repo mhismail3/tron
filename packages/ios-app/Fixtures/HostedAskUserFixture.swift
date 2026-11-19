@@ -146,7 +146,8 @@ private final class HostedAskUserFixtureReceipt: ObservableObject {
         lastCancelled = cancelled
         let scope = "scope=\(interactionID)/\(hostEpoch)/\(presentationRevision)"
         if let digest = value?.objectValue?["digest"]?.stringValue, let approved = value?.objectValue?["approved"]?.boolValue {
-            summary = "native change approved=\(approved) digest=\(digest) \(scope)"
+            let secret = value?.objectValue?["secret"]?.stringValue.map { " secret=\($0.count) characters" } ?? ""
+            summary = "native change approved=\(approved) digest=\(digest)\(secret) \(scope)"
         } else if cancelled {
             summary = "extension.respond cancelled=true \(scope)"
         } else {
@@ -245,8 +246,21 @@ private struct HostedAskUserFixture {
             allowCancel: allowCancel
         )
         self.form = form
-        let nativeChange = HostedLaunch.arguments.contains("-tron-native-change-fixture")
-        let review: ChangeReview? = nativeChange ? try! JSONValue.object([
+        let providerKey = HostedLaunch.arguments.contains("-tron-provider-key-fixture")
+        let nativeChange = providerKey || HostedLaunch.arguments.contains("-tron-native-change-fixture")
+        let review: ChangeReview? = providerKey ? try! JSONValue.object([
+            "digest": .string(String(repeating: "a", count: 64)),
+            "title": .string("Custom model provider"),
+            "requiresTap": .bool(true),
+            "reason": .string("Add the Acme endpoint with its API key."),
+            "intent": .string("provider-api-key"),
+            "items": .array([.object([
+                "label": .string("Custom model provider"),
+                "before": .string("(not set)"),
+                "after": .string("Acme, https://models.acme.example/v1, openai-completions, 1 model, Keychain API key"),
+                "detail": .string("Global stored value\nglobal\nAdding a provider or changing its address or API sends your conversations to that address."),
+            ])]),
+        ]).decode(ChangeReview.self) : nativeChange ? try! JSONValue.object([
             "digest": .string(String(repeating: "a", count: 64)),
             "title": .string("Allow shell command"),
             "requiresTap": .bool(true),

@@ -39,6 +39,31 @@ final class TronInteractionSheetUITests: XCTestCase {
     }
 
     @MainActor
+    func testProviderKeyCardSendsTypedKeyOnlyWithApproval() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-ask-user-fixture", "-tron-provider-key-fixture"]
+        app.launch()
+        let approve = app.buttons["Approve"]
+        XCTAssertTrue(approve.waitForExistence(timeout: 10), app.debugDescription)
+        expand(app, title: "Review change")
+        let field = app.secureTextFields["change-review-secret"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(approve.isEnabled, "Approve waits for a typed key")
+        keep(app, "r8a-provider-key-card-empty")
+        field.tap()
+        field.typeText("sk-fixture-typed-key")
+        XCTAssertFalse(app.staticTexts["sk-fixture-typed-key"].exists, "The typed key is never shown")
+        keep(app, "r8a-provider-key-card-typed")
+        for _ in 0..<8 where !approve.isHittable { app.swipeUp() }
+        XCTAssertTrue(approve.isEnabled && approve.isHittable, app.debugDescription)
+        approve.tap()
+        let expected = "native change approved=true digest=\(String(repeating: "a", count: 64)) secret=20 characters scope=ask-user-interaction/hosted-ask-user-epoch/1"
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == %@", expected)).firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Mutation count: 1"].exists)
+    }
+
+    @MainActor
     func testAskUserToolRowReopensAndSubmits() {
         continueAfterFailure = false
         let app = XCUIApplication()
