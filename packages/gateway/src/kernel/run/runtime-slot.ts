@@ -61,7 +61,7 @@ import { ORDINARY_SESSION_PROFILE, type SessionProfile } from "../host/session-p
 import { historyVisible, type ChangeContext, type SessionAppliers, type SettingsChangePath, type SettingsNotice } from "../settings/settings-change.js";
 import { setPath, type SessionSettingsSource, type SettingsModel } from "../settings/settings-model.js";
 import { SETTINGS_OUTCOME_MESSAGE, CONTEXT_DELIVERY_RECEIPT_TYPE } from "../receipts/delivery-tags.js";
-import { type SettingsSignal, type SettingsInventorySource, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting, type LayerId } from "../settings/tool-contract.js";
+import { explicitChoice, type SettingsSignal, type SettingsInventorySource, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting, type LayerId } from "../settings/tool-contract.js";
 import type { Actor } from "../settings/settings-record.js";
 import { piBuiltinExtensions, managedBrowserExtensions, toolSearchExtension } from "../host/pi-builtins.js";
 import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../host/extension-adapters.js";
@@ -825,7 +825,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     const modelChoice = fixed["model.ref[role=chat]"];
     const choiceIndex = modelChoice ? branch.findIndex(entry => entry.type === "custom" && entry.customType === SESSION_SETTINGS_ENTRY
       && (entry.data as { fixed?: Record<string, { ref: string }> } | null)?.fixed?.["model.ref[role=chat]"]?.ref === modelChoice.ref) : -1;
-    const choice = (key: string, runtime: unknown) => !fixed[key] ? runtime : fixed[key].from === "session" || fixed[key].from === "delegate" ? fixed[key].value : undefined;
+    const choice = (key: string, runtime: unknown) => !fixed[key] ? runtime : explicitChoice(fixed[key]) ? fixed[key].value : undefined;
     const model = this.dependencies.modules.policy("modelRuntimeInstalled")?.().modelChoice(branch, choiceIndex) ?? choice("model.ref[role=chat]",
       session.model && { provider: session.model.provider, id: session.model.id }) as { provider: string; id: string } | undefined;
     const thinking = choice("model.thinking[role=chat]", session.thinkingLevel) as string | undefined;
@@ -1450,7 +1450,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
 
   private explicitReloadSettings(fixed: Record<string, FixedSetting>): Record<string, FixedSetting> {
     return Object.fromEntries(Object.entries(fixed).filter(([key, value]) =>
-      this.dependencies.settingsSchema.schemaKey(key).effect !== "reload" || value.from === "session" || value.from === "delegate"));
+      this.dependencies.settingsSchema.schemaKey(key).effect !== "reload" || explicitChoice(value)));
   }
 
   private async refreshReloadDefaults(): Promise<void> {
@@ -1458,7 +1458,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     if (!owners) return;
     const fixed = readSessionFixedSettings(this.sessionManager.getBranch());
     const keys = Object.keys(fixed).filter(key => this.dependencies.settingsSchema.schemaKey(key).effect === "reload"
-      && fixed[key]!.from !== "session" && fixed[key]!.from !== "delegate");
+      && !explicitChoice(fixed[key]));
     if (!keys.length) return;
     const resolved = await owners.model.resolve({ kind: "session", sessionId: this.id }, this.reloadSettingsSource(), keys, { storeState: false });
     let changed = false;
