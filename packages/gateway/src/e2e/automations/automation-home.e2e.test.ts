@@ -578,6 +578,7 @@ it("real Gateway: a singleton partial input resumes with one model turn and push
     expect(gateway.record().providerRequests).toHaveLength(0);
     expect(pushes).toHaveLength(1);
     expect((await gateway.registry.acquire(sessionId)).canonicalSessionEntries().filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-trigger.v1")).toEqual(messages);
+    await mkdir("test-results/2094", { recursive: true });
     await writeFile("test-results/2094/singleton-crash-restart-trace.json", JSON.stringify({ messages, pushes, final: gateway.record() }, null, 2));
   } finally { for (const owner of owners) owner.dispose(); }
 });
