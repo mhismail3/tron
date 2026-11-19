@@ -3,16 +3,14 @@ import TronMobileCore
 
 struct MCPSignInCard: View {
     let sessionID: String
+    let servers: [MCPServerList.Server]
     @Environment(AppModel.self) private var model
-    @Environment(\.tronPresentationActivity) private var activity
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @PresentationState private var servers: [MCPServerList.Server] = []
     @PresentationState private var authOperationID: String?
     @PresentationState private var starting: String?
     @PresentationState private var error: String?
 
     private var needsSignIn: [MCPServerList.Server] { servers.filter { MCPServerPresentationPolicy.isNeedsAuth($0.state) } }
-    private var requestID: String { "\(model.knowledgePresentationIdentity):\(model.mcpConfigurationRevision)" }
 
     var body: some View {
         Group {
@@ -39,7 +37,6 @@ struct MCPSignInCard: View {
                 .accessibilityIdentifier("mcp-sign-in-card")
             }
         }
-        .task(id: PresentationActivityTaskID(source: requestID, presentationActive: activity.allowsPresentationPublication)) { await load() }
         .tronManagedSheet(isPresented: Binding(get: { authOperationID != nil }, set: { if !$0 { authOperationID = nil } }), identity: "mcp.sign-in") {
             if let operationID = authOperationID {
                 MCPAuthSheet(operationID: operationID) { authOperationID = nil }
@@ -49,11 +46,9 @@ struct MCPSignInCard: View {
         }
     }
 
-    private func load() async {
-        guard activity.allowsPresentationPublication else { return }
+    static func load(_ model: AppModel) async -> [MCPServerList.Server]? {
         struct Params: Encodable { let scope = "global" }
-        guard let loaded: MCPServerList = try? await model.client.request("mcp.list", Params()), !Task.isCancelled else { return }
-        servers = loaded.servers
+        return (try? await model.client.request("mcp.list", Params()) as MCPServerList)?.servers
     }
 
     private func start(_ server: String) async {

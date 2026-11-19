@@ -71,11 +71,7 @@ struct HostedIntegrationsFixtureView: View {
                 } else {
                     NavigationStack {
                         VStack {
-                            if scenario == "mcp-auth-card" {
-                                ScrollView { MCPSignInCard(sessionID: "fixture-auth-session").padding(20) }
-                            } else {
-                                MCPServersSettingsView(sessionID: scenario.hasPrefix("mcp-auth-") ? "fixture-auth-session" : nil)
-                            }
+                            MCPServersSettingsView(sessionID: scenario.hasPrefix("mcp-auth-") ? "fixture-auth-session" : nil)
                             Text(mcpOriginalCounters).font(.caption2).accessibilityIdentifier("fixture.mcp-original")
                             Text(mcpReplacementCounters).font(.caption2).accessibilityIdentifier("fixture.mcp-replacement")
                             Text(model.knowledgeDestinationIdentity.profileID ?? "none").font(.caption2).accessibilityIdentifier("fixture.destination")

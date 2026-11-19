@@ -146,6 +146,7 @@ struct SessionContextSheet: View {
     @Environment(\.tronPresentationActivityCoordinator) private var activityCoordinator
     @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
     @PresentationState private var destination: ManageSessionDestination?
+    @PresentationState private var mcpServers: [MCPServerList.Server] = []
     @PresentationState private var showRename = false
     @PresentationState private var unarchiving = false
     @PresentationState private var name = ""
@@ -208,7 +209,7 @@ struct SessionContextSheet: View {
                         }
                         Group {
                             SessionContextUsageCard(snapshot: snapshot, action: compactButton(snapshot))
-                            MCPSignInCard(sessionID: sessionID)
+                            MCPSignInCard(sessionID: sessionID, servers: mcpServers)
                             ManageModelConfigurationCard(sessionID: sessionID)
                             sessionSection(snapshot)
                         }
@@ -258,6 +259,14 @@ struct SessionContextSheet: View {
                 workspaceProbe?.presentation = value
             }
             #endif
+            .task(id: PresentationActivityTaskID(
+                source: "\(model.knowledgePresentationIdentity):\(model.mcpConfigurationRevision)",
+                presentationActive: presentationActivity.allowsPresentationPublication
+            )) {
+                guard presentationActivity.allowsPresentationPublication,
+                      let servers = await MCPSignInCard.load(model), !Task.isCancelled else { return }
+                mcpServers = servers
+            }
             .task(id: PresentationActivityTaskID(
                 source: workspaceRefreshIdentity, presentationActive: workspaceSurfaceIsActive
             )) {
