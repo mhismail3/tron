@@ -1489,6 +1489,17 @@ describe("outside changes to MCP servers and custom models", () => {
       expect(JSON.stringify(await f.history())).not.toContain(secret);
       expect(await readFile(f.outside.path, "utf8")).not.toContain(secret);
     }
+    const prose = { agentOverrides: { a: { systemPrompt: "see https://example.com" }, b: { systemPrompt: "Ready? If asked for a password: refuse." } } };
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), subagents: { disableBuiltins: true } }));
+    await until("publication: outside clean subagents settings", async () => (await outsideEntries(f)).filter(entry => entry.key === "subagents.settings").length === 4);
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), subagents: prose }));
+    await until("publication: outside credential-free subagents settings", async () => (await outsideEntries(f)).filter(entry => entry.key === "subagents.settings").length === 5);
+    const proseEntry = (await outsideEntries(f)).filter(entry => entry.key === "subagents.settings")[0]!;
+    expect(proseEntry).toMatchObject({ after: prose });
+    expect(proseEntry.redacted).toBeUndefined();
+    const guide = { ...reviewer, qualifiers: { agent: "guide" }, value: "---\nname: guide\ndescription: Guides\n---\n\nGuide: https://example.com/guide\n\n**Why?**\n@planner reviews next.\n" };
+    expect(await f.settingsChanges.change(global, [guide], home)).toMatchObject({ status: "review" });
+    expect(await f.settingsChanges.change(global, [{ ...settings, value: prose }], home)).toMatchObject({ status: "review" });
 
     await mkdir(join(agentsDir, "folder.md"));
     await writeFile(join(agentsDir, "large.md"), `---\nname: large\ndescription: Large\n---\n\n${"x".repeat(70 * 1024)}\n`);

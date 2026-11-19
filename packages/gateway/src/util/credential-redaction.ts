@@ -19,13 +19,10 @@ export function redactCredentialField(key: string, value: unknown): unknown {
   return typeof value === "string" ? redactCredentials(redact(value)) : value;
 }
 
-export function redactCredentialPairs(value: string): string {
-  return value.replace(/((?:authorization|api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|password|secret)\s*[:=]\s*)[^\s,;]+/giu, "$1[REDACTED]");
-}
-
 export function redact(value: string): string {
-  return redactCredentialPairs(value
-    .replace(/\bBearer\s+[^\s,;]+/giu, "Bearer [REDACTED]"))
+  return value
+    .replace(/\bBearer\s+[^\s,;]+/giu, "Bearer [REDACTED]")
+    .replace(/((?:authorization|api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|password|secret)\s*[:=]\s*)[^\s,;]+/giu, "$1[REDACTED]")
     .replace(/\/Users\/[^\s'"]+/gu, "[USER_PATH]")
     .replace(/\/private\/var\/[^\s'"]+/gu, "[PRIVATE_PATH]");
 }

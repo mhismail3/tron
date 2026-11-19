@@ -37,8 +37,9 @@ setting and is not an approval queue.
   `settings.json`) and the `subagents.agent` value (one agent Markdown file whose frontmatter names the
   qualifier and that has a description). Values are checked field by field against what pi-subagents accepts
   (overrides, model scope, watchdog, machines with no local env). `secret-free.ts` `carriesSecret` detects what
-  the shared redactors detect (known token formats, `Bearer` values, private keys, URL userinfo and query strings,
-  `password:`/`secret=`-style pairs) and secret-named fields; both values refuse such content, refuse to change a
+  the shared `redactCredentials` detects (known token formats, `Bearer` values, private keys) plus URL userinfo
+  (`user:pass@`), a secret-named URL query parameter, and a `password:`/`secret=`-style pair whose value is at least
+  8 characters with a digit, each matched within one string value (never across fields), and secret-named fields; both values refuse such content, refuse to change a
   stored value that carries it (`onDisk`), and an outside value that carries it is observed and recorded by digest
   only. A secret in a shape none of these detect is not recognised.
 - `secret-free.ts`: the shared secret-shape refusals (credential detection, secret-named query and token names,
