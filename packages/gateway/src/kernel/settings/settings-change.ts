@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from "node:crypto";
-import { join } from "node:path";
 import type { ModelRuntime } from "../pi/coding-agent.js";
 import { asUncertainOutcome, GatewayError } from "../../errors.js";
 import { RequestSpanLane } from "../../util/request-span.js";
@@ -95,7 +94,7 @@ const adoptsHomeRuntime = (plan: Planned) => plan.request.layer === "session" &&
   && (plan.key.layers.session?.store === "session" || plan.key.layers.session?.store === "session-settings");
 
 const STORE_ORDER: Record<Binding["store"], number> = {
-  "pi": 0, "pi-model-ref": 0, "trust": 1, "mac-terminal": 1, "mac-terminal-service": 1, "mcp": 1, "models": 1, "lesson": 1, "device-preference": 1, "home": 3, "gateway": 4, "session": 5, "session-settings": 5, "session-launch": 5,
+  "pi": 0, "pi-model-ref": 0, "trust": 1, "mac-terminal": 1, "mac-terminal-service": 1, "mcp": 1, "models": 1, "lesson": 1, "agents": 1, "device-preference": 1, "home": 3, "gateway": 4, "session": 5, "session-settings": 5, "session-launch": 5,
 };
 
 type StoreApplyResult = { revision?: number; result?: unknown };
@@ -541,12 +540,6 @@ export class SettingsChangePath {
       if (request.layer === "session" && chatModel) qualifiers.model = `${chatModel.provider}/${chatModel.id}`;
       else throw new GatewayError("invalid_request", `${key.label} needs a model qualifier`);
     }
-    const projectBinding = key.layers.project;
-    if (request.layer === "session" && key.projectSettable && projectBinding && stores.project?.applied) {
-      const value = readBinding(stores, "project", projectBinding, qualifiers, true, key.id)
-        ?? readBinding(stores, "project", projectBinding, qualifiers, false, key.id);
-      if (value !== undefined) throw new GatewayError("conflict", `${key.label} is set by ${join(stores.project.root, ".pi", "settings.json")}; edit its Project key instead. The Session override is retained inactive.`);
-    }
     if (binding.store === "session-launch") throw new GatewayError("invalid_request", "Delegation launch inputs are read-only");
     if (binding.store === "session-settings" && !hasSessionSettingsApplier(key)) {
       throw new GatewayError("unsupported", `${key.label} has no writable ${LAYER_LABELS[request.layer]} store yet`);
@@ -598,6 +591,7 @@ export class SettingsChangePath {
       : binding.store === "trust" ? stores.trust[qualifiers.project!]
       : device ? (device.status === "value" ? device.value : undefined)
       : readBinding(stores, store, binding, qualifiers, qualifiedWrite(binding, qualifiers), key.id);
+    if (before !== undefined) key.type.onDisk?.(before, key.label);
     if (request.expected !== undefined && !deepEqual(request.expected, before ?? null)) {
       throw new GatewayError("conflict", `${key.label} changed since it was read; refresh and try again`, false, {
         current: (before ?? null) as never,

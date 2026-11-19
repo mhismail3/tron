@@ -6,7 +6,7 @@ Current behavior: [settings contract](settings-contract.md).
 
 ## Resolution and ownership
 
-- One registry, resolver and audited change path. Precedence is **Project > Session override > Global**;
+- One registry, resolver and audited change path. Precedence is **Session override > Project > Global** (D23: the most specific explicit choice wins);
   Home uses its Profile as the Session override, has no Project, and no second chapter override.
 - Global is the saved machine configuration with release defaults underneath, presented as one
   editable scope. Keep existing owned Pi/Gateway/credential stores; merging the concept does not
@@ -17,15 +17,13 @@ Current behavior: [settings contract](settings-contract.md).
 - Only trusted Project values enter resolution or SDK admission. Apply the allowlist before every
   consumer, not merely before UI rendering: raw SDK reads must not resurrect ignored safety keys.
   No pinned SDK/package modification is proposed; stop for a decision if that proves necessary.
-- A set Project value masks the Session value at that instance; resolve per-model qualifiers within
-  a scope before comparing scopes. Preserve supported map/tool composition only among admitted values;
-  a masked Session value must not leak into composition. A lower scope's more-specific qualifier
+- An explicit Session value beats a set Project value at that instance; resolve per-model qualifiers within
+  a scope before comparing scopes. A chat's model and thinking count as Session values only when explicitly chosen.
+  Preserve supported map/tool composition only among admitted values. A lower scope's more-specific qualifier
   never outranks a higher scope's plain value.
-- Keep a masked Session override stored, inactive, and unchanged. Removing the Project value reactivates
-  it at the key's effect boundary. Changing a masked override is refused, including agent/taskId writes;
-  Revert is not offered until Project releases the key. No misleading successful-but-ineffective edit.
+- A Session override over a Project value applies and wins; Revert inherits the Project value.
 - Missing/untrusted/unreadable Project settings contribute nothing. Session rows remain editable and
-  show Session/Global values, never the Project pill. A notice says respectively “Project settings
+  show Session/Global values, never a Project source. A notice says respectively “Project settings
   aren't applied until this project is trusted” or “Project settings couldn't be read”; details name
   the path. Trust changes go through the trust prompt, the Project Settings trust row or the agent, not an automatic approval in this sheet.
 - Unknown/disallowed repo keys are ignored with bounded diagnostics naming file/key/reason, never
@@ -104,18 +102,19 @@ trust and explicit credential separation. Learned profile notes never become an 
   Runtime admission applies changed defaults only at the declared effect boundary, never mid-stream.
   Pending startup/reload/restart effects are stated on the row; opening/dismissing never changes state.
 - Global Reset removes the saved value and uses the release default (or “Not set”); does not clear
-  Session or Project values. Session/Profile Revert unsets only that override and inherits Global.
+  Session or Project values. Session/Profile Revert unsets only that override and inherits Project when one
+  is set, else Global.
   Explicit override equal to Global still gets Overridden until reverted. All resets use expected
   revisions, tiering, receipts and undo. Lowering a safety floor still needs the maintainer's tap.
 - Home workers: retain current bounded admission inheritance, not an ambient Home recipe. Capture
   worker model queue/thinking, subagent queue and task budget at delegation; explicit task choices
   replace that seed; store resulting choices in the worker's Session override. Other worker defaults
-  come from Global, not arbitrary Home tool/connection settings. The worker's trusted Project beats
-  both seeded and explicit choices. Later Home model/queue edits affect future admissions, not existing
+  come from Global, not arbitrary Home tool/connection settings. A worker's trusted Project model and
+  thinking beat its queue or profile seed; a model or thinking Home names explicitly beats the Project.
+  Later Home model/queue edits affect future admissions, not existing
   workers; retain the existing live task-budget lowering boundary (raises never expand an active task).
 - `settings` + `taskId` edits that worker's same override store. Model/thinking/Run changes apply next
-  request with the existing fenced notification; busy tools/context changes wait. Project-masked
-  writes refuse with file/key, so Home cannot inadvertently bypass Project precedence (#1336).
+  request with the existing fenced notification; busy tools/context changes wait. Session-scope writes over a Project value apply and win.
 - Home remains hot-reloadable at supported boundaries. Keep its current restricted recipe: no repo,
   no ordinary automatic compaction, no arbitrary shell/extensions. Capability-inapplicable controls
   are omitted rather than pretending to work. The two allowlists grant scopes, not runtime features.
@@ -155,8 +154,6 @@ pills and passive Overridden tags reuse the shared control/status owners.
 | Global `SettingsView`, section links/cards | Keep current group styling/order; every setting row editable, never an inspection clone |
 | Session `SessionContextSheet`, Home `HomeManageSheet` | One Settings row each; remove competing model/tool settings cards from Manage Session, keep composer shortcuts on same owner |
 | Inherited / explicit override row | Plain effective Global value / Overridden tag plus existing round Revert; no source badge/link |
-| Eligible row masked by Project | Disabled editor; separately tappable “Set by Project settings” pill (accessible while editor disabled) |
-| Project pill info | Small sheet: “This is set by the current project's settings. Ask an agent to update them in the repo.” File and exact JSON key path |
 | Non-overridable Project keys | One “Set by Project” row/subsheet, read-only actual allowed Project values only; no unrelated Global values |
 | Untrusted/disallowed Project values | Diagnostic notice/details, not active Project overrides or disabled Session controls |
 | `SettingsConfigurationInspection` | Delete destination, routes and solely-owned fixtures/assertions; no read-only Global Configuration anywhere |

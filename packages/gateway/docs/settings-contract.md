@@ -20,7 +20,7 @@ The settings tool's `update` action (Tron Home only) installs one exact version 
   authority, privacy or spend, and any install or irreversible effect, require an exact paired-native
   tap through the dedicated [native review](#native-review), never a generic form.
   In a `sources.*` path list, adding an entry or removing a `-`/`!` exclusion widens.
-- **F4 Scopes.** Top wins: **Project > Session/Home override > Global**, among the scopes
+- **F4 Scopes.** Top wins: **Session/Home override > Project > Global** (the most specific explicit choice), among the scopes
   the target has and the key's grants allow. One resolver takes the topmost applied scope with
   a value; the effective value is computed, never stored.
 
@@ -32,10 +32,14 @@ The settings tool's `update` action (Tron Home only) installs one exact version 
 | Session/Home override | Session JSONL for ordinary chats and workers; `<tronHome>/state/home/profile.json` for Home's bounded durable recipe | Settings change path; the runtime lane owns SDK effects |
 | Global | Agent and Gateway defaults, trust, notifications and SDK/schema defaults | Gateway and the underlying SDK stores; hand edits are outside writers |
 
-Precedence is Project > Session/Home override > Global, admitted by
-`projectSettable` and `sessionOverridable`. Home has no Project and no separate chapter
-override. Project masks a stored Session choice without deleting it; removing Project
-reactivates that choice. Workers inherit only the bounded queue/model, thinking,
+Precedence is Session/Home override > Project > Global, admitted by
+`projectSettable` and `sessionOverridable` (proof block `settings/precedence`, decision D23). Home has no
+Project and no separate chapter override. A chat's model and thinking count as a Session value only when
+they are an explicit choice (`fixed.from` is `session` or `delegate`); an inherited launch or runtime model
+is not, so a project's model still applies to a chat that never chose one and an unavailable Project model
+is still refused. A Home task worker's model taken from the worker queue is a seed, not an explicit choice:
+a Project model beats it, while a model Home names explicitly beats the Project. Session edits over a
+Project value apply; `projectSetting` (file and key) is served only when the Project layer wins. Workers inherit only the bounded queue/model, thinking,
 subagent-queue and task-budget recipe. The Project store is
 `.pi/` at the worktree root (`TrustInspection.projectDir`, pi's `projectDir`;
 [project root](../src/machine/README.md#project-root)). Trust is the Global key
@@ -50,7 +54,7 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 ## Keys
 
 <!-- tron docs settings -->
-51 keys, declared in `packages/gateway/src/kernel/settings/settings-schema.ts` (`KEYS`).
+52 keys, declared in `packages/gateway/src/kernel/settings/settings-schema.ts` (`KEYS`).
 
 | Key | Qualifier | Group | Layers | Home layers | Timing | Effect | Native tap |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -102,6 +106,7 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 | `sources.themes` | — | sources | project, global | as allowed | fixed | reload | — |
 | `sources.packages` | — | sources | project, global | as allowed | fixed | reload | install |
 | `sources.npmCommand` | — | sources | global | as allowed | live | next-change | trust |
+| `subagents.settings` | — | workers | global | as allowed | live | next-request | trust |
 | `notifications.push.inputNeeded` | — | notifications | global | none | live | next-request | privacy |
 | `notifications.push.finished` | — | notifications | global | none | live | next-request | privacy |
 | `notifications.push.waiting` | — | notifications | global | none | live | next-request | privacy |
@@ -113,6 +118,7 @@ Record subjects (`RECORD_SUBJECTS`), changed per instance through the same path:
 | `tools.mcp.server` | tools | server |
 | `accounts.models.provider` | accounts | provider |
 | `context.lesson` | context | lesson |
+| `subagents.agent` | workers | agent |
 <!-- /tron docs -->
 
 Install telemetry is not a setting: `gateway-main.ts` sets `PI_TELEMETRY=0` before any SDK work, so a hand-written `enableInstallTelemetry` cannot re-enable it; the pin also removes provider attribution headers and is inherited by child processes the Gateway starts.
@@ -123,6 +129,7 @@ Other schema fields: `subgroup`, `type`, `options` or `optionsSource` (`catalog.
 fields (`label`, `help`, `order`, `importance`, `control`,
 `confirm`, `entry`). Record subjects compare by digest. `tools.mcp.server` is writable through this path at the Global layer only, with writers `ui` and `home` (agents other than Home are refused): its value is `{command, args?}` or `{url, headers?}` plus optional `enabled` and `exposure`. `headers` holds only `Authorization`: this server's Keychain bearer reference `{source: "keychain", service: "tron.mcp", account: "tron-mcp-<server>", format: "bearer"}`, which Pi resolves at connection; the token itself is stored only by `mcp.token.set`. Other secret-bearing fields (env, other headers, oauth, credentials in a URL or argument) are refused without echo; an existing record with fields outside that set is refused for change, and edited by hand. Command text, args and URLs are refused when they carry a credential shape (the shared `redactCredentials` detector) or a secret-named token. Adding or enabling a server, changing its command or address, adding its bearer reference, or raising its visibility (hidden, then codemode or deferred, then direct, the order Pi uses for which tools the model is shown) taps; disabling, removing or lowering visibility applies. Absent exposure means codemode. Its effect is `reload`: the freshness owner marks live sessions stale and reloads them at idle.
 `accounts.models.provider` is writable through this path at the Global layer only, with writers `ui` and `home`: its value is `{baseUrl, api, name?, models?}` and each model is `{id, name?, reasoning?, input?, contextWindow?, maxTokens?}`; credentials (`apiKey`, `headers`, `authHeader`), `oauth`, `compat` and `modelOverrides` are refused without echo, and so is an existing provider that carries any of them, which is edited in `models.json` or the app. Adding a provider or changing its address or API taps; other changes apply. Its effect is `next-request`: the shared runtime refreshes before the change returns, so the model list reflects it at once.
+`subagents.settings` is the `subagents` block of the Mac `settings.json` that pi-subagents reads (default model, provider and thinking, agent overrides, scan and exclude directories, machines, model scope, watchdog); it is Global-only with writers `ui` and `home`, closed to those fields and checked field by field against what pi-subagents accepts, and refused when it carries a credential shape or a secret-named field. Setting it taps; unsetting applies. `subagents.agent` (qualifier `agent`) is one user subagent file `agents/<agent>.md` in the agent directory: Markdown whose frontmatter declares `name: <agent>` and a `description`, with no credential shape or secret-named frontmatter field. Adding or changing one taps; removing applies. Both take effect at the next subagent launch (`next-request`). Hand or pi-subagents edits of either reach history as outside changes; definitions, and any `subagents.settings` value in which the shared credential detector (`carriesSecret`, per string value: known token formats, `Bearer` values, private keys, URL userinfo, secret-named URL query parameters, `password:`/`secret=`-style pairs whose value is at least 8 characters with a digit, and secret-named fields; prose such as "password: refuse" is not flagged) finds a credential, compare by digest and are recorded redacted; a secret in a shape it does not detect is recorded as written. A stored value it flags is not changed through this path (edit it by hand). Symlinked `agents/*.md` files are read like pi-subagents reads them; directories and dangling links are skipped. An unreadable `agents/` entry skips that store's comparison; nothing else fails.
 
 ## Timing
 
@@ -213,11 +220,11 @@ acceptance; supported edits announce through the existing fenced worker steer.
 
 `OutsideChanges` (`settings-outside.ts`) compares stores with the values last observed
 (`<tronHome>/state/settings/observed.json`) on every read and on debounced directory events:
-the Mac `settings.json`, `trust.json`, `mcp.json`, `models.json` and each known project's `.pi/`
+the Mac `settings.json`, `trust.json`, `mcp.json`, `models.json`, the user subagent definitions in `agents/*.md` and each known project's `.pi/`
 files; first sight is the baseline. Known projects have no count bound: a project leaves
 observed state only when its root no longer exists on disk. A comparison that changed nothing but the
 read instant writes nothing, so reads never queue behind a durable write. Each differing instance is one `outside`
-entry (with `HEAD` and branch for repository files); MCP servers and custom providers
+entry (with `HEAD` and branch for repository files); MCP servers, custom providers and subagent definitions
 compare by digest and report only added/changed/removed, then `mcp.changed` or `settings.changed`. Tron's own `mcp.json` writes are bracketed (`begin`/`end`); a provider written through the change path is bracketed the same way and refreshes the runtime before the change returns.
 
 ## Project git state
@@ -275,6 +282,7 @@ name their file and never make a Session editor look Project-owned.
 A key's canonical type, validation and runtime clamping apply to every change.
 `dryRun` returns per-key errors and the immutable review. Changes is permanent history,
 not a pending-request inbox. Global writes Global, Session the Session scope, Home its saved settings;
-Project is inspection only. Session/Home reuse Global's renderer and editors; Project-owned rows
-have a read-only value and separate Project info pill, explicit overrides have Overridden/Revert,
+Project is inspection only. Session/Home reuse Global's renderer and editors; a row whose value comes
+from Project stays editable as a Session override (its file and key, `projectSetting`, are served to the
+`settings` tool only; the app does not show them), explicit overrides have Overridden/Revert,
 and the app has no Changes entry: audit history and Undo are the `settings` tool's. Hand-built screens remain only for guided flows and viewers.

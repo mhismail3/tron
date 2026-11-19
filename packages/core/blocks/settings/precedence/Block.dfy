@@ -40,8 +40,8 @@ module SettingsPrecedence refines SettingsPrecedenceLaws {
 
   function Resolve(k: Key, ls: Layers): Resolution {
     var g, h, s, p := ShownOf(k, ls, Global), ShownOf(k, ls, Home), ShownOf(k, ls, Session), ShownOf(k, ls, Project);
-    var won := Over(k, p, Project, Over(k, s, Session, Over(k, h, Home, Over(k, g, Global, Won(Default, FromDefault)))));
-    Resolution(won.value, won.layer, Top(p, Project, Top(s, Session, Top(h, Home, Top(g, Global, AllApplied)))), Shows(g, h, s, p))
+    var won := Over(k, s, Session, Over(k, h, Home, Over(k, p, Project, Over(k, g, Global, Won(Default, FromDefault)))));
+    Resolution(won.value, won.layer, Top(s, Session, Top(h, Home, Top(p, Project, Top(g, Global, AllApplied)))), Shows(g, h, s, p))
   }
 
   // The value after layer m's plain value, when it counts below layer l, over the value from the layers below m.
@@ -56,11 +56,11 @@ module SettingsPrecedence refines SettingsPrecedenceLaws {
     else if k.composes then Compose(v, e.unqualified.v) else Tok(e.unqualified.v)
   }
 
-  // The value from the layers strictly below l: the plain values of Global, Home and Session, lowest first, each
-  // counted only when its layer lies below l. Project is the top layer, so it lies below none.
+  // The value from the layers strictly below l: the plain values of Global, Project and Home, lowest first, each
+  // counted only when its layer lies below l. Session is the top layer, so it lies below none.
   function Below(k: Key, ls: Layers, l: Layer): Value {
-    PlainOver(k, ls, Session, l.Project?,
-      PlainOver(k, ls, Home, l.Session? || l.Project?,
+    PlainOver(k, ls, Home, l.Session?,
+      PlainOver(k, ls, Project, l.Home? || l.Session?,
         PlainOver(k, ls, Global, !l.Global?, Default)))
   }
 
@@ -75,7 +75,7 @@ module SettingsPrecedence refines SettingsPrecedenceLaws {
 
   // The value and origin after the four layers, lowest first.
   ghost function Steps(k: Key, ls: Layers): Won {
-    StepL(k, ls, Project, StepL(k, ls, Session, StepL(k, ls, Home, StepL(k, ls, Global, Won(Default, FromDefault)))))
+    StepL(k, ls, Session, StepL(k, ls, Home, StepL(k, ls, Project, StepL(k, ls, Global, Won(Default, FromDefault)))))
   }
 
   lemma ShownOfSpec(k: Key, ls: Layers, l: Layer)
@@ -133,17 +133,17 @@ module SettingsPrecedence refines SettingsPrecedenceLaws {
   {
     ResolveSteps(k, ls);
     var g := if Live(k, ls, Global) then [TokenOf(ls.global)] else [];
+    var p := if Live(k, ls, Project) then [TokenOf(ls.project)] else [];
     var h := if Live(k, ls, Home) then [TokenOf(ls.home)] else [];
     var se := if Live(k, ls, Session) then [TokenOf(ls.session)] else [];
-    var p := if Live(k, ls, Project) then [TokenOf(ls.project)] else [];
-    assert LiveTokens(k, ls) == g + h + se + p;
-    FoldedAppend(k, Default, g + h + se, p);
-    FoldedAppend(k, Default, g + h, se);
-    FoldedAppend(k, Default, g, h);
+    assert LiveTokens(k, ls) == g + p + h + se;
+    FoldedAppend(k, Default, g + p + h, se);
+    FoldedAppend(k, Default, g + p, h);
+    FoldedAppend(k, Default, g, p);
     var v1 := Folded(k, Default, g); FoldedLayer(k, ls, Global, Default);
-    var v2 := Folded(k, v1, h); FoldedLayer(k, ls, Home, v1);
-    var v3 := Folded(k, v2, se); FoldedLayer(k, ls, Session, v2);
-    FoldedLayer(k, ls, Project, v3);
+    var v2 := Folded(k, v1, p); FoldedLayer(k, ls, Project, v1);
+    var v3 := Folded(k, v2, h); FoldedLayer(k, ls, Home, v2);
+    FoldedLayer(k, ls, Session, v3);
   }
 
   // One layer's plain value folds like its step below l.
@@ -154,15 +154,15 @@ module SettingsPrecedence refines SettingsPrecedenceLaws {
   lemma R8Below(k: Key, ls: Layers, l: Layer)
   {
     var g := if PlainLive(k, ls, Global, l) then [ls.global.unqualified.v] else [];
+    var p := if PlainLive(k, ls, Project, l) then [ls.project.unqualified.v] else [];
     var h := if PlainLive(k, ls, Home, l) then [ls.home.unqualified.v] else [];
-    var se := if PlainLive(k, ls, Session, l) then [ls.session.unqualified.v] else [];
-    assert !PlainLive(k, ls, Project, l);
-    assert BelowTokens(k, ls, l) == g + h + se;
-    FoldedAppend(k, Default, g + h, se);
-    FoldedAppend(k, Default, g, h);
+    assert !PlainLive(k, ls, Session, l);
+    assert BelowTokens(k, ls, l) == g + p + h;
+    FoldedAppend(k, Default, g + p, h);
+    FoldedAppend(k, Default, g, p);
     var v1 := Folded(k, Default, g); FoldedPlain(k, ls, Global, l, Default);
-    var v2 := Folded(k, v1, h); FoldedPlain(k, ls, Home, l, v1);
-    FoldedPlain(k, ls, Session, l, v2);
+    var v2 := Folded(k, v1, p); FoldedPlain(k, ls, Project, l, v1);
+    FoldedPlain(k, ls, Home, l, v2);
   }
 
   lemma R6Shown(k: Key, ls: Layers, l: Layer)

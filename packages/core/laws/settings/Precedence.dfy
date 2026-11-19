@@ -6,7 +6,7 @@
 // resolveInstance, and composedBelow) and scope-resolution.ts (scopeAdmitted).
 // Statements only; the block refines this module. Edit a law only with a new independent review.
 abstract module SettingsPrecedenceLaws {
-  // The four stored layers, lowest first; the built-in default lies below all of them.
+  // The four stored layers; the built-in default lies below all of them. Rank gives their order.
   datatype Layer = Global | Home | Session | Project
   // Token: the name the shell gives one value of one call. The block passes tokens on and never compares or
   // computes with them. A JavaScript number in the compiled block.
@@ -37,14 +37,15 @@ abstract module SettingsPrecedenceLaws {
   // its plain token the layer's ordinary value, both read by the shell from the layer's store; `applied` is
   // false only for the Project layer of an untrusted project.
 
-  // Rank: the precedence order, Global 1 < Home 2 < Session 3 < Project 4 (Project above Session, decided by
-  // Mohsin, H1); the default is below every layer.
+  // Rank: the precedence order, Global 1 < Project 2 < Home 3 < Session 4: the most specific explicit choice wins,
+  // so a chat's or Home's own override beats a checked-in project value (decision D23, replacing H1); the default is
+  // below every layer.
   ghost function Rank(l: Layer): int {
     match l
     case Global => 1
-    case Home => 2
-    case Session => 3
-    case Project => 4
+    case Project => 2
+    case Home => 3
+    case Session => 4
   }
 
   // The entry the layers hold for layer l.
@@ -86,9 +87,9 @@ abstract module SettingsPrecedenceLaws {
   // The tokens of the applied layers that take part, lowest first.
   ghost function LiveTokens(k: Key, ls: Layers): seq<Token> {
     (if Live(k, ls, Global) then [TokenOf(ls.global)] else [])
+    + (if Live(k, ls, Project) then [TokenOf(ls.project)] else [])
     + (if Live(k, ls, Home) then [TokenOf(ls.home)] else [])
     + (if Live(k, ls, Session) then [TokenOf(ls.session)] else [])
-    + (if Live(k, ls, Project) then [TokenOf(ls.project)] else [])
   }
 
   // What the resolution shows for layer l.
@@ -114,8 +115,8 @@ abstract module SettingsPrecedenceLaws {
     ensures Admitted(k, Home) == k.sessionOverridable && Admitted(k, Session) == k.sessionOverridable
     ensures Admitted(k, Project) == k.projectSettable
 
-  // R1 winner: the setting resolves to the highest applied layer that takes part, so a Project value beats
-  // Session, Session beats Home, Home beats Global; and an ordinary (non-composing) setting's value is that
+  // R1 winner: the setting resolves to the highest applied layer that takes part, so a Session value beats
+  // Home, Home beats Project, Project beats Global; and an ordinary (non-composing) setting's value is that
   // layer's shown value.
   lemma R1Winner(k: Key, ls: Layers, l: Layer)
     requires Live(k, ls, l) && forall m: Layer | Rank(m) > Rank(l) :: !Live(k, ls, m)
@@ -175,9 +176,9 @@ abstract module SettingsPrecedenceLaws {
   // hold a plain value, lowest first.
   ghost function BelowTokens(k: Key, ls: Layers, l: Layer): seq<Token> {
     (if PlainLive(k, ls, Global, l) then [ls.global.unqualified.v] else [])
+    + (if PlainLive(k, ls, Project, l) then [ls.project.unqualified.v] else [])
     + (if PlainLive(k, ls, Home, l) then [ls.home.unqualified.v] else [])
     + (if PlainLive(k, ls, Session, l) then [ls.session.unqualified.v] else [])
-    + (if PlainLive(k, ls, Project, l) then [ls.project.unqualified.v] else [])
   }
 
   // PlainLive: layer m is strictly below l, in the target, bound, admitted, applied and holds a plain value.

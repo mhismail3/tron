@@ -1440,6 +1440,105 @@ describe("outside changes to MCP servers and custom models", () => {
     expect(await providers()).toEqual({ "hand-provider": { ...provider, baseUrl: "https://hand-models.invalid/v1", apiKey: secret } });
     transcript.push({ case: "outside mcp and models", detail: await outsideEntries(f) });
   });
+  caseIt("audits outside pi-subagents settings and agent files, and writes them through the typed change path", async owner => {
+    const f = await stagedFixture(owner);
+    const global = { kind: "global" as const };
+    const agentsDir = join(f.agentDir, "agents");
+    const scout = "---\nname: scout\ndescription: Fast recon\n---\n\nRead before you write.\n";
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), subagents: { disableBuiltins: true } }));
+    await until("publication: outside subagents settings", () => f.published("subagents.settings"));
+    expect((await outsideEntries(f)).find(entry => entry.key === "subagents.settings")).toMatchObject({ op: "set", after: { disableBuiltins: true }, actor: { kind: "outside" } });
+    await mkdir(agentsDir, { recursive: true });
+    await writeFile(join(agentsDir, "scout.md"), scout);
+    await until("publication: outside subagent definition", () => f.published("subagents.agent", ["agent", "scout"]));
+    expect((await outsideEntries(f)).find(entry => entry.key === "subagents.agent")).toMatchObject({ qualifiers: { agent: "scout" }, added: true, redacted: true,
+      presentation: { label: "Subagent definition scout", section: "workers" } });
+    await writeFile(join(agentsDir, "scout.md"), scout.replace("Read before", "Always read before"));
+    await until("publication: outside subagent edit", async () => (await outsideEntries(f)).filter(entry => entry.key === "subagents.agent").length === 2);
+
+    const home = { actor: { kind: "home" as const, id: "home" }, reason: "Add a reviewer subagent" };
+    const reviewer = { key: "subagents.agent", qualifiers: { agent: "reviewer" }, layer: "global" as const, op: "set" as const, value: "---\nname: reviewer\ndescription: Reviews changes\n---\n\nReview.\n" };
+    await expect(f.settingsChanges.change(global, [reviewer], { actor: { kind: "agent", id: "chat" }, reason: "Try" })).rejects.toMatchObject({ code: "invalid_request" });
+    for (const value of ["no frontmatter", "---\nname: other\ndescription: d\n---\n", "---\nname: reviewer\ndescription: d\napiKey: x\n---\n", "---\nname: reviewer\n---\n\nReview.\n"]) {
+      await expect(f.settingsChanges.change(global, [{ ...reviewer, value }], home)).rejects.toMatchObject({ code: "invalid_request" });
+    }
+    const review = await f.settingsChanges.change(global, [reviewer], home);
+    expect(review).toMatchObject({ status: "review", review: { requiresTap: true } });
+    expect(await f.settingsChanges.change(global, [reviewer], { ...home, actor: { kind: "ui", id: "device:phone" }, confirmationDigest: review.review!.digest }))
+      .toMatchObject({ status: "applied" });
+    expect(await readFile(join(agentsDir, "reviewer.md"), "utf8")).toBe(reviewer.value);
+    const settings = { key: "subagents.settings", layer: "global" as const, op: "set" as const, value: { disableBuiltins: false, defaultThinking: "low" } };
+    await expect(f.settingsChanges.change(global, [{ ...settings, value: { agentOverrides: { worker: { env: { API_TOKEN: "x" } } } } }], home)).rejects.toMatchObject({ code: "invalid_request" });
+    for (const value of [{ unknownField: 1 }, { agentOverrides: { worker: "x" } }, { agentOverrides: { worker: { tools: "all" } } },
+      { machines: { mini: { env: { HOME: "/x" } } } }, { watchdog: { unknown: 1 } }, { modelScope: { enforce: true } }]) {
+      await expect(f.settingsChanges.change(global, [{ ...settings, value }], home)).rejects.toMatchObject({ code: "invalid_request" });
+    }
+    const settingsReview = await f.settingsChanges.change(global, [settings], home);
+    await f.settingsChanges.change(global, [settings], { ...home, actor: { kind: "ui", id: "device:phone" }, confirmationDigest: settingsReview.review!.digest });
+    expect((await f.macDocument()).subagents).toEqual(settings.value);
+    await f.settingsModel.resolve(global);
+    const outside = await outsideEntries(f);
+    expect(outside.filter(entry => entry.key === "subagents.agent" && entry.qualifiers?.agent === "reviewer")).toEqual([]);
+    expect(outside.filter(entry => entry.key === "subagents.settings")).toHaveLength(1);
+    const created = (await f.history()).find(entry => entry.key === "subagents.agent" && entry.qualifiers?.agent === "reviewer" && entry.status === "applied")!;
+    expect(await f.settingsChanges.undo(created.changeId, { actor: { kind: "ui", id: "device:phone" }, reason: "Remove the reviewer" })).toMatchObject({ status: "applied" });
+    expect(existsSync(join(agentsDir, "reviewer.md"))).toBe(false);
+
+    const token = "sk-handwrittensecret0123456789";
+    await writeFile(join(agentsDir, "hand.md"), `---\nname: hand\ndescription: Hand written\n---\n\nUse ${token}.\n`);
+    await until("publication: hand-written subagent", () => f.published("subagents.agent", ["agent", "hand"]));
+    const clean = { ...reviewer, qualifiers: { agent: "hand" }, value: "---\nname: hand\ndescription: Hand written\n---\n\nClean.\n" };
+    await expect(f.settingsChanges.change(global, [clean], home)).rejects.toMatchObject({ code: "conflict" });
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()),
+      subagents: { agentOverrides: { worker: { systemPrompt: `Use ${token}` } } } }));
+    await until("publication: outside secret-bearing subagents settings", async () => (await outsideEntries(f)).filter(entry => entry.key === "subagents.settings").length === 2);
+    expect((await outsideEntries(f)).filter(entry => entry.key === "subagents.settings")[0]).toMatchObject({ redacted: true });
+    await expect(f.settingsChanges.change(global, [settings], home)).rejects.toMatchObject({ code: "conflict" });
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()),
+      subagents: { agentOverrides: { worker: { systemPrompt: "Fetch https://user:pass1234word@example.com/x; password: hunter2hunter" } } } }));
+    await until("publication: outside URL-credential subagents settings", async () => (await outsideEntries(f)).filter(entry => entry.key === "subagents.settings").length === 3);
+    expect((await outsideEntries(f)).filter(entry => entry.key === "subagents.settings")[0]).toMatchObject({ redacted: true });
+    const shapes: Array<[string, string]> = [["Use password: \"S3cretPassw0rd\" here", "S3cretPassw0rd"], ["Use secret: 'abcd1234efgh' here", "abcd1234efgh"],
+      ["Export DB_PASSWORD=Abc12345xyz first", "Abc12345xyz"], ["Export ANTHROPIC_API_KEY=abcd1234efgh5678 first", "abcd1234efgh5678"],
+      ["Set client_secret=Zq9xLm2pQ7rT now", "Zq9xLm2pQ7rT"], ["git clone https://glpat-abcdefghij1234567890@gitlab.com/x.git", "glpat-abcdefghij1234567890"]];
+    let published = 3;
+    for (const [systemPrompt] of shapes) {
+      await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), subagents: { agentOverrides: { worker: { systemPrompt } } } }));
+      published += 1;
+      await until(`publication: outside ${systemPrompt}`, async () => (await outsideEntries(f)).filter(entry => entry.key === "subagents.settings").length === published);
+      expect((await outsideEntries(f)).filter(entry => entry.key === "subagents.settings")[0], systemPrompt).toMatchObject({ redacted: true });
+    }
+    for (const secret of [token, "pass1234word", "hunter2hunter", ...shapes.map(([, secret]) => secret)]) {
+      expect(JSON.stringify(await f.history()), secret).not.toContain(secret);
+      expect(await readFile(f.outside.path, "utf8"), secret).not.toContain(secret);
+    }
+    const prose = { agentOverrides: { a: { systemPrompt: "see https://example.com" }, b: { systemPrompt: "Ready? If asked for a password: refuse." }, c: { systemPrompt: "Book at https://example.com?email=me@x.com today" } } };
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), subagents: { disableBuiltins: true } }));
+    await until("publication: outside clean subagents settings", async () => (await outsideEntries(f)).filter(entry => entry.key === "subagents.settings").length === published + 1);
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), subagents: prose }));
+    await until("publication: outside credential-free subagents settings", async () => (await outsideEntries(f)).filter(entry => entry.key === "subagents.settings").length === published + 2);
+    const proseEntry = (await outsideEntries(f)).filter(entry => entry.key === "subagents.settings")[0]!;
+    expect(proseEntry).toMatchObject({ after: prose });
+    expect(proseEntry.redacted).toBeUndefined();
+    const guide = { ...reviewer, qualifiers: { agent: "guide" }, value: "---\nname: guide\ndescription: Guides\n---\n\nGuide: https://example.com/guide\n\n**Why?**\n@planner reviews next.\n" };
+    expect(await f.settingsChanges.change(global, [guide], home)).toMatchObject({ status: "review" });
+    expect(await f.settingsChanges.change(global, [{ ...settings, value: prose }], home)).toMatchObject({ status: "review" });
+
+    await mkdir(join(agentsDir, "folder.md"));
+    await writeFile(join(agentsDir, "large.md"), `---\nname: large\ndescription: Large\n---\n\n${"x".repeat(70 * 1024)}\n`);
+    await until("publication: large subagent beside a folder named .md", () => f.published("subagents.agent", ["agent", "large"]));
+    expect(await f.published("subagents.agent", ["agent", "large"])).toBe(true);
+    await expect(f.settingsModel.resolve(global)).resolves.toMatchObject({ target: global });
+    const linkedTarget = join(f.root, "linked-agent.md");
+    await writeFile(linkedTarget, "---\nname: linked\ndescription: Linked in\n---\n\nLinked.\n");
+    await symlink(linkedTarget, join(agentsDir, "linked.md"));
+    await symlink(join(f.root, "missing-agent.md"), join(agentsDir, "dangling.md"));
+    await until("publication: symlinked subagent beside a dangling link", () => f.published("subagents.agent", ["agent", "linked"]));
+    expect(await f.published("subagents.agent", ["agent", "linked"])).toBe(true);
+    await expect(f.settingsModel.resolve(global)).resolves.toMatchObject({ target: global });
+    transcript.push({ case: "outside pi-subagents", detail: await outsideEntries(f) });
+  });
+
   caseIt("refuses a provider write while models.json holds an unrelated invalid entry, and never persists or reports it applied", async owner => {
     const f = await fixture(owner);
     const global = { kind: "global" as const };
@@ -1500,6 +1599,7 @@ describe("every key at every allowed layer", () => {
       if (valueKind === "stringList") return ["sample-entry"];
       if (valueKind === "packages") return ["npm:sample-package"];
       if (valueKind === "text") return "sample-text";
+      if (valueKind === "subagentSettings") return { defaultThinking: "low" };
       throw new Error(`No generic sample for ${row.key} (${valueKind})`);
     };
     const stored = async (key: KeyDeclaration, layer: string, qualifiers: Record<string, string>) => {
@@ -1528,11 +1628,6 @@ describe("every key at every allowed layer", () => {
         const scope = layer === "home" ? "session" : layer;
         const request = [{ key: key.id, layer: scope, op: "set", value, ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) }];
         const extra = layer === "session" ? { fence: fence() } : {};
-        if (row.projectSetting && layer === "session") {
-          await expect(f.change(targets[layer]!, request, extra, client([slot.id]))).rejects.toThrow("edit its Project key instead");
-          report.push({ ...instance, result: "verified masked by Project" });
-          continue;
-        }
         const homeKey = keyForHome(key, layer === "home");
         const binding = homeKey.layers[layer as "global"];
         if (layer === "project" || !scopeAdmitted(homeKey, layer as "global") || !key.writers.includes("ui") || !binding || binding.store === "session-launch") {
@@ -1572,7 +1667,7 @@ describe("every key at every allowed layer", () => {
     transcript.push({ case: `every key: ${only}`, detail: report.filter(entry => entry.layer === only) });
     await mkdir(dirname(EVERY_KEY_ARTIFACT), { recursive: true });
     await writeFile(EVERY_KEY_ARTIFACT, `${JSON.stringify(report, null, 2)}\n`);
-    const gaps = report.filter(entry => entry.layer === only && !["round-trip", "verified read-only", "verified masked by Project", "verified unserved: no writer", "verified unserved: no paired iPhone", "native mutation: real sshd Gateway round trips"].includes(String(entry.result)) && !String(entry.result).startsWith("Home applier"));
+    const gaps = report.filter(entry => entry.layer === only && !["round-trip", "verified read-only", "verified unserved: no writer", "verified unserved: no paired iPhone", "native mutation: real sshd Gateway round trips"].includes(String(entry.result)) && !String(entry.result).startsWith("Home applier"));
     expect(gaps).toEqual([]);
   }, 60_000);
 });
