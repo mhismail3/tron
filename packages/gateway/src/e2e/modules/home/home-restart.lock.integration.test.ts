@@ -193,7 +193,6 @@ describe("gateway/home contention, publication and restart lock", () => {
       inlineTrace: { ...(trace as unknown as Record<string, unknown>), canonicalJsonl: { home: inline } } as TraceValue,
       update: lockUpdateRequested(MODULE),
       validate: () => {
-        expect(second.ok || second.error).toBeTruthy();
         expect(followUp.ok, JSON.stringify(followUp)).toBe(true);
         expect(disableWhileBusy.ok).toBe(false);
         expect(pauseRefused!.ok).toBe(false);

@@ -44,9 +44,8 @@ If you pushed the task branch, delete it on origin once main contains it
 A red or conflict refusal leaves main and your branch unchanged: fix, commit, land again. An uncertain network
 result is not a failed write: inspect `git ls-remote origin refs/heads/main` and
 ancestry before acting. Never force-push main or automatically replay uncertain writes.
-Do not run full suites after landing: the asynchronous main batch owns that coverage and
-the causal revert of a proven culprit
-([principles P2](../../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-batch-signal-not-a-commit-gate)). Sync tracked-clean primary main only when
+Do not run full suites after landing: `land`'s `--full` validation and the device checkpoints own that coverage
+([principles P2](../../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-landing-and-checkpoint-signal)). Sync tracked-clean primary main only when
 strictly behind with `git merge --ff-only origin/main`; preserve untracked files.
 
 ## Issues and preservation

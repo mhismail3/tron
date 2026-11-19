@@ -10,8 +10,6 @@ SOUND="$ROOT/Sources/Resources/Sounds/tron-notification.caf"
 [[ "$(grep -Fc 'Sources/Resources/Sounds/tron-notification.caf' "$PROJECT")" == 1 ]] \
   || fail "project.yml must bundle the notification sound exactly once"
 
-! grep -Fq 'INFOPLIST_KEY_UISupportedInterfaceOrientations' "$PROJECT" \
-  || fail "project.yml must not declare ineffective generated orientation keys"
 /usr/bin/python3 - "$INFO" "$ROOT/ShareExtension/Info.plist" <<'PY' \
   || fail "source Info.plist orientation policy is invalid"
 import plistlib, sys

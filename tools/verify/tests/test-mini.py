@@ -10,9 +10,7 @@ report and exit code come back with the mini checkout path rewritten; that a dir
 unreachable host, an off-pin toolchain, a HEAD other than verify's commit and a job lock held past the caller's
 cap fail with the no-result exit and reason and no result, while a lane's own exit 75 stays its result; that stopping a lane
 waiting for the job lock ends it before it starts; that a push whose job never started leaves no ref once the next job ends; and that stopping the local runner, or killing its
-whole process group, stops the mini lane and releases the mini job lock. The pool (#2336) runs on the mini when
-reachable, set up and idle, and otherwise here with its reason (including an argument naming a path outside
-the checkout and a probe with no or malformed status); a stopped local pool lane is stopped itself.
+whole process group, stops the mini lane and releases the mini job lock.
 """
 from __future__ import annotations
 
@@ -42,8 +40,6 @@ while (($#)); do
 done
 destination="$1"; shift
 [[ "$destination" != unreachable* ]] || { echo "ssh: connect to host $destination port 22: Connection refused" >&2; exit 255; }
-[[ "$destination" != silent* ]] || exit 0
-[[ "$destination" != garbled* ]] || { echo 'mini status: not json'; exit 0; }
 [[ "$destination" != nojob* || "$*" != *" remote "* ]] || { echo "ssh: connection to $destination closed" >&2; exit 255; }
 # sshd runs the command in its own session: killing this client's process group leaves it running, with its
 # input closed once no client holds the pipe.
@@ -137,7 +133,7 @@ class MiniGatewayLane(unittest.TestCase):
         return subprocess.run(command, cwd=self.local / 'packages/gateway', env=options.get('env', self.env), text=True, capture_output=True, timeout=300)
 
     def reader(self):
-        """The shipped mini.py, imported, for the reader verify and the batch classify a lane with."""
+        """The shipped mini.py, imported, for the reader verify classifies a lane with."""
         spec = importlib.util.spec_from_file_location('mini_under_test', self.local / 'tools/verify/mini.py')
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -335,7 +331,7 @@ raise SystemExit(75 if '--incomplete' in sys.argv else 0)
         sha = self.commit('whole-verifier boundary fixture')
         main = self.git('rev-parse', 'HEAD^')
         self.git('update-ref', 'refs/remotes/origin/main', main)
-        for args in (['--batch'], ['--update-locks', 'owner']):
+        for args in (['--update-locks', 'owner'],):
             denied = self.lane('verify', *args)
             self.assertEqual(denied.returncode, NO_RESULT, denied.stdout + denied.stderr)
             self.assertIn('synchronous checks', denied.stderr)
@@ -518,66 +514,6 @@ sys.exit(child.returncode)
             root_rows = connection.execute("SELECT test_id, commit_sha, outcome FROM results WHERE test_id LIKE 'scripts/root.test.mjs::%'").fetchall()
         self.assertEqual(len(root_rows), 1)
         self.assertEqual(root_rows[0][1:], (root_sha, 'passed'))
-
-    def pool(self, *args: str) -> subprocess.CompletedProcess:
-        return subprocess.run(['python3', str(self.local / 'tools/verify/mini.py'), 'pool', *args], cwd=self.local / 'packages/gateway',
-                              env={**self.env, 'HOME': str(self.temporary)}, text=True, capture_output=True, timeout=300)
-
-    def test_the_pool_runs_on_the_mini_when_reachable_and_idle_and_names_this_mac_otherwise(self) -> None:
-        report, args = self.report_args()
-        mini = self.pool(*args)
-        self.assertEqual(mini.returncode, 0, mini.stdout + mini.stderr)
-        self.assertIn('gateway lane: on the Mac mini mini.test', mini.stderr)
-        self.assertIn('stand-in lane progress', mini.stdout)
-        self.assertEqual(json.loads(report.read_text())['cwd'], 'tron-ci/jobs/gateway/packages/gateway', 'the lane ran on the mini')
-
-        def here(reason: str, *extra: str) -> None:
-            report.unlink(missing_ok=True)
-            local = self.pool(*args, *extra)
-            self.assertEqual(local.returncode, 3 if 'fail' in extra else 0, local.stdout + local.stderr)
-            self.assertIn(f'gateway lane: on this Mac ({reason})', local.stderr)
-            self.assertNotIn('pushing', local.stdout)
-            self.assertNotIn('tron-ci', json.loads(report.read_text())['cwd'], 'the lane ran in this checkout')
-
-        with open(self.mini / 'tron-ci/jobs/gateway.lock', 'a+') as lock:
-            lock.write(json.dumps({'host': 'other', 'worktree': '/w', 'pid': 1}))
-            lock.flush()
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            here('the mini is busy with another job')
-        outside = self.temporary / 'outside.config.ts'
-        here(f'an argument names {outside}, outside this checkout', '--config', str(outside))
-        here('an argument names ../../../outside.config.ts, outside this checkout', '--config=../../../outside.config.ts')
-        here('an argument names ../../../outside.test.ts, outside this checkout', '../../../outside.test.ts')
-        self.git('config', 'tron.verify.mini', 'unreachable.test')
-        here('the mini unreachable.test is unreachable: ssh: connect to host unreachable.test port 22: Connection refused', 'fail')
-        self.git('config', 'tron.verify.mini', 'silent.test')
-        here('the mini silent.test answered no status: no output')
-        self.git('config', 'tron.verify.mini', 'garbled.test')
-        here('the mini garbled.test answered no status: mini status: not json')
-        self.git('config', '--unset', 'tron.verify.mini')
-        here('no mini is configured')
-        self.git('config', 'tron.verify.mini', 'mini.test')
-        bare = self.mini / 'tron-ci/tron.git'
-        bare.rename(bare.with_name('moved.git'))
-        here('the mini is not set up: no ~/tron-ci/tron.git')
-        bare.with_name('moved.git').rename(bare)
-        self.write('README', 'uncommitted\n')
-        here('uncommitted changes; the mini runs a commit')
-
-    def test_stopping_a_pool_lane_on_this_mac_stops_the_lane_itself(self) -> None:
-        self.git('config', 'tron.verify.mini', 'unreachable.test')
-        runner = subprocess.Popen(['python3', str(self.local / 'tools/verify/mini.py'), 'pool', 'hang'], cwd=self.local / 'packages/gateway',
-                                  env={**self.env, 'HOME': str(self.temporary)}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        self.addCleanup(lambda: runner.poll() is None and runner.kill())
-        started = self.temporary / 'lane-started'
-        for _ in range(300):
-            if started.exists():
-                break
-            time.sleep(0.1)
-        self.assertTrue(started.exists(), 'the local lane started')
-        runner.send_signal(signal.SIGTERM)
-        self.assertEqual(runner.wait(timeout=30), 143)
-        self.assertEqual((self.temporary / 'lane-terminated').read_text(), 'SIGTERM', 'the lane itself received the stop')
 
     def test_an_unreachable_host_or_off_pin_toolchain_fails_without_a_result(self) -> None:
         report, args = self.report_args()

@@ -3,7 +3,6 @@ import { chmod, mkdir, mkdtemp, readdir, realpath, rm, stat, writeFile } from "n
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { performance } from "node:perf_hooks";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { expect, it } from "vitest";
 import { TrustService } from "../../../kernel/resources/trust-service.js";
@@ -17,9 +16,6 @@ it("starts managed-subagent sessions from a fresh build without transforming Typ
   const tronHome = join(root, "tron");
   const previous = { agentDir: process.env.PI_CODING_AGENT_DIR, providerRoot: process.env[DELEGATED_PROVIDER_ROOT_ENV] };
   let registry: RuntimeRegistry | undefined;
-  let last = performance.now();
-  let longestStallMs = 0;
-  const sampler = setInterval(() => { const now = performance.now(); longestStallMs = Math.max(longestStallMs, now - last - 10); last = now; }, 10);
   try {
     const workspaces = [join(root, "first"), join(root, "second")];
     await Promise.all([mkdir(agentDir), ...workspaces.map(cwd => mkdir(cwd))]);
@@ -47,13 +43,10 @@ it("starts managed-subagent sessions from a fresh build without transforming Typ
     const cache = await stat(join(tronHome, "cache", "pi-subagents-transform-cache", managedSubagents.root.split("/").at(-1)!));
     expect(cache.isDirectory() && (cache.mode & 0o777)).toBe(0o700);
   } finally {
-    clearInterval(sampler);
     await registry?.dispose();
     for (const [name, value] of [["PI_CODING_AGENT_DIR", previous.agentDir], [DELEGATED_PROVIDER_ROOT_ENV, previous.providerRoot]] as const) {
       if (value === undefined) delete process.env[name]; else process.env[name] = value;
     }
-    const report = process.env.TRON_SUBAGENT_TRANSFORM_REPORT;
-    if (report) await writeFile(report, JSON.stringify({ longestStallMs: Math.round(longestStallMs) }) + "\n");
     await rm(root, { recursive: true, force: true });
   }
 }, 180_000);

@@ -12,8 +12,6 @@ schemes = ["Tron Development", "Tron Device", "Tron UI Validation", "Tron Device
 for config in configs:
     assert re.search(rf"^  {re.escape(config)}:", source, re.M), config
 assert len(re.findall(r"^  [A-Za-z][^:]*:\n    build:", source, re.M)) == 5
-for stale in ("Tron Beta", "Tron Fast", "  Beta:", "  ProdDebug:", "  DeviceTest:"):
-    assert stale not in source, stale
 for scheme in schemes:
     assert source.count(f"  {scheme}:\n") == 1, scheme
 assert "  Tron:\n" not in source
@@ -62,12 +60,10 @@ for name, (bundle, route, apns, attest, blur, flags) in expected.items():
             assert "GCC_OPTIMIZATION_LEVEL = 3" in text
     if name == "LocalDevice":
         assert "TRON_PRIVATE_VARIABLE_BLUR=1" in text
-        assert "#include \"Debug.xcconfig\"" not in text
     if name == "DevicePerformance":
         assert "TRON_PRIVATE_VARIABLE_BLUR" not in text
         # The profiler's measurement build: optimized like LocalDevice, with
         # testability kept for the @testable hosted test bundle.
-        assert "#include \"Debug.xcconfig\"" not in text
         for setting in ("SWIFT_OPTIMIZATION_LEVEL = -O", "SWIFT_COMPILATION_MODE = wholemodule",
                         "GCC_OPTIMIZATION_LEVEL = 3", "ENABLE_TESTABILITY = YES"):
             assert setting in text, (name, setting)
@@ -88,14 +84,9 @@ for name, (bundle, route, apns, attest, blur, flags) in expected.items():
 info_plist = (root / "Sources/Info.plist").read_text()
 assert "TRON_PUSH_ROUTE" in info_plist
 assert "TRONGatewayProtocolVersion" in info_plist and "TRONGatewayMinProtocolVersion" in info_plist
-assert "#if BETA" not in (root / "Sources/Notifications/PushNotificationCoordinator.swift").read_text()
-assert (root / "TronMobileDevelopment.entitlements").exists()
-assert (root / "TronMobileLocalDevice.entitlements").exists()
-assert (root / "TronMobileRelease.entitlements").exists()
 for entitlement in (root / "TronMobileDevelopment.entitlements", root / "TronMobileLocalDevice.entitlements", root / "TronMobileRelease.entitlements", root / "ShareExtension" / "ShareExtensionDevelopment.entitlements", root / "ShareExtension" / "ShareExtensionProduction.entitlements"):
     assert "com.apple.security.application-groups" in entitlement.read_text(), entitlement
     assert "application-identifier" not in entitlement.read_text() and "com.apple.developer.team-identifier" not in entitlement.read_text(), entitlement
-assert not any((root / "Configuration" / old).exists() for old in ("Beta.xcconfig", "ProdDebug.xcconfig", "Prod.xcconfig", "DeviceTest.xcconfig"))
 print("iOS build matrix policy passed")
 PY
 

@@ -49,7 +49,6 @@ test("a block a shell runs compiles to a module that needs no Dafny runtime", as
     assert.throws(() => meter.Grain(name), { name: "TypeError", message: `not a Scale: ${JSON.stringify(name)}` });
   }
   assert.deepEqual(meter.Firsts([2, 0, 2, 1, 0]), [1, 0, 2]);
-  assert.deepEqual(meter.Firsts([2, 0, 2, 1, 0]), [1, 0, 2]);
   assert.deepEqual(meter.Firsts([7, 0]), [0]);
   assert.deepEqual(meter.Firsts([]), []);
   assert.throws(() => meter.Firsts([0, -1]), { name: "RangeError", message: "not a Position: -1" });

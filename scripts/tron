@@ -22,9 +22,9 @@ Commands:
                                     every mutating Gateway lifecycle transition
   chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]
                                     Attach terminal chat to the Gateway-owned runtime
-  test gateway [--mini|--local] [vitest args...]
-                                    Run Gateway tests with pinned Node on the test-host pool: the Mac
-                                    mini when reachable and idle, else here (tools/verify/README.md)
+  test gateway [--mini] [vitest args...]
+                                    Run Gateway tests with pinned Node here, or on the Mac mini
+                                    under its lease with --mini (tools/verify/README.md)
   test ios [--ios-host mini|local] [runner args...]
                                     Run the owned iOS runner under the mini lease by default;
                                     return logs and native result bundles; local is host-local.
@@ -82,9 +82,9 @@ Commands:
                                     objects to test-results/metrics/<sha>.json;
                                     --compare prints the delta table; never a gate
   verify [--changed] [--base <ref>] | --module <id> | --all | --update-locks <id> [--skip ios,mac,relay] [--plan]
-         [--gateway-host pool|local|mini] [--ios-host local|mini]
+         [--gateway-host local|mini] [--ios-host local|mini]
                                     Mechanical none/partial/full tier; affected checks
-                                    now, full coverage in the async main batch.
+                                    now, full coverage in land's --full validation.
                                     --plan includes dirty paths and exact commands.
                                     Live logs and partial test-results/verify/<sha>.json;
                                     no empty test passes; land, not verify, gates main.
@@ -93,18 +93,6 @@ Commands:
   land [-m <message>]               Merge this branch --no-ff onto fetched main, run Tiers 0-2
                                     on that exact merge on the mini, push it only if it passed;
                                     one land at a time per host (tools/verify/land.md)
-  verify --hunt [--rounds N] [--hours H] [--plan]
-                                    Repeat unchanged-main non-Apple suites on mini; zero-wait lease,
-                                    unique logs, partial receipts and first-red retention.
-  verify --batch [--base <main-anchor> | --repeat] [--plan]
-                                    Async full-main batch, run in a linked worktree (never
-                                    the primary checkout); first use needs --base, then
-                                    raw last-green owns coverage. Proves a red's culprit
-                                    with fresh exact-case controls, prepares its revert;
-                                    publishes only after review, once
-                                    `git config tron.verify.revertRemote origin`.
-  verify --batch --review <culprit> --decision ACCEPT|BLOCK --reviewer <id> --binding <digest>
-                                    Record a non-author decision on one bound request.
   mutate <gateway-src-file> [--count N] [--seed S] [--timeout SECONDS]
                                     Seeded sampled mutation of one file against the tests
                                     verify selects for it (lock sensitivity, plan 6.6);
@@ -227,8 +215,7 @@ case "$cmd" in
       gateway)
         case "${1:-}" in
           --mini) shift; exec python3 "$ROOT/tools/verify/mini.py" "$@" ;;
-          --local) shift; exec python3 "$ROOT/tools/verify/gateway.py" "$@" ;;
-          *) exec python3 "$ROOT/tools/verify/mini.py" pool "$@" ;;
+          *) exec python3 "$ROOT/tools/verify/gateway.py" "$@" ;;
         esac
         ;;
       ios) exec python3 "$ROOT/tools/verify/mini.py" ios "$@" ;;
