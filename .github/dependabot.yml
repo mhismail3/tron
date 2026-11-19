@@ -1,7 +1,7 @@
 version: 2
 # Security alerts cover every lockfile without configuration. Version updates arrive as one
 # grouped minor/patch PR per package; majors stay separate for a maintainer decision. Agents
-# fold a PR by redoing the bump on main and landing it with plain Git, then close the PR.
+# fold a PR by redoing the bump on main and landing it with `scripts/tron land`, then close the PR.
 updates:
   - package-ecosystem: npm
     directory: /packages/gateway
