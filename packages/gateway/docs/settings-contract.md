@@ -216,6 +216,13 @@ Home's delegated-worker model/thinking and supported Run changes retain Session
 fences and effect points. A disposed worker or changed actual target refuses
 acceptance; supported edits announce through the existing fenced worker steer.
 
+## File-tool guard
+
+The agent's `read`, `write` and `edit` tools refuse `settings.json`, `mcp.json`, `trust.json` and `auth.json` in the
+agent directory, including through symlinks, `file://` URLs and letter case, so the settings tool stays their only
+agent writer. `grep`, `find`, `ls` and `bash` are not guarded; the guard steers agents and is not a security boundary
+(see `admin/README.md`).
+
 ## Outside changes
 
 `OutsideChanges` (`settings-outside.ts`) compares stores with the values last observed

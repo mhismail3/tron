@@ -137,7 +137,13 @@ are installed; schema access never evaluates their late-bound service getter.
 - Change/Undo: kernel `SettingsChangePath.change`, `undo`, `applyAgain`.
 - Learned profile: Home `HomeProfileItems.change` / `undo` under `SettingsChangePath.auditSubject`.
 - Outside detection: `OutsideChanges` (`reconcile`, `dispose`).
-- Agent tool and web mark: `tron-settings-extension.ts`.
+- Agent tool, web mark and file-tool guard: `tron-settings-extension.ts`. Its `tool_call` hook refuses `read`,
+  `write` and `edit` of `settings.json`, `mcp.json`, `trust.json` and `auth.json` directly in the agent directory
+  (the path normalized as Pi's tools do, including `@`, `~` and `file://`; resolved against the chat's cwd; the
+  parent directory's realpath and a case-folded name compared, and a path whose realpath is one of those files'
+  realpaths refused too). `grep`, `find`, `ls` and `bash` are not guarded: they take directories or arbitrary
+  commands that cannot be parsed reliably, so the guard steers agents to the settings tool and is not a security
+  boundary.
 
 ## Signals
 
