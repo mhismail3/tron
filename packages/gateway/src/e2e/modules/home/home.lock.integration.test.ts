@@ -58,7 +58,7 @@ async function loadedExtensions(gateway: LockGateway, sessionId: string): Promis
 const HOME_EXTENSIONS = [
   "<inline:tron-context-window> | on session_start×1,session_tree×1,model_select×1,before_agent_start×1,turn_start×1",
   "<inline:tron-compaction-policy> | on message_end×1,session_start×1,session_before_compact×1",
-  "<inline:tron-settings> | tools settings",
+  "<inline:tron-settings> | tools settings | on tool_call×1",
   "<inline:tron-session-import> | tools session_import",
   "<inline:tron-projects> | tools projects",
   "<inline:tron-ask-user> | tools ask_user",
@@ -79,7 +79,7 @@ const WORKER_EXTENSIONS = [
   "<inline:tron-compaction-policy> | on message_end×1,session_start×1,session_before_compact×1",
   "<inline:tron-core> | tools jev | on session_start×1,session_shutdown×1,before_agent_start×1",
   "<inline:tron-web-research> | tools web_search | on session_start×1,session_shutdown×1",
-  "<inline:tron-settings> | tools settings",
+  "<inline:tron-settings> | tools settings | on tool_call×1",
   "<inline:tron-session-import> | tools session_import",
   "<inline:tron-projects> | tools projects",
   "<inline:tron-ask-user> | tools ask_user",

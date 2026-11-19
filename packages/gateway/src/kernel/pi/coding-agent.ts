@@ -19,6 +19,7 @@ export {
   DefaultPackageManager,
   DefaultResourceLoader,
   estimateTokens,
+  getAgentDir,
   getShellConfig,
   hasTrustRequiringProjectResources,
   initTheme,
