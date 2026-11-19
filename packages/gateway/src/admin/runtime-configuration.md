@@ -103,7 +103,7 @@ Adding and removing packages is a `sources.packages` change (install card).
   (`<tronHome>/cache/model-release-dates.json`, ≤ 32 MiB, ETag/Last-Modified) on
   `packages/gateway/src/providers/model-release-dates.json`, with aliases in
   `model-release-date-aliases.json`. Reads never do network I/O. Refresh after listen
-  and every 12 h; `models.refresh` (60 s) adds `releaseDates: {updated[, error]}`
+  and every 12 h, outside restart/stop drain (shutdown aborts it); `models.refresh` (60 s) adds `releaseDates: {updated[, error]}`
   without failing the provider refresh; `force: true` bypasses freshness; `PI_OFFLINE`
   disables fetching; `models.catalogChanged` on change. Baseline:
   `scripts/models/update-model-release-dates.mjs` (`--check`).
