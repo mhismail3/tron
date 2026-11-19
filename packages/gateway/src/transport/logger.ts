@@ -244,23 +244,8 @@ function boundedErrorFields(
   };
 }
 
-function boundedError(value: unknown): LogError | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  const raw = value as Partial<LogError>;
-  if (typeof raw.name !== "string" || typeof raw.message !== "string") return undefined;
-  const error = boundedErrorFields(raw.name, raw.code, raw.message, raw.stack, redact);
-  const cause = raw.cause ? boundedError({ ...raw.cause, cause: undefined }) : undefined;
-  return {
-    ...error,
-    ...(typeof raw.details === "string" ? { details: boundedBytes(redact(raw.details), MAX_ERROR_MESSAGE_BYTES) } : {}),
-    ...(cause ? { cause } : {}),
-  };
-}
-
-function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescribed: boolean): Omit<LogRecord, "timestamp" | "level" | "message"> {
-  const error = value.error === undefined
-    ? undefined
-    : errorIsDescribed ? boundedError(value.error) : describeError(value.error);
+function normalizedFields(value: LogMetadata & { error?: unknown }): Omit<LogRecord, "timestamp" | "level" | "message"> {
+  const error = value.error === undefined ? undefined : describeError(value.error);
   const durationMs = durationField(value.durationMs);
   const unaccountedMs = durationField(value.unaccountedMs);
   const acceptToUpgradeMs = durationField(value.acceptToUpgradeMs);
@@ -368,7 +353,7 @@ export class GatewayLogger {
       message: boundedMessage(message),
       process: "gateway",
       ...this.identity,
-      ...normalizedFields(metadata, false),
+      ...normalizedFields(metadata),
     };
     if (level === "debug") return;
     this.file?.append(record);
