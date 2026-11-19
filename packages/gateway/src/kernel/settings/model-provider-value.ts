@@ -1,10 +1,11 @@
 import { GatewayError } from "../../errors.js";
+import { isCredentialReference } from "../pi/coding-agent.js";
 import { boolean, integer, object, string } from "../../util/validation.js";
 import { refuseSetting as refuse, secretFreeText, secretFreeUrl } from "./secret-free.js";
 import type { Direction } from "./tool-contract.js";
 import type { ValueType } from "./settings-types.js";
 
-const HINT = "a provider API key is entered on the iPhone card and stored in the Keychain; other credentials and request options are set in models.json, never through settings";
+const HINT = "a provider API key is entered on the iPhone card and stored in the Keychain, or named by a 1Password op:// reference; other credentials and request options are set in models.json, never through settings";
 const FIELDS = ["baseUrl", "api", "name", "models", "apiKey"] as const;
 const MODEL_FIELDS = ["id", "name", "reasoning", "input", "contextWindow", "maxTokens"] as const;
 const MODALITIES = ["text", "image"] as const;
@@ -22,13 +23,14 @@ interface ModelProviderModel {
 }
 
 export interface ProviderKeyReference { source: "keychain"; service: "tron.provider"; account: string }
+export interface ProviderOnePasswordReference { source: "1password"; reference: string }
 
 export interface ModelProviderValue {
   baseUrl: string;
   api: string;
   name?: string;
   models?: ModelProviderModel[];
-  apiKey?: ProviderKeyReference;
+  apiKey?: ProviderKeyReference | ProviderOnePasswordReference;
 }
 
 export function providerKeyReference(provider: string): ProviderKeyReference {
@@ -36,7 +38,7 @@ export function providerKeyReference(provider: string): ProviderKeyReference {
 }
 
 export function addsProviderKey(before: unknown, after: unknown): boolean {
-  return (after as ModelProviderValue | undefined)?.apiKey !== undefined && (before as ModelProviderValue | undefined)?.apiKey === undefined;
+  return (after as ModelProviderValue | undefined)?.apiKey?.source === "keychain" && (before as ModelProviderValue | undefined)?.apiKey?.source !== "keychain";
 }
 
 function validateModel(raw: unknown, label: string): ModelProviderModel {
@@ -80,13 +82,16 @@ function validateModelProviderValue(value: unknown, label: string, provider?: st
     result.models = models;
   }
   if (raw.apiKey !== undefined) {
-    const expected = providerKeyReference(provider ?? "");
-    const reference = raw.apiKey;
-    if (!reference || typeof reference !== "object" || Array.isArray(reference)
-      || JSON.stringify(Object.entries(reference).sort()) !== JSON.stringify(Object.entries(expected).sort())) {
-      refuse(label, `apiKey holds only this provider's Keychain reference; ${HINT}`);
+    const keychain = providerKeyReference(provider ?? "");
+    const reference = raw.apiKey as Record<string, unknown> | null;
+    if (reference && typeof reference === "object" && !Array.isArray(reference)
+      && JSON.stringify(Object.entries(reference).sort()) === JSON.stringify(Object.entries(keychain).sort())) {
+      result.apiKey = keychain;
+    } else if (reference?.source === "1password" && Object.keys(reference).length === 2 && isCredentialReference(reference)) {
+      result.apiKey = { source: "1password", reference: secretFreeText((reference as { reference: string }).reference, label, "apiKey reference", HINT) };
+    } else {
+      refuse(label, `apiKey holds only this provider's Keychain reference or a 1Password op:// reference; ${HINT}`);
     }
-    result.apiKey = expected;
   }
   return result;
 }
@@ -105,7 +110,8 @@ export function modelProviderDirection(before: unknown, after: unknown): Directi
   if (before === undefined) return "widen";
   const was = before as ModelProviderValue;
   const now = after as ModelProviderValue;
-  return was.baseUrl === now.baseUrl && was.api === now.api && !addsProviderKey(was, now) ? "narrow" : "widen";
+  const newKey = now.apiKey !== undefined && JSON.stringify(now.apiKey) !== JSON.stringify(was.apiKey);
+  return was.baseUrl === now.baseUrl && was.api === now.api && !newKey ? "narrow" : "widen";
 }
 
 export const modelProviderType: ValueType = {
@@ -114,6 +120,7 @@ export const modelProviderType: ValueType = {
   format: value => {
     const provider = value as ModelProviderValue;
     const models = provider.models ? `${provider.models.length} model${provider.models.length === 1 ? "" : "s"}` : undefined;
-    return [provider.name, provider.baseUrl, provider.api, models, provider.apiKey ? "Keychain API key" : undefined].filter(Boolean).join(", ");
+    return [provider.name, provider.baseUrl, provider.api, models, provider.apiKey?.source === "keychain" ? "Keychain API key"
+      : provider.apiKey ? `1Password API key ${provider.apiKey.reference}` : undefined].filter(Boolean).join(", ");
   },
 };

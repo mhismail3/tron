@@ -22,6 +22,7 @@ export {
   getShellConfig,
   hasTrustRequiringProjectResources,
   initTheme,
+  isCredentialReference,
   loadMcpConfig,
   loadProjectContextFiles,
   loadSkills,
