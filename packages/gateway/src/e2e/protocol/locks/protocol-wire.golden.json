@@ -1661,41 +1661,6 @@
       ]
     },
     {
-      "method": "settings.history",
-      "request": [
-        ":object",
-        "limit:number"
-      ],
-      "ok": true,
-      "response": [
-        ":object",
-        "entries:array",
-        "entries[].actor.id:string",
-        "entries[].actor.kind:string",
-        "entries[].actor:object",
-        "entries[].after:number",
-        "entries[].at:string",
-        "entries[].changeId:string",
-        "entries[].commandId:string",
-        "entries[].key:string",
-        "entries[].layer:string",
-        "entries[].op:string",
-        "entries[].presentation.actor:string",
-        "entries[].presentation.display.after:string",
-        "entries[].presentation.display.before:string",
-        "entries[].presentation.display:object",
-        "entries[].presentation.label:string",
-        "entries[].presentation.layer:string",
-        "entries[].presentation.section:string",
-        "entries[].presentation:object",
-        "entries[].reason:string",
-        "entries[].status:string",
-        "entries[].target.kind:string",
-        "entries[].target:object",
-        "entries[]:object"
-      ]
-    },
-    {
       "method": "session.archive.set",
       "request": [
         ":object",
