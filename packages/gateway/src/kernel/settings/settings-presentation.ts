@@ -1,6 +1,6 @@
-import { HOME_PROFILE_SUBJECT, recordSubject, type SettingsSchema } from "../kernel/settings/settings-schema.js";
-import type { Actor, ChangeEntry } from "../kernel/settings/settings-record.js";
-import { formatStoredSetting, LAYER_LABELS } from "../kernel/settings/settings-types.js";
+import { HOME_PROFILE_SUBJECT, recordSubject, type SettingsSchema } from "./settings-schema.js";
+import type { Actor, ChangeEntry } from "./settings-record.js";
+import { formatStoredSetting, LAYER_LABELS } from "./settings-types.js";
 
 function requesterLabel(actor: Actor): string {
   return actor.kind === "worker" && actor.taskId ? `Home task ${actor.taskId}`
