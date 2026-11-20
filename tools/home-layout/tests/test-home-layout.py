@@ -831,6 +831,21 @@ class MigrateTests(unittest.TestCase):
         self.assertEqual(self.migrate("--rollback")[0], 0)
         self.assertEqual((self.home / "late-backup/only-copy").read_text(), "late")
 
+    def test_an_edited_manifest_keeps_the_journal_that_owns_earlier_moves(self) -> None:
+        self.fixture.write(REGISTRY, registry(PATHS, [self.RETIRED[1]]))
+        self.assertEqual(self.migrate("--apply")[0], 0)
+        (self.home / "late-backup").mkdir(mode=0o700)
+        (self.home / "late-backup/only-copy").write_text("late")
+        self.fixture.write(REGISTRY, registry(PATHS, [{"from": "late-backup", "to": "~/.tron-maintenance/backups/late-backup"}, self.RETIRED[1]]))
+        code, report = self.migrate("--dry-run")
+        self.assertEqual((code, report["blockers"]), (0, []), report)
+        self.assertEqual({row["from"]: row["state"] for row in report["moves"]}, {"late-backup": "pending", "backup-1": "done"})
+        self.assertEqual(self.migrate("--apply")[0], 0)
+        self.assertEqual(len(list((self.user / ".tron-maintenance/layout-v2").glob("*.json"))), 1)
+        self.assertEqual(self.migrate("--rollback")[0], 0)
+        self.assertEqual((self.home / "late-backup/only-copy").read_text(), "late")
+        self.assertEqual((self.home / "backup-1/only-copy").read_bytes(), b"unique recovery")
+
     def test_a_crashed_home_retains_the_only_claim_on_a_shared_pending_move(self) -> None:
         self.use_recovery_registry()
         (self.home / "gateway/home").mkdir()
