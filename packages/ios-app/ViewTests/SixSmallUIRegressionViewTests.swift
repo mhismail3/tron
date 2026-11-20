@@ -62,11 +62,11 @@ final class SixSmallUIRegressionViewTests: ShuffledTestCase {
         for (extra, contentSize) in cases {
             try await surface("workspace", extra: extra, contentSize: contentSize) { app in
                 try await app.until("the workspace path and pills") {
-                    ([root, "b8d31a1d", "Clean", "Detached HEAD"]).allSatisfy { text(app, $0) != nil }
+                    ([root, "b8d31a1d", "Clean", "Detached HEAD"]).allSatisfy { app.staticText($0) != nil }
                 }
-                let path = text(app, root)!.accessibilityFrame
+                let path = app.staticText(root)!.accessibilityFrame
                 for label in ["b8d31a1d", "Clean", "Detached HEAD"] {
-                    XCTAssertFalse(path.intersects(text(app, label)!.accessibilityFrame),
+                    XCTAssertFalse(path.intersects(app.staticText(label)!.accessibilityFrame),
                                    "Narrow/accessibility workspace path must not overlap \(label)")
                 }
             }
@@ -80,9 +80,5 @@ final class SixSmallUIRegressionViewTests: ShuffledTestCase {
             try await app.until("the surface") { app.element("Done") != nil }
             try await body(app)
         }
-    }
-
-    private func text(_ app: MountedFixture, _ label: String) -> NSObject? {
-        MountedFixture.elements(in: app.top).last { $0.accessibilityLabel == label && !$0.accessibilityTraits.contains(.button) }
     }
 }

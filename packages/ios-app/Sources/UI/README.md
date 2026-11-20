@@ -157,7 +157,8 @@ scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeSheetLoadingSurfaceRemainsFullWidth \
   --only-testing TronMobileUITests/TronHomeSheetsUITests/testHomeCursorPagesRetryAndRetainScroll \
   --only-testing TronMobileUITests/TronSheetTintUITests \
-  --only-testing TronMobileUITests/TronAccessibilityUITests
+  --only-testing TronMobileUITests/TronAccessibilityUITests \
+  --only-testing TronMobileViewTests/AccessibilityMaintenanceViewTests
 packages/ios-app/scripts/test-source-policy.sh
 scripts/tron-ios-test run --only-testing TronMobileUITests/TronChatHapticsUITests \
   --only-testing TronMobileUITests/TronInteractionHapticsUITests \

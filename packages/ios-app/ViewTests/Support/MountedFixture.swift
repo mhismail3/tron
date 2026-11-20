@@ -196,6 +196,20 @@ final class MountedFixture {
         }
     }
 
+    func button(_ key: String) -> NSObject? {
+        Self.elements(in: top).last {
+            ($0.accessibilityLabel == key || Self.identifier($0) == key) && $0.accessibilityTraits.contains(.button)
+        }
+    }
+
+    func staticText(_ label: String) -> NSObject? {
+        Self.elements(in: top).last { $0.accessibilityLabel == label && !$0.accessibilityTraits.contains(.button) }
+    }
+
+    func onScreen(_ node: NSObject) -> Bool {
+        window.bounds.contains(node.accessibilityFrame)
+    }
+
     func animations() -> [String] {
         var found: [String] = []
         func visit(_ layer: CALayer) {
