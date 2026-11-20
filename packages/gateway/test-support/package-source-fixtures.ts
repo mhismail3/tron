@@ -47,7 +47,7 @@ export async function publishedNpmRegistry(root: string, packages: readonly { na
   const saved = keys.map(key => process.env[key]);
   process.env.npm_config_registry = state.base;
   process.env.npm_config_cache = join(root, "npm-cache");
-  return { base: state.base, state, close: async () => {
+  return { state, close: async () => {
     await new Promise<void>(done => server.close(() => done()));
     keys.forEach((key, index) => { if (saved[index] === undefined) delete process.env[key]; else process.env[key] = saved[index]; });
   } };

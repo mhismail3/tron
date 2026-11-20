@@ -360,11 +360,11 @@ case "$cmd" in
     ;;
   land)
     git -C "$ROOT" fetch --quiet --no-tags --refmap= origin refs/heads/main
-    tool="$(mktemp -d "${TMPDIR:-/tmp}/tron-land-tool.XXXXXX")"
-    trap 'rm -rf "$tool"' EXIT
+    tool="$(git -C "$ROOT" rev-parse --absolute-git-dir)/tron-land-tool"
+    mkdir -p "$tool"
     for file in land.py host_lock.py; do git -C "$ROOT" show "FETCH_HEAD:tools/verify/$file" >"$tool/$file"; done
     cd "$ROOT"
-    python3 "$tool/land.py" "$@"
+    exec python3 "$tool/land.py" "$@"
     ;;
   mutate)
     exec python3 "$ROOT/tools/verify/mutate.py" "$@"
