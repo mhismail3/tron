@@ -102,9 +102,6 @@ describe("settings package update installs one exact version through the owner",
       { name: pinnedName, versions: ["1.0.0", "1.1.0"], latest: "1.0.0" },
       { name: rangedName, versions: ["1.0.0", "1.1.0", "1.2.0"], latest: "1.2.0" },
     ]);
-    const saved = { registry: process.env.npm_config_registry, cache: process.env.npm_config_cache };
-    process.env.npm_config_registry = registry.base;
-    process.env.npm_config_cache = join(root, "npm-cache");
     try {
       const source = `npm:${name}`, pinned = `npm:${pinnedName}@1.0.0`, rangedSource = `npm:${rangedName}@^1.0.0`;
       const local = await fixturePackage(root, "local-update-refusal");
@@ -201,8 +198,6 @@ describe("settings package update installs one exact version through the owner",
 
     } finally {
       await registry.close();
-      process.env.npm_config_registry = saved.registry;
-      process.env.npm_config_cache = saved.cache;
     }
   });
 
@@ -324,9 +319,6 @@ describe("settings package update installs one exact version through the owner",
     const name = `tron-update-plan-${Date.now()}`;
     const unrelated = "npm:tron-plan-unrelated-missing";
     const registry = await publishedNpmRegistry(root, [{ name, versions: ["1.0.0", "1.2.0"], latest: "1.0.0" }]);
-    const saved = { registry: process.env.npm_config_registry, cache: process.env.npm_config_cache };
-    process.env.npm_config_registry = registry.base;
-    process.env.npm_config_cache = join(root, "npm-cache");
     try {
       const source = `npm:${name}`;
       const settingsPath = join(agentDir, "settings.json");
@@ -362,8 +354,6 @@ describe("settings package update installs one exact version through the owner",
       expect((await changes.record.page({ filter: entry => entry.key === "package.update" })).entries).toEqual([]);
     } finally {
       await registry.close();
-      process.env.npm_config_registry = saved.registry;
-      process.env.npm_config_cache = saved.cache;
     }
   });
 });
@@ -376,9 +366,6 @@ describe("settings package update binds the effective installer of a trusted pro
     await mkdir(agentDir, { recursive: true });
     await mkdir(join(cwd, ".pi"), { recursive: true });
     const registry = await publishedNpmRegistry(root, [{ name, versions: ["1.0.0", "1.2.0"], latest: "1.0.0" }]);
-    const saved = { registry: process.env.npm_config_registry, cache: process.env.npm_config_cache };
-    process.env.npm_config_registry = registry.base;
-    process.env.npm_config_cache = join(root, "npm-cache");
     const source = `npm:${name}`;
     const globalSettings = join(agentDir, "settings.json"), projectSettings = join(cwd, ".pi", "settings.json");
     await writeFile(globalSettings, JSON.stringify({ packages: [source] }));
@@ -394,8 +381,6 @@ describe("settings package update binds the effective installer of a trusted pro
     expect(await installedVersion()).toBe("1.0.0");
     return { root, cwd, source, projectSettings, changes, packages, requester, installedVersion, close: async () => {
       await registry.close();
-      process.env.npm_config_registry = saved.registry;
-      process.env.npm_config_cache = saved.cache;
     } };
   }
 
