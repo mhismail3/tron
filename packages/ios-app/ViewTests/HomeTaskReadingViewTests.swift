@@ -4,21 +4,20 @@ import XCTest
 
 @MainActor
 final class HomeTaskReadingViewTests: ShuffledTestCase {
-    func testTaskReadingSubtextLight() async throws { try await exercise([]) }
-    func testTaskReadingSubtextAccessibilityLarge() async throws {
-        try await exercise([], contentSize: .accessibilityLarge, accessibilityLarge: true)
-    }
+    func testTaskReadingSubtextLight() async throws { try await exercise(.large) }
+    func testTaskReadingSubtextAccessibilityLarge() async throws { try await exercise(.accessibilityLarge) }
 
-    private func exercise(_ arguments: [String], contentSize: UIContentSizeCategory = .large,
-                          accessibilityLarge: Bool = false) async throws {
-        try await mounted(["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-task-padding-review"] + arguments,
+    private func exercise(_ contentSize: UIContentSizeCategory) async throws {
+        let accessibilityLarge = contentSize.isAccessibilityCategory
+        try await mounted(["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-task-padding-review"],
                           contentSize: contentSize) { app in
             try await openManageHome(app)
             _ = try await revealed(app, "home-manage-controls")
             try await app.until("the Controls row markers") {
                 app.element("home-manage-controls-title") != nil && app.element("home-manage-controls-subtext") != nil
             }
-            XCTAssertTrue(app.element("home-manage-controls")?.accessibilityLabel?.contains("Pause or resume memory, or disable Home") == true)
+            let controlsLabel = app.element("home-manage-controls")?.accessibilityLabel ?? ""
+            XCTAssertTrue(controlsLabel.contains("Controls") && controlsLabel.contains("Pause or resume memory, or disable Home"), controlsLabel)
             let metadata = app.element("home-manage-controls-subtext")!, settingsTitle = app.element("home-manage-controls-title")!
             let metadataLines: CGFloat = accessibilityLarge ? 2 : 1
             let metadataHeight = metadata.accessibilityFrame.height / metadataLines
