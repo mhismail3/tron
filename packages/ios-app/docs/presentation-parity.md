@@ -41,6 +41,8 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 - **Code insets.** `ToolDetailCodeBlock` uses a flat, lightly tinted inset, never Liquid Glass.
   Memory entries and tool argument/error sheets share it, so an entry card owns the only glass
   container around its monospace content.
+  Inside a settings group, monospace content is a `TronSettingsCodeRow` (provider-error messages,
+  review exact values), so the group stays the only container.
 - **Long content.** Containers above `TronLongContentPolicy.flatSurfaceCharacterThreshold` use
   `tronScrollSurface`; shorter ones keep glass with identical padding and typography. Prompt text
   keeps about `promptVisibleLines` lines and masks only the text's bottom ink on overflow; the

@@ -142,10 +142,11 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   error ink; only non-tappable informational pills may retain a flat surface.
   The existing transcript notification route keeps its sheet live above lazy rows.
   `ChatDetailSheet`, shared with nested tool details, owns navigation/Done, medium/large detents,
-  top chrome and insets. Themed standard sections, glass groups and rows show totals, distinct
-  breakdown and first/last times; native disclosures reveal each occurrence's metadata and
-  selectable `ToolDetailCodeBlock` JSON (or verbatim text). Long payload cards use the shared
-  static-surface policy instead of a tall backdrop filter.
+  top chrome and insets. Single errors and runs share one layout of themed standard groups: a
+  summary row (runs: totals, distinct breakdown, first/last times), then per occurrence, newest
+  first and always visible, a details group (model, type, time, request ID, HTTP status rows) and
+  a Message group whose `TronSettingsCodeRow` holds the full selectable JSON (or verbatim text).
+  Long payload groups use the shared static-surface policy instead of a tall backdrop filter.
 - **Error presentation.** `TronMobileViewTests/ChatProviderErrorStyleViewTests` checks that hosted
   ChatView error pills stay centred in both appearances; `TronChatProviderErrorStyleUITests` keeps the
   standard error sheet's payload selectable (light).
