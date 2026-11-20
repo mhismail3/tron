@@ -34,8 +34,8 @@ final class MountedFixture {
         host = UIHostingController(rootView: AnyView(HostedFixtureRoot(hostedModel: AppModel())
             .environment(\.scenePhase, .active)
             .transaction { $0.animation = nil; $0.disablesAnimations = true }))
-        host.traitOverrides.preferredContentSizeCategory = contentSize
         window = UIWindow(windowScene: scene)
+        window.traitOverrides.preferredContentSizeCategory = contentSize
         window.frame = scene.screen.bounds
         window.windowLevel = .normal + 1
         window.rootViewController = host

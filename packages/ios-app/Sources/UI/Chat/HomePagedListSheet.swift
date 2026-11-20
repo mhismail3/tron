@@ -229,11 +229,11 @@ struct HomePagedListSheet: View {
                     .multilineTextAlignment(.center)
                     .tronListMarker(.subtext)
             }
-            .tronListMarkers("home-memory-boundary")
             .padding(.horizontal, TronListMetrics.horizontalPadding)
             .padding(.vertical, TronListMetrics.headerGap)
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("home-memory-resolution-boundary")
+            .tronListMarkers("home-memory-boundary")
         }
         }
     }

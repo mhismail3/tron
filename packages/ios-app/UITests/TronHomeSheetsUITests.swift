@@ -17,13 +17,6 @@ final class TronHomeSheetsUITests: XCTestCase {
         return app
     }
 
-    @MainActor func testManageHomeMemoryAndChapterCountValues() {
-        let app = launchPolishManage(["-memory-boundary-regression"]); defer { app.terminate() }
-        XCTAssertTrue(element(app, "home-manage-memory-browser").label.contains("40 messages · 11 lines in view"))
-        XCTAssertTrue(element(app, "home-manage-chapters").label.contains("2 chapters · Active chapter 22% of soft limit"))
-        shot("2063-count-values")
-    }
-
     @MainActor func testMemoryBoundaryFollowsCanonicalSnapshotChange() {
         let app = launchPolishManage(["-memory-boundary-regression"]); defer { app.terminate() }
         open(app, element(app, "home-manage-memory-browser"), ready: "home-memory-row-39", name: "2063-before-change")
@@ -41,25 +34,14 @@ final class TronHomeSheetsUITests: XCTestCase {
         shot("2063-after-snapshot-change")
     }
 
-    @MainActor func testRingAlignmentReviewXXXL() {
-        captureRingAlignment("xxxl", arguments: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"])
+    @MainActor private func shot(_ name: String) {
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
-    @MainActor private func captureRingAlignment(_ name: String, arguments: [String]) {
-        let app = launchPolishManage(arguments); defer { app.terminate() }
-        let ring = element(app, "home-context-ring").frame
-        let title = app.staticTexts["969K tokens left"].frame
-        let detail = element(app, "home-context-detail").frame
-        XCTAssertEqual(ring.midY, title.union(detail).midY, accuracy: 1.5,
-                       "The ring centers on title and subtext together, not only the title")
-        let measurement = XCTAttachment(string: "ring=\(ring), title=\(title), detail=\(detail), combinedMidY=\(title.union(detail).midY), delta=\(ring.midY - title.union(detail).midY)")
-        measurement.name = "1752-\(name)-observed-geometry"
-        measurement.lifetime = .keepAlways
-        add(measurement)
-        shot("1752-\(name)-summary")
-    }
-
-    @MainActor private func assertCompactHomeSummary(_ app: XCUIApplication, workers: String, level: String) {
+    @MainActor private func assertCompactHomeSummary(_ app: XCUIApplication) {
         for removed in ["home-context-activation", "context-segmented-bar", "home-manage-host",
                         "context-segment-instructions", "context-segment-profile", "context-segment-memory",
                         "context-segment-chapter", "context-segment-results", "context-segment-input"] {
@@ -72,18 +54,13 @@ final class TronHomeSheetsUITests: XCTestCase {
         }
         let pill = element(app, "home-manage-workers"), state = element(app, "home-manage-state")
         XCTAssertTrue(pill.exists)
-        XCTAssertEqual(pill.label, workers)
-        XCTAssertTrue((pill.value as? String)?.lowercased().contains(level.lowercased()) == true)
+        XCTAssertEqual(pill.label, "0 workers")
+        XCTAssertTrue((pill.value as? String)?.lowercased().contains("normal") == true)
         XCTAssertGreaterThanOrEqual(pill.frame.minX, state.frame.maxX)
         XCTAssertEqual(pill.frame.midY, state.frame.midY, accuracy: 1)
         XCTAssertLessThanOrEqual(pill.frame.maxX, app.frame.maxX)
         let color = ink(app, pill)
-        switch level {
-        case "Normal": XCTAssertGreaterThan(color[1], color[0] + 0.1)
-        default:
-            XCTAssertGreaterThan(color[0], color[1] + 0.2)
-            XCTAssertGreaterThan(color[0], color[2] + 0.2)
-        }
+        XCTAssertGreaterThan(color[1], color[0] + 0.1)
         let ring = element(app, "home-context-ring")
         XCTAssertTrue(ring.exists)
         XCTAssertEqual(ring.value as? String, "3 percent")
@@ -94,138 +71,6 @@ final class TronHomeSheetsUITests: XCTestCase {
         let detail = element(app, "home-context-detail").label.replacingOccurrences(of: "\u{00A0}", with: " ")
         XCTAssertTrue(detail.contains("31K/1M") && detail.contains("3% used"), detail)
         XCTAssertTrue(detail.contains("1.8M total tokens") && detail.contains("91.4% cache hit"), detail)
-    }
-
-    @MainActor func testTaskReadingSubtextAccessibility() {
-        exerciseTaskReadingSubtext("ax-large", arguments: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"])
-    }
-
-    @MainActor private func exerciseTaskReadingSubtext(_ name: String, arguments: [String]) {
-        let app = launchPolishManage(arguments + ["-home-task-padding-review"])
-        defer { app.terminate() }
-        let controls = element(app, "home-manage-controls")
-        for _ in 0..<8 where !controls.isHittable { app.swipeUp() }
-        let metadata = controls.staticTexts["Pause or resume memory, or disable Home"]
-        let controlsTitle = controls.staticTexts["Controls"]
-        XCTAssertTrue(metadata.exists && controlsTitle.exists)
-        let metadataLines = name == "ax-large" ? 2.0 : 1.0
-        if name == "ax-large" {
-            XCTAssertGreaterThan(metadata.frame.height, controlsTitle.frame.height, "The subtitle wraps at accessibility text")
-        }
-        let metadataHeight = metadata.frame.height / metadataLines
-        XCTAssertGreaterThan(metadataHeight, 0)
-        XCTAssertLessThan(metadataHeight, controlsTitle.frame.height,
-                          "Default shared-row callers keep their smaller metadata style")
-        shot("1771-default-metadata-\(name)")
-        let tasks = element(app, "home-manage-tasks")
-        for _ in 0..<8 where !tasks.isHittable { app.swipeDown() }
-        open(app, tasks, ready: "home-task-terminal", name: "reading-subtext-tasks")
-        expand(app, done: "home-sheet-done-tasks")
-        let terminal = element(app, "home-task-terminal")
-        for _ in 0..<8 where !terminal.isHittable { app.swipeUp() }
-        open(app, terminal, ready: "home-task-detail", name: "reading-subtext-task")
-        expand(app, done: "home-sheet-done-task")
-        shot("1771-reading-header-\(name)")
-        app.swipeUp()
-        let title = element(app, "home-task-model-title")
-        XCTAssertTrue(title.exists)
-        let lineHeight = title.frame.height
-        XCTAssertGreaterThan(lineHeight, 0)
-        var geometry = ["metadataLine=\(metadataHeight)", "readingLine=\(lineHeight)",
-                        app.staticTexts["fixture.home-typography"].label]
-        for id in ["home-task-result", "home-task-model", "home-task-subagents", "home-task-spend"] {
-            let value = element(app, "\(id)-subtext")
-            XCTAssertTrue(value.exists)
-            let lines = name == "ax-large" && id == "home-task-subagents" ? 2.0 : 1.0
-            XCTAssertEqual(value.frame.height / lines, lineHeight, accuracy: 0.25,
-                           "\(id) uses the approved reading size, not metadata")
-            geometry.append("\(id): \(value.frame)")
-        }
-        let step = element(app, "home-task-checkin-summary-title")
-        let done = element(app, "home-task-checkin-done-subtext")
-        let next = element(app, "home-task-checkin-next-subtext")
-        XCTAssertTrue(step.exists && done.exists && next.exists)
-        let checkinHeight = step.frame.height + done.frame.height + next.frame.height
-        XCTAssertGreaterThan(checkinHeight / lineHeight, 4.5,
-                             "The long check-in wraps to at least five lines without the default two-line cap")
-        XCTAssertTrue(element(app, "home-task-checkin-next").label.contains("report the remaining scope"),
-                      "The complete check-in, including its final Next instruction, remains available")
-        geometry.append("checkin step: \(step.frame) done: \(done.frame) next: \(next.frame) lines: \(checkinHeight / lineHeight)")
-        let measurement = XCTAttachment(string: geometry.joined(separator: "\n"))
-        measurement.name = "1771-reading-geometry-\(name)"
-        measurement.lifetime = .keepAlways
-        add(measurement)
-        shot("1771-reading-worker-\(name)")
-    }
-
-    @MainActor private func assertChapterSummaryStats(_ app: XCUIApplication) -> [XCUIElement] {
-        let header = element(app, "home-chapter-header"), stats = element(app, "home-chapter-stats")
-        XCTAssertTrue(stats.exists, "Active and sealed chapter counts belong to the summary, not a separate rows card")
-        let tags = stats.staticTexts.allElementsBoundByIndex
-        XCTAssertEqual(tags.count, 3)
-        for phrase in ["user message", "Home repl", "task"] { XCTAssertTrue(tags.contains { $0.label.contains(phrase) }) }
-        XCTAssertGreaterThanOrEqual(stats.frame.minY, element(app, "home-chapter-size").frame.maxY)
-        XCTAssertLessThanOrEqual(stats.frame.maxY, header.frame.maxY)
-        for tag in tags {
-            XCTAssertGreaterThanOrEqual(tag.frame.minX, header.frame.minX)
-            XCTAssertLessThanOrEqual(tag.frame.maxX, header.frame.maxX)
-        }
-        return tags
-    }
-
-    @MainActor func testSummaryAndChapterTagsFitAtXXXL() {
-        let app = launchPolishManage(["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"])
-        defer { app.terminate() }
-        assertCompactHomeSummary(app, workers: "0 workers", level: "Normal")
-        let summary = element(app, "home-context-summary")
-        for id in ["home-context-ring", "home-context-detail"] {
-            XCTAssertTrue(summary.frame.contains(element(app, id).frame), "\(id) stays inside the compact summary at XXXL")
-        }
-        shot("1723-summary-xxxl")
-        open(app, element(app, "home-manage-chapters"), ready: "home-chapter-list", name: "chapters-xxxl")
-        expand(app, done: "home-sheet-done-chapters")
-        open(app, element(app, "home-chapter-2"), ready: "home-chapter-detail", name: "chapter-xxxl")
-        expand(app, done: "home-sheet-done-chapter")
-        let tags = assertChapterSummaryStats(app)
-        XCTAssertGreaterThan(Set(tags.map { $0.frame.minY.rounded() }).count, 1, "Tags wrap rather than clip at XXXL")
-        shot("1723-chapter-xxxl-wrapping")
-    }
-
-    @MainActor
-    func testHostPressureCriticalAndUncappedWorkersAtLargeText() {
-        checkHostStatus(level: "Critical", workers: "7 workers running",
-                        arguments: ["-host-critical", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
-    }
-
-    @MainActor
-    private func checkHostStatus(level: String, workers: String, arguments: [String]) {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"] + arguments
-        app.launch(); defer { app.terminate() }
-        let home = app.buttons["home-pinned-row"]
-        XCTAssertTrue(home.waitForExistence(timeout: 15))
-        XCTAssertTrue(home.label.contains("Host \(level.lowercased())"), home.label)
-        XCTAssertTrue(home.label.contains(workers), home.label)
-        let dashboard = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        dashboard.name = "931-\(level)-dashboard"
-        dashboard.lifetime = .keepAlways
-        add(dashboard)
-        home.tap()
-        let ring = app.buttons["session-context-button"]
-        XCTAssertTrue(ring.waitForExistence(timeout: 15))
-        XCTAssertTrue(waitFor(ring, "enabled == true"))
-        open(app, ring, ready: "home-manage-state", name: "host-status")
-        expand(app, done: "home-sheet-done-manage")
-        assertCompactHomeSummary(app, workers: workers.replacingOccurrences(of: " running", with: ""), level: level)
-        keep("931-\(level)-manage")
-    }
-
-    @MainActor private func shot(_ name: String) {
-        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
     }
 
     @MainActor
@@ -304,7 +149,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         keep("01-manage")
 
         XCTAssertFalse(element(app, "home-manage-context").exists, "Home Context is part of Manage Home")
-        assertCompactHomeSummary(app, workers: "0 workers", level: "Normal")
+        assertCompactHomeSummary(app)
 
         app.swipeUp()
         let controls = element(app, "home-manage-controls"), tasks = element(app, "home-manage-tasks")

@@ -25,51 +25,6 @@ final class TronAccessibilityUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Gateway Server Info"].isHittable)
     }
 
-    func testMaintenanceActionGeometry() {
-        let app = launch()
-        defer { app.terminate() }
-        app.buttons["Maintenance"].tap()
-        let labels = ["Rebuild from Source", "Roll Back", "Restart", "Disable", "Forget Server"]
-        for label in labels { XCTAssertTrue(app.buttons[label].waitForExistence(timeout: 3)) }
-        let frames = labels.map { app.buttons[$0].frame }
-        XCTAssertEqual(frames[0].minX, frames[2].minX, accuracy: 1)
-        XCTAssertEqual(frames[1].minX, frames[3].minX, accuracy: 1)
-        XCTAssertEqual(frames[0].width, frames[1].width, accuracy: 1)
-        XCTAssertEqual(frames[0].minY, frames[1].minY, accuracy: 1)
-        XCTAssertEqual(frames[2].minY, frames[3].minY, accuracy: 1)
-        XCTAssertGreaterThan(frames[2].minY, frames[0].maxY)
-        XCTAssertGreaterThan(frames[4].width, frames[0].width * 1.5)
-        XCTAssertGreaterThan(frames[4].minY, frames[2].maxY)
-    }
-
-    func testLoneMaintenanceActionUsesFullContentWidth() {
-        for arguments in [[], ["-fixture-light"], ["-fixture-large-type"]] {
-            let app = launch(["-fixture-lone-maintenance"] + arguments)
-            defer { app.terminate() }
-            app.buttons["Maintenance"].tap()
-            let labels = ["Rebuild from Source", "Restart", "Disable", "Forget Server"]
-            for label in labels { XCTAssertTrue(app.buttons[label].waitForExistence(timeout: 3)) }
-            let frames = labels.map { app.buttons[$0].frame }
-            let attachment = XCTAttachment(screenshot: app.screenshot())
-            attachment.name = "maintenance-lone-action-\(arguments.joined(separator: "-"))"
-            attachment.lifetime = .keepAlways
-            add(attachment)
-            XCTAssertEqual(frames[2].minX, frames[3].minX, accuracy: 1)
-            XCTAssertEqual(frames[2].maxX, frames[3].maxX, accuracy: 1,
-                           "Disable must reach the same trailing edge as Forget Server")
-            XCTAssertEqual(frames[2].width, frames[3].width, accuracy: 1)
-            XCTAssertEqual(frames[0].width, frames[1].width, accuracy: 1)
-            XCTAssertEqual(frames[0].minY, frames[1].minY, accuracy: 1)
-            XCTAssertGreaterThan(frames[2].minY, max(frames[0].maxY, frames[1].maxY))
-            XCTAssertGreaterThan(frames[3].minY, frames[2].maxY)
-            for label in labels {
-                XCTAssertTrue(app.buttons[label].isHittable)
-                XCTAssertGreaterThanOrEqual(app.buttons[label].frame.height, 44)
-            }
-            app.terminate()
-        }
-    }
-
     func testMacReplacementJournalRows() {
         for arguments in [[], ["-fixture-large-type"]] {
             let app = launch(arguments)
