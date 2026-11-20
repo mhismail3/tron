@@ -33,7 +33,7 @@ install)
   cp "$src/plugin/Info.plist" TronUnlock.bundle/Contents/Info.plist
   codesign -f -s - -o runtime TronUnlock.bundle
 
-  trap 'echo "install failed; restoring the backed-up right" >&2; restore_rule' ERR
+  trap 'echo "install failed; restoring the backed-up screensaver rule and removing the Tron right" >&2; restore_rule; sudo security authorizationdb remove com.tron.unlock 2>/dev/null || true' ERR
   sudo install -d -o root -g wheel -m 755 "$home"
   sudo install -d -o "$(id -u)" -g wheel -m 755 "$home/run"
   sudo install -o root -g wheel -m 755 tron-unlock-broker "$broker"
@@ -42,6 +42,8 @@ install)
   sudo chown -R root:wheel "$plugins/TronUnlock.bundle"
   sudo sqlite3 "$tcc" "insert or replace into access (service,client,client_type,auth_value,auth_reason,auth_version,flags) values ('kTCCServiceListenEvent','$broker',1,2,4,1,0)"
   launchctl bootout "gui/$(id -u)/com.tron.unlock.broker" 2>/dev/null || true
+  for _ in $(seq 40); do launchctl print "gui/$(id -u)/com.tron.unlock.broker" >/dev/null 2>&1 || break; sleep 0.25; done
+  rm -f "$home/run/plugin.sock"
   cp "$src/guest/com.tron.unlock.broker.plist" "$agent"
   launchctl bootstrap "gui/$(id -u)" "$agent"
   for _ in $(seq 20); do [ -S "$home/run/plugin.sock" ] && break; sleep 0.25; done
@@ -60,7 +62,8 @@ uninstall)
   launchctl bootout "gui/$(id -u)/com.tron.unlock.broker" 2>/dev/null || true
   rm -f "$agent"
   sudo sqlite3 "$tcc" "delete from access where client='$broker'"
-  sudo rm -rf "$plugins/TronUnlock.bundle" "$home"
+  sudo rm -rf "$plugins/TronUnlock.bundle" "$home/run" "$broker"
+  sudo rmdir "$home" 2>/dev/null || true
   ;;
 esac
 security authorizationdb read system.login.screensaver 2>/dev/null | plutil -p - | sed -n '/rule/,/]/p'

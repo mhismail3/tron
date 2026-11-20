@@ -5,11 +5,6 @@ import Foundation
 import Security
 import os
 
-#if FAULTS
-let faultHooks = true
-#else
-let faultHooks = false
-#endif
 let log = Logger(subsystem: "com.tron.unlock", category: "broker")
 let runDir = "/Library/Application Support/Tron/run"
 let pluginSocket = runDir + "/plugin.sock"
@@ -22,6 +17,13 @@ func lockScreen() -> Int32 {
   let handle = dlopen("/System/Library/PrivateFrameworks/login.framework/Versions/Current/login", RTLD_NOW)
   guard let symbol = dlsym(handle, "SACLockScreenImmediate") else { return -1 }
   return unsafeBitCast(symbol, to: LockFunction.self)()
+}
+
+func lockUntilLocked() {
+  for _ in 0..<40 where !screenLocked() {
+    _ = lockScreen()
+    usleep(50_000)
+  }
 }
 
 func screenLocked() -> Bool {
@@ -88,7 +90,9 @@ final class LocalStubApproval: ApprovalSource {
 final class Lease {
   enum State { case idle, approved(task: String, seconds: Int, expires: Date), active(task: String, ends: Date) }
   var state = State.idle
+#if FAULTS
   var fault = "none"
+#endif
   var shield: [NSWindow] = []
   var tap: CFMachPort?
   var endTimer: Timer?
@@ -108,8 +112,11 @@ final class Lease {
       print(stamp(), "plugin DENY no-approval"); fflush(stdout)
       return "DENY\n"
     }
+    guard FileManager.default.createFile(atPath: leaseMarker, contents: Data(task.utf8)) else {
+      print(stamp(), "plugin DENY marker-write-failed"); fflush(stdout)
+      return "DENY\n"
+    }
     state = .active(task: task, ends: Date().addingTimeInterval(TimeInterval(seconds)))
-    FileManager.default.createFile(atPath: leaseMarker, contents: Data(task.utf8))
     print(stamp(), "plugin ALLOW", task); fflush(stdout)
     DispatchQueue.main.async { self.begin(seconds: seconds) }
     return "ALLOW\n"
@@ -191,8 +198,9 @@ func serve() {
   let lease = Lease()
   mkdir(NSHomeDirectory() + "/.tron-unlock", 0o700)
   if access(leaseMarker, F_OK) == 0 {
-    print(stamp(), "stale lease marker; relock SACLockScreenImmediate=\(screenLocked() ? 0 : lockScreen())"); fflush(stdout)
-    unlink(leaseMarker)
+    lockUntilLocked()
+    print(stamp(), "stale lease marker; relocked=\(screenLocked())"); fflush(stdout)
+    if screenLocked() { unlink(leaseMarker) }
   }
   let plugin = listen(pluginSocket, mode: 0o666)
   let control = listen(controlSocket, mode: 0o600)
@@ -205,14 +213,16 @@ func serve() {
       guard peerSatisfies(fd, pluginPeerRequirement) else { print(stamp(), "plugin peer rejected"); fflush(stdout); close(fd); continue }
       Thread.detachNewThread {
         let request = readLine(fd)
-        let mode = DispatchQueue.main.sync { lease.fault }
-        print(stamp(), "plugin request=\(request) fault=\(mode)"); fflush(stdout)
-        switch mode {
-        case "hang": sleep(5)
+        print(stamp(), "plugin request=\(request)"); fflush(stdout)
+#if FAULTS
+        switch DispatchQueue.main.sync(execute: { lease.fault }) {
+        case "hang": sleep(5); close(fd); return
         case "crash": abort()
-        case "garbage": reply(fd, "ALLOWX\n")
-        default: reply(fd, request == "UNLOCK" ? DispatchQueue.main.sync { lease.answerPlugin() } : "DENY\n")
+        case "garbage": reply(fd, "ALLOWX\n"); close(fd); return
+        default: break
         }
+#endif
+        reply(fd, request == "UNLOCK" ? DispatchQueue.main.sync { lease.answerPlugin() } : "DENY\n")
         close(fd)
       }
     }
@@ -225,7 +235,9 @@ func serve() {
       let words = readLine(fd).split(separator: " ").map(String.init)
       switch words.first {
       case "APPROVE" where words.count == 3: reply(fd, DispatchQueue.main.sync { lease.approve(task: words[1], seconds: Int(words[2]) ?? 0) } ? "OK\n" : "ERR\n")
-      case "FAULT" where words.count == 2 && faultHooks: DispatchQueue.main.sync { lease.fault = words[1] }; reply(fd, "OK\n")
+#if FAULTS
+      case "FAULT" where words.count == 2: DispatchQueue.main.sync { lease.fault = words[1] }; reply(fd, "OK\n")
+#endif
       case "END": DispatchQueue.main.sync { lease.end("stop") }; reply(fd, "OK\n")
       default: reply(fd, "ERR\n")
       }
@@ -234,7 +246,7 @@ func serve() {
   }
   signal(SIGTERM, SIG_IGN)
   let term = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-  term.setEventHandler { lease.end("sigterm"); exit(0) }
+  term.setEventHandler { lease.end("sigterm"); lockUntilLocked(); if screenLocked() { unlink(leaseMarker) }; exit(0) }
   term.resume()
   print(stamp(), "serving"); fflush(stdout)
   NSApplication.shared.setActivationPolicy(.accessory)

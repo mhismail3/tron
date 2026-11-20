@@ -98,6 +98,8 @@ static const char *ask_broker_unbounded(long long deadline) {
     if (getpeereid(fd, &euid, &egid) != 0 || euid != owner) goto done;
     verdict = "signature";
     if (!peer_is_broker(fd)) goto done;
+    verdict = "deadline";
+    if (now_ms() >= deadline) goto done;
     verdict = "write";
     if (write(fd, "UNLOCK\n", 7) != 7) goto done;
     verdict = "timeout";
@@ -122,8 +124,10 @@ static const char *ask_broker(void) {
         verdict = ask_broker_unbounded(deadline);
         dispatch_semaphore_signal(done);
     });
-    if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, (deadline - now_ms() + 50) * NSEC_PER_MSEC)) != 0) return "deadline";
-    return verdict;
+    int64_t wait_ms = (int64_t)(deadline - now_ms() + 50);
+    long timed_out = dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, (wait_ms > 0 ? wait_ms : 0) * (int64_t)NSEC_PER_MSEC));
+    dispatch_release(done);
+    return timed_out ? "deadline" : verdict;
 }
 
 static OSStatus PluginDestroy(AuthorizationPluginRef plugin) {
