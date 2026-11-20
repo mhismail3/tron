@@ -574,10 +574,10 @@ index 0000000..79d22c7
 +}
 diff --git a/extensions/agent-browser/lib/owned-launches.ts b/extensions/agent-browser/lib/owned-launches.ts
 new file mode 100644
-index 0000000..6fa06af
+index 0000000..71490ac
 --- /dev/null
 +++ b/extensions/agent-browser/lib/owned-launches.ts
-@@ -0,0 +1,476 @@
+@@ -0,0 +1,479 @@
 +import { execFile } from "node:child_process";
 +import { randomUUID, createHash } from "node:crypto";
 +import { mkdir, readFile, readdir, rename, rm, writeFile, lstat, realpath } from "node:fs/promises";
@@ -755,13 +755,16 @@ index 0000000..6fa06af
 +	}
 +
 +	private async persistentProfile(path: string): Promise<string> {
-+		if (
-+			path !== resolve(path) ||
-+			[this.profile, this.root].some((owned) => path === owned || path.startsWith(`${owned}/`))
-+		) {
++		if (path !== resolve(path)) {
 +			refuseOwnedLaunch();
 +		}
 +		await privateEntry(path, true);
++		const real = await realpath(path);
++		for (const owned of await Promise.all([this.profile, this.root].map((item) => realpath(item)))) {
++			if (real === owned || real.startsWith(`${owned}/`)) {
++				refuseOwnedLaunch();
++			}
++		}
 +		await privateEntry(join(path, ".tron-owned-profile"), false);
 +		return path;
 +	}
