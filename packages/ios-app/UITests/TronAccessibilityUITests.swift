@@ -10,6 +10,37 @@ final class TronAccessibilityUITests: XCTestCase {
         return app
     }
 
+    func testSessionsMenuSettingsAndCanonicalPreferences() throws {
+        let app = launch(["-fixture-dashboard", "-fixture-light"])
+        defer { app.terminate() }
+        let menu = app.buttons["dashboard.menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(app.buttons["dashboard.search"].exists, "No standalone dashboard header search icon")
+        XCTAssertFalse(app.buttons["Search sessions"].exists)
+        menu.tap()
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertFalse(app.buttons["Filter"].exists)
+        XCTAssertFalse(app.buttons["Search"].exists)
+        let capture = XCTAttachment(screenshot: app.screenshot())
+        capture.name = "sessions-popup-restored-settings"
+        capture.lifetime = .keepAlways
+        add(capture)
+        app.buttons["Settings"].tap()
+        XCTAssertTrue(app.staticTexts["Global Settings"].waitForExistence(timeout: 5), app.debugDescription)
+        app.buttons["settings-link-Appearance"].tap()
+        let servers = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Visible Servers")).firstMatch
+        XCTAssertTrue(app.navigationBars.staticTexts["Appearance"].waitForExistence(timeout: 3), app.debugDescription)
+        for _ in 0..<8 where !servers.isHittable { app.swipeUp() }
+        XCTAssertTrue(servers.isHittable, app.debugDescription)
+        servers.tap()
+        XCTAssertTrue(app.staticTexts["Visible Servers"].waitForExistence(timeout: 3), app.debugDescription)
+        let done = try XCTUnwrap(app.buttons.matching(identifier: "Done").allElementsBoundByIndex.first(where: \.isHittable))
+        done.tap()
+        app.buttons["settings-done"].tap()
+        XCTAssertTrue(menu.waitForExistence(timeout: 3))
+        XCTAssertTrue(menu.isHittable, "Done returns to the dashboard, not a duplicate Settings owner")
+    }
+
     func testDashboardHeaderFramesAndNativeMenuOrder() {
         for arguments in [[], ["-fixture-light", "-fixture-large-type"]] {
             let app = launch(["-fixture-dashboard"] + arguments)
