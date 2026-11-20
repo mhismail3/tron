@@ -61,7 +61,7 @@ import { completionOwnedByMarker, type CanonicalAssistantCompletion, type Sessio
 import { ResourceFreshness, type ResourceFreshnessRecord } from "../run/resource-freshness.js";
 import { ExtensionActivityRecency } from "../../sessions/extension-activity-recency.js";
 import { ProcessActivityRecency } from "../projection/process-activity-recency.js";
-import { ExtensionArtifactDiscovery, type ExtensionArtifactDiscoveryCounts } from "../../sessions/extension-artifact-discovery.js";
+import { ExtensionArtifactDiscovery, type ExtensionArtifactDiscoveryCounts, type ExtensionArtifactRootWatchHandle, type ExtensionArtifactRootWatchRequest } from "../../sessions/extension-artifact-discovery.js";
 import type { ResourceRoot } from "../resources/resource-root.js";
 import type { ModuleHost } from "../host/module-host.js";
 import { GatewayWorkRegistry } from "../run/gateway-work-registry.js";
@@ -495,6 +495,7 @@ export class RuntimeRegistry implements SessionOperations {
       tronHome: string;
       modules: ModuleHost;
       delegatedArtifactRoot?: string;
+      watchArtifactRoot?: (request: ExtensionArtifactRootWatchRequest) => ExtensionArtifactRootWatchHandle;
       managedSubagents?: ManagedSubagents;
       mcpAuth?: RuntimeSlotDependencies["mcpAuth"];
       idleRuntimeMs: number;

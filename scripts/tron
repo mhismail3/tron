@@ -31,6 +31,9 @@ Commands:
   test mac [test classes...]        Build and run the Mac integration tests under a temporary HOME
   test tooling [test files...]      Run Python script integration suites with per-test evidence
   flakes [--tree HASH] [--json]     Read same-tree pass/fail history from the external test ledger
+  flakes --budgets [FRACTION] [--json]
+                                    Gateway tests whose slowest pass uses over FRACTION (0.25)
+                                    of their timeout or wait bound (tools/verify/README.md)
   provider-smoke [--probe-only] [--live --agent-dir <dir>] [--require-fable-5-2] [--json]
                                     Claude subscription smoke of the pinned Pi: Fable 5.2,
                                     the Claude Code version it sends, Tron's wiring tests

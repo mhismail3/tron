@@ -736,6 +736,42 @@ class LedgerTests(VerifyCase):
         self.assertIn('outside repositories and ~/.tron', refused.stderr)
         self.assertFalse((r.path / 'ledger.sqlite3').exists())
 
+    def test_budgets_flags_a_gateway_test_whose_slowest_pass_nears_its_wait_bound_on_the_unchanged_file(self) -> None:
+        r = self.repo
+        r.write('packages/gateway/test-support/wait-for.ts', 'const x = declared > 0 ? declared : 12_000;\nexport const HOOK_HANG_BOUND_MS = 5_000;\n')
+        r.write('packages/gateway/vitest.config.ts', 'testTimeout: 15_000,\n')
+        for config in ('vitest.nested.config.ts', 'vitest.mac-terminal.config.ts'):
+            r.write(f'packages/gateway/{config}', 'testTimeout: 300_000,\n')
+        path = 'packages/gateway/src/a.integration.test.ts'
+        r.write(path, 'it("waits", async () => {\n  await waitFor(() => ok, "edit", { boundMs: 4_000 });\n});\n'
+                      'it("long", async () => {\n  await work();\n}, 60_000);\n'
+                      'it.each(["a", "b"])("each at %s", async () => {\n  await work();\n}, 60_000);\n'
+                      'describe("hooked", () => {\n  beforeEach(async () => {\n    await prepare();\n  }, 60_000);\n'
+                      '  it("after a slow hook", async () => {\n    await work();\n  });\n});\n'
+                      'for (const name of names) it(name, async () => {\n  await work();\n});\n'
+                      'it.each(["x"])("uses 50%% of budget at %s", async () => {\n  await work();\n}, 60_000);\n')
+        r.commit('gateway tests')
+        ledger = Path(r.env['HOME']) / '.tron-maintenance/test-ledger/results.sqlite3'
+        ledger.parent.mkdir(parents=True)
+        head = r.git('rev-parse', 'HEAD')
+        rows = [(head, 'waits', 1.5), (head, 'long', 6.0), ('0' * 40, 'long', 50.0), (head, 'each at a', 6.0),
+                (head, 'hooked after a slow hook', 18.0), (head, 'uses 50% of budget at x', 20.0), (head, 'uses 50x of budget at x', 2.0)]
+        with sqlite3.connect(ledger) as connection:
+            connection.execute('CREATE TABLE results (run_id TEXT, test_id TEXT, commit_sha TEXT, tree_hash TEXT, dirty INTEGER, outcome TEXT, seconds REAL, lane TEXT, host TEXT, cpu_idle_percent REAL, memory_free_percent REAL, measured_at TEXT, seen_at TEXT, contended INTEGER)')
+            connection.execute("INSERT INTO results VALUES ('r', ?, ?, 't', 0, 'passed', 9.0, 'gateway', 'mac', 50, 50, 'm', 's', 0)",
+                               (f'{path}::dynamic name', head))
+            connection.executemany("INSERT INTO results VALUES ('r', ?, ?, 't', 0, 'passed', ?, 'gateway', 'mini', 50, 50, 'm', 's', 0)",
+                                   [(f'{path}::{title}', commit, seconds) for commit, title, seconds in [*rows, (head, 'dynamic name', 2.0)]])
+        query = subprocess.run([str(r.path / 'scripts/tron'), 'flakes', '--budgets', '--json'], cwd=r.path, env=r.env, capture_output=True, text=True)
+        self.assertEqual(query.returncode, 0, query.stderr)
+        self.assertEqual([(row['test_id'], row['host'], row['fastest'], row['slowest'], row.get('wait_seconds'), row.get('timeout_seconds', row.get('budget')))
+                          for row in json.loads(query.stdout)],
+                         [(f'{path}::hooked after a slow hook', 'mini', 18.0, 18.0, None, 15.0),
+                          (f'{path}::uses 50% of budget at x', 'mini', 20.0, 20.0, None, 60.0),
+                          (f'{path}::waits', 'mini', 1.5, 1.5, 4.0, 15.0),
+                          (f'{path}::dynamic name', 'mac', 9.0, 9.0, None, 'unknown'),
+                          (f'{path}::uses 50x of budget at x', 'mini', 2.0, 2.0, None, 'unknown')])
+
 
 class SelectionTests(VerifyCase):
     def test_one_module_change_runs_only_its_tests_and_a_failure_fails_loudly(self) -> None:

@@ -18,7 +18,7 @@ import { EXTENSION_ACTIVITY_RECEIPT_TYPE } from "../../kernel/receipts/extension
 import {
   RuntimeRegistry,
 } from "../../kernel/session/runtime-registry.js";
-import type { ExtensionArtifactDiscoveryCounts } from "../../sessions/extension-artifact-discovery.js";
+import type { ExtensionArtifactDiscoveryCounts, ExtensionArtifactRootWatchRequest } from "../../sessions/extension-artifact-discovery.js";
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 import { createColdRegistryFixture, initializeRegistry, settleCatalog, temporaryRoot } from "../../../test-support/runtime-registry-fixture.js";
 const statusJsonReplace = vi.hoisted(() => ({
@@ -56,6 +56,17 @@ function projectedExtensionActivity(activities: ExtensionRunActivity[] | undefin
 }
 
 const DISCOVERY_PASS_LIMIT = 8;
+
+function heldWatcher() {
+  const requests: ExtensionArtifactRootWatchRequest[] = [];
+  return {
+    changed: (root: string, name: string) => { for (const request of requests) if (request.root === root) request.onEvent(name); },
+    watchArtifactRoot: (request: ExtensionArtifactRootWatchRequest) => {
+      requests.push(request);
+      return { close: () => { requests.splice(requests.indexOf(request), 1); } };
+    },
+  };
+}
 
 async function discoverExtensionArtifactsUntil(
   registry: RuntimeRegistry,
@@ -2050,7 +2061,8 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       lifecycleArtifactVersion: 3, runId, state: "complete",
       startedAt: startedAt - 120_000, lastUpdate: startedAt - 120_000, endedAt: startedAt - 120_000,
     });
-    const fixture = await coldFixture("ambient-steady-state", { delegatedRoot: delegated.delegatedRoot });
+    const watcher = heldWatcher();
+    const fixture = await coldFixture("ambient-steady-state", { delegatedRoot: delegated.delegatedRoot, watchArtifactRoot: watcher.watchArtifactRoot });
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     vi.spyOn(slot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
       .mockReturnValue({ source: "pi-subagents" });
@@ -2085,6 +2097,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       lifecycleArtifactVersion: 3, runId: finishedRunId, state: "complete",
       startedAt: startedAt - 120_000, lastUpdate: startedAt + 1_000, endedAt: startedAt + 1_000,
     }));
+    watcher.changed(runsRoot, `${finishedRunId}/status.json`);
     await discoverExtensionArtifactsUntil(fixture.registry, () => routed.mock.calls.some(([asyncDir]) => asyncDir === finishedDir));
     expect(routed.mock.calls.some(([asyncDir]) => asyncDir === finishedDir)).toBe(true);
     await rm(delegated.root, { recursive: true, force: true });
