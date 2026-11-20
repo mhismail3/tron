@@ -122,7 +122,7 @@ trust and explicit credential separation. Learned profile notes never become an 
 - Home-only worker defaults gain editable Global backing where currently Profile-only. Preserve
   existing Home defaults as overrides. Knowledge background work continues using Global, Home memory
   its Profile override. Coordinate #1593's proposed model-queue note moves; do not invent a fourth queue.
-- Keep iPhone preferences device-local, editable under the existing This iPhone group in Global Settings:
+- Keep iPhone preferences device-local, editable in Settings › Appearance:
   appearance, fonts, dashboard filters/limits and finished-child retention. They affect no agent and
   do not become Gateway keys or synchronize between phones. Haptics currently follow app/system policy;
   do not invent a setting. Local preferences are outside Gateway Changes; device enrollment secrets,
@@ -132,13 +132,13 @@ Device-local settings (S=no, P=no, safety=no, immediate presentation effect; not
 
 | Key | Group | Current owner / storage |
 | --- | --- | --- |
-| `appearanceMode` | This iPhone / Appearance | `AppearanceSettings`, UserDefaults |
-| `fontFamily` | This iPhone / Appearance | `FontSettings`, UserDefaults |
-| `monoFontFamily` | This iPhone / Appearance | `FontSettings`, UserDefaults |
-| `fontAxisValues` | This iPhone / Appearance | `FontSettings`, UserDefaults |
-| `subagentRecentFinishedRetentionMinutes.v1` | This iPhone / Appearance | `AppLocalBehaviorSettings`, UserDefaults |
-| `dashboardChatsPerProject.v1` | This iPhone / Appearance | `AppLocalBehaviorSettings`, UserDefaults |
-| `dashboard.serverFilter.preferences.v2` | This iPhone / Appearance | `DashboardServerFilterPreferences`, UserDefaults |
+| `appearanceMode` | Appearance | `AppearanceSettings`, UserDefaults |
+| `fontFamily` | Appearance | `FontSettings`, UserDefaults |
+| `monoFontFamily` | Appearance | `FontSettings`, UserDefaults |
+| `fontAxisValues` | Appearance | `FontSettings`, UserDefaults |
+| `subagentRecentFinishedRetentionMinutes.v1` | Appearance | `AppLocalBehaviorSettings`, UserDefaults |
+| `dashboardChatsPerProject.v1` | Appearance | `AppLocalBehaviorSettings`, UserDefaults |
+| `dashboard.serverFilter.preferences.v2` | Appearance | `DashboardServerFilterPreferences`, UserDefaults |
 | `dashboard.automations.preferences.v1` | Dashboard local presentation | Existing Dashboard preferences owner, UserDefaults |
 | `dashboard.homeUsage.hiddenProviders.v1` | Dashboard Home usage visibility | Existing Home usage preferences owner, UserDefaults |
 

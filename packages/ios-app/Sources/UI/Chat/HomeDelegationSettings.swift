@@ -26,50 +26,35 @@ extension HomeTaskSheet.PendingRevocation.Target {
 
 extension HomeTaskSheet {
     func permissionList(_ permissions: HomeTaskPermissionsDTO) -> some View {
-        TronSettingsSections(alignment: .leading, spacing: TronSpacing.section, hidesLoneHeading: true) {
-            TronSettingsGroup("Permissions") {
-                VStack(spacing: 0) {
-                    if permissions.scopes.isEmpty {
-                        TronSettingsRow(icon: "lock.shield", title: "Delegation: All trusted projects") {
-                            TronStatusPill(text: "Not authorized", accent: .tronSlate)
-                        }
-                    } else {
-                        ForEach(Array(permissions.scopes.enumerated()), id: \.element.id) { index, scope in
-                            if index > 0 { TronSettingsDivider() }
-                            TronSettingsRow(icon: "lock.shield", title: "Delegation: All trusted projects") {
-                                TronStatusPill(text: scope.active ? (permissions.needsReconfirmation ? "Reconfirm" : "Active") : "Revoked",
-                                               accent: scope.active ? (permissions.needsReconfirmation ? .tronAmber : .tronEmerald) : .tronSlate)
-                                    .fixedSize()
-                                if scope.active { revokeButton(label: "Revoke scope \(scope.id)") { requestRevocation(.scope(scope.id)) } }
-                            }
-                        }
-                    }
-                    if permissions.needsReconfirmation {
-                        TronSettingsDivider()
-                        Button { mutate(.reconfirmPermissions) } label: {
-                            TronSettingsRow(icon: "checkmark.arrow.trianglehead.counterclockwise", title: "Reconfirm permissions",
-                                            subtitle: "Restored standing scopes need your confirmation. One-use grants are never renewed.")
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(!canMutate)
-                        .accessibilityIdentifier("home-permissions-reconfirm")
-                    }
+        let scope = permissions.scopes.first(where: \.active)
+        let pill: (String, Color) = scope == nil ? ("Not authorized", .tronSlate)
+            : permissions.needsReconfirmation ? ("Reconfirm", .tronAmber) : ("Active", .tronEmerald)
+        return TronGlassCard {
+            VStack(spacing: 0) {
+                TronSettingsRow(icon: "lock.shield", title: "Home delegation: All trusted projects") {
+                    TronStatusPill(text: pill.0, accent: pill.1).fixedSize()
+                    if let scope { revokeButton(label: "Revoke scope \(scope.id)") { requestRevocation(.scope(scope.id)) } }
                 }
-            }
-            if !permissions.grants.isEmpty {
-                TronSettingsGroup("One-use grants") {
-                    VStack(spacing: 0) {
-                        ForEach(Array(permissions.grants.enumerated()), id: \.element.id) { index, grant in
-                            if index > 0 { TronSettingsDivider() }
-                            TronSettingsRow(icon: "key", title: grant.target,
-                                            subtitle: "Expires \(Date(timeIntervalSince1970: Double(grant.expiresAt) / 1000).formatted())",
-                                            titleIsIdentifier: true) {
-                                let pill = Self.grantPill(grant.state)
-                                TronStatusPill(text: pill.0, accent: pill.1).fixedSize()
-                                if grant.state == .available {
-                                    revokeButton(label: "Revoke grant \(grant.id)") { requestRevocation(.grant(grant.id)) }
-                                }
-                            }
+                .accessibilityIdentifier("settings-home-delegation")
+                if permissions.needsReconfirmation {
+                    TronSettingsDivider()
+                    Button { mutate(.reconfirmPermissions) } label: {
+                        TronSettingsRow(icon: "checkmark.arrow.trianglehead.counterclockwise", title: "Reconfirm permissions",
+                                        subtitle: "Restored standing scopes need your confirmation. One-use grants are never renewed.")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canMutate)
+                    .accessibilityIdentifier("home-permissions-reconfirm")
+                }
+                ForEach(permissions.grants) { grant in
+                    TronSettingsDivider()
+                    TronSettingsRow(icon: "key", title: grant.target,
+                                    subtitle: "One-use grant · expires \(Date(timeIntervalSince1970: Double(grant.expiresAt) / 1000).formatted())",
+                                    titleIsIdentifier: true) {
+                        let grantPill = Self.grantPill(grant.state)
+                        TronStatusPill(text: grantPill.0, accent: grantPill.1).fixedSize()
+                        if grant.state == .available {
+                            revokeButton(label: "Revoke grant \(grant.id)") { requestRevocation(.grant(grant.id)) }
                         }
                     }
                 }

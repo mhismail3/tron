@@ -80,7 +80,7 @@ its own entry. The typed value carries no inline credentials: the bearer is a Ke
 
 `SettingsToolAccess` resolves and changes the current session or Home's delegated
 worker. Home's resolve also lists, from the Global target, each key Home may write that its
-own session does not resolve (device preferences only when named); those rows set Global, not Home. Its `history` action pages the durable audit (50 records by default, at most 200),
+own session does not resolve; those rows set Global, not Home. Its `history` action pages the durable audit (50 records by default, at most 200),
 optionally filtered by key, using the returned cursor. The caller's actor is threaded into
 `SettingsChangePath.history`, `undo` and `applyAgain`, where `historyVisible` decides scope (outside
 entries are visible only to Tron Home and the maintainer, so `applyAgain` is Home-only in practice: it
@@ -89,7 +89,6 @@ undoes only changes whose target is its session or that its session initiated (i
 included); Tron Home and the maintainer see and undo every change. `inventory` is a read-only projection of hooks, packages, modules, configured MCP servers and custom model providers (id, base URL host, API, model ids) for the chat's directory; it starts no MCP server and resolves no credential (see `admin/README.md`). `undo` takes a change id and
 reason; the target session's own store is acquired through its owner, never Home's snapshot.
 Writer grants, exact native taps, expected-value checks and busy/idle rules still apply.
-A device-preference key (`device-preference` store, one explicit iPhone qualifier) is read through `SettingsStores.devicePreferences`, a per-request snapshot the owner takes only for the keys requested, through the injected `DevicePreferencePort`. An unconfigured, unavailable or unknown read is shown as such and never as a default; a write refuses unless its fresh read is a value, and an unconfirmed write is reported as an uncertain outcome, never replayed. `applyStore` receives the value the store holds before the write as `current`: a forward write passes the planned `before`, and bundle compensation passes the planned `after`, so a device compensation CASes on what the phone actually holds.
 Routine reversible changes, tool selection included, apply, log and can be undone.
 `update` (Home only) installs one exact npm version or git commit of a configured package behind the install tap, showing any configured pin change; its audit entries are `action` records and never undoable (see `docs/settings-contract.md`).
 Widening trust/executable authority, privacy access or spend, and any install or

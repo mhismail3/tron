@@ -16,7 +16,6 @@ enum HomeSheetDestination: Identifiable {
     case taskHistory(String)
     case checkin(HomeTaskHistoryItem)
     case controls
-    case permissions
 
     var id: String {
         switch self {
@@ -34,7 +33,6 @@ enum HomeSheetDestination: Identifiable {
         case .taskHistory: "task-history"
         case .checkin: "checkin"
         case .controls: "controls"
-        case .permissions: "permissions"
         }
     }
 
@@ -49,7 +47,6 @@ enum HomeSheetDestination: Identifiable {
         case .taskHistory: "Check-ins"
         case .checkin: "Check-in"
         case .controls: "Controls"
-        case .permissions: "Task Permissions"
         }
     }
 
@@ -66,7 +63,6 @@ enum HomeSheetDestination: Identifiable {
         case .task(let id): .task(id)
         case .taskHistory(let id): .taskHistory(id, cursor: nil)
         case .controls: .status
-        case .permissions: .permissions
         }
     }
 
@@ -147,8 +143,6 @@ struct HomeSheet: View {
                 HomePagedListSheet(destination: destination, profileID: profileID, onOpenSession: onOpenSession)
             } else if case .taskHistory = destination {
                 HomePagedListSheet(destination: destination, profileID: profileID, onOpenSession: onOpenSession)
-            } else if case .permissions = destination {
-                HomeTaskSheet(permissionsFor: profileID)
             } else if case .checkin(let item) = destination {
                 HomeTaskCheckinSheet(item: item)
             } else if destination.isTaskSurface {

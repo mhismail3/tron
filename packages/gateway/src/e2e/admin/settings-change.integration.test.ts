@@ -1756,8 +1756,7 @@ describe("every key at every allowed layer", () => {
       for (const layer of Object.keys(key.layers).filter(layer => layer === only)) {
         const row = await resolve(layer, key.id);
         const instance = { key: key.id, layer, qualifiers: row?.qualifiers };
-        if (!row) { report.push({ ...instance, result: key.writers.length === 0 ? "verified unserved: no writer"
-          : key.layers.global?.store === "device-preference" ? "verified unserved: no paired iPhone" : "no instance on its target" }); continue; }
+        if (!row) { report.push({ ...instance, result: key.writers.length === 0 ? "verified unserved: no writer" : "no instance on its target" }); continue; }
         const value = await sample(layer, row, key);
         const scope = layer === "home" ? "session" : layer;
         const request = [{ key: key.id, layer: scope, op: "set", value, ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) }];

@@ -6,8 +6,7 @@ network. The existing static Builds page/publisher on `:8443` is unchanged.
 
 From a trusted repository session, ask Tron to offer
 `tools/web/apps/builds/Builds.swift` as app id `builds`, with
-`feeds: ["ios-builds"]`. On iPhone, enable the existing **Run Swift files**
-experiment, open the inline card, review exact source/hash, target and access,
+`feeds: ["ios-builds"]`. On iPhone, open the inline card, review exact source/hash, target and access,
 then choose **Install App**. No offer is an installation by itself.
 
 Apps → Builds opens fresh committed publisher metadata from that Gateway's home.
