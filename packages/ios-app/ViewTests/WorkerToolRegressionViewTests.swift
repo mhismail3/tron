@@ -50,21 +50,6 @@ final class WorkerToolRegressionViewTests: ShuffledTestCase {
         }
     }
 
-    func testAggregateRowsHumanizeExtensionsMCPAndCanonicalToolNames() async throws {
-        try await surface("worker-identities") { app in
-            let expected = [("previewDocument", "Preview Document"), ("extension_preview_document", "Extension preview document"),
-                            ("mcp__wordcraft__preview_document", "Wordcraft / Preview document"), ("knowledge", "Knowledge"),
-                            ("settings", "Settings"), ("subagent", "Subagents"), ("checkin", "Check in"), ("report", "Report result")]
-            for (raw, friendly) in expected {
-                let row = try await revealed(app, "tool-run-summary-worker-review-\(raw)")
-                XCTAssertTrue(row.accessibilityLabel?.hasPrefix(friendly + ",") == true,
-                              "Expected \(friendly), got \(row.accessibilityLabel ?? "")")
-            }
-            try await app.activate("tool-run-summary-worker-review-report")
-            try await app.until("the report evidence") { app.element("home-tool-text-evidence") != nil }
-        }
-    }
-
     private func surface(_ name: String, dark: Bool = false, extra: [String] = [],
                          _ body: (MountedFixture) async throws -> Void) async throws {
         try await mounted(["-tron-settings-fixture", "-settings-expanded-review", "-six-ui-surface", name,

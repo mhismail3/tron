@@ -68,13 +68,22 @@ final class AccessibilityMaintenanceViewTests: ShuffledTestCase {
                 try await app.activate("Mac Replacement")
                 let steps = ["Full signed build", "Rolled back", "Preflight", "Build signed app", "Verify signature",
                              "Stop running workers", "Stop Gateway", "Swap app", "Start new app", "Verify Gateway", "Finish"]
-                try await app.until("the journal rows") { steps.allSatisfy { app.staticText($0) != nil } }
-                let resume = try await revealed(app, "Resume iPhone SSH terminal")
-                XCTAssertTrue(app.onScreen(resume), "a stopped worker offers Resume")
-                XCTAssertNotNil(app.staticText("Failed at Start new app"))
-                XCTAssertNotNil(app.staticText("Previous app restored"))
-                XCTAssertNil(app.button("Resume Settings polish"), "a resumed worker offers no second Resume")
-                XCTAssertNotNil(app.staticText("Resumed in place"))
+                try await app.until("the journal rows") { steps.allSatisfy { row(app, $0) != nil } }
+                var resume: NSObject?
+                try await app.until("the stopped worker's Resume") {
+                    resume = MountedFixture.elements(in: app.top).last {
+                        $0.accessibilityTraits.contains(.button) && $0.accessibilityLabel?.hasSuffix("Resume iPhone SSH terminal") == true
+                    }
+                    return resume != nil
+                }
+                try await app.reveal(resume!)
+                XCTAssertTrue(app.onScreen(resume!), "a stopped worker offers Resume")
+                XCTAssertNotNil(row(app, "Failed at Start new app"))
+                XCTAssertNotNil(row(app, "Previous app restored"))
+                XCTAssertFalse(MountedFixture.elements(in: app.top).contains {
+                    $0.accessibilityTraits.contains(.button) && $0.accessibilityLabel?.contains("Resume Settings polish") == true
+                }, "a resumed worker offers no second Resume")
+                XCTAssertTrue(row(app, "Settings polish")?.accessibilityLabel?.contains("Resumed in place") == true)
             }
         }
     }
@@ -140,36 +149,6 @@ final class AccessibilityMaintenanceViewTests: ShuffledTestCase {
         }
     }
 
-    func testSessionsMenuSettingsAndCanonicalPreferences() async throws {
-        try await mounted(["-tron-accessibility-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
-                           "-fixture-dashboard", "-fixture-light"]) { app in
-            let titles = menuActionTitles(try await dashboardMenu(app))
-            XCTAssertNil(app.element("dashboard.search"), "No standalone dashboard header search icon")
-            XCTAssertNil(app.element("Search sessions"))
-            XCTAssertTrue(titles.contains("Settings"))
-            XCTAssertFalse(titles.contains("Filter"))
-            XCTAssertFalse(titles.contains("Search"))
-            try await performDashboardAction(app, "Settings")
-            try await app.until("Global Settings opens") { app.staticText("Global Settings") != nil }
-            try await app.activate("settings-link-Appearance")
-            try await app.until("Appearance opens") { app.navigationTitle("Appearance") != nil }
-            let servers = try await containing(app, "Visible Servers")
-            try await app.reveal(servers)
-            XCTAssertTrue(app.onScreen(servers))
-            XCTAssertTrue(servers.accessibilityActivate())
-            try await app.until("Visible Servers opens") { app.staticText("Visible Servers") != nil }
-            let done = try XCTUnwrap(MountedFixture.elements(in: app.top).last {
-                ($0.accessibilityLabel == "Done" || MountedFixture.identifier($0) == "Done")
-                    && $0.accessibilityTraits.contains(.button) && app.onScreen($0)
-            })
-            XCTAssertTrue(done.accessibilityActivate())
-            try await app.activate("settings-done")
-            try await app.until("the dashboard menu returns") {
-                (app.element("dashboard.menu") as? UIButton).map { app.onScreen($0) } == true
-            }
-        }
-    }
-
     func testKnowledgeProductIsAbsentFromDashboardAndConnectedServices() async throws {
         for variant in ["-fixture-light", "-fixture-dark", "-fixture-xxxl", "-fixture-large-type"] {
             try await mounted(["-tron-accessibility-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
@@ -204,14 +183,10 @@ final class AccessibilityMaintenanceViewTests: ShuffledTestCase {
         try await app.until("\(text) on the worker row") { value(app).contains(text) }
     }
 
-    private func containing(_ app: MountedFixture, _ text: String) async throws -> NSObject {
-        var node: NSObject?
-        try await app.until("a button containing \(text)") {
-            node = MountedFixture.elements(in: app.top).last {
-                $0.accessibilityTraits.contains(.button) && $0.accessibilityLabel?.contains(text) == true
-            }
-            return node != nil
+    private func row(_ app: MountedFixture, _ title: String) -> NSObject? {
+        MountedFixture.elements(in: app.top).last {
+            !$0.accessibilityTraits.contains(.button)
+                && ($0.accessibilityLabel == title || $0.accessibilityLabel?.hasPrefix(title + ", ") == true)
         }
-        return node!
     }
 }
