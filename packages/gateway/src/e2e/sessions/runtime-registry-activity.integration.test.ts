@@ -121,9 +121,11 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       runtimes.push(runtime);
       return runtime;
     };
+    let releaseTurns!: () => void;
+    const turns = new Promise<void>((resolve) => { releaseTurns = resolve; });
     faux.setResponses([
-      async () => { await new Promise((resolve) => setTimeout(resolve, 150)); return fauxAssistantMessage("first complete"); },
-      async () => { await new Promise((resolve) => setTimeout(resolve, 150)); return fauxAssistantMessage("second complete"); },
+      async () => { await turns; return fauxAssistantMessage("first complete"); },
+      async () => { await turns; return fauxAssistantMessage("second complete"); },
     ]);
 
     const registry = await createTestRegistry({
@@ -160,8 +162,11 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     ]));
     const beforeHeartbeat = summaryUpdates.findLast((update) => update.sessionId === first.id)!;
     expect(beforeHeartbeat.activeSince).toBeDefined();
-    await new Promise((resolve) => setTimeout(resolve, 2));
-    (first as unknown as { publishActivityHeartbeat: () => void }).publishActivityHeartbeat();
+    vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+    try {
+      vi.setSystemTime(Date.parse(beforeHeartbeat.updatedAt) + 1_000);
+      (first as unknown as { publishActivityHeartbeat: () => void }).publishActivityHeartbeat();
+    } finally { vi.useRealTimers(); }
     const afterHeartbeat = summaryUpdates.findLast((update) => update.sessionId === first.id)!;
     expect(Date.parse(afterHeartbeat.updatedAt)).toBeGreaterThan(Date.parse(beforeHeartbeat.updatedAt));
     expect(afterHeartbeat.activeSince).toBe(beforeHeartbeat.activeSince);
@@ -170,10 +175,12 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(first.isBusy).toBe(true);
     expect(second.isBusy).toBe(true);
     let drainCompleted = false;
+    const drainPasses = vi.spyOn(registry, "administrativeDrainSnapshot");
     const drain = registry.waitUntilIdle().then(() => { drainCompleted = true; });
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await waitFor(() => drainCompleted || drainPasses.mock.calls.length >= 4, "the drain keeps waiting on both running slots");
     expect(drainCompleted).toBe(false);
 
+    releaseTurns();
     await waitFor(() => !first.isBusy && !second.isBusy, "both slots to go idle");
     await drain;
     expect(drainCompleted).toBe(true);
@@ -224,8 +231,9 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const queued = await slot.prompt("accepted follow up", [], "followUp");
     expect(slot.snapshot().queuedItems).toMatchObject([{ id: queued.operationId, behavior: "followUp" }]);
     let drained = false;
+    const drainPasses = vi.spyOn(registry, "administrativeDrainSnapshot");
     const drain = registry.waitUntilIdle().then(() => { drained = true; });
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await waitFor(() => drained || drainPasses.mock.calls.length >= 4, "the drain keeps waiting on the queued follow-up");
     expect(drained).toBe(false);
     expect(slot.snapshot().queuedItems).toHaveLength(1);
     releaseFirst();
@@ -396,8 +404,11 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     });
     expect(active.activeSince).toBeDefined();
     expect(Date.parse(active.updatedAt)).toBeGreaterThan(Date.parse(startedAt));
-    await new Promise((resolve) => setTimeout(resolve, 2));
-    slot.publishActivityHeartbeat();
+    vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+    try {
+      vi.setSystemTime(Date.parse(active.updatedAt) + 1_000);
+      slot.publishActivityHeartbeat();
+    } finally { vi.useRealTimers(); }
     const heartbeat = fixture.summaries.at(-1)!;
     expect(Date.parse(heartbeat.updatedAt)).toBeGreaterThan(Date.parse(active.updatedAt));
     expect(heartbeat.activeSince).toBe(active.activeSince);
@@ -509,7 +520,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(slot.isDrainBusy).toBe(true);
     let drainSettled = false;
     const drain = fixture.registry.waitUntilIdle().then(() => { drainSettled = true; });
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await waitFor(() => fixture.registry.administrativeDrainSnapshot().phase === "waiting", "the drain waits on the detached run");
     slot.ownedTurns.stopExtensionActivityWatcher(toolCallId);
     expect(drainSettled).toBe(false);
 
@@ -582,7 +593,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const drain = fixture.registry.waitUntilIdle();
     let drained = false;
     void drain.then(() => { drained = true; });
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await waitFor(() => fixture.registry.administrativeDrainSnapshot().phase === "waiting", "the drain waits on the detached run");
     internal.stopExtensionActivityWatcher(toolCallId);
     expect(drained).toBe(false);
     expect(fixture.registry.administrativeDrainSnapshot()).toMatchObject({
@@ -2353,8 +2364,11 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const terminalAt = Date.parse(admitted?.lifecycle?.terminalAt ?? "");
     expect(terminalAt).toBeGreaterThanOrEqual(admissionWindowStartedAt);
     expect(terminalAt).toBeLessThanOrEqual(Date.parse(admitted?.lifecycle?.observedAt ?? ""));
-    await new Promise((resolve) => setTimeout(resolve, 2));
-    await refreshSubagentActivityFromArtifact(internal, asyncDir);
+    vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+    try {
+      vi.setSystemTime(Date.parse(admitted?.lifecycle?.observedAt ?? "") + 1_000);
+      await refreshSubagentActivityFromArtifact(internal, asyncDir);
+    } finally { vi.useRealTimers(); }
     const reobserved = slot.snapshot().extensionActivities?.find((candidate) => candidate.toolCallId === toolCallId);
     expect(reobserved?.lifecycle?.terminalAt).toBe(admitted?.lifecycle?.terminalAt);
 

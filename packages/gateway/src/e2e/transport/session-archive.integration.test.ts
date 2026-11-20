@@ -612,9 +612,10 @@ describe("session archive over the real Gateway", () => {
     });
     const firstArchived = await archive(older.id, "archive-command-cursor-older");
     expect(firstArchived.ok).toBe(true);
-    await new Promise((resolve) => setTimeout(resolve, 5));
     const newer = await f.coldSession("cursor-archived-newer");
-    const secondArchived = await archive(newer.id, "archive-command-cursor-newer");
+    vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+    vi.setSystemTime(Date.now() + 1_000);
+    const secondArchived = await archive(newer.id, "archive-command-cursor-newer").finally(() => vi.useRealTimers());
     expect(secondArchived.ok).toBe(true);
     expect((await list(client, "only")).sessions.map((row) => row.id)).toEqual([newer.id, older.id]);
 
@@ -1463,8 +1464,9 @@ describe("session archive over the real Gateway", () => {
         .slots.get(session.id)?.isBusy, "run settled");
       expect(await archivedRecord(f.root, session.id)).toBeDefined();
       restoreRemovals();
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      const second = await archiveSession(client, session.id, "pending-rearchive-command");
+      vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+      vi.setSystemTime(Date.parse(first.archivedAt) + 1_000);
+      const second = await archiveSession(client, session.id, "pending-rearchive-command").finally(() => vi.useRealTimers());
       expect(Date.parse(second.archivedAt)).toBeGreaterThan(Date.parse(first.archivedAt));
       const stored = await archivedRecord(f.root, session.id) as { archivedAt: string };
       expect(stored.archivedAt).toBe(second.archivedAt);

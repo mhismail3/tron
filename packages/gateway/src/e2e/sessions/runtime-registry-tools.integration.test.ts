@@ -905,8 +905,9 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       const drainPrompt = slot.prompt("run codemode under administrative drain");
       await waitFor(() => slot.snapshot().toolExecutions.some((tool) => tool.toolCallId === "codemode-drain"), "the codemode drain tool");
       let drained = false;
+      const drainPasses = vi.spyOn(registry, "administrativeDrainSnapshot");
       const drain = registry.waitUntilIdle().then(() => { drained = true; });
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await waitFor(() => drained || drainPasses.mock.calls.length >= 4, "the drain keeps waiting on the codemode tool");
       expect(drained).toBe(false);
       await drainPrompt;
       await drain;
@@ -1486,8 +1487,9 @@ export default function (pi) {
     };
     expect(marker.operations.map((operation) => operation.operationId)).toContain((slot as any).pendingExtensionCommand?.id);
     let drainSettled = false;
+    const drainPasses = vi.spyOn(registry, "administrativeDrainSnapshot");
     const drain = registry.waitUntilIdle().then(() => { drainSettled = true; });
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await waitFor(() => drainSettled || drainPasses.mock.calls.length >= 4, "the drain keeps waiting on the pending command");
     expect(drainSettled).toBe(false);
     slot.respondToInteraction(pending.id, pending.hostEpoch, pending.presentationRevision, true, false);
     await expect(command).resolves.toEqual({ operationId: expect.any(String) });
@@ -1502,7 +1504,8 @@ export default function (pi) {
     const markerClear = vi.spyOn(markerStore, "clear").mockImplementationOnce(async () => markerClearBarrier);
     const aborting = slot.abort();
     await waitFor(() => markerClear.mock.calls.length === 1, "the marker clear");
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    const passesAtClear = drainPasses.mock.calls.length;
+    await waitFor(() => drainSettled || drainPasses.mock.calls.length >= passesAtClear + 3, "the drain keeps waiting on the marker clear");
     expect(drainSettled).toBe(false);
     markerClear.mockImplementation(originalClear);
     releaseMarkerClear();
