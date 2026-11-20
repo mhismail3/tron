@@ -5,10 +5,17 @@ import Foundation
 import Security
 import os
 
+#if FAULTS
+let faultHooks = true
+#else
+let faultHooks = false
+#endif
 let log = Logger(subsystem: "com.tron.unlock", category: "broker")
-let pluginSocket = "/tmp/com.tron.unlock/plugin.sock"
+let runDir = "/Library/Application Support/Tron/run"
+let pluginSocket = runDir + "/plugin.sock"
+let leaseMarker = NSHomeDirectory() + "/.tron-unlock/lease-active"
 let controlSocket = NSHomeDirectory() + "/.tron-unlock/control.sock"
-let pluginPeerRequirement = "anchor apple"
+let pluginPeerRequirement = "anchor apple and identifier \"com.apple.SecurityAgentHelper.arm64\""
 
 typealias LockFunction = @convention(c) () -> Int32
 func lockScreen() -> Int32 {
@@ -53,6 +60,13 @@ func readLine(_ fd: Int32) -> String {
 
 func reply(_ fd: Int32, _ text: String) { _ = text.withCString { write(fd, $0, strlen($0)) } }
 
+func guarded(_ fd: Int32) {
+  var on: Int32 = 1
+  setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+  var timeout = timeval(tv_sec: 0, tv_usec: 500_000)
+  setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+}
+
 func peerSatisfies(_ fd: Int32, _ requirementText: String) -> Bool {
   var token = audit_token_t()
   var length = socklen_t(MemoryLayout<audit_token_t>.size)
@@ -78,11 +92,15 @@ final class Lease {
   var shield: [NSWindow] = []
   var tap: CFMachPort?
   var endTimer: Timer?
+  var pollTimer: Timer?
 
-  func approve(task: String, seconds: Int) {
+  func approve(task: String, seconds: Int) -> Bool {
+    if case .active = state { return false }
+    guard (1...600).contains(seconds) else { return false }
     state = .approved(task: task, seconds: seconds, expires: Date().addingTimeInterval(30))
     log.notice("lease approved task=\(task, privacy: .public) seconds=\(seconds)")
     print(stamp(), "approved", task, seconds); fflush(stdout)
+    return true
   }
 
   func answerPlugin() -> String {
@@ -91,6 +109,7 @@ final class Lease {
       return "DENY\n"
     }
     state = .active(task: task, ends: Date().addingTimeInterval(TimeInterval(seconds)))
+    FileManager.default.createFile(atPath: leaseMarker, contents: Data(task.utf8))
     print(stamp(), "plugin ALLOW", task); fflush(stdout)
     DispatchQueue.main.async { self.begin(seconds: seconds) }
     return "ALLOW\n"
@@ -98,7 +117,7 @@ final class Lease {
 
   func begin(seconds: Int) {
     endTimer = Timer.scheduledTimer(withTimeInterval: TimeInterval(seconds), repeats: false) { _ in self.end("lease-expired") }
-    Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { timer in
+    pollTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { timer in
       guard !screenLocked() else { return }
       timer.invalidate()
       self.showShield()
@@ -143,9 +162,21 @@ final class Lease {
   func end(_ reason: String) {
     guard case .active = state else { return }
     let started = Date()
-    let result = lockScreen()
+    var result: Int32 = -1
+    for _ in 0..<20 where !screenLocked() {
+      result = lockScreen()
+      usleep(50_000)
+    }
+    guard screenLocked() else {
+      print(stamp(), "RELOCK FAILED reason=\(reason) SACLockScreenImmediate=\(result); lease stays active"); fflush(stdout)
+      log.fault("relock failed reason=\(reason, privacy: .public)")
+      DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.end(reason) }
+      return
+    }
     state = .idle
+    unlink(leaseMarker)
     endTimer?.invalidate()
+    pollTimer?.invalidate()
     if let tap { CGEvent.tapEnable(tap: tap, enable: false) }
     tap = nil
     shield.forEach { $0.orderOut(nil) }
@@ -156,44 +187,51 @@ final class Lease {
 }
 
 func serve() {
+  signal(SIGPIPE, SIG_IGN)
   let lease = Lease()
-  mkdir("/tmp/com.tron.unlock", 0o755)
   mkdir(NSHomeDirectory() + "/.tron-unlock", 0o700)
+  if access(leaseMarker, F_OK) == 0 {
+    print(stamp(), "stale lease marker; relock SACLockScreenImmediate=\(screenLocked() ? 0 : lockScreen())"); fflush(stdout)
+    unlink(leaseMarker)
+  }
   let plugin = listen(pluginSocket, mode: 0o666)
   let control = listen(controlSocket, mode: 0o600)
-  LocalStubApproval().start { task, seconds in DispatchQueue.main.async { lease.approve(task: task, seconds: seconds) } }
+  LocalStubApproval().start { task, seconds in DispatchQueue.main.async { _ = lease.approve(task: task, seconds: seconds) } }
   Thread.detachNewThread {
     while true {
       let fd = accept(plugin, nil, nil)
       guard fd >= 0 else { continue }
-      let trusted = peerSatisfies(fd, pluginPeerRequirement)
-      let request = readLine(fd)
-      let mode = DispatchQueue.main.sync { lease.fault }
-      print(stamp(), "plugin request=\(request) trustedPeer=\(trusted) fault=\(mode)"); fflush(stdout)
-      switch mode {
-      case "hang": sleep(5)
-      case "crash": abort()
-      case "garbage": reply(fd, "ALLOWX\n")
-      default: reply(fd, trusted && request == "UNLOCK" ? DispatchQueue.main.sync { lease.answerPlugin() } : "DENY\n")
+      guarded(fd)
+      guard peerSatisfies(fd, pluginPeerRequirement) else { print(stamp(), "plugin peer rejected"); fflush(stdout); close(fd); continue }
+      Thread.detachNewThread {
+        let request = readLine(fd)
+        let mode = DispatchQueue.main.sync { lease.fault }
+        print(stamp(), "plugin request=\(request) fault=\(mode)"); fflush(stdout)
+        switch mode {
+        case "hang": sleep(5)
+        case "crash": abort()
+        case "garbage": reply(fd, "ALLOWX\n")
+        default: reply(fd, request == "UNLOCK" ? DispatchQueue.main.sync { lease.answerPlugin() } : "DENY\n")
+        }
+        close(fd)
       }
-      close(fd)
     }
   }
   Thread.detachNewThread {
     while true {
       let fd = accept(control, nil, nil)
       guard fd >= 0 else { continue }
+      guarded(fd)
       let words = readLine(fd).split(separator: " ").map(String.init)
       switch words.first {
-      case "APPROVE" where words.count == 3: DispatchQueue.main.sync { lease.approve(task: words[1], seconds: Int(words[2]) ?? 0) }; reply(fd, "OK\n")
-      case "FAULT" where words.count == 2: DispatchQueue.main.sync { lease.fault = words[1] }; reply(fd, "OK\n")
+      case "APPROVE" where words.count == 3: reply(fd, DispatchQueue.main.sync { lease.approve(task: words[1], seconds: Int(words[2]) ?? 0) } ? "OK\n" : "ERR\n")
+      case "FAULT" where words.count == 2 && faultHooks: DispatchQueue.main.sync { lease.fault = words[1] }; reply(fd, "OK\n")
       case "END": DispatchQueue.main.sync { lease.end("stop") }; reply(fd, "OK\n")
       default: reply(fd, "ERR\n")
       }
       close(fd)
     }
   }
-  signal(SIGPIPE, SIG_IGN)
   signal(SIGTERM, SIG_IGN)
   let term = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
   term.setEventHandler { lease.end("sigterm"); exit(0) }

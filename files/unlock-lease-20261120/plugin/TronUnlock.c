@@ -1,4 +1,6 @@
 #include <CoreFoundation/CoreFoundation.h>
+#include <dispatch/dispatch.h>
+#include <sys/stat.h>
 #include <Security/AuthorizationPlugin.h>
 #include <Security/Security.h>
 #include <errno.h>
@@ -14,7 +16,8 @@
 #include <unistd.h>
 #include "requirement.h"
 
-#define SOCKET_PATH "/tmp/com.tron.unlock/plugin.sock"
+#define RUN_DIR "/Library/Application Support/Tron/run"
+#define SOCKET_PATH RUN_DIR "/plugin.sock"
 #define DEADLINE_MS 1000
 
 typedef struct { const AuthorizationCallbacks *callbacks; } Plugin;
@@ -66,8 +69,18 @@ static bool peer_is_broker(int fd) {
     return ok;
 }
 
-static const char *ask_broker(void) {
-    long long deadline = now_ms() + DEADLINE_MS;
+static bool path_is_private(uid_t *owner) {
+    struct stat parent, dir, sock;
+    if (lstat("/Library/Application Support/Tron", &parent) != 0 || !S_ISDIR(parent.st_mode) || parent.st_uid != 0 || (parent.st_mode & 022)) return false;
+    if (lstat(RUN_DIR, &dir) != 0 || !S_ISDIR(dir.st_mode) || (dir.st_mode & 022)) return false;
+    if (lstat(SOCKET_PATH, &sock) != 0 || !S_ISSOCK(sock.st_mode) || sock.st_uid != dir.st_uid) return false;
+    *owner = dir.st_uid;
+    return true;
+}
+
+static const char *ask_broker_unbounded(long long deadline) {
+    uid_t owner;
+    if (!path_is_private(&owner)) return "path";
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd < 0) return "socket";
     const char *verdict = "connect";
@@ -78,7 +91,11 @@ static const char *ask_broker(void) {
     strlcpy(address.sun_path, SOCKET_PATH, sizeof address.sun_path);
     char reply[16];
     size_t n = 0;
+    uid_t euid;
+    gid_t egid;
     if (connect(fd, (struct sockaddr *)&address, sizeof address) != 0) goto done;
+    verdict = "owner";
+    if (getpeereid(fd, &euid, &egid) != 0 || euid != owner) goto done;
     verdict = "signature";
     if (!peer_is_broker(fd)) goto done;
     verdict = "write";
@@ -94,6 +111,18 @@ static const char *ask_broker(void) {
     else if (strcmp(verdict, "reply") == 0) verdict = "deny";
 done:
     close(fd);
+    return verdict;
+}
+
+static const char *ask_broker(void) {
+    long long deadline = now_ms() + DEADLINE_MS;
+    __block const char *verdict = "timeout";
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0), ^{
+        verdict = ask_broker_unbounded(deadline);
+        dispatch_semaphore_signal(done);
+    });
+    if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, (deadline - now_ms() + 50) * NSEC_PER_MSEC)) != 0) return "deadline";
     return verdict;
 }
 
