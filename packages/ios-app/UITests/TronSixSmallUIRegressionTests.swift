@@ -2,8 +2,6 @@ import XCTest
 import UIKit
 
 @MainActor final class TronSixSmallUIRegressionTests: XCTestCase {
-    private let root = "/Users/fixture/Workspace/tron-worktrees/six-small-ui-fixes"
-
     func testToastGlyphUsesActivePrimary() {
         for mode in ["light", "dark"] {
             let app = launch("toast", mode: mode)
@@ -48,10 +46,10 @@ import UIKit
         app.terminate()
     }
 
-    private func launch(_ surface: String, mode: String = "light", extra: [String] = []) -> XCUIApplication {
+    private func launch(_ surface: String, mode: String = "light") -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-settings-fixture", "-settings-expanded-review", "-six-ui-surface", surface,
-                               "-themeColor", "burgundy", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + extra
+                               "-themeColor", "burgundy", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         if mode == "dark" { app.launchArguments.append("-settings-dark") }
         app.launch()
         XCTAssertTrue(app.buttons["Done"].firstMatch.waitForExistence(timeout: 15), app.debugDescription)

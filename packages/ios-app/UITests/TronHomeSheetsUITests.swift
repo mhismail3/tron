@@ -41,7 +41,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         add(attachment)
     }
 
-    @MainActor private func assertCompactHomeSummary(_ app: XCUIApplication, workers: String, level: String) {
+    @MainActor private func assertCompactHomeSummary(_ app: XCUIApplication) {
         for removed in ["home-context-activation", "context-segmented-bar", "home-manage-host",
                         "context-segment-instructions", "context-segment-profile", "context-segment-memory",
                         "context-segment-chapter", "context-segment-results", "context-segment-input"] {
@@ -54,18 +54,13 @@ final class TronHomeSheetsUITests: XCTestCase {
         }
         let pill = element(app, "home-manage-workers"), state = element(app, "home-manage-state")
         XCTAssertTrue(pill.exists)
-        XCTAssertEqual(pill.label, workers)
-        XCTAssertTrue((pill.value as? String)?.lowercased().contains(level.lowercased()) == true)
+        XCTAssertEqual(pill.label, "0 workers")
+        XCTAssertTrue((pill.value as? String)?.lowercased().contains("normal") == true)
         XCTAssertGreaterThanOrEqual(pill.frame.minX, state.frame.maxX)
         XCTAssertEqual(pill.frame.midY, state.frame.midY, accuracy: 1)
         XCTAssertLessThanOrEqual(pill.frame.maxX, app.frame.maxX)
         let color = ink(app, pill)
-        switch level {
-        case "Normal": XCTAssertGreaterThan(color[1], color[0] + 0.1)
-        default:
-            XCTAssertGreaterThan(color[0], color[1] + 0.2)
-            XCTAssertGreaterThan(color[0], color[2] + 0.2)
-        }
+        XCTAssertGreaterThan(color[1], color[0] + 0.1)
         let ring = element(app, "home-context-ring")
         XCTAssertTrue(ring.exists)
         XCTAssertEqual(ring.value as? String, "3 percent")
@@ -154,7 +149,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         keep("01-manage")
 
         XCTAssertFalse(element(app, "home-manage-context").exists, "Home Context is part of Manage Home")
-        assertCompactHomeSummary(app, workers: "0 workers", level: "Normal")
+        assertCompactHomeSummary(app)
 
         app.swipeUp()
         let controls = element(app, "home-manage-controls"), tasks = element(app, "home-manage-tasks")
