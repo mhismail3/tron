@@ -50,7 +50,7 @@ export class ChildSessionAdmission {
       const recoverySessionOwner = identityStrategy === "piArtifact"
         ? (record as Record<PropertyKey, unknown>)[RECOVERY_SESSION_OWNER]
         : undefined;
-      const sessionOwnerId = [recoverySessionOwner, embeddedHeader ? record.sessionOwnerId : undefined, record.runId, progress?.runId]
+      const sessionOwnerId = [embeddedHeader ? record.sessionOwnerId : undefined, recoverySessionOwner, record.runId, progress?.runId]
         .find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
       const rawLabel = [progress?.agent, record.agent]
         .find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
