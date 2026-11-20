@@ -85,7 +85,7 @@ class MiniGatewayLane(unittest.TestCase):
         self.temporary = Path(tempfile.mkdtemp(prefix='tron-mini-test-'))
         self.addCleanup(shutil.rmtree, self.temporary, True)
         self.local, self.mini = self.temporary / 'local', self.temporary / 'mini-home'
-        for path in ('tools/verify/mini.py', 'tools/verify/ledger.py', 'tools/verify/ledger-node.mjs', 'tools/verify/ledger-host.mjs', 'scripts/tron-node', '.node-version', 'config/ci-toolchain.env'):
+        for path in ('tools/verify/mini.py', 'tools/verify/vitest_configs.py', 'tools/verify/ledger.py', 'tools/verify/ledger-node.mjs', 'tools/verify/ledger-host.mjs', 'scripts/tron-node', '.node-version', 'config/ci-toolchain.env'):
             (self.local / path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / path, self.local / path)
         self.write('tools/verify/gateway.py', LANE)
@@ -184,6 +184,18 @@ class MiniGatewayLane(unittest.TestCase):
         self.assertIn('uncommitted', dirty.stderr)
         self.assertNotIn('pushing', dirty.stdout)
         self.assertFalse(report.exists())
+
+    def test_a_selection_spanning_vitest_configs_is_refused_before_the_mini_is_contacted(self) -> None:
+        self.write('packages/gateway/vitest.nested.config.ts', 'export const nestedTestFiles = [\n  "src/a/nested.e2e.test.ts",\n];\n')
+        for path in ('src/a/nested.e2e.test.ts', 'src/a/plain.test.ts'):
+            self.write(f'packages/gateway/{path}', '')
+        self.commit('two configs')
+        refused = self.lane('src/a/nested.e2e.test.ts', 'src/a/plain.test.ts', '-t', 'x')
+        self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
+        self.assertIn('scripts/tron test gateway --config vitest.nested.config.ts -t x src/a/nested.e2e.test.ts', refused.stderr)
+        self.assertIn('scripts/tron test gateway --config vitest.config.ts -t x src/a/plain.test.ts', refused.stderr)
+        self.assertNotIn('pushing', refused.stdout, 'nothing was submitted to the mini queue')
+        self.assertEqual(self.git('for-each-ref', cwd=self.mini / 'tron-ci/tron.git'), '')
 
     def test_a_read_only_directory_a_job_left_in_the_checkout_is_cleaned_for_the_next_job(self) -> None:
         report, args = self.report_args()

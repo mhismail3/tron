@@ -141,6 +141,14 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
         return no_result('mini verification accepts synchronous checks, not golden recording')
     if git('status', '--porcelain', '--untracked-files=normal'):
         return no_result('the worktree has uncommitted or untracked changes; the mini runs a commit, commit first')
+    if lane == 'gateway':
+        sys.path.insert(0, str(ROOT / 'tools/verify'))
+        from vitest_configs import Refused, with_own_config
+        try:
+            with_own_config(args, ROOT / 'packages/gateway')
+        except Refused as refusal:
+            print(refusal, file=sys.stderr)
+            return 2
     try:
         ssh = ssh_command()
     except SystemExit as error:
