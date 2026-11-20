@@ -22,6 +22,7 @@
     "test-support/episodic-chapter-source.ts",
     "test-support/fixed-recording.ts",
     "test-support/fixture-process-owner.mjs",
+    "test-support/fs-events.ts",
     "test-support/gateway-lock-harness.ts",
     "test-support/gateway-process.ts",
     "test-support/gateway-registry.ts",
