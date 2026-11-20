@@ -118,3 +118,4 @@ final class TronAccessibilityUITests: XCTestCase {
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 3), .completed, XCUIApplication().debugDescription)
     }
+}
