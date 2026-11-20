@@ -116,7 +116,7 @@ final class TronConsolidatedUIRegressionTests: XCTestCase {
         XCTAssertTrue(card.waitForExistence(timeout: 5))
         XCTAssertTrue(card.staticTexts["Thinking"].exists && card.staticTexts["Context Window"].exists)
         tap(app, "settings-row-model.thinking_role_chat_-reset")
-        let revertedThinking = expectation(for: NSPredicate(format: "value == %@", "High"), evaluatedWith: card.buttons["Thinking"])
+        let revertedThinking = expectation(for: NSPredicate(format: "value == %@", "High"), evaluatedWith: card.buttons.matching(identifier: "settings-choice-control").buttons["Thinking"])
         wait(for: [revertedThinking], timeout: 5)
         tap(app, "manage-model-switch")
         let alternative = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Alternative Model'")).firstMatch
