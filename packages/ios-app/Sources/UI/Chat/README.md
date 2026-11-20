@@ -143,7 +143,7 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   The existing transcript notification route keeps its sheet live above lazy rows.
   `ChatDetailSheet`, shared with nested tool details, owns navigation/Done, medium/large detents,
   top chrome and insets. Single errors and runs share one layout of themed standard groups: a
-  summary row (runs: totals, distinct breakdown, first/last times), then per occurrence, newest
+  summary row (runs: totals and first/last times, then the Breakdown list), then per occurrence, newest
   first and always visible, a details group (model, type, time, request ID, HTTP status rows) and
   a Message group whose `TronSettingsCodeRow` holds the full selectable JSON (or verbatim text).
   Long payload groups use the shared static-surface policy instead of a tall backdrop filter.
