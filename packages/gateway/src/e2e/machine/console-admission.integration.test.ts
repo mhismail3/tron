@@ -74,13 +74,14 @@ async function fixture() {
   const dispatched = join(root, "dispatched"), release = join(root, "release");
   boundary.lockFile = join(root, "locked-during-dispatch");
   boundary.driver = join(root, "driver.cjs");
+  await execute("/usr/bin/mkfifo", [release]);
   await writeFile(boundary.driver, `const fs = require('node:fs/promises');
 (async () => {
   const tool = process.argv[3], args = JSON.parse(process.argv[4]);
   if (tool === 'start_session') return console.log(JSON.stringify({ active: true, revived: false }));
   await fs.writeFile(${JSON.stringify(dispatched)}, tool);
   const mode = await fs.readFile(${JSON.stringify(join(root, "mode"))}, 'utf8').catch(() => '');
-  if (mode === 'hold') while (!(await fs.stat(${JSON.stringify(release)}).catch(() => false))) await new Promise(resolve => setTimeout(resolve, 10));
+  if (mode === 'hold') await fs.readFile(${JSON.stringify(release)});
   if (mode === 'lock') await fs.writeFile(${JSON.stringify(boundary.lockFile)}, 'locked');
   const png = Buffer.alloc(33); Buffer.from([137,80,78,71,13,10,26,10]).copy(png); png.writeUInt32BE(13, 8); png.write('IHDR', 12); png.writeUInt32BE(4, 16); png.writeUInt32BE(4, 20);
   if (args.screenshot_out_file) await fs.writeFile(args.screenshot_out_file, png);
@@ -193,7 +194,7 @@ describe.skipIf(process.platform !== "darwin")("console admission for computer a
       `import cp from "node:child_process"; import { syncBuiltinESMExports } from "node:module";
 const spawn = cp.spawn; cp.spawn = (file, args, options) => spawn(file, args.map(arg => arg === "PreventUserIdleDisplaySleep" ? "PreventUserIdleSystemSleep" : arg), options);
 syncBuiltinESMExports();
-const { DisplayActivity } = await import(${JSON.stringify(source)}); new DisplayActivity().hold(); process.send("ready"); setInterval(() => {}, 1000);`],
+const { DisplayActivity } = await import(${JSON.stringify(source)}); new DisplayActivity().hold(); process.send("ready");`],
       { stdio: ["ignore", "ignore", "pipe", "ipc"] });
     let diagnostic = "";
     child.stderr!.on("data", chunk => { diagnostic += chunk; });
