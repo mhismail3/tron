@@ -302,7 +302,7 @@ final class TronMacTerminalLoadingUITests: XCTestCase {
             app.launch()
             let row = app.buttons["settings-mac-terminal"]
             XCTAssertTrue(row.waitForExistence(timeout: 15), app.debugDescription)
-                row.tap()
+            row.tap()
             let title = app.descendants(matching: .any)["terminal-sheet-title"].firstMatch
             XCTAssertTrue(title.waitForExistence(timeout: 15), app.debugDescription)
             Thread.sleep(forTimeInterval: 2)
