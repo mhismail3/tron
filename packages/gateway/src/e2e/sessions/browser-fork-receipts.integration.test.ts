@@ -231,6 +231,7 @@ describe("packaged agent-browser receipts", () => {
       const first=await launch("persistent-first");
       expect(await step("persistent-cleanup",["owned-launch","cleanup",first.launchId])).toMatchObject({isError:true});
       expect(JSON.stringify(await step("persistent-exited",["connect",first.endpoint],true))).toContain("owned_launch_required");
+      expect(await readdir(join(agentDir,"browser","profile.launches"))).not.toContain(`${new URL(first.endpoint).port}.json`);
       await launch("persistent-second");
       await expect(readFile(join(profile,".tron-owned-profile"),"utf8")).resolves.toMatch(/^[0-9a-f-]{36}$/);
     });

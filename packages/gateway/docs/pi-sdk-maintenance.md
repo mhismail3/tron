@@ -179,8 +179,9 @@ checks listener PID, process birth, profile argv and issued launch nonce. Generi
 `owned-launch prepare|record|cleanup` gives those producers receipts without a second
 launcher. A persistent producer profile (the studio's signed-in Chrome) passes its absolute path to
 `prepare <path>` and `record <launchId> <pid> <path>`; it must be a private directory outside the
-owned profile and launch root holding an operator-placed `.tron-owned-profile` marker, its receipt
-lapses when that browser exits, and `cleanup` never deletes it. Personal profiles, state imports and cookie/profile copying are unavailable;
+owned profile and launch root holding an operator-placed `.tron-owned-profile` marker. Admission rests
+on that marker and the live launch checks (`prepare` stores no launch id); the receipt lapses when
+that browser exits, and `cleanup` never deletes it. Personal profiles, state imports and cookie/profile copying are unavailable;
 existing personal-Chrome logins do not transfer. New owned-profile logins persist across browser
 and Gateway restarts: the owned browser always launches under its profile-bound root session with
 native restore, saving cookie and storage state under the private browser HOME
