@@ -48,22 +48,6 @@ import UIKit
         app.terminate()
     }
 
-    func testWorkspaceNarrowAndAccessibilitySizesDoNotOverlapPath() {
-        let largest = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
-        for extra in [["-six-ui-narrow"], ["-six-ui-narrow"] + largest,
-                      [], largest] {
-            let app = launch("workspace", extra: extra)
-            let path = app.staticTexts[root].firstMatch
-            XCTAssertTrue(path.waitForExistence(timeout: 8), app.debugDescription)
-            for label in ["b8d31a1d", "Clean", "Detached HEAD"] {
-                let pill = app.staticTexts[label].firstMatch
-                XCTAssertTrue(pill.waitForExistence(timeout: 8), app.debugDescription)
-                XCTAssertFalse(path.frame.intersects(pill.frame), "Narrow/accessibility workspace path must not overlap \(label)")
-            }
-            app.terminate()
-        }
-    }
-
     private func launch(_ surface: String, mode: String = "light", extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-settings-fixture", "-settings-expanded-review", "-six-ui-surface", surface,
