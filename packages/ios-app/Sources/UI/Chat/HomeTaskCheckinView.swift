@@ -55,7 +55,6 @@ struct HomeTaskCheckinView: View {
                     }
                         .font(TronTypography.settingsRowSubtext)
                         .foregroundStyle(Color.tronTextSecondary)
-                        .tronListMarkers("\(identifier)-timestamp")
                         .frame(minWidth: 44, minHeight: 44)
                         .contentShape(Rectangle())
                 }
@@ -63,6 +62,7 @@ struct HomeTaskCheckinView: View {
                 .accessibilityLabel("\(HomeSheetTime.relative(checkin.at) ?? checkin.at), \(absoluteTime)")
                 .accessibilityHint("Show the exact check-in time and operation")
                 .accessibilityIdentifier("\(identifier)-time")
+                .tronListMarkers("\(identifier)-timestamp")
                 .popover(isPresented: $showingTime) {
                     VStack(alignment: .leading, spacing: TronListMetrics.headerGap) {
                         Text(verbatim: absoluteTime).font(TronTypography.subheadline)
