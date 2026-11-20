@@ -10,12 +10,12 @@ import { DeviceStore } from "../security/device-store.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
 const cleanups: Array<() => Promise<void>> = [];
+afterEach(async () => { await Promise.all(cleanups.splice(0).map((cleanup) => cleanup())); });
 
 async function fenced(socket: WebSocket, frames: any[], id: string): Promise<void> {
   socket.send(JSON.stringify({ type: "request", id, method: "test.fence", params: {} }));
   await waitFor(() => frames.some((frame) => frame.id === id), `the ${id} fence answer`);
 }
-afterEach(async () => { await Promise.all(cleanups.splice(0).map((cleanup) => cleanup())); });
 
 describe("two-phase session synchronization protocol", () => {
   it("joins overlapping opens, preserves independent completion order, and cleans failed/oversized owners", async () => {

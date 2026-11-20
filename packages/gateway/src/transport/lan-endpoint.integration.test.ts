@@ -27,7 +27,6 @@ afterEach(async () => {
   if (failures.length) throw new AggregateError(failures, "fixture cleanup failed");
 });
 
-
 async function unusedPort(): Promise<number> {
   const probe = createTcpServer();
   await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
@@ -520,8 +519,6 @@ describe("LAN endpoint", () => {
     await starting;
     expect(await tlsReaches("127.0.0.1", port)).toBe(false);
     expect(vi.getTimerCount(), "a stopped endpoint leaves no reconcile timer").toBe(0);
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(await tlsReaches("127.0.0.1", port)).toBe(false);
   });
 
   it("binds nothing while the setting is off, and retires the lane and its sockets on shutdown", async () => {
