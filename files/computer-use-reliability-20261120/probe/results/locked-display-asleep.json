@@ -1,0 +1,258 @@
+{
+ "label": "locked-display-asleep",
+ "startedAt": "2026-11-20T20:00:50.432Z",
+ "steps": [
+  {
+   "name": "console",
+   "ok": true,
+   "axTrusted": false,
+   "loginDone": true,
+   "mainDisplayAsleep": true,
+   "onConsole": true,
+   "onScreenOwners": "1Password,Claude,Device Hub,Finder,Ghostty,Google Chrome,System Information,TextEdit,Wallpaper,Window Server,WindowManager,cua-driver",
+   "onScreenWindows": 21,
+   "screenCapture": true,
+   "screenIsLocked": true,
+   "ms": 125
+  },
+  {
+   "name": "os.screencapture",
+   "ok": true,
+   "code": 0,
+   "stderr": "",
+   "colors64": 4,
+   "darkFraction": 1,
+   "height": 2056,
+   "meanLuma": 0,
+   "width": 3600,
+   "ms": 204
+  },
+  {
+   "name": "cua.start_session",
+   "ok": true,
+   "active": true,
+   "ms": 24
+  },
+  {
+   "name": "cua.list_windows",
+   "ok": true,
+   "windows": 2,
+   "found": true,
+   "onScreen": true,
+   "ms": 27
+  },
+  {
+   "name": "cua.ax-read",
+   "ok": true,
+   "elements": 0,
+   "labels": [],
+   "ms": 72
+  },
+  {
+   "name": "cua.window-screenshot",
+   "ok": false,
+   "error": "get_window_state: No content produced (neither AX tree nor screenshot succeeded)\n",
+   "ms": 151
+  },
+  {
+   "name": "cua.click-ax",
+   "ok": false,
+   "error": "click: Provide either element_token or (x + y). pid is always required.\n",
+   "ms": 66
+  },
+  {
+   "name": "cua.type-text",
+   "ok": true,
+   "claim": "refused",
+   "oracle": "",
+   "pass": false,
+   "ms": 2121
+  },
+  {
+   "name": "cua.set-value",
+   "ok": false,
+   "error": "set_value: set_value requires element_token to address the target element.\n",
+   "ms": 94
+  },
+  {
+   "name": "cua.hotkey-replace",
+   "ok": true,
+   "claims": [
+    "refused",
+    "refused"
+   ],
+   "oracle": "old value",
+   "pass": false,
+   "ms": 2209
+  },
+  {
+   "name": "cua.desktop-screenshot",
+   "ok": true,
+   "colors64": 4,
+   "darkFraction": 1,
+   "height": 2056,
+   "meanLuma": 0,
+   "width": 3600,
+   "ms": 301
+  },
+  {
+   "name": "cdp-headless.launch",
+   "ok": true,
+   "version": "Chrome/151.0.7922.138",
+   "ms": 863
+  },
+  {
+   "name": "cdp-headless.navigate",
+   "ok": true,
+   "loaded": true,
+   "title": "Bench Form",
+   "visibility": "visible",
+   "ms": 43
+  },
+  {
+   "name": "cdp-headless.click",
+   "ok": true,
+   "oracle": "1",
+   "pass": true,
+   "ms": 3
+  },
+  {
+   "name": "cdp-headless.select-all-replace",
+   "ok": true,
+   "oracle": "new value",
+   "pass": true,
+   "ms": 4
+  },
+  {
+   "name": "cdp-headless.screenshot",
+   "ok": true,
+   "colors64": 128,
+   "darkFraction": 0,
+   "height": 557,
+   "meanLuma": 252,
+   "width": 900,
+   "ms": 73
+  },
+  {
+   "name": "cdp-headless.raf",
+   "ok": true,
+   "framesIn1s": 55,
+   "ms": 1006
+  },
+  {
+   "name": "cdp-headed.launch",
+   "ok": true,
+   "version": "Chrome/151.0.7922.138",
+   "ms": 824
+  },
+  {
+   "name": "cdp-headed.navigate",
+   "ok": true,
+   "loaded": true,
+   "title": "Bench Form",
+   "visibility": "visible",
+   "ms": 32
+  },
+  {
+   "name": "cdp-headed.click",
+   "ok": true,
+   "oracle": "0",
+   "pass": false,
+   "ms": 3079
+  },
+  {
+   "name": "cdp-headed.select-all-replace",
+   "ok": true,
+   "oracle": "new value",
+   "pass": true,
+   "ms": 4
+  },
+  {
+   "name": "cdp-headed.screenshot",
+   "ok": true,
+   "colors64": 132,
+   "darkFraction": 0,
+   "height": 1114,
+   "meanLuma": 252,
+   "width": 1800,
+   "ms": 92
+  },
+  {
+   "name": "cdp-headed.raf",
+   "ok": true,
+   "framesIn1s": 56,
+   "ms": 1007
+  },
+  {
+   "name": "cdp-headed-unthrottled.launch",
+   "ok": true,
+   "version": "Chrome/151.0.7922.138",
+   "ms": 833
+  },
+  {
+   "name": "cdp-headed-unthrottled.navigate",
+   "ok": true,
+   "loaded": true,
+   "title": "Bench Form",
+   "visibility": "visible",
+   "ms": 36
+  },
+  {
+   "name": "cdp-headed-unthrottled.click",
+   "ok": true,
+   "oracle": "1",
+   "pass": true,
+   "ms": 3
+  },
+  {
+   "name": "cdp-headed-unthrottled.select-all-replace",
+   "ok": true,
+   "oracle": "new value",
+   "pass": true,
+   "ms": 3
+  },
+  {
+   "name": "cdp-headed-unthrottled.screenshot",
+   "ok": true,
+   "colors64": 134,
+   "darkFraction": 0,
+   "height": 1114,
+   "meanLuma": 252,
+   "width": 1800,
+   "ms": 112
+  },
+  {
+   "name": "cdp-headed-unthrottled.raf",
+   "ok": true,
+   "framesIn1s": 53,
+   "ms": 1004
+  },
+  {
+   "name": "agent-browser.headless",
+   "ok": true,
+   "opened": true,
+   "oracle": "1",
+   "pass": true,
+   "colors64": 89,
+   "darkFraction": 0,
+   "height": 768,
+   "meanLuma": 253,
+   "width": 1024,
+   "ms": 1368
+  },
+  {
+   "name": "console.after",
+   "ok": true,
+   "axTrusted": false,
+   "loginDone": true,
+   "mainDisplayAsleep": true,
+   "onConsole": true,
+   "onScreenOwners": "1Password,Claude,Device Hub,Finder,Ghostty,Google Chrome,System Information,TextEdit,Wallpaper,Window Server,WindowManager,cua-driver",
+   "onScreenWindows": 21,
+   "screenCapture": true,
+   "screenIsLocked": true,
+   "ms": 81
+  }
+ ],
+ "finishedAt": "2026-11-20T20:01:08.045Z"
+}

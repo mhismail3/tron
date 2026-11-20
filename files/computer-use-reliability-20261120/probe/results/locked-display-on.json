@@ -1,0 +1,263 @@
+{
+ "label": "locked-display-on",
+ "startedAt": "2026-11-20T20:02:16.969Z",
+ "steps": [
+  {
+   "name": "console",
+   "ok": true,
+   "axTrusted": false,
+   "loginDone": true,
+   "mainDisplayAsleep": false,
+   "onConsole": true,
+   "onScreenOwners": "1Password,Claude,Device Hub,Finder,Ghostty,Google Chrome,System Information,TextEdit,Wallpaper,Window Server,WindowManager,cua-driver",
+   "onScreenWindows": 20,
+   "screenCapture": true,
+   "screenIsLocked": true,
+   "ms": 159
+  },
+  {
+   "name": "os.screencapture",
+   "ok": true,
+   "code": 0,
+   "stderr": "",
+   "colors64": 228,
+   "darkFraction": 0.73,
+   "height": 2056,
+   "meanLuma": 7,
+   "width": 3600,
+   "ms": 410
+  },
+  {
+   "name": "cua.start_session",
+   "ok": true,
+   "active": true,
+   "ms": 16
+  },
+  {
+   "name": "cua.list_windows",
+   "ok": true,
+   "windows": 2,
+   "found": true,
+   "onScreen": true,
+   "ms": 24
+  },
+  {
+   "name": "cua.ax-read",
+   "ok": true,
+   "elements": 0,
+   "labels": [],
+   "ms": 67
+  },
+  {
+   "name": "cua.window-screenshot",
+   "ok": true,
+   "frameValid": true,
+   "colors64": 89,
+   "darkFraction": 0,
+   "height": 584,
+   "meanLuma": 31,
+   "width": 840,
+   "ms": 227
+  },
+  {
+   "name": "cua.click-ax",
+   "ok": false,
+   "error": "click: Provide either element_token or (x + y). pid is always required.\n",
+   "ms": 72
+  },
+  {
+   "name": "cua.type-text",
+   "ok": true,
+   "claim": "refused",
+   "oracle": "",
+   "pass": false,
+   "ms": 2105
+  },
+  {
+   "name": "cua.set-value",
+   "ok": false,
+   "error": "set_value: set_value requires element_token to address the target element.\n",
+   "ms": 102
+  },
+  {
+   "name": "cua.hotkey-replace",
+   "ok": true,
+   "claims": [
+    "refused",
+    "refused"
+   ],
+   "oracle": "old value",
+   "pass": false,
+   "ms": 2204
+  },
+  {
+   "name": "cua.desktop-screenshot",
+   "ok": true,
+   "colors64": 226,
+   "darkFraction": 0.73,
+   "height": 2056,
+   "meanLuma": 7,
+   "width": 3600,
+   "ms": 544
+  },
+  {
+   "name": "cdp-headless.launch",
+   "ok": true,
+   "version": "Chrome/151.0.7922.138",
+   "ms": 1098
+  },
+  {
+   "name": "cdp-headless.navigate",
+   "ok": true,
+   "loaded": true,
+   "title": "Bench Form",
+   "visibility": "visible",
+   "ms": 50
+  },
+  {
+   "name": "cdp-headless.click",
+   "ok": true,
+   "oracle": "1",
+   "pass": true,
+   "ms": 17
+  },
+  {
+   "name": "cdp-headless.select-all-replace",
+   "ok": true,
+   "oracle": "new value",
+   "pass": true,
+   "ms": 22
+  },
+  {
+   "name": "cdp-headless.screenshot",
+   "ok": true,
+   "colors64": 128,
+   "darkFraction": 0,
+   "height": 557,
+   "meanLuma": 252,
+   "width": 900,
+   "ms": 75
+  },
+  {
+   "name": "cdp-headless.raf",
+   "ok": true,
+   "framesIn1s": 59,
+   "ms": 1013
+  },
+  {
+   "name": "cdp-headed.launch",
+   "ok": true,
+   "version": "Chrome/151.0.7922.138",
+   "ms": 830
+  },
+  {
+   "name": "cdp-headed.navigate",
+   "ok": true,
+   "loaded": true,
+   "title": "Bench Form",
+   "visibility": "visible",
+   "ms": 34
+  },
+  {
+   "name": "cdp-headed.click",
+   "ok": true,
+   "oracle": "1",
+   "pass": true,
+   "ms": 3
+  },
+  {
+   "name": "cdp-headed.select-all-replace",
+   "ok": true,
+   "oracle": "new value",
+   "pass": true,
+   "ms": 4
+  },
+  {
+   "name": "cdp-headed.screenshot",
+   "ok": true,
+   "colors64": 134,
+   "darkFraction": 0,
+   "height": 1114,
+   "meanLuma": 252,
+   "width": 1800,
+   "ms": 108
+  },
+  {
+   "name": "cdp-headed.raf",
+   "ok": true,
+   "framesIn1s": 57,
+   "ms": 1025
+  },
+  {
+   "name": "cdp-headed-unthrottled.launch",
+   "ok": true,
+   "version": "Chrome/151.0.7922.138",
+   "ms": 839
+  },
+  {
+   "name": "cdp-headed-unthrottled.navigate",
+   "ok": true,
+   "loaded": true,
+   "title": "Bench Form",
+   "visibility": "visible",
+   "ms": 32
+  },
+  {
+   "name": "cdp-headed-unthrottled.click",
+   "ok": true,
+   "oracle": "1",
+   "pass": true,
+   "ms": 3
+  },
+  {
+   "name": "cdp-headed-unthrottled.select-all-replace",
+   "ok": true,
+   "oracle": "new value",
+   "pass": true,
+   "ms": 5
+  },
+  {
+   "name": "cdp-headed-unthrottled.screenshot",
+   "ok": true,
+   "colors64": 134,
+   "darkFraction": 0,
+   "height": 1114,
+   "meanLuma": 252,
+   "width": 1800,
+   "ms": 88
+  },
+  {
+   "name": "cdp-headed-unthrottled.raf",
+   "ok": true,
+   "framesIn1s": 53,
+   "ms": 1002
+  },
+  {
+   "name": "agent-browser.headless",
+   "ok": true,
+   "opened": true,
+   "oracle": "1",
+   "pass": true,
+   "colors64": 89,
+   "darkFraction": 0,
+   "height": 768,
+   "meanLuma": 253,
+   "width": 1024,
+   "ms": 1399
+  },
+  {
+   "name": "console.after",
+   "ok": true,
+   "axTrusted": false,
+   "loginDone": true,
+   "mainDisplayAsleep": false,
+   "onConsole": true,
+   "onScreenOwners": "1Password,Claude,Device Hub,Finder,Ghostty,Google Chrome,System Information,TextEdit,Wallpaper,Window Server,WindowManager,cua-driver",
+   "onScreenWindows": 20,
+   "screenCapture": true,
+   "screenIsLocked": true,
+   "ms": 81
+  }
+ ],
+ "finishedAt": "2026-11-20T20:02:32.822Z"
+}
