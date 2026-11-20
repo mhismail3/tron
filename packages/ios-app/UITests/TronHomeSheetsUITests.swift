@@ -41,6 +41,43 @@ final class TronHomeSheetsUITests: XCTestCase {
         add(attachment)
     }
 
+    @MainActor private func assertCompactHomeSummary(_ app: XCUIApplication, workers: String, level: String) {
+        for removed in ["home-context-activation", "context-segmented-bar", "home-manage-host",
+                        "context-segment-instructions", "context-segment-profile", "context-segment-memory",
+                        "context-segment-chapter", "context-segment-results", "context-segment-input"] {
+            XCTAssertFalse(element(app, removed).exists, "Removed Home-only summary content: \(removed)")
+        }
+        let summary = element(app, "home-context-summary")
+        XCTAssertTrue(summary.exists)
+        for label in ["Read / Write", "Input", "Output", "Cost"] {
+            XCTAssertFalse(summary.staticTexts[label].exists, "Home does not show the session's \(label) metric")
+        }
+        let pill = element(app, "home-manage-workers"), state = element(app, "home-manage-state")
+        XCTAssertTrue(pill.exists)
+        XCTAssertEqual(pill.label, workers)
+        XCTAssertTrue((pill.value as? String)?.lowercased().contains(level.lowercased()) == true)
+        XCTAssertGreaterThanOrEqual(pill.frame.minX, state.frame.maxX)
+        XCTAssertEqual(pill.frame.midY, state.frame.midY, accuracy: 1)
+        XCTAssertLessThanOrEqual(pill.frame.maxX, app.frame.maxX)
+        let color = ink(app, pill)
+        switch level {
+        case "Normal": XCTAssertGreaterThan(color[1], color[0] + 0.1)
+        default:
+            XCTAssertGreaterThan(color[0], color[1] + 0.2)
+            XCTAssertGreaterThan(color[0], color[2] + 0.2)
+        }
+        let ring = element(app, "home-context-ring")
+        XCTAssertTrue(ring.exists)
+        XCTAssertEqual(ring.value as? String, "3 percent")
+        XCTAssertEqual(ring.frame.width, ring.frame.height, accuracy: 0.5)
+        let title = app.staticTexts["969K tokens left"]
+        XCTAssertTrue(title.exists)
+        XCTAssertLessThan(ring.frame.maxX, title.frame.minX)
+        let detail = element(app, "home-context-detail").label.replacingOccurrences(of: "\u{00A0}", with: " ")
+        XCTAssertTrue(detail.contains("31K/1M") && detail.contains("3% used"), detail)
+        XCTAssertTrue(detail.contains("1.8M total tokens") && detail.contains("91.4% cache hit"), detail)
+    }
+
     @MainActor
     func testHomeCursorPagesRetryAndRetainScroll() {
         continueAfterFailure = false
