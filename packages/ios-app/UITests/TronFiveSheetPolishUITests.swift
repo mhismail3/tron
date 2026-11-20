@@ -5,7 +5,7 @@ import Vision
 @MainActor final class TronFiveSheetPolishUITests: XCTestCase {
     func testNumericKeyboardToolbar() {
         for mode in ["light", "dark"] {
-            let app = launch(mode, fixture: "-tron-mac-settings-fixture", extra: ["-settings-nested"])
+            let app = launch(mode)
             defer { app.terminate() }
             XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 10))
             app.buttons["Open Settings"].tap()
@@ -54,11 +54,12 @@ import Vision
         } catch { XCTFail("Could not inspect actual toolbar pixels: \(error)") }
     }
 
-    private func launch(_ mode: String, fixture: String, extra: [String] = []) -> XCUIApplication {
+    private func launch(_ mode: String) -> XCUIApplication {
         continueAfterFailure = true
         let app = XCUIApplication()
-        app.launchArguments = [fixture, "-themeColor", "burgundy", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + extra
-        if mode == "dark" { app.launchArguments += ["-home-dark", "-settings-dark"] }
+        app.launchArguments = ["-tron-mac-settings-fixture", "-themeColor", "burgundy", "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
+                               "-settings-nested"]
+        if mode == "dark" { app.launchArguments.append("-settings-dark") }
         app.launch()
         return app
     }
