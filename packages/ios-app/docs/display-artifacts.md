@@ -62,7 +62,7 @@ The transcript decoder admits typed display metadata only on `toolResult` rows f
 A displayed
 `.swift` code artifact gains a play control in its document sheet that runs
 the file as an interpreted, native SwiftUI app (#889). With the inline
-surface the display becomes into a small app card whose tap runs it
+surface the display becomes a small app card whose tap runs it
 (`DisplayRoute.runsSwiftApp`, #1339). The [Swift apps](swift-apps.md) document
 owns the card, runtime boundaries and supported subset.
 

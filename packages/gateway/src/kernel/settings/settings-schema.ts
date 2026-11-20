@@ -8,7 +8,7 @@ import { lessonMoveDirection, lessonMoveType } from "./lesson-move-value.js";
 import { modelProviderDirection, modelProviderType } from "./model-provider-value.js";
 import { agentDefinitionDirection, agentDefinitionType, subagentSettingsType } from "./subagents-value.js";
 
-interface SectionDeclaration { id: string; title: string; description: string; order: number; note?: string; chatInline?: boolean }
+interface SectionDeclaration { id: string; title: string; description: string; order: number; chatInline?: boolean }
 
 export const SECTIONS: readonly SectionDeclaration[] = [
   { id: "model", title: "Model", description: "Model and thinking", order: 10, chatInline: true },

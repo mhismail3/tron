@@ -253,7 +253,7 @@ struct AttachmentFilePreviewSheet: View {
     }
 
     private var runAction: TronDocumentSheetAction? {
-        guard name.lowercased().hasSuffix(".swift"),
+        guard SwiftAppDisplay.runs(fileNamed: name),
               case .prepared(let preview) = phase,
               case .code(let source) = preview.content,
               !preview.isTruncated else { return nil }

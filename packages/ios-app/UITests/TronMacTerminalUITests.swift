@@ -225,7 +225,6 @@ final class TronMacTerminalUITests: XCTestCase {
     private func openMacTerminal(_ app: XCUIApplication) {
         let row = app.buttons["settings-mac-terminal"]
         XCTAssertTrue(row.waitForExistence(timeout: 15), app.debugDescription)
-        for _ in 0..<12 where !row.isHittable { app.swipeUp() }
         row.tap()
     }
 
@@ -303,8 +302,7 @@ final class TronMacTerminalLoadingUITests: XCTestCase {
             app.launch()
             let row = app.buttons["settings-mac-terminal"]
             XCTAssertTrue(row.waitForExistence(timeout: 15), app.debugDescription)
-            for _ in 0..<12 where !row.isHittable { app.swipeUp() }
-            row.tap()
+                row.tap()
             let title = app.descendants(matching: .any)["terminal-sheet-title"].firstMatch
             XCTAssertTrue(title.waitForExistence(timeout: 15), app.debugDescription)
             Thread.sleep(forTimeInterval: 2)

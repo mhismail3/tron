@@ -102,10 +102,9 @@ struct SettingsView: View {
         _ title: String,
         summary: String,
         icon: String,
-        onDismiss: (() -> Void)? = nil,
         @ViewBuilder destination: @escaping () -> Destination
     ) -> some View {
-        TronProgressiveSheetLink(accessibilityLabel: title, onDismiss: onDismiss, destination: destination) {
+        TronProgressiveSheetLink(accessibilityLabel: title, destination: destination) {
             TronGlassCard {
                 TronSettingsRow(icon: icon, title: title, subtitle: summary, subtitleColor: .tronTextSecondary)
                     .contentShape(Rectangle())

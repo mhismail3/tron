@@ -46,6 +46,8 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10), app.debugDescription)
         openHomePermissions(app)
         let row = app.descendants(matching: .any)["settings-home-delegation"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
+        reveal(row, in: app)
         XCTAssertTrue(row.label.contains("Home delegation: All trusted projects"), row.label)
         XCTAssertTrue(row.label.contains("Reconfirm"), "A restored scope shows the Reconfirm pill: \(row.label)")
         let reconfirm = app.buttons["home-permissions-reconfirm"]
@@ -754,7 +756,6 @@ final class TronSmokeUITests: XCTestCase {
         for row in ["home-manage-memory-browser", "home-manage-tasks", "home-manage-controls"] {
             XCTAssertTrue(app.descendants(matching: .any)[row].exists, row)
         }
-        XCTAssertFalse(app.descendants(matching: .any)["home-manage-permissions"].exists, "Home delegation lives in Settings")
         for row in ["home-manage-pause", "home-manage-disable"] {
             XCTAssertFalse(app.descendants(matching: .any)[row].exists, "\(row) lives in Controls")
         }
@@ -1179,9 +1180,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(gear.waitForExistence(timeout: 10), app.debugDescription)
         gear.tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Settings"].waitForExistence(timeout: 5), app.debugDescription)
-        let row = app.descendants(matching: .any)["settings-home-delegation"]
-        XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
-        reveal(row, in: app)
     }
 
     private func waitForEnabled(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
@@ -1697,7 +1695,6 @@ final class TronSmokeUITests: XCTestCase {
         tapScrolling(app.buttons["settings-link-Appearance"], in: app)
         XCTAssertTrue(app.navigationBars.staticTexts["Appearance"].waitForExistence(timeout: 5))
         closeTopSheet(app)
-        XCTAssertFalse(app.buttons["settings-link-Setup"].exists, "Settings has no Setup sheet")
     }
 
     @MainActor

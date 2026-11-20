@@ -200,7 +200,7 @@ sheet at the tap and answers the typed owner once with the review's digest throu
 dismissal send nothing. Generic forms never authorize effects. The card shows Gateway text
 only and keeps exact values behind its disclosure. Audit history and Undo belong to the agent's
 `settings` tool; owner actions have no generic Undo. The card surface, Approve/Cancel/Undo actions and
-native change title use `tronPrimary`, not the generic question's amber accent. Agent & Tools
+native change title use `tronPrimary`, not the generic question's amber accent. Settings
 and its inherited admin-sheet chrome follow the selected primary theme; semantic statuses keep their colors.
 
 ## Shared lists and readers

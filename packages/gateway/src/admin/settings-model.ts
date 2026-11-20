@@ -205,7 +205,7 @@ export class SettingsStoreAdapter {
     await assertNewModelChoice(runtime, ref.provider, ref.id);
   }
 
-  async applyStore(bundleTarget: SettingsTarget, stores: SettingsStores, plan: Planned, value: unknown, bundleContext: ChangeContext, writers: Pick<SettingsWriters, "setTrust">, current: unknown): Promise<{ revision?: number; result?: unknown }> {
+  async applyStore(bundleTarget: SettingsTarget, stores: SettingsStores, plan: Planned, value: unknown, bundleContext: ChangeContext, writers: Pick<SettingsWriters, "setTrust">): Promise<{ revision?: number; result?: unknown }> {
     const { binding, qualifiers } = plan;
     const target = plan.target ?? bundleTarget;
     const context = plan.session ? { ...bundleContext, session: plan.session } : bundleContext;

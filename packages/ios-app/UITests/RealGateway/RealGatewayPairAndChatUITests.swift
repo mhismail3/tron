@@ -910,7 +910,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(gear.waitForExistence(timeout: 30), app.debugDescription)
         gear.tap()
         XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 30), app.debugDescription)
-        for (name, marker) in [("Appearance", app.textFields["Chats per project"])] {
+        do {
+            let (name, marker) = ("Appearance", app.textFields["Chats per project"])
             let link = app.buttons["settings-link-" + name]
             revealBelowNavigationBar(app, link)
             link.tap()

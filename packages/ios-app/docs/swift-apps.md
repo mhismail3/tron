@@ -303,8 +303,8 @@ through the read-only attachment fixture (`-readonly-preview-scenario display-sw
 inline card open/replay and bounded states (#1339), the recovered Builds preview (#1319), model
 initialization and rollback, enum payloads, protocols and geometry, refused protocol
 extensions, optional chaining, timers, `habits` (generics, bindings, pickers), dictionaries,
-the flag and truncation gate, `budget` (shared store, tabs, dismissal, the link policy at the
-fixture's `OpenURLAction`), the live Settings switch, contained failures (`broken`, nesting
+the truncation gate, `budget` (shared store, tabs, dismissal, the link policy at the
+fixture's `OpenURLAction`), contained failures (`broken`, nesting
 limit, `limits` with loops, recursion, overflow, hostile formats, rollback) and sibling-
 preserving diagnostics. `assertToolbarTint` checks the hosted chrome. Screenshots are labelled
 simulator evidence on fixture data.

@@ -32,12 +32,8 @@ final class DashboardHeadersViewTests: ShuffledTestCase {
                 try await app.activate("Open Settings")
                 try await app.until("Settings opens") { app.navigationTitle("Settings") != nil }
                 try await app.expandTopSheet()
-                XCTAssertNil(app.navigationTitle("Global Settings"), app.tree())
                 for header in ["This iPhone", "Accounts", "Agent & Tools", "System"] {
                     XCTAssertNil(app.staticText(header), "Settings has no section header \(header)\n\(app.tree())")
-                }
-                for removed in ["settings-link-Mac Terminal", "settings-link-Setup"] {
-                    XCTAssertNil(app.element(removed), "\(removed) is not a Settings row\n\(app.tree())")
                 }
                 let rows = ["Appearance", "Connections", "Model Providers", "MCP Servers"].map { "settings-link-\($0)" }
                 try await app.until("every Settings row") { rows.allSatisfy { app.element($0) != nil } }

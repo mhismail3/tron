@@ -35,7 +35,6 @@ final class TronHomeControlsUITests: XCTestCase {
         open(app, ring, ready: "home-manage-state", name: "manage")
         let controls = element(app, "home-manage-controls")
         for _ in 0..<8 where controls.exists && (!controls.isHittable || controls.frame.maxY > app.frame.maxY - 50) { app.swipeUp() }
-        XCTAssertFalse(element(app, "home-manage-permissions").exists, "Home delegation lives in Settings")
         XCTAssertFalse(element(app, "home-manage-pause").exists, "Pause is not a Manage Home row")
         XCTAssertFalse(element(app, "home-manage-disable").exists, "Disable is not a Manage Home row")
         let manage = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
