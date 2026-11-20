@@ -359,7 +359,12 @@ case "$cmd" in
     exec python3 "$ROOT/tools/verify/verify.py" "$@"
     ;;
   land)
-    exec python3 "$ROOT/tools/verify/land.py" "$@"
+    git -C "$ROOT" fetch --quiet --no-tags --refmap= origin refs/heads/main
+    tool="$(mktemp -d "${TMPDIR:-/tmp}/tron-land-tool.XXXXXX")"
+    trap 'rm -rf "$tool"' EXIT
+    for file in land.py host_lock.py; do git -C "$ROOT" show "FETCH_HEAD:tools/verify/$file" >"$tool/$file"; done
+    cd "$ROOT"
+    python3 "$tool/land.py" "$@"
     ;;
   mutate)
     exec python3 "$ROOT/tools/verify/mutate.py" "$@"

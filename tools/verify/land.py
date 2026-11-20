@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from host_lock import LAND_LOCK, wait_for_lock  # noqa: E402  (the one host lock owner)
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True).stdout.strip())
 SKIP = "ios,mac,python-here"
 ARTIFACTS = "mini: artifacts: "
 

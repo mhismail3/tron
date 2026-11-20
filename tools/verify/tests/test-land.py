@@ -5,7 +5,8 @@ A disposable checkout lands a task branch onto its own bare origin. The mini is 
 the `ssh` stand-in of test-mini.py, and the commit's own `tools/verify/verify.py` there is a stand-in that records
 the commit it validated and fails when the tree holds a planted `RED`. The cases check that a red merge, a conflict,
 a report naming another commit, a passed report with a nonzero exit and a refused push each leave main unchanged; that a main moved during validation is merged again and validated again, and only that new
-merge lands; and that two concurrent lands wait in arrival order, the second validated on top of the first.
+merge lands; that two concurrent lands wait in arrival order, the second validated on top of the first; and that
+`scripts/tron land` runs main's land tool, so a branch cut before it existed still lands.
 """
 from __future__ import annotations
 
@@ -50,7 +51,7 @@ class Land(unittest.TestCase):
         self.temporary = Path(tempfile.mkdtemp(prefix='tron-land-test-'))
         self.addCleanup(shutil.rmtree, self.temporary, True)
         self.local, self.mini, self.origin = self.temporary / 'local', self.temporary / 'mini-home', self.temporary / 'origin.git'
-        for path in ('tools/verify/land.py', 'tools/verify/mini.py', 'tools/verify/ledger.py', 'scripts/tron-node', '.node-version',
+        for path in ('scripts/tron', 'tools/verify/land.py', 'tools/verify/mini.py', 'tools/verify/ledger.py', 'scripts/tron-node', '.node-version',
                      'config/ci-toolchain.env'):
             (self.local / path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / path, self.local / path)
@@ -228,6 +229,26 @@ class Land(unittest.TestCase):
         self.assertEqual(self.main(), two)
         self.assertEqual(self.parents(two), [one, second_head])
         self.assertEqual(self.parents(one), [self.base, first_head])
+
+    def test_scripts_tron_land_runs_mains_land_tool_on_a_branch_that_lacks_it(self) -> None:
+        index = {**os.environ, 'GIT_INDEX_FILE': str(self.temporary / 'index')}
+        subprocess.run(['git', 'read-tree', self.base], cwd=self.local, env=index, check=True)
+        subprocess.run(['git', 'rm', '-q', '--cached', 'tools/verify/land.py', 'tools/verify/host_lock.py'], cwd=self.local, env=index, check=True)
+        tree = subprocess.check_output(['git', 'write-tree'], cwd=self.local, env=index, text=True).strip()
+        older = self.git('commit-tree', tree, '-m', 'before land existed')
+        main = self.git('commit-tree', f'{self.base}^{{tree}}', '-p', self.base, '-p', older, '-m', 'land arrives on main')
+        self.git('push', '-q', 'origin', f'{main}:refs/heads/main')
+        self.git('checkout', '-q', '-B', 'topic', older)
+        self.assertFalse((self.local / 'tools/verify/land.py').exists())
+        self.write('feature.txt', 'feature\n')
+        head = self.commit('change on a branch cut before land existed')
+        process = subprocess.Popen([str(self.local / 'scripts/tron'), 'land'], cwd=self.local, env=self.env, text=True,
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        self.addCleanup(lambda: process.poll() is None and process.kill())
+        code, output = self.finish(process)
+        self.assertEqual(code, 0, output)
+        self.assertEqual(self.runs(), [self.main()], 'main is exactly the validated commit')
+        self.assertEqual(self.parents(self.main()), [main, head])
 
 
 if __name__ == '__main__':
