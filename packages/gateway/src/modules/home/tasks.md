@@ -77,7 +77,7 @@ present, must agree with that layout. Root chats, unrelated children and ambiguo
 
 `checkin` (current worker operation only; never seals or pauses): `step` (256 bytes), `done`,
 `next`, optional `blocker` (512 each), `refs` (`branch`, `commit`, `issue`), `needsAttention`;
-≤ 4 KiB. Twelve entries are kept, three shown, carried to resumed successors. Routine
+≤ 4 KiB. Each operation keeps twelve and shows three of its own; a resume starts empty. Routine
 check-ins never wake or push. `needsAttention` needs a blocker and requests at most one wake per
 30 minutes per lineage through a task outbox (`requested`, `rate-limited`, `pending`, `none`),
 kept for a paused Home. Progress is never success evidence.
@@ -193,7 +193,9 @@ next startup; it is not treated as a successful cleanup.
   historical phase at check-in time. A changed task store or authority epoch during the
   canonical read refuses rather than mixing operation versions.
 - `home.taskStatus` remains the exact named operation, adding result, worker model,
-  subagents and ≤ 20 live runs. Historical task records and worker sessions are not deleted.
+  subagents and ≤ 20 live runs. It, `task status` and the `task` control row show only that
+  operation's check-ins; a resume starts with none, so a settled predecessor's blocker never
+  reads as current. Historical task records and worker sessions are not deleted.
 - Home's `task` tool (`list`, `status`, `report`, `metrics`, `steer`, `interrupt`, `stop`,
   `resume`, `rename`) acts only on its own identity and generation; refusals name the
   state and action to use (`home.task.control`). Rename writes the canonical session name.

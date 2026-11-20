@@ -178,6 +178,9 @@ export type HomeHostReading = "unavailable" | {
   heavy: Record<string, readonly HeavyProcessKind[] | "unavailable">;
 };
 
+const currentCheckins = (task: HomeTaskRecord): HomeTaskCheckin[] =>
+  (task.checkins ?? []).filter(checkin => checkin.operationId === task.operationId).slice(-HOME_TASK_CHECKIN_VISIBLE);
+
 export class HomeTaskDispatcher {
   private readonly listFlights = new Map<string, ListFlight>();
   private readonly running = new Set<string>();
@@ -396,7 +399,6 @@ export class HomeTaskDispatcher {
       intent: { text: brief }, intentDigest: taskIntentDigest(brief), target: previous.target,
       grantRef: null, scopeRef: null, lifecycle: "pending", sessionId: null, operationId: null,
       stopIntent: null, spend: null, reportRef: null, terminalEvidence: null,
-      ...(previous.checkins ? { checkins: previous.checkins } : {}),
       ...(previous.lastAttentionAt ? { lastAttentionAt: previous.lastAttentionAt } : {}),
       resumes: { taskId: previous.taskId, operationId: previous.operationId!, ...(text ? { instruction: text } : {}) },
       ...(budget && Object.keys(budget).length ? { budget } : {}),
@@ -829,7 +831,7 @@ export class HomeTaskDispatcher {
     const evidence = task.terminalEvidence;
     return { taskId: task.taskId, title: (await this.display(task)).title, state, outcome: evidence?.outcome ?? null,
       ...(evidence ? { reason: evidence.reason } : {}), ...(evidence?.failureCause ? { failureCause: evidence.failureCause } : {}), ...(evidence?.detail ? { detail: evidence.detail } : {}),
-      sessionId: task.sessionId, operationId: task.operationId, checkins: (task.checkins ?? []).slice(-HOME_TASK_CHECKIN_VISIBLE),
+      sessionId: task.sessionId, operationId: task.operationId, checkins: currentCheckins(task),
       ...(task.resumes ? { resumes: task.resumes.taskId } : {}),
       ...(continuedAs ? { continuedAs } : {}), updatedAt: new Date(task.updatedAt).toISOString(), actions };
   }
@@ -868,7 +870,7 @@ export class HomeTaskDispatcher {
   async status(taskId: string): Promise<HomeTaskStatus> {
     const task = await this.result(taskId);
     const workerModel = task.sessionId ? await this.sessions.taskWorkerModel(task.sessionId) ?? null : null;
-    const status = { ...task, checkins: (task.checkins ?? []).slice(-HOME_TASK_CHECKIN_VISIBLE), ...await this.display(task), workerModel, subagents: await this.subagents(task),
+    const status = { ...task, checkins: currentCheckins(task), ...await this.display(task), workerModel, subagents: await this.subagents(task),
       subagentRuns: await this.liveSubagentRuns(task), ownerSettlement: await this.ownerSettlement(task) };
     if (task.lifecycle === "terminal" && task.terminalEvidence?.reason === "no-report") {
       const current = await this.store.read(taskId);
@@ -962,7 +964,7 @@ export class HomeTaskDispatcher {
         taskId: task.taskId, createdAt: task.createdAt, updatedAt: task.updatedAt, sessionId: task.sessionId, target: task.target,
         lifecycle: task.lifecycle, outcome: task.terminalEvidence?.outcome ?? null, spend: task.spend,
         attention: homeTaskNeedsAttention(task),
-        checkins: (task.checkins ?? []).filter(checkin => checkin.operationId === task.operationId).slice(-HOME_TASK_CHECKIN_VISIBLE), pendingGrant, ...await this.display(task),
+        checkins: currentCheckins(task), pendingGrant, ...await this.display(task),
       });
     }
     return { items, counts: page.counts, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) };
