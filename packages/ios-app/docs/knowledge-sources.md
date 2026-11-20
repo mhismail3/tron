@@ -20,8 +20,8 @@ Home memory, chapters, zoom and memory search keep their existing owners.
 
 ## Validation
 
-`TronAccessibilityUITests/testKnowledgeProductIsAbsentFromDashboardAndConnectedServices`
-checks route absence with the real native menu and Settings in Light/Dark/large type.
+`AccessibilityMaintenanceViewTests/testKnowledgeProductIsAbsentFromDashboardAndConnectedServices`
+checks route absence through the menu and Settings in Light/Dark/large type.
 `TronSmokeUITests/testDashboardMenuStaysOpenDuringParentUpdates` keeps the existing
 native-menu continuity/selection proof using Automations.
 

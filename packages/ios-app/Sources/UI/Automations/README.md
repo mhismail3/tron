@@ -95,7 +95,7 @@ scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronDashboardWindowControlsUITests
 ```
 
-`TronAccessibilityUITests` drives the real dashboard destinations and checks that Knowledge is absent from the menu and Connected Services in Light/Dark/large type. The parent-update menu journey retains its Automations selection and thirty-update witness. The Automations fixture accepts no mutations.
+`AccessibilityMaintenanceViewTests` drives the dashboard destinations in-process and checks that Knowledge is absent from the menu and Connected Services in Light/Dark/large type; `TronAccessibilityUITests` keeps the header frames and native menu geometry. The parent-update menu journey retains its Automations selection and thirty-update witness. The Automations fixture accepts no mutations.
 `TronDashboardWindowControlsUITests` checks that the title sits below the status bar in a
 full-screen window (the canonical iPhone lane, full-screen iPad). On an iPad
 simulator in Windowed Apps mode it also resizes the window and checks the title clears the
