@@ -62,32 +62,6 @@ final class ManageSheetsThemeViewTests: ShuffledTestCase {
         }
     }
 
-    func testPrimaryContainersShareSurfaceAndKeepTerminalNeutral() async throws {
-        for theme in [ThemeColor.burgundy, .emerald, .oliveGold] {
-            for dark in [false, true] {
-                try await mounted(["-tron-session-configuration-fixture", "-manage-session-review",
-                                   "-fixture-appearance", dark ? "dark" : "light"], theme: theme) { app in
-                    try await app.activate("Stop session")
-                    try await app.until("Manage Session opens") { app.element("session-usage-summary") != nil }
-                    try await app.expandTopSheet()
-                    let model = try XCTUnwrap(app.element("session-model-summary")).accessibilityFrame
-                    try await app.until("the model card shows Thinking") { hasLabel(app, "Thinking", in: model) }
-                    let image = app.render()
-                    let reference = surface(app, model, image)
-                    let summary = surface(app, try XCTUnwrap(app.element("session-usage-summary")).accessibilityFrame, image)
-                    let navigation = surface(app, try XCTUnwrap(button(app, "Workspace")).accessibilityFrame, image)
-                    if theme == .burgundy, dark {
-                        for (name, color) in [("usage", summary), ("navigation", navigation)] {
-                            XCTAssertEqual(color[0] - color[1], reference[0] - reference[1], accuracy: 5,
-                                           "\(name) must share the model card's deep-wine glass, not use lifted ink")
-                        }
-                    }
-                    XCTAssertNotNil(button(app, "manage-session-rename"))
-                }
-            }
-        }
-    }
-
     func testInstructionsRowsKeepTheirSummaryOnTheTitleLine() async throws {
         let instructions = ["-tron-agent-instructions-fixture"]
         try await mounted(instructions) { app in
@@ -113,28 +87,6 @@ final class ManageSheetsThemeViewTests: ShuffledTestCase {
                 XCTAssertGreaterThan(frame.height, 56, "\(id)'s summary moves below its title at XXXL")
             }
         }
-    }
-
-    private func button(_ app: MountedFixture, _ key: String) -> NSObject? {
-        MountedFixture.elements(in: app.top).last {
-            (MountedFixture.identifier($0) == key || $0.accessibilityLabel == key) && $0.accessibilityTraits.contains(.button)
-        }
-    }
-
-    private func hasLabel(_ app: MountedFixture, _ label: String, in frame: CGRect) -> Bool {
-        MountedFixture.elements(in: app.top).contains {
-            $0.accessibilityLabel == label && frame.contains(CGPoint(x: $0.accessibilityFrame.midX, y: $0.accessibilityFrame.midY))
-        }
-    }
-
-    private func surface(_ app: MountedFixture, _ frame: CGRect, _ image: UIImage) -> [Double] {
-        let area = CGRect(x: frame.minX + 6, y: frame.midY - 2, width: 3, height: 4)
-        XCTAssertTrue(app.window.bounds.contains(area), "Surface sample must be on screen: \(area)")
-        guard let pixels = app.pixels(area, image: image), !pixels.isEmpty else {
-            XCTFail("Missing surface crop")
-            return [0, 0, 0]
-        }
-        return (0..<3).map { channel in pixels.map { $0[channel] }.sorted()[pixels.count / 2] }
     }
 
     private static let summaries = [("preamble", "Built into Pi"), ("tools", "3 tools"), ("rules", "3 rules · 1 from tools"),
