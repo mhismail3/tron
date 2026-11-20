@@ -7,7 +7,7 @@ runs the Gateway's `node --test` files on the mini's pinned Node, its TAP output
 `mini.py ios` invokes the native iOS owner; `mini.py verify` invokes verification inside the lease. Both return
 bounded digest-checked native artifact archives with commit, execution-host and raw-exit receipts.
 
-Local side: refuse a dirty tree, push the exact HEAD commit to the mini's bare repository, run this same file there
+Local side: refuse a dirty tree and (exit 2) a Gateway selection spanning Vitest configs, push the exact HEAD commit to the mini's bare repository, run this same file there
 (sent as source, so both halves are one version), stream its output live, and write the Vitest output files it
 returns where the caller asked, with the mini's checkout path rewritten to this checkout. The exit code is the
 mini's. No result, never a local fallback, exits EXIT_NO_RESULT with a last `mini: no result: <reason>` line on stderr;

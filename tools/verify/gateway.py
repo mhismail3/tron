@@ -5,7 +5,6 @@ from pathlib import Path
 import fcntl
 import json
 import os
-import re
 import shutil
 import signal
 import subprocess
