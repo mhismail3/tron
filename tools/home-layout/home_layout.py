@@ -742,7 +742,7 @@ def read_journal(path: Path, report: dict) -> dict | None:
         if len(contents) > JOURNAL_MAX_BYTES:
             raise LayoutError("unsafe_journal")
         journal = json.loads(contents)
-    if (not isinstance(journal, dict) or journal.keys() != {"registry", "moves", "layouts"}
+    if (not isinstance(journal, dict) or journal.keys() != {"registry", "moves", "layouts"} or not isinstance(journal["registry"], str)
             or not isinstance(journal["moves"], list) or not isinstance(journal["layouts"], dict)):
         raise LayoutError("invalid_journal")
     if journal["registry"] + ".json" != path.name:
@@ -791,6 +791,11 @@ def journal_context(report: dict, rollback: bool = False) -> tuple[Path, dict | 
             raise LayoutError("destination_claim_conflict")
         if not rollback and row["state"] == "pending" and claim is not None and claim["home"] != report["home"]:
             raise LayoutError("move_owned_by_other_home")
+        layout = journal["layouts"].get(report["home"]) if journal else None
+        if (not rollback and row["state"] == "pending" and layout is not None and layout["direction"] == "applied"
+                and not row["from"].startswith("~/") and not row["to"].startswith("~/")
+                and {"from": row["from"], "to": row["to"]} not in layout["slots"]):
+            raise LayoutError("layout_slots_changed")
     return path, journal
 
 

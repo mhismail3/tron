@@ -1656,6 +1656,16 @@ class RuntimeMigrationTests(unittest.TestCase):
             self.assertEqual(mission["runs"][0]["asyncDir"], str(home / sdk["asyncDir"].replace("internal/subagents/", "state/subagents/")))
             self.assertEqual(mission["notes"], old_cwd)
             self.assertEqual(json.loads((home / "agent/trust.json").read_text()), {new_cwd: True})
+            (home / "late").mkdir()
+            fixture.write(REGISTRY, registry({**paths, "state/late": entry(subtree=True)}, [*retired, {"from": "late", "to": "state/late"}]))
+            for mode in ("--dry-run", "--apply"):
+                late_before = snapshot(home.parent)
+                late = fixture.run("migrate", "--home", str(home), mode, env={"HOME": str(home.parent)})
+                self.assertEqual(late.returncode, 1, late.stdout + late.stderr)
+                self.assertIn("layout_slots_changed", json.loads(late.stdout)["blockers"])
+                self.assertEqual(normalize_lease_parent(snapshot(home.parent, contents_first=False)), normalize_lease_parent(late_before))
+            fixture.write(REGISTRY, registry(paths, retired))
+            (home / "late").rmdir()
             hidden = session.parent / "artifacts" / session.name
             hidden.parent.mkdir()
             session.rename(hidden)
