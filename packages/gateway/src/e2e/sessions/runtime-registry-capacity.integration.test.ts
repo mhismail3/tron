@@ -22,6 +22,10 @@ function subscribeAudience(registry: RuntimeRegistry, sessionId: string): void {
   registry.subscribe("test-audience", sessionId);
 }
 
+function coldLoadQueue(registry: object): number {
+  return (registry as unknown as { coldLoadGate: { waiters: unknown[] } }).coldLoadGate.waiters.length;
+}
+
 describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false }, () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const registries: RuntimeRegistry[] = [];
@@ -82,7 +86,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(JSON.parse(await readFile(markerPath, "utf8")).operations).toHaveLength(1);
     let drained = false;
     const drain = registry.waitUntilIdle().then(() => { drained = true; });
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await waitFor(() => registry.administrativeDrainSnapshot().phase === "waiting", "the drain waits on the running Bash");
     expect(drained).toBe(false);
     releaseBash();
     await expect(bash).resolves.toEqual({ output: "ok" });
@@ -184,13 +188,12 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
 
     const eviction = (registry as unknown as { evictIdle: () => Promise<void> }).evictIdle();
     await waitFor(() => gracefulDispose.mock.calls.length === 1, "the graceful disposal");
-    let acquisitionSettled = false;
-    const acquisition = registry.acquire(sessionId).finally(() => { acquisitionSettled = true; });
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(acquisitionSettled).toBe(false);
+    let disposedWhenAcquired: boolean | undefined;
+    const acquisition = registry.acquire(sessionId).finally(() => { disposedWhenAcquired = slot.isDisposed; });
 
     await eviction;
     const reopened = await acquisition;
+    expect(disposedWhenAcquired, "the acquisition settles only after the forced eviction disposed the old slot").toBe(true);
     expect(timedOut).toHaveBeenCalledWith(5_000);
     expect(forceDispose).toHaveBeenCalledOnce();
     expect(slot.isDisposed).toBe(true);
@@ -576,10 +579,11 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await waitFor(() => loads.length === 2, "the second catalog load");
     const controller = new AbortController();
     const abandoned = fixture.registry.acquire(abandonedSession.getSessionId(), controller.signal);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await waitFor(() => coldLoadQueue(fixture.registry) === 1, "the third load queued behind the two running");
     expect(loads).toHaveLength(2);
     controller.abort(new Error("the client left"));
     await expect(abandoned).rejects.toThrow("the client left");
+    expect(coldLoadQueue(fixture.registry), "the departed load leaves the queue").toBe(0);
     for (const release of releaseLoads.splice(0)) release();
     await Promise.all([first, second]);
     expect([...loads].sort()).toEqual([fixture.manager.getSessionId(), queued.getSessionId()].sort());
@@ -603,40 +607,39 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       await new Promise<void>((resolve) => { releaseLoads.push(resolve); });
       return await realCreate(...args);
     });
-    const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 50));
-
     const held = [fixture.registry.acquire(fixture.manager.getSessionId()), fixture.registry.acquire(filler.getSessionId())];
     await waitFor(() => loads.length === 2, "the second catalog load");
     const firstLeaving = new AbortController();
     const secondLeaving = new AbortController();
     const firstWaiter = fixture.registry.acquire(shared.getSessionId(), firstLeaving.signal);
     const secondWaiter = fixture.registry.acquire(shared.getSessionId(), secondLeaving.signal);
-    await tick();
+    await waitFor(() => coldLoadQueue(fixture.registry) === 1, "the shared load queued once for both waiters");
     expect(loads).toHaveLength(2);
 
     firstLeaving.abort(new Error("the first connection left"));
-    await tick();
+    expect(coldLoadQueue(fixture.registry), "the shared load stays queued for the remaining waiter").toBe(1);
     expect(loads).toHaveLength(2);
 
     secondLeaving.abort(new Error("the second connection left"));
     await expect(secondWaiter).rejects.toThrow("the second connection left");
     await expect(firstWaiter).rejects.toThrow("the second connection left");
+    expect(coldLoadQueue(fixture.registry), "the abandoned shared load leaves the queue").toBe(0);
 
     const thirdLeaving = new AbortController();
     const thirdWaiter = fixture.registry.acquire(shared.getSessionId(), thirdLeaving.signal);
-    await tick();
+    await waitFor(() => coldLoadQueue(fixture.registry) === 1, "the retried shared load queued");
     expect(loads).toHaveLength(2);
     releaseLoads.shift()!();
     await waitFor(() => loads.length === 3, "the third catalog load");
     expect(loads[2]).toBe(shared.getSessionId());
     const otherWaiter = fixture.registry.acquire(other.getSessionId());
-    await tick();
+    await waitFor(() => coldLoadQueue(fixture.registry) === 1, "the other load queued behind the shared one");
     expect(loads).toHaveLength(3);
 
-    for (let pass = 0; pass < 8 && loads.length < 4; pass += 1) {
+    await waitFor(() => {
       for (const release of releaseLoads.splice(0)) release();
-      await tick();
-    }
+      return loads.length === 4;
+    }, "the other load starts once a running load finishes");
     for (const release of releaseLoads.splice(0)) release();
     await Promise.all([...held, thirdWaiter, otherWaiter]);
     expect([...loads].sort()).toEqual([

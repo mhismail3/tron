@@ -27,8 +27,6 @@ afterEach(async () => {
   if (failures.length) throw new AggregateError(failures, "fixture cleanup failed");
 });
 
-const RECONCILE_SETTLE_MS = 150;
-
 async function unusedPort(): Promise<number> {
   const probe = createTcpServer();
   await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
@@ -137,22 +135,28 @@ interface EndpointFixture {
   port: number;
 }
 
-async function endpointFixture(prefix: string, addresses: LanAddress[], handlers: { onConnection?: (socket: Duplex) => void } = {}): Promise<EndpointFixture & { endpoint: LanEndpoint; addresses: LanAddress[] }> {
+async function endpointFixture(prefix: string, addresses: LanAddress[], handlers: { onConnection?: (socket: Duplex) => void } = {}): Promise<EndpointFixture & { endpoint: LanEndpoint; addresses: LanAddress[]; passes: () => number }> {
   const home = await tempRoot(prefix);
   const stateDirectory = join(home, "lan-endpoint");
   const port = await unusedPort();
   const log = { log: vi.fn() };
+  let passes = 0;
   const endpoint = new LanEndpoint({
     enabled: true, stateDirectory, port, logger: log as never,
     listenerLimits: HTTP_LISTENER_LIMITS,
-    lanAddresses: () => [...addresses],
+    lanAddresses: () => { passes += 1; return [...addresses]; },
     reconcileIntervalMs: 25,
     ...RESPONDING_HANDLERS,
     ...(handlers.onConnection === undefined ? {} : { onConnection: handlers.onConnection }),
   });
   await endpoint.start();
   cleanups.push(() => endpoint.stop());
-  return { log: log.log, stateDirectory, port, endpoint, addresses };
+  return { log: log.log, stateDirectory, port, endpoint, addresses, passes: () => passes };
+}
+
+async function reconcilePasses(fixture: { passes: () => number }, count: number): Promise<void> {
+  const target = fixture.passes() + count;
+  await waitFor(() => fixture.passes() >= target, `${count} more reconcile passes`);
 }
 
 interface GatewayFixture {
@@ -345,7 +349,7 @@ describe("LAN endpoint", () => {
 
     fixture.addresses.length = 0;
     expect((await waitForRecord(fixture.log, "lan.listener", "state", "disabled")).fields.reason).toBe("no_private_address");
-    await new Promise((resolve) => setTimeout(resolve, RECONCILE_SETTLE_MS));
+    await reconcilePasses(fixture, 6);
     expect(records(fixture.log, "lan.listener").filter((record) => record.fields.reason === "no_private_address")).toHaveLength(1);
   });
 
@@ -354,7 +358,7 @@ describe("LAN endpoint", () => {
     const disabled = await waitForRecord(fixture.log, "lan.listener", "state", "disabled");
     expect(disabled.fields.reason).toBe("bind_failed");
     expect(disabled.level).toBe("warning");
-    await new Promise((resolve) => setTimeout(resolve, RECONCILE_SETTLE_MS));
+    await reconcilePasses(fixture, 6);
     expect(records(fixture.log, "lan.listener").filter((record) => record.fields.reason === "bind_failed")).toHaveLength(1);
   });
 
@@ -480,9 +484,11 @@ describe("LAN endpoint", () => {
     const fixture = await gatewayFixture();
     await waitForRecord(fixture.log, "lan.listener", "state", "bound");
     const token = await localToken(fixture.root);
+    vi.useFakeTimers({ toFake: ["performance"] });
+    cleanups.push(async () => { vi.useRealTimers(); });
     const handed = await openTls("::1", fixture.port);
     cleanups.push(async () => { handed.destroy(); });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    vi.advanceTimersByTime(300);
     const socket = new WebSocket(`wss://[::1]:${fixture.port}/v1/socket`, {
       headers: { authorization: `Bearer ${token}` },
       rejectUnauthorized: false,
@@ -500,6 +506,8 @@ describe("LAN endpoint", () => {
     const home = await tempRoot("tron-lan-stop-");
     const port = await unusedPort();
     const log = { log: vi.fn() };
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    cleanups.push(async () => { vi.useRealTimers(); });
     const endpoint = new LanEndpoint({
       enabled: true, stateDirectory: join(home, "lan-endpoint"), port, logger: log as never,
       listenerLimits: HTTP_LISTENER_LIMITS,
@@ -510,8 +518,7 @@ describe("LAN endpoint", () => {
     await endpoint.stop();
     await starting;
     expect(await tlsReaches("127.0.0.1", port)).toBe(false);
-    await new Promise((resolve) => setTimeout(resolve, RECONCILE_SETTLE_MS));
-    expect(await tlsReaches("127.0.0.1", port)).toBe(false);
+    expect(vi.getTimerCount(), "a stopped endpoint leaves no reconcile timer").toBe(0);
   });
 
   it("binds nothing while the setting is off, and retires the lane and its sockets on shutdown", async () => {

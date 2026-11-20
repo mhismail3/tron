@@ -12,6 +12,11 @@ import { waitFor } from "../../test-support/wait-for.js";
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { await Promise.all(cleanups.splice(0).map((cleanup) => cleanup())); });
 
+async function fenced(socket: WebSocket, frames: any[], id: string): Promise<void> {
+  socket.send(JSON.stringify({ type: "request", id, method: "test.fence", params: {} }));
+  await waitFor(() => frames.some((frame) => frame.id === id), `the ${id} fence answer`);
+}
+
 describe("two-phase session synchronization protocol", () => {
   it("joins overlapping opens, preserves independent completion order, and cleans failed/oversized owners", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-sync-race-"));
@@ -403,7 +408,7 @@ describe("synchronization catch-up overflow recovery", () => {
     gateway.broadcastSession("gone", "session.progress", {
       runtimeGeneration: "generation-gone", eventSequence: 500, revision: 500,
     } as any);
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await fenced(socket, frames, "fence-gone");
     expect(frames.slice(goneResyncIndex + 1).some((frame) => frame.topic === "session.progress" && frame.sessionId === "gone")).toBe(false);
     await openAndSync("gone-again", "gone");
     gateway.broadcastSession("gone", "session.progress", {
@@ -419,7 +424,7 @@ describe("synchronization catch-up overflow recovery", () => {
     gateway.broadcastSession("oversized", "session.progress", {
       runtimeGeneration: "generation-oversized", eventSequence: 500, revision: 500,
     } as any);
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await fenced(socket, frames, "fence-oversized");
     expect(frames.slice(fallbackEnd).some((frame) => frame.topic === "session.progress" && frame.sessionId === "oversized")).toBe(false);
 
     socket.send(JSON.stringify({ type: "request", id: "open-timeout", method: "session.open", params: { sessionId: "timeout" } }));
@@ -576,7 +581,7 @@ describe("connection-wide synchronization ownership", () => {
     expect(closed.result).toEqual({ closed: true });
     const closedEvents = frames.length;
     gateway.broadcastSession(currentSessionId, "session.progress", event(currentSessionId, 4) as any);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await fenced(socket, frames, "fence-closed-rekey");
     expect(frames.slice(closedEvents).some((frame) => frame.sessionId === currentSessionId && frame.topic === "session.progress")).toBe(false);
 
     const openedPending = await request("open-pending", "session.open", "pending");
@@ -801,7 +806,6 @@ describe("disposable read cancellation", () => {
     const connection = [...(gateway as unknown as {
       clients: Map<string, { synchronizations: Map<string, unknown> }>;
     }).clients.values()][0]!;
-    const tick = async (): Promise<void> => { await new Promise((resolve) => setTimeout(resolve, 1)); };
     const answered = (id: string): any => frames.find((frame) => frame.id === id);
     const open = (id: string, sessionId: string): void => {
       socket.send(JSON.stringify({ type: "request", id, method: "session.open", params: { sessionId } }));
@@ -853,13 +857,13 @@ describe("disposable read cancellation", () => {
     expect(cancelled()[2]!.metadata).toMatchObject({ method: "session.open", requestID: "open-4", stage: "session.open.join" });
 
     cancel("never-admitted");
-    await tick();
+    await fenced(socket, frames, "fence-never-admitted");
     expect(cancelled()).toHaveLength(3);
 
     socket.send(JSON.stringify({ type: "request", id: "prompt-1", method: "session.prompt", params: { sessionId: "slow" } }));
     await waitFor(() => promptStarts.length === 1, "the admitted prompt");
     cancel("prompt-1");
-    await tick();
+    await fenced(socket, frames, "fence-prompt");
     expect(cancelled()).toHaveLength(3);
     releasePrompt?.();
     await waitFor(() => answered("prompt-1") !== undefined, "the prompt's answer");
@@ -867,7 +871,7 @@ describe("disposable read cancellation", () => {
     sync("sync-gated", "gated");
     await waitFor(() => releaseGatedSync !== undefined, "the admitted synchronization");
     cancel("sync-gated");
-    await tick();
+    await fenced(socket, frames, "fence-gated-sync");
     expect(cancelled()).toHaveLength(3);
     releaseGatedSync?.();
     await waitFor(() => answered("sync-gated") !== undefined, "the synchronization's answer");
@@ -980,7 +984,6 @@ describe("mobile presentation slot", () => {
     socket.send(JSON.stringify({ type: "hello", protocolVersion: 9, clientRole: "mobile" }));
     await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
 
-    const tick = async (): Promise<void> => { await new Promise((resolve) => setTimeout(resolve, 1)); };
     const answered = (id: string): any => frames.find((frame) => frame.id === id);
     const page = (prefix: string, sessionId: string): void => {
       socket.send(JSON.stringify({ type: "request", id: `${prefix}-open`, method: "session.open", params: { sessionId } }));
