@@ -5,17 +5,27 @@ import XCTest
 @MainActor
 final class HomeTaskReadingViewTests: ShuffledTestCase {
     func testTaskReadingSubtextLight() async throws { try await exercise([]) }
+    func testTaskReadingSubtextAccessibilityLarge() async throws {
+        try await exercise([], contentSize: .accessibilityLarge, accessibilityLarge: true)
+    }
 
-    private func exercise(_ arguments: [String]) async throws {
-        try await mounted(["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-task-padding-review"] + arguments) { app in
+    private func exercise(_ arguments: [String], contentSize: UIContentSizeCategory = .large,
+                          accessibilityLarge: Bool = false) async throws {
+        try await mounted(["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-task-padding-review"] + arguments,
+                          contentSize: contentSize) { app in
             try await openManageHome(app)
             _ = try await revealed(app, "home-manage-controls")
             try await app.until("the Controls row markers") {
                 app.element("home-manage-controls-title") != nil && app.element("home-manage-controls-subtext") != nil
             }
             let metadata = app.element("home-manage-controls-subtext")!, settingsTitle = app.element("home-manage-controls-title")!
-            let metadataHeight = metadata.accessibilityFrame.height
+            let metadataLines: CGFloat = accessibilityLarge ? 2 : 1
+            let metadataHeight = metadata.accessibilityFrame.height / metadataLines
             XCTAssertGreaterThan(metadataHeight, 0)
+            if accessibilityLarge {
+                XCTAssertGreaterThan(metadata.accessibilityFrame.height, settingsTitle.accessibilityFrame.height,
+                                     "The subtitle wraps at accessibility text")
+            }
             XCTAssertLessThan(metadataHeight, settingsTitle.accessibilityFrame.height, "Default shared-row callers keep their smaller metadata style")
             _ = try await revealed(app, "home-manage-tasks")
             try await app.activate("home-manage-tasks")
@@ -32,7 +42,8 @@ final class HomeTaskReadingViewTests: ShuffledTestCase {
             let lineHeight = app.element("home-task-model-title")!.accessibilityFrame.height
             XCTAssertGreaterThan(lineHeight, 0)
             for id in ["home-task-result", "home-task-model", "home-task-subagents", "home-task-spend"] {
-                XCTAssertEqual(app.element("\(id)-subtext")!.accessibilityFrame.height, lineHeight, accuracy: 0.25,
+                let lines: CGFloat = accessibilityLarge && id == "home-task-subagents" ? 2 : 1
+                XCTAssertEqual(app.element("\(id)-subtext")!.accessibilityFrame.height / lines, lineHeight, accuracy: 0.25,
                                "\(id) uses the approved reading size, not metadata")
             }
             let checkinHeight = ["home-task-checkin-summary-title", "home-task-checkin-done-subtext", "home-task-checkin-next-subtext"]
