@@ -439,6 +439,19 @@ describe("global provider resources", () => {
     expect(f.broadcast).toHaveBeenCalledTimes(1);
   });
 
+  it("refreshes a valid custom provider despite an unrelated runtime error", async () => {
+    const f = await fixture();
+    const runtime = await ModelRuntime.create({ authPath: join(f.agentDir, "auth.json"), modelsPath: join(f.agentDir, "models.json"), refreshOnCreate: false });
+    const resources = await GlobalProviderResources.create({ cwd: homedir(), agentDir: f.agentDir, modelRuntime: runtime, auth: f.broker, log: f.log, broadcast: f.broadcast });
+    await writeFile(join(f.agentDir, "auth.json"), "{ not json");
+    await runtime.refresh({ allowNetwork: false }).catch(() => {});
+    expect(runtime.getError()).toMatch(/^Availability refresh: /u);
+    await new ModelConfigService(f.agentDir).setProvider("tron-provider", { baseUrl: "http://127.0.0.1:9/v1", api: "openai-completions", models: [{ id: "local-model" }] });
+    await resources.refreshModels();
+    expect(runtime.getModel("tron-provider", "local-model")).toBeDefined();
+    expect(f.log).not.toHaveBeenCalledWith("error", expect.stringContaining("Custom model configuration is invalid"));
+  });
+
   it("fails a catalog refresh whose models.json the runtime cannot load, with its cause, and logs it", async () => {
     const f = await fixture();
     await writeFile(join(f.agentDir, "models.json"), `${JSON.stringify({ providers: { broken: { baseUrl: 5, api: "openai-completions" } } })}\n`);

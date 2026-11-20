@@ -17,6 +17,8 @@ interface ProviderRegistration {
   register: () => void;
 }
 
+const MODELS_JSON_ERROR = /^(?:Failed to load models\.json|Failed to parse models\.json|Invalid models\.json schema)/u;
+
 export class GlobalProviderResources {
   private readonly mutex = new AsyncMutex();
   private providerContributions: ProviderRegistration[] = [];
@@ -174,8 +176,8 @@ export class GlobalProviderResources {
       for (const failure of failures) this.log("error", failure);
       for (const diagnostic of loaded.errors) this.log("error", `Global extension ${diagnostic.path} failed to load: ${diagnostic.error}`);
       for (const [providerId, error] of result.errors) this.log("warning", `Global provider ${providerId} refresh failed: ${error.message}`);
-      const invalid = this.invalidModels();
-      if (invalid) this.log("error", invalid);
+      const error = this.modelRuntime.getError();
+      if (error) this.log("error", this.invalidModels() ?? `Global model runtime error: ${modelsErrorSummary(error)}`);
     } finally {
       this.broadcast();
     }
@@ -183,7 +185,7 @@ export class GlobalProviderResources {
 
   private invalidModels(): string | undefined {
     const error = this.modelRuntime.getError();
-    return error === undefined ? undefined : `Custom model configuration is invalid: ${modelsErrorSummary(error)}`;
+    return error && MODELS_JSON_ERROR.test(error) ? `Custom model configuration is invalid: ${modelsErrorSummary(error)}` : undefined;
   }
 
   private replayContributions(
