@@ -18,6 +18,7 @@ final class HomeTaskReadingViewTests: ShuffledTestCase {
             try await app.until("the Controls row markers") {
                 app.element("home-manage-controls-title") != nil && app.element("home-manage-controls-subtext") != nil
             }
+            XCTAssertTrue(app.element("home-manage-controls")?.accessibilityLabel?.contains("Pause or resume memory, or disable Home") == true)
             let metadata = app.element("home-manage-controls-subtext")!, settingsTitle = app.element("home-manage-controls-title")!
             let metadataLines: CGFloat = accessibilityLarge ? 2 : 1
             let metadataHeight = metadata.accessibilityFrame.height / metadataLines
