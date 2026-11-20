@@ -116,7 +116,7 @@ struct ManageModelConfigurationCard: View {
             }
             if setting.overridden == true { resetButton(setting).padding(.trailing, 12) }
         }
-        .disabled(!availability.canSelect)
+        .disabled(availability.isApplying)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(settingsRowIdentifier(setting))
     }

@@ -281,7 +281,11 @@ const scripted = (context, options, state, model) => {
   }
   return typeof step === "function" ? step(context, options, state, model) : step;
 };
-faux.setResponses(Array.from({ length: 64 }, () => scripted));
+const unframed = (context) => {
+  const last = context.messages.at(-1);
+  return last?.role === "user" && textOf(last).startsWith("<turn-frame>") ? { ...context, messages: context.messages.slice(0, -1) } : context;
+};
+faux.setResponses(Array.from({ length: 64 }, () => (context, ...rest) => scripted(unframed(context), ...rest)));
 export default function (pi) {
   pi.registerProvider(faux.provider);
   // Hermetic manual OAuth: no browser endpoint or real credential is used.

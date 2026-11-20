@@ -1599,7 +1599,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         XCTAssertEqual(tron.id, "tron")
         XCTAssertTrue(tron.perTurn)
         XCTAssertTrue(tron.text.contains(workspace))
-        XCTAssertTrue(instructions.text.hasSuffix("\n\n" + tron.text))
+        XCTAssertTrue(instructions.text.hasSuffix("\n\n<tron>\n" + tron.text + "\n</tron>"))
         let project = try XCTUnwrap(instructions.sections.first { $0.id == "project_context" })
         XCTAssertEqual(project.entries.map(\.path), ["\(workspace)/AGENTS.md"])
         XCTAssertEqual(project.entries.first?.text, "# E2E Project Rules\n\nKeep the boundary fixture honest.\n")
