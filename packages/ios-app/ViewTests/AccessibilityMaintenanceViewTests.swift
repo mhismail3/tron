@@ -5,7 +5,7 @@ import XCTest
 @MainActor
 final class AccessibilityMaintenanceViewTests: ShuffledTestCase {
     func testMaintenanceActionGeometry() async throws {
-        try await mounted(["-tron-accessibility-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]) { app in
+        try await mounted(["-tron-accessibility-fixture"]) { app in
             try await app.activate("Maintenance")
             let frames = try await actionFrames(app, ["Rebuild from Source", "Roll Back", "Restart", "Disable", "Forget Server"])
             XCTAssertEqual(frames[0].minX, frames[2].minX, accuracy: 1)
@@ -21,7 +21,7 @@ final class AccessibilityMaintenanceViewTests: ShuffledTestCase {
 
     func testLoneMaintenanceActionUsesFullContentWidth() async throws {
         for arguments in [[], ["-fixture-light"], ["-fixture-large-type"]] {
-            try await mounted(["-tron-accessibility-fixture", "-fixture-lone-maintenance", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+            try await mounted(["-tron-accessibility-fixture", "-fixture-lone-maintenance"]
                               + arguments) { app in
                 try await app.activate("Maintenance")
                 let labels = ["Rebuild from Source", "Restart", "Disable", "Forget Server"]
@@ -43,7 +43,7 @@ final class AccessibilityMaintenanceViewTests: ShuffledTestCase {
     }
 
     func testServerInfoRowsAndDone() async throws {
-        try await mounted(["-tron-accessibility-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]) { app in
+        try await mounted(["-tron-accessibility-fixture"]) { app in
             try await app.activate("Gateway Server Info")
             let facts = ["Machine, Mac", "Gateway, 1", "Agent runtime, 2", "Protocol, 9",
                          "Restart supervision, Managed LaunchAgent", "Source revision, source-revision",
@@ -64,7 +64,7 @@ final class AccessibilityMaintenanceViewTests: ShuffledTestCase {
 
     func testMacReplacementJournalRows() async throws {
         for arguments in [[], ["-fixture-large-type"]] {
-            try await mounted(["-tron-accessibility-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + arguments) { app in
+            try await mounted(["-tron-accessibility-fixture"] + arguments) { app in
                 try await app.activate("Mac Replacement")
                 let steps = ["Full signed build", "Rolled back", "Preflight", "Build signed app", "Verify signature",
                              "Stop running workers", "Stop Gateway", "Swap app", "Start new app", "Verify Gateway", "Finish"]
@@ -89,7 +89,7 @@ final class AccessibilityMaintenanceViewTests: ShuffledTestCase {
     }
 
     func testJSONTypedButtonsOpenTheirCompleteValues() async throws {
-        try await mounted(["-tron-accessibility-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]) { app in
+        try await mounted(["-tron-accessibility-fixture"]) { app in
             try await app.activate("Structured JSON")
             let rows = ["Active Async Capacity, Object, 2 fields", "Mode, Text, single", "Results, List, 0 items"]
             try await app.until("the JSON rows") { rows.allSatisfy { app.button($0) != nil } }
@@ -102,7 +102,7 @@ final class AccessibilityMaintenanceViewTests: ShuffledTestCase {
 
     func testActivityValuesUpdateInTheSamePresentedSheet() async throws {
         for arguments in [[], ["-fixture-light", "-fixture-large-type"]] {
-            try await mounted(["-tron-accessibility-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + arguments) { app in
+            try await mounted(["-tron-accessibility-fixture"] + arguments) { app in
                 try await app.activate("Session Activity")
                 try await app.until("the worker row") { app.button("worker") != nil }
                 try await waitForValue(app, "LIVE OUTPUT: Inspecting the source files.")
@@ -141,7 +141,7 @@ final class AccessibilityMaintenanceViewTests: ShuffledTestCase {
             ("Settings", "Global Settings"),
         ]
         for (action, expected) in destinations {
-            try await mounted(["-tron-accessibility-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US", "-fixture-dashboard"]) { app in
+            try await mounted(["-tron-accessibility-fixture", "-fixture-dashboard"]) { app in
                 try await performDashboardAction(app, action)
                 try await app.until("\(expected) opens") { app.staticText(expected) != nil }
                 XCTAssertFalse(MountedFixture.views(UINavigationBar.self, in: app.top).isEmpty)
@@ -151,10 +151,10 @@ final class AccessibilityMaintenanceViewTests: ShuffledTestCase {
 
     func testKnowledgeProductIsAbsentFromDashboardAndConnectedServices() async throws {
         for variant in ["-fixture-light", "-fixture-dark", "-fixture-xxxl", "-fixture-large-type"] {
-            try await mounted(["-tron-accessibility-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
-                               "-fixture-dashboard", variant]) { app in
+            try await mounted(["-tron-accessibility-fixture", "-fixture-dashboard", variant]) { app in
                 let titles = menuActionTitles(try await dashboardMenu(app))
                 XCTAssertFalse(titles.contains("Knowledge"))
+                XCTAssertNil(app.button("Knowledge"))
                 for title in ["Settings", "Automations", "Apps", "New Session"] {
                     XCTAssertTrue(titles.contains(title))
                 }

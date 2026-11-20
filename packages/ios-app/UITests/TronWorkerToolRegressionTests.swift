@@ -19,11 +19,10 @@ import XCTest
         app.terminate()
     }
 
-    private func launch(_ surface: String, dark: Bool = false, extra: [String] = []) -> XCUIApplication {
+    private func launch(_ surface: String) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-settings-fixture", "-settings-expanded-review", "-six-ui-surface", surface,
-                               "-themeColor", "burgundy", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + extra
-        if dark { app.launchArguments.append("-settings-dark") }
+                               "-themeColor", "burgundy", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
         XCTAssertTrue(app.buttons["Done"].firstMatch.waitForExistence(timeout: 15), app.debugDescription)
         return app

@@ -88,6 +88,7 @@ None of its own; catalog reads report through the State owners.
 ```bash
 scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronAccessibilityUITests \
+  --only-testing TronMobileViewTests/AccessibilityMaintenanceViewTests \
   --only-testing TronMobileUITests/TronSmokeUITests/testAutomationsSheetFromTronMenu \
   --only-testing TronMobileUITests/TronSmokeUITests/testAutomationsListActiveBeforePaused \
   --only-testing TronMobileUITests/TronSmokeUITests/testAutomationEditDateControlsVisualParity \

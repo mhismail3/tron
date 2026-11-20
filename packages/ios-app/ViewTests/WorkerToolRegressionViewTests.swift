@@ -52,8 +52,7 @@ final class WorkerToolRegressionViewTests: ShuffledTestCase {
 
     private func surface(_ name: String, dark: Bool = false, extra: [String] = [],
                          _ body: (MountedFixture) async throws -> Void) async throws {
-        try await mounted(["-tron-settings-fixture", "-settings-expanded-review", "-six-ui-surface", name,
-                           "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        try await mounted(["-tron-settings-fixture", "-settings-expanded-review", "-six-ui-surface", name]
                           + (dark ? ["-settings-dark"] : []) + extra, theme: .burgundy) { app in
             try await app.until("the surface") { app.button("Done") != nil }
             try await body(app)

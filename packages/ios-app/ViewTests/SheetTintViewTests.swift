@@ -45,12 +45,7 @@ final class SheetTintViewTests: ShuffledTestCase {
 
     func testDashboardSheetToolbarsTakeTheirTitleTint() async throws {
         try await mounted(["-tron-accessibility-fixture", "-fixture-dashboard"]) { app in
-            try await app.until("the dashboard menu") { app.element("dashboard.menu") is UIButton }
-            guard let menu = (app.element("dashboard.menu") as? UIButton)?.menu,
-                  let automations = menuAction("Automations", in: menu) else {
-                return XCTFail("The dashboard menu offers no Automations action\n\(app.tree())")
-            }
-            automations.perform(NSSelectorFromString("performWithSender:target:"), with: nil, with: nil)
+            try await performDashboardAction(app, "Automations")
             try await assertToolbarTint(app, title: "Automations")
             try await app.activate("automations.new")
             try await assertToolbarTint(app, title: "New Automation")
@@ -94,7 +89,6 @@ final class SheetTintViewTests: ShuffledTestCase {
         XCTAssertGreaterThan(ink[0], ink[2], "\(context) \(ink) is not the burgundy theme", file: file, line: line)
         XCTAssertGreaterThan(ink[2], ink[1], "\(context) \(ink) is not the burgundy theme", file: file, line: line)
     }
-
 }
 
 @MainActor
