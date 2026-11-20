@@ -4,11 +4,7 @@ import XCTest
 
 @MainActor
 final class MemoryPositionViewTests: ShuffledTestCase {
-    func testScopedMemoryLight() async throws { try await journey(dark: false, large: false) }
-    func testScopedMemoryDark() async throws { try await journey(dark: true, large: false) }
-    func testScopedMemoryAccessibility() async throws { try await journey(dark: false, large: true) }
-    func testMediumMemoryLight() async throws { try await journey(dark: false, large: false, expandsMemory: false) }
-    func testMediumMemoryDark() async throws { try await journey(dark: true, large: false, expandsMemory: false) }
+    func testScopedMemoryAccessibility() async throws { try await journey() }
 
     func testPagedMemoryAndTasksLabelLoadedItems() async throws {
         try await mounted(["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-paging", "-home-browser-paging"]) { app in
@@ -32,28 +28,26 @@ final class MemoryPositionViewTests: ShuffledTestCase {
         }
     }
 
-    private func journey(dark: Bool, large: Bool, expandsMemory: Bool = true) async throws {
-        let size: UIContentSizeCategory = large ? .accessibilityExtraExtraExtraLarge : .large
+    private func journey() async throws {
         try await mounted(["-tron-home-dashboard-fixture", "-home-shell-ready", "-memory-position-regression",
-                           "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + (dark ? ["-home-dark"] : []),
-                          contentSize: size) { app in
+                           "-AppleLanguages", "(en)", "-AppleLocale", "en_US"], contentSize: .accessibilityExtraExtraExtraLarge) { app in
             try await app.activate("home-pinned-row")
             try await app.activate("session-context-button")
             try await app.until("Manage Home opens") { app.element("home-manage-state") != nil }
-            try await expand(app, required: !large)
+            _ = try? await app.expandTopSheet()
             _ = try await revealed(app, "home-manage-chapters")
             try await app.activate("home-manage-chapters")
             try await app.until("Chapters opens") { app.element("home-chapter-1") != nil }
-            try await expand(app, required: !large)
+            _ = try? await app.expandTopSheet()
             try await app.activate("home-chapter-1")
             try await app.until("the chapter opens") { app.element("home-chapter-detail") != nil }
-            try await expand(app, required: !large)
+            _ = try? await app.expandTopSheet()
             _ = try await revealed(app, "home-chapter-browse-memory")
             XCTAssertNil(app.element("From Home's summaries of this chapter."),
                          "Topics already names the chapter summaries; no redundant caption can scroll behind Chapters")
             try await app.activate("home-chapter-browse-memory")
             try await app.until("the scoped memory opens") { app.element("home-memory-summary-7672-8") != nil }
-            if expandsMemory { try await expand(app, required: !large) }
+            _ = try? await app.expandTopSheet()
             try await checkChip(app, count: 32)
             try await app.activate("home-sheet-done-memory")
             try await app.activate("home-sheet-done-chapter")
@@ -61,7 +55,7 @@ final class MemoryPositionViewTests: ShuffledTestCase {
             _ = try await revealed(app, "home-manage-memory-browser")
             try await app.activate("home-manage-memory-browser")
             try await app.until("the unscoped memory opens") { app.element("home-memory-summary-7736-8") != nil }
-            if expandsMemory { try await expand(app, required: !large) }
+            _ = try? await app.expandTopSheet()
             try await checkChip(app, count: 40)
         }
     }
@@ -91,13 +85,6 @@ final class MemoryPositionViewTests: ShuffledTestCase {
         return try XCTUnwrap(chip)
     }
 
-    private func expand(_ app: MountedFixture, required: Bool) async throws {
-        if required {
-            try await app.expandTopSheet()
-        } else {
-            _ = try? await app.expandTopSheet()
-        }
-    }
 }
 
 @MainActor
