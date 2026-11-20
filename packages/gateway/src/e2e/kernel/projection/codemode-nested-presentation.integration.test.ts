@@ -16,6 +16,7 @@ vi.mock("../../../machine/cua-client.js", () => ({ CuaComputerClient: class {
   private pending = false;
   constructor(readonly binding: unknown) {}
   invalidateObservation() {}
+  async endTurn() {}
   async invoke(tool: string) {
     if (this.pending) throw new Error("One computer operation may be pending");
     this.pending = true;
