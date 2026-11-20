@@ -4,11 +4,11 @@
   "version": "0.9.19-tron.1",
   "artifact": {
     "path": "third_party/pi-agent-browser-native/pi-agent-browser-native-0.9.19-tron.1.tgz",
-    "integrity": "sha512-oBq93YKJVmaHRv40U9oQf4+77Szu6TkUWgcNPYe7ecTJFFaDhZAWYXB8+B7CQYwLfvUAawtRtQsFlj2VDiW73w=="
+    "integrity": "sha512-rEokP8cQIxap4IRG0APN91Qd44/Cp2AQa72EDn7IsUxLf2B2kQVuReMujbBZPS5v7ZWPo3BJVqjPkjYgzurEZw=="
   },
   "patch": {
     "path": "third_party/pi-agent-browser-native/tron.patch",
-    "sha256": "46096c357ef2cc674c0bdd0e71fd088ffb45619fe3789a929e4a6646c3581376"
+    "sha256": "fc8b7411955acc0e53abd5b609652d593c505206d4c9c28ca22896db7d28145d"
   },
   "license": {
     "path": "third_party/pi-agent-browser-native/LICENSE",

@@ -1,5 +1,5 @@
 diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md
-index 15a57c6..d1b12cc 100644
+index 15a57c6..5350b24 100644
 --- a/docs/ARCHITECTURE.md
 +++ b/docs/ARCHITECTURE.md
 @@ -283,0 +284,10 @@ Upstream restore-state persistence remains upstream-owned. The wrapper passes an
@@ -9,7 +9,7 @@ index 15a57c6..d1b12cc 100644
 +
 +Owned mode uses one persistent custom profile and a private native HOME/socket pool. A profile setting is not an attachment receipt. After local execution, the native owner records the exact loopback endpoint, listener PID, process-start identity, issued launch nonce and profile command line. Every attachment revalidates that record before invoking the native CLI. Existing native execution claims serialize the store across runtimes; atomic records and bounded sessions survive reloads. The owned browser is always launched by the profile-bound root session (`tron-<profile hash>`) with native restore keyed to that session; any other session, including wrapper-managed and `fresh` sessions, first triggers that root launch and then attaches over CDP, so wrapper-managed sessions keep their restore-disabled policy. Restore state is saved on close and periodically under the private owned HOME (`.agent-browser/sessions/`), whose parents are mode 0700, and is restored by the next root launch after a Gateway or browser restart. Session cookies therefore outlive browser close: a login held only in a session cookie survives restarts, independent of Chrome's own session-cookie handling.
 +
-+Generic `connect` remains available for recorded launches. Native Electron launch records its child before handoff, including known page endpoints. An external owned Chrome producer such as studio uses `owned-launch prepare`, launches ordinary Chrome with the returned arguments, then calls `owned-launch record <launchId> <pid>` before connecting to the returned endpoint. These are launch receipts, not a second launcher. After that temporary child has exited, `owned-launch cleanup <launchId>` retires its profile. Unknown or unrecorded cleanup ownership is refused and retained for diagnosis; no PID-file-based signalling is added.
++Generic `connect` remains available for recorded launches. Native Electron launch records its child before handoff, including known page endpoints. An external owned Chrome producer such as studio uses `owned-launch prepare`, launches ordinary Chrome with the returned arguments, then calls `owned-launch record <launchId> <pid>` before connecting to the returned endpoint. These are launch receipts, not a second launcher. After that temporary child has exited, `owned-launch cleanup <launchId>` retires its profile. A persistent producer profile, such as a studio's signed-in Chrome, passes its absolute path to both `owned-launch prepare <path>` and `owned-launch record <launchId> <pid> <path>`; it must be a private directory outside the owned profile and launch root that already holds an operator-placed `.tron-owned-profile` marker file. Its receipt is dropped when the browser exits and `cleanup` never deletes it. Unknown or unrecorded cleanup ownership is refused and retained for diagnosis; no PID-file-based signalling is added.
 +
 +Personal profile selection/copying, auto-discovered or unrecorded endpoints, imported browser state, opaque plugin/flow runners and system-browser-opening commands are refused. Attachments must be standalone so their receipt precedes page work; batches may operate on an already attached owned browser. Existing personal-Chrome login state is unavailable and is never copied. New logins in the owned profile persist through native close/restart.
 +
@@ -574,10 +574,10 @@ index 0000000..79d22c7
 +}
 diff --git a/extensions/agent-browser/lib/owned-launches.ts b/extensions/agent-browser/lib/owned-launches.ts
 new file mode 100644
-index 0000000..1ea4800
+index 0000000..6fa06af
 --- /dev/null
 +++ b/extensions/agent-browser/lib/owned-launches.ts
-@@ -0,0 +1,456 @@
+@@ -0,0 +1,476 @@
 +import { execFile } from "node:child_process";
 +import { randomUUID, createHash } from "node:crypto";
 +import { mkdir, readFile, readdir, rename, rm, writeFile, lstat, realpath } from "node:fs/promises";
@@ -690,17 +690,20 @@ index 0000000..1ea4800
 +	return pid;
 +}
 +
-+async function privateDirectory(path: string): Promise<void> {
-+	await mkdir(path, { recursive: true, mode: 0o700 });
-+	const stat = await lstat(path);
++async function privateEntry(path: string, directory: boolean): Promise<void> {
++	const stat = await lstat(path).catch(() => refuseOwnedLaunch());
 +	if (
-+		!stat.isDirectory() ||
-+		stat.isSymbolicLink() ||
++		(directory ? !stat.isDirectory() : !stat.isFile()) ||
 +		stat.uid !== process.getuid?.() ||
 +		(stat.mode & 0o077) !== 0
 +	) {
 +		refuseOwnedLaunch();
 +	}
++}
++
++async function privateDirectory(path: string): Promise<void> {
++	await mkdir(path, { recursive: true, mode: 0o700 });
++	await privateEntry(path, true);
 +}
 +
 +export class OwnedLaunches {
@@ -748,15 +751,23 @@ index 0000000..1ea4800
 +			}
 +			await writeFile(marker, randomUUID(), { mode: 0o600, flag: "wx" });
 +		}
-+		const stat = await lstat(marker);
++		await privateEntry(marker, false);
++	}
++
++	private async persistentProfile(path: string): Promise<string> {
 +		if (
-+			!stat.isFile() ||
-+			stat.isSymbolicLink() ||
-+			stat.uid !== process.getuid?.() ||
-+			(stat.mode & 0o077) !== 0
++			path !== resolve(path) ||
++			[this.profile, this.root].some((owned) => path === owned || path.startsWith(`${owned}/`))
 +		) {
 +			refuseOwnedLaunch();
 +		}
++		await privateEntry(path, true);
++		await privateEntry(join(path, ".tron-owned-profile"), false);
++		return path;
++	}
++
++	private temporary(launch: Launch): boolean {
++		return launch.profile === join(this.root, `studio-${launch.token}`);
 +	}
 +
 +	private file(endpoint: string): string {
@@ -823,7 +834,7 @@ index 0000000..1ea4800
 +		for (const launch of await this.records()) {
 +			if (await this.live(launch)) {
 +				result.push(launch);
-+			} else if (launch.kind !== "studio") {
++			} else if (launch.kind !== "studio" || !this.temporary(launch)) {
 +				await rm(this.file(launch.endpoint));
 +			}
 +		}
@@ -892,13 +903,19 @@ index 0000000..1ea4800
 +		await this.save({ ...launch, sessions: prior?.sessions ?? launch.sessions });
 +	}
 +
-+	private async studioPrepare(): Promise<Record<string, unknown>> {
-+		if ((await readdir(this.root)).filter((name) => name.startsWith("studio-")).length >= 128) {
-+			refuseOwnedLaunch();
-+		}
++	private async studioPrepare(persistent: string | undefined): Promise<Record<string, unknown>> {
 +		const token = randomUUID();
-+		const profile = join(this.root, `studio-${token}`);
-+		await mkdir(profile, { mode: 0o700 });
++		let profile: string;
++		if (persistent === undefined) {
++			if ((await readdir(this.root)).filter((name) => name.startsWith("studio-")).length >= 128) {
++				refuseOwnedLaunch();
++			}
++			profile = join(this.root, `studio-${token}`);
++			await mkdir(profile, { mode: 0o700 });
++		} else {
++			profile = await this.persistentProfile(persistent);
++			await rm(join(profile, "DevToolsActivePort"), { force: true });
++		}
 +		return {
 +			launchId: token,
 +			profile,
@@ -920,8 +937,11 @@ index 0000000..1ea4800
 +	private async studioRecord(
 +		token: string | undefined,
 +		rawPid: string | undefined,
++		persistent: string | undefined,
 +	): Promise<Record<string, unknown>> {
-+		const profile = this.studioProfile(token);
++		const temporary = this.studioProfile(token);
++		const profile =
++			persistent === undefined ? temporary : await this.persistentProfile(persistent);
 +		const pid = Number(rawPid);
 +		if (!Number.isSafeInteger(pid) || pid <= 1) {
 +			refuseOwnedLaunch();
@@ -954,7 +974,7 @@ index 0000000..1ea4800
 +			refuseOwnedLaunch();
 +		}
 +		const record = (await this.records()).find(
-+			(item) => item.profile === path && item.token === token,
++			(item) => item.profile === path && item.token === token && this.temporary(item),
 +		);
 +		if (!record || (await readProcessStartIdentity(record.pid)) === record.start) {
 +			refuseOwnedLaunch();
@@ -972,16 +992,16 @@ index 0000000..1ea4800
 +		let data: Record<string, unknown>;
 +		switch (args[1] ?? "") {
 +			case "prepare":
-+				if (args.length !== 2) {
++				if (args.length > 3) {
 +					refuseOwnedLaunch();
 +				}
-+				data = await this.studioPrepare();
++				data = await this.studioPrepare(args[2]);
 +				break;
 +			case "record":
-+				if (args.length !== 4) {
++				if (args.length < 4 || args.length > 5) {
 +					refuseOwnedLaunch();
 +				}
-+				data = await this.studioRecord(args[2], args[3]);
++				data = await this.studioRecord(args[2], args[3], args[4]);
 +				break;
 +			case "cleanup":
 +				if (args.length !== 3) {

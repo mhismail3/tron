@@ -76,6 +76,14 @@ function closeNative(agentDir: string, sockets: string | undefined): void {
   }
 }
 
+async function closeProducer(child: ReturnType<typeof spawn>, exited: Promise<unknown>, endpoint: string|undefined): Promise<void> {
+  try {
+    if(child.exitCode===null && endpoint){const socket=new WebSocket(endpoint);try {await awaitsWithin(once(socket,"open"),"producer cleanup connection",HOOK_HANG_BOUND_MS);socket.send(JSON.stringify({id:1,method:"Browser.close"}));await awaitsWithin(exited,"producer graceful exit",HOOK_HANG_BOUND_MS);} finally {socket.terminate();}}
+  } finally {
+    if(child.exitCode===null){if(!child.pid || child.pid<=1) throw new Error("Producer cleanup has no owned child PID; profile retained");child.kill("SIGTERM");await awaitsWithin(exited,"owned producer child exit",HOOK_HANG_BOUND_MS);}
+  }
+}
+
 describe("packaged agent-browser receipts", () => {
   describe("packaged owned-browser qualification", { concurrent: false, shuffle: false }, () => {
     let root: string, agentDir: string, cwd: string, control: string, base: string, endpoint: string;
@@ -187,14 +195,44 @@ describe("packaged agent-browser receipts", () => {
         expect(await step("producer-read",["get","cdp-url"])).toMatchObject({isError:false,details:{data:{cdpUrl:endpoint}}});
         expect(await step("producer-detach",["close"])).toMatchObject({isError:false});
       } finally {
-        try {
-          if(child.exitCode===null && endpoint){const socket=new WebSocket(endpoint);try {await awaitsWithin(once(socket,"open"),"producer cleanup connection",HOOK_HANG_BOUND_MS);socket.send(JSON.stringify({id:1,method:"Browser.close"}));await awaitsWithin(exited,"producer graceful exit",HOOK_HANG_BOUND_MS);} finally {socket.terminate();}}
-        } finally {
-          if(child.exitCode===null){if(!child.pid || child.pid<=1) throw new Error("Producer cleanup has no owned child PID; profile retained");child.kill("SIGTERM");await awaitsWithin(exited,"owned producer child exit",HOOK_HANG_BOUND_MS);}
-        }
+        await closeProducer(child,exited,endpoint);
       }
       expect(await step("producer-cleanup",["owned-launch","cleanup",launchId])).toMatchObject({isError:false,details:{data:{cleaned:true}}});
       await expect(readFile(join(profile,"DevToolsActivePort"))).rejects.toMatchObject({code:"ENOENT"});
+    });
+    it("admits only an operator-marked persistent producer profile, relaunches it and never cleans it", async () => {
+      const chrome=process.env.AGENT_BROWSER_EXECUTABLE_PATH;
+      if(!chrome) throw new Error("Chrome for Testing is required");
+      const profile=join(root,"Studio Chrome");
+      await mkdir(profile,{mode:0o700});
+      expect(JSON.stringify(await step("persistent-unmarked",["owned-launch","prepare",profile]))).toContain("owned_launch_required");
+      await writeFile(join(profile,".tron-owned-profile"),randomUUID(),{mode:0o600});
+      const launch=async(label:string)=>{
+        const prepared=await step(label+"-prepare",["owned-launch","prepare",profile]);
+        expect(prepared).toMatchObject({isError:false,details:{data:{profile}}});
+        const {launchId,args}=prepared.details.data;
+        const child=spawn(chrome,["--headless=new","--password-store=basic","--use-mock-keychain",...args,"about:blank"],{stdio:"ignore"});
+        const exited=once(child,"exit");
+        let endpoint:string|undefined;
+        try {
+          await waitFor(async()=>{try{return (await readFile(join(profile,"DevToolsActivePort"),"utf8")).includes("/devtools/browser/");}catch{return false;}},"persistent producer endpoint");
+          const [port,path]=(await readFile(join(profile,"DevToolsActivePort"),"utf8")).trim().split("\n");
+          endpoint=`ws://127.0.0.1:${port}${path}`;
+          expect(await step(label+"-record",["owned-launch","record",launchId,String(child.pid),profile])).toMatchObject({isError:false,details:{data:{endpoint}}});
+          expect(await step(label+"-connect",["connect",`http://127.0.0.1:${port}`],true)).toMatchObject({isError:false});
+          expect(await step(label+"-verify",["get","url"])).toMatchObject({isError:false});
+          expect(await step(label+"-read",["get","cdp-url"])).toMatchObject({isError:false,details:{data:{cdpUrl:endpoint}}});
+          expect(await step(label+"-detach",["close"])).toMatchObject({isError:false});
+        } finally {
+          await closeProducer(child,exited,endpoint);
+        }
+        return {launchId,endpoint:endpoint!};
+      };
+      const first=await launch("persistent-first");
+      expect(await step("persistent-cleanup",["owned-launch","cleanup",first.launchId])).toMatchObject({isError:true});
+      expect(JSON.stringify(await step("persistent-exited",["connect",first.endpoint],true))).toContain("owned_launch_required");
+      await launch("persistent-second");
+      await expect(readFile(join(profile,".tron-owned-profile"),"utf8")).resolves.toMatch(/^[0-9a-f-]{36}$/);
     });
     it("hands a native Electron launch fixture to the recorded-owner engine without touching an installed app", async () => {
       const appPath=join(root,"OwnedFixture.app"), contents=join(appPath,"Contents");
