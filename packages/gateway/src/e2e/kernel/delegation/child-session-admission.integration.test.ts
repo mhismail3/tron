@@ -322,6 +322,67 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     )).total).toBeGreaterThan(0);
   });
 
+  it("binds a revived async single through its declared session owner when its fan-out root is a workflow launch", async () => {
+    const fixture = await coldFixture("revived-async-single-declared-owner");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const parentFile = slot.sessionFile!;
+    const revivedRunId = "revived-single-run";
+    const sessionOwnerId = "original-workflow-child-run";
+    const toolCallId = "revive-tool";
+    const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", revivedRunId);
+    const childDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), sessionOwnerId, "run-0");
+    await Promise.all([mkdir(asyncDir, { recursive: true }), mkdir(childDirectory, { recursive: true })]);
+    const childManager = SessionManager.create(fixture.cwd, childDirectory, { id: "revived-child-session" });
+    childManager.appendMessage(fauxAssistantMessage("revived reviewer transcript"));
+    const childFile = join(childDirectory, "session.jsonl");
+    await rename(childManager.getSessionFile()!, childFile);
+    const started = Date.now() - 1_000;
+    const startedAt = new Date(started).toISOString();
+    const internal = slot.ownedTurns;
+    internal.extensionActivities.set(toolCallId, {
+      id: toolCallId, activityId: "revive-activity", runId: revivedRunId, toolCallId,
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
+      startedAt, updatedAt: startedAt, children: [],
+      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
+    });
+    internal.extensionRunOwnership.set(revivedRunId, { toolCallId, asyncDir, terminal: false });
+    const node = { label: "reviewer", state: "running", startedAt: started, updatedAt: started + 500, sessionFile: childFile, sessionOwnerId };
+    await writeFile(join(asyncDir, "status.json"), JSON.stringify({
+      lifecycleProjection: {
+        version: 1, runId: revivedRunId, sessionId: parentFile, generatedAt: started + 500,
+        caps: { maxRuns: 1, maxChildrenPerNode: 8, maxDepth: 3, maxStringLength: 160, maxSerializedBytes: 30_720 },
+        omitted: { runs: 0, children: 0, byteLimitExceeded: false },
+        root: { id: revivedRunId, kind: "subagent", ...node, children: [{ id: "step:0", kind: "step", ...node }] },
+      },
+      lifecycleArtifactVersion: 3,
+      runId: revivedRunId,
+      sessionId: parentFile,
+      sessionOwnerId,
+      mode: "single",
+      state: "running",
+      startedAt: started,
+      lastUpdate: started + 500,
+      steps: [{ agent: "reviewer", status: "running", sessionFile: childFile, sessionOwnerId }],
+    }));
+    await writeFile(join(asyncDir, "recovery-descriptor.json"), JSON.stringify({
+      version: 1,
+      sourceRunId: revivedRunId,
+      sessionFile: childFile,
+      sessionOwnerId,
+      runFanoutBudget: { version: 1, rootRunId: "workflow-launch-tool-call", directory: "/private/opaque", limit: 64, parentPath: "workflow[review]" },
+    }));
+    await refreshExtensionActivityFromArtifact(internal, toolCallId, asyncDir);
+
+    const process = slot.snapshot().processActivities?.find((activity) => activity.kind === "subagent");
+    expect(process).toMatchObject({ childSessionRef: "revived-child-session", visibility: "active" });
+    expect(slot.processChildSessionBinding(process!.processId)).toMatchObject({
+      ref: "revived-child-session", producerId: "step:0", sessionOwnerId, runId: revivedRunId,
+    });
+    expect((await fixture.registry.readOnlySubagentTranscriptPage(
+      "revived-child-session", await realpath(childFile), slot.id, process!.processId, revivedRunId,
+    )).total).toBeGreaterThan(0);
+  });
+
   it("separates a workflow producer identity from its fresh child-run path owner", async () => {
     const fixture = await coldFixture("validated-workflow-child-owner");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
