@@ -52,7 +52,7 @@ def waits(text: str, source: str, default: int, hook: int) -> list[int]:
     return bounds + ([default] if plain > 0 else [])
 
 
-def budgets(root: Path) -> dict[str, dict]:
+def budgets(root: Path) -> dict[str, list[dict]]:
     """Per Gateway test file: its tests' (title, Vitest timeout, smallest wait bound) list; a test without its own wait takes the file helpers' bound."""
     gateway = root / GATEWAY
     bounds = config_bounds(gateway)
