@@ -4,12 +4,24 @@ import TronMobileCore
 
 @MainActor
 struct HostedChatAnnotationFixture: View {
-    static let transcriptData = Data(#"""
+    static var transcriptData: Data {
+        let arguments = HostedLaunch.arguments
+        let rich = arguments.contains("-annotation-rich-blocks")
+            ? #"\n\n| Setting | Value |\n| --- | --- |\n| Reconnect cap | 30 seconds |\n| Jitter | 20 percent |\n\n```swift\nlet retryCapSeconds = 30\n```"#
+            : ""
+        let prompts = arguments.contains("-annotation-wrapped-prompt")
+            ? #",{"id":"short","parentId":"answer","presentationId":"short","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"user","content":[{"id":"short-text","ordinal":0,"type":"text","text":"Status?"}]}"#
+                + #",{"id":"wrapped","parentId":"short","presentationId":"wrapped","timestamp":"2026-01-01T00:00:03Z","kind":"message","role":"user","content":[{"id":"wrapped-text","ordinal":0,"type":"text","text":"\#(wrappedPrompt)"}]}"#
+            : ""
+        return Data(#"""
         [
           {"id":"ask","parentId":null,"presentationId":"ask","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[{"id":"ask-text","ordinal":0,"type":"text","text":"How should the gateway retry dropped connections?"}]},
-          {"id":"answer","parentId":"ask","presentationId":"answer","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"answer-text","ordinal":0,"type":"text","text":"## Retry policy\n\nThe gateway should retry dropped connections with **exponential backoff**, starting at one second and capping at thirty seconds. Each attempt adds jitter so many phones do not reconnect at once.\n\nKeep the session open while retrying:\n\n- Accepted prompts continue on the Mac.\n- The phone receives an authoritative snapshot when it returns.\n\nSee the [reconnect notes](https://example.com/reconnect) for the full contract."}],"provider":"anthropic","modelId":"claude-fable-5-2"}
+          {"id":"answer","parentId":"ask","presentationId":"answer","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"answer-text","ordinal":0,"type":"text","text":"## Retry policy\n\nThe gateway should retry dropped connections with **exponential backoff**, starting at one second and capping at thirty seconds. Each attempt adds jitter so many phones do not reconnect at once.\n\nKeep the session open while retrying:\n\n- Accepted prompts continue on the Mac.\n- The phone receives an authoritative snapshot when it returns.\n\nSee the [reconnect notes](https://example.com/reconnect) for the full contract.\#(rich)"}],"provider":"anthropic","modelId":"claude-fable-5-2"}\#(prompts)
         ]
         """#.utf8)
+    }
+
+    static let wrappedPrompt = "Analyze where we left off on our different reconciliation_ledger_workstreams"
 
     @State private var model: AppModel
     @State private var ready = false
