@@ -259,6 +259,7 @@ struct HomeTaskSheet: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("home-task-view-checkins")
+                    .tronListMarkers("home-task-view-checkins")
                     if !rows.isEmpty { TronSettingsDivider(accent: accent) }
                     ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
                         if index > 0 { TronSettingsDivider(accent: accent) }

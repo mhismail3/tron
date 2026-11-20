@@ -80,7 +80,7 @@ final class HomeSheetsViewTests: ShuffledTestCase {
                 _ = try await revealed(app, "home-task-checkin-next")
                 let ids = ["home-task-checkin-summary-title", "home-task-checkin-summary-subtext", "home-task-checkin-done-title",
                            "home-task-checkin-done-subtext", "home-task-checkin-next-title", "home-task-checkin-timestamp-title",
-                           "home-task-view-checkins"]
+                           "home-task-view-checkins-subtext"]
                 try await app.until("the check-in rows") { ids.allSatisfy { app.element($0) != nil } }
                 let meta = app.element("home-task-checkin-summary-subtext")!.accessibilityFrame
                 let standard = app.element("home-task-checkin-timestamp-title")!.accessibilityFrame
@@ -88,12 +88,9 @@ final class HomeSheetsViewTests: ShuffledTestCase {
                 XCTAssertLessThanOrEqual(app.element("home-task-checkin-next-title")!.accessibilityFrame.minY
                                             - app.element("home-task-checkin-done-subtext")!.accessibilityFrame.maxY, 12,
                                          "Adjacent check-in blocks use shared section/line spacing, not full row insets twice")
-                let viewAll = try await revealed(app, "home-task-view-checkins")
-                let subtitle = try XCTUnwrap(MountedFixture.elements(in: app.top).last { node in
-                    node.accessibilityLabel == "Every operation and resume" && !node.accessibilityTraits.contains(.button)
-                        && viewAll.accessibilityFrame.contains(CGPoint(x: node.accessibilityFrame.midX, y: node.accessibilityFrame.midY))
-                }, app.tree())
-                XCTAssertEqual(subtitle.accessibilityFrame.height, meta.height, accuracy: 0.5)
+                _ = try await revealed(app, "home-task-view-checkins")
+                XCTAssertTrue(app.element("home-task-view-checkins")?.accessibilityLabel?.contains("Every operation and resume") == true)
+                XCTAssertEqual(app.element("home-task-view-checkins-subtext")!.accessibilityFrame.height, meta.height, accuracy: 0.5)
             }
         }
     }
