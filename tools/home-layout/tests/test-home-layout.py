@@ -831,6 +831,21 @@ class MigrateTests(unittest.TestCase):
         self.assertEqual(self.migrate("--rollback")[0], 0)
         self.assertEqual((self.home / "late-backup/only-copy").read_text(), "late")
 
+    def test_an_edited_manifest_keeps_the_journal_that_owns_earlier_moves(self) -> None:
+        self.fixture.write(REGISTRY, registry(PATHS, [self.RETIRED[1]]))
+        self.assertEqual(self.migrate("--apply")[0], 0)
+        (self.home / "late-backup").mkdir(mode=0o700)
+        (self.home / "late-backup/only-copy").write_text("late")
+        self.fixture.write(REGISTRY, registry(PATHS, [{"from": "late-backup", "to": "~/.tron-maintenance/backups/late-backup"}, self.RETIRED[1]]))
+        code, report = self.migrate("--dry-run")
+        self.assertEqual((code, report["blockers"]), (0, []), report)
+        self.assertEqual({row["from"]: row["state"] for row in report["moves"]}, {"late-backup": "pending", "backup-1": "done"})
+        self.assertEqual(self.migrate("--apply")[0], 0)
+        self.assertEqual(len(list((self.user / ".tron-maintenance/layout-v2").glob("*.json"))), 1)
+        self.assertEqual(self.migrate("--rollback")[0], 0)
+        self.assertEqual((self.home / "late-backup/only-copy").read_text(), "late")
+        self.assertEqual((self.home / "backup-1/only-copy").read_bytes(), b"unique recovery")
+
     def test_a_crashed_home_retains_the_only_claim_on_a_shared_pending_move(self) -> None:
         self.use_recovery_registry()
         (self.home / "gateway/home").mkdir()
@@ -1641,6 +1656,16 @@ class RuntimeMigrationTests(unittest.TestCase):
             self.assertEqual(mission["runs"][0]["asyncDir"], str(home / sdk["asyncDir"].replace("internal/subagents/", "state/subagents/")))
             self.assertEqual(mission["notes"], old_cwd)
             self.assertEqual(json.loads((home / "agent/trust.json").read_text()), {new_cwd: True})
+            (home / "late").mkdir()
+            fixture.write(REGISTRY, registry({**paths, "state/late": entry(subtree=True)}, [*retired, {"from": "late", "to": "state/late"}]))
+            for mode in ("--dry-run", "--apply"):
+                late_before = snapshot(home.parent)
+                late = fixture.run("migrate", "--home", str(home), mode, env={"HOME": str(home.parent)})
+                self.assertEqual(late.returncode, 1, late.stdout + late.stderr)
+                self.assertIn("layout_slots_changed", json.loads(late.stdout)["blockers"])
+                self.assertEqual(normalize_lease_parent(snapshot(home.parent, contents_first=False)), normalize_lease_parent(late_before))
+            fixture.write(REGISTRY, registry(paths, retired))
+            (home / "late").rmdir()
             hidden = session.parent / "artifacts" / session.name
             hidden.parent.mkdir()
             session.rename(hidden)

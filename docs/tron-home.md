@@ -185,8 +185,10 @@ installation. Keep the target Gateway, Mac wrapper and workers stopped through t
 maintainer-approved operation and recovery. Use the same source and registry for both homes. Review dry-run and maintenance
 index first; migration does not edit the index. Copies and snapshots are retained.
 
-One private journal at `$HOME/.tron-maintenance/layout-v2/<registry-sha256>.json` owns
-moves across homes. Claims bind home, logical endpoints and device/inode. The private journal directory's whole-operation kernel lock serializes writes. A claim reserved by another home refuses even after a
+One private journal at `$HOME/.tron-maintenance/layout-v2/<registry-sha256>.json`, named
+by the registry that created it, owns moves across homes; later registry edits keep it, each
+recorded move must still be a declared retired row, a second journal refuses, and a new
+in-home row after an applied layout refuses (`layout_slots_changed`) instead of moving without rewrites. Claims bind home, logical endpoints and device/inode. The private journal directory's whole-operation kernel lock serializes writes. A claim reserved by another home refuses even after a
 crash. Inverse releases each claim durably after its rename; another home can then
 acquire the restored source. Unknown/replaced destinations and changed digests refuse.
 A completed rename is inferred only from its inode, never replayed speculatively.

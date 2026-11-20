@@ -742,10 +742,10 @@ def read_journal(path: Path, report: dict) -> dict | None:
         if len(contents) > JOURNAL_MAX_BYTES:
             raise LayoutError("unsafe_journal")
         journal = json.loads(contents)
-    if (not isinstance(journal, dict) or journal.keys() != {"registry", "moves", "layouts"}
+    if (not isinstance(journal, dict) or journal.keys() != {"registry", "moves", "layouts"} or not isinstance(journal["registry"], str)
             or not isinstance(journal["moves"], list) or not isinstance(journal["layouts"], dict)):
         raise LayoutError("invalid_journal")
-    if journal["registry"] != report["source"]["manifest_sha256"]:
+    if journal["registry"] + ".json" != path.name:
         raise LayoutError("journal_contract_changed")
     registry = load()
     runtime_layout.validate_journal(sys.modules[__name__], journal, registry, report)
@@ -767,7 +767,17 @@ def read_journal(path: Path, report: dict) -> dict | None:
 
 
 def journal_context(report: dict, rollback: bool = False) -> tuple[Path, dict | None]:
-    path = Path(report["user_home"]) / ".tron-maintenance/layout-v2" / (report["source"]["manifest_sha256"] + ".json")
+    directory = Path(report["user_home"]) / ".tron-maintenance/layout-v2"
+    names = []
+    if observed(str(directory)) is not None:
+        fd = open_home(str(directory))
+        try:
+            names = sorted(name for name in os.listdir(fd) if re.fullmatch(r"[a-f0-9]{64}\.json", name))
+        finally:
+            os.close(fd)
+    if len(names) > 1:
+        raise LayoutError("journal_ambiguous")
+    path = directory / (names[0] if names else report["source"]["manifest_sha256"] + ".json")
     journal = read_journal(path, report)
     claims = {row["destination"]: row for row in journal["moves"]} if journal else {}
     for claim in claims.values():
@@ -781,6 +791,11 @@ def journal_context(report: dict, rollback: bool = False) -> tuple[Path, dict | 
             raise LayoutError("destination_claim_conflict")
         if not rollback and row["state"] == "pending" and claim is not None and claim["home"] != report["home"]:
             raise LayoutError("move_owned_by_other_home")
+        layout = journal["layouts"].get(report["home"]) if journal else None
+        if (not rollback and row["state"] == "pending" and layout is not None and layout["direction"] == "applied"
+                and not row["from"].startswith("~/") and not row["to"].startswith("~/")
+                and {"from": row["from"], "to": row["to"]} not in layout["slots"]):
+            raise LayoutError("layout_slots_changed")
     return path, journal
 
 
@@ -814,7 +829,7 @@ def execute_migration(home: str, rollback: bool, root: Path = ROOT) -> tuple[int
                 return 1, report
             if rollback and read_journal(journal_path, current) is None:
                 raise LayoutError("no_journal")
-            _, journal = journal_context(current, rollback)
+            journal_path, journal = journal_context(current, rollback)
             if rollback and journal is None:
                 raise LayoutError("no_journal")
             def identities(plan):
