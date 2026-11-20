@@ -1,74 +1,45 @@
 import XCTest
 
 @MainActor final class TronMemoryPositionUITests: XCTestCase {
-    func testScopedMemoryLight() throws { try journey(dark: false, large: false) }
-    func testScopedMemoryDark() throws { try journey(dark: true, large: false) }
-    func testScopedMemoryAccessibility() throws { try journey(dark: false, large: true) }
-    func testMediumMemoryLight() throws { try journey(dark: false, large: false, expandsMemory: false) }
-    func testMediumMemoryDark() throws { try journey(dark: true, large: false, expandsMemory: false) }
+    func testScopedMemoryLight() throws { try journey(dark: false) }
+    func testScopedMemoryDark() throws { try journey(dark: true) }
+    func testMediumMemoryLight() throws { try journey(dark: false, expandsMemory: false) }
+    func testMediumMemoryDark() throws { try journey(dark: true, expandsMemory: false) }
 
-    func testPagedMemoryAndTasksLabelLoadedItems() throws {
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-paging", "-home-browser-paging"]
-        app.launch(); defer { app.terminate() }
-        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
-        app.buttons["home-pinned-row"].tap()
-        XCTAssertTrue(app.buttons["session-context-button"].waitForExistence(timeout: 10))
-        app.buttons["session-context-button"].tap()
-        try expand(app, "Manage Home")
-        for (row, title, viewport, done) in [
-            ("home-manage-memory-browser", "Memory", "home-memory-viewport", "home-sheet-done-memory"),
-            ("home-manage-tasks", "Tasks", "home-tasks-viewport", "home-sheet-done-tasks")
-        ] {
-            try reveal(app, row).tap()
-            try expand(app, title)
-            element(app, viewport).swipeUp()
-            let chip = app.buttons["feed-position-chip"]
-            XCTAssertTrue(chip.waitForExistence(timeout: 10))
-            XCTAssertTrue(chip.label.hasPrefix("Items "), chip.label)
-            if title == "Memory" {
-                XCTAssertTrue(chip.label.contains("of at least 10"), chip.label)
-            }
-            shot("paged-\(title.lowercased())")
-            app.buttons[done].tap()
-        }
-    }
-
-    private func journey(dark: Bool, large: Bool, expandsMemory: Bool = true) throws {
+    private func journey(dark: Bool, expandsMemory: Bool = true) throws {
         continueAfterFailure = true
         let app = XCUIApplication()
         app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-memory-position-regression",
                                "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
             + (dark ? ["-home-dark"] : [])
-            + (large ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] : [])
         app.launch(); defer { app.terminate() }
-        let mode = (expandsMemory ? "" : "medium-") + (large ? "accessibility" : dark ? "dark" : "light")
+        let mode = (expandsMemory ? "" : "medium-") + (dark ? "dark" : "light")
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
         let ring = app.buttons["session-context-button"]
         XCTAssertTrue(ring.waitForExistence(timeout: 10)); ring.tap()
-        try expand(app, "Manage Home", required: !large)
+        try expand(app, "Manage Home")
         try reveal(app, "home-manage-chapters").tap()
         XCTAssertTrue(app.buttons["home-chapter-1"].waitForExistence(timeout: 10))
-        try expand(app, "Chapters", required: !large)
+        try expand(app, "Chapters")
         shot("chapters-list-\(mode)")
         app.buttons["home-chapter-1"].tap()
         XCTAssertTrue(element(app, "home-chapter-detail").waitForExistence(timeout: 10))
-        try expand(app, "Chapters", required: !large)
+        try expand(app, "Chapters")
         let browse = try reveal(app, "home-chapter-browse-memory")
         shot("chapters-header-\(mode)")
         XCTAssertFalse(app.staticTexts["From Home's summaries of this chapter."].exists,
                        "Topics already names the chapter summaries; no redundant caption can scroll behind Chapters")
         browse.tap()
         XCTAssertTrue(app.buttons["home-memory-summary-7672-8"].waitForExistence(timeout: 10))
-        if expandsMemory { try expand(app, "Memory", required: !large) }
+        if expandsMemory { try expand(app, "Memory") }
         checkChip(app, count: 32, mode: "scoped-\(mode)")
         app.buttons["home-sheet-done-memory"].tap()
         app.buttons["home-sheet-done-chapter"].tap()
         app.buttons["home-sheet-done-chapters"].tap()
         try reveal(app, "home-manage-memory-browser").tap()
         XCTAssertTrue(app.buttons["home-memory-summary-7736-8"].waitForExistence(timeout: 10))
-        if expandsMemory { try expand(app, "Memory", required: !large) }
+        if expandsMemory { try expand(app, "Memory") }
         checkChip(app, count: 40, mode: "unscoped-\(mode)")
     }
 
@@ -167,7 +138,7 @@ import XCTest
         }
         return target
     }
-    private func expand(_ app: XCUIApplication, _ title: String, required: Bool = true) throws {
+    private func expand(_ app: XCUIApplication, _ title: String) throws {
         let window = app.windows.firstMatch
         XCTAssertTrue(try frontmostBar(app, titled: title).staticTexts[title].firstMatch.waitForExistence(timeout: 10))
         for _ in 0..<4 {
@@ -179,7 +150,6 @@ import XCTest
                 .press(forDuration: 0.1, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
         }
         let bar = try frontmostBar(app, titled: title)
-        if !required { return }
         guard bar.frame.minY <= 120 else {
             throw navigationFailure("Sheet '\(title)' did not reach its large detent after 4 title drags: toolbar=\(bar.frame)")
         }

@@ -261,9 +261,9 @@ timestamp ordering.
 compares each chip's rendered title ink with its category's contrast-safe palette in light and dark;
 its capture-only method provides Burgundy/Emerald light/dark visual review.
 
-`TronWorkerToolRegressionTests` exercises custom worker report outcomes/Markdown/evidence,
-check-in attention/Next, friendly transcript chips, aggregate navigation and extension/MCP
-humanization.
+`WorkerToolRegressionViewTests` exercises custom worker report outcomes/Markdown/evidence,
+check-in attention/Next and friendly transcript chips; `TronWorkerToolRegressionTests` keeps aggregate
+navigation and extension/MCP humanization.
 
 `TronInteractionSheetUITests` exercises the native change card's exact scoped answer and the
 ask_user form over the hosted socket; the Gateway's `native-change.e2e.test.ts` owns

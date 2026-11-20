@@ -45,12 +45,7 @@ final class SheetTintViewTests: ShuffledTestCase {
 
     func testDashboardSheetToolbarsTakeTheirTitleTint() async throws {
         try await mounted(["-tron-accessibility-fixture", "-fixture-dashboard"]) { app in
-            try await app.until("the dashboard menu") { app.element("dashboard.menu") is UIButton }
-            guard let menu = (app.element("dashboard.menu") as? UIButton)?.menu,
-                  let automations = Self.action("Automations", in: menu) else {
-                return XCTFail("The dashboard menu offers no Automations action\n\(app.tree())")
-            }
-            automations.perform(NSSelectorFromString("performWithSender:target:"), with: nil, with: nil)
+            try await performDashboardAction(app, "Automations")
             try await assertToolbarTint(app, title: "Automations")
             try await app.activate("automations.new")
             try await assertToolbarTint(app, title: "New Automation")
@@ -94,14 +89,6 @@ final class SheetTintViewTests: ShuffledTestCase {
         XCTAssertGreaterThan(ink[0], ink[2], "\(context) \(ink) is not the burgundy theme", file: file, line: line)
         XCTAssertGreaterThan(ink[2], ink[1], "\(context) \(ink) is not the burgundy theme", file: file, line: line)
     }
-
-    private static func action(_ title: String, in menu: UIMenu) -> UIAction? {
-        for child in menu.children {
-            if let action = child as? UIAction, action.title == title { return action }
-            if let nested = child as? UIMenu, let action = action(title, in: nested) { return action }
-        }
-        return nil
-    }
 }
 
 @MainActor
@@ -113,6 +100,42 @@ func revealed(_ app: MountedFixture, _ key: String) async throws -> NSObject {
     }
     try await app.reveal(node!)
     return app.element(key) ?? node!
+}
+
+@MainActor
+func menuAction(_ title: String, in menu: UIMenu) -> UIAction? {
+    for child in menu.children {
+        if let action = child as? UIAction, action.title == title { return action }
+        if let nested = child as? UIMenu, let action = menuAction(title, in: nested) { return action }
+    }
+    return nil
+}
+
+@MainActor
+func menuActionTitles(_ menu: UIMenu) -> [String] {
+    menu.children.flatMap { child -> [String] in
+        if let action = child as? UIAction { return [action.title] }
+        if let nested = child as? UIMenu { return menuActionTitles(nested) }
+        return []
+    }
+}
+
+@MainActor
+func dashboardMenu(_ app: MountedFixture) async throws -> UIMenu {
+    try await app.until("the dashboard menu") { app.element("dashboard.menu") is UIButton }
+    guard let menu = (app.element("dashboard.menu") as? UIButton)?.menu else {
+        throw FixtureNotReady(description: "the dashboard menu has no menu\n\(app.tree())")
+    }
+    return menu
+}
+
+@MainActor
+func performDashboardAction(_ app: MountedFixture, _ title: String) async throws {
+    let menu = try await dashboardMenu(app)
+    guard let action = menuAction(title, in: menu) else {
+        throw FixtureNotReady(description: "the dashboard menu offers no \(title) action\n\(app.tree())")
+    }
+    action.perform(NSSelectorFromString("performWithSender:target:"), with: nil, with: nil)
 }
 
 @MainActor
