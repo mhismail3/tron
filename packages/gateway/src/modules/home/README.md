@@ -165,7 +165,7 @@ Composition supplies the same late K6 settings, Profile and raw model owners.
   provider's prompt count (input, cache read and cache write) and its sections are rescaled to
   sum to it.
 - `home.context` breaks the last request into `instructions`, `profile`, `memory`, `chapter`,
-  `results`, `input` (`profile` is the static areas section plus the turn state). For caching, tools and system text are byte-identical for user turns
+  `results`, `input` (`profile` is the static areas section plus the turn state; `input` is the newest maintainer message, or a wake's trigger result). For caching, tools and system text are byte-identical for user turns
   and wakes: everything that varies by activation (chat model and thinking, profile counts, versions, sorting offer and diagnostics) is in the
   common turn frame (`kernel/run/turn-frame.ts`) after the newest input; the memory message ends with the view and the nonce. The view only grows between rebalances,
   goes in four-line blocks with one Anthropic mark on the last whole block and, when the view starts with whole blocks of settled lines

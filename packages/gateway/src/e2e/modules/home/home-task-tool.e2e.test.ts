@@ -263,6 +263,9 @@ describe("Home's task tool on the wire (#961)", () => {
     const early = await homeCalls("task", { action: "report", taskId: "wire-worker" });
     expect(early.isError, early.text).toBe(false);
     expect(early.json()).toMatchObject({ taskId: "wire-worker", settled: false, control: { state: "running" }, next: expect.stringMatching(/wakes Home by itself: end this turn now/u) });
+    const earlyStatus = await homeCalls("task", { action: "status", taskId: "wire-worker" });
+    expect(earlyStatus.isError, earlyStatus.text).toBe(false);
+    expect(earlyStatus.json()).toMatchObject({ taskId: "wire-worker", control: { state: "running" }, next: expect.stringMatching(/wakes Home by itself: end this turn now/u) });
     await sweep.sweep();
     expect((await homeCalls("task", { action: "list" })).json().host.heavy).toEqual({ "wire-worker": [] });
     const workerSession = row.sessionId as string;
