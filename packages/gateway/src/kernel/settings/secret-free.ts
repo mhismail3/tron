@@ -23,7 +23,7 @@ export function refuseSetting(label: string, reason: string): never {
 
 export function secretFreeText(text: string, label: string, what: string, hint: string): string {
   if (redactCredentials(text) !== text) refuseSetting(label, `${what} carries a credential; ${hint}`);
-  if (/[\u0000\r\n]/u.test(text)) refuseSetting(label, `${what} has a control character`);
+  if (/[\u0000\r\n\p{Bidi_Control}]/u.test(text)) refuseSetting(label, `${what} has a control character`);
   return text;
 }
 
