@@ -39,6 +39,7 @@ import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
 import { waitFor } from "../../../test-support/wait-for.js";
+import { fsEventsProbe } from "../../../test-support/fs-events.js";
 const ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../../test-results/settings-change.json");
 const EVERY_KEY_ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../../test-results/settings-every-key.json");
 const transcript: Array<{ case: string; detail: unknown }> = [];
@@ -1389,21 +1390,29 @@ describe("outside changes to MCP servers and custom models", () => {
 
     const late = join(f.root, "late-pi");
     await mkdir(late);
-    await f.trust.set(late, true);
-    await f.service.invoke(client(), "settings.resolve", { target: { kind: "project", cwd: late }, keys: ["run.transport"] });
-    await mkdir(join(late, ".pi"));
-    await writeJson(join(late, ".pi", "mcp.json"), { mcpServers: { first: { url: "http://127.0.0.1:1/first" } } });
-    await until("publication: MCP server first", () => f.published("tools.mcp.server", ["server", "first"]));
-    await new Promise(resolve => setTimeout(resolve, 400));
-    await writeJson(join(late, ".pi", "mcp.json"), { mcpServers: { first: { url: "http://127.0.0.1:1/first" }, second: { url: "http://127.0.0.1:1/second" } } });
-    await until("publication: MCP server second", () => f.published("tools.mcp.server", ["server", "second"]));
-    expect(await f.published("tools.mcp.server", ["server", "second"])).toBe(true);
+    await mkdir(join(f.root, "fsevents-probe"));
+    const fsEvents = fsEventsProbe(join(f.root, "fsevents-probe"));
+    try {
+      await f.trust.set(late, true);
+      await f.service.invoke(client(), "settings.resolve", { target: { kind: "project", cwd: late }, keys: ["run.transport"] });
+      await fsEvents.live();
+      await mkdir(join(late, ".pi"));
+      await writeJson(join(late, ".pi", "mcp.json"), { mcpServers: { first: { url: "http://127.0.0.1:1/first" } } });
+      await until("publication: MCP server first", () => f.published("tools.mcp.server", ["server", "first"]));
+      await fsEvents.live();
+      await writeJson(join(late, ".pi", "mcp.json"), { mcpServers: { first: { url: "http://127.0.0.1:1/first" }, second: { url: "http://127.0.0.1:1/second" } } });
+      await until("publication: MCP server second", () => f.published("tools.mcp.server", ["server", "second"]));
+      expect(await f.published("tools.mcp.server", ["server", "second"])).toBe(true);
 
-    const chat = await f.registry.create(subdirectory);
-    expect(chat.cwd).toBe(await realpath(subdirectory));
-    expect(chat.projectDir).toBe(await realpath(project));
-    await writeJson(join(project, ".pi", "mcp.json"), { mcpServers: { "project-tron": { url: "http://127.0.0.1:1/project" } } });
-    await until("publication: MCP server project-tron", () => f.published("tools.mcp.server", ["server", "project-tron"]));
+      const chat = await f.registry.create(subdirectory);
+      expect(chat.cwd).toBe(await realpath(subdirectory));
+      expect(chat.projectDir).toBe(await realpath(project));
+      await fsEvents.live();
+      await writeJson(join(project, ".pi", "mcp.json"), { mcpServers: { "project-tron": { url: "http://127.0.0.1:1/project" } } });
+      await until("publication: MCP server project-tron", () => f.published("tools.mcp.server", ["server", "project-tron"]));
+    } finally {
+      fsEvents.close();
+    }
     await expect(readFile(join(subdirectory, ".pi", "mcp.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     git(project, "add", ".pi/mcp.json");
     git(project, "commit", "-q", "-m", "project mcp");

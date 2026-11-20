@@ -1,9 +1,9 @@
-import { watch } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { execFileSync } from "node:child_process";
 import { fixture, disposeFixtures } from "../../test-support/home-task-fixture.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { fsEventsProbe } from "../../test-support/fs-events.js";
 import { GatewayService, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,21 +14,6 @@ import { OutsideChanges, projectStores } from "./settings-outside.js";
 
 const roots: string[] = [];
 
-function fsEventsProbe(directory: string): { live(): Promise<void>; close(): void } {
-  let probe = 0;
-  const seen = new Set<string>();
-  const watcher = watch(directory, { persistent: false }, (_event, name) => { if (name !== null) seen.add(String(name)); });
-  return {
-    live: () => {
-      seen.clear();
-      return waitFor(async () => {
-        await writeFile(join(directory, `fsevents-probe-${probe += 1}`), "");
-        return seen.size > 0;
-      }, "the process FSEvents stream rescheduled after the latest watch delivers events").then(() => undefined);
-    },
-    close: () => watcher.close(),
-  };
-}
 afterEach(async () => { await disposeFixtures(); for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 
 it("persists observed state only when a comparison changed it", async () => {
