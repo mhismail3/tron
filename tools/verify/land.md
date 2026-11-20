@@ -1,7 +1,9 @@
 # Land
 
 `scripts/tron land [-m <message>]` is the one way a task branch reaches `main`. Run it in the task's own worktree
-with a clean, committed tree on the task branch. It:
+with a clean, committed tree on the task branch. It runs fetched main's `land.py` and `host_lock.py` (copied into the worktree's
+Git directory), never the branch's own, so a branch that lacks or predates them lands by main's rules once its
+`scripts/tron` has this wrapper. A change to the `land.py`/`mini.py` contract therefore lands in two steps. It:
 
 1. Waits its turn for the host's `/tmp/tron-land.lock` (first come, first served through `host_lock.py`, the same
    ticket queue as the full-Gateway lock), so one land runs per host and the rest wait in arrival order.

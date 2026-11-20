@@ -814,9 +814,6 @@ describe("package update through the registered settings tool", () => {
     const f = await fixture();
     const name = `tron-update-e2e-${Date.now()}`;
     const registry = await publishedNpmRegistry(f.root, [{ name, versions: ["1.0.0", "1.2.0", "1.3.0"], latest: "1.0.0" }]);
-    const saved = { registry: process.env.npm_config_registry, cache: process.env.npm_config_cache };
-    process.env.npm_config_registry = registry.base;
-    process.env.npm_config_cache = join(f.root, "npm-cache");
     try {
       const source = `npm:${name}`;
       const settingsPath = join(f.agentDir, "settings.json");
@@ -872,8 +869,6 @@ describe("package update through the registered settings tool", () => {
       expect(await installedVersion(`npm:${name}@1.2.0`)).toBe("1.2.0");
     } finally {
       await registry.close();
-      process.env.npm_config_registry = saved.registry;
-      process.env.npm_config_cache = saved.cache;
     }
   });
 
@@ -881,9 +876,6 @@ describe("package update through the registered settings tool", () => {
     const f = await fixture();
     const name = `tron-update-stale-${Date.now()}`;
     const registry = await publishedNpmRegistry(f.root, [{ name, versions: ["1.0.0", "1.2.0"], latest: "1.0.0" }]);
-    const saved = { registry: process.env.npm_config_registry, cache: process.env.npm_config_cache };
-    process.env.npm_config_registry = registry.base;
-    process.env.npm_config_cache = join(f.root, "npm-cache");
     try {
       const source = `npm:${name}`;
       const settingsPath = join(f.agentDir, "settings.json");
@@ -920,8 +912,6 @@ describe("package update through the registered settings tool", () => {
         .toContain("The package changed since review; nothing was applied");
     } finally {
       await registry.close();
-      process.env.npm_config_registry = saved.registry;
-      process.env.npm_config_cache = saved.cache;
     }
   });
 });

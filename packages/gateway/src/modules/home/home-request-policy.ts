@@ -623,7 +623,7 @@ function requestSections(system: HomeSystemPrompt, cut: RewrittenContext, view: 
   kind: HomeActivationKind): HomeContextSection[] {
   const tail = cut.tail;
   let inputAt = -1;
-  if (kind === "user") inputAt = tail.findIndex(item => item.message.role === "user");
+  if (kind === "user") inputAt = tail.findLastIndex(item => item.message.role === "user");
   else for (let index = tail.length - 1; index >= 0 && inputAt < 0; index--) {
     if (isTaskResult(tail[index]!.message)) inputAt = index;
   }

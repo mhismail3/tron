@@ -1644,9 +1644,10 @@ describe("outside changes to MCP servers and custom models", () => {
     const provider = { baseUrl: "https://op-models.invalid/v1", api: "openai-completions", models: [{ id: "m" }] };
     const set = (value: unknown) => ({ key: "accounts.models.provider", qualifiers: { provider: "opref" }, layer: "global" as const, op: "set" as const, value });
     const home = { actor: { kind: "home" as const, id: "home" }, reason: "Add the 1Password-keyed endpoint" };
-    for (const apiKey of [{ ...op, format: "bearer" }, { ...op, executable: "/bin/sh" }, { source: "1password", reference: "op://only-two" }, { source: "1password", reference: "op://v/sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789/f" }]) {
+    for (const apiKey of [{ ...op, format: "bearer" }, { ...op, executable: "/bin/sh" }, { source: "1password", reference: "op://only-two" }, { source: "1password", reference: "op://v/sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789/f" }, { source: "1password", reference: "op://Private/\u202Eredoc/credential" }]) {
       await expect(f.settingsChanges.change(global, [set({ ...provider, apiKey })], home)).rejects.toMatchObject({ code: "invalid_request" });
     }
+    await expect(f.settingsChanges.change(global, [set({ ...provider, name: "Acme \u2067models\u2069" })], home)).rejects.toMatchObject({ code: "invalid_request", message: expect.stringContaining("control character") });
     const referenced = { ...provider, apiKey: op };
     const review = await f.settingsChanges.change(global, [set(referenced)], home);
     expect(review).toMatchObject({ status: "review", review: { requiresTap: true, items: [{ after: expect.stringContaining("1Password API key op://Private/Acme models/credential") }] } });

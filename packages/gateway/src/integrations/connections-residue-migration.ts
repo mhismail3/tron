@@ -3,8 +3,10 @@ import { constants } from "node:fs";
 import { copyFile, lstat, mkdir, open, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveAgentDir } from "../config.js";
 import { syncDurably } from "../foundation/durable-json.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
+import { acquireAgentRuntimeLock } from "../sessions/agent-runtime-lock.js";
 import { validateConnectionState } from "./connection-contract.js";
 
 const STATE_MAX_BYTES = 4 * 1_048_576;
@@ -31,32 +33,42 @@ export async function planConnectionsResidue(tronHome: string): Promise<ResidueP
   return { ...plan, before, after: Buffer.from(`${JSON.stringify(after, null, 2)}\n`, "utf8") };
 }
 
-export async function applyConnectionsResidue(plan: ResiduePlan, backup: string): Promise<boolean> {
+export async function applyConnectionsResidue(plan: ResiduePlan, backup: string, agentDir: string): Promise<boolean> {
   if (!plan.before || !plan.after) return false;
-  await mkdir(backup, { recursive: true, mode: 0o700 });
-  if ((await readdir(backup)).length) throw new Error(`Backup directory ${backup} is not empty`);
-  const original = join(backup, "connections.json");
-  await copyFile(plan.path, original, constants.COPYFILE_EXCL);
-  if (!(await readFile(original)).equals(plan.before)) throw new Error(`${plan.path} changed while it was backed up; rerun with a new backup directory`);
-  const manifest: Manifest = { version: 1, path: plan.path, before: digest(plan.before), after: digest(plan.after) };
-  await writeFile(join(backup, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600, flag: "wx" });
-  try { await publish(plan.path, plan.after, plan.before); }
-  catch (error) {
-    if (!(await readFile(plan.path)).equals(plan.after)) await rm(join(backup, "manifest.json"), { force: true });
-    throw error;
+  const release = await acquireAgentRuntimeLock(agentDir);
+  try {
+    await mkdir(backup, { recursive: true, mode: 0o700 });
+    if ((await readdir(backup)).length) throw new Error(`Backup directory ${backup} is not empty`);
+    const original = join(backup, "connections.json");
+    await copyFile(plan.path, original, constants.COPYFILE_EXCL);
+    if (!(await readFile(original)).equals(plan.before)) throw new Error(`${plan.path} changed while it was backed up; rerun with a new backup directory`);
+    const manifest: Manifest = { version: 1, path: plan.path, before: digest(plan.before), after: digest(plan.after) };
+    await writeFile(join(backup, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+    try { await publish(plan.path, plan.after, plan.before); }
+    catch (error) {
+      if (!(await readFile(plan.path)).equals(plan.after)) await rm(join(backup, "manifest.json"), { force: true });
+      throw error;
+    }
+    return true;
+  } finally {
+    await release();
   }
-  return true;
 }
 
-export async function restoreConnectionsResidue(backup: string): Promise<boolean> {
-  const manifest = JSON.parse(await readFile(join(backup, "manifest.json"), "utf8")) as Manifest;
-  const current = await readFile(manifest.path);
-  if (digest(current) === manifest.before) return false;
-  if (digest(current) !== manifest.after) throw new Error(`${manifest.path} changed after the migration; restore it by hand from ${backup}`);
-  const original = await readFile(join(backup, "connections.json"));
-  if (digest(original) !== manifest.before) throw new Error("The backup does not match its manifest");
-  await publish(manifest.path, original, current);
-  return true;
+export async function restoreConnectionsResidue(backup: string, agentDir: string): Promise<boolean> {
+  const release = await acquireAgentRuntimeLock(agentDir);
+  try {
+    const manifest = JSON.parse(await readFile(join(backup, "manifest.json"), "utf8")) as Manifest;
+    const current = await readFile(manifest.path);
+    if (digest(current) === manifest.before) return false;
+    if (digest(current) !== manifest.after) throw new Error(`${manifest.path} changed after the migration; restore it by hand from ${backup}`);
+    const original = await readFile(join(backup, "connections.json"));
+    if (digest(original) !== manifest.before) throw new Error("The backup does not match its manifest");
+    await publish(manifest.path, original, current);
+    return true;
+  } finally {
+    await release();
+  }
 }
 
 async function publish(path: string, bytes: Buffer, expected: Buffer): Promise<void> {
@@ -74,7 +86,7 @@ async function publish(path: string, bytes: Buffer, expected: Buffer): Promise<v
   try { await syncDurably(directory); } finally { await directory.close(); }
 }
 
-const USAGE = "usage: migrate connections-residue --tron-home <dir> [--apply --backup <new dir>] | --restore --backup <dir>\n";
+const USAGE = "usage: migrate connections-residue --tron-home <dir> [--apply --backup <new dir> | --restore --backup <dir>]\n";
 
 async function main(argv: readonly string[]): Promise<number> {
   const options = new Map<string, string>(); const flags = new Set<string>();
@@ -85,17 +97,18 @@ async function main(argv: readonly string[]): Promise<number> {
     else { process.stderr.write(`unknown argument ${argument}\n${USAGE}`); return 64; }
   }
   const backup = options.get("--backup");
+  const tronHome = options.get("--tron-home");
+  if (!tronHome || ((flags.has("--apply") || flags.has("--restore")) && !backup) || flags.size > 1) { process.stderr.write(USAGE); return 64; }
+  const home = resolve(tronHome);
+  const agentDir = resolveAgentDir(home);
   if (flags.has("--restore")) {
-    if (!backup) { process.stderr.write(USAGE); return 64; }
-    process.stdout.write(`${JSON.stringify({ restored: await restoreConnectionsResidue(resolve(backup)) })}\n`);
+    process.stdout.write(`${JSON.stringify({ restored: await restoreConnectionsResidue(resolve(backup!), agentDir) })}\n`);
     return 0;
   }
-  const tronHome = options.get("--tron-home");
-  if (!tronHome || (flags.has("--apply") && !backup)) { process.stderr.write(USAGE); return 64; }
-  const plan = await planConnectionsResidue(resolve(tronHome));
+  const plan = await planConnectionsResidue(home);
   const { before: _before, after: _after, ...summary } = plan;
   process.stdout.write(`plan ${JSON.stringify(summary)}\n`);
-  if (flags.has("--apply")) process.stdout.write(`${JSON.stringify({ applied: await applyConnectionsResidue(plan, resolve(backup!)) })}\n`);
+  if (flags.has("--apply")) process.stdout.write(`${JSON.stringify({ applied: await applyConnectionsResidue(plan, resolve(backup!), agentDir) })}\n`);
   return 0;
 }
 

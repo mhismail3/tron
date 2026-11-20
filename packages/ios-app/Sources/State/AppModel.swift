@@ -3589,19 +3589,19 @@ extension AppModel {
     func noteSettingsChanged() { settingsTrust.noteSettingsChanged() }
 
     func previewSettingsChange(target: JSONValue, change: JSONValue) async throws -> SettingsChangeResult {
-        let snapshot = try rendererConfigurationSnapshot(target)
-        return try await settingsTrust.previewChange(target: target, change: change, fence: rendererConfigurationFence(snapshot))
+        let snapshot = try modelConfigurationSnapshot(target)
+        return try await settingsTrust.previewChange(target: target, change: change, fence: modelConfigurationFence(snapshot))
     }
 
     func changeSetting(target: JSONValue, change: JSONValue, confirmationDigest: String? = nil) async throws {
-        let snapshot = try rendererConfigurationSnapshot(target)
-        try await settingsTrust.change(target: target, change: change, fence: rendererConfigurationFence(snapshot), confirmationDigest: confirmationDigest) { [weak self] in
+        let snapshot = try modelConfigurationSnapshot(target)
+        try await settingsTrust.change(target: target, change: change, fence: modelConfigurationFence(snapshot), confirmationDigest: confirmationDigest) { [weak self] in
             guard let snapshot else { return true }
             return self?.admitsConfigurationSend(snapshot) == true
         }
     }
 
-    func rendererConfigurationLockedReason(target: JSONValue) -> String? {
+    func modelConfigurationLockedReason(target: JSONValue) -> String? {
         guard target.objectValue?["kind"]?.stringValue == "session",
               let sessionID = target.objectValue?["sessionId"]?.stringValue else { return nil }
         guard let snapshot = authoritativeSnapshot(for: sessionID), admitsConfigurationSend(snapshot) else {
@@ -3611,13 +3611,13 @@ extension AppModel {
         return nil
     }
 
-    private func rendererConfigurationSnapshot(_ target: JSONValue) throws -> SessionSnapshot? {
+    private func modelConfigurationSnapshot(_ target: JSONValue) throws -> SessionSnapshot? {
         guard target.objectValue?["kind"]?.stringValue == "session",
               let sessionID = target.objectValue?["sessionId"]?.stringValue else { return nil }
         return try configurationSnapshot(sessionID)
     }
 
-    private func rendererConfigurationFence(_ snapshot: SessionSnapshot?) throws -> JSONValue? {
+    private func modelConfigurationFence(_ snapshot: SessionSnapshot?) throws -> JSONValue? {
         guard let snapshot else { return nil }
         return .object(["runtimeGeneration": .string(snapshot.runtimeGeneration),
                         "model": try snapshot.model.map(JSONValue.encode) ?? .null,

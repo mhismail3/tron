@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { startLockGateway } from "../../../../test-support/gateway-lock-harness.js";
 import { ConnectionOwner } from "../../../integrations/connection-owner.js";
+import { acquireAgentRuntimeLock } from "../../../sessions/agent-runtime-lock.js";
 
 const beforePublish = vi.hoisted(() => ({ hook: undefined as undefined | (() => Promise<void>), directorySync: undefined as undefined | string }));
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -66,7 +67,7 @@ it("projects retained connection state read-only and redacts credential referenc
 it("removes retired setup operations, receipts and Raindrop mappings once, behind a restorable backup", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-connections-residue-"));
   try {
-    const home = join(root, "tron"), directory = join(home, "state", "integrations"), path = join(directory, "connections.json");
+    const home = join(root, "tron"), directory = join(home, "state", "integrations"), path = join(directory, "connections.json"), agentDir = join(home, "agent");
     expect(await planConnectionsResidue(home)).toEqual({ path, setupOperations: 0, receipts: 0, collectionMappings: 0 });
     const at = "2026-01-01T00:00:00.000Z";
     const instance = { id: "raindrop", definitionId: "knowledge.raindrop", implementation: "knowledge-connector", providerAccountId: "1", credentialRef: "connector:raindrop:kept",
@@ -86,20 +87,20 @@ it("removes retired setup operations, receipts and Raindrop mappings once, behin
     expect(await readFile(path)).toEqual(original);
     await mkdir(join(root, "used"));
     await writeFile(join(root, "used", "x"), "");
-    await expect(applyConnectionsResidue(plan, join(root, "used"))).rejects.toThrow(/not empty/);
+    await expect(applyConnectionsResidue(plan, join(root, "used"), agentDir)).rejects.toThrow(/not empty/);
     await writeFile(path, JSON.stringify({ ...state, stateRevision: 8 }), { mode: 0o600 });
-    await expect(applyConnectionsResidue(plan, join(root, "raced"))).rejects.toThrow(/changed while it was backed up/);
+    await expect(applyConnectionsResidue(plan, join(root, "raced"), agentDir)).rejects.toThrow(/changed while it was backed up/);
     await writeFile(path, original, { mode: 0o600 });
     const concurrent = JSON.stringify({ ...state, stateRevision: 9 });
     beforePublish.hook = () => writeFile(path, concurrent, { mode: 0o600 });
-    await expect(applyConnectionsResidue(await planConnectionsResidue(home), join(root, "late"))).rejects.toThrow(/changed since it was read/);
+    await expect(applyConnectionsResidue(await planConnectionsResidue(home), join(root, "late"), agentDir)).rejects.toThrow(/changed since it was read/);
     expect(await readFile(path, "utf8")).toBe(concurrent);
-    await expect(restoreConnectionsResidue(join(root, "late"))).rejects.toThrow(/ENOENT.*manifest\.json/);
+    await expect(restoreConnectionsResidue(join(root, "late"), agentDir)).rejects.toThrow(/ENOENT.*manifest\.json/);
     await writeFile(path, original, { mode: 0o600 });
     beforePublish.directorySync = directory;
-    await expect(applyConnectionsResidue(await planConnectionsResidue(home), join(root, "unsynced"))).rejects.toThrow(/directory sync failed/);
+    await expect(applyConnectionsResidue(await planConnectionsResidue(home), join(root, "unsynced"), agentDir)).rejects.toThrow(/directory sync failed/);
     expect(await planConnectionsResidue(home)).toEqual({ path, setupOperations: 0, receipts: 0, collectionMappings: 0 });
-    expect(await restoreConnectionsResidue(join(root, "unsynced"))).toBe(true);
+    expect(await restoreConnectionsResidue(join(root, "unsynced"), agentDir)).toBe(true);
     expect(await readFile(path)).toEqual(original);
     await writeFile(path, original, { mode: 0o600 });
     await writeFile(path, JSON.stringify({ ...state, setupOperations: { jev: { ...state.setupOperations.jev, status: "unknown" } } }), { mode: 0o600 });
@@ -107,7 +108,11 @@ it("removes retired setup operations, receipts and Raindrop mappings once, behin
     await writeFile(path, original, { mode: 0o600 });
 
     const backup = join(root, "backup");
-    expect(await applyConnectionsResidue(await planConnectionsResidue(home), backup)).toBe(true);
+    let gateway = await acquireAgentRuntimeLock(agentDir);
+    try { await expect(applyConnectionsResidue(await planConnectionsResidue(home), backup, agentDir)).rejects.toThrow(/Another Tron Gateway/); }
+    finally { await gateway(); }
+    expect(await readFile(path)).toEqual(original);
+    expect(await applyConnectionsResidue(await planConnectionsResidue(home), backup, agentDir)).toBe(true);
     const { raindropCollections: _mappings, ...kept } = instance;
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ schemaVersion: 1, stateRevision: 8, instances: { raindrop: kept }, setupOperations: {}, receipts: {} });
     const { credentialRef: _credentialRef, ...projected } = kept;
@@ -117,15 +122,19 @@ it("removes retired setup operations, receipts and Raindrop mappings once, behin
 
     const migrated = await readFile(path);
     await writeFile(path, JSON.stringify({ ...JSON.parse(migrated.toString("utf8")), stateRevision: 9 }), { mode: 0o600 });
-    await expect(restoreConnectionsResidue(backup)).rejects.toThrow(/changed after the migration/);
+    await expect(restoreConnectionsResidue(backup, agentDir)).rejects.toThrow(/changed after the migration/);
     await writeFile(path, migrated, { mode: 0o600 });
     await writeFile(join(backup, "connections.json"), "{}");
-    await expect(restoreConnectionsResidue(backup)).rejects.toThrow(/does not match its manifest/);
+    await expect(restoreConnectionsResidue(backup, agentDir)).rejects.toThrow(/does not match its manifest/);
     expect(await readFile(path)).toEqual(migrated);
     await writeFile(join(backup, "connections.json"), original);
-    expect(await restoreConnectionsResidue(backup)).toBe(true);
+    gateway = await acquireAgentRuntimeLock(agentDir);
+    try { await expect(restoreConnectionsResidue(backup, agentDir)).rejects.toThrow(/Another Tron Gateway/); }
+    finally { await gateway(); }
+    expect(await readFile(path)).toEqual(migrated);
+    expect(await restoreConnectionsResidue(backup, agentDir)).toBe(true);
     expect(await readFile(path)).toEqual(original);
-    expect(await restoreConnectionsResidue(backup)).toBe(false);
+    expect(await restoreConnectionsResidue(backup, agentDir)).toBe(false);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

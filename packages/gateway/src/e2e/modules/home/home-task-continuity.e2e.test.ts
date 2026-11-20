@@ -175,9 +175,9 @@ describe("resuming a stopped Home worker in place", () => {
     const resumed = await homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "resume", taskId: task.taskId }) as { taskId: string; operationId: string };
     await waitFor(async () => (await homeOwnerOf(f.registry).taskStatus(resumed.taskId)).lifecycle === "terminal", "checkin successor settles");
     const final = await client.request("home.taskStatus", { taskId: resumed.taskId }) as any;
-    expect(final.checkins).toHaveLength(2);
-    expect(final.checkins[0]).toEqual(status.checkins[0]);
-    expect(final.checkins[1]).toMatchObject({ taskId: resumed.taskId, operationId: resumed.operationId, sessionId: task.sessionId, step: "Validating the fix" });
+    expect(final.checkins).toEqual([expect.objectContaining({ taskId: resumed.taskId, operationId: resumed.operationId, sessionId: task.sessionId, step: "Validating the fix" })]);
+    expect((await homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "status", taskId: resumed.taskId }) as any).control.checkins).toEqual(final.checkins);
+    expect((await client.request("home.taskStatus", { taskId: task.taskId }) as any).checkins).toEqual(status.checkins);
     await client.close();
     const cold = await f.restart();
     expect((await homeOwnerOf(cold).taskStatus(resumed.taskId) as any).checkins).toEqual(final.checkins);

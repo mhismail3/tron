@@ -167,8 +167,8 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   the Overridden pill and a tool selection's "N of M tools" count never truncate. At
   accessibility sizes, or when the cluster would leave the title less than a 96-point column,
   the cluster stacks under the text column.
-- **Reset.** Uses the renderer's preview/confirmation/receipted `settings.change` unset at the
-  writable layer. Inherited values have no reset; nothing invents a default locally.
+- **Reset.** Global Settings, the chat model card and Controls use the preview/confirmation/receipted
+  `settings.change` unset at the writable layer. Inherited values have no reset; nothing invents a default locally.
 - **Text entry** ends through `tronTextEntryDone` (return reads Done; multi-line or
   return-less keyboards show Done above the keyboard). Entry guidance is the schema's `entry`
   (`hint`, `example`); iOS writes no per-key guidance. Free text shows a muted `(empty)`
@@ -184,8 +184,8 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 - **Captions and notices.** Passive explanations use `TronSettingsCaption` in
   `TronTypography.settingsRowSubtext` (never smaller than rows), attached eight points below with
   `tronSettingsCaption`. Actionable failures use `TronSettingsNotice` with a trailing Retry.
-- **Saving.** Ordinary settings have no Save toolbar: valid edits use the renderer's typed
-  change path; failed initial reads show a `Settings Unavailable` placeholder with Reload; refresh errors use `presentError`. Authentication, package
+- **Saving.** Ordinary settings have no Save toolbar: valid edits use the typed
+  `settings.change` path; failed initial reads show a `Settings Unavailable` placeholder with Reload; refresh errors use `presentError`. Authentication, package
   installation and maintenance stay explicit commands.
 - **Setup cards.** New Session cards are one `TronSetupCardLabel` with
   `TronTypography.settingsRowSubtext`.
@@ -194,8 +194,8 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 
 `ChangeReviewCard` (`UI/Components/ChangeReviewCard.swift`) is the one plaintext before/after
 card; `ChangeReviewSheet` presents it. A review with intent `provider-api-key` adds one `SecureField` for the provider's API key; Approve stays disabled until it holds text, and the approving answer alone carries it (`secret`), never shown again. An agent, Home or worker change arrives as the native
-`change` interaction (`ExtensionInteractionSheet`); renderer rows whose dry run requires a tap
-present the same sheet. Approve retires the
+`change` interaction (`ExtensionInteractionSheet`); Global Settings, chat model card and Controls rows whose dry run
+requires a tap present the same sheet. Approve retires the
 sheet at the tap and answers the typed owner once with the review's digest through the receipt executor; Cancel and native
 dismissal send nothing. Generic forms never authorize effects. The card shows Gateway text
 only and keeps exact values behind its disclosure. Audit history and Undo belong to the agent's
