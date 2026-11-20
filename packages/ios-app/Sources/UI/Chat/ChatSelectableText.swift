@@ -224,6 +224,8 @@ struct ChatSelectableTextStyle: Hashable {
     var size: CGFloat = 14
     var weight: TronFontLoader.Weight = .regular
     var color: Color = .tronTextPrimary
+    var mono = false
+    var lineSpacing: CGFloat = 0
 }
 
 struct ChatSelectableInlineText: UIViewRepresentable {
@@ -363,10 +365,16 @@ struct ChatSelectableInlineText: UIViewRepresentable {
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: ChatSelectableTextView, context: Context) -> CGSize? {
         configure(uiView, coordinator: context.coordinator)
-        let width = proposal.width ?? 10_000
+        guard let width = proposal.width else {
+            let ideal = ceil(uiView.attributedText.boundingRect(
+                with: CGSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil
+            ).width) + 1
+            return CGSize(width: ideal, height: ceil(uiView.sizeThatFits(CGSize(width: ideal, height: .greatestFiniteMagnitude)).height))
+        }
         guard width > 0, width.isFinite else { return nil }
         let size = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
-        return CGSize(width: proposal.width ?? ceil(size.width), height: ceil(size.height))
+        return CGSize(width: width, height: ceil(size.height))
     }
 
     private func configure(_ view: ChatSelectableTextView, coordinator: Coordinator) {
@@ -901,13 +909,14 @@ enum ChatSelectableTextLayout {
         traits: UITraitCollection
     ) -> NSAttributedString {
         let value = inline.attributedString ?? AttributedString(inline.source)
-        let base = scaledFont(size: style.size, weight: style.weight, traits: traits)
-        let strong = scaledFont(size: style.size, weight: max(style.weight, .bold), traits: traits)
+        let base = scaledFont(size: style.size, weight: style.weight, mono: style.mono, traits: traits)
+        let strong = scaledFont(size: style.size, weight: max(style.weight, .bold), mono: style.mono, traits: traits)
         let code = scaledFont(size: style.size, weight: style.weight, mono: true, traits: traits)
         let color = UIColor(style.color).resolvedColor(with: traits)
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byWordWrapping
         paragraph.lineBreakStrategy = .standard
+        paragraph.lineSpacing = style.lineSpacing
         let result = NSMutableAttributedString(
             string: String(value.characters),
             attributes: [.font: base, .foregroundColor: color, .paragraphStyle: paragraph]

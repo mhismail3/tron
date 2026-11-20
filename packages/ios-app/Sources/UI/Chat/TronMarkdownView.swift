@@ -41,33 +41,17 @@ struct TronMarkdownView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             ForEach(Array(document.blocks.enumerated()), id: \.offset) { index, block in
-                if !streaming, let annotationSource, let annotationPresenter, annotationPresenter.admitsAnnotations,
-                   Self.isSelectableProse(block.kind) {
+                if let annotation, Self.isSelectableProse(block.kind) {
                     if let range = selectableProseRange(startingAt: index) {
-                        let blocks = Array(document.blocks[range])
-                        let blockKey = annotationSource.blockKey("prose:\(range.lowerBound):\(range.upperBound)")
+                        let blockKey = annotation.source.blockKey("prose:\(range.lowerBound):\(range.upperBound)")
                         ChatSelectableInlineText(
-                            messageBlocks: blocks,
+                            messageBlocks: Array(document.blocks[range]),
                             style: textStyle,
-                            highlights: annotationPresenter.highlights(
-                                itemID: annotationSource.itemID,
-                                blockKey: blockKey
-                            ),
-                            revealSource: (annotationPresenter, annotationSource.itemID, blockKey),
-                            onAnnotate: { quote, selectedRange, rect in
-                                annotationPresenter.begin(ChatAnnotationRequest(
-                                    quote: quote,
-                                    anchor: ChatAnnotationAnchor(
-                                        itemID: annotationSource.itemID,
-                                        blockKey: blockKey,
-                                        location: selectedRange.location,
-                                        length: selectedRange.length
-                                    ),
-                                    selectionRect: rect
-                                ))
-                            }
+                            highlights: annotation.presenter.highlights(itemID: annotation.source.itemID, blockKey: blockKey),
+                            revealSource: (annotation.presenter, annotation.source.itemID, blockKey),
+                            onAnnotate: Self.annotate(blockKey: blockKey, annotation: annotation)
                         )
-                        .chatRevealedSource(annotationPresenter, itemID: annotationSource.itemID, blockKey: blockKey)
+                        .chatRevealedSource(annotation.presenter, itemID: annotation.source.itemID, blockKey: blockKey)
                         .frame(alignment: .topLeading)
                     }
                 } else {
@@ -103,7 +87,18 @@ struct TronMarkdownView: View {
                         language: language,
                         code: value,
                         streaming: streaming && block.isOpenCodeFence
-                    )
+                    ) {
+                        if let annotation {
+                            annotatable(
+                                MarkdownPresentation.Inline(source: value, attributedString: nil),
+                                identity: "block:\(index)",
+                                style: ChatSelectableTextStyle(size: 13, color: textStyle.color, mono: true, lineSpacing: 3),
+                                annotation: annotation
+                            )
+                        } else {
+                            Text(value).font(TronFont.mono(13)).lineSpacing(3).textSelection(.enabled)
+                        }
+                    }
                     .id(block.id)
                 case .quote(let value):
                     ChatQuoteBlock {
@@ -127,7 +122,21 @@ struct TronMarkdownView: View {
                     MarkdownResourceImage(alt: alt, destination: destination)
                         .id(block.id)
                 case .table(let rows):
-                    MarkdownTable(rows: rows)
+                    MarkdownTable(rows: rows) { row, column, value in
+                        let weight: Font.Weight = row == 0 ? .semibold : .regular
+                        if let annotation {
+                            annotatable(
+                                value,
+                                identity: "block:\(index):cell:\(row):\(column)",
+                                style: ChatSelectableTextStyle(size: 12, weight: TronFontLoader.weight(weight), color: textStyle.color),
+                                annotation: annotation
+                            )
+                            .fixedSize()
+                        } else {
+                            (value.attributedString.map { Text($0) } ?? Text(value.source))
+                                .font(TronFont.body(12, weight: weight))
+                        }
+                    }
                 case .rule:
                     Divider()
                     }
@@ -154,6 +163,11 @@ struct TronMarkdownView: View {
         }
     }
 
+    private var annotation: (source: ChatAnnotationSource, presenter: ChatAnnotationPresenter)? {
+        guard !streaming, let annotationSource, let annotationPresenter, annotationPresenter.admitsAnnotations else { return nil }
+        return (annotationSource, annotationPresenter)
+    }
+
     @ViewBuilder
     private func inlineBlock(
         _ value: MarkdownPresentation.Inline,
@@ -161,33 +175,11 @@ struct TronMarkdownView: View {
         style: ChatSelectableTextStyle? = nil
     ) -> some View {
         let style = style ?? textStyle
-        if !streaming, let annotationSource, let annotationPresenter, annotationPresenter.admitsAnnotations {
-            let blockKey = annotationSource.blockKey(identity)
-            ChatSelectableInlineText(
-                inline: value,
-                style: style,
-                highlights: annotationPresenter.highlights(itemID: annotationSource.itemID, blockKey: blockKey),
-                revealSource: (annotationPresenter, annotationSource.itemID, blockKey),
-                onAnnotate: { quote, range, rect in
-                    annotationPresenter.begin(ChatAnnotationRequest(
-                        quote: quote,
-                        anchor: ChatAnnotationAnchor(
-                            itemID: annotationSource.itemID,
-                            blockKey: blockKey,
-                            location: range.location,
-                            length: range.length
-                        ),
-                        selectionRect: rect
-                    ))
+        if let annotation {
+            annotatable(value, identity: identity, style: style, annotation: annotation)
+                .alignmentGuide(.firstTextBaseline) { _ in
+                    ChatSelectableTextLayout.firstBaseline(style: style, sizeCategory: sizeCategory)
                 }
-            )
-            .alignmentGuide(.firstTextBaseline) { _ in
-                ChatSelectableTextLayout.firstBaseline(style: style, sizeCategory: sizeCategory)
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(value.accessibilitySource)
-            .accessibilityAddTraits(.isStaticText)
-            .chatRevealedSource(annotationPresenter, itemID: annotationSource.itemID, blockKey: blockKey)
         } else if !streaming, selectableText {
             ChatSelectableInlineText(inline: value, style: style, detectsLinks: true, onAnnotate: nil)
                 .alignmentGuide(.firstTextBaseline) { _ in
@@ -195,6 +187,45 @@ struct TronMarkdownView: View {
                 }
         } else {
             streamingInline(value, identity: identity)
+        }
+    }
+
+    private func annotatable(
+        _ value: MarkdownPresentation.Inline,
+        identity: String,
+        style: ChatSelectableTextStyle,
+        annotation: (source: ChatAnnotationSource, presenter: ChatAnnotationPresenter)
+    ) -> some View {
+        let (source, presenter) = annotation
+        let blockKey = source.blockKey(identity)
+        return ChatSelectableInlineText(
+            inline: value,
+            style: style,
+            highlights: presenter.highlights(itemID: source.itemID, blockKey: blockKey),
+            revealSource: (presenter, source.itemID, blockKey),
+            onAnnotate: Self.annotate(blockKey: blockKey, annotation: annotation)
+        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(value.accessibilitySource)
+        .accessibilityAddTraits(.isStaticText)
+        .chatRevealedSource(presenter, itemID: source.itemID, blockKey: blockKey)
+    }
+
+    private static func annotate(
+        blockKey: String,
+        annotation: (source: ChatAnnotationSource, presenter: ChatAnnotationPresenter)
+    ) -> (String, NSRange, CGRect) -> Void {
+        { quote, range, rect in
+            annotation.presenter.begin(ChatAnnotationRequest(
+                quote: quote,
+                anchor: ChatAnnotationAnchor(
+                    itemID: annotation.source.itemID,
+                    blockKey: blockKey,
+                    location: range.location,
+                    length: range.length
+                ),
+                selectionRect: rect
+            ))
         }
     }
 
@@ -279,10 +310,11 @@ final class CodeCopyFeedbackLifecycle {
     }
 }
 
-private struct CodeBlock: View {
+private struct CodeBlock<Content: View>: View {
     let language: String?
     let code: String
     let streaming: Bool
+    @ViewBuilder let content: Content
     @State private var copyFeedback = CodeCopyFeedbackLifecycle()
 
     var body: some View {
@@ -304,7 +336,7 @@ private struct CodeBlock: View {
             .padding(.horizontal, 12).padding(.vertical, 7)
             Divider()
             ScrollView(.horizontal, showsIndicators: false) {
-                Text(code).font(TronFont.mono(13)).lineSpacing(3).textSelection(.enabled)
+                content
                     .padding(12).fixedSize(horizontal: true, vertical: false)
                     .chatSecondaryScrollContent()
             }
@@ -321,15 +353,10 @@ private struct CodeBlock: View {
     }
 }
 
-private struct MarkdownTable: View {
+private struct MarkdownTable<Cell: View>: View {
     let rows: [[MarkdownPresentation.Inline]]
+    @ViewBuilder let cell: (Int, Int, MarkdownPresentation.Inline) -> Cell
     private var widths: Int { rows.map(\.count).max() ?? 0 }
-
-    private func cell(_ value: MarkdownPresentation.Inline?) -> Text {
-        guard let value else { return Text("") }
-        if let attributed = value.attributedString { return Text(attributed) }
-        return Text(value.source)
-    }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: true) {
@@ -337,9 +364,10 @@ private struct MarkdownTable: View {
                 ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
                     GridRow {
                         ForEach(0..<widths, id: \.self) { column in
-                            cell(column < row.count ? row[column] : nil)
-                                .font(TronFont.body(12, weight: rowIndex == 0 ? .semibold : .regular))
-                                .padding(.vertical, 2)
+                            Group {
+                                if column < row.count { cell(rowIndex, column, row[column]) } else { Text("") }
+                            }
+                            .padding(.vertical, 2)
                         }
                     }
                     if rowIndex == 0 { Divider().gridCellColumns(widths) }
