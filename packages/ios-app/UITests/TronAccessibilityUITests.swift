@@ -26,7 +26,7 @@ final class TronAccessibilityUITests: XCTestCase {
         capture.lifetime = .keepAlways
         add(capture)
         app.buttons["Settings"].tap()
-        XCTAssertTrue(app.staticTexts["Global Settings"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["settings-link-Appearance"].tap()
         let servers = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Visible Servers")).firstMatch
         XCTAssertTrue(app.navigationBars.staticTexts["Appearance"].waitForExistence(timeout: 3), app.debugDescription)

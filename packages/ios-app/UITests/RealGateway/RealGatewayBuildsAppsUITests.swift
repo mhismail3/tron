@@ -9,7 +9,7 @@ extension RealGatewayPairAndChatUITests {
         let fixture = try RealGatewayUIFixture.fromEnvironment()
         let appDirectory = fixture.tronHome.appendingPathComponent("workspace/state/apps/builds")
         let suffix = "light"
-        let app = launchApp(additionalArguments: ["-appearanceMode", suffix, "-tron.experimental.swiftApps", "NO"])
+        let app = launchApp(additionalArguments: ["-appearanceMode", suffix])
         defer { app.terminate() }
         open(fixture.invitationLink())
         completeFirstRunSetup(app, inWorkspace: fixture.workspace)
@@ -68,7 +68,7 @@ extension RealGatewayPairAndChatUITests {
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
         try seedBuild(tron: tron, second: false)
         let suffix = "light-\(large ? "xxxl" : "default")"
-        let app = launchApp(additionalArguments: ["-appearanceMode", "light", "-tron.experimental.swiftApps", "YES"]
+        let app = launchApp(additionalArguments: ["-appearanceMode", "light"]
             + (large ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] : []))
         defer { app.terminate() }
         open(fixture.invitationLink())

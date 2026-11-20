@@ -15,7 +15,7 @@ final class TronAppsInstallDesignUITests: XCTestCase {
                 let suffix = "\(dark ? "dark" : "light")-\(large ? "xxxl" : "default")"
                 let app = XCUIApplication()
                 app.launchEnvironment["TRON_HOSTED_SWIFT_APP_SOURCE"] = try String(contentsOf: url, encoding: .utf8)
-                app.launchArguments = ["-tron-readonly-attachment-fixture", "-readonly-preview-scenario", "display-swift-builds-preview-\(dark ? "dark" : "light")", "-tron.experimental.swiftApps", "YES", "-AppleLanguages", "(en)", "-AppleLocale", "en_US", "-themeColor", "emerald"]
+                app.launchArguments = ["-tron-readonly-attachment-fixture", "-readonly-preview-scenario", "display-swift-builds-preview-\(dark ? "dark" : "light")", "-AppleLanguages", "(en)", "-AppleLocale", "en_US", "-themeColor", "emerald"]
                     + (large ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] : [])
                 app.launch()
                 let display = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "BuildsPreview.swift")).firstMatch

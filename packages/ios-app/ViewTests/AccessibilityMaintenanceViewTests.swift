@@ -138,7 +138,7 @@ final class AccessibilityMaintenanceViewTests: ShuffledTestCase {
     func testDashboardActionsPresentTheirExistingDestinations() async throws {
         let destinations = [
             ("New Session", "New Session"), ("Automations", "Automations"),
-            ("Settings", "Global Settings"),
+            ("Settings", "Settings"),
         ]
         for (action, expected) in destinations {
             try await mounted(["-tron-accessibility-fixture", "-fixture-dashboard"]) { app in

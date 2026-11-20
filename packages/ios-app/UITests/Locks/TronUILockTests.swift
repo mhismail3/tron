@@ -28,7 +28,7 @@ final class TronUILockTests: XCTestCase {
             let gear = app.navigationBars.buttons["Settings"]
             try require(gear, in: app)
             gear.tap()
-            try require(app.staticTexts["Global Settings"], in: app)
+            try require(app.navigationBars.staticTexts["Settings"], in: app)
             assertUILock(app, "settings-home-\(mode)", accessibility: Self.homeSettingsTree)
             app.terminate()
         }

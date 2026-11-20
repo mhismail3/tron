@@ -793,7 +793,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(gear.waitForExistence(timeout: 30), app.debugDescription)
         gear.tap()
         XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 30), app.debugDescription)
-        guard let macTerminal = hittableElement(app, identifier: "settings-link-Mac Terminal", timeout: 30) else {
+        guard let macTerminal = hittableElement(app, identifier: "settings-mac-terminal", timeout: 30) else {
             return XCTFail("no Mac Terminal row: \(app.debugDescription)")
         }
         macTerminal.tap()
@@ -910,8 +910,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(gear.waitForExistence(timeout: 30), app.debugDescription)
         gear.tap()
         XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 30), app.debugDescription)
-        for (name, marker) in [("Appearance", app.textFields["Chats per project"]),
-                               ("Setup", app.switches["Run Swift files"])] {
+        for (name, marker) in [("Appearance", app.textFields["Chats per project"])] {
             let link = app.buttons["settings-link-" + name]
             revealBelowNavigationBar(app, link)
             link.tap()
@@ -968,7 +967,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         func openGlobalSettings() {
             XCTAssertTrue(globalSettingsGear.waitForExistence(timeout: 30), app.debugDescription)
             globalSettingsGear.tap()
-            XCTAssertTrue(app.navigationBars.staticTexts["Global Settings"].waitForExistence(timeout: 30), app.debugDescription)
+            XCTAssertTrue(app.navigationBars.staticTexts["Settings"].waitForExistence(timeout: 30), app.debugDescription)
         }
         openGlobalSettings()
         let mcpLink = app.buttons["settings-link-MCP Servers"]
@@ -984,8 +983,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         keepScreenshot(app, name: "settings-mcp-outside-addition")
         dismissTopSheet(app)
         XCTAssertTrue(waitUntil(timeout: 15) { !outsideServer.exists && mcpLink.exists }, "dismissing MCP Servers must return to Settings")
-        for _ in 0..<3 where app.navigationBars.staticTexts["Global Settings"].exists { dismissTopSheet(app); Thread.sleep(forTimeInterval: 1) }
-        XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
+        for _ in 0..<3 where app.navigationBars.staticTexts["Settings"].exists { dismissTopSheet(app); Thread.sleep(forTimeInterval: 1) }
+        XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Settings"], timeout: 15))
 
     }
 
