@@ -175,8 +175,9 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(first.isBusy).toBe(true);
     expect(second.isBusy).toBe(true);
     let drainCompleted = false;
+    const drainPasses = vi.spyOn(registry, "administrativeDrainSnapshot");
     const drain = registry.waitUntilIdle().then(() => { drainCompleted = true; });
-    await waitFor(() => registry.administrativeDrainSnapshot().phase === "waiting", "the drain waits on both running slots");
+    await waitFor(() => drainCompleted || drainPasses.mock.calls.length >= 4, "the drain keeps waiting on both running slots");
     expect(drainCompleted).toBe(false);
 
     releaseTurns();
@@ -230,8 +231,9 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const queued = await slot.prompt("accepted follow up", [], "followUp");
     expect(slot.snapshot().queuedItems).toMatchObject([{ id: queued.operationId, behavior: "followUp" }]);
     let drained = false;
+    const drainPasses = vi.spyOn(registry, "administrativeDrainSnapshot");
     const drain = registry.waitUntilIdle().then(() => { drained = true; });
-    await waitFor(() => registry.administrativeDrainSnapshot().phase === "waiting", "the drain waits on the queued follow-up");
+    await waitFor(() => drained || drainPasses.mock.calls.length >= 4, "the drain keeps waiting on the queued follow-up");
     expect(drained).toBe(false);
     expect(slot.snapshot().queuedItems).toHaveLength(1);
     releaseFirst();
