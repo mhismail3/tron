@@ -278,7 +278,7 @@
       "timeout-literal": 2
     },
     "src/e2e/transport/session-archive.integration.test.ts": {
-      "sleep": 5,
+      "sleep": 3,
       "timeout-literal": 8
     },
     "src/e2e/workspace/tron-workspace.integration.test.ts": {
