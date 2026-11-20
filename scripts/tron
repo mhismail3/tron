@@ -43,9 +43,10 @@ Commands:
                                     tool and Tron surface (tools/computer-bench)
   build gateway                     Build Gateway directly with pinned Node
   migrate connections-residue --tron-home <dir> [--apply --backup <new dir>]
-  migrate connections-residue --restore --backup <dir>
+  migrate connections-residue --tron-home <dir> --restore --backup <dir>
                                     One-shot #2327 removal of retired connection setup
                                     operations, receipts and Raindrop collection mappings;
+                                    refuses while a Gateway owns the agent directory;
                                     dry run unless --apply; never at startup
   migrate inert-pi-fields --agent-dir <dir> [--apply --backup <new dir>]
   migrate inert-pi-fields --restore --backup <dir>

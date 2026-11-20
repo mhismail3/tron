@@ -34,6 +34,8 @@ Services setup. `scripts/tron migrate connections-residue` (`connections-residue
 is the maintainer's one-shot, backed-up removal of retired setup operations, receipts and
 Raindrop collection mappings; instances and credential references stay. Dry run unless
 `--apply --backup <new dir>`; `--restore --backup <dir>` puts back only bytes it published.
+Apply and restore take the agent runtime lock, so both refuse while a Gateway owns the
+agent directory.
 It and the Raindrop mapping validator are deleted once the live run is verified.
 
 ## Signals
@@ -49,7 +51,7 @@ scripts/tron test gateway src/e2e/integrations/tests/connections.projection.inte
 ```
 
 The same file proves the residue migration (backup, raced and refused publications,
-restore) and the retired RPCs' refusal. The projection test seeds retained historical state, reads it through the real agent
+refusal under a live Gateway's runtime lock, restore) and the retired RPCs' refusal. The projection test seeds retained historical state, reads it through the real agent
 `connections` tool, and proves an empty projection without creating storage, exact
 redaction of the credential reference and byte-identical state after the read.
 
