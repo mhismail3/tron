@@ -28,7 +28,7 @@ struct ManageModelConfigurationCard: View {
     }
     private var availability: ModelSelectionAvailability {
         if changing { return .applying }
-        if let reason = model.rendererConfigurationLockedReason(target: target) { return .blocked(reason) }
+        if let reason = model.modelConfigurationLockedReason(target: target) { return .blocked(reason) }
         return .ready
     }
 
