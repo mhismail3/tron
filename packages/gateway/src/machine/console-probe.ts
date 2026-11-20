@@ -23,8 +23,10 @@ const MESSAGES: Record<ConsoleCause, string> = {
 };
 
 export class ConsoleUnavailableError extends Error {
-  constructor(readonly code: ConsoleCause) {
+  readonly code: ConsoleCause;
+  constructor(code: ConsoleCause) {
     super(`${code}: ${MESSAGES[code]}. Desktop observation, capture and input are refused until the user unlocks or wakes it; nothing was captured or sent. Browser work over CDP is unaffected.`);
+    this.code = code;
   }
 }
 
@@ -37,8 +39,9 @@ export async function consoleCause(): Promise<ConsoleCause | undefined> {
 
 export class ConsoleGate {
   private episode = false;
+  private readonly notify: (sessionId: string, cause: ConsoleCause) => Promise<unknown>;
 
-  constructor(private readonly notify: (sessionId: string, cause: ConsoleCause) => Promise<unknown>) {}
+  constructor(notify: (sessionId: string, cause: ConsoleCause) => Promise<unknown>) { this.notify = notify; }
 
   async admit(sessionId: string): Promise<void> {
     const cause = await consoleCause();

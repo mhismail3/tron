@@ -31,6 +31,8 @@ vi.mock("../../../machine/cua-client.js", () => ({ CuaComputerClient: class {
   async close() {}
 } }));
 
+vi.mock("../../../machine/console-probe.js", () => ({ ConsoleGate: class { async admit() {} } }));
+
 const registries: RuntimeRegistry[] = [];
 const roots: string[] = [];
 afterEach(async () => {
