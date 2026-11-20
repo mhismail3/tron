@@ -70,7 +70,6 @@
     "state/uploads": {"owner": "gateway/machine", "subtree": true, "prune": {"maxEntries": 16384}},
     "state/upload-objects": {"owner": "gateway/machine", "subtree": true, "prune": {"when": "unreferenced objects are collected"}},
     "state/upload-bodies": {"owner": "gateway/machine", "class": "scratch", "subtree": true, "prune": {"when": "cleared on Gateway start"}},
-    "state/upload-imports": {"owner": "gateway/machine", "class": "scratch", "subtree": true, "prune": {"when": "not pruned: retired with session.import; removal by layout migration #2588"}},
     "state/display-artifacts": {"owner": "gateway/display", "subtree": true, "prune": {"when": "removed per artifact; orphan objects are collected"}},
     "state/web-research-children": {"owner": "gateway/workspace", "class": "scratch", "subtree": true, "prune": {"maxEntries": 4096, "when": "retired with their scope"}},
     "state/workspace-state": {"owner": "gateway/workspace", "subtree": true},
@@ -131,6 +130,7 @@
     "state/mac-terminal": {"owner": "gateway/security", "class": "keep", "credential": true, "subtree": true}
   },
   "retired": [
+    {"from": "state/upload-imports", "to": "~/.tron-maintenance/backups/2026-11-20-upload-imports"},
     {"from": "logs/device-exports", "to": "~/.tron-maintenance/backups/2026-11-19-device-exports"},
     {"from": "gateway/layout-migration", "to": "~/.tron-maintenance/backups/2026-11-07-2313-layout-connections"},
     {"from": "gateway/home/chapter-reseals.jsonl", "to": "~/.tron-maintenance/backups/2026-11-12-2500-retired-residue/stable/chapter-reseals.jsonl"},

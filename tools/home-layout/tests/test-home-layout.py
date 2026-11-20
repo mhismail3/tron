@@ -796,14 +796,18 @@ class MigrateTests(unittest.TestCase):
         (debug / "gateway/proof-traffic/only-copy").write_text("debug")
         (stable / "gateway/home").mkdir()
         (stable / "gateway/home/chapter-reseals.jsonl").write_text("stable")
+        (stable / "state/upload-imports").mkdir(parents=True)
         shared = self.user / "Workspace/workspace-backups/x-library-20261111T1425"
         shared.mkdir(parents=True)
         (shared / "only-copy").write_text("shared")
         for home in (debug, stable):
             code, report = self.migrate("--apply", home=home)
             self.assertEqual(code, 0, report)
+        self.assertFalse((stable / "state/upload-imports").exists())
+        self.assertTrue((self.user / ".tron-maintenance/backups/2026-11-20-upload-imports").is_dir())
         self.assertEqual(self.migrate("--rollback", home=stable)[0], 0)
         self.assertEqual((stable / "gateway/home/chapter-reseals.jsonl").read_text(), "stable")
+        self.assertTrue((stable / "state/upload-imports").is_dir())
         self.assertFalse((debug / "gateway/proof-traffic").exists())
         self.assertFalse(shared.exists())
         self.assertEqual(self.migrate("--rollback", home=debug)[0], 0)
