@@ -148,7 +148,9 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   a Message group whose `TronSettingsCodeRow` holds the full selectable JSON (or verbatim text).
   Long payload groups use the shared static-surface policy instead of a tall backdrop filter.
 - **Error presentation.** `TronMobileViewTests/ChatProviderErrorStyleViewTests` checks that hosted
-  ChatView error pills stay centred in both appearances; `TronChatProviderErrorStyleUITests` keeps the
+  ChatView error pills stay centred in both appearances, that a live run groups, settles and survives
+  reopen, that error sheets show the breakdown, pretty JSON and raw text, and that every occurrence
+  uses the standard detail rows; `TronChatProviderErrorStyleUITests` keeps the
   standard error sheet's payload selectable (light).
 - **Haptics.** Live events only, through `TronHaptics`; `ChatLiveHapticLedger` tells live from restored.
 - **Extension interactions.** The mounted route is the sole sheet owner and presents pending
