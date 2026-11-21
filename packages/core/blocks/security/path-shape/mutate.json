@@ -1,0 +1,60 @@
+{
+  "block": "security/path-shape",
+  "tier": "high-stakes",
+  "tierReason": "security: decides whether a path is inside a workspace root and which delegated artifact paths the Gateway reads (workspace escape, arbitrary file reads)",
+  "impl": "blocks/security/path-shape/Block.dfy",
+  "symbols": [
+    "Contained",
+    "Below",
+    "Nth",
+    "Run",
+    "TemporaryRun",
+    "ArtifactAllowed"
+  ],
+  "verify": [
+    "blocks/security/path-shape/Block.dfy"
+  ],
+  "laws": {
+    "C1 containment": [
+      "SecurityPathShape.C1Containment",
+      "SecurityPathShape.ContainedSpec"
+    ],
+    "A1 owned-run": [
+      "SecurityPathShape.A1OwnedRun",
+      "SecurityPathShape.BelowSpec",
+      "SecurityPathShape.ShapeSpec",
+      "SecurityPathShape.NthSpec"
+    ],
+    "A2 shared-run": [
+      "SecurityPathShape.A2SharedRun"
+    ]
+  },
+  "helpers": [
+    "ElemsCons",
+    "NamesCons",
+    "PiecesCons"
+  ],
+  "translate": "blocks/security/path-shape/Block.dfy",
+  "accepted": {},
+  "report": "blocks/security/path-shape/MUTATION.json",
+  "kinds": {
+    "safety": [
+      "C1 containment",
+      "A1 owned-run",
+      "A2 shared-run"
+    ],
+    "progress": [
+      "C1 containment",
+      "A1 owned-run",
+      "A2 shared-run"
+    ],
+    "recovery": "n/a: stateless; each call decides from the resolved paths the shell passes",
+    "stale-inputs": "n/a: no stored state; a path changed on disk between the shell's realpath and its use is the shell's (Assumption A3: symlinks refused, real paths resolved per call)",
+    "exact-results": [
+      "C1 containment",
+      "A1 owned-run",
+      "A2 shared-run"
+    ],
+    "uncertain-outcomes": "n/a: no effects; the block returns a boolean and the shell reads or refuses"
+  }
+}

@@ -1,6 +1,9 @@
-import { isAbsolute, relative, sep } from "node:path";
+import { resolve, sep } from "node:path";
+import { core as pathShape } from "../core/security/path-shape/facade.js";
 
 export function containedWithin(root: string, candidate: string): boolean {
-  const delta = relative(root, candidate);
-  return delta === "" || (!delta.startsWith(`..${sep}`) && delta !== ".." && !isAbsolute(delta));
+  const tokens = new Map<string, number>();
+  const components = (path: string) => resolve(path).split(sep).filter(Boolean)
+    .map(name => tokens.get(name) ?? tokens.set(name, tokens.size).size - 1);
+  return pathShape.Contained(components(root), components(candidate));
 }
