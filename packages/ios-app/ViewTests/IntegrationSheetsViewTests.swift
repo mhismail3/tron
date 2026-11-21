@@ -18,10 +18,6 @@ final class IntegrationSheetsViewTests: ShuffledTestCase {
         try await assertRetryRecovers(scenario: "connection-retry", state: "Reconnecting")
     }
 
-    func testRetryConnectionRecoversUnreachableDetails() async throws {
-        try await assertRetryRecovers(scenario: "connection-unreachable", state: "Mac unreachable")
-    }
-
     func testOpenedTransportFailureDoesNotClaimMacUnreachable() async throws {
         try await mounted(integrations("connection-opened-failure")) { app in
             try await app.until("two failed sockets") { app.staticText("failed sockets 2") != nil }

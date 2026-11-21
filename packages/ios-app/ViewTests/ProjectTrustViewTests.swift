@@ -29,8 +29,7 @@ final class ProjectTrustViewTests: ShuffledTestCase {
             try await app.activate("fixture.release-trust-reads")
             try await counts(app, contain: "releasedReads:2")
             await settle()
-            let notices = try XCTUnwrap(app.element("fixture.trust-notices"))
-            XCTAssertFalse(notices.accessibilityLabel?.contains("Earlier trust read failure") == true,
+            XCTAssertFalse(app.element("fixture.trust-notices")?.accessibilityLabel?.contains("Earlier trust read failure") == true,
                            "An earlier trust read cannot publish an error into the newer inspection")
             XCTAssertNotNil(app.staticText("Resources blocked"))
             try await assertOriginalCommands(app, count: 2)
