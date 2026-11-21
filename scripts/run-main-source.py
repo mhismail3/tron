@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resolve origin/main, or run an iOS install/share from a disposable main worktree.
+"""Resolve origin/main, or run an iOS install/share from a disposable main (or share --ref) worktree.
 
 This selects build source, not check results. Never mutates a worker's checkout.
 """
@@ -22,14 +22,24 @@ def main():
     parser.add_argument("command", nargs=argparse.REMAINDER, help="-- scripts/tron-ios-device install|share ...")
     args = parser.parse_args()
     root = args.root.resolve()
-    git(root, "fetch", "--no-tags", "origin", "refs/heads/main:refs/remotes/origin/main")
-    revision = git(root, "rev-parse", "origin/main")
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
+    if command and (command[0] != "scripts/tron-ios-device" or len(command) < 2
+                    or command[1] not in ("install", "share")):
+        parser.error("only scripts/tron-ios-device install or share is supported")
+    ref = "main"
+    if "--ref" in command:
+        if command[1] != "share":
+            parser.error("--ref is only valid with share")
+        index = command.index("--ref")
+        if index + 1 >= len(command) or command[index + 1].startswith("-"):
+            parser.error("--ref requires a branch name")
+        ref = command[index + 1]
+        git(root, "check-ref-format", "--branch", ref)
+    git(root, "fetch", "--no-tags", "origin", f"refs/heads/{ref}:refs/remotes/origin/{ref}")
+    revision = git(root, "rev-parse", f"origin/{ref}^{{commit}}")
     if not command:
         print(revision)
         return 0
-    if command[0] != "scripts/tron-ios-device" or len(command) < 2 or command[1] not in ("install", "share"):
-        parser.error("only scripts/tron-ios-device install or share is supported")
     with tempfile.TemporaryDirectory(prefix="tron-main-source-") as directory:
         worktree = Path(directory) / "source"
         git(root, "worktree", "add", "--detach", str(worktree), revision)

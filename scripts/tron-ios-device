@@ -30,6 +30,7 @@ SHARE_AGENT_PLIST="$HOME/Library/LaunchAgents/$SHARE_AGENT_LABEL.plist"
 SHARE_KEEP=5
 SHARE_TITLE=""
 SHARE_NOTES=""
+SHARE_REF=""
 
 usage() {
     cat <<'USAGE'
@@ -39,7 +40,7 @@ Usage:
   scripts/tron-ios-device stop [--device-id ID] [--device-name NAME]
   scripts/tron-ios-device status [--device-id ID] [--device-name NAME]
   scripts/tron-ios-device source             # resolve fetched origin/main, no build/install
-  scripts/tron-ios-device share --title TITLE --notes NOTES [--fast-debug]
+  scripts/tron-ios-device share --title TITLE --notes NOTES [--ref BRANCH] [--fast-debug]
   scripts/tron-ios-device share-host enable|status|disable
   scripts/tron-ios-device compile [--fast-debug]
 
@@ -51,7 +52,8 @@ Environment overrides:
   --fast-debug              Use the separate unoptimized UI-iteration build (both modes compile incrementally)
 
 Install and share build fetched origin/main in a disposable worktree, not a
-check receipt or the caller\'s branch. compile remains worktree-local for validation.
+check receipt or the caller\'s branch; share --ref BRANCH builds fetched
+origin/BRANCH instead. compile remains worktree-local for validation.
 The only install pair is Tron Device + LocalDevice. Release and
 DevicePerformance are never ordinary install targets.
   TRON_IOS_REQUIRED_SDK_MAJOR
@@ -218,6 +220,12 @@ parse_common_args() {
             --fast-debug)
                 BUILD_MODE="fast-debug"
                 shift
+                ;;
+            --ref)
+                [[ "$CMD" == "share" ]] || die "--ref is only valid with share"
+                SHARE_REF="${2:-}"
+                [ -n "$SHARE_REF" ] || die "--ref requires a branch name"
+                shift 2
                 ;;
             --title|--notes)
                 [[ "$CMD" == "share" ]] || die "$1 is only valid with share"
@@ -614,7 +622,7 @@ share_build() {
     [[ -n "$SHARE_TITLE" && -n "$SHARE_NOTES" ]] || die "share requires --title and --notes"
     [[ -z "$(git -C "$ROOT_DIR" status --porcelain)" ]] || die "working tree is dirty: commit before sharing a build"
     local url branch commit
-    branch="$(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD)"
+    branch="${SHARE_REF:-main}"
     commit="$(git -C "$ROOT_DIR" rev-parse HEAD)"
     url="$(share_base_url)"
     share_host_reachable "$url" \
