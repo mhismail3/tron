@@ -20,4 +20,80 @@ final class TaskToolSheetViewTests: ShuffledTestCase {
             }
         }
     }
+
+    func testCatalogShowsTaskContentAndKeepsJSONInTechnicalDetails() async throws {
+        try await mounted(["-tron-tool-sheets-polish-fixture", "-polish-scenario", "task-list",
+                           "-polish-light", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]) { app in
+            _ = try await revealed(app, "task-tool-row-photo-readiness")
+            let task = label(app, "task-tool-row-photo-readiness")
+            XCTAssertTrue(task.contains("Keep Send disabled while photos prepare"))
+            XCTAssertTrue(task.contains("Running"))
+            XCTAssertTrue(task.contains("Attachment readiness now has one owner."))
+            XCTAssertNotNil(app.staticText("10 running · 495 finished"), app.tree())
+            _ = try await revealed(app, "task-tool-row-older-layout-audit")
+            XCTAssertTrue(label(app, "task-tool-row-older-layout-audit").contains("older-layout-audit"))
+            XCTAssertTrue(label(app, "task-tool-row-older-layout-audit").contains("Stopped"))
+            _ = try await revealed(app, "task-tool-row-tool-sheet-review")
+            XCTAssertTrue(label(app, "task-tool-row-tool-sheet-review").contains("Needs attention"))
+            XCTAssertNotNil(app.staticText("More tasks are available."), app.tree())
+            try await app.activate("Technical details")
+            try await app.until("the Result JSON row") { app.labelled("Inspect Result JSON,") != nil }
+            let result = app.labelled("Inspect Result JSON,")!
+            try await app.reveal(result)
+            XCTAssertTrue(app.onScreen(result), app.tree())
+            XCTAssertTrue(result.accessibilityActivate())
+            try await app.until("the Result JSON sheet") { app.staticText("Result JSON") != nil }
+            try await app.until("the raw JSON") {
+                MountedFixture.views(UITextView.self, in: app.top).contains { $0.text.contains("photo-readiness") }
+            }
+        }
+    }
+
+    func testReportAndControlMessagesOpenOriginalTextInSharedReader() async throws {
+        for scenario in ["task-report", "task-steer", "task-resume", "task-interrupt"] {
+            try await mounted(["-tron-tool-sheets-polish-fixture", "-polish-scenario", scenario,
+                               "-polish-light", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]) { app in
+                try await app.until("the outcome") { app.element("home-tool-outcome") != nil }
+                if scenario == "task-report" {
+                    _ = try await revealed(app, "home-tool-row-Page")
+                    XCTAssertTrue(label(app, "home-tool-row-Page").contains("Bytes 0–"), app.tree())
+                } else {
+                    XCTAssertTrue(label(app, "home-tool-outcome").contains("Accepted"), app.tree())
+                }
+                if scenario == "task-resume" {
+                    _ = try await revealed(app, "home-tool-row-Continues as task")
+                    XCTAssertTrue(label(app, "home-tool-row-Continues as task").contains("photo-readiness-2"))
+                }
+                let id = scenario == "task-report" ? "report" : "message"
+                _ = try await revealed(app, "home-tool-text-\(id)-view-all")
+                try await app.activate("home-tool-text-\(id)-view-all")
+                try await app.until("the shared reader") { app.element("home-reading-text") != nil }
+                let tail = "Wait for visual approval before behavioral regression runs or merging."
+                try await app.until("the full reader tail") { tailNode(app, tail) != nil }
+                try await app.reveal(tailNode(app, tail)!)
+                XCTAssertTrue(app.onScreen(tailNode(app, tail)!), "Full reader retains the original tail")
+            }
+        }
+    }
+
+    func testMessageBodyUsesStandardTextInk() async throws {
+        for mode in ["light", "dark"] {
+            try await mounted(["-tron-tool-sheets-polish-fixture", "-polish-scenario", "task-steer", "-polish-\(mode)",
+                               "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]) { app in
+                try await app.until("the message body") { app.element("home-tool-text-message") != nil }
+                let body = app.element("home-tool-text-message")!.accessibilityFrame
+                let area = body.insetBy(dx: 16, dy: 16).intersection(app.window.bounds)
+                let text = CGRect(x: area.minX, y: area.minY, width: area.width, height: min(area.height, 160))
+                XCTAssertNil(app.ink(text), "\(mode): message body must be the neutral standard text colour, not a tint")
+            }
+        }
+    }
+
+    private func label(_ app: MountedFixture, _ key: String) -> String {
+        app.element(key)?.accessibilityLabel ?? ""
+    }
+
+    private func tailNode(_ app: MountedFixture, _ tail: String) -> NSObject? {
+        MountedFixture.elements(in: app.top).last { $0.accessibilityLabel?.contains(tail) == true }
+    }
 }
