@@ -162,7 +162,7 @@ async function writeChildProgram(fx: RecoveryFixture): Promise<{ program: string
   const program = join(fx.root, "child.mjs");
   const hook = join(fx.root, "hook.mjs");
   await writeFile(hook, `import { registerHooks } from "node:module";\nimport { pathToFileURL } from "node:url";\nregisterHooks({\n  resolve(specifier, context, nextResolve) {\n    try { return nextResolve(specifier, context); }\n    catch (error) {\n      if (specifier.endsWith(".js")) return nextResolve(specifier.slice(0, -3) + ".ts", context);\n      throw error;\n    }\n  },\n});\nawait import(pathToFileURL(process.argv[1]).href);\n`, "utf8");
-  await writeFile(program, `import { EpisodicMemory } from ${JSON.stringify(EPISODIC_MEMORY_MODULE)};\nimport { singleChapterSource } from ${JSON.stringify(CHAPTER_SOURCE_MODULE)};\nimport { TronWorkspace } from ${JSON.stringify(WORKSPACE_MODULE)};\n\nconst [home, sessionFile, sessionId] = process.argv.slice(2);\nconst zero = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };\nconst workspace = new TronWorkspace(home);\nconst memory = await EpisodicMemory.open({\n  workspace, sessionId, sessionSource: singleChapterSource(sessionId, sessionFile),\n  limits: { viewBytes: 4096, jobs: 4, retryMs: 0 },\n  summarizer: async (request) => {\n    const last = request.turns[request.turns.length - 1].text.replace(/\\s+/g, " ").trim().slice(-200);\n    return { role: "assistant", content: [{ type: "text", text: last }], api: "faux", provider: "faux", model: "child", usage: zero, stopReason: "stop", timestamp: Date.now() };\n  },\n  \n});\nawait memory.entriesCommitted(sessionId);\nprocess.stdout.write("ready\\n");\n// The parent appends the edit and then drops this marker. Intercept the exact\n// invalidation append, after the catalog revision is durable and before it lands.\nawait new Promise(resolve => process.stdin.once("data", resolve));\nconst owner = memory;\nconst append = owner.store.appendNode.bind(owner.store);\nowner.store.appendNode = async record => {\n  if (record.nodes) {\n    process.stdout.write("invalidation-window\\n");\n    // The unresolved await alone does not keep Node alive; retain a live handle\n    // so the parent can observe the exact crash window even when descheduled.\n    setInterval(() => {}, 1_000);\n    await new Promise(() => {});\n  }\n  await append(record);\n};\nawait memory.entriesCommitted(sessionId);\nprocess.stdout.write("done\\n");\n`, "utf8");
+  await writeFile(program, `import { EpisodicMemory } from ${JSON.stringify(EPISODIC_MEMORY_MODULE)};\nimport { singleChapterSource } from ${JSON.stringify(CHAPTER_SOURCE_MODULE)};\nimport { TronWorkspace } from ${JSON.stringify(WORKSPACE_MODULE)};\n\nconst [home, sessionFile, sessionId] = process.argv.slice(2);\nconst zero = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };\nconst workspace = new TronWorkspace(home);\nconst memory = await EpisodicMemory.open({\n  workspace, sessionId, sessionSource: singleChapterSource(sessionId, sessionFile),\n  limits: { viewBytes: 4096, jobs: 4, retryMs: 0 },\n  summarizer: async (request) => {\n    const last = request.turns[request.turns.length - 1].text.replace(/\\s+/g, " ").trim().slice(-200);\n    return { role: "assistant", content: [{ type: "text", text: last }], api: "faux", provider: "faux", model: "child", usage: zero, stopReason: "stop", timestamp: Date.now() };\n  },\n  \n});\nawait memory.entriesCommitted(sessionId);\nprocess.stdout.write("ready\\n");\nawait new Promise(resolve => process.stdin.once("data", resolve));\nconst owner = memory;\nconst append = owner.store.appendNode.bind(owner.store);\nowner.store.appendNode = async record => {\n  if (record.nodes) {\n    process.stdout.write("invalidation-window\\n");\n    // The unresolved await alone does not keep Node alive; retain a live handle\n    // so the parent can observe the exact crash window even when descheduled.\n    setInterval(() => {}, 1_000);\n    await new Promise(() => {});\n  }\n  await append(record);\n};\nawait memory.entriesCommitted(sessionId);\nprocess.stdout.write("done\\n");\n`, "utf8");
   return { program, hook };
 }
 
@@ -308,7 +308,7 @@ describe("episodic memory crash recovery", () => {
     child.stderr.on("data", (chunk: Buffer) => { output += chunk.toString(); });
     await waitForChildLine(child, "ready", () => output);
     fx.manager.appendContextEdit(target.id, { content: editedText });
-    child.stdin!.write("go\n");
+    child.stdin!.end("go\n");
     await waitForChildLine(child, "invalidation-window", () => output);
     expect(child.exitCode, "child exited before the parent could kill it").toBeNull();
     expect(readFileSync(fx.catalogPath, "utf8")).toContain(editedText);
@@ -475,7 +475,7 @@ describe("frozen layout recovery", () => {
       fx.manager.appendMessage(fauxAssistantMessage([{ type: "text", text: `after reply ${index} ${"b".repeat(700)}` }]));
     }
     const history = await sha256File(fx.sessionFile);
-    child.stdin!.write("go\n");
+    child.stdin!.end("go\n");
     const exit = await awaitsWithin(exited, `child to reach ${point}`);
     expect(output, `the kill point ${point} was reached`).toContain("killed");
     expect(output).not.toContain("done");

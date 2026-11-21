@@ -1,3 +1,4 @@
+import type { FSWatcher } from "node:fs";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -63,7 +64,7 @@ async function liveHome() {
   return { f, home, commands, turn, service, client, userHome };
 }
 
-function freshnessOf(f: { registry: unknown }): { changed: () => void; watchInputs: Map<string, { relevant: (name: string) => boolean; recursive: boolean }> } {
+function freshnessOf(f: { registry: unknown }): { changed: () => void; watchers: Map<string, { watcher: FSWatcher }> } {
   return (f.registry as { freshness: never }).freshness;
 }
 
@@ -82,9 +83,18 @@ async function watchersDeliver(f: { registry: unknown; agentDir: string; signals
   }
 }
 
-function watchedBy(f: { registry: unknown }, path: string): boolean {
-  return [...freshnessOf(f).watchInputs].some(([root, { relevant, recursive }]) => path.startsWith(`${root}/`)
-    && (recursive || !path.slice(root.length + 1).includes("/")) && relevant(path.slice(root.length + 1)));
+async function withDetachedWatchers(f: { registry: unknown }, probe: (deliver: (path: string) => void) => Promise<void>): Promise<void> {
+  const detached = [...freshnessOf(f).watchers].map(([root, { watcher }]) => ({ root, watcher, listeners: watcher.listeners("change") as Array<(event: string, name: string) => void> }));
+  for (const { watcher } of detached) watcher.removeAllListeners("change");
+  try {
+    await probe(path => {
+      for (const { root, listeners } of detached) {
+        if (path.startsWith(`${root}/`)) for (const listener of listeners) listener("rename", path.slice(root.length + 1));
+      }
+    });
+  } finally {
+    for (const { watcher, listeners } of detached) for (const listener of listeners) watcher.on("change", listener);
+  }
 }
 
 async function writeSkill(agentDir: string, name: string, description: string, body: string): Promise<void> {
@@ -242,8 +252,20 @@ describe("Home's global skills and prompt templates follow the agent directory l
       await waitFor(() => chat.runtime.session.systemPrompt.includes("FRESH_ANCESTOR_RULE"), "new ancestor context refreshes");
     } finally { releaseLease(); }
     const project = await realpath(f.cwd);
-    expect(watchedBy(f, join(project, "unrelated", "activity.json"))).toBe(false);
-    expect(watchedBy(f, join(project, "CLAUDE.md"))).toBe(true);
+    const changed = vi.spyOn(freshnessOf(f), "changed");
+    await withDetachedWatchers(f, async deliver => {
+      const fence = async (label: string) => {
+        const before = changed.mock.calls.length;
+        deliver(join(project, "CLAUDE.md"));
+        await waitFor(() => changed.mock.calls.length > before, label);
+        await new Promise(resolve => setImmediate(resolve));
+      };
+      await fence("an in-flight context event settles");
+      const delivered = changed.mock.calls.length;
+      deliver(join(project, "unrelated", "activity.json"));
+      await fence("the context file event after the unrelated one reaches the freshness owner");
+      expect(changed.mock.calls.length - delivered, "an unrelated project file event reached the freshness owner").toBe(1);
+    });
     await mkdir(join(f.agentDir, "prompts"), { recursive: true });
     await symlink(join(f.root, "missing-prompt"), join(f.agentDir, "prompts", "broken.md"));
     await writePrompt(f.agentDir, "after-link", "Survives dangling resource link", "BODY");

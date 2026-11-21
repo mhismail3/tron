@@ -118,10 +118,12 @@ function canonicalUserContents(slot: RuntimeSlot): Array<Array<TextContent | Ima
 describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false }, () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const registries: RuntimeRegistry[] = [];
+  const heldGates: Array<() => void> = [];
 
   const coldFixture = createColdRegistryFixture.bind(undefined, registries);
 
   afterEach(async () => {
+    for (const release of heldGates.splice(0)) release();
     await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
     vi.restoreAllMocks();
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
@@ -718,7 +720,7 @@ export default function (pi) {
       return runtime;
     };
     const lastContinuation = Promise.withResolvers<void>();
-    onTestFinished(() => lastContinuation.resolve());
+    heldGates.push(lastContinuation.resolve);
     faux.setResponses([
       fauxAssistantMessage("first complete"),
       async () => {
@@ -1183,7 +1185,7 @@ export default function (pi) {
       await Promise.all([mkdir(agentDir), mkdir(extensionDir, { recursive: true })]);
       process.env.PI_CODING_AGENT_DIR = agentDir;
       const gate = Promise.withResolvers<void>();
-      onTestFinished(() => gate.resolve());
+      heldGates.push(gate.resolve);
       const hookGlobals = globalThis as typeof globalThis & { tronStreamingHookGate?: Promise<void> };
       hookGlobals.tronStreamingHookGate = gate.promise;
       onTestFinished(() => { delete hookGlobals.tronStreamingHookGate; });
@@ -1258,7 +1260,7 @@ export default function (pi) {
     const extensionDir = join(cwd, ".pi", "extensions");
     await Promise.all([mkdir(agentDir), mkdir(extensionDir, { recursive: true })]);
     const gate = Promise.withResolvers<void>();
-    onTestFinished(() => gate.resolve());
+    heldGates.push(gate.resolve);
     const hookGlobals = globalThis as typeof globalThis & { tronHandledInputGate?: Promise<void> };
     hookGlobals.tronHandledInputGate = gate.promise;
     onTestFinished(() => { delete hookGlobals.tronHandledInputGate; });
@@ -1304,7 +1306,7 @@ export default function (pi) {
     const extensionDir = join(cwd, ".pi", "extensions");
     await Promise.all([mkdir(agentDir), mkdir(extensionDir, { recursive: true })]);
     const gate = Promise.withResolvers<void>();
-    onTestFinished(() => gate.resolve());
+    heldGates.push(gate.resolve);
     const hookGlobals = globalThis as typeof globalThis & { tronDelayedPreflightGate?: Promise<void>; tronDelayedPreflightEntered?: boolean };
     hookGlobals.tronDelayedPreflightGate = gate.promise;
     onTestFinished(() => { delete hookGlobals.tronDelayedPreflightGate; delete hookGlobals.tronDelayedPreflightEntered; });
@@ -1360,7 +1362,7 @@ export default function (pi) {
     await trust.set(cwd, true);
     const faux = fauxProvider({ provider: "tron-drain-cutoff", tokensPerSecond: 10_000 });
     const firstTurn = Promise.withResolvers<void>();
-    onTestFinished(() => firstTurn.resolve());
+    heldGates.push(firstTurn.resolve);
     faux.setResponses([
       async () => { await firstTurn.promise; return fauxAssistantMessage("first"); },
       fauxAssistantMessage("must be aborted"),
@@ -1418,7 +1420,7 @@ export default function (pi) {
     let startedResolve!: () => void;
     const started = new Promise<void>((resolve) => { startedResolve = resolve; });
     const preflight = Promise.withResolvers<void>();
-    onTestFinished(() => preflight.resolve());
+    heldGates.push(preflight.resolve);
     vi.spyOn(session, "prompt").mockImplementationOnce(async (_text, options) => {
       startedResolve();
       await preflight.promise;
@@ -2142,7 +2144,7 @@ export default function (pi) {
     const entered = join(root, "input-entered");
     await Promise.all([mkdir(agentDir), mkdir(extensionDir, { recursive: true })]);
     const inputGate = Promise.withResolvers<void>();
-    onTestFinished(() => inputGate.resolve());
+    heldGates.push(inputGate.resolve);
     const hookGlobals = globalThis as typeof globalThis & { tronQueuedInputGate?: Promise<void> };
     hookGlobals.tronQueuedInputGate = inputGate.promise;
     onTestFinished(() => { delete hookGlobals.tronQueuedInputGate; });
