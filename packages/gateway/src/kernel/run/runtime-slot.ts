@@ -1585,7 +1585,9 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   private async reloadBoundSession(): Promise<void> {
     const session = this.runtime.session;
     await this.refreshReloadDefaults();
-    await session.resourceLoader.reload(this.effectiveResourceReloadOptions());
+    const trust = this.effectiveResourceReloadOptions();
+    if (trust) session.settingsManager.setProjectTrusted(await trust.resolveProjectTrust());
+    await session.resourceLoader.reload();
     if (this.liveProfile().managedSubagents) {
       await this.dependencies.managedSubagents?.completeLoad(session.settingsManager, this.cwd, this.dependencies.agentDir, session.resourceLoader.getExtensions().extensions);
     }
