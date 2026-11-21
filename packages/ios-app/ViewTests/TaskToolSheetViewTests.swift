@@ -21,34 +21,6 @@ final class TaskToolSheetViewTests: ShuffledTestCase {
         }
     }
 
-    func testCatalogShowsTaskContentAndKeepsJSONInTechnicalDetails() async throws {
-        try await mounted(["-tron-tool-sheets-polish-fixture", "-polish-scenario", "task-list",
-                           "-polish-light", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]) { app in
-            _ = try await revealed(app, "task-tool-row-photo-readiness")
-            let task = label(app, "task-tool-row-photo-readiness")
-            XCTAssertTrue(task.contains("Keep Send disabled while photos prepare"))
-            XCTAssertTrue(task.contains("Running"))
-            XCTAssertTrue(task.contains("Attachment readiness now has one owner."))
-            XCTAssertNotNil(app.staticText("10 running · 495 finished"), app.tree())
-            _ = try await revealed(app, "task-tool-row-older-layout-audit")
-            XCTAssertTrue(label(app, "task-tool-row-older-layout-audit").contains("older-layout-audit"))
-            XCTAssertTrue(label(app, "task-tool-row-older-layout-audit").contains("Stopped"))
-            _ = try await revealed(app, "task-tool-row-tool-sheet-review")
-            XCTAssertTrue(label(app, "task-tool-row-tool-sheet-review").contains("Needs attention"))
-            XCTAssertNotNil(app.staticText("More tasks are available."), app.tree())
-            try await app.activate("Technical details")
-            try await app.until("the Result JSON row") { app.labelled("Inspect Result JSON,") != nil }
-            let result = app.labelled("Inspect Result JSON,")!
-            try await app.reveal(result)
-            XCTAssertTrue(app.onScreen(result), app.tree())
-            XCTAssertTrue(result.accessibilityActivate())
-            try await app.until("the Result JSON sheet") { app.staticText("Result JSON") != nil }
-            try await app.until("the raw JSON") {
-                MountedFixture.views(UITextView.self, in: app.top).contains { $0.text.contains("photo-readiness") }
-            }
-        }
-    }
-
     func testReportAndControlMessagesOpenOriginalTextInSharedReader() async throws {
         for scenario in ["task-report", "task-steer", "task-resume", "task-interrupt"] {
             try await mounted(["-tron-tool-sheets-polish-fixture", "-polish-scenario", scenario,

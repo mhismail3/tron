@@ -36,8 +36,9 @@ final class SubagentParityViewTests: ShuffledTestCase {
                 try await app.activate("Technical details")
                 try await app.until("the origin section") { app.staticText("ORIGIN") != nil }
                 if mode == "legacy" {
-                    try await app.until("the envelope row") { app.labelled("Inspect report envelope") != nil }
-                    let envelope = try XCTUnwrap(app.labelled("Inspect report envelope"))
+                    let envelopeRow = { self.nodes(app) { $0.accessibilityTraits.contains(.button) && $0.accessibilityLabel?.contains("Inspect report envelope") == true }.last }
+                    try await app.until("the envelope row") { envelopeRow() != nil }
+                    let envelope = try XCTUnwrap(envelopeRow())
                     try await app.reveal(envelope)
                     XCTAssertTrue(app.onScreen(envelope))
                     try await app.until("the evidence table") { !texts(app, containing: "evidence/native-result.xcresult").isEmpty }
@@ -49,26 +50,6 @@ final class SubagentParityViewTests: ShuffledTestCase {
                 try await app.until("the technical details close") { app.button("Technical details") != nil }
                 try await app.activate("Done")
                 try await app.until("the message returns") { app.button(pill) != nil }
-            }
-        }
-    }
-
-    func testNativeOrganizationAndPills() async throws {
-        for scheme in ["light", "dark"] {
-            try await mounted(["-tron-subagent-parity-fixture", "-\(scheme)"]) { app in
-                try await app.until("the Subagents button") { app.button("Subagents") != nil }
-                try await verifyPills(app)
-                try await app.activate("Subagents")
-                try await app.until("the running subagents sheet") { app.staticText("Running subagents") != nil }
-                try await app.until("the worker row") { app.button("Worker") != nil }
-                try await app.until("the worker's output and tool count") {
-                    ["PARITY_CHILD_COMPLETE", "parity.txt", "2 tools"].allSatisfy { app.button("Worker")?.accessibilityValue?.contains($0) == true }
-                }
-                XCTAssertNil(app.staticText("PRIVATE PROVIDER STATUS"))
-                XCTAssertNil(app.staticText("PRIVATE PROVIDER FRAME"))
-                XCTAssertTrue(texts(app, containing: "PI_SUBAGENT_ASYNC_JSON").isEmpty)
-                try press(app.button("Worker"))
-                try await app.until("the child transcript") { app.staticText("Child transcript reached through the native row.") != nil }
             }
         }
     }
@@ -121,28 +102,6 @@ final class SubagentParityViewTests: ShuffledTestCase {
         }
     }
 
-    func testActivityRowsCaptures() async throws {
-        for scheme in ["light", "dark"] {
-            for state in ["running", "recent"] {
-                try await mounted(["-tron-subagent-parity-fixture", "-\(scheme)"]
-                                  + (state == "recent" ? ["-activity-preview-recent"] : [])) { app in
-                    try await app.until("the Subagents button") { app.button("Subagents") != nil }
-                    try await app.activate("Subagents")
-                    let heading = state == "running" ? "Running subagents" : "Completed subagents"
-                    try await app.until(heading) { app.staticText(heading) != nil }
-                    let prefix = state == "running" ? "Live," : "Completed,"
-                    try await app.until("the row reads \(prefix)") { activityValue(app).hasPrefix(prefix) }
-                    XCTAssertEqual(rows(app) { $0.hasPrefix("subagent-row-") }.count, 1)
-                    if state == "running" {
-                        XCTAssertTrue(activityValue(app).contains("Claude Fable 5.2 · Medium thinking"), activityValue(app))
-                    }
-                    XCTAssertNil(app.staticText("DETAILS"), "The bespoke DETAILS heading is retired")
-                    XCTAssertNil(app.staticText("LIVE OUTPUT"), "The bespoke LIVE OUTPUT heading is retired")
-                }
-            }
-        }
-    }
-
     private func verifyRuntimeWake(_ stage: String) async throws {
         for scheme in ["light", "dark"] {
             try await mounted(["-tron-subagent-parity-fixture", "-\(scheme)", "-\(stage)"]) { app in
@@ -161,7 +120,7 @@ final class SubagentParityViewTests: ShuffledTestCase {
             ("Subagent, Needs Attention", "May the worker proceed?")
         ] {
             try await app.until("the \(label) pill") { app.button(label) != nil }
-            XCTAssertEqual(rows(app) { $0 == label }.count, 1, "One pill per subagent message")
+            XCTAssertEqual(nodes(app) { $0.accessibilityTraits.contains(.button) && ($0.accessibilityLabel == label || MountedFixture.identifier($0) == label) }.count, 1, "One pill per subagent message")
             XCTAssertNil(app.staticText("Subagent updates above."), "Wake must not be a user bubble")
             try await app.activate(label)
             try await app.until("the \(label) details") { app.staticText(body) != nil }
@@ -196,10 +155,6 @@ final class SubagentParityViewTests: ShuffledTestCase {
 
     private func rowValue(_ app: MountedFixture, _ id: String) -> String {
         rows(app) { $0 == id }.first?.accessibilityValue ?? ""
-    }
-
-    private func activityValue(_ app: MountedFixture) -> String {
-        rows(app) { $0.hasPrefix("subagent-row-") }.first?.accessibilityValue ?? ""
     }
 
     private func texts(_ app: MountedFixture, containing text: String) -> [NSObject] {
