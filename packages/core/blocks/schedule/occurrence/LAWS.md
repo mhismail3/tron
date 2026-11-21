@@ -7,7 +7,7 @@ Block hash: `8358bfcb2ff969ff` (over `blocks/schedule/occurrence/Block.dfy`, `la
 |---|---|
 | Proof (pinned Dafny, --verify-included-files) | PASS: blocks/schedule/occurrence/Block.dfy: Dafny program verifier finished with 49 verified, 0 errors;  |
 | Independent review | ACCEPT by law-reviewer (runs b126a428, 42c2f2e7) (anthropic/claude-haiku-5-5, transcript-verified); writer parent (anthropic/claude-fable-5-2); 2026-11-10 |
-| Mutation check | PASS: 115 valid mutants, 115 killed by laws, 0 survived, 0 accepted (blocks/schedule/occurrence/MUTATION.json) |
+| Mutation check | PASS: 115 valid mutants, 115 killed by laws, 0 survived, 0 accepted (blocks/schedule/occurrence/MUTATION.json; statuses a9803a481e00d4e3) |
 | Cut over | the only implementation: `packages/gateway/src/core/schedule/occurrence` runs this block's compiled core (scripts/tron proof facade) |
 
 ## L1 next-sound
@@ -20,7 +20,7 @@ lemma L1NextSound(t: Trigger, after: Ms)
   ensures Next(t, after).v > after && Occ(t, Next(t, after).v as int)
 ```
 
-**Mutation results.** kills 30 of 115 valid mutants; 0 killed by this law alone.
+**Mutation results.** kills 29 of 115 valid mutants; 0 killed by this law alone.
 
 **Reviewer notes.** ACCEPT: Next is a plus (q+1) periods, strictly after after, and an occurrence, with the once case matching.
 
@@ -34,7 +34,7 @@ lemma L2NextMinimal(t: Trigger, after: Ms, x: int)
   ensures Next(t, after).Some? && Next(t, after).v as int <= x
 ```
 
-**Mutation results.** kills 17 of 115 valid mutants; 0 killed by this law alone.
+**Mutation results.** kills 19 of 115 valid mutants; 0 killed by this law alone.
 
 **Reviewer notes.** ACCEPT: Any occurrence x > after has k at least q+1, so Next is no later than x.
 
@@ -63,7 +63,7 @@ lemma L4FirstInterval(t: Trigger, now: Ms)
     f.Some? && f.v >= now && Occ(t, f.v as int) && forall x: int | Occ(t, x) && x >= now as int :: f.v as int <= x
 ```
 
-**Mutation results.** kills 12 of 115 valid mutants; 3 killed by this law alone.
+**Mutation results.** kills 11 of 115 valid mutants; 2 killed by this law alone.
 
 **Reviewer notes.** ACCEPT: First is the anchor when now is at or before it, else Next(now-1), and minimality follows from L2.
 
@@ -126,7 +126,7 @@ lemma NoOccBetween(a: int, e: int, j: nat, k: nat, q: int, now: int)
   ensures false
 ```
 
-**Mutation results.** kills 67 of 115 valid mutants; 36 killed by this law alone.
+**Mutation results.** kills 69 of 115 valid mutants; 36 killed by this law alone.
 
 **Reviewer notes.** ACCEPT: The Witness is the latest due occurrence, exactly one of dispatch or skip is taken, and the new next equals Next(now) for intervals and none for once.
 
@@ -154,7 +154,7 @@ lemma L8FirstAfterOccurrence(a: Ms, e: Ms, k: nat)
   ensures First(Interval(a, e), (a as int + k * (e as int) + 1) as Ms) == Some((a as int + (k + 1) * (e as int)) as Ms)
 ```
 
-**Mutation results.** kills 33 of 115 valid mutants; 0 killed by this law alone.
+**Mutation results.** kills 34 of 115 valid mutants; 0 killed by this law alone.
 
 **Reviewer notes.** ACCEPT: Creating at a+k*e+1 gives Next(a+k*e) = a+(k+1)*e, as the English states.
 

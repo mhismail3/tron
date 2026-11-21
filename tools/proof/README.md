@@ -7,7 +7,7 @@
 scripts/tron proof bootstrap   # install the pin if absent, then re-verify it; prints versions and the entry point
 scripts/tron proof doctor      # re-verify only; never downloads or writes
 scripts/tron proof check [<block>...] [--json] [--root <dir>] [--cache <file>]
-scripts/tron proof mutate <block> [--root <dir>] [--jobs 1..4] [--out <report.json>] [--laws <file>]
+scripts/tron proof mutate <block> [--root <dir>] [--jobs 1..4] [--out <digest.json>] [--report <full.json>] [--laws <file>]
                           [--config <mutate.json>] [--only <id>] [--list] [--equiv <id>] [--recheck <report.json> [--sample N]]
 scripts/tron proof packet <block> [--root <dir>] [--write] [--no-verify] [--recheck]
 scripts/tron proof packet --batch <out.md> [--root <dir>] <block>...
@@ -81,10 +81,14 @@ of the core root (so relative includes hold) with the pinned wrapper after `doct
    `rolldown/utils` parser supplies the AST; prepare its development dependencies with
    `scripts/tron-node exec npm --prefix packages/gateway ci`. Invalid checker syntax refuses hashing.
    Comment-only tool edits preserve mutation freshness; code edits still stale every report.
-6. **Recheck.** `--recheck <report>` never trusts a report: it recomputes counts and verdict, rejects acceptances
-   not in mutate.json, re-resolves every stillborn mutant, re-runs every non-killed one and N killed ones chosen
-   with a fresh random seed.
-7. **Solver cap.** `--jobs` 1..4 (default 2), each Dafny with `--cores 1`; every child runs in its own process
+6. **Report.** `--out` writes the committed digest: the summary, per-law kills, `statuses` (sha256 over every
+   mutant's id, status and acceptance) and the mutants not killed by a law (`notKilled`, each with its change and
+   acceptance). The full per-mutant report goes only where `--report <file>` names, never into source.
+7. **Recheck.** `--recheck <digest>` never trusts a digest: it regenerates every mutant, re-resolves each to find
+   the stillborn ones, rebuilds every label (listed ones as listed, the rest killed), recomputes counts, verdict and
+   `statuses`, rejects acceptances not in mutate.json, re-runs every listed one and N killed ones chosen with a
+   fresh random seed.
+8. **Solver cap.** `--jobs` 1..4 (default 2), each Dafny with `--cores 1`; every child runs in its own process
    group and is killed with its solvers on exit or signal.
 
 Exit 0: PASS; 1: FAIL; 2: config, baseline or toolchain error. Limits: mutants are first-order; the tokenizer
@@ -106,7 +110,7 @@ law-kind table and five gates, each bound to the block hash:
   hash and exactly that model. `reviewer.session` is the transcript's path below its project directory of
   `~/.tron/agent/sessions` (read, never written), so a committed review holds no machine path; it must match
   exactly one transcript.
-- **Mutation:** the `report` for the current hash and checker, PASS (with `--recheck`, re-run with 12 samples).
+- **Mutation:** the `report` digest for the current hash and checker, PASS, with its `statuses` prefix (with `--recheck`, re-run with 12 samples).
 - **Cut over:** names the shell that runs the block (`block.json` `shell`); every core block has one.
 
 A gate for another hash shows STALE. Exit 1 lists packet problems: a missing English comment, a law lemma not
@@ -135,7 +139,8 @@ implementation is refused, also behind a comment and from a laws file.
 `scripts/tron-node exec node --test tools/proof/tests/gates.test.mjs` runs `proof mutate` and `proof packet` on a
 copy of the fixture blocks `demo/clamp` and `demo/timeout` (`tests/fixtures/mutate`, with law variants in
 `tests/fixtures/mutate-variants`; test input, not core blocks), about 2 minutes: the real laws PASS with six
-proven equivalences; a weakened law FAILS with the survivor it no longer catches; a false equivalence claim is
+proven equivalences, and the committed digest agrees with the full report; `--recheck` accepts that digest and
+rejects one that hides a not-killed mutant; a weakened law FAILS with the survivor it no longer catches; a false equivalence claim is
 rejected by its failing proof; a mutant only an unmapped helper catches is `unmapped`, not killed; a law proof
 that runs out of resources is `unknown-timeout` after its retry, never killed; the packet renders each law's
 English and statement from the laws file; and an impl or a law edit shows the review and the mutation report

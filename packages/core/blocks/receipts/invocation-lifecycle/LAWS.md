@@ -7,7 +7,7 @@ Block hash: `55c084fc5b4201ec` (over `blocks/receipts/invocation-lifecycle/Block
 |---|---|
 | Proof (pinned Dafny, --verify-included-files) | PASS: blocks/receipts/invocation-lifecycle/Block.dfy: Dafny program verifier finished with 72 verified, 0 errors;  |
 | Independent review | ACCEPT by law-reviewer (runs b126a428, 42c2f2e7) (anthropic/claude-haiku-5-5, transcript-verified); writer parent (anthropic/claude-fable-5-2); 2026-11-10 |
-| Mutation check | PASS: 155 valid mutants, 155 killed by laws, 0 survived, 0 accepted (blocks/receipts/invocation-lifecycle/MUTATION.json) |
+| Mutation check | PASS: 155 valid mutants, 155 killed by laws, 0 survived, 0 accepted (blocks/receipts/invocation-lifecycle/MUTATION.json; statuses b5bfd0660a8c6e2f) |
 | Cut over | the only implementation: `packages/gateway/src/core/receipts/invocation-lifecycle` runs this block's compiled core (scripts/tron proof facade) |
 
 ## F1 fold-computed

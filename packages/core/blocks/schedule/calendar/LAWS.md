@@ -7,7 +7,7 @@ Block hash: `2faaf56b95d29819` (over `blocks/schedule/calendar/Block.dfy`, `laws
 |---|---|
 | Proof (pinned Dafny, --verify-included-files) | PASS: blocks/schedule/calendar/Block.dfy: Dafny program verifier finished with 96 verified, 0 errors;  |
 | Independent review | ACCEPT by law-reviewer (runs b126a428, 42c2f2e7) (anthropic/claude-haiku-5-5, transcript-verified); writer parent (anthropic/claude-opus-5-5); 2026-11-10 |
-| Mutation check | PASS: 264 valid mutants, 261 killed by laws, 0 survived, 3 accepted (blocks/schedule/calendar/MUTATION.json) |
+| Mutation check | PASS: 264 valid mutants, 261 killed by laws, 0 survived, 3 accepted (blocks/schedule/calendar/MUTATION.json; statuses 2bde5f3744089228) |
 | Cut over | the only implementation: `packages/gateway/src/core/schedule/calendar` runs this block's compiled core (scripts/tron proof facade) |
 
 ## N1 next-sound
@@ -194,7 +194,7 @@ lemma CandidateBounds(z: Zone, c: Calendar, d: Ms, lo: Ms, hi: Ms)
   ensures lo < Candidate(z, c, d, lo, hi).v < hi
 ```
 
-**Mutation results.** kills 59 of 264 valid mutants; 13 killed by this law alone.
+**Mutation results.** kills 60 of 264 valid mutants; 13 killed by this law alone.
 
 **Reviewer notes.** ACCEPT: The law matches Floor(b) <= x <= b and Occ(x) with the ScanMax window.
 

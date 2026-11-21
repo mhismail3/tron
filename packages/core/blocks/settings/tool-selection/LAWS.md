@@ -7,7 +7,7 @@ Block hash: `d696d90ade3dda62` (over `blocks/settings/tool-selection/Block.dfy`,
 |---|---|
 | Proof (pinned Dafny, --verify-included-files) | PASS: blocks/settings/tool-selection/Block.dfy: Dafny program verifier finished with 77 verified, 0 errors;  |
 | Independent review | ACCEPT by law-reviewer (runs b126a428, 42c2f2e7) (anthropic/claude-haiku-5-5, transcript-verified); writer parent (anthropic/claude-fable-5-2); 2026-11-10 |
-| Mutation check | PASS: 96 valid mutants, 96 killed by laws, 0 survived, 0 accepted (blocks/settings/tool-selection/MUTATION.json) |
+| Mutation check | PASS: 96 valid mutants, 96 killed by laws, 0 survived, 0 accepted (blocks/settings/tool-selection/MUTATION.json; statuses 7a15138d963cbb2b) |
 | Cut over | the only implementation: `packages/gateway/src/core/settings/tool-selection` runs this block's compiled core (scripts/tron proof facade) |
 
 ## L1 compose-computed

@@ -7,7 +7,7 @@ Block hash: `29e72683e031aeb1` (over `blocks/settings/precedence/Block.dfy`, `la
 |---|---|
 | Proof (pinned Dafny, --verify-included-files) | PASS: blocks/settings/precedence/Block.dfy: Dafny program verifier finished with 35 verified, 0 errors;  |
 | Independent review | ACCEPT by law-reviewer (Home task, session 01a1f51b) (anthropic/claude-sonnet-5-5, transcript-verified); writer settings worker (R14 d683f8843, #2619 306b1a702) (anthropic/claude-opus-5-5); 2026-11-19 |
-| Mutation check | PASS: 103 valid mutants, 103 killed by laws, 0 survived, 0 accepted (blocks/settings/precedence/MUTATION.json) |
+| Mutation check | PASS: 103 valid mutants, 103 killed by laws, 0 survived, 0 accepted (blocks/settings/precedence/MUTATION.json; statuses 52f7366df04a6030) |
 | Cut over | the only implementation: `packages/gateway/src/core/settings/precedence` runs this block's compiled core (scripts/tron proof facade) |
 
 ## S1 admission
