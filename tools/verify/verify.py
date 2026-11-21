@@ -756,19 +756,21 @@ JS_IMPORT = re.compile(r"""(?:\bfrom|\bimport)\s*\(?\s*["'](\.{1,2}/[^"']+)["']"
 
 def importers(changed: list[str], tracked: list[str]) -> dict[str, set[str]]:
     """Untyped code files that import a changed file, by importer: Python by module name (or by the
-    path it hands importlib), JavaScript by relative specifier. A typed importer is left to its
-    compiler, which already checks the shapes it uses across modules."""
+    path it hands importlib), JavaScript by relative specifier, and any script that names a changed
+    JSON data file by its repository path. A typed importer is left to its compiler, which already
+    checks the shapes it uses across modules."""
     names: dict[str, set[str]] = {}
     for path in changed:
         if path.endswith(".py") and Path(path).stem.isidentifier():
             names.setdefault(Path(path).stem, set()).add(path)
     python_paths = [path for path in changed if path.endswith(".py")]
+    data = [path for path in changed if path.endswith(".json") and "/" in path]
     targets = set(changed)
     found: dict[str, set[str]] = {}
     for path in tracked:
         file = ROOT / path
         python = path.endswith(".py")
-        if not (python or path.endswith((".mjs", ".js", ".cjs"))):
+        if not (python or path.endswith((".mjs", ".js", ".cjs", ".sh"))):
             if "." in Path(path).name or not path.startswith(("scripts/", "tools/")):
                 continue
             try:
@@ -782,14 +784,14 @@ def importers(changed: list[str], tracked: list[str]) -> dict[str, set[str]]:
             source = file.read_text(errors="replace")
         except OSError:
             continue
-        hits = set()
+        hits = {target for target in data if target in source}
         if python:
             for first, listed in PYTHON_IMPORT.findall(source):
                 for name in [first] if first else [part.split()[0].split(".")[0] for part in listed.split(",") if part.split()]:
                     hits |= names.get(name, set())
             if "spec_from_file_location" in source:
                 hits |= {target for target in python_paths if target in source}
-        else:
+        elif not path.endswith(".sh"):
             for specifier in JS_IMPORT.findall(source):
                 resolved = os.path.normpath(str(Path(path).parent / specifier))
                 candidates = {resolved, resolved + ".js", resolved + ".mjs", resolved + ".ts", f"{resolved}/index.js"}

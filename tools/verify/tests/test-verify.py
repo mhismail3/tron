@@ -846,6 +846,24 @@ class SelectionTests(VerifyCase):
         deleted = r.verify("--changed", "--plan")
         self.assertIn("repo/beta: imports changed mods/alpha/alpha.py; its 1 owned test file(s)", deleted.stdout)
 
+    def test_a_data_file_change_runs_the_scripts_that_name_its_path(self) -> None:
+        """#2551: a Cua release-pin-only change selected only its owner's tests, never the shell and
+        Python checks in another module that read the pin by its repository path."""
+        r = self.repo
+        r.write("mods/alpha/pin.json", '{"version": "1"}\n')
+        r.write("mods/beta/test-pin.sh", 'grep -q \'"version": "1"\' "$(dirname "$0")/../../mods/alpha/pin.json"\n')
+        r.write("mods/untested/read-pin.py", "import json\nprint(json.load(open('mods/alpha/pin.json')))\n")
+        r.commit("beta and untested read alpha's pin")
+        r.git("branch", "-f", "base")
+        r.write("mods/alpha/pin.json", '{"version": "2"}\n')
+        r.commit("pin moves")
+        failed = r.verify("--changed")
+        self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
+        selection = r.report()["selection"]
+        self.assertEqual(selection["tests"], ["mods/alpha/test-alpha.py", "mods/beta/test-pin.sh"])
+        self.assertIn("mods/beta/test-pin.sh: imports changed mods/alpha/pin.json", selection["reasons"])
+        self.assertIn("repo/untested: imports changed mods/alpha/pin.json; its 0 owned test file(s)", selection["reasons"])
+
     def test_ignored_residue_with_no_named_writer_fails_the_run(self) -> None:
         r = self.repo
         r.write(".gitignore", "test-results/\n*.log\n")
