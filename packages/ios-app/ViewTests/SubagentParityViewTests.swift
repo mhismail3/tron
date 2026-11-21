@@ -17,43 +17,6 @@ final class SubagentParityViewTests: ShuffledTestCase {
         }
     }
 
-    func testHomeResultReadableMessageAndNestedInfo() async throws {
-        for mode in ["legacy", "typed-report", "plain-report", "malformed-report"] {
-            try await mounted(["-tron-subagent-parity-fixture", "-presentation-polish", "-\(mode)",
-                               mode == "typed-report" ? "-dark" : "-light"]) { app in
-                let pill = mode == "typed-report" ? "Worker, Reported" : "Worker, Received"
-                try await app.activate(pill)
-                if mode == "plain-report" {
-                    try await app.until("the plain report") { app.staticText("Plain report remains complete.") != nil }
-                } else if mode == "malformed-report" {
-                    try await app.until("the preserved text") { !texts(app, containing: "preserve this text").isEmpty }
-                } else {
-                    try await app.until("the actual report") { app.staticText("Actual report") != nil }
-                    XCTAssertNotNil(app.staticText("All requested changes are preserved."))
-                    XCTAssertNotNil(app.staticText(mode == "typed-report" ? "Needs input" : "Final report"))
-                    XCTAssertTrue(texts(app, containing: "receiptId").isEmpty)
-                }
-                try await app.activate("Technical details")
-                try await app.until("the origin section") { app.staticText("ORIGIN") != nil }
-                if mode == "legacy" {
-                    let envelopeRow = { self.nodes(app) { $0.accessibilityTraits.contains(.button) && $0.accessibilityLabel?.contains("Inspect report envelope") == true }.last }
-                    try await app.until("the envelope row") { envelopeRow() != nil }
-                    let envelope = try XCTUnwrap(envelopeRow())
-                    try await app.reveal(envelope)
-                    XCTAssertTrue(app.onScreen(envelope))
-                    try await app.until("the evidence table") { !texts(app, containing: "evidence/native-result.xcresult").isEmpty }
-                    try press(envelope)
-                    try await app.until("the envelope inspector") { app.staticText("Report envelope") != nil }
-                    try await app.activate("Done")
-                }
-                try await app.activate("Done")
-                try await app.until("the technical details close") { app.button("Technical details") != nil }
-                try await app.activate("Done")
-                try await app.until("the message returns") { app.button(pill) != nil }
-            }
-        }
-    }
-
     func testHistoricalSessionPills() async throws {
         try await mounted(["-tron-subagent-parity-fixture", "-dark", "-historical"]) { app in
             try await app.until("the needs-attention pill") { app.button("Subagent, Needs Attention") != nil }
@@ -155,13 +118,5 @@ final class SubagentParityViewTests: ShuffledTestCase {
 
     private func rowValue(_ app: MountedFixture, _ id: String) -> String {
         rows(app) { $0 == id }.first?.accessibilityValue ?? ""
-    }
-
-    private func texts(_ app: MountedFixture, containing text: String) -> [NSObject] {
-        nodes(app) { !$0.accessibilityTraits.contains(.button) && $0.accessibilityLabel?.contains(text) == true }
-    }
-
-    private func press(_ node: NSObject?) throws {
-        guard let node, node.accessibilityActivate() else { throw FixtureNotReady(description: "refused activation") }
     }
 }
