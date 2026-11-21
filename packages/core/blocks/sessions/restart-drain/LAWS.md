@@ -6,7 +6,7 @@ Block hash: `828f2b535b690753` (over `blocks/sessions/restart-drain/Block.dfy`, 
 | Gate | Status |
 |---|---|
 | Proof (pinned Dafny, --verify-included-files) | PASS: blocks/sessions/restart-drain/Block.dfy: Dafny program verifier finished with 50 verified, 0 errors;  |
-| Independent review | NOT ACCEPTED: STALE (reviewed ccc862b30925fae0, current 828f2b535b690753); reviewer transcript never mentions the current block hash (it did not review this version) |
+| Independent review | ACCEPT by law-reviewer (runs 56a28161, ea6bdb60) (openai/gpt-6-luna, transcript-verified); writer parent (Home task, #2634) (anthropic/claude-opus-5-5); 2026-11-21 |
 | Mutation check | PASS: 105 valid mutants, 100 killed by laws, 0 survived, 5 accepted (blocks/sessions/restart-drain/MUTATION.json; statuses c1167956fbf94fb2) |
 | Cut over | the only implementation: `packages/gateway/src/core/sessions/restart-drain` runs this block's compiled core (scripts/tron proof facade) |
 
@@ -22,7 +22,7 @@ lemma C1Completed(count: Count, blockers: List<Blocker>, tracked: Tracked, now: 
 
 **Mutation results.** kills 12 of 105 valid mutants; 3 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: English and Dafny agree: completion is equivalent to count == 0 and clears tracking; count=0 with any blocker list satisfies the premise. This matches the TypeScript early return; it kills 12 mutants (3 alone), providing exact completion and progress behavior.
+**Reviewer notes.** ACCEPT: English and Dafny agree: completion is equivalent to count == 0 and clears tracking; count=0 with any blocker list satisfies the premise. The expanded Ms range does not change this result; it matches the TypeScript early return and kills 12 mutants (3 alone).
 
 ## U1 unresolved-owners
 
@@ -48,7 +48,7 @@ lemma AllOwnersSpec(n: Count, bs: List<Blocker>)
 
 **Mutation results.** kills 31 of 105 valid mutants; 8 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: English and Dafny agree for count != 0: unresolved owners occur exactly when the listed blockers account for the count and each is a suspect receipt write with a session, then tracking clears; count=1 with one such blocker is a satisfying input. This matches unresolvedOwners; it kills 31 mutants (8 alone).
+**Reviewer notes.** ACCEPT: English and Dafny agree for count != 0: unresolved owners occur exactly when the listed blockers account for the count and each is a suspect receipt write with a session, then tracking clears; count=1 with one qualifying blocker satisfies the premise. The new shell outcome without an owners array remains equivalent because every listed blocker qualifies whenever this outcome holds; it kills 31 mutants (8 alone).
 
 ## W1 unlisted
 
@@ -62,7 +62,7 @@ lemma W1Unlisted(count: Count, blockers: List<Blocker>, tracked: Tracked, now: M
 
 **Mutation results.** kills 12 of 105 valid mutants; 0 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: English and Dafny agree that a nonzero count with an empty listed-blocker list returns Waiting and preserves tracking; count=65 with 64 omitted blockers is a satisfying input under the 64-item snapshot cap. It kills 12 mutants (0 alone); it is still needed to specify the exact omitted-blocker case and preserve the timer across that poll.
+**Reviewer notes.** ACCEPT: English and Dafny agree that a nonzero count with an empty listed-blocker list returns Waiting and preserves tracking; count=65 with 64 omitted blockers satisfies the premise under the snapshot cap. It kills 12 mutants (0 alone); it still specifies the omitted-blocker case and preserves the timer across that poll.
 
 ## O1 oldest-tracked
 
@@ -123,7 +123,7 @@ lemma ProgressSpec(blockers: List<Blocker>, o: Blocker)
 
 **Mutation results.** kills 27 of 105 valid mutants; 11 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: English and Dafny agree under the non-owner, nonempty domain: tracking names the first blocker at the earliest set admission time, or the first when none is set, with the specified state, admission, and session progress; one active blocker with unset admission satisfies the premise. It matches the TypeScript reducer and kills 27 mutants (11 alone).
+**Reviewer notes.** ACCEPT: English and Dafny agree under the non-owner, nonempty domain: tracking names the first blocker at the earliest set admission time, or the first when none is set, with its session progress; one active blocker with unset admission satisfies the premise. Numeric ordering matches the intended expanded-year correction in A2; it kills 27 mutants (11 alone).
 
 ## R1 timer-reset
 
@@ -149,7 +149,7 @@ lemma SameSpec(a: State, b: State, s: Time, t: Time)
 
 **Mutation results.** kills 24 of 105 valid mutants; 10 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: English and Dafny agree that the timer is retained only when the tracked id, state, progress, and admission fields match, otherwise reset to the progress/admission/now signal; one active blocker with a changed tracked id satisfies the premise. This matches the TypeScript signature comparison and kills 24 mutants (10 alone).
+**Reviewer notes.** ACCEPT: English and Dafny agree that the timer is retained only when the tracked id, state, progress, and admission fields match, otherwise reset to the progress/admission/now signal; one active blocker with a changed tracked id satisfies the premise. The Date maximum remains within Ms and shell parsing, and it kills 24 mutants (10 alone).
 
 ## T1 stalled
 
@@ -165,7 +165,7 @@ lemma T1Stalled(count: Count, blockers: List<Blocker>, tracked: Tracked, now: Ms
 
 **Mutation results.** kills 32 of 105 valid mutants; 10 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: English and Dafny agree that the tracked oldest blocker is stalled exactly when its clamped age reaches the limit, and otherwise waits; one active blocker, untracked, with now at or beyond its admission plus the limit satisfies the premise. This matches the TypeScript age and threshold logic and kills 32 mutants (10 alone).
+**Reviewer notes.** ACCEPT: English and Dafny agree that the tracked oldest blocker is stalled exactly when its clamped age reaches the limit, and otherwise waits; one active blocker, untracked, with now at or beyond its admission plus the limit satisfies the premise. The enlarged Ms range covers all Date timestamps without changing the threshold semantics; it kills 32 mutants (10 alone).
 
 ## Proof helpers (statements only; not laws, but part of what is proven)
 
@@ -352,4 +352,4 @@ ghost function Age(now: Ms, since: Ms): Ms { if now <= since then 0 else now - s
 
 ## Reviewer: general notes
 
-High-stakes is correct because the decision controls restart behavior during live run lifecycles. A1 is realistic for the shell’s token mapping and hashed snapshot ids, though hash uniqueness is an operational assumption rather than a mathematical guarantee; A2 is supported by the producer’s sorted, capped snapshot and ISO timestamp parsing; A3 is supported by the per-drain progress instance and caller behavior. Recovery is reasonably n/a because tracked state is process-local and each drain starts fresh; uncertain outcomes are reasonably n/a because the block has no effects. Safety, progress, recovery, stale-input, exact-result, and uncertain-outcome kinds are accounted for. The 131,983 seeded comparisons and live-log comparisons are evidence, but absent SHADOW.json / seven-day 100% real-traffic shadow evidence leaves the high-stakes cut-over gate unverified.
+Second review round following the earlier ACCEPT at ccc862b30925fae0. The Ms upper bound now matches JavaScript Date's maximum (8.64e15 ms), which is an exactly representable integer; A2 now accurately explains that numeric ordering intentionally differs from the old lexicographic string comparison for expanded-year extension timestamps, while four-digit years retain matching ordering. The new unresolved-owners result omits an owners array, but its caller logs snapshot.blockers; under U1's condition that is exactly the prior filtered owners list. A1-A3 remain realistic and explicit. High-stakes remains correct; all required law kinds are covered or reasonably marked n/a. No law changes warrant revising verdicts. Real-traffic shadow evidence over the required seven-day window remains a cut-over readiness risk.
