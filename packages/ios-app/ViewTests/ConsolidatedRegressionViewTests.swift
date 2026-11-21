@@ -40,12 +40,6 @@ final class ConsolidatedRegressionViewTests: ShuffledTestCase {
         try await app.expandTopSheet()
     }
 
-    private func cleanTree(_ app: MountedFixture) -> String? {
-        MountedFixture.elements(in: app.top).last {
-            $0.accessibilityLabel?.contains("Working tree clean") == true && app.onScreen($0)
-        }?.accessibilityLabel
-    }
-
     private func tap(_ app: MountedFixture, _ key: String) async throws {
         _ = try await revealed(app, key)
         try await app.activate(key)
