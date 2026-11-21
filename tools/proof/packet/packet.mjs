@@ -101,7 +101,7 @@ function packet(root, block, opts = {}) {
   if (opts.recheck && ms && mutFresh) { const r = sh([process.execPath, join(REPO, "tools/proof/mutate/mutate.mjs"), block, "--root", root, "--recheck", join(root, cfg.report), "--sample", "12", "--jobs", "2"], REPO); try { mutRecheck = JSON.parse(r.out.trim().split("\n").pop()); } catch { mutRecheck = { recheck: "error", why: r.out.slice(-200) }; } }
   const toolNow = toolHash();
   const toolFresh = ms?.toolHash === toolNow;
-  const reportOnly = (report?.results ?? []).filter((r) => r.accepted && !cfg.accepted?.[r.id]).map((r) => r.id);
+  const reportOnly = (report?.notKilled ?? []).filter((r) => r.accepted && !cfg.accepted?.[r.id]).map((r) => r.id);
   if (reportOnly.length) problems.push(`mutation report accepts mutants not in mutate.json accepted: ${reportOnly.join(", ")}`);
   const mutOk = reportOnly.length === 0 && ms?.pass === true && mutFresh && toolFresh && (!opts.recheck || mutRecheck?.recheck === "ok");
   const tierRules = cfg.tier === "high-stakes"
@@ -113,7 +113,7 @@ function packet(root, block, opts = {}) {
     "| Gate | Status |", "|---|---|",
     `| Proof (pinned Dafny, --verify-included-files) | ${verify.ok === null ? verify.text : `${verify.ok ? "PASS" : "FAIL"}: ${verify.text}`} |`,
     `| Independent review | ${!review ? "MISSING" : reviewOk ? `ACCEPT by ${review.reviewer.agent} (${review.reviewer.model}, transcript-verified); writer ${review.writer.agent} (${review.writer.model}); ${review.date}` : `NOT ACCEPTED: ${reviewProblems.join("; ")}`} |`,
-    `| Mutation check | ${!ms ? "MISSING" : `${!mutFresh ? `STALE (report for ${ms.inputsHash}) ` : ""}${!toolFresh ? "STALE (older mutation checker) " : ""}${ms.pass ? "PASS" : "FAIL"}${mutRecheck ? ` [recheck ${mutRecheck.recheck}: ${mutRecheck.sampled?.length ?? 0} sampled mutants re-run]` : ""}: ${ms.valid} valid mutants, ${ms.killed} killed by laws, ${ms.survived} survived, ${ms.accepted} accepted (${cfg.report})`} |`,
+    `| Mutation check | ${!ms ? "MISSING" : `${!mutFresh ? `STALE (report for ${ms.inputsHash}) ` : ""}${!toolFresh ? "STALE (older mutation checker) " : ""}${ms.pass ? "PASS" : "FAIL"}${mutRecheck ? ` [recheck ${mutRecheck.recheck}: ${mutRecheck.sampled?.length ?? 0} sampled mutants re-run]` : ""}: ${ms.valid} valid mutants, ${ms.killed} killed by laws, ${ms.survived} survived, ${ms.accepted} accepted (${cfg.report}; statuses ${report.statuses?.slice(0, 16) ?? "MISSING"})`} |`,
     shell === undefined ? "| Cut over | no: block.json names no shell that runs this block |"
       : `| Cut over | the only implementation: \`${shell}\` runs this block's compiled core (scripts/tron proof facade) |`, "");
   const per = (law) => report?.perLaw?.find((p) => p.law === law);
@@ -131,7 +131,7 @@ function packet(root, block, opts = {}) {
   md.push("## Implementation under test (compiled to JS; the laws constrain these)", "");
   for (const d of impl) md.push("```dafny", `${d.header} ${d.body}`.trim(), "```", "");
   if (used.size) { md.push("## Definitions the laws use", ""); for (const [id, x] of used) md.push(`**${id}**${x.comment ? `: ${x.comment}` : ""}`, "", "```dafny", `${x.header} ${x.body}`.trim(), "```", ""); }
-  const notKilled = report?.results?.filter((r) => r.status !== "killed" && r.status !== "stillborn") ?? [];
+  const notKilled = report?.notKilled ?? [];
   if (notKilled.length || Object.keys(cfg.accepted ?? {}).length) md.push("## Mutants not killed by a law (each needs the reviewer's AGREE)", "", "| Mutant | Change | Status | Reviewer |", "|---|---|---|---|", ...notKilled.map((r) => `| \`${r.id}\` | \`${r.from}\` -> \`${r.to}\` | ${r.accepted ?? r.status} | ${review?.acceptedMutants?.[r.id] ?? "-"} |`), "");
   if (review?.general) md.push("## Reviewer: general notes", "", review.general, "");
   if (problems.length) md.push("## Packet problems", "", ...problems.map((p) => `- ${p}`), "");

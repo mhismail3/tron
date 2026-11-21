@@ -45,8 +45,11 @@ test("mutation and packet gates fail for the right reasons", (t) => {
   const cli = (...args) => spawnSync(join(ROOT, "scripts/tron"), ["proof", ...args, "--root", root], { encoding: "utf8" });
   const mutate = (out, ...args) => {
     const block = args[0] === "demo/timeout" ? args.shift() : "demo/clamp";
-    const run = cli("mutate", block, "--jobs", "2", "--out", out, ...args);
-    const report = JSON.parse(readFileSync(out, "utf8"));
+    const run = cli("mutate", block, "--jobs", "2", "--out", out, "--report", `${out}.full`, ...args);
+    const digest = JSON.parse(readFileSync(out, "utf8"));
+    const report = JSON.parse(readFileSync(`${out}.full`, "utf8"));
+    assert.deepEqual(digest.summary, report.summary);
+    assert.deepEqual(digest.notKilled, report.results.filter((r) => r.status !== "killed" && r.status !== "stillborn"));
     return { status: run.status, summary: report.summary, byId: Object.fromEntries(report.results.map((r) => [r.id, r])) };
   };
   const variant = (name) => join(FIXTURES, "mutate-variants", name);
@@ -56,6 +59,18 @@ test("mutation and packet gates fail for the right reasons", (t) => {
   assert.deepEqual([real.summary.pass, real.summary.valid, real.summary.killed, real.summary.accepted, real.summary.survived, real.summary.unknown], [true, 16, 10, 6, 0, 0]);
   for (const r of Object.values(real.byId).filter((x) => x.status !== "killed")) assert.match(r.accepted, /^equivalent \(proven\): /, r.id);
   assert.deepEqual(real.byId[ALWAYS_HI].killedBy, ["L2 inside"]);
+
+  const digestPath = join(root, "blocks/demo/clamp/mutation-report.json");
+  const recheck = (path) => cli("mutate", "demo/clamp", "--jobs", "2", "--recheck", path, "--sample", "3");
+  const honest = recheck(digestPath);
+  assert.equal(honest.status, 0, honest.stdout + honest.stderr);
+  assert.match(honest.stdout, /"recheck":"ok"/);
+  const forged = JSON.parse(readFileSync(digestPath, "utf8"));
+  forged.notKilled = forged.notKilled.filter((r) => r.id !== "Clamp/boundary/<-><=#1");
+  writeFileSync(join(base, "forged.json"), JSON.stringify(forged));
+  const caught = recheck(join(base, "forged.json"));
+  assert.equal(caught.status, 1);
+  assert.match(caught.stdout, /"recheck":"mismatch"/);
 
   const weak = mutate(join(base, "weak.json"), "--laws", variant("weak-L2.dfy"));
   assert.equal(weak.status, 1);

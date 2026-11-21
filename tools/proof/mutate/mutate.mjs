@@ -239,29 +239,34 @@ const generated = mutants(implSrc, tokenize(implSrc), cfg.symbols, lawFiles.flat
 let all = generated;
 if (opt("--only")) all = all.filter((m) => m.id.includes(opt("--only")));
 
+const statusDigest = (rs) => createHash("sha256").update(rs.map((r) => `${r.id}\t${r.status}\t${r.accepted ? 1 : 0}`).sort().join("\n")).digest("hex");
 const recheck = opt("--recheck") ? JSON.parse(readFileSync(opt("--recheck"), "utf8")) : null;
-let recheckProblems = [];
+let rechecked;
 if (recheck) {
   const fail = (why) => { console.log(JSON.stringify({ recheck: "mismatch", why })); process.exit(1); };
-  const rs = recheck.results;
-  if (rs.length !== generated.length || rs.some((r) => !generated.some((m) => m.id === r.id))) fail("report's mutant set differs from the generated set");
-  const bogus = rs.filter((r) => r.accepted && !cfg.accepted?.[r.id]); if (bogus.length) fail(`acceptances not in mutate.json: ${bogus.map((r) => r.id).join(", ")}`);
-  const vs = rs.filter((r) => r.status !== "stillborn"), cnt = (st) => vs.filter((r) => r.status === st && !r.accepted).length;
-  const derived = { mutants: rs.length, stillborn: rs.length - vs.length, valid: vs.length, killed: cnt("killed"), survived: cnt("survived"), accepted: vs.filter((r) => r.accepted).length,
+  const listed = recheck.notKilled;
+  if (!Array.isArray(listed) || typeof recheck.statuses !== "string") fail("report is not a mutation digest (statuses, notKilled)");
+  const unknownIds = listed.filter((r) => !generated.some((m) => m.id === r.id)); if (unknownIds.length) fail(`report names mutants not generated: ${unknownIds.map((r) => r.id).join(", ")}`);
+  const bogus = listed.filter((r) => r.accepted && !cfg.accepted?.[r.id]); if (bogus.length) fail(`acceptances not in mutate.json: ${bogus.map((r) => r.id).join(", ")}`);
+  const byId = new Map(listed.map((r) => [r.id, r]));
+  const resolvesAll = async (m) => {
+    const dir = mkdtempSync(join(tmpdir(), "mutate-sb-")); copyBlock(dir); writeFileSync(join(dir, cfg.impl), m.src);
+    try { for (const f of verifyFiles) if ((await sh([DAFNY, "resolve", f], { cwd: dir, env })).code !== 0) return false; return true; }
+    finally { rmSync(dir, { recursive: true, force: true }); }
+  };
+  const stillbornIds = new Set(); let at = 0;
+  await Promise.all(Array.from({ length: jobs }, async () => { while (at < generated.length) { const m = generated[at++]; if (!(await resolvesAll(m))) stillbornIds.add(m.id); } }));
+  const listedStillborn = listed.filter((r) => stillbornIds.has(r.id)); if (listedStillborn.length) fail(`mutants listed as not killed do not resolve: ${listedStillborn.map((r) => r.id).join(", ")}`);
+  rechecked = generated.map((m) => stillbornIds.has(m.id) ? { id: m.id, status: "stillborn" } : byId.get(m.id) ?? { id: m.id, status: "killed" });
+  const vs = rechecked.filter((r) => r.status !== "stillborn"), cnt = (st) => vs.filter((r) => r.status === st && !r.accepted).length;
+  const derived = { mutants: rechecked.length, stillborn: rechecked.length - vs.length, valid: vs.length, killed: cnt("killed"), survived: cnt("survived"), accepted: vs.filter((r) => r.accepted).length,
     unknown: vs.filter((r) => ["unknown-timeout", "unmapped", "verifier-error"].includes(r.status)).length };
-  derived.pass = recheck.summary.filter == null && vs.length > 0 && derived.stillborn / rs.length <= 0.4 && derived.survived === 0 && derived.unknown === 0;
-  for (const [k, v] of Object.entries(derived)) if (recheck.summary[k] !== v) fail(`summary.${k} ${recheck.summary[k]} but results imply ${v}`);
-
-  const sdir = mkdtempSync(join(tmpdir(), "mutate-sb-")); copyBlock(sdir);
-  for (const r of rs.filter((x) => x.status === "stillborn")) {
-    writeFileSync(join(sdir, cfg.impl), generated.find((m) => m.id === r.id).src);
-    const res = await sh([DAFNY, "resolve", cfg.verify[0]], { cwd: sdir, env });
-    if (res.code === 0) { rmSync(sdir, { recursive: true, force: true }); fail(`mutant ${r.id} is labelled stillborn but resolves`); }
-  }
-  rmSync(sdir, { recursive: true, force: true });
+  derived.pass = recheck.summary.filter == null && vs.length > 0 && derived.stillborn / rechecked.length <= 0.4 && derived.survived === 0 && derived.unknown === 0;
+  for (const [k, v] of Object.entries(derived)) if (recheck.summary[k] !== v) fail(`summary.${k} ${recheck.summary[k]} but the regenerated mutants imply ${v}`);
+  if (statusDigest(rechecked) !== recheck.statuses) fail("statuses digest differs from the regenerated mutants' labels");
   const seed = randomBytes(16).toString("hex"), rank = (id) => createHash("sha256").update(seed + id).digest("hex");
-  const killed = rs.filter((r) => r.status === "killed").map((r) => r.id).sort((a, b) => rank(a).localeCompare(rank(b)));
-  const pick = new Set([...killed.slice(0, Number(opt("--sample", 6))), ...rs.filter((r) => r.status !== "killed" && r.status !== "stillborn").map((r) => r.id)]);
+  const killed = rechecked.filter((r) => r.status === "killed").map((r) => r.id).sort((a, b) => rank(a).localeCompare(rank(b)));
+  const pick = new Set([...killed.slice(0, Number(opt("--sample", 6))), ...listed.map((r) => r.id)]);
   all = generated.filter((m) => pick.has(m.id));
 }
 for (const id of Object.keys(cfg.accepted ?? {})) if (!generated.some((m) => m.id === id)) { console.error(`accepted mutant ${id} matches no generated mutant (stale acceptance)`); process.exit(2); }
@@ -327,7 +332,7 @@ if (retry.length) {
 rmSync(work, { recursive: true, force: true });
 results.sort((a, b) => a.line - b.line || a.col - b.col || a.id.localeCompare(b.id));
 if (recheck) {
-  const want = Object.fromEntries(recheck.results.map((r) => [r.id, `${r.status}|${r.accepted ? "accepted" : ""}`]));
+  const want = Object.fromEntries(rechecked.map((r) => [r.id, `${r.status}|${r.accepted ? "accepted" : ""}`]));
   const bad = results.filter((r) => want[r.id] !== `${r.status}|${r.accepted ? "accepted" : ""}`).map((r) => ({ id: r.id, report: want[r.id], now: `${r.status}|${r.accepted ? "accepted" : ""}` }));
   const out = { recheck: bad.length ? "mismatch" : "ok", inputsHash: blockHash(root, cfg), reportHash: recheck.summary.inputsHash, sampled: results.map((r) => r.id), mismatches: bad };
   console.log(JSON.stringify(out)); process.exit(bad.length || out.inputsHash !== out.reportHash ? 1 : 0);
@@ -354,7 +359,8 @@ const md = [`# Mutation report: ${cfg.block} (${cfg.tier})`, "", `laws: \`${summ
   "| Operator | Generated | Stillborn | Valid | Killed | Survived | Unknown | Accepted |", "|---|---|---|---|---|---|---|---|", ...Object.entries(byOp).map(([o, c]) => `| ${o} | ${results.filter((r) => r.op === o).length} | ${results.filter((r) => r.op === o && r.status === "stillborn").length} | ${c.valid} | ${c.killed} | ${c.survived} | ${c.unknown} | ${c.accepted} |`), ""];
 const bad = valid.filter((r) => r.status !== "killed" || r.accepted);
 if (bad.length) md.push("| Not killed by a law | Where | Change | Status |", "|---|---|---|---|", ...bad.map((r) => `| \`${r.id}\` | ${r.sym} ${r.line}:${r.col} | \`${r.from}\` -> \`${r.to}\` | ${r.accepted ? `accepted: ${r.accepted}` : r.status + (r.acceptanceRejected ? ` (acceptance rejected: ${r.acceptanceRejected.join(" ").replace(/\|/g, "/")})` : "")} |`), "");
-const outPath = opt("--out");
-if (outPath) { writeFileSync(outPath, JSON.stringify({ summary, perLaw, results }, null, 1)); writeFileSync(outPath.replace(/\.json$/, ".md"), md.join("\n")); }
+const notKilled = results.filter((r) => r.status !== "killed" && r.status !== "stillborn");
+if (opt("--out")) writeFileSync(opt("--out"), `${JSON.stringify({ summary, perLaw, statuses: statusDigest(results), notKilled }, null, 1)}\n`);
+if (opt("--report")) writeFileSync(opt("--report"), JSON.stringify({ summary, perLaw, results }, null, 1));
 console.log(md.join("\n"));
 process.exit(summary.pass ? 0 : 1);
