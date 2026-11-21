@@ -6,7 +6,6 @@ enum TronTopBlurStyle {
     case dashboard
     case sheet
     case toolDetail
-    case logs
 
     var height: CGFloat {
         switch self {
@@ -14,7 +13,6 @@ enum TronTopBlurStyle {
         case .dashboard: 176
         case .sheet: 116
         case .toolDetail: 100
-        case .logs: 184
         }
     }
 
@@ -22,7 +20,7 @@ enum TronTopBlurStyle {
         switch self {
         case .chat: 24
         case .dashboard: 22
-        case .sheet, .toolDetail, .logs: 20
+        case .sheet, .toolDetail: 20
         }
     }
 }
@@ -120,17 +118,108 @@ private struct TronTopBlurModifier: ViewModifier {
     }
 }
 
+@MainActor @Observable
+final class TronTopBlurFade {
+    private(set) var progress: CGFloat = 0
+
+    func update(offset: CGFloat, distance: CGFloat) {
+        let next = offset.isFinite ? min(1, max(0, offset / distance)) : 0
+        guard next != progress else { return }
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { progress = next }
+    }
+
+    static func revealedOffset(offset: CGFloat, insetTop: CGFloat, insetBottom: CGFloat,
+                               content: CGFloat, container: CGFloat) -> CGFloat {
+        min(offset + insetTop, max(0, content + insetTop + insetBottom - container))
+    }
+}
+
+struct TronTopBlurFeed {
+    let fade: TronTopBlurFade
+    let distance: CGFloat
+
+    @MainActor func report(_ scrollView: UIScrollView) {
+        let inset = scrollView.adjustedContentInset
+        fade.update(offset: TronTopBlurFade.revealedOffset(
+            offset: scrollView.contentOffset.y, insetTop: inset.top, insetBottom: inset.bottom,
+            content: scrollView.contentSize.height, container: scrollView.bounds.height
+        ), distance: distance)
+    }
+}
+
+private struct TronTopBlurFeedKey: EnvironmentKey {
+    static let defaultValue: TronTopBlurFeed? = nil
+}
+
+extension EnvironmentValues {
+    var tronTopBlurFeed: TronTopBlurFeed? {
+        get { self[TronTopBlurFeedKey.self] }
+        set { self[TronTopBlurFeedKey.self] = newValue }
+    }
+}
+
+@MainActor
+final class TronTopBlurScrollObservation {
+    private weak var scrollView: UIScrollView?
+    private var observations: [NSKeyValueObservation] = []
+    private var feed: TronTopBlurFeed?
+
+    nonisolated init() {}
+
+    func attach(_ scrollView: UIScrollView, feed: TronTopBlurFeed?) {
+        self.feed = feed
+        if scrollView !== self.scrollView {
+            self.scrollView = scrollView
+            observations = [
+                scrollView.observe(\.contentOffset) { [weak self] _, _ in MainActor.assumeIsolated { self?.report() } },
+                scrollView.observe(\.contentSize) { [weak self] _, _ in MainActor.assumeIsolated { self?.report() } },
+            ]
+        }
+        report()
+    }
+
+    private func report() {
+        if let scrollView { feed?.report(scrollView) }
+    }
+}
+
 private struct TronTopBlurSurfaceModifier: ViewModifier {
     @Environment(\.tronTopBlurStyle) private var style
+    @State private var fade = TronTopBlurFade()
 
     func body(content: Content) -> some View {
-        content
+        let chrome = content
             .frame(maxWidth: .infinity)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar, .bottomBar)
             .toolbarBackground(.clear, for: .navigationBar, .bottomBar)
-            .overlay(alignment: .top) {
-                if let style { TronTopBlurOverlay(style: style) }
-            }
+        if let style {
+            chrome
+                .environment(\.tronTopBlurFeed, TronTopBlurFeed(fade: fade, distance: style.height))
+                .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                    TronTopBlurFade.revealedOffset(
+                        offset: geometry.contentOffset.y, insetTop: geometry.contentInsets.top,
+                        insetBottom: geometry.contentInsets.bottom,
+                        content: geometry.contentSize.height, container: geometry.containerSize.height
+                    )
+                } action: { _, offset in
+                    fade.update(offset: offset, distance: style.height)
+                }
+                .overlay(alignment: .top) { TronFadingTopBlurOverlay(style: style, fade: fade) }
+        } else {
+            chrome
+        }
+    }
+}
+
+private struct TronFadingTopBlurOverlay: View {
+    let style: TronTopBlurStyle
+    let fade: TronTopBlurFade
+
+    var body: some View {
+        TronTopBlurOverlay(style: style)
+            .opacity(fade.progress)
     }
 }
 

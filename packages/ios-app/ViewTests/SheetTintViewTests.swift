@@ -63,6 +63,34 @@ final class SheetTintViewTests: ShuffledTestCase {
         }
     }
 
+    func testSheetTopBlurTracksScrollFromInvisibleAtRest() async throws {
+        try await mounted(["-tron-settings-navigation-fixture"], contentSize: .accessibilityExtraExtraExtraLarge) { app in
+            try await app.until("Settings") { app.navigationTitle("Settings") != nil }
+            let scroll = try XCTUnwrap(MountedFixture.views(UIScrollView.self, in: app.top)
+                .filter { $0.contentSize.height > $0.bounds.height }.max { $0.bounds.height < $1.bounds.height }, app.tree())
+            let top = -scroll.adjustedContentInset.top
+            func blur(at offset: CGFloat) async throws -> Float {
+                scroll.setContentOffset(CGPoint(x: 0, y: top + offset), animated: false)
+                var opacity: Float = -1
+                try await app.until("the top blur at \(offset)") {
+                    let next = MountedFixture.views(VariableBackdropBlurView.self, in: app.top).map { view in
+                        sequence(first: view.layer, next: \.superlayer).reduce(Float(1)) { $0 * $1.opacity }
+                    }.max() ?? 0
+                    defer { opacity = next }
+                    return next == opacity
+                }
+                return opacity
+            }
+            XCTAssertEqual(try await blur(at: 0), 0, accuracy: 0.01, "The sheet top blur shows at rest")
+            XCTAssertEqual(try await blur(at: -40), 0, accuracy: 0.01, "Pull-down overscroll shows the top blur")
+            XCTAssertEqual(try await blur(at: TronTopBlurStyle.sheet.height / 2), 0.5, accuracy: 0.05,
+                           "The top blur is not proportional to the scroll")
+            XCTAssertEqual(try await blur(at: TronTopBlurStyle.sheet.height * 2), 1, accuracy: 0.01,
+                           "The top blur does not reach full strength after scrolling")
+            XCTAssertEqual(try await blur(at: 0), 0, accuracy: 0.01, "The top blur stays after scrolling back")
+        }
+    }
+
     @discardableResult
     func assertToolbarTint(_ app: MountedFixture, title: String, file: StaticString = #filePath,
                            line: UInt = #line) async throws -> [Double] {

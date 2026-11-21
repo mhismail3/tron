@@ -433,6 +433,15 @@ struct AttachmentPDFView: UIViewRepresentable {
             view.autoScales = true
         }
         softenScrollEdges(in: view, secondaryToChat: context.environment.chatOwnsStatusBar)
+        if let scrollView = Self.scrollView(in: view) {
+            context.coordinator.attach(scrollView, feed: context.environment.tronTopBlurFeed)
+        }
+    }
+
+    func makeCoordinator() -> TronTopBlurScrollObservation { TronTopBlurScrollObservation() }
+
+    private static func scrollView(in view: UIView) -> UIScrollView? {
+        view as? UIScrollView ?? view.subviews.lazy.compactMap(scrollView).first
     }
 
     private func softenScrollEdges(in view: UIView, secondaryToChat: Bool) {
