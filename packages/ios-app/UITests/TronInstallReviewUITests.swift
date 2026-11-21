@@ -98,7 +98,7 @@ final class TronInstallReviewUITests: XCTestCase {
 
     @MainActor private func launch(dark: Bool = false, large: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-readonly-attachment-fixture", "-readonly-preview-scenario", "display-swift-install-review-inline-\(dark ? "dark" : "light")", "-tron.experimental.swiftApps", "YES", "-AppleLanguages", "(en)", "-AppleLocale", "en_US", "-themeColor", "emerald"]
+        app.launchArguments = ["-tron-readonly-attachment-fixture", "-readonly-preview-scenario", "display-swift-install-review-inline-\(dark ? "dark" : "light")", "-AppleLanguages", "(en)", "-AppleLocale", "en_US", "-themeColor", "emerald"]
         if large { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
         app.launch()
         return app

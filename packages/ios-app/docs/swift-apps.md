@@ -1,22 +1,22 @@
-# Experimental: running single-file SwiftUI apps (#889)
+# Running single-file SwiftUI apps (#889)
 
-Off by default behind **Settings › System › Setup › Run Swift files**. The agent writes a
+Always on. The agent writes a
 single-file SwiftUI app and presents it with `display`; the phone shows the source in the shared
-document sheet and, with the flag on, a play control runs it as a native SwiftUI app in a large
+document sheet and a play control runs it as a native SwiftUI app in a large
 sheet (idea: <https://x.com/ronithhh/status/2102163666422702538>).
 
 ## End to end
 
 1. The agent calls `display` with a `.swift` `path` or `internal_file`; the Gateway already
    classifies it as `code` ([display artifacts](display-artifacts.md)).
-2. `AttachmentFilePreviewSheet` opens it; with `SwiftAppExperiment` on, `TronDocumentSheet`
+2. `AttachmentFilePreviewSheet` opens it; `TronDocumentSheet`
    shows a leading **Run <file>** control. Truncated previews never run.
 3. `SwiftAppRunnerSheet` parses once (`SwiftAppParser`) and renders through
    `SwiftAppRenderer`; dismissal discards the program and its state.
 
 ## Inline mini-app card (#1339)
 
-An **inline** `.swift` display with the flag on shows `SwiftAppDisplayCard` instead of source:
+An **inline** `.swift` display shows `SwiftAppDisplayCard` instead of source:
 Swift logo, title, caption (else "Swift app") and a play control in the inline card's lavender
 glass (`DisplayInlineLayoutPolicy`, `DisplayInlineControlFace`). The card is one button; its
 menu keeps **View Source** (with its own Run) and **Tool Details**. It loads through the same
@@ -52,7 +52,7 @@ installation or obtain feed authority.
 
 ## Reviewed Install App and Builds (#1162)
 
-With Run Swift files on, `swift_app offer` renders an inline Swift card whose
+`swift_app offer` renders an inline Swift card whose
 native producer intent opens Install App review, not a disposable preview.
 Preparation and review share one Settings-style navigation shell and medium/large
 detents. The main review shows the app, where it runs and declared access, with
@@ -103,20 +103,6 @@ interpreter (light/dark/default/XXXL). Both disable build installation. The
 proposal is synthetic. The real-Gateway `testBuildsInstallLight/Dark/LightXXXL/DarkXXXL`
 journeys separately exercise the production offer/review/Apps paths with the canonical
 interpreted source and synthetic publisher files; they never tap Install Build.
-
-## Flag
-
-The stored choice is the UserDefaults key `tron.experimental.swiftApps`, owned by the observable
-`SwiftAppExperiment.shared`, so open sheets and `canRun` readers see a change at once. The launch
-argument `-tron.experimental.swiftApps YES|NO` sets the same stored choice.
-
-Home can change it for one explicitly selected, paired iPhone (settings key `experimental.swiftApps`,
-qualifier `device`, writers `ui` and `home`, no native tap). The Gateway owns no copy: a read or
-change is a request to that phone's single newest ready authenticated connection
-(`DevicePreferenceCoordinator` answers `device.preference.request`), which compares the expected value
-with the stored one and replies `applied` or `conflict` through `device.preference.respond`. A change
-that the phone does not confirm is reported unknown and is inspected, never replayed. Changing the flag
-never installs or runs Swift source.
 
 Use the [iOS development helpers](../../../.agents/skills/tron-ios/SKILL.md) for
 simulator/device work; do not bypass their host leases.
@@ -250,8 +236,7 @@ writes after awaits; accepted install work also blocks conflicting management.
 
 ## Apps menu and Manage
 
-The Tron menu's **Apps** item (always offered beside Automations; not gated by the
-"Run Swift files" experiment, which only controls chat Run buttons) opens `InstalledAppsSheet`:
+The Tron menu's **Apps** item (always offered beside Automations) opens `InstalledAppsSheet`:
 the selected Gateway's `apps.pending` and `apps.list`, refreshed on open, pull and
 after review or runner closes; Manage updates the same catalog. Valid, uninstalled offers appear in a **Pending**
 section above installed apps, using the shared list rows and primary theme. Installed
@@ -318,8 +303,8 @@ through the read-only attachment fixture (`-readonly-preview-scenario display-sw
 inline card open/replay and bounded states (#1339), the recovered Builds preview (#1319), model
 initialization and rollback, enum payloads, protocols and geometry, refused protocol
 extensions, optional chaining, timers, `habits` (generics, bindings, pickers), dictionaries,
-the flag and truncation gate, `budget` (shared store, tabs, dismissal, the link policy at the
-fixture's `OpenURLAction`), the live Settings switch, contained failures (`broken`, nesting
+the truncation gate, `budget` (shared store, tabs, dismissal, the link policy at the
+fixture's `OpenURLAction`), contained failures (`broken`, nesting
 limit, `limits` with loops, recursion, overflow, hostile formats, rollback) and sibling-
 preserving diagnostics. `assertToolbarTint` checks the hosted chrome. Screenshots are labelled
 simulator evidence on fixture data.

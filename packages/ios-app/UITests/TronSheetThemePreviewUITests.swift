@@ -35,7 +35,7 @@ final class TronSheetThemePreviewUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 15))
         app.buttons["Open Settings"].tap()
-        expand(app, title: "Global Settings")
+        expand(app, title: "Settings")
         return app
     }
 

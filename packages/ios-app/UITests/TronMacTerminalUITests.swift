@@ -71,7 +71,7 @@ final class TronMacTerminalUITests: XCTestCase {
         try capture(app, "persist-before-dismiss")
 
         app.navigationBars.buttons["Done"].firstMatch.tap()
-        let row = app.buttons["settings-link-Mac Terminal"]
+        let row = app.buttons["settings-mac-terminal"]
         XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
         row.tap()
         waitForEmulator(app, containing: "SHELL_ONE_42")
@@ -223,9 +223,8 @@ final class TronMacTerminalUITests: XCTestCase {
 
     @MainActor
     private func openMacTerminal(_ app: XCUIApplication) {
-        let row = app.buttons["settings-link-Mac Terminal"]
+        let row = app.buttons["settings-mac-terminal"]
         XCTAssertTrue(row.waitForExistence(timeout: 15), app.debugDescription)
-        for _ in 0..<12 where !row.isHittable { app.swipeUp() }
         row.tap()
     }
 
@@ -301,9 +300,8 @@ final class TronMacTerminalLoadingUITests: XCTestCase {
             app.launchArguments = ["-tron-mac-terminal-fixture", "-mac-terminal-scenario", "loading"]
                 + (scheme == "light" ? ["-mac-terminal-light"] : [])
             app.launch()
-            let row = app.buttons["settings-link-Mac Terminal"]
+            let row = app.buttons["settings-mac-terminal"]
             XCTAssertTrue(row.waitForExistence(timeout: 15), app.debugDescription)
-            for _ in 0..<12 where !row.isHittable { app.swipeUp() }
             row.tap()
             let title = app.descendants(matching: .any)["terminal-sheet-title"].firstMatch
             XCTAssertTrue(title.waitForExistence(timeout: 15), app.debugDescription)

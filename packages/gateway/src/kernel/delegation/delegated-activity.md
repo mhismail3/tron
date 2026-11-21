@@ -126,8 +126,10 @@ not depend on the Transport logger implementation. Optional logging and metadata
   `runId`/`asyncId` and never gain ownership from array position.
 - Async artifacts: child identity is `childId`, then workflow key, then child `runId`, else
   `step:N`. A workflow's `runId` and its canonical session owner are independent (resumes may
-  share a session); contradictory bindings for one process fail closed. A detached single run
-  may use the parent fan-out root only through a matching private recovery descriptor. A
+  share a session); contradictory bindings for one process fail closed. A child's session owner
+  is its embedded-header `sessionOwnerId` (a revived run writes into the original run's
+  directory); a detached single run without one may use the parent fan-out root only through a
+  matching private recovery descriptor. A
   session target published before its JSONL exists is retried on bounded backoff and on an
   explicit open; no path scans. Bare launcher acknowledgements stay hidden until child evidence.
 - `status.json`'s first property is the `lifecycleProjection` header, admitted from a 32 KiB

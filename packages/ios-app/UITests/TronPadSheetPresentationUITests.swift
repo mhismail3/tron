@@ -69,12 +69,12 @@ final class TronPadSheetPresentationUITests: XCTestCase {
         let gear = app.navigationBars.buttons["Settings"]
         XCTAssertTrue(gear.waitForExistence(timeout: 5), app.debugDescription)
         gear.tap()
-        let title = app.staticTexts["Global Settings"]
+        let title = app.staticTexts["Settings"]
         XCTAssertTrue(title.waitForExistence(timeout: 5), app.debugDescription)
-        let settings = sheetFrame(app, title: "Global Settings", done: app.buttons["Done"].firstMatch)
+        let settings = sheetFrame(app, title: "Settings", done: app.buttons["Done"].firstMatch)
         assertTrailingColumn(settings, in: window)
-        keepScreenshot(app, "ipad-landscape-global-settings")
-        assertChatInteractive(app, beside: settings, typing: " and beside Global Settings")
+        keepScreenshot(app, "ipad-landscape-settings")
+        assertChatInteractive(app, beside: settings, typing: " and beside Settings")
     }
 
     @MainActor

@@ -28,11 +28,42 @@ final class SheetThemePreviewViewTests: ShuffledTestCase {
         }
     }
 
+    func testSelectedThemeSwatchIsSaturatedWithoutBorder() async throws {
+        for mode in ["light", "dark"] {
+            try await mounted(["-tron-settings-fixture", "-settings-nested", "-settings-expanded-review"]
+                              + (mode == "dark" ? ["-settings-dark"] : [])) { app in
+                try await app.activate("Open Settings")
+                try await open(app, "settings-link-Appearance", title: "Appearance")
+                let selected = try await revealed(app, "theme-color-emerald")
+                XCTAssertEqual(selected.accessibilityValue, "Selected")
+                let other = try await app.still("the swatch row") {
+                    app.element("theme-color-burgundy").map { [$0.accessibilityFrame.minX, $0.accessibilityFrame.minY,
+                                                              $0.accessibilityFrame.width, $0.accessibilityFrame.height] }
+                }
+                let tile = app.element("theme-color-emerald")!.accessibilityFrame
+                let otherTile = CGRect(x: other[0], y: other[1], width: other[2], height: other[3])
+                let image = app.render()
+                @MainActor func saturation(_ area: CGRect) -> Double {
+                    let pixels = app.pixels(area, image: image) ?? []
+                    XCTAssertFalse(pixels.isEmpty, "\(mode): no pixels in \(area)")
+                    return pixels.map { ($0.max()! - $0.min()!) / max($0.max()!, 1) }.reduce(0, +) / Double(max(pixels.count, 1))
+                }
+                func edge(_ frame: CGRect) -> CGRect { CGRect(x: frame.minX + 0.5, y: frame.midY + 6, width: 1.5, height: 12) }
+                func fill(_ frame: CGRect) -> CGRect { CGRect(x: frame.minX + 5, y: frame.midY + 6, width: 4, height: 12) }
+                let selectedFill = saturation(fill(tile))
+                XCTAssertLessThan(saturation(edge(tile)) - selectedFill, 0.08,
+                                  "\(mode): the selected swatch has no border ring (edge \(saturation(edge(tile))) vs fill \(selectedFill))")
+                XCTAssertGreaterThan(selectedFill, saturation(fill(otherTile)) + 0.02,
+                                     "\(mode): the selected swatch's container is more saturated than an unselected one")
+            }
+        }
+    }
+
     private func settings(_ mode: String, _ body: (MountedFixture) async throws -> Void) async throws {
         try await mounted(["-tron-settings-fixture", "-settings-nested", "-settings-expanded-review", "-settings-sheet-theme-review"]
                           + (mode == "dark" ? ["-settings-dark"] : [])) { app in
             try await app.activate("Open Settings")
-            try await app.until("Global Settings opens") { app.navigationTitle("Global Settings") != nil }
+            try await app.until("Settings opens") { app.navigationTitle("Settings") != nil }
             try await app.expandTopSheet()
             try await open(app, "settings-link-Connections", title: "Connections")
             try await body(app)

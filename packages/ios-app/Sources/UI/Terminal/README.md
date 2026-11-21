@@ -14,7 +14,7 @@ neither Tron.app nor the Gateway owns its process or connection.
 
 ## Contract
 
-- Settings › System › **Mac Terminal** is the only entry point. The Gateway is
+- The Settings toolbar's **Mac Terminal** button (`apple.terminal`) is the only entry point. The Gateway is
   needed only to enroll or revoke this iPhone's key, not to reconnect.
 - The physical iPhone uses a non-exportable Secure Enclave P-256 key with
   `AfterFirstUnlockThisDeviceOnly`; only the Simulator uses a software key.

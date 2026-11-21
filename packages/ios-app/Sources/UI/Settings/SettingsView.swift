@@ -8,6 +8,7 @@ struct SettingsView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @PresentationState private var showsNotifications = false
+    @PresentationState private var showsMacTerminal = false
     @PresentationState private var hasRefreshedNotificationBadge = false
 
     init(onImported: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in }) {
@@ -17,33 +18,23 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 18) {
-                    SettingsGroupCard(.iphone) {
-                        settingsLink("Appearance", summary: "Dashboard, activity, theme, and fonts",
-                                     icon: "circle.lefthalf.filled") { AppearanceSettingsView() }
+                VStack(spacing: 12) {
+                    settingsLink("Appearance", summary: "Dashboard, activity, theme, and fonts",
+                                 icon: "circle.lefthalf.filled") { AppearanceSettingsView() }
+                    settingsLink("Connections", summary: "Paired Macs and authorized devices", icon: "desktopcomputer") {
+                        ConnectionsSettingsView()
                     }
-                    SettingsGroupCard(.accounts) {
-                        settingsLink("Connections", summary: "Paired Macs and authorized devices", icon: "desktopcomputer") {
-                            ConnectionsSettingsView()
-                        }
-                        TronSettingsDivider()
-                        settingsLink("Model Providers", summary: "Provider accounts and sign-in", icon: "key") {
-                            ProvidersSettingsView(sessionID: nil)
-                        }
+                    settingsLink("Model Providers", summary: "Provider accounts and sign-in", icon: "key") {
+                        ProvidersSettingsView(sessionID: nil)
                     }
-                    SettingsGroupCard(.tools) {
-                        settingsLink("MCP Servers", summary: "Tool providers and their sign-ins", icon: "server.rack") {
-                            MCPServersSettingsView()
-                        }
+                    settingsLink("MCP Servers", summary: "Tool providers and their sign-ins", icon: "server.rack") {
+                        MCPServersSettingsView()
                     }
-                    SettingsGroupCard(.diagnostics) {
-                        MacTerminalSettingsRow()
-                        TronSettingsDivider()
-                        settingsLink("Setup", summary: "Import, session storage, telemetry, and prototypes", icon: "gearshape.2") {
-                            SetupSettingsView()
-                        }
+                    if model.homeStatus.capabilityEnabled, let profileID = model.selectedGatewayProfileID() {
+                        HomeTaskSheet(permissionsFor: profileID)
                     }
                 }
+                .tronSettingsVisualTheme(accent: .tronPrimary)
                 .padding(.horizontal, 20)
                 .padding(.top, 18)
                 .padding(.bottom, 40)
@@ -57,8 +48,15 @@ struct SettingsView: View {
                         unreadCount: model.notificationInbox.unreadCount,
                         action: { showsNotifications = true }
                     )
+                    Button { showsMacTerminal = true } label: {
+                        Image(systemName: "apple.terminal")
+                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
+                            .tronToolbarAction(accent: .tronPrimary)
+                    }
+                    .accessibilityLabel("Mac Terminal")
+                    .accessibilityIdentifier("settings-mac-terminal")
                 }
-                ToolbarItem(placement: .principal) { TronSheetTitle(title: "Global Settings") }
+                ToolbarItem(placement: .principal) { TronSheetTitle(title: "Settings") }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: dynamicTypeSize.isAccessibilitySize ? "xmark" : "checkmark")
@@ -78,6 +76,11 @@ struct SettingsView: View {
             identity: "settings.notifications"
         ) {
             NotificationInboxView(onOpenSession: onImported)
+        }
+        .tronManagedSheet(isPresented: $showsMacTerminal, identity: "settings.Mac Terminal") {
+            MacTerminalSheet()
+                .tronSettingsVisualTheme(accent: .tronPrimary)
+                .tronPresentation()
         }
         .task(id: PresentationActivityTaskID(source: model.settingsFreshness,
                                              presentationActive: presentationActivity.allowsPresentationPublication)) {
@@ -99,77 +102,15 @@ struct SettingsView: View {
         _ title: String,
         summary: String,
         icon: String,
-        onDismiss: (() -> Void)? = nil,
         @ViewBuilder destination: @escaping () -> Destination
     ) -> some View {
-        TronProgressiveSheetLink(accessibilityLabel: title, onDismiss: onDismiss, destination: destination) {
-            TronSettingsRow(icon: icon, title: title, subtitle: summary, subtitleColor: .tronTextSecondary)
-                .contentShape(Rectangle())
+        TronProgressiveSheetLink(accessibilityLabel: title, destination: destination) {
+            TronGlassCard {
+                TronSettingsRow(icon: icon, title: title, subtitle: summary, subtitleColor: .tronTextSecondary)
+                    .contentShape(Rectangle())
+            }
         }
         .accessibilityIdentifier("settings-link-\(title)")
-    }
-}
-
-enum SettingsGroupKind {
-    case tools, accounts, more, iphone, diagnostics
-
-    var title: String {
-        switch self {
-        case .tools: "Agent & Tools"
-        case .accounts: "Accounts"
-        case .more: "More"
-        case .iphone: "This iPhone"
-        case .diagnostics: "System"
-        }
-    }
-
-    @MainActor var accent: Color {
-        switch self {
-        case .tools, .accounts, .more, .iphone: .tronPrimary
-        case .diagnostics: .tronSteel
-        }
-    }
-
-    static let placedSections: Set<String> = ["model", "workers", "context", "run", "trust", "notifications", "connections", "tools", "sources"]
-
-    static func icon(forSection id: String) -> String {
-        switch id {
-        case "model": "cpu"
-        case "context": "rectangle.compress.vertical"
-        case "run": "arrow.clockwise"
-        case "workers": "person.2"
-        case "advanced": "gearshape.2"
-        case "tools": "wrench.and.screwdriver"
-        case "sources": "shippingbox"
-        default: "slider.horizontal.3"
-        }
-    }
-}
-
-struct SettingsGroupCard<Content: View>: View {
-    let kind: SettingsGroupKind
-    @ViewBuilder let content: () -> Content
-
-    init(_ kind: SettingsGroupKind, @ViewBuilder content: @escaping () -> Content) {
-        self.kind = kind; self.content = content
-    }
-
-    var body: some View {
-        TronSettingsGroup(kind.title, accent: kind.accent) { content() }
-            .tronSettingsVisualTheme(accent: kind.accent)
-    }
-}
-
-struct SetupSettingsView: View {
-    var body: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            TronSettingsSections(alignment: .leading, spacing: 20, hidesLoneHeading: true) {
-                ExperimentalSettingsContent()
-            }
-            .padding(20)
-        }
-        .tronScrollEdgeChrome()
-        .tronNavigationTitle("Setup")
     }
 }
 

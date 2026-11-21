@@ -17,7 +17,6 @@ struct HostedReadonlyAttachmentFixture: View {
     @State private var before = "none"
     @State private var hasBackgrounded = false
     @State private var poisonPublished = false
-    @State private var showsSettings = false
     @State private var localAttachment: PendingAttachment?
     @State private var pendingStrip: [PendingAttachment] = []
     private let gateway: ReadonlyAttachmentGateway
@@ -63,9 +62,6 @@ struct HostedReadonlyAttachmentFixture: View {
                     ChatView(sessionID: sessionID)
                         .id("\(model.knowledgeDestinationIdentity):\(sessionID)")
                 }
-                if scenario.contains("settings") {
-                    Button("Open Settings") { showsSettings = true }.accessibilityIdentifier("fixture.open-settings")
-                }
                 Text(counters).font(.caption2).accessibilityIdentifier("fixture.preview-counts")
                 Text(native).font(.caption2).accessibilityIdentifier("fixture.preview-native")
                 Text(poisonPublished ? "poison:true" : "poison:false").font(.caption2).accessibilityIdentifier("fixture.preview-poison")
@@ -75,7 +71,6 @@ struct HostedReadonlyAttachmentFixture: View {
             }
             .frame(maxHeight: localAttachment == nil && pendingStrip.isEmpty ? nil : .infinity, alignment: .top)
         }
-        .tronManagedSheet(isPresented: $showsSettings, identity: "fixture.settings") { SettingsView() }
         .environment(\.openURL, OpenURLAction { url in
             SwiftAppLinkTestProbe.shared.opened.append(url.absoluteString)
             return .handled

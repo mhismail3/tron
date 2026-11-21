@@ -58,9 +58,6 @@ extension HomeSheet {
                 divider()
                 navigationRow(icon: "switch.2", subtitle: "Pause or resume memory, or disable Home",
                               destination: .controls, id: "home-manage-controls")
-                divider()
-                navigationRow(icon: "lock.shield", subtitle: "Scopes and grants Home's workers may use",
-                              destination: .permissions, id: "home-manage-permissions")
             }
         }
     }

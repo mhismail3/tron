@@ -43,8 +43,13 @@ final class TronSmokeUITests: XCTestCase {
         app.launch(); defer { app.terminate() }
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
-        openManageHome(app)
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10), app.debugDescription)
         openHomePermissions(app)
+        let row = app.descendants(matching: .any)["settings-home-delegation"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
+        reveal(row, in: app)
+        XCTAssertTrue(row.label.contains("Home delegation: All trusted projects"), row.label)
+        XCTAssertTrue(row.label.contains("Reconfirm"), "A restored scope shows the Reconfirm pill: \(row.label)")
         let reconfirm = app.buttons["home-permissions-reconfirm"]
         reveal(reconfirm, in: app); reconfirm.tap()
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
@@ -64,7 +69,7 @@ final class TronSmokeUITests: XCTestCase {
         app.launch(); defer { app.terminate() }
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
-        openManageHome(app)
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10), app.debugDescription)
         openHomePermissions(app)
         reveal(app.buttons["Revoke scope scope-one"], in: app)
         app.buttons["Revoke scope scope-one"].tap()
@@ -416,7 +421,7 @@ final class TronSmokeUITests: XCTestCase {
                 app.launch()
                 XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
                 app.buttons["home-pinned-row"].tap()
-                openManageHome(app)
+                XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10), app.debugDescription)
                 openHomePermissions(app)
                 let anchor = state == "restored" ? app.buttons["home-permissions-reconfirm"] : app.buttons["Revoke scope scope-one"]
                 reveal(anchor, in: app)
@@ -728,9 +733,9 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(gear.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertFalse(app.navigationBars.buttons["Manage Home"].exists)
         gear.tap()
-        XCTAssertTrue(app.staticTexts["Global Settings"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.navigationBars.staticTexts["Settings"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertFalse(app.descendants(matching: .any)["home-manage-state"].exists)
-        XCTAssertTrue(homeControlCount.label.contains("control-count:0"), "Opening Global Settings must not apply controls")
+        XCTAssertTrue(homeControlCount.label.contains("control-count:0"), "Opening Settings must not apply controls")
         keepScreenshot(named: "home-gear-settings-sheet")
         app.buttons["Done"].firstMatch.tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 5), app.debugDescription)
@@ -748,7 +753,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertLessThan(done.frame.minY, mediumTop - 100, "Manage Home must drag to its large detent")
         keepScreenshot(named: "manage-home-large")
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-chapters"].exists)
-        for row in ["home-manage-memory-browser", "home-manage-tasks", "home-manage-controls", "home-manage-permissions"] {
+        for row in ["home-manage-memory-browser", "home-manage-tasks", "home-manage-controls"] {
             XCTAssertTrue(app.descendants(matching: .any)[row].exists, row)
         }
         for row in ["home-manage-pause", "home-manage-disable"] {
@@ -814,7 +819,8 @@ final class TronSmokeUITests: XCTestCase {
                 XCTAssertTrue(app.staticTexts["No tasks"].waitForExistence(timeout: 5))
                 keepScreenshot(named: "home-tasks-empty")
                 app.buttons["home-sheet-done-tasks"].tap()
-                tapManageRow(app, "home-manage-permissions")
+                app.buttons["home-sheet-done-manage"].tap()
+                openHomePermissions(app)
                 let refusal = app.staticTexts["Home task permissions refused"]
                 XCTAssertTrue(refusal.waitForExistence(timeout: 10), app.debugDescription)
                 reveal(refusal, in: app)
@@ -1170,9 +1176,10 @@ final class TronSmokeUITests: XCTestCase {
 
     @MainActor
     private func openHomePermissions(_ app: XCUIApplication) {
-        let row = app.descendants(matching: .any)["home-manage-permissions"]
-        reveal(row, in: app)
-        row.tap()
+        let gear = app.navigationBars.buttons["Settings"]
+        XCTAssertTrue(gear.waitForExistence(timeout: 10), app.debugDescription)
+        gear.tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Settings"].waitForExistence(timeout: 5), app.debugDescription)
     }
 
     private func waitForEnabled(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
@@ -1688,20 +1695,6 @@ final class TronSmokeUITests: XCTestCase {
         tapScrolling(app.buttons["settings-link-Appearance"], in: app)
         XCTAssertTrue(app.navigationBars.staticTexts["Appearance"].waitForExistence(timeout: 5))
         closeTopSheet(app)
-        tapScrolling(app.buttons["settings-link-Setup"], in: app)
-        let experiment = app.switches["Run Swift files"]
-        XCTAssertTrue(experiment.waitForExistence(timeout: 5))
-        let originalExperiment = experiment.value as! String
-        experiment.tap()
-        let changedExperiment = originalExperiment == "1" ? "0" : "1"
-        XCTAssertEqual(experiment.value as? String, changedExperiment)
-        closeTopSheet(app)
-        tapScrolling(app.buttons["settings-link-Setup"], in: app)
-        XCTAssertTrue(experiment.waitForExistence(timeout: 5))
-        XCTAssertEqual(experiment.value as? String, changedExperiment, "The device-local safeguard survives its combined destination")
-        experiment.tap()
-        XCTAssertEqual(experiment.value as? String, originalExperiment)
-        keepScreenshot(named: "1325-setup-experiments-live-controls")
     }
 
     @MainActor

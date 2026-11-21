@@ -7,7 +7,7 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
 
 ## Owns
 
-- Shell: `SettingsView` (`SettingsGroupKind` groups, `SettingsGroupCard`).
+- Shell: `SettingsView` (one flat list of row containers).
 - Choices: `SettingsChoiceSlider`.
 - Exact reviews use the shared `ChangeReviewSheet`.
 - Agent configuration: `ConfigurationSlider(Surface)`.
@@ -15,20 +15,23 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   (`IntegrationSheetRoutes`), `MCPServersSettingsView`, `ConnectionSettingsView`,
   `PairedDeviceDetailView`, `MacReplacementSheet`.
 - Trust: `TrustSettingsView`.
-- This iPhone and diagnostics: `AppearanceSettingsView`, `AppLocalBehaviorSettings`,
+- This iPhone: `AppearanceSettingsView`, `AppLocalBehaviorSettings`,
   `NotificationInboxView`.
 
 ## Contract
 
-- **Layout.** The gear opens one sheet: This iPhone (primary: Appearance, one sheet: Dashboard, Subagent Activity, Color Mode, Theme color, Text Font and Code Font),
-  Accounts (primary: Connections, Model Providers),
-  Agent & Tools (MCP Servers),
-  System (steel blue: Mac Terminal, Setup). Every category destination
-  inherits its group tint for chrome, containers and icons; semantic statuses retain their colors.
-  Primary groups use the selected theme's `tronPrimary`; System uses `tronSteel`, not the neutral `tronSlate` role.
+- **Layout.** The gear opens one Settings sheet: a plain list of row containers with no section headers:
+  Appearance (one sheet: Dashboard, Subagent Activity, Color Mode, Theme color, Text Font and Code Font),
+  Connections, Model Providers, MCP Servers and, on a Home Gateway, Home delegation. Every destination
+  uses the selected theme's `tronPrimary`; semantic statuses retain their colors. The leading toolbar holds
+  Notifications and Mac Terminal (`apple.terminal`), which opens `MacTerminalSheet`.
+- **Home delegation.** One Home per Gateway, so its task permissions are global: one row
+  "Home delegation: All trusted projects" (`HomeTaskSheet(permissionsFor:)`, polled `home.taskPermissions`) with
+  Active, Reconfirm or Not authorized and Revoke; Reconfirm permissions appears only when needed, one-use
+  grants only when any exist. Granting stays on the native approval card.
   The `trust` group has no Global view; the
   `connections` group (Mac Terminal key and private SSH service) is owned by the Mac Terminal sheet.
-  Notifications sit in the toolbar; there is no Value & Source sheet.
+  There is no Value & Source sheet.
   The app has no Trusted Projects list: the agent changes `permissions.projectTrust` and
   `permissions.defaultProjectTrust` behind the native card; the untrusted-project prompt and the
   Project Settings trust row (`TrustSettingsView`) also write `permissions.projectTrust`.
@@ -36,13 +39,14 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   a fresh process. Emerald, Deep Burgundy and Olive Gold share adaptive primary roles;
   semantic statuses and resource identities do not change with the theme. Explicit theme
   selection also applies its bundled alternate app icon, with iOS's automatic change alert.
+  The selected theme swatch shows a checkmark and a more saturated container, never a border.
   Selection rows serialize while UIKit applies the icon; failure leaves the theme applied and
   explains how to retry. Restores and Light/Dark/Auto changes do not request icon changes.
   Home Screen light/dark/clear/tinted renditions remain system/user-controlled and need not match
   the in-app color mode. Section layouts use
   `TronSettingsSections`, including conditional groups. Settings subsheets
   opt in with `hidesLoneHeading: true`: one container has no heading, multiple containers retain
-  their headings, and explanatory detail remains. Top-level settings keep all group headings.
+  their headings, and explanatory detail remains. Top-level Settings has no headings.
 - **Model card rows.** Revert sits before the value; the value pill is rightmost, with independent
   44-point targets, and an override shows the shared Overridden pill beside the row title.
 - **Writes.** Every write is a `settings.change`: dry run first, and a refusal shows under its row.
@@ -51,8 +55,8 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   are disabled, and its change gate serializes writes. Every other setting, outside-change recovery
   (`applyAgain`) and Undo go through the agent's `settings` tool. The Gateway supplies override
   presence and permissions; rows never infer ownership from value equality.
-- **Manage Home and the chat model card.** Manage Home lists Controls (`HomeControlsSection`) and Task
-  Permissions (`HomeTaskSheet(permissionsFor:)`) as navigation rows beside Profile, Memory, Chapters and Tasks.
+- **Manage Home and the chat model card.** Manage Home lists Controls (`HomeControlsSection`) as a navigation
+  row beside Profile, Memory, Chapters and Tasks.
   The chat model card (`ManageModelConfigurationCard`, `session-model-summary` or `home-model-summary`) reads
   `settings.resolve` for the three chat-model keys. Switch Model lists the catalog, Thinking lists the session's
   thinking levels, and Context Window lists the selected model's limits. Writes are `settings.change` at the
@@ -81,7 +85,7 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   Model-registry activation still needs a maintainer-initiated Gateway restart; file edits do
   not promise hot reload.
   `compaction-policy.v1` adds per-field thinking and focus inheritance.
-- **Tools and extensions.** Global Settings has no Tools, Extensions or package rows: the agent
+- **Tools and extensions.** Settings has no Tools, Extensions or package rows: the agent
   changes `tools.*` and `sources.*` (installs and enables behind the native card), updates a
   package with the `settings` tool's `update`, and reads packages, modules and hooks through
   `inventory`. Session and Home Tools sections stay.
