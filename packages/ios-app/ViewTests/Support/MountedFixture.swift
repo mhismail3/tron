@@ -97,6 +97,17 @@ final class MountedFixture {
         guard target?.accessibilityActivate() == true else { throw FixtureNotReady(description: "\(key) refused activation") }
     }
 
+    func pressButton(containing text: String) async throws {
+        var target: NSObject?
+        try await until("a button containing \(text)") {
+            target = Self.elements(in: top).last {
+                $0.accessibilityTraits.contains(.button) && $0.accessibilityLabel?.contains(text) == true
+            }
+            return target != nil
+        }
+        guard target?.accessibilityActivate() == true else { throw FixtureNotReady(description: "\(text) refused activation") }
+    }
+
     func reveal(_ node: NSObject) async throws {
         let frame = node.accessibilityFrame
         let scrolls = Self.views(UIScrollView.self, in: top).filter {
