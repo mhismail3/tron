@@ -239,6 +239,10 @@ const generated = mutants(implSrc, tokenize(implSrc), cfg.symbols, lawFiles.flat
 let all = generated;
 if (opt("--only")) all = all.filter((m) => m.id.includes(opt("--only")));
 
+if (!flag("--list") && !opt("--equiv")) {
+  const doctor = await sh(["/bin/bash", join(REPO, "tools/proof/bootstrap.sh"), "doctor"], { env });
+  if (doctor.code !== 0) { console.error(`pinned toolchain unavailable: ${doctor.out.trim()}`); process.exit(2); }
+}
 const statusDigest = (rs) => createHash("sha256").update(rs.map((r) => `${r.id}\t${r.status}\t${r.accepted ? 1 : 0}`).sort().join("\n")).digest("hex");
 const recheck = opt("--recheck") ? JSON.parse(readFileSync(opt("--recheck"), "utf8")) : null;
 let rechecked;
@@ -249,13 +253,21 @@ if (recheck) {
   const unknownIds = listed.filter((r) => !generated.some((m) => m.id === r.id)); if (unknownIds.length) fail(`report names mutants not generated: ${unknownIds.map((r) => r.id).join(", ")}`);
   const bogus = listed.filter((r) => r.accepted && !cfg.accepted?.[r.id]); if (bogus.length) fail(`acceptances not in mutate.json: ${bogus.map((r) => r.id).join(", ")}`);
   const byId = new Map(listed.map((r) => [r.id, r]));
-  const resolvesAll = async (m) => {
-    const dir = mkdtempSync(join(tmpdir(), "mutate-sb-")); copyBlock(dir); writeFileSync(join(dir, cfg.impl), m.src);
-    try { for (const f of verifyFiles) if ((await sh([DAFNY, "resolve", f], { cwd: dir, env })).code !== 0) return false; return true; }
-    finally { rmSync(dir, { recursive: true, force: true }); }
-  };
   const stillbornIds = new Set(); let at = 0;
-  await Promise.all(Array.from({ length: jobs }, async () => { while (at < generated.length) { const m = generated[at++]; if (!(await resolvesAll(m))) stillbornIds.add(m.id); } }));
+  await Promise.all(Array.from({ length: jobs }, async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mutate-sb-")); copyBlock(dir);
+    try {
+      while (at < generated.length) {
+        const m = generated[at++]; writeFileSync(join(dir, cfg.impl), m.src);
+        for (const f of verifyFiles) {
+          const r = await sh([DAFNY, "resolve", f], { cwd: dir, env });
+          if (r.code === 0) continue;
+          if (!/resolution\/type errors|parse errors/.test(r.out)) { console.error(`dafny resolve failed on ${m.id} without a resolution error: ${r.out.slice(-400)}`); process.exit(2); }
+          stillbornIds.add(m.id); break;
+        }
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }));
   const listedStillborn = listed.filter((r) => stillbornIds.has(r.id)); if (listedStillborn.length) fail(`mutants listed as not killed do not resolve: ${listedStillborn.map((r) => r.id).join(", ")}`);
   rechecked = generated.map((m) => stillbornIds.has(m.id) ? { id: m.id, status: "stillborn" } : byId.get(m.id) ?? { id: m.id, status: "killed" });
   const vs = rechecked.filter((r) => r.status !== "stillborn"), cnt = (st) => vs.filter((r) => r.status === st && !r.accepted).length;
@@ -272,8 +284,6 @@ if (recheck) {
 for (const id of Object.keys(cfg.accepted ?? {})) if (!generated.some((m) => m.id === id)) { console.error(`accepted mutant ${id} matches no generated mutant (stale acceptance)`); process.exit(2); }
 if (opt("--equiv")) { const m = all.find((x) => x.id === opt("--equiv")); if (!m) { console.error(`no mutant ${opt("--equiv")} (use --list)`); process.exit(2); } console.log(equivSource(implSrc, m.src, m.sym, cfg.accepted?.[m.id]?.hint)); process.exit(0); }
 if (flag("--list")) { for (const m of all) console.log(`${m.id}  (${m.line}:${m.col})`); console.error(`${all.length} mutants`); process.exit(0); }
-const doctor = await sh(["/bin/bash", join(REPO, "tools/proof/bootstrap.sh"), "doctor"], { env });
-if (doctor.code !== 0) { console.error(`pinned toolchain unavailable: ${doctor.out.trim()}`); process.exit(2); }
 const work = mkdtempSync(join(tmpdir(), "mutate-"));
 const t0 = Date.now();
 

@@ -20,7 +20,7 @@ lemma L1NextSound(t: Trigger, after: Ms)
   ensures Next(t, after).v > after && Occ(t, Next(t, after).v as int)
 ```
 
-**Mutation results.** kills 30 of 115 valid mutants; 0 killed by this law alone.
+**Mutation results.** kills 29 of 115 valid mutants; 0 killed by this law alone.
 
 **Reviewer notes.** ACCEPT: Next is a plus (q+1) periods, strictly after after, and an occurrence, with the once case matching.
 
@@ -63,7 +63,7 @@ lemma L4FirstInterval(t: Trigger, now: Ms)
     f.Some? && f.v >= now && Occ(t, f.v as int) && forall x: int | Occ(t, x) && x >= now as int :: f.v as int <= x
 ```
 
-**Mutation results.** kills 11 of 115 valid mutants; 4 killed by this law alone.
+**Mutation results.** kills 11 of 115 valid mutants; 2 killed by this law alone.
 
 **Reviewer notes.** ACCEPT: First is the anchor when now is at or before it, else Next(now-1), and minimality follows from L2.
 
@@ -126,7 +126,7 @@ lemma NoOccBetween(a: int, e: int, j: nat, k: nat, q: int, now: int)
   ensures false
 ```
 
-**Mutation results.** kills 68 of 115 valid mutants; 36 killed by this law alone.
+**Mutation results.** kills 69 of 115 valid mutants; 36 killed by this law alone.
 
 **Reviewer notes.** ACCEPT: The Witness is the latest due occurrence, exactly one of dispatch or skip is taken, and the new next equals Next(now) for intervals and none for once.
 
@@ -154,7 +154,7 @@ lemma L8FirstAfterOccurrence(a: Ms, e: Ms, k: nat)
   ensures First(Interval(a, e), (a as int + k * (e as int) + 1) as Ms) == Some((a as int + (k + 1) * (e as int)) as Ms)
 ```
 
-**Mutation results.** kills 32 of 115 valid mutants; 0 killed by this law alone.
+**Mutation results.** kills 34 of 115 valid mutants; 0 killed by this law alone.
 
 **Reviewer notes.** ACCEPT: Creating at a+k*e+1 gives Next(a+k*e) = a+(k+1)*e, as the English states.
 

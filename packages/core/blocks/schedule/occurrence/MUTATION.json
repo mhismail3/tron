@@ -3,14 +3,14 @@
   "block": "schedule/occurrence",
   "tier": "high-stakes",
   "laws": "blocks/schedule/occurrence/Block.dfy",
-  "toolHash": "e33956298205be96",
+  "toolHash": "ac4ab6d9eb34842e",
   "mutants": 116,
   "stillborn": 1,
   "valid": 115,
   "killed": 115,
   "survived": 0,
   "accepted": 0,
-  "seconds": 331,
+  "seconds": 290,
   "score": 1,
   "unknown": 0,
   "stillbornRatio": 0.009,
@@ -22,7 +22,7 @@
  "perLaw": [
   {
    "law": "L1 next-sound",
-   "killed": 30,
+   "killed": 29,
    "only": 0
   },
   {
@@ -38,7 +38,7 @@
   {
    "law": "L4 first-interval",
    "killed": 11,
-   "only": 4
+   "only": 2
   },
   {
    "law": "L5 classify-not-due",
@@ -47,7 +47,7 @@
   },
   {
    "law": "L6 classify-due",
-   "killed": 68,
+   "killed": 69,
    "only": 36
   },
   {
@@ -57,7 +57,7 @@
   },
   {
    "law": "L8 first-after-occurrence",
-   "killed": 32,
+   "killed": 34,
    "only": 0
   }
  ],

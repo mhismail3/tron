@@ -70,7 +70,13 @@ test("mutation and packet gates fail for the right reasons", (t) => {
   writeFileSync(join(base, "forged.json"), JSON.stringify(forged));
   const caught = recheck(join(base, "forged.json"));
   assert.equal(caught.status, 1);
-  assert.match(caught.stdout, /"recheck":"mismatch"/);
+  assert.match(caught.stdout, /"recheck":"mismatch","why":"summary\.killed 10 but the regenerated mutants imply 11"/);
+  forged.notKilled = JSON.parse(readFileSync(digestPath, "utf8")).notKilled;
+  forged.statuses = "0".repeat(64);
+  writeFileSync(join(base, "forged.json"), JSON.stringify(forged));
+  const relabelled = recheck(join(base, "forged.json"));
+  assert.equal(relabelled.status, 1);
+  assert.match(relabelled.stdout, /"why":"statuses digest differs from the regenerated mutants' labels"/);
 
   const weak = mutate(join(base, "weak.json"), "--laws", variant("weak-L2.dfy"));
   assert.equal(weak.status, 1);
