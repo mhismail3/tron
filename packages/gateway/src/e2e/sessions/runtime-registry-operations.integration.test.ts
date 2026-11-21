@@ -30,6 +30,20 @@ async function collectStream(stream: NodeJS.ReadableStream): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
+async function expectDrainHeld(registry: RuntimeRegistry, settled: () => boolean, label: string): Promise<void> {
+  const passes = vi.spyOn(registry, "administrativeDrainSnapshot");
+  const start = passes.mock.calls.length;
+  await waitFor(() => settled() || passes.mock.calls.length >= start + 3, label);
+  expect(settled(), label).toBe(false);
+}
+
+async function expectJoinHeld(join: { mock: { calls: unknown[]; settledResults: Array<{ type: string }> } }, settled: () => boolean, label: string): Promise<void> {
+  await waitFor(() => settled() || join.mock.calls.length > 0, label);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  expect(settled(), label).toBe(false);
+  expect(join.mock.settledResults.map((result) => result.type), label).toEqual(join.mock.calls.map(() => "incomplete"));
+}
+
 function subscribeAudience(registry: RuntimeRegistry, sessionId: string): void {
   registry.subscribe("test-audience", sessionId);
 }
@@ -869,8 +883,7 @@ export default function (pi) {
     let disposalSettled = false;
     const receiptJoin = vi.spyOn((slot as unknown as { runPersistence: RunPersistence }).runPersistence, "waitForReceiptWrites");
     const disposal = registry.dispose().finally(() => { disposalSettled = true; });
-    await waitFor(() => disposalSettled || receiptJoin.mock.calls.length > 0, "disposal to join the blocked completion stamp");
-    expect(disposalSettled).toBe(false);
+    await expectJoinHeld(receiptJoin, () => disposalSettled, "disposal holds at the blocked completion stamp");
     releaseSecondStamp();
     await disposal;
 
@@ -1318,8 +1331,9 @@ export default function (pi) {
     await slot.setModel(model.provider, model.id);
     const prompt = slot.prompt("accepted before cutoff");
     await waitFor(() => hookGlobals.tronDelayedPreflightEntered, "the input hook to hold preflight");
-    const drain = registry.waitUntilIdle();
-    await waitFor(() => registry.administrativeDrainSnapshot().phase === "waiting", "the drain to wait on the held preflight");
+    let drained = false;
+    const drain = registry.waitUntilIdle().then(() => { drained = true; });
+    await expectDrainHeld(registry, () => drained, "the drain waits on the held preflight");
     gate.resolve();
     await expect(prompt).resolves.toMatchObject({ operationId: expect.any(String) });
     await drain;
@@ -1367,8 +1381,9 @@ export default function (pi) {
     await slot.setModel(model.provider, model.id);
     await slot.prompt("start");
     await waitFor(() => slot.catalogPhase === "running", "the catalog phase to run");
-    const drain = registry.waitUntilIdle();
-    await waitFor(() => registry.administrativeDrainSnapshot().phase === "waiting", "the drain to wait on the first turn");
+    let drained = false;
+    const drain = registry.waitUntilIdle().then(() => { drained = true; });
+    await expectDrainHeld(registry, () => drained, "the drain waits on the first turn");
     firstTurn.resolve();
     await drain;
     expect(slot.isDrainBusy).toBe(false);
@@ -2799,10 +2814,8 @@ export default function (pi) {
     const navigating = slot.navigate("target", { summarize: true });
     await waitFor(() => navigate.mock.calls.length === 1, "the navigation");
     let drained = false;
-    const drainPasses = vi.spyOn(registry, "administrativeDrainSnapshot");
     const drain = registry.waitUntilIdle().then(() => { drained = true; });
-    await waitFor(() => drained || drainPasses.mock.calls.length >= 4, "the drain keeps waiting on the held work");
-    expect(drained).toBe(false);
+    await expectDrainHeld(registry, () => drained, "the drain waits on the held work");
     release();
     await navigating;
     await drain;
@@ -2821,10 +2834,8 @@ export default function (pi) {
     const reloading = slot.reload();
     await waitFor(() => reload.mock.calls.length === 1, "the reload");
     let drained = false;
-    const drainPasses = vi.spyOn(registry, "administrativeDrainSnapshot");
     const drain = registry.waitUntilIdle().then(() => { drained = true; });
-    await waitFor(() => drained || drainPasses.mock.calls.length >= 4, "the drain keeps waiting on the held work");
-    expect(drained).toBe(false);
+    await expectDrainHeld(registry, () => drained, "the drain waits on the held work");
     release();
     await reloading;
     await drain;
@@ -3007,8 +3018,7 @@ export default function (pi) {
       await waitFor(() => held > 0, "the completed run's settlement chain to start");
       const receiptJoin = vi.spyOn((slot as unknown as { runPersistence: RunPersistence }).runPersistence, "waitForReceiptWrites");
       disposal = registry.dispose().then(() => { disposed = true; });
-      await waitFor(() => disposed || receiptJoin.mock.calls.length > 0, "disposal to join the settlement chain");
-      expect(disposed, "dispose resolved while the settlement chain was still pending").toBe(false);
+      await expectJoinHeld(receiptJoin, () => disposed, "dispose holds while the settlement chain is pending");
     } finally {
       releaseTerminal();
     }
