@@ -700,6 +700,21 @@ class LedgerTests(VerifyCase):
                     self.assertIn('file passed', log)
                     self.assertEqual(log.count('pair met'), 2, log)
 
+    def test_parallel_first_appenders_to_a_new_ledger_all_record(self) -> None:
+        """Parallel test files each open the ledger; switching a new store to WAL raced, and an appender failed its file with 'database is locked'."""
+        record = ("import sys; sys.path.insert(0, sys.argv[1]); import ledger; ledger.append([{'runId': 'r', 'testId': 't', 'commit': 'c', "
+                  "'tree': 't', 'dirty': 0, 'outcome': 'passed', 'seconds': 0, 'lane': 'python', 'host': 'h', 'cpuIdlePercent': None, "
+                  "'memoryFreePercent': None, 'measuredAt': 'm', 'seenAt': 's', 'contended': 0}])")
+        for trial in range(30):
+            store = Path(self.temp.name) / f'ledger-{trial}' / 'results.sqlite3'
+            env = {**os.environ, 'TRON_TEST_LEDGER': str(store)}
+            appenders = [subprocess.Popen([sys.executable, '-c', record, str(ROOT / 'tools/verify')], env=env, stderr=subprocess.PIPE, text=True)
+                         for _ in range(12)]
+            errors = [error for appender in appenders for _, error in [appender.communicate()] if appender.returncode]
+            self.assertEqual(errors, [], trial)
+            with sqlite3.connect(store) as connection:
+                self.assertEqual(connection.execute('SELECT COUNT(*) FROM results').fetchone()[0], 12)
+
     def test_public_tooling_run_appends_real_cases_and_flakes_means_same_tree_pass_and_fail(self) -> None:
         r = self.repo
         r.write('mods/alpha/test-alpha.py', 'import os, unittest\nclass Cases(unittest.TestCase):\n    def test_variable(self):\n        self.assertFalse(os.environ.get("LEDGER_FIXTURE_FAIL"))\n    def test_broken(self):\n        self.fail("always broken")\n    def test_cross_tree(self):\n        self.assertFalse(os.environ.get("LEDGER_OTHER_TREE_FAIL"))\nunittest.main()\n')

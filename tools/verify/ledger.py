@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import fcntl
 from contextlib import closing
 from datetime import datetime, timezone
 import json
@@ -44,8 +45,13 @@ def database(write: bool = False):
     connection = sqlite3.connect(str(path) if write else path.as_uri() + '?mode=ro', uri=not write, timeout=30)
     connection.row_factory = sqlite3.Row
     if write:
-        connection.execute('PRAGMA journal_mode=WAL')
-        connection.execute('CREATE TABLE IF NOT EXISTS results (run_id TEXT NOT NULL, test_id TEXT NOT NULL, commit_sha TEXT NOT NULL, tree_hash TEXT NOT NULL, dirty INTEGER NOT NULL, outcome TEXT NOT NULL, seconds REAL NOT NULL, lane TEXT NOT NULL, host TEXT NOT NULL, cpu_idle_percent REAL, memory_free_percent REAL, measured_at TEXT NOT NULL, seen_at TEXT NOT NULL, contended INTEGER NOT NULL)')
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            fcntl.flock(directory, fcntl.LOCK_EX)
+            connection.execute('PRAGMA journal_mode=WAL')
+            connection.execute('CREATE TABLE IF NOT EXISTS results (run_id TEXT NOT NULL, test_id TEXT NOT NULL, commit_sha TEXT NOT NULL, tree_hash TEXT NOT NULL, dirty INTEGER NOT NULL, outcome TEXT NOT NULL, seconds REAL NOT NULL, lane TEXT NOT NULL, host TEXT NOT NULL, cpu_idle_percent REAL, memory_free_percent REAL, measured_at TEXT NOT NULL, seen_at TEXT NOT NULL, contended INTEGER NOT NULL)')
+        finally:
+            os.close(directory)
     return connection
 
 
