@@ -28,7 +28,7 @@ export interface Core {
 export function bind(M: any): Core {
   const bool = (b: boolean): boolean => { if (typeof b !== "boolean") throw new TypeError(`not a boolean: ${String(b)}`); return b; };
   const inCount = (n: number): number => { if (!Number.isSafeInteger(n) || n < 0 || n > 4294967295) throw new RangeError(`not a Count: ${n}`); return n; };
-  const inMs = (n: number): number => { if (!Number.isSafeInteger(n) || n < 0 || n > 253402300799999) throw new RangeError(`not a Ms: ${n}`); return n; };
+  const inMs = (n: number): number => { if (!Number.isSafeInteger(n) || n < 0 || n > 8640000000000000) throw new RangeError(`not a Ms: ${n}`); return n; };
   const inToken = (n: number): number => { if (!Number.isSafeInteger(n) || n < 0 || n > 4294967295) throw new RangeError(`not a Token: ${n}`); return n; };
   const toList = <T>(v: readonly T[], each: (x: T) => unknown): unknown => { if (!Array.isArray(v)) throw new TypeError(`not an array: ${JSON.stringify(v)}`); let list = M.List.create_Nil(); for (let i = v.length - 1; i >= 0; i--) list = M.List.create_Cons(each(v[i] as T), list); return list; };
   const toBlocker = (v: Blocker): unknown => { if (typeof v !== "object" || v === null) return unknown("Blocker", v); return M.Blocker.create_Blocker(inToken(v.id), bool(v.receipt), toSession(v.session), toState(v.state), toTime(v.admitted), toTime(v.progress)); };

@@ -42,7 +42,7 @@ export async function waitForStopDrain(
 type RestartDrainDecision =
   | { outcome: "completed" }
   | { outcome: "waiting" }
-  | { outcome: "unresolved-owners"; owners: AdministrativeDrainBlockerSummary[] }
+  | { outcome: "unresolved-owners" }
   | { outcome: "stalled"; blocker: AdministrativeDrainBlockerSummary; ageMs: number };
 
 export class RestartDrainProgress {
@@ -62,7 +62,7 @@ export class RestartDrainProgress {
     this.tracked = step.tracked.$ === "Tracking" ? { name: names[step.tracked.id]!, at: step.tracked } : undefined;
     const outcome = step.outcome;
     if (outcome.$ === "Completed") return { outcome: "completed" };
-    if (outcome.$ === "UnresolvedOwners") return { outcome: "unresolved-owners", owners: snapshot.blockers };
+    if (outcome.$ === "UnresolvedOwners") return { outcome: "unresolved-owners" };
     if (outcome.$ === "Waiting") return { outcome: "waiting" };
     return { outcome: "stalled", blocker: snapshot.blockers.find((blocker) => blocker.id === names[outcome.blocker])!, ageMs: outcome.age };
   }

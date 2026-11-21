@@ -13,8 +13,8 @@ abstract module SessionsRestartDrainLaws {
   newtype Token = x: int | 0 <= x < 0x1_0000_0000
   // Count: how many operations block the drain.
   newtype Count = x: int | 0 <= x < 0x1_0000_0000
-  // Ms: a time in milliseconds from 1970 to the end of 9999, or a duration.
-  newtype Ms = x: int | 0 <= x < 253_402_300_800_000
+  // Ms: a time in milliseconds since 1970, or a duration, up to the latest time a JavaScript Date holds.
+  newtype Ms = x: int | 0 <= x <= 8_640_000_000_000_000
   // List: a linked list, crossing to the shell as an array.
   datatype List<T> = Nil | Cons(head: T, tail: List<T>)
   // State: a blocker's state, named as the snapshot names it.
@@ -41,10 +41,13 @@ abstract module SessionsRestartDrainLaws {
   // the blocker's distinct key), so the shell finds a stalled blocker by its id.
   // Assumption A2: count is the snapshot's blockerCount and the blockers are its listed blockers in order (at most
   // 64; the rest are omitted). A session id is absent or non-empty (the runtime registry omits an empty one), and
-  // every admission and progress time is absent or a 24-character Date#toISOString instant of the years 1970 to
-  // 9999 (the registry's sources write only those); the shell refuses any other and passes each time as its
-  // milliseconds. Such strings order as their milliseconds, so the block orders times exactly as the replaced
-  // TypeScript's string comparison did. now is the Gateway clock read once per poll and limit the stall limit.
+  // every admission and progress time is absent or a Date#toISOString instant at or after 1970: the Gateway's
+  // clocks write those, and an extension-reported time is bounded to 0 to 8.64e15 ms and written by toISOString
+  // before it reaches a blocker. The shell refuses any other string and passes each time as its milliseconds. For
+  // the years 1970 to 9999 the strings order as their milliseconds, so the block orders them as the replaced
+  // TypeScript's string comparison did; an expanded year after 9999 (+0YYYYY, only from an extension-reported
+  // time) is ordered by its time, where the string comparison put it before every four-digit year. now is the
+  // Gateway clock read once per poll and limit the stall limit.
   // Assumption A3: the shell keeps the returned tracked value for the next poll of the same drain and starts each
   // drain with nothing tracked; on Completed or UnresolvedOwners it restarts, on Stalled it restarts naming the
   // blocker, and on Waiting it polls again.

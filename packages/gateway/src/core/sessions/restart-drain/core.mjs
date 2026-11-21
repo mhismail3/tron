@@ -161,7 +161,7 @@ let SessionsRestartDrain = (function() {
     }
     static _Is(__source) {
       let _2_x = new BigNumber(__source);
-      return ((_dafny.ZERO).isLessThanOrEqualTo(_2_x)) && ((_2_x).isLessThan(new BigNumber(253402300800000)));
+      return ((_dafny.ZERO).isLessThanOrEqualTo(_2_x)) && ((_2_x).isLessThanOrEqualTo(new BigNumber(8640000000000000)));
     }
   };
 
