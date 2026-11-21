@@ -2,9 +2,13 @@ import SwiftUI
 import TronMobileCore
 
 enum SwiftAppDisplay {
-    @MainActor static func runs(_ display: DisplayProjection) -> Bool {
+    static func runs(_ display: DisplayProjection) -> Bool {
         guard display.kind == .code, let artifact = display.artifact else { return false }
-        return SwiftAppExperiment.shared.canRun(fileNamed: artifact.name)
+        return runs(fileNamed: artifact.name)
+    }
+
+    static func runs(fileNamed name: String) -> Bool {
+        name.lowercased().hasSuffix(".swift")
     }
 
     static func prepare(

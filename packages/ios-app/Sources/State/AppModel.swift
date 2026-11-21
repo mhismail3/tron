@@ -193,7 +193,6 @@ final class AppModel {
     private let sessionMutations: SessionMutationService
     let settingsTrust: SettingsTrustCoordinator
     private let providerAuth: ProviderAuthCoordinator
-    private let devicePreference: DevicePreferenceCoordinator
     let composerDrafts: ComposerDraftCoordinator
     let extensionInteractionDrafts: ExtensionInteractionDraftStore
     let gitInspection: GatewayGitInspection
@@ -495,12 +494,6 @@ final class AppModel {
             mutationExecutor: mutationExecutor,
             uuidSource: uuidSource
         )
-        let devicePreference = DevicePreferenceCoordinator(
-            client: client,
-            mutationExecutor: mutationExecutor,
-            uuidSource: uuidSource,
-            experiment: .shared
-        )
         let providerAuth = ProviderAuthCoordinator(
             client: client,
             mutationExecutor: mutationExecutor,
@@ -622,7 +615,6 @@ final class AppModel {
         self.sessionMutations = sessionMutations
         self.settingsTrust = settingsTrust
         self.providerAuth = providerAuth
-        self.devicePreference = devicePreference
         self.composerDrafts = composerDrafts
         self.extensionInteractionDrafts = extensionInteractionDrafts
         self.gitInspection = gitInspection
@@ -3936,19 +3928,10 @@ extension AppModel {
             let context = try HomeContextProjection.validated(try await contextValue)
             let chapterJSON = try await chapterValue
             let chapters = try chapterJSON.map { try HomeChapterList.validated($0) }
-            var tasks: HomeTaskPage?
-            var permissions: HomeTaskPermissionsDTO?
-            if status.admitsTaskReads {
-                async let taskPage = optionalRead {
-                    try HomeTaskPage.validated(try await read("home.taskList", .object(["limit": .number(20)])))
-                }
-                async let taskPermissions = optionalRead {
-                    try HomeTaskPermissionsDTO.decode(try await read("home.taskPermissions"))
-                }
-                tasks = try await taskPage
-                permissions = try await taskPermissions
-            }
-            return .manage(HomeManageDTO(status: status, context: context, chapters: chapters, tasks: tasks, permissions: permissions,
+            let tasks = status.admitsTaskReads ? try await optionalRead {
+                try HomeTaskPage.validated(try await read("home.taskList", .object(["limit": .number(20)])))
+            } : nil
+            return .manage(HomeManageDTO(status: status, context: context, chapters: chapters, tasks: tasks,
                                          profile: try await profileList))
         case .tasks(let cursor, let filter):
             let status = try await readTaskStatus()
@@ -4173,10 +4156,6 @@ extension AppModel {
             providerAuth.handleEvent(event.payload)
         case "auth.completed":
             providerAuth.dispatchCompletion(event.payload)
-        case "device.preference.request":
-            if let admission = lifecycle.admission, admission.connectionID != nil {
-                devicePreference.handleRequest(event.payload, admission: admission, profileID: lifecycle.selectedProfileID)
-            }
         case "settings.changed":
             settingsTrust.noteSettingsChanged()
         case "trust.changed":

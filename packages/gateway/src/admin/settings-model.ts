@@ -7,7 +7,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { clampThinkingLevel, getSupportedThinkingLevels, type Model, type ThinkingLevel } from "../kernel/pi/ai.js";
 import { SettingsManager, type ModelRuntime } from "../kernel/pi/coding-agent.js";
-import { asUncertainOutcome, GatewayError } from "../errors.js";
+import { GatewayError } from "../errors.js";
 import { validateProjectSettings } from "../kernel/settings/settings-sdk-manager.js";
 import { contextWindowLimits, parseContextModelKey, validateContextWindow } from "../providers/context-window-policy.js";
 import { assertNewModelChoice } from "../providers/openai-model-eligibility.js";
@@ -24,7 +24,7 @@ import { agentDefinition, setAgentDefinition } from "./agent-definitions.js";
 import type { TrustService } from "../kernel/resources/trust-service.js";
 import { targetLayers } from "../kernel/settings/settings-resolver.js";
 import type { SettingsSchema } from "../kernel/settings/settings-schema.js";
-import { type DevicePreferencePort, type DevicePreferenceRead, type DevicePreferenceSnapshot, type FormatContext, type ModelRefValue, type OptionSources, type SettingsStores, type ResolveOptions, type ObservedStore, type PlannedWrite } from "../kernel/settings/settings-types.js";
+import { type FormatContext, type ModelRefValue, type OptionSources, type SettingsStores, type ResolveOptions, type ObservedStore, type PlannedWrite } from "../kernel/settings/settings-types.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
 import type { PackageUpdateRequest } from "./package-service.js";
 import type { Actor } from "../kernel/settings/settings-record.js";
@@ -41,7 +41,6 @@ interface SettingsModelDependencies {
   mcpAdmin?: McpAdminService;
   modelConfig?: ModelConfigService;
   lessonMoves?: LessonMoveStore;
-  devicePreferences?: DevicePreferencePort;
 }
 
 export interface LessonMoveStore {
@@ -124,17 +123,6 @@ export class SettingsStoreAdapter {
     return { format: formatContext(runtime), options: optionSources(runtime) };
   }
 
-  private async devicePreferenceSnapshot(target: SettingsTarget, keys: readonly string[] | undefined): Promise<DevicePreferenceSnapshot | undefined> {
-    const requested = this.dependencies.schema.KEYS.filter(key => key.layers.global?.store === "device-preference" && (!keys || keys.includes(key.id)));
-    if (!requested.length || (target.kind !== "global" && target.kind !== "home")) return undefined;
-    const port = this.dependencies.devicePreferences;
-    if (!port) return { devices: [], reads: {} };
-    const devices = await port.devices().catch(() => []);
-    const reads = Object.fromEntries(await Promise.all(devices.map(async device => [device, Object.fromEntries(await Promise.all(requested.map(async key =>
-      [key.id, await port.read(device, key.id).catch((): DevicePreferenceRead => ({ status: "unavailable" }))] as const)))] as const)));
-    return { devices, reads };
-  }
-
   async stores(target: SettingsTarget, session?: SessionSettingsSource, options: { storeState?: boolean; keys?: readonly string[] } = {}): Promise<SettingsStores> {
     const storeState = options.storeState !== false;
     if (target.kind === "session" && !session) throw new GatewayError("invalid_request", "A session target needs its session");
@@ -176,7 +164,6 @@ export class SettingsStoreAdapter {
     } : undefined;
     const home = target.kind === "home" || (target.kind === "session" && session!.home);
     const layers = targetLayers(target, { home, project: project !== undefined });
-    const devicePreferences = await stage("settings.store.device-preferences", () => this.devicePreferenceSnapshot(target, options.keys));
     const macTerminal = this.dependencies.macTerminalKeys
       ? await stage("settings.store.mac-terminal-keys", () => this.dependencies.macTerminalKeys!.read())
       : {};
@@ -186,7 +173,6 @@ export class SettingsStoreAdapter {
       trust,
       macTerminal,
       macTerminalServerEnabled: await this.macTerminalKeys?.enabled() ?? false,
-      ...(devicePreferences ? { devicePreferences } : {}),
       gateway: await stage("settings.store.gateway-settings", () => this.gatewaySettings()),
       ...(outside ? { outside } : {}),
       ...(project ? { project } : {}),
@@ -219,7 +205,7 @@ export class SettingsStoreAdapter {
     await assertNewModelChoice(runtime, ref.provider, ref.id);
   }
 
-  async applyStore(bundleTarget: SettingsTarget, stores: SettingsStores, plan: Planned, value: unknown, bundleContext: ChangeContext, writers: Pick<SettingsWriters, "setTrust">, current: unknown): Promise<{ revision?: number; result?: unknown }> {
+  async applyStore(bundleTarget: SettingsTarget, stores: SettingsStores, plan: Planned, value: unknown, bundleContext: ChangeContext, writers: Pick<SettingsWriters, "setTrust">): Promise<{ revision?: number; result?: unknown }> {
     const { binding, qualifiers } = plan;
     const target = plan.target ?? bundleTarget;
     const context = plan.session ? { ...bundleContext, session: plan.session } : bundleContext;
@@ -264,17 +250,6 @@ export class SettingsStoreAdapter {
       case "lesson":
         await this.lessonMoves().set(qualifiers.lesson!, unset ? undefined : value as LessonMoveValue, plan.changeId);
         return {};
-      case "device-preference": {
-        if (unset) throw new GatewayError("invalid_request", `${plan.key.label} cannot be unset on an iPhone`);
-        const port = this.dependencies.devicePreferences;
-        if (!port) throw new GatewayError("busy", "This iPhone is not connected; nothing was changed", true);
-        const outcome = await port.compareAndSet(qualifiers.device!, plan.key.id, current, value);
-        if (outcome.status === "applied") return {};
-        if (outcome.status === "conflict") throw new GatewayError("conflict", `${plan.key.label} changed on this iPhone since it was read; refresh and try again`, false, { current: outcome.current as never });
-        if (outcome.status === "unavailable") throw new GatewayError("busy", "This iPhone is not connected; nothing was changed", true);
-        const message = `${plan.key.label}: the write to this iPhone has an unknown outcome; inspect it before changing it again`;
-        throw asUncertainOutcome(new GatewayError("conflict", message), message);
-      }
       case "trust":
         return { result: await writers.setTrust(qualifiers.project!, unset ? null : value as boolean) };
       case "gateway":

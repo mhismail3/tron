@@ -167,13 +167,13 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   the Overridden pill and a tool selection's "N of M tools" count never truncate. At
   accessibility sizes, or when the cluster would leave the title less than a 96-point column,
   the cluster stacks under the text column.
-- **Reset.** Global Settings, the chat model card and Controls use the preview/confirmation/receipted
+- **Reset.** Settings, the chat model card and Controls use the preview/confirmation/receipted
   `settings.change` unset at the writable layer. Inherited values have no reset; nothing invents a default locally.
 - **Text entry** ends through `tronTextEntryDone` (return reads Done; multi-line or
   return-less keyboards show Done above the keyboard). Entry guidance is the schema's `entry`
   (`hint`, `example`); iOS writes no per-key guidance. Free text shows a muted `(empty)`
   placeholder.
-- **Accents.** Group accents flow from `SettingsGroupCard` through every progressive sheet; a
+- **Accents.** The settings accent flows from `SettingsView` through every progressive sheet; a
   destination reachable elsewhere reads the inherited theme and names only its standalone
   fallback (`tronSettingsVisualTheme(inheriting:)`). Project Trust, Gateway actions and
   warning/error/destructive/log-level colors stay semantic. A theme carries readable ink and
@@ -194,13 +194,13 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 
 `ChangeReviewCard` (`UI/Components/ChangeReviewCard.swift`) is the one plaintext before/after
 card; `ChangeReviewSheet` presents it. A review with intent `provider-api-key` adds one `SecureField` for the provider's API key; Approve stays disabled until it holds text, and the approving answer alone carries it (`secret`), never shown again. An agent, Home or worker change arrives as the native
-`change` interaction (`ExtensionInteractionSheet`); Global Settings, chat model card and Controls rows whose dry run
+`change` interaction (`ExtensionInteractionSheet`); Settings, chat model card and Controls rows whose dry run
 requires a tap present the same sheet. Approve retires the
 sheet at the tap and answers the typed owner once with the review's digest through the receipt executor; Cancel and native
 dismissal send nothing. Generic forms never authorize effects. The card shows Gateway text
 only and keeps exact values behind its disclosure. Audit history and Undo belong to the agent's
 `settings` tool; owner actions have no generic Undo. The card surface, Approve/Cancel/Undo actions and
-native change title use `tronPrimary`, not the generic question's amber accent. Agent & Tools
+native change title use `tronPrimary`, not the generic question's amber accent. Settings
 and its inherited admin-sheet chrome follow the selected primary theme; semantic statuses keep their colors.
 
 ## Shared lists and readers

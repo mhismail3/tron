@@ -241,7 +241,6 @@ private struct ThemeColorPicker: View {
 
     private func tile(_ color: ThemeColor) -> some View {
         let isSelected = color == selection
-        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
         return Button { select(color) } label: {
             VStack(alignment: .leading, spacing: 10) {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
@@ -256,7 +255,6 @@ private struct ThemeColorPicker: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, minHeight: 76, maxHeight: .infinity, alignment: .topLeading)
-            .overlay { if isSelected { shape.strokeBorder(color.ink, lineWidth: 2) } }
             .tronGlassSurface(accent: color.surfaceTint, cornerRadius: 16,
                               tintOpacity: isSelected ? 0.34 : 0.18, interactive: true,
                               respectsSettingsTheme: false)

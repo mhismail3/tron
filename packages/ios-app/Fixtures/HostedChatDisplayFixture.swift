@@ -1017,7 +1017,7 @@ private actor HostedHomeShellGateway {
     private func taskPermissions() -> JSONValue {
         let ids = ["request-existing", "request-approve", "request-deny"]
         let binding = taskBinding()
-        let expiresAt = nowMilliseconds() + 604_800_000
+        let expiresAt = 1_795_814_640_000.0
         let decisions: [JSONValue] = [.object(["id": .string("existing-decision"), "requestId": .string("request-existing"),
             "decidedAt": .number(1000), "approved": .bool(true), "expiresAt": .number(expiresAt)])]
         var grant = binding.objectValue!
