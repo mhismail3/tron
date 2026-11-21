@@ -16,13 +16,6 @@ export const DELEGATED_SUPERVISOR_TOOL_NAME = "subagent_supervisor";
 
 const DELEGATED_PROVIDER_SOURCE = "pi-subagents";
 
-const DELEGATED_ARTIFACT_FILES = [
-  "status.json",
-  "events.jsonl",
-  "recovery-descriptor.json",
-  "process-terminal.json",
-] as const;
-
 export const DELEGATED_PROVIDER_ROOT_ENV = "PI_SUBAGENTS_TEMP_ROOT";
 
 const PI_HOST_PACKAGE_ROOT = piHostPackageRoot();
@@ -59,7 +52,7 @@ export async function ensureDelegatedArtifactRoot(root: string): Promise<void> {
   }
 }
 
-const ARTIFACT_NAMES: readonly string[] = [...DELEGATED_ARTIFACT_FILES, "async-subagent-runs"];
+const ARTIFACT_NAMES = ["status.json", "events.jsonl", "recovery-descriptor.json", "process-terminal.json", "async-subagent-runs"];
 
 function canonical(value: string): string {
   try {

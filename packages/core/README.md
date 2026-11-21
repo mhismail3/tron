@@ -33,10 +33,13 @@ names and +name/-name modifiers compose and are stored, over name tokens; shell
 `packages/gateway/src/core/settings/tool-selection`), `receipts/invocation-lifecycle` (how a session's
 invocation receipts fold into each invocation's lifecycle, and which histories are refused; shell
 `packages/gateway/src/kernel/receipts/invocation-receipts.ts`, core in
-`packages/gateway/src/core/receipts/invocation-lifecycle`), and `home/task-authorization` (whether a Home task runs under
+`packages/gateway/src/core/receipts/invocation-lifecycle`), `home/task-authorization` (whether a Home task runs under
 the standing scope or a one-use grant, or must wait for reconfirmation or a grant, over string tokens; shell
 `packages/gateway/src/modules/home/home-task-authorization.ts`, core in
-`packages/gateway/src/core/home/task-authorization`).
+`packages/gateway/src/core/home/task-authorization`), and `security/path-shape` (whether a resolved path is within a root,
+and whether a delegated subagent artifact path has an allowed run shape, over path-component tokens; shells
+`packages/gateway/src/machine/path-containment.ts` and `packages/gateway/src/kernel/delegation/delegated-provider.ts`,
+core in `packages/gateway/src/core/security/path-shape`).
 
 ## Block contract
 

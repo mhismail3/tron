@@ -1,0 +1,30 @@
+{
+ "packetHash": "7b9bd5421f227385",
+ "tier": "high-stakes",
+ "date": "2026-11-21",
+ "writer": {
+  "agent": "parent (Home task, #2633)",
+  "model": "anthropic/claude-opus-5-5"
+ },
+ "reviewer": {
+  "agent": "law-reviewer (run d2904aec)",
+  "model": "openai/gpt-6-luna",
+  "session": "2026-11-21T10-59-35-091Z_01a1fdc2-f633-73fc-a4c0-53b4b2dea1e6/df844bc1-f564-4bfa-b76c-06b39a003c81/run-0/session.jsonl"
+ },
+ "laws": {
+  "C1 containment": {
+   "verdict": "ACCEPT",
+   "notes": "The Dafny iff states whole-component prefix containment, matching the English and Node path.relative behavior for resolved paths. The premise is satisfiable (root [a], path [a,b]); the empty root also correctly accepts all paths. It kills 9 mutants, 5 alone."
+  },
+  "A1 owned-run": {
+   "verdict": "ACCEPT",
+   "notes": "The Dafny iff requires a strict descendant of the owned runs root with exactly one run piece, optionally followed by an allowed artifact; this matches the old relative-path checks and rejects the root and deeper paths. The premise is satisfiable (runs [r], path [r,run]); it kills 56 mutants, 38 alone."
+  },
+  "A2 shared-run": {
+   "verdict": "ACCEPT",
+   "notes": "The Dafny iff requires a strict descendant matching either the temporary-root shape or project-run shape; this matches both old branches, including the temporary branch's effective containment check via its first relative component. The premise is satisfiable (temporary [t], path [t,pi-subagents-x,async-subagent-runs,run]); it kills 4 mutants, 1 alone."
+  }
+ },
+ "acceptedMutants": {},
+ "general": "High-stakes is appropriate because these decisions constrain filesystem reads and workspace containment. A1-A3 are stated as shell assumptions: token identity, resolved components and backslash splitting, and shell-side validation. C1/A1/A2 give exact-result iff laws; mutation evidence reports 69/69 valid mutants killed and no accepted or surviving mutants. Recovery, stale-input, and uncertain-outcome kinds are reasonably n/a for a stateless boolean block; safety, progress, and exact-results are covered by the iff laws. The supplied materials did not include SHADOW.json, so the separate differential result remains unreviewed."
+}

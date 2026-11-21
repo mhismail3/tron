@@ -1,0 +1,41 @@
+{
+ "summary": {
+  "block": "security/path-shape",
+  "tier": "high-stakes",
+  "laws": "blocks/security/path-shape/Block.dfy",
+  "toolHash": "ac4ab6d9eb34842e",
+  "mutants": 98,
+  "stillborn": 29,
+  "valid": 69,
+  "killed": 69,
+  "survived": 0,
+  "accepted": 0,
+  "seconds": 41,
+  "score": 1,
+  "unknown": 0,
+  "stillbornRatio": 0.296,
+  "filter": null,
+  "generated": 98,
+  "pass": true,
+  "inputsHash": "7b9bd5421f227385"
+ },
+ "perLaw": [
+  {
+   "law": "C1 containment",
+   "killed": 9,
+   "only": 5
+  },
+  {
+   "law": "A1 owned-run",
+   "killed": 56,
+   "only": 38
+  },
+  {
+   "law": "A2 shared-run",
+   "killed": 4,
+   "only": 1
+  }
+ ],
+ "statuses": "86f1ad666b44f7ea91c4d947cee29a488c0acb495f410de74f6f0b85488333bd",
+ "notKilled": []
+}
