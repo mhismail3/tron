@@ -28,7 +28,10 @@ following symlinks).
   only `provider-usage-limit` or `provider-error`).
 - `authorization.json` (`HomeTaskAuthorization`): strict v1 `scopes`, `requests`, `decisions`,
   `grants`; ≤ 4 MiB and 10,000 records per array; each decision names one request once; each
-  grant one approved decision with matching binding, expiry and epoch.
+  grant one approved decision with matching binding, expiry and epoch. Which authority a task runs
+  under (standing scope, one-use grant, reconfirmation, grant required) is decided by the proven block
+  `home/task-authorization` ([packages/core](../../../../core/README.md)); the class keeps the store,
+  mutex, writes and diagnostics.
 - Both files replace durably (temp, fsync, rename, directory fsync) before acknowledgement.
   Malformed or contradictory records keep their bytes and refuse (`home.task.store-refused`);
   an uncertain publication fences the instance until reload, except the one in-place update that

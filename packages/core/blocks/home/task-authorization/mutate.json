@@ -1,0 +1,61 @@
+{
+  "block": "home/task-authorization",
+  "tier": "high-stakes",
+  "tierReason": "authority: decides whether a Home task runs and under which grant or standing scope (LAW-WRITING: authority, approvals, grants are high-stakes)",
+  "impl": "blocks/home/task-authorization/Block.dfy",
+  "symbols": [
+    "ScopeFor",
+    "GrantFor",
+    "StaleScopes",
+    "StaleGrants",
+    "Authorize"
+  ],
+  "verify": [
+    "blocks/home/task-authorization/Block.dfy"
+  ],
+  "laws": {
+    "S1 authority": [
+      "HomeTaskAuthorization.S1Authority",
+      "HomeTaskAuthorization.ScopeForSpec",
+      "HomeTaskAuthorization.GrantForSpec"
+    ],
+    "A1 standing-scope-first": [
+      "HomeTaskAuthorization.A1StandingFirst",
+      "HomeTaskAuthorization.ScopeForFirst"
+    ],
+    "G1 one-use-grant": [
+      "HomeTaskAuthorization.G1OneUseGrant",
+      "HomeTaskAuthorization.GrantForFirst"
+    ],
+    "R1 refusal": [
+      "HomeTaskAuthorization.R1Refusal",
+      "HomeTaskAuthorization.StaleScopesSpec",
+      "HomeTaskAuthorization.StaleGrantsSpec"
+    ]
+  },
+  "helpers": [
+    "ElemsCons"
+  ],
+  "translate": "blocks/home/task-authorization/Block.dfy",
+  "accepted": {},
+  "report": "blocks/home/task-authorization/MUTATION.json",
+  "kinds": {
+    "safety": [
+      "S1 authority"
+    ],
+    "progress": [
+      "A1 standing-scope-first",
+      "G1 one-use-grant"
+    ],
+    "recovery": "n/a: stateless; each call decides from the stored scopes and grants, and a restore is the restore-epoch input (R1)",
+    "stale-inputs": [
+      "R1 refusal"
+    ],
+    "exact-results": [
+      "A1 standing-scope-first",
+      "G1 one-use-grant",
+      "R1 refusal"
+    ],
+    "uncertain-outcomes": "n/a: no effects; consuming the grant and recording the request are the shell's store writes under its mutex (Assumption A2)"
+  }
+}

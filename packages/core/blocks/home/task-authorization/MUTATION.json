@@ -1,0 +1,46 @@
+{
+ "summary": {
+  "block": "home/task-authorization",
+  "tier": "high-stakes",
+  "laws": "blocks/home/task-authorization/Block.dfy",
+  "toolHash": "ac4ab6d9eb34842e",
+  "mutants": 64,
+  "stillborn": 15,
+  "valid": 49,
+  "killed": 49,
+  "survived": 0,
+  "accepted": 0,
+  "seconds": 40,
+  "score": 1,
+  "unknown": 0,
+  "stillbornRatio": 0.234,
+  "filter": null,
+  "generated": 64,
+  "pass": true,
+  "inputsHash": "9ff9c43e57e84576"
+ },
+ "perLaw": [
+  {
+   "law": "S1 authority",
+   "killed": 23,
+   "only": 0
+  },
+  {
+   "law": "A1 standing-scope-first",
+   "killed": 9,
+   "only": 2
+  },
+  {
+   "law": "G1 one-use-grant",
+   "killed": 16,
+   "only": 3
+  },
+  {
+   "law": "R1 refusal",
+   "killed": 23,
+   "only": 19
+  }
+ ],
+ "statuses": "ed7322c28dafff9f38ab7cecce398b9f8adfb156a7f74d01aad896542a8a21aa",
+ "notKilled": []
+}
