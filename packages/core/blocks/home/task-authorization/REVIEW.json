@@ -1,0 +1,34 @@
+{
+ "packetHash": "9ff9c43e57e84576",
+ "tier": "high-stakes",
+ "date": "2026-11-21",
+ "writer": {
+  "agent": "parent (Home task tron-proof-codebase-map-20261121-1)",
+  "model": "anthropic/claude-opus-5-5"
+ },
+ "reviewer": {
+  "agent": "law-reviewer (runs 8accb1fd, 8f90dac3)",
+  "model": "openai/gpt-6-luna",
+  "session": "2026-11-21T06-38-46-586Z_01a1fcd4-2f3a-73fc-a4c0-53ac2e550990/7e3e259b-590c-44f7-88b1-f208e2a0766c/run-0/session.jsonl"
+ },
+ "laws": {
+  "S1 authority": {
+   "verdict": "ACCEPT",
+   "notes": "The Dafny guarantees the stated authorization safety conditions. A satisfying input is one active scope matching the request epoch, no grants, and now = 0; the law kills 23 mutants, though none exclusively."
+  },
+  "A1 standing-scope-first": {
+   "verdict": "ACCEPT",
+   "notes": "The premises are satisfiable with one active matching scope at index 0, and the conclusion matches the old first-scope behavior. It kills 9 mutants, 2 exclusively."
+  },
+  "G1 one-use-grant": {
+   "verdict": "ACCEPT",
+   "notes": "With no scopes and one matching available grant expiring at 10 when now = 0, the premises hold and Dafny matches the English. The explicit single-clock-reading assumption is acceptable: it defines a consistent authorization instant, and documents the narrow millisecond-tick divergence from the old per-candidate reads."
+  },
+  "R1 refusal": {
+   "verdict": "ACCEPT",
+   "notes": "Empty scope and grant lists satisfy the premises and produce GrantRequired as stated. An active scope or available grant from another restore epoch is a stale authorization input, and the law correctly requires reconfirmation when no matching authority exists."
+  }
+ },
+ "acceptedMutants": {},
+ "general": "High-stakes is correct. A2 is realistic and testable against the validator and mutex-owned writes; A1 documents the single-reading semantics and the narrow possible difference from the replaced TypeScript. The fixed-clock old-vs-new differential reports 100,002 comparisons and zero differences, but does not exercise that clock-tick edge; the explicit snapshot semantics are acceptable. All six law kinds are accounted for, 49 valid mutants were killed, and the cheap progress report records all four laws closed. First round at ebaca602936051f4 rejected G1 and R1 on the clock reading; Assumption A1 now states it."
+}

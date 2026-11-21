@@ -30,10 +30,13 @@ layer, over value tokens; shell `packages/gateway/src/kernel/settings/settings-r
 `packages/gateway/src/core/settings/precedence`), `settings/tool-selection` (how a tool selection's plain
 names and +name/-name modifiers compose and are stored, over name tokens; shell
 `packages/gateway/src/kernel/settings/settings-types.ts`, core in
-`packages/gateway/src/core/settings/tool-selection`) and `receipts/invocation-lifecycle` (how a session's
+`packages/gateway/src/core/settings/tool-selection`), `receipts/invocation-lifecycle` (how a session's
 invocation receipts fold into each invocation's lifecycle, and which histories are refused; shell
 `packages/gateway/src/kernel/receipts/invocation-receipts.ts`, core in
-`packages/gateway/src/core/receipts/invocation-lifecycle`).
+`packages/gateway/src/core/receipts/invocation-lifecycle`), and `home/task-authorization` (whether a Home task runs under
+the standing scope or a one-use grant, or must wait for reconfirmation or a grant, over string tokens; shell
+`packages/gateway/src/modules/home/home-task-authorization.ts`, core in
+`packages/gateway/src/core/home/task-authorization`).
 
 ## Block contract
 

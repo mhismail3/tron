@@ -31,7 +31,11 @@ abstract module HomeTaskAuthorizationLaws {
 
   // Assumption A1: the shell gives equal strings equal tokens and distinct strings distinct tokens within one
   // call; the request's target is the trusted target the shell resolved (an untrusted target is refused before
-  // the block is asked); `now` is the Gateway clock read once per call, and a grant's expiry its stored time.
+  // the block is asked); a grant's expiry is its stored time, and `now` is the Gateway clock read once per call,
+  // so one decision judges every grant at the same instant. The TypeScript this block replaced read the clock
+  // again for each grant it tested; the two differ only when the millisecond clock advances during one
+  // synchronous scan of the store and a grant tested later expires in that millisecond, and then this single
+  // reading is the consistent one (#2632).
   // Assumption A2: the scopes and grants are the authorization store's, in stored order, loaded under the
   // authorization mutex; every stored scope covers all trusted projects (the store's validator admits no other
   // kind) and ids are unique. On OneUseGrant the shell saves that grant as consumed under the same mutex before
