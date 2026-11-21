@@ -1,6 +1,7 @@
 import { Type } from "../kernel/pi/ai.js";
 import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
 import type { BrowserLiveViewRegistry } from "./browser-live-view.js";
+import type { ConsoleGate } from "../machine/console-probe.js";
 
 const parameters = Type.Object({
   action: Type.Union([Type.Literal("catalog"), Type.Literal("view"), Type.Literal("stop")]),
@@ -15,6 +16,7 @@ export function createTronNativeCaptureExtension(input: {
   sessionId: () => string;
   views: BrowserLiveViewRegistry;
   deferred: boolean;
+  gate: ConsoleGate;
 }): ExtensionFactory {
   return (pi) => {
     pi.registerTool({
@@ -30,6 +32,7 @@ export function createTronNativeCaptureExtension(input: {
         if ((params.action === "view") !== (params.handle !== undefined)) throw new Error("Only view requires a returned source handle");
         if (params.action !== "view" && params.region !== undefined) throw new Error("Only view accepts a display region");
         const sessionId = input.sessionId();
+        if (params.action !== "stop") await input.gate.admit(sessionId);
         if (params.action === "catalog") {
           const sources = await input.views.catalogNative(sessionId, signal);
           signal?.throwIfAborted();

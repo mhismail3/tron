@@ -11,6 +11,7 @@ import { admitToolDisplayProjection, displayReferences } from "./display-contrac
 import { observeTrustedAgentBrowserResult } from "./browser-live-view-adapter.js";
 import type { ToolReferences, ToolResultProjection } from "../kernel/projection/tool-result.js";
 import { createTronNativeCaptureExtension } from "./tron-native-capture-extension.js";
+import type { ConsoleGate } from "../machine/console-probe.js";
 
 type DisplayRuntime = { readonly disposed: boolean; toolResultReferences(): ToolReferences };
 
@@ -121,13 +122,13 @@ export function createDisplayModule(services: () => DisplayOwner): ModuleDescrip
   };
 }
 
-export function createNativeCaptureModule(services: () => DisplayOwner): ModuleDescriptor {
+export function createNativeCaptureModule(services: () => DisplayOwner, gate: ConsoleGate): ModuleDescriptor {
   return {
     name: "tron-native-capture", purpose: "Captures live views from connected devices.",
     tools: ["native_capture"], commands: [],
     start: () => ({ extension: session => {
       const views = services().liveViews;
-      return views ? createTronNativeCaptureExtension({ sessionId: session.sessionId, views, deferred: session.defersRareTools }) : undefined;
+      return views ? createTronNativeCaptureExtension({ sessionId: session.sessionId, views, deferred: session.defersRareTools, gate }) : undefined;
     } }),
   };
 }

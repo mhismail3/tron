@@ -12,7 +12,9 @@ import { compactionPolicyModule } from "../kernel/run/compaction-policy.js";
 import { initTheme } from "../kernel/pi/adapters.js";
 import { settingsModule } from "../admin/settings-module.js";
 import { askUserModule } from "../extensions/ask-user-module.js";
-import { computerModule } from "../display/computer-module.js";
+import { randomUUID } from "node:crypto";
+import { createComputerModule } from "../display/computer-module.js";
+import { ConsoleGate } from "../machine/console-probe.js";
 import { createAppsModule } from "../modules/apps/module.js";
 import { workspaceModule } from "../workspace/workspace-module.js";
 import { createCoreModule } from "../workspace/core-module.js";
@@ -44,6 +46,12 @@ export function gatewayModules(owners: () => ModuleOwners, projectOptions?: Cons
     return owner ? (request: Parameters<SessionSearchService["search"]>[0], signal?: AbortSignal) => owner.search(request, signal) : undefined;
   } }));
   const projects = projectsModule(new ProjectLifecycle(() => owners().home.trust, projectRuntimePort(registry, () => home.owner().activeTaskTargets()), projectOptions));
+  const gate = new ConsoleGate(async (sessionId, cause) => {
+    const { notifications, machineId } = owners().home;
+    await notifications?.enqueue({ sessionId, sourceId: `${cause}-${randomUUID()}`, kind: "explicit", title: cause === "mac_locked" ? "Mac locked" : "Mac display asleep",
+      message: `Tron paused desktop work because the Mac ${cause === "mac_locked" ? "is locked. Unlock it" : "display is asleep. Wake it"} to continue; browser work is unaffected.`,
+      ...(machineId ? { route: { sessionId, machineId } } : {}) });
+  });
   const providers = createContextWindowModule(() => owners().openAIModelEligibility, owners, () => owners().home.modelQueue);
   return { home: home.owner, projects, providers, runtimeOrder: ORDINARY_MODULE_NAMES, modules: [
     workspaceModule,
@@ -58,8 +66,8 @@ export function gatewayModules(owners: () => ModuleOwners, projectOptions?: Cons
     askUserModule,
     createDisplayModule(() => owners().display),
     createAppsModule(() => owners().display),
-    createNativeCaptureModule(() => owners().display),
-    computerModule,
+    createNativeCaptureModule(() => owners().display, gate),
+    createComputerModule(gate),
     createScheduleModule(() => owners().scheduleToolOperations),
     createNotifyModule(() => ({ notifications: owners().home.notifications, machineId: owners().home.machineId })),
     home.home,
