@@ -28,7 +28,7 @@ def main():
         script.write_text('''#!/bin/sh
 set -eu
 git rev-parse HEAD > "$SOURCE_REPORT"
-printf "%s\\n" "$TRON_MAIN_SOURCE_ROOT" "$@" >> "$SOURCE_REPORT"
+printf "%s\\n" "$TRON_MAIN_SOURCE_ROOT" "$TRON_MAIN_SOURCE_REF" "$@" >> "$SOURCE_REPORT"
 nested=packages/ios-app/build/DerivedData-fast-debug/SourcePackages/checkouts/generated
 mkdir -p "$nested"
 git -C "$nested" init -q
@@ -62,7 +62,7 @@ exit "${BUILD_STATUS:-0}"
                 assert result.returncode == status, (operation, status, result.returncode, result.stdout, result.stderr)
                 report = (root / "report").read_text().splitlines()
                 assert report[0] == main_sha and not Path(report[1]).exists(), report
-                assert report[2:] == [operation, "--fast-debug"], report
+                assert report[2:] == ["main", operation, "--fast-debug"], report
                 assert git(repo, "status", "--porcelain") == before
                 assert git(user, "rev-parse", "HEAD") == user_sha
                 assert (user / "dirty").read_text() == "keep caller draft"
@@ -77,7 +77,7 @@ exit "${BUILD_STATUS:-0}"
                                 text=True, capture_output=True, timeout=15)
         assert result.returncode == 0, (result.stdout, result.stderr)
         report = (root / "report").read_text().splitlines()
-        assert report[0] == candidate_sha != main_sha and report[2:] == ["share", "--ref", "candidate", "--fast-debug"], report
+        assert report[0] == candidate_sha != main_sha and report[2:] == ["candidate", "share", "--fast-debug"], report
         (root / "report").unlink()
         for refused in (["install", "--ref", "candidate"], ["share", "--ref"], ["share", "--ref", "absent"]):
             result = subprocess.run([script, *refused], env=env, text=True, capture_output=True, timeout=15)

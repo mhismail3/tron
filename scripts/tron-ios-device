@@ -30,7 +30,6 @@ SHARE_AGENT_PLIST="$HOME/Library/LaunchAgents/$SHARE_AGENT_LABEL.plist"
 SHARE_KEEP=5
 SHARE_TITLE=""
 SHARE_NOTES=""
-SHARE_REF=""
 
 usage() {
     cat <<'USAGE'
@@ -220,12 +219,6 @@ parse_common_args() {
             --fast-debug)
                 BUILD_MODE="fast-debug"
                 shift
-                ;;
-            --ref)
-                [[ "$CMD" == "share" ]] || die "--ref is only valid with share"
-                SHARE_REF="${2:-}"
-                [ -n "$SHARE_REF" ] || die "--ref requires a branch name"
-                shift 2
                 ;;
             --title|--notes)
                 [[ "$CMD" == "share" ]] || die "$1 is only valid with share"
@@ -622,7 +615,7 @@ share_build() {
     [[ -n "$SHARE_TITLE" && -n "$SHARE_NOTES" ]] || die "share requires --title and --notes"
     [[ -z "$(git -C "$ROOT_DIR" status --porcelain)" ]] || die "working tree is dirty: commit before sharing a build"
     local url branch commit
-    branch="${SHARE_REF:-main}"
+    branch="${TRON_MAIN_SOURCE_REF:?share runs only through run-main-source.py}"
     commit="$(git -C "$ROOT_DIR" rev-parse HEAD)"
     url="$(share_base_url)"
     share_host_reachable "$url" \
