@@ -288,7 +288,6 @@
       "timeout-literal": 2
     },
     "src/episodic/episodic-memory-recovery.integration.test.ts": {
-      "sleep": 4,
       "timeout-literal": 8
     },
     "src/episodic/episodic-memory.e2e.test.ts": {
