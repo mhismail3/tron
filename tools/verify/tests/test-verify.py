@@ -249,8 +249,7 @@ class ExternalVerificationTests(VerifyCase):
             else:
                 self.assertEqual(node_command[-1:], [files[3]], options)
                 self.assertNotIn("mini.py", " ".join(node_command), options)
-            local_python = "status=0; " + "; ".join(f"echo '### verify file: {path}'; python3 tools/verify/ledger.py python {path} || {{ code=$?; [ \"$status\" -ne 0 ] || status=$code; }}"
-                                       for path in ("mods/alpha/test-alpha.py", "scripts/test-pooled.py")) + '; exit "$status"'
+            local_python = "python3 tools/verify/files.py python mods/alpha/test-alpha.py scripts/test-pooled.py"
             python_command = next(c["command"] for c in plan["commands"] if c["name"] == "tests: python")
             self.assertEqual([python_command[0], Path(python_command[1]).name, *python_command[2:]] if runner == "mini.py"
                              else python_command, ["python3", "mini.py", "python", local_python] if runner == "mini.py"
@@ -681,7 +680,9 @@ class LedgerTests(VerifyCase):
                                 ('mods/alpha/test-fixtures.py::setUpClass (Skipped)', 'skipped'),
                                 ('mods/alpha/test-passed.py', 'passed')])
         r.write('mods/alpha/test-000-status.py', 'import sys\nsys.exit(37)\n')
-        r.commit('first nonzero status with later files')
+        for side, mode in (('reader', 'O_RDONLY'), ('writer', 'O_WRONLY')):
+            r.write(f'mods/alpha/test-pair-{side}.py', "import os, signal, unittest\nfrom pathlib import Path\nFIFO = Path(os.environ['TMPDIR']) / 'tron-pair.fifo'\nclass Pair(unittest.TestCase):\n    def test_meets_its_partner(self):\n        try:\n            os.mkfifo(FIFO)\n        except FileExistsError:\n            pass\n        signal.alarm(60)\n        os.close(os.open(FIFO, os.{}))\n        signal.alarm(0)\n        print('pair met')\nunittest.main()\n".format(mode))
+        r.commit('first nonzero status with later files, and two files that each finish only while the other runs')
         for entry in ('tooling', 'verify'):
             with self.subTest(entry=entry):
                 if entry == 'tooling':
@@ -695,7 +696,9 @@ class LedgerTests(VerifyCase):
                     self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
                     step = next(step for step in r.report()['steps'] if step['name'] == 'tests: python')
                     self.assertEqual(step['exit'], 37)
-                    self.assertIn('file passed', (r.path / step['log']).read_text())
+                    log = (r.path / step['log']).read_text()
+                    self.assertIn('file passed', log)
+                    self.assertEqual(log.count('pair met'), 2, log)
 
     def test_public_tooling_run_appends_real_cases_and_flakes_means_same_tree_pass_and_fail(self) -> None:
         r = self.repo

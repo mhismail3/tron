@@ -1168,9 +1168,8 @@ def ios_owner_count(output: str) -> int:
     return sum(int(count) for count in ran)
 
 
-def per_file(interpreter: str, files: list[str]) -> str:
-    runner = 'python3 tools/verify/ledger.py ' + ('python' if interpreter == 'python3' else 'exec shell bash')
-    return "status=0; " + "; ".join(f"echo {shlex.quote(FILE_MARKER + path)}; {runner} {shlex.quote(path)} || {{ code=$?; [ \"$status\" -ne 0 ] || status=$code; }}" for path in files) + '; exit "$status"'
+def per_file(kind: str, files: list[str]) -> str:
+    return shlex.join(["python3", "tools/verify/files.py", kind, *files])
 
 
 def test_step_names(group: str, shards: list[list[str]], skipped: bool) -> list[str]:
@@ -1225,11 +1224,11 @@ def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, ga
         return ([sys.executable, str(ROOT / 'tools/verify/ledger.py'), 'exec', 'node', *node, 'node', '--test', '--test-concurrency=1',
                  '--test-reporter=' + str(ROOT / 'tools/verify/ledger-node.mjs'), *files], ROOT, tap_count)
     if group == "python-here":
-        return (per_file("python3", files), ROOT, python_count)
+        return (per_file("python", files), ROOT, python_count)
     if group == "python":
-        command = per_file("python3", files)
+        command = per_file("python", files)
         return (["python3", str(ROOT / "tools/verify/mini.py"), "python", command] if gateway_host == "mini" else command, ROOT, python_count)
-    return (per_file("bash", files), ROOT, lambda _out: len(files))
+    return (per_file("shell", files), ROOT, lambda _out: len(files))
 
 
 IOS_POLL_SECONDS = 0.5
