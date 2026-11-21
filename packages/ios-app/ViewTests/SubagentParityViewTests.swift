@@ -1,0 +1,212 @@
+import UIKit
+import XCTest
+@testable import TronMobile
+
+@MainActor
+final class SubagentParityViewTests: ShuffledTestCase {
+    func testHomeChipLabelCaptures() async throws {
+        let chips = ["Manage task, Completed, 42ms", "Send notification, Completed, 18ms", "Worker · Simplify Home chip labels, Reported"]
+        for scheme in ["light", "dark"] {
+            try await mounted(["-tron-subagent-parity-fixture", "-home-chip-labels", "-\(scheme)"]) { app in
+                try await app.until("the assistant reply and its chips") {
+                    reply(app, "The requested changes are ready for review.") && chips.allSatisfy { app.button($0) != nil }
+                }
+                XCTAssertTrue(nodes(app) { $0.accessibilityTraits.contains(.button) && $0.accessibilityLabel?.contains("Tron Home ·") == true }.isEmpty)
+                XCTAssertTrue(nodes(app) { $0.accessibilityTraits.contains(.button) && $0.accessibilityLabel?.contains("Tron Notify ·") == true }.isEmpty)
+            }
+        }
+    }
+
+    func testHomeResultReadableMessageAndNestedInfo() async throws {
+        for mode in ["legacy", "typed-report", "plain-report", "malformed-report"] {
+            try await mounted(["-tron-subagent-parity-fixture", "-presentation-polish", "-\(mode)",
+                               mode == "typed-report" ? "-dark" : "-light"]) { app in
+                let pill = mode == "typed-report" ? "Worker, Reported" : "Worker, Received"
+                try await app.activate(pill)
+                if mode == "plain-report" {
+                    try await app.until("the plain report") { app.staticText("Plain report remains complete.") != nil }
+                } else if mode == "malformed-report" {
+                    try await app.until("the preserved text") { !texts(app, containing: "preserve this text").isEmpty }
+                } else {
+                    try await app.until("the actual report") { app.staticText("Actual report") != nil }
+                    XCTAssertNotNil(app.staticText("All requested changes are preserved."))
+                    XCTAssertNotNil(app.staticText(mode == "typed-report" ? "Needs input" : "Final report"))
+                    XCTAssertTrue(texts(app, containing: "receiptId").isEmpty)
+                }
+                try await app.activate("Technical details")
+                try await app.until("the origin section") { app.staticText("ORIGIN") != nil }
+                if mode == "legacy" {
+                    try await app.until("the envelope row") { app.labelled("Inspect report envelope") != nil }
+                    let envelope = try XCTUnwrap(app.labelled("Inspect report envelope"))
+                    try await app.reveal(envelope)
+                    XCTAssertTrue(app.onScreen(envelope))
+                    try await app.until("the evidence table") { !texts(app, containing: "evidence/native-result.xcresult").isEmpty }
+                    try press(envelope)
+                    try await app.until("the envelope inspector") { app.staticText("Report envelope") != nil }
+                    try await app.activate("Done")
+                }
+                try await app.activate("Done")
+                try await app.until("the technical details close") { app.button("Technical details") != nil }
+                try await app.activate("Done")
+                try await app.until("the message returns") { app.button(pill) != nil }
+            }
+        }
+    }
+
+    func testNativeOrganizationAndPills() async throws {
+        for scheme in ["light", "dark"] {
+            try await mounted(["-tron-subagent-parity-fixture", "-\(scheme)"]) { app in
+                try await app.until("the Subagents button") { app.button("Subagents") != nil }
+                try await verifyPills(app)
+                try await app.activate("Subagents")
+                try await app.until("the running subagents sheet") { app.staticText("Running subagents") != nil }
+                try await app.until("the worker row") { app.button("Worker") != nil }
+                try await app.until("the worker's output and tool count") {
+                    ["PARITY_CHILD_COMPLETE", "parity.txt", "2 tools"].allSatisfy { app.button("Worker")?.accessibilityValue?.contains($0) == true }
+                }
+                XCTAssertNil(app.staticText("PRIVATE PROVIDER STATUS"))
+                XCTAssertNil(app.staticText("PRIVATE PROVIDER FRAME"))
+                XCTAssertTrue(texts(app, containing: "PI_SUBAGENT_ASYNC_JSON").isEmpty)
+                try press(app.button("Worker"))
+                try await app.until("the child transcript") { app.staticText("Child transcript reached through the native row.") != nil }
+            }
+        }
+    }
+
+    func testHistoricalSessionPills() async throws {
+        try await mounted(["-tron-subagent-parity-fixture", "-dark", "-historical"]) { app in
+            try await app.until("the needs-attention pill") { app.button("Subagent, Needs Attention") != nil }
+            XCTAssertNil(app.button("Extension content"), "Historic classification belongs to Gateway, not npm parsing")
+            try await verifyPills(app)
+        }
+    }
+
+    func testPendingWakePreflightJourney() async throws {
+        try await verifyRuntimeWake("pending-wake")
+    }
+
+    func testQueuedWakeSteerJourney() async throws {
+        try await verifyRuntimeWake("queued-wake")
+    }
+
+    func testQueuedMaintainerRemainsVisible() async throws {
+        for scheme in ["light", "dark"] {
+            try await mounted(["-tron-subagent-parity-fixture", "-\(scheme)", "-queued-wake", "-queued-maintainer"]) { app in
+                try await app.until("the maintainer's queued message") { app.staticText("Maintainer queued message") != nil }
+                XCTAssertNil(app.staticText("Subagent updates above."))
+            }
+        }
+    }
+
+    func testHistoryQueuedPausedResumedAndTerminalExecutions() async throws {
+        for outcome in ["completed", "failed", "stopped"] {
+            try await mounted(["-tron-subagent-parity-fixture", "-history-grouping", "-history-lifecycle", "-history-\(outcome)", "-dark"]) { app in
+                try await app.activate("Subagent History")
+                try await app.until("the worker row") { app.button("subagent-row-worker") != nil }
+                try await app.expandTopSheet()
+                let stages = [("worker", "Queued", true), ("worker", "Running", true),
+                              ("worker", "Pausing…", true), ("worker", "Paused", false),
+                              ("resumed", "Queued", true), ("resumed", "Running", true),
+                              ("resumed", outcome.capitalized, false)]
+                for (index, stage) in stages.enumerated() {
+                    if index > 0 { try await app.activate("Advance lifecycle") }
+                    try await assertHistoryRow(app, id: stage.0, status: stage.1, active: stage.2)
+                    try await assertHistoryRow(app, id: "completed", status: "Completed", active: false)
+                    if index >= 4 {
+                        try await assertHistoryRow(app, id: "worker", status: "Paused", active: false)
+                        XCTAssertEqual(rows(app) { $0.hasPrefix("subagent-row-") }.count, 3)
+                    }
+                }
+            }
+        }
+    }
+
+    func testActivityRowsCaptures() async throws {
+        for scheme in ["light", "dark"] {
+            for state in ["running", "recent"] {
+                try await mounted(["-tron-subagent-parity-fixture", "-\(scheme)"]
+                                  + (state == "recent" ? ["-activity-preview-recent"] : [])) { app in
+                    try await app.until("the Subagents button") { app.button("Subagents") != nil }
+                    try await app.activate("Subagents")
+                    let heading = state == "running" ? "Running subagents" : "Completed subagents"
+                    try await app.until(heading) { app.staticText(heading) != nil }
+                    let prefix = state == "running" ? "Live," : "Completed,"
+                    try await app.until("the row reads \(prefix)") { activityValue(app).hasPrefix(prefix) }
+                    XCTAssertEqual(rows(app) { $0.hasPrefix("subagent-row-") }.count, 1)
+                    if state == "running" {
+                        XCTAssertTrue(activityValue(app).contains("Claude Fable 5.2 · Medium thinking"), activityValue(app))
+                    }
+                    XCTAssertNil(app.staticText("DETAILS"), "The bespoke DETAILS heading is retired")
+                    XCTAssertNil(app.staticText("LIVE OUTPUT"), "The bespoke LIVE OUTPUT heading is retired")
+                }
+            }
+        }
+    }
+
+    private func verifyRuntimeWake(_ stage: String) async throws {
+        for scheme in ["light", "dark"] {
+            try await mounted(["-tron-subagent-parity-fixture", "-\(scheme)", "-\(stage)"]) { app in
+                try await app.until("the needs-attention pill") { app.button("Subagent, Needs Attention") != nil }
+                XCTAssertNil(app.staticText("Subagent updates above."),
+                             "An internal input must have no user-position bubble before canonical binding: \(stage)")
+                XCTAssertNil(app.button("Subagent, Update"), "A hidden wake must not gain a pill")
+            }
+        }
+    }
+
+    private func verifyPills(_ app: MountedFixture) async throws {
+        for (label, body) in [
+            ("Subagent, Progress Update", "Worker has finished discovery."),
+            ("Subagent, Child Update", "Reviewer child result: no blockers."),
+            ("Subagent, Needs Attention", "May the worker proceed?")
+        ] {
+            try await app.until("the \(label) pill") { app.button(label) != nil }
+            XCTAssertEqual(rows(app) { $0 == label }.count, 1, "One pill per subagent message")
+            XCTAssertNil(app.staticText("Subagent updates above."), "Wake must not be a user bubble")
+            try await app.activate(label)
+            try await app.until("the \(label) details") { app.staticText(body) != nil }
+            XCTAssertNil(app.staticText("Unknown source"))
+            XCTAssertNil(app.staticText("Context received"))
+            try await app.activate("Done")
+        }
+        XCTAssertNil(app.button("Subagent, Update"), "Internal wake must not add a pill")
+    }
+
+    private func assertHistoryRow(_ app: MountedFixture, id: String, status: String, active: Bool) async throws {
+        try await app.until("\(id) reads \(status)") { rowValue(app, "subagent-row-\(id)").hasPrefix("\(status),") }
+        XCTAssertEqual(rows(app) { $0 == "subagent-row-\(id)" }.count, 1)
+        if !active {
+            XCTAssertFalse(rowValue(app, "subagent-row-\(id)").contains("LIVE OUTPUT"))
+        }
+    }
+
+    private func reply(_ app: MountedFixture, _ text: String) -> Bool {
+        !nodes(app) {
+            MountedFixture.identifier($0) == "chat.assistant.selectable-text" && ($0 as? UITextView)?.text.contains(text) == true
+        }.isEmpty
+    }
+
+    private func nodes(_ app: MountedFixture, _ match: (NSObject) -> Bool) -> [NSObject] {
+        MountedFixture.elements(in: app.top).filter(match)
+    }
+
+    private func rows(_ app: MountedFixture, _ match: (String) -> Bool) -> [NSObject] {
+        nodes(app) { $0.accessibilityTraits.contains(.button) && match(MountedFixture.identifier($0) ?? "") }
+    }
+
+    private func rowValue(_ app: MountedFixture, _ id: String) -> String {
+        rows(app) { $0 == id }.first?.accessibilityValue ?? ""
+    }
+
+    private func activityValue(_ app: MountedFixture) -> String {
+        rows(app) { $0.hasPrefix("subagent-row-") }.first?.accessibilityValue ?? ""
+    }
+
+    private func texts(_ app: MountedFixture, containing text: String) -> [NSObject] {
+        nodes(app) { !$0.accessibilityTraits.contains(.button) && $0.accessibilityLabel?.contains(text) == true }
+    }
+
+    private func press(_ node: NSObject?) throws {
+        guard let node, node.accessibilityActivate() else { throw FixtureNotReady(description: "refused activation") }
+    }
+}
