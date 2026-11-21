@@ -166,29 +166,32 @@ module SessionsRestartDrain refines SessionsRestartDrainLaws {
   lemma W1Unlisted(count: Count, blockers: List<Blocker>, tracked: Tracked, now: Ms, limit: Ms)
   {}
 
-  // Under O1's premises, Evaluate tracks the oldest blocker, judged by Progress, from the timer's start.
-  lemma Tracks(count: Count, blockers: List<Blocker>, tracked: Tracked, now: Ms, limit: Ms, i: int)
+  // Under O1's premises: not every blocker is an owner, Evaluate takes the oldest blocker, and the progress time it
+  // computes is the one that judges that blocker.
+  lemma Facts(count: Count, blockers: List<Blocker>, i: int)
     requires count != 0 && !OnlyOwners(count, Elems(blockers)) && Oldest(Elems(blockers), i)
-    ensures var o, p := Elems(blockers)[i], Progress(Elems(blockers), Elems(blockers)[i]);
-      var since := if Unchanged(tracked, o, p) then tracked.since else Signal(p, o.admitted, now);
-      var age := Age(now, since);
-      Evaluate(count, blockers, tracked, now, limit)
-        == Step(if age >= limit then Stalled(o.id, age) else Waiting, Tracking(o.id, o.state, p, o.admitted, since))
+    ensures !AllOwners(count, blockers) && blockers.Cons? && OldestOf(blockers.tail, blockers.head) == Elems(blockers)[i]
+    ensures var o := Elems(blockers)[i];
+      (if o.session.NoSession? then o.progress else LatestFor(blockers, o.session.session, Unset)) == Progress(Elems(blockers), o)
   {
     AllOwnersSpec(count, blockers);
     OldestSpec(blockers, i);
-    var o := Elems(blockers)[i];
-    ProgressSpec(blockers, o);
-    var p := Progress(Elems(blockers), o);
-    if tracked.Tracking? { SameSpec(tracked.state, o.state, tracked.progress, p); SameSpec(tracked.state, o.state, tracked.admitted, o.admitted); }
+    ProgressSpec(blockers, Elems(blockers)[i]);
   }
 
   lemma O1OldestTracked(count: Count, blockers: List<Blocker>, tracked: Tracked, now: Ms, limit: Ms, i: int)
-  { Tracks(count, blockers, tracked, now, limit, i); }
+  { Facts(count, blockers, i); }
 
   lemma R1TimerReset(count: Count, blockers: List<Blocker>, tracked: Tracked, now: Ms, limit: Ms, i: int)
-  { Tracks(count, blockers, tracked, now, limit, i); }
+  {
+    Facts(count, blockers, i);
+    var o := Elems(blockers)[i];
+    if tracked.Tracking? {
+      SameSpec(tracked.state, o.state, tracked.progress, Progress(Elems(blockers), o));
+      SameSpec(tracked.state, o.state, tracked.admitted, o.admitted);
+    }
+  }
 
   lemma T1Stalled(count: Count, blockers: List<Blocker>, tracked: Tracked, now: Ms, limit: Ms, i: int)
-  { Tracks(count, blockers, tracked, now, limit, i); }
+  { Facts(count, blockers, i); }
 }

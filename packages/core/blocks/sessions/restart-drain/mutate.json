@@ -27,7 +27,7 @@
     ],
     "O1 oldest-tracked": [
       "SessionsRestartDrain.O1OldestTracked",
-      "SessionsRestartDrain.Tracks",
+      "SessionsRestartDrain.Facts",
       "SessionsRestartDrain.OldestSpec",
       "SessionsRestartDrain.OldestWalk",
       "SessionsRestartDrain.LatestSpec",
@@ -47,7 +47,34 @@
     "LaterAssoc"
   ],
   "translate": "blocks/sessions/restart-drain/Block.dfy",
-  "accepted": {},
+  "accepted": {
+    "LatestFor/boundary/>->>=#1": {
+      "kind": "equivalent",
+      "reason": "on equal milliseconds both keep a time At(ms) of the same value, so the running latest is the same Time either way",
+      "reviewer": "law reviewer (REVIEW.json acceptedMutants)",
+      "hint": "if bs.Cons? { var h := bs.head; LatestFor__equiv(bs.tail, s, if h.session.InSession? && h.session.session == s && h.progress.At? && (latest.Unset? || h.progress.ms > latest.ms) then h.progress else latest); }"
+    },
+    "Evaluate/swap-args/tracked.state, o.state->o.state, tracked.state#1": {
+      "kind": "equivalent",
+      "reason": "SameState and SameTime are symmetric (each is equality, SameSpec), so swapping the tracked and the current value cannot change which branch Evaluate takes",
+      "reviewer": "law reviewer (REVIEW.json acceptedMutants)"
+    },
+    "Evaluate/swap-args/tracked.progress, p->p, tracked.progress#1": {
+      "kind": "equivalent",
+      "reason": "SameState and SameTime are symmetric (each is equality, SameSpec), so swapping the tracked and the current value cannot change which branch Evaluate takes",
+      "reviewer": "law reviewer (REVIEW.json acceptedMutants)"
+    },
+    "Evaluate/swap-args/tracked.admitted, o.admitted->o.admitted, tracked.admitted#1": {
+      "kind": "equivalent",
+      "reason": "SameState and SameTime are symmetric (each is equality, SameSpec), so swapping the tracked and the current value cannot change which branch Evaluate takes",
+      "reviewer": "law reviewer (REVIEW.json acceptedMutants)"
+    },
+    "Evaluate/boundary/<=-><#1": {
+      "kind": "equivalent",
+      "reason": "when now equals since both give the age 0 (now - since is 0)",
+      "reviewer": "law reviewer (REVIEW.json acceptedMutants)"
+    }
+  },
   "report": "blocks/sessions/restart-drain/MUTATION.json",
   "kinds": {
     "safety": [
