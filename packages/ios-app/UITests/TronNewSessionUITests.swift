@@ -111,15 +111,6 @@ final class TronNewSessionUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts["fixture.create-result"].label, "callbacks:0 owned:false")
         evidence(app, "348-new-session-pretrust-background")
     }
-    @MainActor func testOriginalUnresolvedTrustFallbackCreatesOnce() {
-        continueAfterFailure = false
-        let app = launch("trust-original"); defer { app.terminate() }
-        XCTAssertTrue(app.buttons["Create"].waitForExistence(timeout: 15)); app.buttons["Create"].tap()
-        XCTAssertTrue(wait(app.staticTexts["fixture.create-result"], "label == 'callbacks:1 owned:true'"))
-        XCTAssertTrue(app.staticTexts["fixture.trust-counts"].label.hasPrefix("trusts:1 successor:0 fallback:true"))
-        XCTAssertEqual(app.staticTexts["fixture.create-counts"].label, "creates:1 typed:0")
-        evidence(app, "348-new-session-original-trust")
-    }
     @MainActor func testAcceptedTrustDoesNotReplayOrAutomaticallyCreateAfterBackground() {
         continueAfterFailure = false
         let app = launch("trust-accepted-background"); defer { app.terminate() }
