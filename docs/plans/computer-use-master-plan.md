@@ -185,7 +185,7 @@ was checked at both tags (`git tag --contains`).
 
 Owner: `packages/gateway/src/machine/cua-client.ts`.
 
-- **N1 (new): no timeout or abort on any driver call.**
+- **N1 (new, #2644): no timeout or abort on any driver call.**
   - PROVEN: `execFileAsync` at `:110`, `:129`, `:155` and `:220` passes neither `timeout` nor `signal`.
   - A hung daemon blocks the turn, and Stop cannot end it.
   - `close()` loops forever on `session_cleanup_pending` (`:218-228`).
@@ -325,7 +325,7 @@ Owner: `packages/gateway/third_party/pi-agent-browser-native/tron.patch`.
 
 ### RC8. Guidance and errors point agents to refused routes
 
-- **New, PROVEN.** The bundled browser wrapper tells the model to
+- **New, PROVEN (#2645).** The bundled browser wrapper tells the model to
   `open -a <App> --args --remote-debugging-port=9222 ...; then agent_browser connect 9222`. Sources:
   `Gateway/app/node_modules/pi-agent-browser-native/dist/extensions/agent-browser/index.js:39525-39529`
   (`ELECTRON_EXISTING_AUTH_GUIDANCE`) and the wrapper's `COMMAND_REFERENCE.md` (line 497).
