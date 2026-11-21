@@ -30,7 +30,7 @@ export class ConsoleUnavailableError extends Error {
   }
 }
 
-export async function consoleCause(): Promise<ConsoleCause | undefined> {
+async function consoleCause(): Promise<ConsoleCause | undefined> {
   const { stdout } = await run(OSASCRIPT, ["-l", "JavaScript", "-e", PROBE], { encoding: "utf8", timeout: 900, maxBuffer: 4096, env: {} });
   const state = JSON.parse(stdout) as { locked?: unknown; asleep?: unknown };
   if (typeof state.locked !== "boolean" || typeof state.asleep !== "boolean") throw new Error("Console state is unavailable");

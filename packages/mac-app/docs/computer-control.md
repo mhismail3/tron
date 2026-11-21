@@ -220,7 +220,8 @@ Node addon queue/exit/allocation paths; and mounted iOS paint/visibility/geometr
 Live vendor-driver checks use a disposable fixture and independent app outcomes.
 They do not certify every app, OS version or sudden mid-action host death. A locked
 console or sleeping display is refused by the Gateway with `mac_locked`/`display_asleep`
-([Gateway machine](../../gateway/src/machine/README.md#native-capture-and-computer-use)). Same-installed-host end-to-end validation remains an explicit gate.
+at each `computer` call and `native_capture` catalog/view; a live view already streaming
+before the lock is not stopped ([Gateway machine](../../gateway/src/machine/README.md#native-capture-and-computer-use)). Same-installed-host end-to-end validation remains an explicit gate.
 
 The retained `TronNativeCaptureQualification` creates its own marker window, checks
 actual decoded colors and resize geometry, joins Stop, then checks source close
