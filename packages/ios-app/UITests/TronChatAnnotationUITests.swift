@@ -61,6 +61,41 @@ final class TronChatAnnotationUITests: XCTestCase {
         XCTAssertLessThan(try XCTUnwrap(pasted.range(of: "Retry policy")).lowerBound, try XCTUnwrap(pasted.range(of: "• Accepted prompts")).lowerBound)
     }
 
+    @MainActor func testTableAndCodeSelectionsOfferAnnotate() {
+        continueAfterFailure = false
+        for (scheme, extra) in [("dark", [String]()), ("light", ["-annotation-light"])] {
+            let app = launch(["-annotation-rich-blocks"] + extra)
+            for (text, name) in [("Reconnect cap", "table"), ("let retryCapSeconds = 30", "code")] {
+                let block = assistantBlock(app, containing: text)
+                XCTAssertTrue(block.waitForExistence(timeout: 5), app.debugDescription)
+                for _ in 0..<4 where !block.isHittable {
+                    if block.frame.midY < app.windows.firstMatch.frame.midY { app.swipeDown() } else { app.swipeUp() }
+                }
+                block.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).press(forDuration: 1.0)
+                let annotate = menuAction(app, "Annotate")
+                XCTAssertTrue(annotate.waitForExistence(timeout: 5), "A \(name) selection offers Annotate: \(app.debugDescription)")
+                keepScreenshot(app, "annotate-\(name)-\(scheme)")
+                annotate.tap()
+                let bubble = app.otherElements["chat.annotation.bubble"]
+                XCTAssertTrue(bubble.waitForExistence(timeout: 5), app.debugDescription)
+                let quote = app.descendants(matching: .any)["chat.annotation.bubble.quote"].label
+                XCTAssertFalse(quote.isEmpty)
+                XCTAssertTrue(text.contains(quote) || quote.contains(text), "The quote comes from the \(name): \(quote)")
+                dismissKeyboardTip(app)
+                app.typeText("note")
+                app.buttons["Save annotation"].firstMatch.tap()
+                XCTAssertTrue(wait(for: bubble, exists: false))
+                if app.keyboards.firstMatch.exists {
+                    let window = app.windows.firstMatch
+                    window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+                        .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
+                }
+            }
+            XCTAssertEqual(app.otherElements.matching(identifier: "composer.staged-chip").count, 2, app.debugDescription)
+            app.terminate()
+        }
+    }
+
     @MainActor func testAnnotateSelectionEditChipAndSend() {
         continueAfterFailure = false
         let app = launch(); defer { app.terminate() }

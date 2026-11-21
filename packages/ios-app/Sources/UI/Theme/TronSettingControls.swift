@@ -321,3 +321,18 @@ extension Binding {
         wrappedValue = next
     }
 }
+
+struct TronSettingsCodeRow: View {
+    let text: String
+
+    var body: some View {
+        Text(verbatim: text)
+            .font(TronTypography.code(size: TronTypography.sizeBodySM))
+            .foregroundStyle(Color.tronTextPrimary)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
+            .padding(.vertical, TronSpacing.xl)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}

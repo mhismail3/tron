@@ -38,20 +38,49 @@ struct ExtensionInteractionSheet: View {
     }
 
     var body: some View {
+        Group {
+            if interaction.method == .change, let review = interaction.review {
+                ChangeReviewSheet(
+                    review: review,
+                    submitting: submitting,
+                    secret: review.intent == .providerApiKey ? $secretKey : nil,
+                    failure: submissionError,
+                    close: close,
+                    approve: { respond(value: .object(["digest": .string(review.digest), "approved": .bool(true)]
+                        .merging(review.intent == .providerApiKey ? ["secret": .string(secretKey)] : [:]) { $1 }), approval: pushRetryGate(for: review)) },
+                    cancel: { respond(value: .object(["digest": .string(review.digest), "approved": .bool(false)])) }
+                )
+            } else {
+                question
+            }
+        }
+        .onAppear { resetState() }
+        .onChange(of: ExtensionInteractionScope(interaction)) { _, _ in resetState() }
+        .onChange(of: text) { _, _ in persistDraft() }
+        .onChange(of: isExpired) { _, expired in
+            if expired { textFocused = false }
+        }
+        .onChange(of: selectedOption) { _, _ in persistDraft() }
+        .onChange(of: confirmValue) { _, _ in persistDraft() }
+        .task(id: ExtensionInteractionScope(interaction)) {
+            guard let expiresAt = interaction.expiresAt,
+                  let expiration = GatewayTimestamp.parse(expiresAt) else { return }
+            while !Task.isCancelled, currentDate < expiration {
+                currentDate = Date()
+                do { try await Task.sleep(for: .seconds(1)) }
+                catch { return }
+            }
+            currentDate = Date()
+        }
+    }
+
+    private var question: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 16) {
-                    if interaction.method == .change, let review = interaction.review {
-                        ChangeReviewCard(review: review, submitting: submitting,
-                            secret: review.intent == .providerApiKey ? $secretKey : nil,
-                            approve: { respond(value: .object(["digest": .string(review.digest), "approved": .bool(true)]
-                                .merging(review.intent == .providerApiKey ? ["secret": .string(secretKey)] : [:]) { $1 }), approval: pushRetryGate(for: review)) },
-                            cancel: { respond(value: .object(["digest": .string(review.digest), "approved": .bool(false)])) })
-                    } else {
-                        promptCard
-                        expirationView
-                        control
-                    }
+                    promptCard
+                    expirationView
+                    control
                     if let submissionError {
                         Label(submissionError, systemImage: "exclamationmark.triangle.fill")
                             .font(TronTypography.bodySM)
@@ -76,16 +105,15 @@ struct ExtensionInteractionSheet: View {
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                             .tronToolbarAction(role: .neutral)
                     }
-                    .accessibilityLabel(interaction.method == .change ? "Close review without deciding" : "Close question and keep answer")
+                    .accessibilityLabel("Close question and keep answer")
                     .disabled(submitting)
                 }
                 ToolbarItem(placement: .principal) {
-                    Text(interaction.method == .change ? "Review change" : "Question")
+                    Text("Question")
                         .font(TronTypography.sans(size: TronTypography.sizeBodyLG, weight: .semibold))
-                        .foregroundStyle(interaction.method == .change ? Color.tronPrimary : Color.tronAmber)
+                        .foregroundStyle(Color.tronAmber)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    if interaction.method != .change {
                     Button(action: submit) {
                         TronToolbarTextLabel(
                             "Submit",
@@ -96,7 +124,6 @@ struct ExtensionInteractionSheet: View {
                     }
                     .accessibilityLabel("Submit answer")
                     .disabled(!canSubmit || submitting || isExpired)
-                    }
                 }
             }
         }
@@ -104,24 +131,6 @@ struct ExtensionInteractionSheet: View {
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .interactiveDismissDisabled()
-        .onAppear { resetState() }
-        .onChange(of: ExtensionInteractionScope(interaction)) { _, _ in resetState() }
-        .onChange(of: text) { _, _ in persistDraft() }
-        .onChange(of: isExpired) { _, expired in
-            if expired { textFocused = false }
-        }
-        .onChange(of: selectedOption) { _, _ in persistDraft() }
-        .onChange(of: confirmValue) { _, _ in persistDraft() }
-        .task(id: ExtensionInteractionScope(interaction)) {
-            guard let expiresAt = interaction.expiresAt,
-                  let expiration = GatewayTimestamp.parse(expiresAt) else { return }
-            while !Task.isCancelled, currentDate < expiration {
-                currentDate = Date()
-                do { try await Task.sleep(for: .seconds(1)) }
-                catch { return }
-            }
-            currentDate = Date()
-        }
     }
 
     private var promptCard: some View {

@@ -69,8 +69,7 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   layer already stores sends nothing, while picking an inherited or default value pins it there. A row whose dry run requires a
   tap (trust, privacy or spend widening, installs, irreversible effects) opens the shared
   `ChangeReviewSheet`; Approve commits once bound to the shown digest, Cancel sends nothing.
-  The shared card, its actions and native review title use `tronPrimary`, including read-only
-  history. Generic questions retain their own accent; theme never changes approval authority.
+  Its title and Approve use `tronPrimary`; Cancel is red. Generic questions retain their own accent; theme never changes approval authority.
 - **Providers.** Configured above Available. Connect/Configure opens one sheet showing every
   advertised method; the visible sheet owns the operation's prompts, and an answered choice
   restarts with `replaceOperationId` (`ProviderAuthSelectionTrail`). Usage rows reserve a skeleton

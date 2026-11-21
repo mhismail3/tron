@@ -99,8 +99,9 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   `ChatAnnotationPresenter` + a detached `ChatScrollCoordinator` reveal, then flashes it (#2387).
   An anchored quote exposes `chat.annotation.quote` as one button while its source presenter is
   available; its combined accessibility label remains the quoted text.
-  Staged selections anchor by run-scoped UTF-16 range for their highlight (not persisted). Code blocks, tables and blockquotes keep their own renderers, and a selection
-  does not cross them (#1112). Camera, photo and file attachments stage locally (10 items, 25 MiB);
+  Staged selections anchor by run-scoped UTF-16 range for their highlight (not persisted). Blockquotes,
+  code blocks and each table cell are their own selectable runs through the same Annotate path; a
+  selection does not cross them (#1112). Camera, photo and file attachments stage locally (10 items, 25 MiB);
   `CameraModel` drives one `AVCaptureSession` (#937), created lazily on first use because SwiftUI
   may construct and discard the sheet model every render; on a camera switch the first-frame
   detector is armed before the session commit. The context ring opens Manage Session.
@@ -117,7 +118,7 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   status, paged reports and receipts; unknown shapes stay generic. Check-ins lead with the step/summary,
   then standard Attention, Progress and timestamp/reference rows; raw receipt fields stay in Technical details. Worker reports render their invocation’s outcome, Markdown summary and acceptance evidence through shared Home sections; opaque receipts stay in Technical details. Report/check-in sheets use `tronPrimary`. `ToolDetailPresentation` owns one name/icon catalog for transcript, nested calls, sheets and resource tools; unknown extension/MCP names are humanized without changing invocation identity. Task reports/messages use `PromptTextPreview` and the full reader; absent fields are not inferred.
 - **Native change reviews.** An agent's change that needs the maintainer's tap arrives as the
-  native `change` interaction and presents `ChangeReviewCard` in the interaction sheet (a `provider-api-key` review adds its secure key field); generic
+  native `change` interaction and presents `ChangeReviewSheet` from the interaction sheet (a `provider-api-key` review adds its secure key field); generic
   forms and ask_user never authorize effects. Historical settings-outcome contexts use the
   ordinary context viewer. `ChatTranscriptSheetRoutes` owns transcript sheets
   above lazy rows, including push review, so scrolling cannot dismiss them. Positive status uses
@@ -141,10 +142,11 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   error ink; only non-tappable informational pills may retain a flat surface.
   The existing transcript notification route keeps its sheet live above lazy rows.
   `ChatDetailSheet`, shared with nested tool details, owns navigation/Done, medium/large detents,
-  top chrome and insets. Themed standard sections, glass groups and rows show totals, distinct
-  breakdown and first/last times; native disclosures reveal each occurrence's metadata and
-  selectable `ToolDetailCodeBlock` JSON (or verbatim text). Long payload cards use the shared
-  static-surface policy instead of a tall backdrop filter.
+  top chrome and insets. Single errors and runs share one layout of themed standard groups: a
+  summary row (runs: totals and first/last times, then the Breakdown list), then per occurrence, newest
+  first and always visible, a details group (model, type, time, request ID, HTTP status rows) and
+  a Message group whose `TronSettingsCodeRow` holds the full selectable JSON (or verbatim text).
+  Long payload groups use the shared static-surface policy instead of a tall backdrop filter.
 - **Error presentation.** `TronMobileViewTests/ChatProviderErrorStyleViewTests` checks that hosted
   ChatView error pills stay centred in both appearances; `TronChatProviderErrorStyleUITests` keeps the
   standard error sheet's payload selectable (light).
