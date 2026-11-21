@@ -24,7 +24,7 @@ it("answers a missing path not_found and an existing folder conflict, not an int
   expect(await refusal(service.createDirectory(join(root, "note.txt"), "child"))).toEqual({ code: "invalid_request", message: "Path is not a directory", retryable: false });
 });
 
-it("refuses a sibling whose name extends the root's and a path that climbs out of the root", async () => {
+it("refuses a sibling whose name extends the root's and an ancestor of the root", async () => {
   const parent = await mkdtemp(join(tmpdir(), "tron-filesystem-containment-"));
   roots.push(parent);
   const root = join(parent, "root");
@@ -34,6 +34,5 @@ it("refuses a sibling whose name extends the root's and a path that climbs out o
   const refusal = (operation: Promise<unknown>) => operation.then(() => undefined, error => publicError(error));
   expect((await service.list(join(root, "inside"))).path).toBe(join(await realpath(root), "inside"));
   expect(await refusal(service.list(join(parent, "rootx")))).toEqual(outside);
-  expect(await refusal(service.list(join(root, "inside", "..", "..", "rootx")))).toEqual(outside);
   expect(await refusal(service.list(parent))).toEqual(outside);
 });
