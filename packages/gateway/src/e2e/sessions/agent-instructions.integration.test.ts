@@ -299,7 +299,7 @@ describe("Agent Instructions projection through the pinned runtime", () => {
     expect(tools.entries!.map(entry => entry.name)).toEqual(["fixture_tool"]);
   }, 20_000);
 
-  it("tells the agent to do on-screen work itself only with a computer or browser tool, and Mac work only with computer", async () => {
+  it("tells the agent to do on-screen work itself only with a computer or browser tool, Mac work only with computer, and web work never with computer", async () => {
     vi.stubEnv("FIXTURE_BROWSER_TOOL", "1");
     const f = await fixture();
     const operating = async (tools: string[]) => {
@@ -307,16 +307,20 @@ describe("Agent Instructions projection through the pinned runtime", () => {
       return (await turn(f)).received;
     };
     const guidance = "Use agent_browser for browser work; prefer it to browser shell commands or one-off workarounds.";
+    const web = "Web work never uses computer: do web pages, including signed-in sites, with agent_browser in a Tron-owned browser. computer is for native apps and system dialogs.";
     const computer = await operating(["computer"]);
     expect(computer).not.toContain(guidance);
+    expect(computer).toContain(web);
     expect(computer).toContain("Do on-screen work yourself, by default and liberally: web flows (consoles, dashboards, OAuth consent, forms), macOS permission prompts and dialogs, app windows, and storing secrets in Keychain without echoing them to chat, logs or files. Use whichever available computer or browser tool does each step fastest and most accurately");
     const browser = await operating(["agent_browser"]);
     expect(browser).toContain("Do on-screen work yourself, by default and liberally: web flows (consoles, dashboards, OAuth consent, forms). Use whichever available computer or browser tool");
     expect(browser.split(guidance)).toHaveLength(2);
     expect(browser).not.toContain("macOS permission prompts");
+    expect(browser).not.toContain(web);
     const both = await operating(["computer", "agent_browser"]);
     expect(both.split(guidance)).toHaveLength(2);
     expect(both).toContain("macOS permission prompts");
+    expect(both.split(web)).toHaveLength(2);
     const neither = await operating(["fixture_tool"]);
     expect(neither).not.toContain("Do on-screen work yourself");
     expect(neither).not.toContain(guidance);
