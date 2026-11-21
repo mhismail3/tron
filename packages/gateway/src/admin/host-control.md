@@ -131,7 +131,9 @@ not the worker session being resumed.
   and records `failed` otherwise. The restart drain stalls after the oldest blocker makes
   no progress for 180 s, counting progress by any blocker on its session (a Home task held
   between turns progresses through its live async runs), then exact cancellation and grace; only-suspect
-  `terminal-receipt-persistence` blockers proceed at once. The stop drain has no stall
+  `terminal-receipt-persistence` blockers proceed at once. The proven block `sessions/restart-drain`
+  (`packages/core`) makes that decision; `restart-drain.ts` carries its stall timer between polls and refuses a
+  blocker time that is not a `Date#toISOString` instant. The stop drain has no stall
   bound: a stop exits 0 and nothing relaunches to recover cut work, so it waits for
   every accepted owner; a caller needing a deadline stops waiting itself (Mac Quit waits
   unbounded while the drain is reachable, `packages/mac-app/README.md`). Both name their blockers
