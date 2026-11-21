@@ -1,0 +1,48 @@
+{
+ "packetHash": "ccc862b30925fae0",
+ "tier": "high-stakes",
+ "date": "2026-11-21",
+ "writer": {
+  "agent": "parent (Home task, #2634)",
+  "model": "anthropic/claude-opus-5-5"
+ },
+ "reviewer": {
+  "agent": "law-reviewer (run 56a28161)",
+  "model": "openai/gpt-6-luna",
+  "session": "2026-11-21T13-49-01-574Z_01a1fe5e-1705-73fc-a4c0-53b7ddde3d58/8c5566c6-7b8c-4419-9515-77865a95de05/run-0/session.jsonl"
+ },
+ "laws": {
+  "C1 completed": {
+   "verdict": "ACCEPT",
+   "notes": "English and Dafny agree: completion is equivalent to count == 0 and clears tracking; count=0 with any blocker list satisfies the premise. This matches the TypeScript early return; it kills 12 mutants (3 alone), providing exact completion and progress behavior."
+  },
+  "U1 unresolved-owners": {
+   "verdict": "ACCEPT",
+   "notes": "English and Dafny agree for count != 0: unresolved owners occur exactly when the listed blockers account for the count and each is a suspect receipt write with a session, then tracking clears; count=1 with one such blocker is a satisfying input. This matches unresolvedOwners; it kills 31 mutants (8 alone)."
+  },
+  "W1 unlisted": {
+   "verdict": "ACCEPT",
+   "notes": "English and Dafny agree that a nonzero count with an empty listed-blocker list returns Waiting and preserves tracking; count=65 with 64 omitted blockers is a satisfying input under the 64-item snapshot cap. It kills 12 mutants (0 alone); it is still needed to specify the exact omitted-blocker case and preserve the timer across that poll."
+  },
+  "O1 oldest-tracked": {
+   "verdict": "ACCEPT",
+   "notes": "English and Dafny agree under the non-owner, nonempty domain: tracking names the first blocker at the earliest set admission time, or the first when none is set, with the specified state, admission, and session progress; one active blocker with unset admission satisfies the premise. It matches the TypeScript reducer and kills 27 mutants (11 alone)."
+  },
+  "R1 timer-reset": {
+   "verdict": "ACCEPT",
+   "notes": "English and Dafny agree that the timer is retained only when the tracked id, state, progress, and admission fields match, otherwise reset to the progress/admission/now signal; one active blocker with a changed tracked id satisfies the premise. This matches the TypeScript signature comparison and kills 24 mutants (10 alone)."
+  },
+  "T1 stalled": {
+   "verdict": "ACCEPT",
+   "notes": "English and Dafny agree that the tracked oldest blocker is stalled exactly when its clamped age reaches the limit, and otherwise waits; one active blocker, untracked, with now at or beyond its admission plus the limit satisfies the premise. This matches the TypeScript age and threshold logic and kills 32 mutants (10 alone)."
+  }
+ },
+ "acceptedMutants": {
+  "LatestFor/boundary/>->>=#1": "AGREE",
+  "Evaluate/swap-args/tracked.state, o.state->o.state, tracked.state#1": "AGREE",
+  "Evaluate/swap-args/tracked.progress, p->p, tracked.progress#1": "AGREE",
+  "Evaluate/swap-args/tracked.admitted, o.admitted->o.admitted, tracked.admitted#1": "AGREE",
+  "Evaluate/boundary/<=-><#1": "AGREE"
+ },
+ "general": "High-stakes is correct because the decision controls restart behavior during live run lifecycles. A1 is realistic for the shell’s token mapping and hashed snapshot ids, though hash uniqueness is an operational assumption rather than a mathematical guarantee; A2 is supported by the producer’s sorted, capped snapshot and ISO timestamp parsing; A3 is supported by the per-drain progress instance and caller behavior. Recovery is reasonably n/a because tracked state is process-local and each drain starts fresh; uncertain outcomes are reasonably n/a because the block has no effects. Safety, progress, recovery, stale-input, exact-result, and uncertain-outcome kinds are accounted for. The 131,983 seeded comparisons and live-log comparisons are evidence, but absent SHADOW.json / seven-day 100% real-traffic shadow evidence leaves the high-stakes cut-over gate unverified."
+}

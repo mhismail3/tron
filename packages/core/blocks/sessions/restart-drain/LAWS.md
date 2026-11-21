@@ -6,7 +6,7 @@ Block hash: `ccc862b30925fae0` (over `blocks/sessions/restart-drain/Block.dfy`, 
 | Gate | Status |
 |---|---|
 | Proof (pinned Dafny, --verify-included-files) | PASS: blocks/sessions/restart-drain/Block.dfy: Dafny program verifier finished with 50 verified, 0 errors;  |
-| Independent review | MISSING |
+| Independent review | ACCEPT by law-reviewer (run 56a28161) (openai/gpt-6-luna, transcript-verified); writer parent (Home task, #2634) (anthropic/claude-opus-5-5); 2026-11-21 |
 | Mutation check | PASS: 105 valid mutants, 100 killed by laws, 0 survived, 5 accepted (blocks/sessions/restart-drain/MUTATION.json; statuses c1167956fbf94fb2) |
 | Cut over | the only implementation: `packages/gateway/src/core/sessions/restart-drain` runs this block's compiled core (scripts/tron proof facade) |
 
@@ -22,7 +22,7 @@ lemma C1Completed(count: Count, blockers: List<Blocker>, tracked: Tracked, now: 
 
 **Mutation results.** kills 12 of 105 valid mutants; 3 killed by this law alone.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: English and Dafny agree: completion is equivalent to count == 0 and clears tracking; count=0 with any blocker list satisfies the premise. This matches the TypeScript early return; it kills 12 mutants (3 alone), providing exact completion and progress behavior.
 
 ## U1 unresolved-owners
 
@@ -48,7 +48,7 @@ lemma AllOwnersSpec(n: Count, bs: List<Blocker>)
 
 **Mutation results.** kills 31 of 105 valid mutants; 8 killed by this law alone.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: English and Dafny agree for count != 0: unresolved owners occur exactly when the listed blockers account for the count and each is a suspect receipt write with a session, then tracking clears; count=1 with one such blocker is a satisfying input. This matches unresolvedOwners; it kills 31 mutants (8 alone).
 
 ## W1 unlisted
 
@@ -62,7 +62,7 @@ lemma W1Unlisted(count: Count, blockers: List<Blocker>, tracked: Tracked, now: M
 
 **Mutation results.** kills 12 of 105 valid mutants; 0 killed by this law alone.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: English and Dafny agree that a nonzero count with an empty listed-blocker list returns Waiting and preserves tracking; count=65 with 64 omitted blockers is a satisfying input under the 64-item snapshot cap. It kills 12 mutants (0 alone); it is still needed to specify the exact omitted-blocker case and preserve the timer across that poll.
 
 ## O1 oldest-tracked
 
@@ -123,7 +123,7 @@ lemma ProgressSpec(blockers: List<Blocker>, o: Blocker)
 
 **Mutation results.** kills 27 of 105 valid mutants; 11 killed by this law alone.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: English and Dafny agree under the non-owner, nonempty domain: tracking names the first blocker at the earliest set admission time, or the first when none is set, with the specified state, admission, and session progress; one active blocker with unset admission satisfies the premise. It matches the TypeScript reducer and kills 27 mutants (11 alone).
 
 ## R1 timer-reset
 
@@ -149,7 +149,7 @@ lemma SameSpec(a: State, b: State, s: Time, t: Time)
 
 **Mutation results.** kills 24 of 105 valid mutants; 10 killed by this law alone.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: English and Dafny agree that the timer is retained only when the tracked id, state, progress, and admission fields match, otherwise reset to the progress/admission/now signal; one active blocker with a changed tracked id satisfies the premise. This matches the TypeScript signature comparison and kills 24 mutants (10 alone).
 
 ## T1 stalled
 
@@ -165,7 +165,7 @@ lemma T1Stalled(count: Count, blockers: List<Blocker>, tracked: Tracked, now: Ms
 
 **Mutation results.** kills 32 of 105 valid mutants; 10 killed by this law alone.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: English and Dafny agree that the tracked oldest blocker is stalled exactly when its clamped age reaches the limit, and otherwise waits; one active blocker, untracked, with now at or beyond its admission plus the limit satisfies the premise. This matches the TypeScript age and threshold logic and kills 32 mutants (10 alone).
 
 ## Proof helpers (statements only; not laws, but part of what is proven)
 
@@ -344,8 +344,12 @@ ghost function Age(now: Ms, since: Ms): Ms { if now <= since then 0 else now - s
 
 | Mutant | Change | Status | Reviewer |
 |---|---|---|---|
-| `LatestFor/boundary/>->>=#1` | `>` -> `>=` | equivalent (proven): on equal milliseconds both keep a time At(ms) of the same value, so the running latest is the same Time either way [law reviewer (REVIEW.json acceptedMutants)] | - |
-| `Evaluate/swap-args/tracked.state, o.state->o.state, tracked.state#1` | `tracked.state, o.state` -> `o.state, tracked.state` | equivalent (proven): SameState and SameTime are symmetric (each is equality, SameSpec), so swapping the tracked and the current value cannot change which branch Evaluate takes [law reviewer (REVIEW.json acceptedMutants)] | - |
-| `Evaluate/swap-args/tracked.progress, p->p, tracked.progress#1` | `tracked.progress, p` -> `p, tracked.progress` | equivalent (proven): SameState and SameTime are symmetric (each is equality, SameSpec), so swapping the tracked and the current value cannot change which branch Evaluate takes [law reviewer (REVIEW.json acceptedMutants)] | - |
-| `Evaluate/swap-args/tracked.admitted, o.admitted->o.admitted, tracked.admitted#1` | `tracked.admitted, o.admitted` -> `o.admitted, tracked.admitted` | equivalent (proven): SameState and SameTime are symmetric (each is equality, SameSpec), so swapping the tracked and the current value cannot change which branch Evaluate takes [law reviewer (REVIEW.json acceptedMutants)] | - |
-| `Evaluate/boundary/<=-><#1` | `<=` -> `<` | equivalent (proven): when now equals since both give the age 0 (now - since is 0) [law reviewer (REVIEW.json acceptedMutants)] | - |
+| `LatestFor/boundary/>->>=#1` | `>` -> `>=` | equivalent (proven): on equal milliseconds both keep a time At(ms) of the same value, so the running latest is the same Time either way [law reviewer (REVIEW.json acceptedMutants)] | AGREE |
+| `Evaluate/swap-args/tracked.state, o.state->o.state, tracked.state#1` | `tracked.state, o.state` -> `o.state, tracked.state` | equivalent (proven): SameState and SameTime are symmetric (each is equality, SameSpec), so swapping the tracked and the current value cannot change which branch Evaluate takes [law reviewer (REVIEW.json acceptedMutants)] | AGREE |
+| `Evaluate/swap-args/tracked.progress, p->p, tracked.progress#1` | `tracked.progress, p` -> `p, tracked.progress` | equivalent (proven): SameState and SameTime are symmetric (each is equality, SameSpec), so swapping the tracked and the current value cannot change which branch Evaluate takes [law reviewer (REVIEW.json acceptedMutants)] | AGREE |
+| `Evaluate/swap-args/tracked.admitted, o.admitted->o.admitted, tracked.admitted#1` | `tracked.admitted, o.admitted` -> `o.admitted, tracked.admitted` | equivalent (proven): SameState and SameTime are symmetric (each is equality, SameSpec), so swapping the tracked and the current value cannot change which branch Evaluate takes [law reviewer (REVIEW.json acceptedMutants)] | AGREE |
+| `Evaluate/boundary/<=-><#1` | `<=` -> `<` | equivalent (proven): when now equals since both give the age 0 (now - since is 0) [law reviewer (REVIEW.json acceptedMutants)] | AGREE |
+
+## Reviewer: general notes
+
+High-stakes is correct because the decision controls restart behavior during live run lifecycles. A1 is realistic for the shell’s token mapping and hashed snapshot ids, though hash uniqueness is an operational assumption rather than a mathematical guarantee; A2 is supported by the producer’s sorted, capped snapshot and ISO timestamp parsing; A3 is supported by the per-drain progress instance and caller behavior. Recovery is reasonably n/a because tracked state is process-local and each drain starts fresh; uncertain outcomes are reasonably n/a because the block has no effects. Safety, progress, recovery, stale-input, exact-result, and uncertain-outcome kinds are accounted for. The 131,983 seeded comparisons and live-log comparisons are evidence, but absent SHADOW.json / seven-day 100% real-traffic shadow evidence leaves the high-stakes cut-over gate unverified.
