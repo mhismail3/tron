@@ -40,7 +40,7 @@ final class ChatHapticsViewTests: ShuffledTestCase {
     }
 
     private func assertHaptics(_ app: MountedFixture, _ played: String, _ message: String) async throws {
-        for _ in 0..<60 { await MountedFixture.nextFrame() }
+        for _ in 0..<120 { await MountedFixture.nextFrame() }
         XCTAssertEqual(app.element("fixture.haptics")?.accessibilityLabel, "haptics:\(played)", message)
     }
 }

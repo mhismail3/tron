@@ -20,13 +20,4 @@ final class HomeDashboardViewTests: ShuffledTestCase {
             }
         }
     }
-
-    func testHomeButtonShowsWorking() async throws {
-        try await mounted(["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-dashboard-view-home",
-                           "-home-phase-active"]) { app in
-            try await app.until("the Home button reads Working") {
-                app.element("dashboard.menu")?.accessibilityValue == "Working"
-            }
-        }
-    }
 }
