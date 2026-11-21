@@ -165,8 +165,11 @@ export default function (pi) {
     await writeJson(join(repo, ".pi", "settings.json"), { retry: { maxRetries: 8 } });
     await writeJson(join(repo, ".pi", "mcp.json"), { mcpServers: mcpServer("root2") });
     await writeJson(join(nested, ".pi", "settings.json"), { retry: { maxRetries: 50 } });
-    await slot.reload();
+    const reloaded = slot.reload();
+    const queuedReload = slot.reload();
+    await reloaded;
     expect(maxRetries(slot)).toBe(8);
+    await queuedReload;
     await waitFor(() => mcpTools(slot).join() === "mcp__root2__where", "the edited root MCP server");
     await waitFor(() => !alive(firstRootServer), "the replaced root MCP server to stop");
     expect(existsSync(join(root, "nested.pid"))).toBe(false);

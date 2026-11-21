@@ -6,6 +6,7 @@ import { mkdtemp, open as openFile, realpath, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { openNativeCaptureClient, type NativeAutomationEndpoint, type NativeCaptureBinding } from "./native-capture-client.js";
+import { ConsoleUnavailableError, DisplayActivity } from "./console-probe.js";
 
 const execFileAsync = promisify(execFile);
 const DRIVER = "/Applications/Tron.app/Contents/Library/Native/cua-driver";
@@ -46,8 +47,14 @@ export class CuaComputerClient {
   private pixelObserved = false;
   private refreshEndpoint = false;
   private windowReferences: { pid: number; window: number; tokens: Set<string> } | undefined;
+  private readonly activity = new DisplayActivity();
 
-  constructor(private readonly binding: NativeCaptureBinding) {}
+  constructor(private readonly binding: NativeCaptureBinding, private readonly admit: () => Promise<void>) {}
+
+  async endTurn(): Promise<void> {
+    await this.pending?.catch(() => {});
+    await this.activity.release();
+  }
 
   invalidateObservation(): void {
     this.observed = false; this.desktopObserved = false; this.pixelObserved = false; this.windowReferences = undefined;
@@ -105,6 +112,8 @@ export class CuaComputerClient {
         if (this.closed) throw new Error("Computer session ended before help publication");
         return { status: "completed", output: { documentation: stdout }, endpointGeneration: "metadata" };
       }
+      await this.admit();
+      this.activity.hold();
       if (!this.endpoint || (observation && this.refreshEndpoint)) {
         if (!observation) throw new Error("Observe before establishing a computer endpoint");
         const native = await openNativeCaptureClient(this.binding);
@@ -148,6 +157,7 @@ export class CuaComputerClient {
       });
       const result = parseCuaOutput(stdout, endpoint.generation, observation ? "observation" : "action");
       if (signal?.aborted || this.closed) throw new Error("Computer operation interrupted; it may have completed. Do not replay it");
+      if (imagePath) await this.admit();
       let image: CuaComputerResult["image"];
       const output = result.output as Record<string, unknown>;
       if (imagePath && output.screenshot_file_path === imagePath && (tool === "get_desktop_state" || output.screenshot_frame_valid === true)) {
@@ -189,6 +199,7 @@ export class CuaComputerClient {
     } catch (error) {
       this.invalidateObservation();
       this.refreshEndpoint = true;
+      if (error instanceof ConsoleUnavailableError) { await this.activity.release(); throw error; }
       throw new Error(`Computer operation unavailable or uncertain; observe before acting again. ${error instanceof Error ? error.message : String(error)}`);
     } finally { if (directory) await rm(directory, { recursive: true, force: true }); }
   }
@@ -202,7 +213,7 @@ export class CuaComputerClient {
     if (this.closing) return this.closing;
     this.closed = true;
     this.closing = (async () => {
-      await this.pending?.catch(() => {});
+      await this.endTurn();
       const endpoint = this.endpoint; this.endpoint = undefined;
       if (!endpoint) return;
       for (;;) {
