@@ -2,7 +2,7 @@ import { createTestRegistry, displayStoreOf, displayOwnerOf } from "../../../tes
 import type { RunPersistence } from "../../kernel/run/run-persistence.js";
 import { performance as nodePerformance } from "node:perf_hooks";
 import { sealBrowserToolReference } from "../../display/browser-tool-reference.js";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
@@ -703,15 +703,17 @@ export default function (pi) {
       runtime.registerNativeProvider(faux.provider);
       return runtime;
     };
+    const lastContinuation = Promise.withResolvers<void>();
+    onTestFinished(() => lastContinuation.resolve());
     faux.setResponses([
       fauxAssistantMessage("first complete"),
       async () => {
-        await new Promise((resolve) => setTimeout(resolve, 250));
+        await waitFor(() => complete.mock.calls.length >= 2, "the failed first attention completion to retry");
         return fauxAssistantMessage("continuation one complete");
       },
       fauxAssistantMessage("continuation two complete"),
       async () => {
-        await new Promise((resolve) => setTimeout(resolve, 250));
+        await lastContinuation.promise;
         return fauxAssistantMessage("continuation three complete");
       },
     ]);
@@ -756,8 +758,11 @@ export default function (pi) {
     await waitFor(() => faux.state.callCount === 4, "the fourth model call");
     expect(slot.snapshot()).toMatchObject({ phase: "running", operation: { kind: "prompt" } });
     const continuationSnapshotIndex = snapshots.length;
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    const ownership = (slot as unknown as { runAttention: { completionOwnershipQueue: unknown[]; attentionBarrier?: Promise<void> } }).runAttention;
+    await waitFor(() => complete.mock.calls.length >= 4 && ownership.completionOwnershipQueue.length === 0 && !ownership.attentionBarrier,
+      "the third completion's attention to settle while the fourth turn runs");
     expect(snapshots.slice(continuationSnapshotIndex).every((snapshot) => snapshot.phase === "running" && snapshot.operation)).toBe(true);
+    lastContinuation.resolve();
     await waitFor(() => !slot.isBusy, "the slot to go idle");
     const settled = slot.snapshot();
     expect(settled).toMatchObject({ phase: "idle" });
@@ -862,8 +867,9 @@ export default function (pi) {
     const blockedQueue = (slot as unknown as { runAttention: { completionOwnershipQueue: unknown[] } }).runAttention.completionOwnershipQueue;
     expect(blockedQueue).toHaveLength(1);
     let disposalSettled = false;
+    const receiptJoin = vi.spyOn((slot as unknown as { runPersistence: RunPersistence }).runPersistence, "waitForReceiptWrites");
     const disposal = registry.dispose().finally(() => { disposalSettled = true; });
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await waitFor(() => disposalSettled || receiptJoin.mock.calls.length > 0, "disposal to join the blocked completion stamp");
     expect(disposalSettled).toBe(false);
     releaseSecondStamp();
     await disposal;
@@ -1161,18 +1167,20 @@ export default function (pi) {
       const cwd = join(root, "workspace");
       const extensionDir = join(cwd, ".pi", "extensions");
       const entered = join(root, "entered");
-      const release = join(root, "release");
       await Promise.all([mkdir(agentDir), mkdir(extensionDir, { recursive: true })]);
       process.env.PI_CODING_AGENT_DIR = agentDir;
+      const gate = Promise.withResolvers<void>();
+      onTestFinished(() => gate.resolve());
+      const hookGlobals = globalThis as typeof globalThis & { tronStreamingHookGate?: Promise<void> };
+      hookGlobals.tronStreamingHookGate = gate.promise;
+      onTestFinished(() => { delete hookGlobals.tronStreamingHookGate; });
       await writeFile(join(extensionDir, "streaming-hook.ts"), `
-        import { existsSync, writeFileSync } from "node:fs";
+        import { writeFileSync } from "node:fs";
         export default function (pi) {
           pi.on(${JSON.stringify(hook)}, async (event) => {
             if (event.message?.role !== "assistant") return;
             writeFileSync(${JSON.stringify(entered)}, "entered");
-            while (!existsSync(${JSON.stringify(release)})) {
-              await new Promise((resolve) => setTimeout(resolve, 5));
-            }
+            await globalThis.tronStreamingHookGate;
           });
         }
       `);
@@ -1209,7 +1217,7 @@ export default function (pi) {
       if (hook === "message_end") {
         expect(slot.snapshot().transcript.some((item) => item.kind === "message" && item.role === "assistant")).toBe(false);
       }
-      await writeFile(release, "release");
+      gate.resolve();
       await prompt;
       await waitFor(() => !slot.isBusy, "the slot to go idle");
 
@@ -1236,9 +1244,14 @@ export default function (pi) {
     const cwd = join(root, "workspace");
     const extensionDir = join(cwd, ".pi", "extensions");
     await Promise.all([mkdir(agentDir), mkdir(extensionDir, { recursive: true })]);
+    const gate = Promise.withResolvers<void>();
+    onTestFinished(() => gate.resolve());
+    const hookGlobals = globalThis as typeof globalThis & { tronHandledInputGate?: Promise<void> };
+    hookGlobals.tronHandledInputGate = gate.promise;
+    onTestFinished(() => { delete hookGlobals.tronHandledInputGate; });
     await writeFile(join(extensionDir, "handled.ts"), `export default function (pi) {
       pi.on("input", async () => {
-        await new Promise((resolve) => setTimeout(resolve, 200));
+        await globalThis.tronHandledInputGate;
         return { action: "handled" };
       });
     }\n`);
@@ -1254,6 +1267,7 @@ export default function (pi) {
     const prompting = slot.prompt("handled without agent");
     await waitFor(() => slot.isBusy, "the slot to take work");
     await expect(slot.dispose()).rejects.toMatchObject({ code: "busy" });
+    gate.resolve();
     const admitted = await prompting;
     expect(admitted).toMatchObject({ operationId: expect.any(String) });
     await waitFor(() => !slot.isBusy, "the slot to go idle");
@@ -1276,8 +1290,13 @@ export default function (pi) {
     const cwd = join(root, "workspace");
     const extensionDir = join(cwd, ".pi", "extensions");
     await Promise.all([mkdir(agentDir), mkdir(extensionDir, { recursive: true })]);
+    const gate = Promise.withResolvers<void>();
+    onTestFinished(() => gate.resolve());
+    const hookGlobals = globalThis as typeof globalThis & { tronDelayedPreflightGate?: Promise<void>; tronDelayedPreflightEntered?: boolean };
+    hookGlobals.tronDelayedPreflightGate = gate.promise;
+    onTestFinished(() => { delete hookGlobals.tronDelayedPreflightGate; delete hookGlobals.tronDelayedPreflightEntered; });
     await writeFile(join(extensionDir, "delay.ts"), `export default function (pi) {
-      pi.on("input", async () => { await new Promise((resolve) => setTimeout(resolve, 150)); });
+      pi.on("input", async () => { globalThis.tronDelayedPreflightEntered = true; await globalThis.tronDelayedPreflightGate; });
     }\n`);
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
@@ -1298,8 +1317,10 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const prompt = slot.prompt("accepted before cutoff");
-    await waitFor(() => slot.isBusy, "the slot to take work");
+    await waitFor(() => hookGlobals.tronDelayedPreflightEntered, "the input hook to hold preflight");
     const drain = registry.waitUntilIdle();
+    await waitFor(() => registry.administrativeDrainSnapshot().phase === "waiting", "the drain to wait on the held preflight");
+    gate.resolve();
     await expect(prompt).resolves.toMatchObject({ operationId: expect.any(String) });
     await drain;
     expect(faux.state.callCount).toBe(1);
@@ -1324,8 +1345,10 @@ export default function (pi) {
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
     const faux = fauxProvider({ provider: "tron-drain-cutoff", tokensPerSecond: 10_000 });
+    const firstTurn = Promise.withResolvers<void>();
+    onTestFinished(() => firstTurn.resolve());
     faux.setResponses([
-      async () => { await new Promise((resolve) => setTimeout(resolve, 150)); return fauxAssistantMessage("first"); },
+      async () => { await firstTurn.promise; return fauxAssistantMessage("first"); },
       fauxAssistantMessage("must be aborted"),
     ]);
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
@@ -1344,7 +1367,10 @@ export default function (pi) {
     await slot.setModel(model.provider, model.id);
     await slot.prompt("start");
     await waitFor(() => slot.catalogPhase === "running", "the catalog phase to run");
-    await registry.waitUntilIdle();
+    const drain = registry.waitUntilIdle();
+    await waitFor(() => registry.administrativeDrainSnapshot().phase === "waiting", "the drain to wait on the first turn");
+    firstTurn.resolve();
+    await drain;
     expect(slot.isDrainBusy).toBe(false);
     expect(failures).not.toEqual([]);
   });
@@ -1376,9 +1402,11 @@ export default function (pi) {
     }).runtime.session;
     let startedResolve!: () => void;
     const started = new Promise<void>((resolve) => { startedResolve = resolve; });
+    const preflight = Promise.withResolvers<void>();
+    onTestFinished(() => preflight.resolve());
     vi.spyOn(session, "prompt").mockImplementationOnce(async (_text, options) => {
       startedResolve();
-      await new Promise((resolve) => setTimeout(resolve, 6_000));
+      await preflight.promise;
       options?.preflightResult?.("started");
     });
 
@@ -1404,6 +1432,7 @@ export default function (pi) {
         attachments: [attachment],
       });
       await vi.advanceTimersByTimeAsync(6_000);
+      preflight.resolve();
       await expect(prompting).resolves.toMatchObject({ operationId: expect.any(String) });
     } finally {
       vi.useRealTimers();
@@ -1944,11 +1973,12 @@ export default function (pi) {
     await slot.prompt("first");
     await attentionEntered;
     let secondSettled = false;
+    const admissionChecks = vi.spyOn(slot, "assertHomePromptAdmission");
     const second = slot.prompt("ordered second", [], "steer").then(result => {
       secondSettled = true;
       return result;
     });
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await waitFor(() => secondSettled || admissionChecks.mock.calls.length >= 2, "the second prompt to enter its runtime lane");
     expect(secondSettled, "the newer command waits for the durable attention commit").toBe(false);
     releaseAttention();
     const accepted = await second;
@@ -2095,17 +2125,19 @@ export default function (pi) {
     const cwd = join(root, "workspace");
     const extensionDir = join(cwd, ".pi", "extensions");
     const entered = join(root, "input-entered");
-    const releaseInput = join(root, "release-input");
     await Promise.all([mkdir(agentDir), mkdir(extensionDir, { recursive: true })]);
+    const inputGate = Promise.withResolvers<void>();
+    onTestFinished(() => inputGate.resolve());
+    const hookGlobals = globalThis as typeof globalThis & { tronQueuedInputGate?: Promise<void> };
+    hookGlobals.tronQueuedInputGate = inputGate.promise;
+    onTestFinished(() => { delete hookGlobals.tronQueuedInputGate; });
     await writeFile(join(extensionDir, "delay-queued-input.ts"), `
-      import { existsSync, writeFileSync } from "node:fs";
+      import { writeFileSync } from "node:fs";
       export default function (pi) {
         pi.on("input", async (event) => {
           if (event.text !== "became ordinary") return;
           writeFileSync(${JSON.stringify(entered)}, "entered");
-          while (!existsSync(${JSON.stringify(releaseInput)})) {
-            await new Promise((resolve) => setTimeout(resolve, 5));
-          }
+          await globalThis.tronQueuedInputGate;
         });
       }\n`);
     const trust = new TrustService(agentDir);
@@ -2144,7 +2176,7 @@ export default function (pi) {
     await waitFor(() => existsSync(entered), "the entered marker file");
     releaseResponse();
     await waitFor(() => !slot.snapshot().acceptsQueuedPrompts, "the slot to stop accepting queued prompts");
-    await writeFile(releaseInput, "release");
+    inputGate.resolve();
 
     const admitted = await prompting;
     await waitFor(() => slot.snapshot().transcript.some(item =>
@@ -2767,8 +2799,9 @@ export default function (pi) {
     const navigating = slot.navigate("target", { summarize: true });
     await waitFor(() => navigate.mock.calls.length === 1, "the navigation");
     let drained = false;
+    const drainPasses = vi.spyOn(registry, "administrativeDrainSnapshot");
     const drain = registry.waitUntilIdle().then(() => { drained = true; });
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await waitFor(() => drained || drainPasses.mock.calls.length >= 4, "the drain keeps waiting on the held work");
     expect(drained).toBe(false);
     release();
     await navigating;
@@ -2788,8 +2821,9 @@ export default function (pi) {
     const reloading = slot.reload();
     await waitFor(() => reload.mock.calls.length === 1, "the reload");
     let drained = false;
+    const drainPasses = vi.spyOn(registry, "administrativeDrainSnapshot");
     const drain = registry.waitUntilIdle().then(() => { drained = true; });
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await waitFor(() => drained || drainPasses.mock.calls.length >= 4, "the drain keeps waiting on the held work");
     expect(drained).toBe(false);
     release();
     await reloading;
@@ -2971,18 +3005,18 @@ export default function (pi) {
     try {
       void slot.prompt("complete normally").catch(() => {});
       await waitFor(() => held > 0, "the completed run's settlement chain to start");
+      const receiptJoin = vi.spyOn((slot as unknown as { runPersistence: RunPersistence }).runPersistence, "waitForReceiptWrites");
       disposal = registry.dispose().then(() => { disposed = true; });
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await waitFor(() => disposed || receiptJoin.mock.calls.length > 0, "disposal to join the settlement chain");
       expect(disposed, "dispose resolved while the settlement chain was still pending").toBe(false);
     } finally {
       releaseTerminal();
     }
     await disposal;
     spy.mockRestore();
-    const markerPath = join(root, "tron", "state", "runtime-markers", `${slot.id}.json`);
-    const markerAtDispose = existsSync(markerPath) ? readFileSync(markerPath, "utf8") : undefined;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(existsSync(markerPath) ? readFileSync(markerPath, "utf8") : undefined, "a marker write landed after dispose").toEqual(markerAtDispose);
+    const markerLanes = (registry as unknown as { markers: { lanes: Map<string, unknown> } }).markers.lanes;
+    expect(markerLanes.size, "a marker write was still in flight after dispose").toBe(0);
+    expect((slot as unknown as { runPersistence: RunPersistence }).runPersistence.pendingReceiptWrites.size, "a receipt write was still in flight after dispose").toBe(0);
   });
 
   it("records completed when SDK Stop fails before cancellation and the real run finishes naturally", async () => {
@@ -3962,7 +3996,13 @@ export default function (pi) {
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
     const faux = fauxProvider({ provider: "tron-forced-marker", tokensPerSecond: 10_000 });
     faux.setResponses([
-      async () => { await new Promise((resolve) => setTimeout(resolve, 250)); return fauxAssistantMessage("late"); },
+      async (_context, options) => {
+        await new Promise<void>((resolve) => {
+          if (options?.signal?.aborted) resolve();
+          options?.signal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+        return fauxAssistantMessage("late");
+      },
     ]);
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
