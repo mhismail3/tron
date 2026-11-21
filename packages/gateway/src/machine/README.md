@@ -96,8 +96,9 @@ The iPhone pins the private host identity at enrollment
   `{socket, generation}` bootstrap and accepts no endpoint, environment or session
   from model input. Refused, malformed, non-zero or disconnected results are refusal
   or `outcomeUnknown`, never success or replay. Every driver process has a 10 s deadline
-  (plus 250 ms per typed character) and the turn's abort signal: Stop kills the call and
-  reports an uncertain effect; `close()` gives up after 10 s. Help strips the reserved
+  (`type_text` 125 s, past the driver's own 120 s request bound); a call that never answers
+  is killed and reported as an uncertain effect, so Stop waits at most that long;
+  `close()` gives up after 10 s. Help strips the reserved
   fields from the driver schema; driver and adapter staleness both say
   `stale_element_token`. Actions need fresh observations from the same load. Observation images come from
   disposable files removed before publication. Cua telemetry is off; missing Cua

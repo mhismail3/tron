@@ -14,7 +14,7 @@ import { BrowserLiveViewRegistry } from "../../display/browser-live-view.js";
 import type { NotificationService } from "../../notifications/notification-service.js";
 
 const DRIVER = "/Applications/Tron.app/Contents/Library/Native/cua-driver";
-const boundary = vi.hoisted(() => ({ driver: "", lockFile: "", probes: 0, host: [] as string[], console: { locked: false, asleep: false } }));
+const boundary = vi.hoisted(() => ({ driver: "", lockFile: "", deadlineScale: 1, probes: 0, host: [] as string[], console: { locked: false, asleep: false } }));
 vi.mock("../../machine/native-capture-transport.js", () => ({ openNativeCaptureTransport: () => {
   const identity = { bootID: crypto.randomUUID(), connectionID: crypto.randomUUID(), sessionID: crypto.randomUUID() };
   const generation = crypto.randomUUID();
@@ -43,7 +43,7 @@ vi.mock("node:child_process", async original => {
         const lockedByDriver = boundary.lockFile !== "" && (() => { try { readFileSync(boundary.lockFile); return true; } catch { return false; } })();
         return { stdout: JSON.stringify({ ...boundary.console, locked: boundary.console.locked || lockedByDriver }), stderr: "" };
       }
-      return file === DRIVER ? run(process.execPath, [boundary.driver, ...args], options) : run(file, args, options);
+      return file === DRIVER ? run(process.execPath, [boundary.driver, ...args], { ...options, timeout: options.timeout && options.timeout / boundary.deadlineScale }) : run(file, args, options);
     },
   });
   const spawn = (file: string, args: string[], options: any) => actual.spawn(file,
@@ -55,7 +55,7 @@ const execute = promisify(execFile);
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
-  boundary.console = { locked: false, asleep: false }; boundary.probes = 0; boundary.host = []; boundary.lockFile = "";
+  boundary.console = { locked: false, asleep: false }; boundary.deadlineScale = 1; boundary.probes = 0; boundary.host = []; boundary.lockFile = "";
 });
 
 async function heldAssertions(owner = process.pid): Promise<number> {
@@ -178,23 +178,30 @@ describe.skipIf(process.platform !== "darwin")("console admission for computer a
     expect(await heldAssertions()).toBe(0);
   });
 
-  it.each([false, true])("holds the OS idle assertion only while a computer turn runs and releases it at turn end (Stop=%s); Stop ends a stalled driver call without waiting for it", async stop => {
+  it.each([false, true])("holds the OS idle assertion only while a computer turn runs and releases it at turn end (Stop=%s)", async stop => {
     const f = await fixture();
     expect(await heldAssertions()).toBe(0);
     await f.mode("hold");
     const prompting = f.turn([desktop("desktop")]);
     await waitFor(() => f.dispatched(), "accepted driver observation");
     await waitFor(async () => await heldAssertions() === 1, "the scoped OS assertion while the computer turn runs");
-    if (stop) {
-      await f.slot.abort("agent");
-      await prompting;
-      expect((await execute("/bin/ps", ["-axo", "command="])).stdout).not.toContain(f.root);
-    } else {
-      await f.release();
-      await prompting;
-    }
+    const stopping = stop ? f.slot.abort("agent") : undefined;
+    await f.release();
+    await stopping;
+    await prompting;
     await waitFor(async () => await heldAssertions() === 0, "assertion release at turn end");
     if (!stop) expect(f.result("desktop").isError).not.toBe(true);
+  });
+
+  it("ends a driver call that never answers at its deadline as an uncertain effect and leaves no driver process", async () => {
+    const f = await fixture();
+    await f.mode("hold");
+    boundary.deadlineScale = 20;
+    await f.turn([desktop("desktop")]);
+    expect(f.result("desktop").isError).toBe(true);
+    expect(JSON.stringify(f.result("desktop").content)).toContain("gave no answer within 10 s");
+    expect((await execute("/bin/ps", ["-axo", "command="])).stdout).not.toContain(f.root);
+    await waitFor(async () => await heldAssertions() === 0, "assertion release after the deadline");
   });
 
   it("projects help without reserved fields and types a driver-side stale element refusal", async () => {
