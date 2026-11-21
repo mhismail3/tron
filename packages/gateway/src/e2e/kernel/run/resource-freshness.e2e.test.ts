@@ -173,6 +173,7 @@ describe("Home's global skills and prompt templates follow the agent directory l
     const userHome = await mkdtemp(join(tmpdir(), "tron-home-resources-"));
     homes.push(userHome);
     vi.stubEnv("HOME", userHome);
+    await mkdir(join(userHome, ".agents", "skills"), { recursive: true });
     const f = await fixture();
     const greeted = await f.registry.acquire(f.home.sessionId);
     f.faux.setResponses([fauxAssistantMessage("Hello.")]);
@@ -184,6 +185,7 @@ describe("Home's global skills and prompt templates follow the agent directory l
     const restarted = await f.restartToReadiness();
     const before = f.events.length;
     await restarted.acquire(f.home.sessionId);
+    await watchersDeliver({ registry: restarted, agentDir: f.agentDir, signals: f.signals }, userHome);
     expect(f.events.slice(before).filter(event => event.topic === "session.resourcesChanged")).toEqual([]);
     await writePrompt(f.agentDir, "after-start", "Written after start", "BODY");
     await waitFor(() => f.events.slice(before).some(event => event.topic === "session.resourcesChanged"), "Home reloads for a write after its watchers started");
