@@ -2,34 +2,12 @@ import XCTest
 
 final class TronIntegrationSheetsUITests: XCTestCase {
     @MainActor
-    func testOllamaUnlimitedAccessibilityAndTypeSizes() {
-        for (size, largeType) in [("default", false), ("large", true)] {
-            let app = launch(scenario: "ollama-detail", largeType: largeType)
-            defer { app.terminate() }
-            app.buttons["Details for Ollama"].tap()
-            let cardLabel = "Unlimited. Local models run on this Mac with no account usage limits."
-            let card = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", cardLabel)).firstMatch
-            XCTAssertTrue(card.waitForExistence(timeout: 5), app.debugDescription)
-            keepScreenshot(app, name: "583-ollama-\(size)")
-        }
-    }
-
-    @MainActor
-    private func launch(scenario: String = "default", dark: Bool = false, largeType: Bool = false) -> XCUIApplication {
+    private func launch(scenario: String) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-integrations-fixture", "-integrations-scenario", scenario,
                                "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-        if dark { app.launchArguments += ["-ui-dark-mode"] }
-        if largeType {
-            app.launchArguments += ["-fixture-large-type", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
-        }
         app.launch()
         return app
-    }
-
-    @MainActor
-    func testRetryConnectionRecoversReconnectingDetails() {
-        assertRetryRecovers(scenario: "connection-retry")
     }
 
     @MainActor
@@ -45,21 +23,6 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Connected")).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Mac unreachable")).firstMatch.waitForExistence(timeout: 30), app.debugDescription)
         keepScreenshot(app, name: "established-loss-unreachable-simulator")
-    }
-
-    @MainActor
-    func testOpenedTransportFailureDoesNotClaimMacUnreachable() {
-        let app = launch(scenario: "connection-opened-failure")
-        defer { app.terminate() }
-        let count = app.staticTexts["failed-socket-count"]
-        let twoAttempts = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "failed sockets 2"), object: count)
-        XCTAssertEqual(XCTWaiter.wait(for: [twoAttempts], timeout: 10), .completed)
-        let reconnecting = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Connection status: Reconnecting")).firstMatch
-        XCTAssertTrue(reconnecting.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Mac unreachable")).firstMatch.exists)
-        app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Retry Connection")).firstMatch.tap()
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Connection status: Connected")).firstMatch.waitForExistence(timeout: 10))
-        keepScreenshot(app, name: "opened-transport-recovered-simulator")
     }
 
     @MainActor

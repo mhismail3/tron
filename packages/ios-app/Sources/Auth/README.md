@@ -43,6 +43,7 @@ None.
 
 ```bash
 scripts/tron-ios-test run --only-testing TronMobileUITests/TronIntegrationSheetsUITests \
+  --only-testing TronMobileViewTests/IntegrationSheetsViewTests \
   --only-testing TronMobileUITests/TronMCPServerSheetsUITests
 ```
 
