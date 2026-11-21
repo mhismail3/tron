@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { AsyncMutex } from "../../util/async-mutex.js";
+import { core as authorization, type GrantState } from "../../core/home/task-authorization/facade.js";
 
 export interface HomeTaskAuthorizationRequest {
   intentDigest: string;
@@ -66,6 +67,8 @@ export interface HomeTaskAuthorizationDiagnostic {
 type HomeTaskAuthorizationResult =
   | { kind: "standing-scope"; scopeId: string }
   | { kind: "one-use-grant"; grantId: string };
+
+const GRANT_STATE: Record<HomeTaskOneUseGrant["state"], GrantState> = { available: "Available", consumed: "Consumed", revoked: "Revoked" };
 
 export class HomeTaskAuthorizationError extends Error {
   constructor(readonly code: "untrusted-target" | "grant-required" | "invalid-decision" | "scope-reconfirmation-required", readonly requestId?: string) {
@@ -165,18 +168,18 @@ export class HomeTaskAuthorization {
     const target = await this.resolveTarget(request.target);
     return this.mutex.run(async () => {
       const state = await this.options.store.load();
-      const scope = state.scopes.find((candidate) => candidate.kind === "all-trusted-projects"
-        && candidate.active && candidate.restoreEpoch === request.restoreEpoch);
-      if (scope) return { kind: "standing-scope", scopeId: scope.id };
-      const grant = state.grants.find((candidate) => candidate.state === "available"
-        && candidate.expiresAt > this.now()
-        && candidate.intentDigest === request.intentDigest
-        && candidate.target === target
-        && candidate.authorizationScope === request.authorizationScope
-        && candidate.restoreEpoch === request.restoreEpoch);
+      const tokens = new Map<string, number>();
+      const token = (value: string): number => tokens.get(value) ?? tokens.set(value, tokens.size).size - 1;
+      const decision = authorization.Authorize(
+        state.scopes.map(scope => ({ id: token(scope.id), active: scope.active, epoch: token(scope.restoreEpoch) })),
+        state.grants.map(grant => ({ id: token(grant.id), state: GRANT_STATE[grant.state], expiresAt: grant.expiresAt,
+          intent: token(grant.intentDigest), target: token(grant.target), scope: token(grant.authorizationScope), epoch: token(grant.restoreEpoch) })),
+        { intent: token(request.intentDigest), target: token(target), scope: token(request.authorizationScope), epoch: token(request.restoreEpoch) },
+        this.now());
+      if (decision.$ === "StandingScope") return { kind: "standing-scope", scopeId: state.scopes.find(scope => token(scope.id) === decision.scope)!.id };
+      const grant = decision.$ === "OneUseGrant" ? state.grants.find(candidate => token(candidate.id) === decision.grant)! : undefined;
       if (!grant) {
-        if (state.scopes.some(candidate => candidate.active && candidate.restoreEpoch !== request.restoreEpoch)
-          || state.grants.some(candidate => candidate.state === "available" && candidate.restoreEpoch !== request.restoreEpoch)) {
+        if (decision.$ === "Reconfirm") {
           this.diagnostic("refused", undefined, "scope-reconfirmation-required");
           throw new HomeTaskAuthorizationError("scope-reconfirmation-required");
         }
