@@ -146,6 +146,8 @@ describe("packaged agent-browser receipts", () => {
       const opened=await step("endpoint",["get","cdp-url"]);
       expect(opened).toMatchObject({isError:false});
       endpoint=opened.details.data.cdpUrl;
+      const launch=JSON.parse(await readFile(join(agentDir,"browser","profile.launches",`${new URL(endpoint).port}.json`),"utf8"));
+      expect(execFileSync("/bin/ps",["-o","command=","-p",String(launch.pid)],{encoding:"utf8"})).toMatch(/--disable-backgrounding-occluded-windows.*--disable-renderer-backgrounding.*--disable-background-timer-throttling/);
       sockets=opened.details.managedSessionSocketDir;
       expect(typeof sockets).toBe("string");
     });
