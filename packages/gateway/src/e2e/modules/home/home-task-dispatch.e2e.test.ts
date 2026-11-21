@@ -323,8 +323,10 @@ describe("Home task authorization RPC", () => {
     let second: Promise<any> | undefined;
     try {
       await waitFor(() => reached, "authorization write held");
+      const ownerMutex = (homeOwnerOf(f.registry) as any).tasks.authorization.mutex as { waiting: Set<unknown> };
       second = (order === "revoke-first" ? consume() : revoke()).then(value => { secondSettled = true; return value; }, error => { secondSettled = true; return { error }; });
-      await new Promise(resolve => setTimeout(resolve, 20));
+      await waitFor(() => secondSettled || ownerMutex.waiting.size > 0, "the second operation queues at the owner mutex");
+      await new Promise(resolve => setImmediate(resolve));
       blocked = !secondSettled;
     } finally { release(); await first; await second; }
     expect(blocked).toBe(true);
@@ -829,9 +831,10 @@ describe("Home task cold reconciliation", () => {
     homeOwnerOf(f.registry).publicationUncertain = true;
     const live = () => (f.registry as any).slots.has(f.home.sessionId) as boolean;
     let retired = false;
+    const settleWaiters = (home as unknown as { settleWaiters: Set<unknown> }).settleWaiters;
     const retirement = (homeOwnerOf(f.registry) as any).options.sessions.retireHomeRuntimes().then(() => { retired = true; });
     try {
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await waitFor(() => retired || settleWaiters.size > 0, "retirement waits for the in-flight operation to settle");
       expect(retired).toBe(false);
       expect(live()).toBe(true);
     } finally {
@@ -1452,7 +1455,7 @@ describe("Home task production dispatch", () => {
     await waitForTaskAcknowledgement(f, run.taskId);
     await waitFor(() => f.notifications.some(input => input.sessionId === f.home.sessionId), "wake reply push");
     const eventId = (await homeOwnerOf(f.registry).taskResult(run.taskId)).wake!.eventId;
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await waitFor(() => !home.isBusy, "the wake turn to settle");
     expect(f.events.slice(eventsBeforeWake).filter(event => event.topic === "session.extensionError")).toEqual([]);
     expect(request).toContain("Home task: Finite work | outcome: final");
     expect(homeTools).toContain("task");
@@ -1922,16 +1925,16 @@ describe("Home task production dispatch", () => {
       const session = (slot as any).runtime.session;
       const prompt = session.prompt.bind(session);
       vi.spyOn(session, "prompt").mockImplementation(async (...args: any[]) => { steerEntered = true; await steerGate; return prompt(...args); });
+      const inspections = vi.spyOn(slot, "inspectTaskSettlement");
       steer = slot.prompt("racing maintainer", [], "steer");
       void steer.catch(() => {});
       await waitFor(() => steerEntered, "steer SDK preflight gate");
       releaseWorker();
       await waitFor(() => slot.canonicalSessionEntries().some(entry => entry.type === "custom" && entry.customType === "tron-home-task-report"), "immutable report append");
-      await waitFor(() => inspectionRequested, "live settlement queued behind steer");
-      for (let attempt = 0; attempt < 20; attempt++) {
-        await new Promise(resolve => setTimeout(resolve, 5));
-        expect(canonicalSynced).toBe(false);
-      }
+      await waitFor(() => inspectionRequested && inspections.mock.calls.length > 0, "live settlement queued behind steer");
+      await new Promise(resolve => setImmediate(resolve));
+      expect(inspections.mock.settledResults.map(result => result.type)).toEqual(["incomplete"]);
+      expect(canonicalSynced).toBe(false);
       releaseSteer();
       await expect(steer).rejects.toThrow(/cancel|stopped|outcome|admission/i);
       const result = await run.completion;

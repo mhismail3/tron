@@ -128,7 +128,6 @@
       "timeout-literal": 18
     },
     "src/e2e/modules/home/home-task-dispatch.e2e.test.ts": {
-      "sleep": 4,
       "timeout-literal": 55
     },
     "src/e2e/modules/home/home-task-managed-provider.e2e.test.ts": {
