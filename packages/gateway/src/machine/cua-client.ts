@@ -15,6 +15,8 @@ const OBSERVATIONS = new Set(["help", "list_apps", "list_windows", "get_window_s
 const IMAGES = new Set(["get_window_state", "get_desktop_state"]);
 const ACTIONS = new Set(["launch_app", "set_window_frame", "bring_to_front", "click", "double_click", "right_click", "type_text", "press_key", "hotkey", "scroll", "drag", "move_cursor", "set_value"]);
 const RESERVED = new Set(["session", "_session_id", "socket", "endpoint", "env", "screenshot_out_file"]);
+const DEADLINE_MS = 10_000;
+const TYPING_MS_PER_CHARACTER = 250;
 type CuaComputerResult = Readonly<{
   status: "completed" | "refused" | "outcomeUnknown";
   output: unknown;
@@ -35,6 +37,15 @@ function parseCuaOutput(stdout: string, endpointGeneration: string, kind: "obser
     || (typeof object.status === "string" && !["ok", "completed", "success", "activated", "passed", "matched", "verified", "confirmed", "refused"].includes(object.status))
     || ["unverifiable", "partial", "suspected_noop", "suspectedNoop"].includes(String(object.effect));
   return { status: refused ? "refused" : uncertain ? "outcomeUnknown" : "completed", output, endpointGeneration };
+}
+
+function publicHelp(text: string): string {
+  const marker = text.indexOf("\ninput_schema:\n");
+  if (marker < 0) throw new Error("Unrecognized computer help");
+  const schema = JSON.parse(text.slice(marker + 15)) as { properties?: Record<string, unknown>; required?: string[] };
+  for (const name of RESERVED) delete schema.properties?.[name];
+  if (schema.required) schema.required = schema.required.filter((name) => !RESERVED.has(name));
+  return `${text.slice(0, marker)}\ninput_schema:\n${JSON.stringify(schema, null, 2)}\n`;
 }
 
 export class CuaComputerClient {
@@ -77,7 +88,7 @@ export class CuaComputerClient {
       const token = typeof arguments_.element_token === "string" ? arguments_.element_token : `${arguments_.snapshot_id}:${arguments_.element_index}`;
       const refs = this.windowReferences;
       if (!refs || !refs.tokens.has(token) || (pid !== undefined && pid !== refs.pid)
-        || (window !== undefined && window !== refs.window) || target?.kind === "desktop") throw new Error("Element reference does not belong to this session's latest window observation");
+        || (window !== undefined && window !== refs.window) || target?.kind === "desktop") throw new Error("stale_element_token: the element reference does not belong to this session's latest window observation; call get_window_state again");
     }
     const foreground = arguments_.delivery_mode === "foreground" || arguments_.scope === "desktop" || target?.kind === "desktop" || tool === "bring_to_front";
     if (!observation && foreground && !this.desktopObserved) throw new Error("Inspect the full desktop for system dialogs before foreground input");
@@ -107,10 +118,10 @@ export class CuaComputerClient {
         const name = arguments_.tool;
         if (name === undefined) return { status: "completed", output: { tools: [...OBSERVATIONS, ...ACTIONS] }, endpointGeneration: "metadata" };
         if (typeof name !== "string" || (!OBSERVATIONS.has(name) && !ACTIONS.has(name)) || name === "help") throw new Error("Unsupported computer help topic");
-        const { stdout } = await execFileAsync(DRIVER, ["describe", name], { env: this.environment(), maxBuffer: OUTPUT_LIMIT, encoding: "utf8", windowsHide: true });
-        signal?.throwIfAborted();
+        const help = await this.driver(["describe", name], signal);
+        if (help.failed) throw new Error("Computer help is unavailable");
         if (this.closed) throw new Error("Computer session ended before help publication");
-        return { status: "completed", output: { documentation: stdout }, endpointGeneration: "metadata" };
+        return { status: "completed", output: { documentation: publicHelp(help.stdout) }, endpointGeneration: "metadata" };
       }
       await this.admit();
       this.activity.hold();
@@ -126,11 +137,10 @@ export class CuaComputerClient {
       }
       const endpoint = this.endpoint!;
       if (observation) {
-        const { stdout } = await execFileAsync(DRIVER, ["call", "start_session", JSON.stringify({ session: this.binding.runtimeLoadID }), "--socket", endpoint.socket],
-          { env: this.environment(), maxBuffer: OUTPUT_LIMIT, encoding: "utf8", windowsHide: true });
-        const activation = parseCuaOutput(stdout, endpoint.generation);
+        const started = await this.driver(["call", "start_session", JSON.stringify({ session: this.binding.runtimeLoadID }), "--socket", endpoint.socket], signal);
+        const activation = parseCuaOutput(started.stdout, endpoint.generation);
         const state = activation.output as Record<string, unknown>;
-        if (activation.status !== "completed" || state.active !== true || typeof state.revived !== "boolean") throw new Error("Cua session activation was not confirmed");
+        if (started.failed || activation.status !== "completed" || state.active !== true || typeof state.revived !== "boolean") throw new Error("Cua session activation was not confirmed");
         if (state.revived) this.invalidateObservation();
         signal?.throwIfAborted();
         if (this.closed) throw new Error("Computer session ended during activation");
@@ -152,10 +162,10 @@ export class CuaComputerClient {
       }
       signal?.throwIfAborted();
       if (this.closed) throw new Error("Computer session ended before dispatch");
-      const { stdout } = await execFileAsync(DRIVER, ["call", tool, JSON.stringify(args), "--socket", endpoint.socket], {
-        env: this.environment(), maxBuffer: OUTPUT_LIMIT, encoding: "utf8", windowsHide: true,
-      });
-      const result = parseCuaOutput(stdout, endpoint.generation, observation ? "observation" : "action");
+      const typing = tool === "type_text" && typeof args.text === "string" ? [...args.text].length * TYPING_MS_PER_CHARACTER : 0;
+      const call = await this.driver(["call", tool, JSON.stringify(args), "--socket", endpoint.socket], signal, DEADLINE_MS + typing);
+      const parsed = parseCuaOutput(call.stdout, endpoint.generation, observation ? "observation" : "action");
+      const result: CuaComputerResult = call.failed && parsed.status === "completed" ? { ...parsed, status: "outcomeUnknown" } : parsed;
       if (signal?.aborted || this.closed) throw new Error("Computer operation interrupted; it may have completed. Do not replay it");
       if (imagePath) await this.admit();
       let image: CuaComputerResult["image"];
@@ -204,6 +214,19 @@ export class CuaComputerClient {
     } finally { if (directory) await rm(directory, { recursive: true, force: true }); }
   }
 
+  private async driver(args: string[], signal?: AbortSignal, deadline = DEADLINE_MS): Promise<{ stdout: string; failed: boolean }> {
+    try {
+      const { stdout } = await execFileAsync(DRIVER, args, { env: this.environment(), maxBuffer: OUTPUT_LIMIT, encoding: "utf8", windowsHide: true, timeout: deadline, signal });
+      return { stdout, failed: false };
+    } catch (error) {
+      const failure = error as { name?: unknown; killed?: unknown; code?: unknown; stdout?: unknown };
+      if (failure.name === "AbortError") throw new Error("Computer operation stopped; it may have completed. Do not replay it");
+      if (failure.killed === true) throw new Error(`Cua driver gave no answer within ${deadline / 1000} s; the effect is unknown`);
+      if (typeof failure.code === "number" && typeof failure.stdout === "string" && failure.stdout.trimStart().startsWith("{")) return { stdout: failure.stdout, failed: true };
+      throw error;
+    }
+  }
+
   private environment(): NodeJS.ProcessEnv {
     return { HOME: homedir(), PATH: "/usr/bin:/bin:/usr/sbin:/sbin", TMPDIR: tmpdir(), LANG: "en_US.UTF-8",
       CUA_DRIVER_RS_TELEMETRY_ENABLED: "false", CUA_TELEMETRY_ENABLED: "false" };
@@ -216,12 +239,12 @@ export class CuaComputerClient {
       await this.endTurn();
       const endpoint = this.endpoint; this.endpoint = undefined;
       if (!endpoint) return;
+      const signal = AbortSignal.timeout(DEADLINE_MS);
       for (;;) {
-        const { stdout } = await execFileAsync(DRIVER, ["call", "end_session", JSON.stringify({ session: this.binding.runtimeLoadID }), "--socket", endpoint.socket],
-          { env: this.environment(), maxBuffer: OUTPUT_LIMIT, encoding: "utf8", windowsHide: true });
-        const result = JSON.parse(stdout) as Record<string, unknown>;
+        const ended = await this.driver(["call", "end_session", JSON.stringify({ session: this.binding.runtimeLoadID }), "--socket", endpoint.socket], signal);
+        const result = JSON.parse(ended.stdout) as Record<string, unknown>;
         if (result.code === "session_cleanup_pending") {
-          await delay(100); continue;
+          await delay(100, undefined, { signal }); continue;
         }
         if (result.active !== false || result.code !== undefined || result.error !== undefined) throw new Error("Cua session cleanup was not confirmed");
         break;
