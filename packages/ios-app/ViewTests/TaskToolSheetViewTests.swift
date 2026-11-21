@@ -56,6 +56,9 @@ final class TaskToolSheetViewTests: ShuffledTestCase {
                 let body = app.element("home-tool-text-message")!.accessibilityFrame
                 let area = body.insetBy(dx: 16, dy: 16).intersection(app.window.bounds)
                 let text = CGRect(x: area.minX, y: area.minY, width: area.width, height: min(area.height, 160))
+                let pixels = try XCTUnwrap(app.pixels(text), "\(mode): the message body was not sampled")
+                let brightness = pixels.map { $0.reduce(0, +) / 3 }
+                XCTAssertGreaterThan(brightness.max()! - brightness.min()!, 100, "\(mode): no text ink in the message body")
                 XCTAssertNil(app.ink(text), "\(mode): message body must be the neutral standard text colour, not a tint")
             }
         }

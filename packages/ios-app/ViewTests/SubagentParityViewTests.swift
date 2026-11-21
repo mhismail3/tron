@@ -77,6 +77,8 @@ final class SubagentParityViewTests: ShuffledTestCase {
     }
 
     private func verifyPills(_ app: MountedFixture) async throws {
+        try await app.until("the transcript pills") { app.button("Subagent, Progress Update") != nil }
+        XCTAssertNil(app.button("Subagent, Update"), "Internal wake must not add a pill")
         for (label, body) in [
             ("Subagent, Progress Update", "Worker has finished discovery."),
             ("Subagent, Child Update", "Reviewer child result: no blockers."),
@@ -91,7 +93,6 @@ final class SubagentParityViewTests: ShuffledTestCase {
             XCTAssertNil(app.staticText("Context received"))
             try await app.activate("Done")
         }
-        XCTAssertNil(app.button("Subagent, Update"), "Internal wake must not add a pill")
     }
 
     private func assertHistoryRow(_ app: MountedFixture, id: String, status: String, active: Bool) async throws {
@@ -104,7 +105,7 @@ final class SubagentParityViewTests: ShuffledTestCase {
 
     private func reply(_ app: MountedFixture, _ text: String) -> Bool {
         !nodes(app) {
-            MountedFixture.identifier($0) == "chat.assistant.selectable-text" && ($0 as? UITextView)?.text.contains(text) == true
+            MountedFixture.identifier($0) == "chat.assistant.selectable-text" && ($0 as? UITextView)?.text == text
         }.isEmpty
     }
 

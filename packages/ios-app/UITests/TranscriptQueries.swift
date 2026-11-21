@@ -7,11 +7,6 @@ extension XCTestCase {
     }
 
     @MainActor
-    func assistantReply(_ app: XCUIApplication, labeled text: String) -> XCUIElement {
-        assistantReply(app, NSPredicate(format: "label == %@", text))
-    }
-
-    @MainActor
     func inVisualOrder(_ query: XCUIElementQuery, file: StaticString = #filePath, line: UInt = #line) -> [XCUIElement] {
         let elements = query.allElementsBoundByIndex
         XCTAssertFalse(elements.contains { $0.frame.isEmpty }, "Every element is laid out before it is ordered", file: file, line: line)
