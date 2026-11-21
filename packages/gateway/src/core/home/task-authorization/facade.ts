@@ -8,7 +8,7 @@ export type Decision =
   | { readonly $: "Reconfirm" }
   | { readonly $: "GrantRequired" };
 export interface Grant { readonly id: number; readonly state: GrantState; readonly expiresAt: number; readonly intent: number; readonly target: number; readonly scope: number; readonly epoch: number }
-export type GrantState = "Available" | "Consumed" | "Revoked";
+export type GrantState = "available" | "consumed" | "revoked";
 export interface Request { readonly intent: number; readonly target: number; readonly scope: number; readonly epoch: number }
 export interface Scope { readonly id: number; readonly active: boolean; readonly epoch: number }
 
@@ -24,7 +24,7 @@ export function bind(M: any): Core {
   const toList = <T>(v: readonly T[], each: (x: T) => unknown): unknown => { if (!Array.isArray(v)) throw new TypeError(`not an array: ${JSON.stringify(v)}`); let list = M.List.create_Nil(); for (let i = v.length - 1; i >= 0; i--) list = M.List.create_Cons(each(v[i] as T), list); return list; };
   const fromDecision = (v: any): Decision => v.is_StandingScope ? { $: "StandingScope", scope: inToken(v.dtor_scope) } : v.is_OneUseGrant ? { $: "OneUseGrant", grant: inToken(v.dtor_grant) } : v.is_Reconfirm ? { $: "Reconfirm" } : v.is_GrantRequired ? { $: "GrantRequired" } : bad("Decision");
   const toGrant = (v: Grant): unknown => { if (typeof v !== "object" || v === null) return unknown("Grant", v); return M.Grant.create_Grant(inToken(v.id), toGrantState(v.state), inMs(v.expiresAt), inToken(v.intent), inToken(v.target), inToken(v.scope), inToken(v.epoch)); };
-  const theGrantState: Record<string, unknown> = Object.assign(Object.create(null), { Available: M.GrantState.create_Available(), Consumed: M.GrantState.create_Consumed(), Revoked: M.GrantState.create_Revoked() });
+  const theGrantState: Record<string, unknown> = Object.assign(Object.create(null), { available: M.GrantState.create_available(), consumed: M.GrantState.create_consumed(), revoked: M.GrantState.create_revoked() });
   const toGrantState = (v: GrantState): unknown => theGrantState[v] ?? unknown("GrantState", v);
   const toRequest = (v: Request): unknown => { if (typeof v !== "object" || v === null) return unknown("Request", v); return M.Request.create_Request(inToken(v.intent), inToken(v.target), inToken(v.scope), inToken(v.epoch)); };
   const toScope = (v: Scope): unknown => { if (typeof v !== "object" || v === null) return unknown("Scope", v); return M.Scope.create_Scope(inToken(v.id), bool(v.active), inToken(v.epoch)); };

@@ -18,7 +18,7 @@ module HomeTaskAuthorization refines HomeTaskAuthorizationLaws {
   // The id of the first grant that matches the request at time now.
   function GrantFor(gs: List<Grant>, r: Request, now: Ms): Pick {
     if gs.Nil? then NoPick
-    else if gs.head.state.Available? && gs.head.expiresAt > now && gs.head.intent == r.intent
+    else if gs.head.state.available? && gs.head.expiresAt > now && gs.head.intent == r.intent
       && gs.head.target == r.target && gs.head.scope == r.scope && gs.head.epoch == r.epoch then Picked(gs.head.id)
     else GrantFor(gs.tail, r, now)
   }
@@ -30,7 +30,7 @@ module HomeTaskAuthorization refines HomeTaskAuthorizationLaws {
 
   // Whether an available grant belongs to another restore epoch.
   predicate StaleGrants(gs: List<Grant>, r: Request) {
-    if gs.Nil? then false else if gs.head.state.Available? && gs.head.epoch != r.epoch then true else StaleGrants(gs.tail, r)
+    if gs.Nil? then false else if gs.head.state.available? && gs.head.epoch != r.epoch then true else StaleGrants(gs.tail, r)
   }
 
   function Authorize(scopes: List<Scope>, grants: List<Grant>, r: Request, now: Ms): Decision {

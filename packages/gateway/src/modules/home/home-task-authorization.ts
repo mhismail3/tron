@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { AsyncMutex } from "../../util/async-mutex.js";
-import { core as authorization, type GrantState } from "../../core/home/task-authorization/facade.js";
+import { core as authorization } from "../../core/home/task-authorization/facade.js";
 
 export interface HomeTaskAuthorizationRequest {
   intentDigest: string;
@@ -67,8 +67,6 @@ export interface HomeTaskAuthorizationDiagnostic {
 type HomeTaskAuthorizationResult =
   | { kind: "standing-scope"; scopeId: string }
   | { kind: "one-use-grant"; grantId: string };
-
-const GRANT_STATE: Record<HomeTaskOneUseGrant["state"], GrantState> = { available: "Available", consumed: "Consumed", revoked: "Revoked" };
 
 export class HomeTaskAuthorizationError extends Error {
   constructor(readonly code: "untrusted-target" | "grant-required" | "invalid-decision" | "scope-reconfirmation-required", readonly requestId?: string) {
@@ -172,7 +170,7 @@ export class HomeTaskAuthorization {
       const token = (value: string): number => tokens.get(value) ?? tokens.set(value, tokens.size).size - 1;
       const decision = authorization.Authorize(
         state.scopes.map(scope => ({ id: token(scope.id), active: scope.active, epoch: token(scope.restoreEpoch) })),
-        state.grants.map(grant => ({ id: token(grant.id), state: GRANT_STATE[grant.state], expiresAt: grant.expiresAt,
+        state.grants.map(grant => ({ id: token(grant.id), state: grant.state, expiresAt: grant.expiresAt,
           intent: token(grant.intentDigest), target: token(grant.target), scope: token(grant.authorizationScope), epoch: token(grant.restoreEpoch) })),
         { intent: token(request.intentDigest), target: token(target), scope: token(request.authorizationScope), epoch: token(request.restoreEpoch) },
         this.now());

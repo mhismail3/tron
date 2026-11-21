@@ -31,7 +31,7 @@ let HomeTaskAuthorization = (function() {
       TAIL_CALL_START: while (true) {
         if ((gs).is_Nil) {
           return HomeTaskAuthorization.Pick.create_NoPick();
-        } else if (((((((((gs).dtor_head).dtor_state).is_Available) && ((((gs).dtor_head).dtor_expiresAt) > (now))) && ((((gs).dtor_head).dtor_intent) === ((r).dtor_intent))) && ((((gs).dtor_head).dtor_target) === ((r).dtor_target))) && ((((gs).dtor_head).dtor_scope) === ((r).dtor_scope))) && ((((gs).dtor_head).dtor_epoch) === ((r).dtor_epoch))) {
+        } else if (((((((((gs).dtor_head).dtor_state).is_available) && ((((gs).dtor_head).dtor_expiresAt) > (now))) && ((((gs).dtor_head).dtor_intent) === ((r).dtor_intent))) && ((((gs).dtor_head).dtor_target) === ((r).dtor_target))) && ((((gs).dtor_head).dtor_scope) === ((r).dtor_scope))) && ((((gs).dtor_head).dtor_epoch) === ((r).dtor_epoch))) {
           return HomeTaskAuthorization.Pick.create_Picked(((gs).dtor_head).dtor_id);
         } else {
           let _in0 = (gs).dtor_tail;
@@ -63,7 +63,7 @@ let HomeTaskAuthorization = (function() {
       TAIL_CALL_START: while (true) {
         if ((gs).is_Nil) {
           return false;
-        } else if (((((gs).dtor_head).dtor_state).is_Available) && ((((gs).dtor_head).dtor_epoch) !== ((r).dtor_epoch))) {
+        } else if (((((gs).dtor_head).dtor_state).is_available) && ((((gs).dtor_head).dtor_epoch) !== ((r).dtor_epoch))) {
           return true;
         } else {
           let _in0 = (gs).dtor_tail;
@@ -235,36 +235,36 @@ let HomeTaskAuthorization = (function() {
     constructor(tag) {
       this.$tag = tag;
     }
-    static create_Available() {
+    static create_available() {
       let $dt = new GrantState(0);
       return $dt;
     }
-    static create_Consumed() {
+    static create_consumed() {
       let $dt = new GrantState(1);
       return $dt;
     }
-    static create_Revoked() {
+    static create_revoked() {
       let $dt = new GrantState(2);
       return $dt;
     }
-    get is_Available() { return this.$tag === 0; }
-    get is_Consumed() { return this.$tag === 1; }
-    get is_Revoked() { return this.$tag === 2; }
+    get is_available() { return this.$tag === 0; }
+    get is_consumed() { return this.$tag === 1; }
+    get is_revoked() { return this.$tag === 2; }
     static get AllSingletonConstructors() {
       return this.AllSingletonConstructors_();
     }
     static *AllSingletonConstructors_() {
-      yield GrantState.create_Available();
-      yield GrantState.create_Consumed();
-      yield GrantState.create_Revoked();
+      yield GrantState.create_available();
+      yield GrantState.create_consumed();
+      yield GrantState.create_revoked();
     }
     toString() {
       if (this.$tag === 0) {
-        return "HomeTaskAuthorization.GrantState.Available";
+        return "HomeTaskAuthorization.GrantState.available";
       } else if (this.$tag === 1) {
-        return "HomeTaskAuthorization.GrantState.Consumed";
+        return "HomeTaskAuthorization.GrantState.consumed";
       } else if (this.$tag === 2) {
-        return "HomeTaskAuthorization.GrantState.Revoked";
+        return "HomeTaskAuthorization.GrantState.revoked";
       } else  {
         return "<unexpected>";
       }
@@ -283,7 +283,7 @@ let HomeTaskAuthorization = (function() {
       }
     }
     static Default() {
-      return HomeTaskAuthorization.GrantState.create_Available();
+      return HomeTaskAuthorization.GrantState.create_available();
     }
     static Rtd() {
       return class {

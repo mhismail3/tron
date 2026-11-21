@@ -15,7 +15,7 @@ abstract module HomeTaskAuthorizationLaws {
   newtype Ms = x: int | -0x20_0000_0000_0000 < x < 0x20_0000_0000_0000
   // List: a linked list, crossing to the shell as an array.
   datatype List<T> = Nil | Cons(head: T, tail: List<T>)
-  datatype GrantState = Available | Consumed | Revoked
+  datatype GrantState = available | consumed | revoked
   // Scope: a standing scope over all trusted projects: its id, whether it is active, and the restore epoch it was
   // enabled or last reconfirmed for.
   datatype Scope = Scope(id: Token, active: bool, epoch: Token)
@@ -47,7 +47,7 @@ abstract module HomeTaskAuthorizationLaws {
   // Matches: an available grant that expires strictly after now and was approved for exactly this request: the
   // same intent digest, target, authorization scope and restore epoch.
   ghost predicate Matches(g: Grant, r: Request, now: Ms) {
-    g.state == Available && g.expiresAt > now
+    g.state == available && g.expiresAt > now
     && g.intent == r.intent && g.target == r.target && g.scope == r.scope && g.epoch == r.epoch
   }
 
@@ -55,7 +55,7 @@ abstract module HomeTaskAuthorizationLaws {
   ghost predicate StaleScope(s: Scope, r: Request) { s.active && s.epoch != r.epoch }
 
   // StaleGrant: an available grant (expired or not) for another restore epoch.
-  ghost predicate StaleGrant(g: Grant, r: Request) { g.state == Available && g.epoch != r.epoch }
+  ghost predicate StaleGrant(g: Grant, r: Request) { g.state == available && g.epoch != r.epoch }
 
   // The decision for a request at time now, given the store's scopes and grants.
   function Authorize(scopes: List<Scope>, grants: List<Grant>, r: Request, now: Ms): Decision
