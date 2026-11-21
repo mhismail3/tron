@@ -127,11 +127,6 @@ enum HomeManageRowPresentation {
         let finished = page.items.count - active
         return "\(active) active · \(finished)\(page.nextCursor == nil ? "" : "+") finished"
     }
-
-    static func permissions(_ permissions: HomeTaskPermissionsDTO?) -> String {
-        guard let permissions else { return "Unavailable while task recovery is closed" }
-        return permissions.scopes.contains(where: \.active) ? "All trusted projects" : "No standing scopes"
-    }
 }
 
 enum HomePinnedRowAction: Equatable {

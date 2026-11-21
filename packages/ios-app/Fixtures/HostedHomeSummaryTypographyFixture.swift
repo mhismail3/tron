@@ -37,7 +37,7 @@ struct HostedHomeSummaryTypographyFixture: View {
          "taskRecovery":{"available":true},"memory":{"configured":true,"open":true}}
         """#))
         return HomeManageDTO(status: status, context: status.activation,
-                             chapters: nil, tasks: nil, permissions: nil)
+                             chapters: nil, tasks: nil)
     }
 
     private static var snapshot: SessionSnapshot {

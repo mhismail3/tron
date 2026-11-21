@@ -39,6 +39,25 @@ final class TronInteractionSheetUITests: XCTestCase {
     }
 
     @MainActor
+    func testChangeReviewOpensAtMediumWithToolbarDecisionsAndVisibleExactValues() {
+        continueAfterFailure = false
+        for scheme in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-ask-user-fixture", "-tron-native-change-fixture", "-appearanceMode", scheme]
+            app.launch()
+            let bar = app.navigationBars.containing(.staticText, identifier: "Review change").firstMatch
+            XCTAssertTrue(app.navigationBars.staticTexts["Review change"].waitForExistence(timeout: 10), app.debugDescription)
+            XCTAssertTrue(bar.buttons["Approve"].exists && bar.buttons["Cancel"].exists, "Approve and Cancel are toolbar actions: \(app.debugDescription)")
+            XCTAssertGreaterThan(bar.frame.minY, app.windows.firstMatch.frame.height * 0.3, "The review opens at the medium detent")
+            let exact = app.staticTexts["{\"shell\":\"printf 'native witness'\"}"]
+            XCTAssertTrue(exact.exists, "Exact values are always shown, never behind a disclosure: \(app.debugDescription)")
+            XCTAssertFalse(app.buttons["Exact values"].exists, "No disclosure")
+            keep(app, "review-change-medium-\(scheme)")
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testProviderKeyCardSendsTypedKeyOnlyWithApproval() {
         continueAfterFailure = false
         let app = XCUIApplication()

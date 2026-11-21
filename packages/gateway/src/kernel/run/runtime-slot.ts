@@ -701,7 +701,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           if (!this.usesHomeSettings) return resolution;
           const listed = new Set(resolution.keys.map(key => key.key));
           const globalOnly = owners.model.schema.KEYS.filter(key => key.writers.includes("home") && key.layers.global && !listed.has(key.id)
-            && (keys ? keys.includes(key.id) : key.layers.global.store !== "device-preference")).map(key => key.id);
+            && (!keys || keys.includes(key.id))).map(key => key.id);
           if (globalOnly.length === 0) return resolution;
           const global = await owners.model.resolve({ kind: "global" }, undefined, globalOnly, { storeState: false });
           return { ...resolution, keys: [...resolution.keys, ...global.keys] };

@@ -44,7 +44,7 @@ matrix. `TronUILockTests` retains these witnesses, light and dark each:
 
 | State | Focused owner |
 |---|---|
-| Global Settings (Home gear) | Shared chrome and #1607 source/control metadata |
+| Settings (Home gear) | Shared chrome and #1607 source/control metadata |
 | Memory-search tool detail | Shared chrome and #1607 source/control metadata |
 
 Chat content/tool controls retain `TronMobileViewTests/WorkerToolRegressionViewTests/testTranscriptChipsUseFriendlyNames`,

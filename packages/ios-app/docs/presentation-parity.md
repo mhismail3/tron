@@ -41,6 +41,8 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 - **Code insets.** `ToolDetailCodeBlock` uses a flat, lightly tinted inset, never Liquid Glass.
   Memory entries and tool argument/error sheets share it, so an entry card owns the only glass
   container around its monospace content.
+  Inside a settings group, monospace content is a `TronSettingsCodeRow` (provider-error messages,
+  review exact values), so the group stays the only container.
 - **Long content.** Containers above `TronLongContentPolicy.flatSurfaceCharacterThreshold` use
   `tronScrollSurface`; shorter ones keep glass with identical padding and typography. Prompt text
   keeps about `promptVisibleLines` lines and masks only the text's bottom ink on overflow; the
@@ -110,8 +112,10 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   have no content, so cached or refreshed content is never hidden or replayed. Non-scroll sheets
   (media, terminal, camera, Swift-app preparation) keep their own preparation surfaces.
 - **Chat details.** Provider-error and nested tool-call details reuse `ChatDetailSheet` for
-  navigation, Done, top chrome, insets and detents. Error content composes the existing themed
-  sections/groups/rows and flat code inset, not a second sheet or card style.
+  navigation, Done, top chrome, insets and detents. Single errors and runs share one layout of
+  standard groups: a summary row, then per occurrence (newest first) a details group (model, type,
+  time, request ID, HTTP status rows) and a Message group with the full selectable text; runs add
+  the Breakdown list. No disclosures or a lone container.
 - **Detents.** Progressive and Home sub-sheets open at medium and drag to large; a presentation's
   managed scope owns its chosen detent, so refreshes and child round trips do not reset it.
 - **iPad sheets.** On iPadOS 27 `TronPadSheetMode` replaces every managed sheet's detents (iPhone
@@ -167,13 +171,13 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   the Overridden pill and a tool selection's "N of M tools" count never truncate. At
   accessibility sizes, or when the cluster would leave the title less than a 96-point column,
   the cluster stacks under the text column.
-- **Reset.** Global Settings, the chat model card and Controls use the preview/confirmation/receipted
+- **Reset.** Settings, the chat model card and Controls use the preview/confirmation/receipted
   `settings.change` unset at the writable layer. Inherited values have no reset; nothing invents a default locally.
 - **Text entry** ends through `tronTextEntryDone` (return reads Done; multi-line or
   return-less keyboards show Done above the keyboard). Entry guidance is the schema's `entry`
   (`hint`, `example`); iOS writes no per-key guidance. Free text shows a muted `(empty)`
   placeholder.
-- **Accents.** Group accents flow from `SettingsGroupCard` through every progressive sheet; a
+- **Accents.** The settings accent flows from `SettingsView` through every progressive sheet; a
   destination reachable elsewhere reads the inherited theme and names only its standalone
   fallback (`tronSettingsVisualTheme(inheriting:)`). Project Trust, Gateway actions and
   warning/error/destructive/log-level colors stay semantic. A theme carries readable ink and
@@ -192,16 +196,20 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 
 ## Exact review presentation
 
-`ChangeReviewCard` (`UI/Components/ChangeReviewCard.swift`) is the one plaintext before/after
-card; `ChangeReviewSheet` presents it. A review with intent `provider-api-key` adds one `SecureField` for the provider's API key; Approve stays disabled until it holds text, and the approving answer alone carries it (`secret`), never shown again. An agent, Home or worker change arrives as the native
-`change` interaction (`ExtensionInteractionSheet`); Global Settings, chat model card and Controls rows whose dry run
-requires a tap present the same sheet. Approve retires the
-sheet at the tap and answers the typed owner once with the review's digest through the receipt executor; Cancel and native
-dismissal send nothing. Generic forms never authorize effects. The card shows Gateway text
-only and keeps exact values behind its disclosure. Audit history and Undo belong to the agent's
-`settings` tool; owner actions have no generic Undo. The card surface, Approve/Cancel/Undo actions and
-native change title use `tronPrimary`, not the generic question's amber accent. Agent & Tools
-and its inherited admin-sheet chrome follow the selected primary theme; semantic statuses keep their colors.
+`ChangeReviewSheet` (`UI/Components/ChangeReviewSheet.swift`) is the one plaintext before/after
+review. It opens at medium and composes standard sections: a summary row (title, reason), one
+Before/After group per item with its detail caption, an always-visible monospaced Exact values
+section, and, for intent `provider-api-key`, one `SecureField` for the provider's API key; Approve
+stays disabled until it holds text, and the approving answer alone carries it (`secret`), never
+shown again. Approve (check, `tronPrimary`) and Cancel (red) are toolbar actions; the native
+interaction adds a grey leading close that leaves the review undecided. An agent, Home or worker
+change arrives as the native `change` interaction (`ExtensionInteractionSheet`); Settings,
+chat model card and Controls rows whose dry run requires a tap present the same sheet. Approve
+retires the sheet at the tap and answers the typed owner once with the review's digest through the
+receipt executor; Cancel and native dismissal send nothing. Generic forms never authorize effects.
+The sheet shows Gateway text only. Audit history and Undo belong to the agent's `settings` tool;
+owner actions have no generic Undo. Settings and its inherited admin-sheet chrome follow the
+selected primary theme; semantic statuses keep their colors.
 
 ## Shared lists and readers
 

@@ -3,20 +3,16 @@ import TronMobileCore
 
 struct ChatProviderErrorDetails: View {
     let run: ChatProviderErrorRun
-    @State private var expanded: Set<String>
     private let accent = ChatNotificationTone.error.surfaceColor
-
-    init(run: ChatProviderErrorRun) {
-        self.run = run
-        _expanded = State(initialValue: Set(run.occurrences.last.map { [$0.id] } ?? []))
-    }
 
     var body: some View {
         TronSettingsSections(alignment: .leading, spacing: TronSpacing.section) {
             if run.occurrences.count == 1, let occurrence = run.occurrences.first {
-                TronSettingsGroup("Details", accent: accent, surfaceStyle: surface(occurrence)) {
-                    details(occurrence)
+                TronSettingsGroup(nil, accent: accent) {
+                    TronSettingsRow(icon: "exclamationmark.triangle.fill", title: occurrence.title,
+                                    subtitle: occurrence.timeLabel, accent: accent)
                 }
+                sections(occurrence, heading: "Details")
             } else {
                 let count = run.breakdown.count
                 TronSettingsGroup(nil, accent: accent) {
@@ -29,24 +25,8 @@ struct ChatProviderErrorDetails: View {
                     TronListRow(.init(leading: .icon("exclamationmark.triangle.fill", accent), title: entry.first.title,
                                       status: .init(text: "×\(entry.count)", tone: accent), subtext: entry.first.modelLabel))
                 }
-                TronSettingsGroup("Occurrences · newest first", accent: accent, surfaceStyle: .uncontained) {
-                    VStack(spacing: TronSpacing.md) {
-                        ForEach(run.occurrences.reversed()) { occurrence in
-                            TronSettingsGroup(nil, accent: accent, surfaceStyle: surface(occurrence)) {
-                                DisclosureGroup(isExpanded: Binding(get: { expanded.contains(occurrence.id) }, set: { open in
-                                    if open { expanded.insert(occurrence.id) } else { expanded.remove(occurrence.id) }
-                                })) {
-                                    TronSettingsDivider(accent: accent)
-                                    details(occurrence)
-                                } label: {
-                                    TronSettingsRow(icon: nil, title: occurrence.title, subtitle: occurrence.timeLabel, accent: accent)
-                                        .accessibilityIdentifier("chat-error-occurrence-\(occurrence.id)")
-                                }
-                                .tint(accent)
-                                .padding(.trailing, TronSettingsLayoutPolicy.rowHorizontalPadding)
-                            }
-                        }
-                    }
+                ForEach(Array(run.occurrences.reversed().enumerated()), id: \.element.id) { index, occurrence in
+                    sections(occurrence, heading: "Occurrence \(run.occurrences.count - index) · \(occurrence.timeLabel)")
                 }
             }
         }
@@ -58,14 +38,20 @@ struct ChatProviderErrorDetails: View {
         return "First \(first.timeLabel) · Last \(last.timeLabel)"
     }
 
-    private func surface(_ occurrence: ChatProviderErrorOccurrence) -> TronSettingsGroupSurfaceStyle {
-        occurrence.raw.count > TronLongContentPolicy.flatSurfaceCharacterThreshold ? .scrollOptimized : .glass
-    }
-
-    private func details(_ occurrence: ChatProviderErrorOccurrence) -> some View {
-        VStack(spacing: 0) {
-            TronSettingsRow(icon: "cpu", title: occurrence.modelLabel ?? "Provider error",
-                            subtitle: [occurrence.info?.type, occurrence.timeLabel].compactMap { $0 }.joined(separator: " · "), accent: accent)
+    @ViewBuilder
+    private func sections(_ occurrence: ChatProviderErrorOccurrence, heading: String) -> some View {
+        TronSettingsGroup(heading, accent: accent) {
+            if run.occurrences.count > 1 {
+                TronSettingsRow(icon: "exclamationmark.triangle.fill", title: occurrence.title, accent: accent)
+                TronSettingsDivider(accent: accent)
+            }
+            TronSettingsRow(icon: "cpu", title: "Model", subtitle: occurrence.modelLabel ?? "Unknown", accent: accent)
+            if let type = occurrence.info?.type {
+                TronSettingsDivider(accent: accent)
+                TronSettingsRow(icon: "tag", title: "Type", subtitle: type, accent: accent)
+            }
+            TronSettingsDivider(accent: accent)
+            TronSettingsRow(icon: "clock", title: "Time", subtitle: occurrence.timeLabel, accent: accent)
             if let requestID = occurrence.info?.requestId {
                 TronSettingsDivider(accent: accent)
                 TronSettingsRow(icon: "number", title: "Request ID", subtitle: requestID, accent: accent,
@@ -77,9 +63,14 @@ struct ChatProviderErrorDetails: View {
                 TronSettingsDivider(accent: accent)
                 TronSettingsRow(icon: "network", title: "HTTP status", subtitle: "\(status)", accent: accent)
             }
-            ToolDetailCodeBlock(text: occurrence.formatted, accent: accent)
-                .accessibilityIdentifier("chat-error-body-\(occurrence.id)")
-                .padding(TronSettingsLayoutPolicy.rowHorizontalPadding)
         }
+        TronSettingsGroup("Message", accent: accent, surfaceStyle: surface(occurrence)) {
+            TronSettingsCodeRow(text: occurrence.formatted)
+                .accessibilityIdentifier("chat-error-body-\(occurrence.id)")
+        }
+    }
+
+    private func surface(_ occurrence: ChatProviderErrorOccurrence) -> TronSettingsGroupSurfaceStyle {
+        occurrence.raw.count > TronLongContentPolicy.flatSurfaceCharacterThreshold ? .scrollOptimized : .glass
     }
 }

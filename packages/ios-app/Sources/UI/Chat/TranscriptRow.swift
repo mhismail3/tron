@@ -400,7 +400,7 @@ struct BoundedTrailingContentLayout: Layout {
             return fitted
         }
         let measured = subview.sizeThatFits(ProposedViewSize(width: width, height: nil))
-        let fitted = CGSize(width: width, height: measured.height)
+        let fitted = CGSize(width: min(width, ceil(measured.width)), height: measured.height)
         cache.fittedWidth = width
         cache.fittedSize = fitted
         return fitted

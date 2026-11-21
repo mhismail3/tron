@@ -5,7 +5,7 @@ import { RequestSpanLane } from "../../util/request-span.js";
 import { oneOf } from "../../util/validation.js";
 import { type ConfirmChange, type ChangeRequest, type SettingsSignal, type ChangeOutcome, type ChangeResult, type ChangeStatus, type FixedSetting, type SettingsTarget, type Direction, type LayerId, type Qualifiers, type SettingsHistoryQuery } from "./tool-contract.js";
 import type { Actor, ChangeEntry, SettingsChangeRecord } from "./settings-record.js";
-import { composedBelow, devicePreferenceRead, readBinding, resolveSettings } from "./settings-resolver.js";
+import { composedBelow, readBinding, resolveSettings } from "./settings-resolver.js";
 import { HOME_PROFILE_SUBJECT, SECTIONS, hasSessionSettingsApplier, keyForHome, recordSubject, type Binding, type KeyDeclaration, type SettingsSchema } from "./settings-schema.js";
 import { changeReview, formatStoredSetting, LAYER_LABELS, type ModelRefValue, type SettingsStores, type PlannedWrite } from "./settings-types.js";
 import { presentHistoryEntry } from "./history-presentation.js";
@@ -74,7 +74,7 @@ interface SettingsChangeOwner extends SettingsReadOwner {
   defaultContextWindow(runtime: ModelRuntime, qualifier: string): number | undefined;
   observedWrites(planned: readonly Planned[], projectRoot: string | undefined): PlannedWrite[];
   readonly outsideChanges: { begin(writes: readonly PlannedWrite[]): Promise<void>; end(writes: readonly PlannedWrite[], landed: ReadonlyMap<string, { changeId: string }>): Promise<void> } | undefined;
-  applyStore(target: SettingsTarget, stores: SettingsStores, plan: Planned, value: unknown, context: ChangeContext, writers: Pick<SettingsWriters, "setTrust">, current: unknown): Promise<StoreApplyResult>;
+  applyStore(target: SettingsTarget, stores: SettingsStores, plan: Planned, value: unknown, context: ChangeContext, writers: Pick<SettingsWriters, "setTrust">): Promise<StoreApplyResult>;
   recordValue(subject: string, instance: string): Promise<unknown>;
 }
 
@@ -96,7 +96,7 @@ const adoptsHomeRuntime = (plan: Planned) => plan.request.layer === "session" &&
   && (plan.key.layers.session?.store === "session" || plan.key.layers.session?.store === "session-settings");
 
 const STORE_ORDER: Record<Binding["store"], number> = {
-  "pi": 0, "pi-model-ref": 0, "trust": 1, "mac-terminal": 1, "mac-terminal-service": 1, "mcp": 1, "models": 1, "lesson": 1, "agents": 1, "device-preference": 1, "home": 3, "gateway": 4, "session": 5, "session-settings": 5, "session-launch": 5,
+  "pi": 0, "pi-model-ref": 0, "trust": 1, "mac-terminal": 1, "mac-terminal-service": 1, "mcp": 1, "models": 1, "lesson": 1, "agents": 1, "home": 3, "gateway": 4, "session": 5, "session-settings": 5, "session-launch": 5,
 };
 
 type StoreApplyResult = { revision?: number; result?: unknown };
@@ -469,7 +469,7 @@ export class SettingsChangePath {
     let failure: { plan: Planned; error: GatewayError } | undefined;
     for (const plan of ordered) {
       try {
-        const result = await this.model.owner.applyStore(target, stores, plan, plan.after, context, this.writers, plan.before);
+        const result = await this.model.owner.applyStore(target, stores, plan, plan.after, context, this.writers);
         applied.push({ plan, ...result });
       } catch (error) {
         failure = { plan, error: error instanceof GatewayError ? error : new GatewayError("internal", error instanceof Error ? error.message : String(error)) };
@@ -479,7 +479,7 @@ export class SettingsChangePath {
     if (failure) {
       const unrestored = new Map<string, string>();
       for (const done of [...applied].reverse()) {
-        await this.model.owner.applyStore(target, stores, done.plan, done.plan.before, context, this.writers, done.plan.after).catch((error: unknown) => {
+        await this.model.owner.applyStore(target, stores, done.plan, done.plan.before, context, this.writers).catch((error: unknown) => {
           unrestored.set(done.plan.changeId, `Not rolled back: the ${done.plan.binding.store} store refused its compensating write (${error instanceof Error ? error.message : String(error)}); it may still hold the new value`);
         });
       }
@@ -588,13 +588,8 @@ export class SettingsChangePath {
       fixedAt = { value: after, from: row?.layer ?? "global", at: this.now().toISOString(), ref: randomUUID(), ...(row?.qualifiers ? { qualifiers: row.qualifiers } : {}) };
       request = { ...request, op: "set", value: after };
     }
-    const device = binding.store === "device-preference" ? devicePreferenceRead(stores, qualifiers.device, key.id) : undefined;
-    if (device?.status === "unavailable") throw new GatewayError("busy", `${key.label} needs this iPhone connected; nothing was changed`, true);
-    if (device?.status === "unknown") throw new GatewayError("conflict", `${key.label}: the last write to this iPhone is unconfirmed; inspect it before changing it`);
-    if (device && request.op === "unset") throw new GatewayError("invalid_request", `${key.label} cannot be unset on an iPhone`);
     const before = record && subject ? await this.model.owner.recordValue(subject.id, qualifiers[subject.qualifier]!)
       : binding.store === "trust" ? stores.trust[qualifiers.project!]
-      : device ? (device.status === "value" ? device.value : undefined)
       : readBinding(stores, store, binding, qualifiers, qualifiedWrite(binding, qualifiers), key.id);
     if (before !== undefined) key.type.onDisk?.(before, key.label);
     if (request.expected !== undefined && !deepEqual(request.expected, before ?? null)) {

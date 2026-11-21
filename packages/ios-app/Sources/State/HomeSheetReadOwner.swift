@@ -142,7 +142,6 @@ struct HomeManageDTO: Equatable, Sendable {
     let context: HomeContextProjection
     let chapters: HomeChapterList?
     let tasks: HomeTaskPage?
-    let permissions: HomeTaskPermissionsDTO?
     var profile: HomeProfileList? = nil
 }
 

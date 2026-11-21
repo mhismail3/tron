@@ -6,7 +6,7 @@ import XCTest
 final class SheetTintViewTests: ShuffledTestCase {
     func testSettingsSheetToolbarsTakeTheirTitleTint() async throws {
         try await mounted(["-tron-settings-navigation-fixture"], theme: .burgundy) { app in
-            try await assertToolbarTint(app, title: "Global Settings")
+            try await assertToolbarTint(app, title: "Settings")
             for title in ["Connections", "MCP Servers", "Appearance"] {
                 _ = try await revealed(app, "settings-link-\(title)")
                 assertBurgundy(try await app.inked("\(title) row icon") {
@@ -15,7 +15,7 @@ final class SheetTintViewTests: ShuffledTestCase {
                 try await app.activate("settings-link-\(title)")
                 assertBurgundy(try await assertToolbarTint(app, title: title), "\(title) sheet title")
                 try await app.activate("Done")
-                try await app.until("Global Settings returns") { app.navigationTitle("Global Settings") != nil }
+                try await app.until("Settings returns") { app.navigationTitle("Settings") != nil }
             }
         }
     }

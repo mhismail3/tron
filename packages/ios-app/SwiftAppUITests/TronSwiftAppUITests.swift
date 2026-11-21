@@ -2,12 +2,12 @@ import XCTest
 import UIKit
 
 final class TronSwiftAppUITests: XCTestCase {
-    @MainActor func testDisplayedSwiftFileRunsAsInteractiveAppBehindExperimentFlag() {
+    @MainActor func testDisplayedSwiftFileRunsAsInteractiveApp() {
         continueAfterFailure = false
-        let app = launchSwift("display-swift", flag: true); defer { app.terminate() }
+        let app = launch("display-swift"); defer { app.terminate() }
         openSwiftDisplay(app, named: "Habits.swift")
         let run = app.buttons["Run Habits.swift"]
-        XCTAssertTrue(run.waitForExistence(timeout: 10), "The flag adds the run control to the .swift document sheet")
+        XCTAssertTrue(run.waitForExistence(timeout: 10), "The .swift document sheet offers the run control")
         keepScreenshot(app, "889-1-swift-source-sheet")
         run.tap()
 
@@ -51,7 +51,7 @@ final class TronSwiftAppUITests: XCTestCase {
 
     @MainActor func testRecoveredBuildsPreviewFiltersSearchesAndReopens() {
         continueAfterFailure = false
-        let app = launchSwift("display-swift-builds-preview", flag: true); defer { app.terminate() }
+        let app = launch("display-swift-builds-preview"); defer { app.terminate() }
         openSwiftDisplay(app, named: "BuildsPreview.swift")
         let run = app.buttons["Run BuildsPreview.swift"]
         XCTAssertTrue(run.waitForExistence(timeout: 10)); run.tap()
@@ -109,7 +109,7 @@ final class TronSwiftAppUITests: XCTestCase {
 
     @MainActor func testInlineSwiftAppCardOpensRunnerAndReplays() {
         continueAfterFailure = false
-        var app = launchSwift("display-swift-builds-preview-inline-light", flag: true)
+        var app = launch("display-swift-builds-preview-inline-light")
         let card = app.buttons["swiftApp.card"]
         XCTAssertTrue(card.waitForExistence(timeout: 15), app.debugDescription)
         XCTAssertTrue(wait(card, predicate: "label == 'Open Tron builds, Swift app'"), "The card is ready to run once its complete source is prepared")
@@ -149,7 +149,7 @@ final class TronSwiftAppUITests: XCTestCase {
         closeDocument(app)
         app.terminate()
 
-        app = launchSwift("display-swift-builds-preview-inline", flag: true); defer { app.terminate() }
+        app = launch("display-swift-builds-preview-inline"); defer { app.terminate() }
         let replayed = app.buttons["swiftApp.card"]
         XCTAssertTrue(replayed.waitForExistence(timeout: 15))
         XCTAssertTrue(wait(replayed, predicate: "label == 'Open Tron builds, Swift app'"))
@@ -164,7 +164,7 @@ final class TronSwiftAppUITests: XCTestCase {
 
     @MainActor func testInlineSwiftAppCardStatesStayBounded() {
         continueAfterFailure = false
-        let truncated = launchSwift("display-swift-truncated-inline", flag: true)
+        let truncated = launch("display-swift-truncated-inline")
         let card = truncated.buttons["swiftApp.card"]
         XCTAssertTrue(card.waitForExistence(timeout: 15))
         XCTAssertTrue(wait(card, predicate: "label == 'Habits.swift, Swift app too large to run'"), card.label)
@@ -176,7 +176,7 @@ final class TronSwiftAppUITests: XCTestCase {
         closeDocument(truncated)
         truncated.terminate()
 
-        let broken = launchSwift("display-swift-broken-inline", flag: true)
+        let broken = launch("display-swift-broken-inline")
         let brokenCard = broken.buttons["swiftApp.card"]
         XCTAssertTrue(brokenCard.waitForExistence(timeout: 15))
         XCTAssertTrue(wait(brokenCard, predicate: "label == 'Open Broken.swift, Swift app'"))
@@ -187,11 +187,6 @@ final class TronSwiftAppUITests: XCTestCase {
         closeDocument(broken)
         XCTAssertTrue(brokenCard.waitForExistence(timeout: 5))
         broken.terminate()
-
-        let off = launchSwift("display-swift-inline", flag: false); defer { off.terminate() }
-        let source = off.textViews.matching(NSPredicate(format: "value BEGINSWITH 'import SwiftUI'")).firstMatch
-        XCTAssertTrue(source.waitForExistence(timeout: 15), "Without the switch the inline display stays a source card")
-        XCTAssertFalse(off.buttons["swiftApp.card"].exists)
     }
 
     @MainActor private func closeRunner(_ app: XCUIApplication) {
@@ -200,20 +195,20 @@ final class TronSwiftAppUITests: XCTestCase {
         XCTAssertTrue(wait(done, predicate: "exists == false"), "Done closes the runner")
     }
 
-    @MainActor func testSwiftRunControlRequiresFlagAndCompletePreview() {
+    @MainActor func testSwiftRunControlIsAlwaysOnForCompletePreview() {
         continueAfterFailure = false
-        let control = launchSwift("display-swift", flag: false); defer { control.terminate() }
+        let control = launch("display-swift"); defer { control.terminate() }
         openSwiftDisplay(control, named: "Habits.swift")
         let done = control.buttons["Done"]
         XCTAssertTrue(done.waitForExistence(timeout: 10))
-        XCTAssertFalse(runControl(control).exists, "Without the flag the shared document sheet has no run control")
+        XCTAssertTrue(runControl(control).waitForExistence(timeout: 10), "Running Swift files is always on, with no setting")
         XCTAssertLessThan(done.frame.minY, control.windows.firstMatch.frame.height * 0.35, "The sheet keeps its large document detent")
-        keepScreenshot(control, "889-0-flag-off-document-sheet")
+        keepScreenshot(control, "889-0-document-sheet-run-control")
         done.tap()
         XCTAssertTrue(wait(done, predicate: "exists == false"), "Done still dismisses the document sheet")
         control.terminate()
 
-        let truncated = launchSwift("display-swift-truncated", flag: true)
+        let truncated = launch("display-swift-truncated")
         openSwiftDisplay(truncated, named: "Habits.swift")
         XCTAssertTrue(truncated.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Preview shows the first'")).firstMatch.waitForExistence(timeout: 10),
                       "The fixture is past the preview limit")
@@ -223,7 +218,7 @@ final class TronSwiftAppUITests: XCTestCase {
 
     @MainActor func testDisplayedSwiftProtocolsAndGeometryUseConcreteValues() {
         continueAfterFailure = false
-        let app = launchSwift("display-swift-type-features", flag: true); defer { app.terminate() }
+        let app = launch("display-swift-type-features"); defer { app.terminate() }
         openSwiftDisplay(app, named: "Shapes.swift")
         app.buttons["Run Shapes.swift"].tap()
         let dispatch = app.staticTexts["types.dispatch"]
@@ -259,7 +254,7 @@ final class TronSwiftAppUITests: XCTestCase {
             ("malformed", "MalformedProtocol.swift", "Protocol accessors must be get or get set"),
             ("deep", "DeepProtocol.swift", "Code is nested too deeply"),
         ] {
-            let invalid = launchSwift("display-swift-type-features-\(scenario)", flag: true)
+            let invalid = launch("display-swift-type-features-\(scenario)")
             openSwiftDisplay(invalid, named: name)
             invalid.buttons["Run \(name)"].tap()
             XCTAssertTrue(invalid.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", message)).firstMatch.waitForExistence(timeout: 10))
@@ -270,7 +265,7 @@ final class TronSwiftAppUITests: XCTestCase {
 
     @MainActor func testSwiftProtocolExtensionsCannotSilentlyDisappear() {
         continueAfterFailure = false
-        let app = launchSwift("display-swift-type-features-extension", flag: true); defer { app.terminate() }
+        let app = launch("display-swift-type-features-extension"); defer { app.terminate() }
         openSwiftDisplay(app, named: "ProtocolExtension.swift")
         app.buttons["Run ProtocolExtension.swift"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Extensions require a previously declared concrete type'")).firstMatch.waitForExistence(timeout: 10))
@@ -279,7 +274,7 @@ final class TronSwiftAppUITests: XCTestCase {
 
     @MainActor func testDisplayedSwiftDictionaryAppGroupsAndTalliesItems() {
         continueAfterFailure = false
-        let app = launchSwift("display-swift-dictionary", flag: true); defer { app.terminate() }
+        let app = launch("display-swift-dictionary"); defer { app.terminate() }
         openSwiftDisplay(app, named: "Dictionary.swift")
         let run = app.buttons["Run Dictionary.swift"]
         XCTAssertTrue(run.waitForExistence(timeout: 10)); run.tap()
@@ -320,7 +315,7 @@ final class TronSwiftAppUITests: XCTestCase {
 
     @MainActor func testDisplayedSwiftOptionalChainSkipsMissingLinks() {
         continueAfterFailure = false
-        let app = launchSwift("display-swift-optional-chain", flag: true); defer { app.terminate() }
+        let app = launch("display-swift-optional-chain"); defer { app.terminate() }
         openSwiftDisplay(app, named: "OptionalChain.swift")
         let run = app.buttons["Run OptionalChain.swift"]
         XCTAssertTrue(run.waitForExistence(timeout: 10)); run.tap()
@@ -357,7 +352,7 @@ final class TronSwiftAppUITests: XCTestCase {
 
     @MainActor func testDisplayedSwiftModelsInitializeAndRollback() {
         continueAfterFailure = false
-        let app = launchSwift("display-swift-model-initializers", flag: true); defer { app.terminate() }
+        let app = launch("display-swift-model-initializers"); defer { app.terminate() }
         openSwiftDisplay(app, named: "Models.swift")
         app.buttons["Run Models.swift"].tap()
         let state = app.staticTexts["models.state"]
@@ -376,7 +371,7 @@ final class TronSwiftAppUITests: XCTestCase {
         }
         keepScreenshot(app, "1146-model-initializers")
         app.terminate()
-        let bootstrap = launchSwift("display-swift-model-bootstrap", flag: true); defer { bootstrap.terminate() }
+        let bootstrap = launch("display-swift-model-bootstrap"); defer { bootstrap.terminate() }
         openSwiftDisplay(bootstrap, named: "ModelBootstrap.swift")
         bootstrap.buttons["Run ModelBootstrap.swift"].tap()
         XCTAssertTrue(diagnostic(bootstrap, "did not initialize 'value'").waitForExistence(timeout: 5))
@@ -386,7 +381,7 @@ final class TronSwiftAppUITests: XCTestCase {
                                         ("model-malformed-pattern", "MalformedPattern.swift", "Unexpected ')'"),
                                         ("model-malformed-comma", "MalformedComma.swift", "Expected ')'"),
                                         ("model-malformed-raw", "MalformedRaw.swift", "Raw-value enums cannot have payloads")] {
-            let invalid = launchSwift("display-swift-\(scenario)", flag: true)
+            let invalid = launch("display-swift-\(scenario)")
             defer { invalid.terminate() }
             openSwiftDisplay(invalid, named: file)
             invalid.buttons["Run \(file)"].tap()
@@ -398,7 +393,7 @@ final class TronSwiftAppUITests: XCTestCase {
 
     @MainActor func testDisplayedSwiftEnumPayloadsBindAndStayBounded() {
         continueAfterFailure = false
-        let app = launchSwift("display-swift-model-payloads", flag: true); defer { app.terminate() }
+        let app = launch("display-swift-model-payloads"); defer { app.terminate() }
         openSwiftDisplay(app, named: "Events.swift")
         app.buttons["Run Events.swift"].tap()
         let state = app.staticTexts["events.state"]
@@ -434,7 +429,7 @@ final class TronSwiftAppUITests: XCTestCase {
 
     @MainActor func testDisplayedSwiftTimerTicksAndStopsWithRunner() {
         continueAfterFailure = false
-        let app = launchSwift("display-swift-timer", flag: true); defer { app.terminate() }
+        let app = launch("display-swift-timer"); defer { app.terminate() }
         openSwiftDisplay(app, named: "Stopwatch.swift")
         let run = app.buttons["Run Stopwatch.swift"]
         run.tap()
@@ -461,7 +456,7 @@ final class TronSwiftAppUITests: XCTestCase {
 
     @MainActor func testDisplayedSwiftStoreAppSharesStateAcrossTabs() {
         continueAfterFailure = false
-        let app = launchSwift("display-swift-budget", flag: true); defer { app.terminate() }
+        let app = launch("display-swift-budget"); defer { app.terminate() }
         openSwiftDisplay(app, named: "Budget.swift")
         let run = app.buttons["Run Budget.swift"]
         XCTAssertTrue(run.waitForExistence(timeout: 10)); run.tap()
@@ -560,7 +555,7 @@ final class TronSwiftAppUITests: XCTestCase {
 
     @MainActor func testSwiftAppFailuresStayContainedInTheRunner() {
         continueAfterFailure = false
-        let broken = launchSwift("display-swift-broken", flag: true); defer { broken.terminate() }
+        let broken = launch("display-swift-broken"); defer { broken.terminate() }
         openSwiftDisplay(broken, named: "Broken.swift")
         let runBroken = broken.buttons["Run Broken.swift"]
         XCTAssertTrue(runBroken.waitForExistence(timeout: 10)); runBroken.tap()
@@ -573,14 +568,14 @@ final class TronSwiftAppUITests: XCTestCase {
                        "Supported payload cases do not create obsolete warnings")
         broken.terminate()
 
-        let deep = launchSwift("display-swift-deep", flag: true)
+        let deep = launch("display-swift-deep")
         openSwiftDisplay(deep, named: "Deep.swift")
         let runDeep = deep.buttons["Run Deep.swift"]
         XCTAssertTrue(runDeep.waitForExistence(timeout: 10)); runDeep.tap()
         XCTAssertTrue(deep.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 3: Code is nested too deeply'")).firstMatch.waitForExistence(timeout: 10))
         deep.terminate()
 
-        let app = launchSwift("display-swift-limits", flag: true)
+        let app = launch("display-swift-limits")
         openSwiftDisplay(app, named: "Limits.swift")
         let run = app.buttons["Run Limits.swift"]
         XCTAssertTrue(run.waitForExistence(timeout: 10)); run.tap()
@@ -632,7 +627,7 @@ final class TronSwiftAppUITests: XCTestCase {
 
     @MainActor func testSwiftDiagnosticsPreserveSiblingViews() {
         continueAfterFailure = false
-        let app = launchSwift("display-swift-diagnostics", flag: true); defer { app.terminate() }
+        let app = launch("display-swift-diagnostics"); defer { app.terminate() }
         openSwiftDisplay(app, named: "Diagnostics.swift")
         app.buttons["Run Diagnostics.swift"].tap()
         let taps = app.staticTexts["diagnostics.taps"]
@@ -660,7 +655,7 @@ final class TronSwiftAppUITests: XCTestCase {
 
     @MainActor func testSwiftUnsupportedDiagnosticsAreBoundedAndMalformedSyntaxStops() {
         continueAfterFailure = false
-        let app = launchSwift("display-swift-diagnostic-cap", flag: true); defer { app.terminate() }
+        let app = launch("display-swift-diagnostic-cap"); defer { app.terminate() }
         openSwiftDisplay(app, named: "Capped.swift")
         app.buttons["Run Capped.swift"].tap()
         let capped = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Stopped after 10 unsupported constructs'")).firstMatch
@@ -672,7 +667,7 @@ final class TronSwiftAppUITests: XCTestCase {
         keepScreenshot(app, "1039-bounded-diagnostics")
         app.terminate()
 
-        let malformed = launchSwift("display-swift-diagnostic-malformed", flag: true); defer { malformed.terminate() }
+        let malformed = launch("display-swift-diagnostic-malformed"); defer { malformed.terminate() }
         openSwiftDisplay(malformed, named: "Malformed.swift")
         malformed.buttons["Run Malformed.swift"].tap()
         XCTAssertTrue(malformed.staticTexts.matching(NSPredicate(format: "label CONTAINS \"Unbalanced '{'\"")).firstMatch.waitForExistence(timeout: 10),
@@ -681,7 +676,7 @@ final class TronSwiftAppUITests: XCTestCase {
                       "A fatal syntax error retains independent unsupported diagnostics already collected")
         malformed.terminate()
 
-        let malformedGeneric = launchSwift("display-swift-diagnostic-generic-malformed", flag: true); defer { malformedGeneric.terminate() }
+        let malformedGeneric = launch("display-swift-diagnostic-generic-malformed"); defer { malformedGeneric.terminate() }
         openSwiftDisplay(malformedGeneric, named: "MalformedGeneric.swift")
         malformedGeneric.buttons["Run MalformedGeneric.swift"].tap()
         XCTAssertTrue(malformedGeneric.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Malformed generic parameter clause'")).firstMatch.waitForExistence(timeout: 10),
@@ -718,59 +713,10 @@ final class TronSwiftAppUITests: XCTestCase {
                           "Diagnostic text must use shared primary ink, not an all-red custom label")
     }
 
-    @MainActor func testSettingsSwitchAddsAndRemovesSwiftRunControlLive() {
-        continueAfterFailure = false
-        let app = launchSwift("display-swift-settings", flag: false); defer { app.terminate() }
-        openSwiftDisplay(app, named: "Habits.swift")
-        XCTAssertFalse(runControl(app).exists, "The runner starts off")
-        closeDocument(app)
-
-        setSwiftRunner(app, on: true)
-        openSwiftDisplay(app, named: "Habits.swift")
-        let run = app.buttons["Run Habits.swift"]
-        XCTAssertTrue(run.waitForExistence(timeout: 10), "Turning the switch on adds the run control without a relaunch")
-        keepScreenshot(app, "1006-3-run-control-after-switch-on")
-        run.tap()
-        XCTAssertTrue(app.staticTexts["habits.summary"].waitForExistence(timeout: 10), "The run control runs the app")
-        app.swipeDown(velocity: .fast)
-        XCTAssertTrue(wait(app.staticTexts["habits.summary"], predicate: "exists == false"))
-        closeDocument(app)
-
-        setSwiftRunner(app, on: false)
-        openSwiftDisplay(app, named: "Habits.swift")
-        XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 10))
-        XCTAssertFalse(runControl(app).exists, "Turning the switch off removes the run control")
-        keepScreenshot(app, "1006-4-run-control-after-switch-off")
-    }
-
-    @MainActor private func setSwiftRunner(_ app: XCUIApplication, on: Bool) {
-        let open = app.buttons["fixture.open-settings"]
-        XCTAssertTrue(open.waitForExistence(timeout: 10)); open.tap()
-        let experimental = app.buttons["settings-link-Setup"]
-        XCTAssertTrue(experimental.waitForExistence(timeout: 10))
-        for _ in 0..<12 where !experimental.isHittable { app.swipeUp() }
-        keepScreenshot(app, "1006-1-settings-tools-diagnostics")
-        experimental.tap()
-        let toggle = app.switches["settings-experimental-swift-apps"]
-        XCTAssertTrue(toggle.waitForExistence(timeout: 10), app.debugDescription)
-        for _ in 0..<8 where !toggle.isHittable { app.swipeUp() }
-        if (toggle.value as? String == "1") != on { toggle.tap() }
-        XCTAssertTrue(wait(toggle, predicate: "value == %@", value: on ? "1" : "0"), "The switch shows the new state")
-        keepScreenshot(app, "1006-2-experimental-\(on ? "on" : "off")")
-        app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
-        XCTAssertTrue(wait(toggle, predicate: "exists == false"), "Experimental is dismissed")
-        app.buttons["settings-done"].tap()
-        XCTAssertTrue(wait(app.buttons["settings-done"], predicate: "exists == false"), "Settings is dismissed")
-    }
-
     @MainActor private func closeDocument(_ app: XCUIApplication) {
         let done = app.buttons["Done"]
         XCTAssertTrue(done.waitForExistence(timeout: 10)); done.tap()
         XCTAssertTrue(wait(done, predicate: "exists == false"))
-    }
-
-    @MainActor private func launchSwift(_ scenario: String, flag: Bool) -> XCUIApplication {
-        launch(scenario, extraArguments: ["-tron.experimental.swiftApps", flag ? "YES" : "NO"])
     }
 
     private var canonicalBuildsPreviewSource: String {
@@ -793,9 +739,9 @@ final class TronSwiftAppUITests: XCTestCase {
         XCTAssertTrue(reader.waitForExistence(timeout: 10), "The .swift source is shown in the shared document sheet")
     }
 
-    @MainActor private func launch(_ scenario: String, extraArguments: [String] = []) -> XCUIApplication {
+    @MainActor private func launch(_ scenario: String) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-readonly-attachment-fixture", "-readonly-preview-scenario", scenario, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + extraArguments
+        app.launchArguments = ["-tron-readonly-attachment-fixture", "-readonly-preview-scenario", scenario, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         if scenario.contains("builds-preview") {
             app.launchEnvironment["TRON_HOSTED_SWIFT_APP_SOURCE"] = canonicalBuildsPreviewSource
         }
