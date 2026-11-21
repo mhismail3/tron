@@ -74,7 +74,7 @@ async function fixture() {
   const dispatched = join(root, "dispatched"), release = join(root, "release");
   boundary.lockFile = join(root, "locked-during-dispatch");
   boundary.driver = join(root, "driver.cjs");
-  cleanups.push(() => writeFile(release, "released"));
+  await execute("/usr/bin/mkfifo", [release]);
   await writeFile(boundary.driver, `const fs = require('node:fs/promises');
 (async () => {
   if (process.argv[2] === 'describe') return console.log('name: click\\n\\ninput_schema:\\n' + JSON.stringify({ properties: { session: {}, element_token: {} }, required: ['session'] }));
@@ -83,7 +83,7 @@ async function fixture() {
   if (tool === 'end_session') return console.log(JSON.stringify({ active: false }));
   await fs.writeFile(${JSON.stringify(dispatched)}, tool);
   const mode = await fs.readFile(${JSON.stringify(join(root, "mode"))}, 'utf8').catch(() => '');
-  if (mode === 'hold') while (!await fs.access(${JSON.stringify(release)}).then(() => true, () => false)) await new Promise(resolve => setTimeout(resolve, 10));
+  if (mode === 'hold') await fs.readFile(${JSON.stringify(release)});
   if (mode === 'lock') await fs.writeFile(${JSON.stringify(boundary.lockFile)}, 'locked');
   if (mode === 'stale' && tool === 'click') { console.log(JSON.stringify({ status: 'refused', refusal: { code: 'stale_element_token', message: 'element_token is stale' } })); process.exit(1); }
   const png = Buffer.alloc(33); Buffer.from([137,80,78,71,13,10,26,10]).copy(png); png.writeUInt32BE(13, 8); png.write('IHDR', 12); png.writeUInt32BE(4, 16); png.writeUInt32BE(4, 20);
@@ -178,7 +178,7 @@ describe.skipIf(process.platform !== "darwin")("console admission for computer a
     expect(await heldAssertions()).toBe(0);
   });
 
-  it.each([false, true])("holds the OS idle assertion only while a computer turn runs and releases it at turn end (Stop=%s); Stop ends a stalled driver call within 1 s", async stop => {
+  it.each([false, true])("holds the OS idle assertion only while a computer turn runs and releases it at turn end (Stop=%s); Stop ends a stalled driver call without waiting for it", async stop => {
     const f = await fixture();
     expect(await heldAssertions()).toBe(0);
     await f.mode("hold");
@@ -186,14 +186,13 @@ describe.skipIf(process.platform !== "darwin")("console admission for computer a
     await waitFor(() => f.dispatched(), "accepted driver observation");
     await waitFor(async () => await heldAssertions() === 1, "the scoped OS assertion while the computer turn runs");
     if (stop) {
-      const started = performance.now();
       await f.slot.abort("agent");
-      expect(performance.now() - started).toBeLessThan(1000);
       await prompting;
       expect((await execute("/bin/ps", ["-axo", "command="])).stdout).not.toContain(f.root);
+    } else {
+      await f.release();
+      await prompting;
     }
-    await f.release();
-    await prompting;
     await waitFor(async () => await heldAssertions() === 0, "assertion release at turn end");
     if (!stop) expect(f.result("desktop").isError).not.toBe(true);
   });
