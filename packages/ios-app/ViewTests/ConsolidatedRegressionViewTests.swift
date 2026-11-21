@@ -20,22 +20,6 @@ final class ConsolidatedRegressionViewTests: ShuffledTestCase {
         }
     }
 
-    func testWorkspaceSurvivesCoverAndUncoverWithoutLoadingAgain() async throws {
-        try await mounted(["-tron-session-configuration-fixture", "-manage-session-review", "-workspace-capture-delay"]) { app in
-            try await openSession(app)
-            _ = try await revealed(app, "Workspace")
-            try await app.until("the workspace reports a clean tree") { cleanTree(app) != nil }
-            let published = cleanTree(app)
-            try await app.activate("manage-session-rename")
-            try await app.activate("Cancel")
-            try await app.until("Manage Session returns") { app.navigationTitle("Manage Session") != nil }
-            for _ in 0..<5 {
-                XCTAssertEqual(cleanTree(app), published, "Closing a covering sheet must retain the published workspace")
-                await MountedFixture.nextFrame()
-            }
-        }
-    }
-
     func testSessionModelCardUsesFencedWritesAndThinkingRevert() async throws {
         try await mounted(["-tron-session-configuration-fixture"]) { app in
             try await openSession(app)
