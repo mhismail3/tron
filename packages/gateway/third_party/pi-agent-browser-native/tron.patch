@@ -14,7 +14,7 @@ index 15a57c6..799b18a 100644
 +Personal profile selection/copying, auto-discovered or unrecorded endpoints, imported browser state, opaque plugin/flow runners and system-browser-opening commands are refused. Attachments must be standalone so their receipt precedes page work; batches may operate on an already attached owned browser. Existing personal-Chrome login state is unavailable and is never copied. New logins in the owned profile persist through native close/restart.
 +
 diff --git a/docs/COMMAND_REFERENCE.md b/docs/COMMAND_REFERENCE.md
-index e643937..49c788a 100644
+index e643937..cd3a9d1 100644
 --- a/docs/COMMAND_REFERENCE.md
 +++ b/docs/COMMAND_REFERENCE.md
 @@ -497 +497 @@ Full public guide: [`ELECTRON.md`](ELECTRON.md). Use it as the entry point when
@@ -26,8 +26,11 @@ index e643937..49c788a 100644
 @@ -522 +522 @@ Manual path for externally launched apps: if you started the Electron app yourse
 -{ "args": ["connect", "9222"], "sessionMode": "fresh" }
 +{ "args": ["connect", "<recorded endpoint>"], "sessionMode": "fresh" }
+@@ -1102 +1102 @@ Browser defaults are scoped: global/override `defaultProfile` with `policy: "alw
+-- `--auto-connect`: connect to a running Chrome to reuse auth state. Environment: `AGENT_BROWSER_AUTO_CONNECT`. Optional booleans use separated tokens (`--auto-connect false`); the wrapper rejects `--auto-connect=false` before dispatch.
++- `--auto-connect`: connect to a running Chrome; Tron refuses it (`owned_launch_required`), so use a recorded owned launch for signed-in state. Environment: `AGENT_BROWSER_AUTO_CONNECT`. Optional booleans use separated tokens (`--auto-connect false`); the wrapper rejects `--auto-connect=false` before dispatch.
 diff --git a/docs/ELECTRON.md b/docs/ELECTRON.md
-index 25be383..337630f 100644
+index 25be383..d9a72a1 100644
 --- a/docs/ELECTRON.md
 +++ b/docs/ELECTRON.md
 @@ -42 +42 @@ Two ownership modes coexist:
@@ -75,6 +78,9 @@ index 25be383..337630f 100644
 -
 -If the app is already running without a debug port, ask before relaunching it — relaunching may lose unsaved state and Electron's single-instance behavior will silently drop a second invocation's `--remote-debugging-port` flag.
 +`electron.launch` gives an isolated temporary profile that the wrapper owns and cleans up with `electron.cleanup`. For signed-in state, use `owned-launch prepare <profileDir>`, launch the browser with the returned args, `owned-launch record <launchId> <pid> <profileDir>`, then `connect` the returned endpoint; a debug-port attach to a normal app or browser is refused (`owned_launch_required`); you own that browser's shutdown, and `electron.cleanup` never touches it.
+@@ -333 +300 @@ The app writes to mode-0600 `stdout.log` and `stderr.log` inside its isolated pr
+-Single-instance Electron behavior is a common cause of `timeout` and `upstream-error`. Many Electron apps enforce a single running instance and silently drop a second invocation's `--remote-debugging-port` flag. If the app is already running without a debug port, quit it first or use the manual host-launch path against the existing instance instead.
++Single-instance Electron behavior is a common cause of `timeout` and `upstream-error`. Many Electron apps enforce a single running instance and silently drop a second invocation's `--remote-debugging-port` flag. If the app is already running without a debug port, quit it first; for signed-in state use a recorded owned launch (see [Wrapper-owned vs recorded external launches](#wrapper-owned-vs-recorded-external-launches)).
 diff --git a/docs/REFERENCE.md b/docs/REFERENCE.md
 index 9e42acb..4d59957 100644
 --- a/docs/REFERENCE.md
