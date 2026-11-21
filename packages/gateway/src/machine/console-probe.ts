@@ -23,10 +23,8 @@ const MESSAGES: Record<ConsoleCause, string> = {
 };
 
 export class ConsoleUnavailableError extends Error {
-  readonly code: ConsoleCause;
   constructor(code: ConsoleCause) {
     super(`${code}: ${MESSAGES[code]}. Desktop observation, capture and input are refused until the user unlocks or wakes it; nothing was captured or sent. Browser work over CDP is unaffected.`);
-    this.code = code;
   }
 }
 
