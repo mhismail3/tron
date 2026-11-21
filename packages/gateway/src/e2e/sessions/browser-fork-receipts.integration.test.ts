@@ -205,12 +205,15 @@ describe("packaged agent-browser receipts", () => {
       if(!chrome) throw new Error("Chrome for Testing is required");
       const profile=join(root,"Studio Chrome");
       await mkdir(profile,{mode:0o700});
-      expect(JSON.stringify(await step("persistent-unmarked",["owned-launch","prepare",profile]))).toContain("owned_launch_required");
+      const unmarked=JSON.stringify(await step("persistent-unmarked",["owned-launch","prepare",profile]));
+      expect(unmarked).toContain("owned_launch_required");
+      expect(unmarked).toContain("owned-launch prepare <profileDir>");
       await writeFile(join(profile,".tron-owned-profile"),randomUUID(),{mode:0o600});
       const launch=async(label:string)=>{
         const prepared=await step(label+"-prepare",["owned-launch","prepare",profile]);
         expect(prepared).toMatchObject({isError:false,details:{data:{profile}}});
         const {launchId,args}=prepared.details.data;
+        expect(args).toEqual(expect.arrayContaining(["--disable-backgrounding-occluded-windows","--disable-renderer-backgrounding","--disable-background-timer-throttling"]));
         const child=spawn(chrome,["--headless=new","--password-store=basic","--use-mock-keychain",...args,"about:blank"],{stdio:"ignore"});
         const exited=once(child,"exit");
         let endpoint:string|undefined;
