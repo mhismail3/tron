@@ -1544,7 +1544,9 @@ describe("session archive over the real Gateway", () => {
       const promptPromise = client.request("lane-hold-prompt", "session.prompt", {
         commandId: "lane-hold-prompt-command", sessionId: session.id, text: "must not run hidden",
       }).then((response) => { promptSettled = true; return response; });
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      const lane = (await f.current().registry.acquire(session.id)).lane as unknown as { waiting: Set<unknown> };
+      await waitFor(() => promptSettled || lane.waiting.size > 0, "the prompt queues behind the archive commit on the session lane");
+      await new Promise((resolve) => setImmediate(resolve));
       const admittedDuringCommit = promptSettled;
       expect(admittedDuringCommit).toBe(false);
       releaseCommit();

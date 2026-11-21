@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import type { FSWatcher } from "node:fs";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, getSystemMessageText } from "@earendil-works/pi-ai";
@@ -63,16 +64,36 @@ async function liveHome() {
   return { f, home, commands, turn, service, client, userHome };
 }
 
-async function watchersDeliver(f: { agentDir: string; signals: Array<Record<string, unknown>> }, userHome: string): Promise<void> {
+function freshnessOf(f: { registry: unknown }): { changed: () => void; watchers: Map<string, { watcher: FSWatcher }> } {
+  return (f.registry as { freshness: never }).freshness;
+}
+
+async function watchersDeliver(f: { registry: unknown; agentDir: string; signals: Array<Record<string, unknown>> }, userHome: string): Promise<void> {
   const reloads = () => f.signals.filter(event => event.outcome === "resources-reload" && event.reason === "unchanged").length;
+  const changed = vi.spyOn(freshnessOf(f), "changed");
   for (const [input, label] of [[join(f.agentDir, "settings.json"), "agent directory"], [join(userHome, ".agents", "skills", "probe.txt"), "~/.agents/skills"]] as const) {
     const bytes = await readFile(input).catch(() => Buffer.from("probe\n"));
     const before = reloads();
+    const delivered = changed.mock.calls.length;
     await waitFor(async () => {
-      await writeFile(input, bytes);
-      await new Promise(resolve => setTimeout(resolve, 400));
-      return reloads() > before;
-    }, `Home's ${label} watcher delivers an event`, { intervalMs: 0 });
+      if (reloads() > before) return true;
+      if (changed.mock.calls.length === delivered) await writeFile(input, bytes);
+      return false;
+    }, `Home's ${label} watcher delivers an event`);
+  }
+}
+
+async function withDetachedWatchers(f: { registry: unknown }, probe: (deliver: (path: string) => void) => Promise<void>): Promise<void> {
+  const detached = [...freshnessOf(f).watchers].map(([root, { watcher }]) => ({ root, watcher, listeners: watcher.listeners("change") as Array<(event: string, name: string) => void> }));
+  for (const { watcher } of detached) watcher.removeAllListeners("change");
+  try {
+    await probe(path => {
+      for (const { root, listeners } of detached) {
+        if (path.startsWith(`${root}/`)) for (const listener of listeners) listener("rename", path.slice(root.length + 1));
+      }
+    });
+  } finally {
+    for (const { watcher, listeners } of detached) for (const listener of listeners) watcher.on("change", listener);
   }
 }
 
@@ -162,6 +183,7 @@ describe("Home's global skills and prompt templates follow the agent directory l
     const userHome = await mkdtemp(join(tmpdir(), "tron-home-resources-"));
     homes.push(userHome);
     vi.stubEnv("HOME", userHome);
+    await mkdir(join(userHome, ".agents", "skills"), { recursive: true });
     const f = await fixture();
     const greeted = await f.registry.acquire(f.home.sessionId);
     f.faux.setResponses([fauxAssistantMessage("Hello.")]);
@@ -173,10 +195,11 @@ describe("Home's global skills and prompt templates follow the agent directory l
     const restarted = await f.restartToReadiness();
     const before = f.events.length;
     await restarted.acquire(f.home.sessionId);
-    await new Promise(resolve => setTimeout(resolve, 1_500));
+    await watchersDeliver({ registry: restarted, agentDir: f.agentDir, signals: f.signals }, userHome);
     expect(f.events.slice(before).filter(event => event.topic === "session.resourcesChanged")).toEqual([]);
     await writePrompt(f.agentDir, "after-start", "Written after start", "BODY");
     await waitFor(() => f.events.slice(before).some(event => event.topic === "session.resourcesChanged"), "Home reloads for a write after its watchers started");
+    expect(f.events.slice(before).filter(event => event.topic === "session.resourcesChanged")).toHaveLength(1);
   }, 60_000);
 
   it("refreshes Home and ordinary sessions, skips unchanged rendered inputs, and watches project resources", async () => {
@@ -228,11 +251,21 @@ describe("Home's global skills and prompt templates follow the agent directory l
       await writeFile(join(f.root, "AGENTS.override.md"), "FRESH_ANCESTOR_RULE\n");
       await waitFor(() => chat.runtime.session.systemPrompt.includes("FRESH_ANCESTOR_RULE"), "new ancestor context refreshes");
     } finally { releaseLease(); }
-    await new Promise(resolve => setTimeout(resolve, 300));
-    const beforeUnrelated = f.signals.filter(record => record.outcome === "resources-reload").length;
-    await writeFile(join(f.cwd, "unrelated", "activity.json"), "{}");
-    await new Promise(resolve => setTimeout(resolve, 400));
-    expect(f.signals.filter(record => record.outcome === "resources-reload")).toHaveLength(beforeUnrelated);
+    const project = await realpath(f.cwd);
+    const changed = vi.spyOn(freshnessOf(f), "changed");
+    await withDetachedWatchers(f, async deliver => {
+      const fence = async (label: string) => {
+        const before = changed.mock.calls.length;
+        deliver(join(project, "CLAUDE.md"));
+        await waitFor(() => changed.mock.calls.length > before, label);
+        await new Promise(resolve => setImmediate(resolve));
+      };
+      await fence("an in-flight context event settles");
+      const delivered = changed.mock.calls.length;
+      deliver(join(project, "unrelated", "activity.json"));
+      await fence("the context file event after the unrelated one reaches the freshness owner");
+      expect(changed.mock.calls.length - delivered, "an unrelated project file event reached the freshness owner").toBe(1);
+    });
     await mkdir(join(f.agentDir, "prompts"), { recursive: true });
     await symlink(join(f.root, "missing-prompt"), join(f.agentDir, "prompts", "broken.md"));
     await writePrompt(f.agentDir, "after-link", "Survives dangling resource link", "BODY");
@@ -272,8 +305,9 @@ describe("Home's global skills and prompt templates follow the agent directory l
     await service.invoke(client, "home.prompt", { commandId: "resources-busy-0001", text: "long work" });
     await waitFor(() => started, "Home run started");
     await writePrompt(f.agentDir, "during-run", "Written mid-run", "MID RUN BODY");
+    const deferredBefore = f.signals.filter(record => record.sessionId === home.id && record.reason === "deferred").length;
     await writeSkill(f.agentDir, "during-skill", "Skill written mid-run", "SKILL BODY");
-    await new Promise(resolve => setTimeout(resolve, 1_000));
+    await waitFor(() => f.signals.filter(record => record.sessionId === home.id && record.reason === "deferred").length > deferredBefore, "the change defers behind the Home run");
     expect(home.snapshot().operation).toBeDefined();
     release();
     await waitFor(async () => globalResources(await commands(home.id)).includes("during-run|Written mid-run"), "Home lists the mid-run prompt");

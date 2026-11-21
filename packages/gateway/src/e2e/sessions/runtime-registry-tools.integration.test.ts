@@ -1806,8 +1806,11 @@ export default function (pi) {
       (created as unknown as { requestExtensionShutdown: () => void }).requestExtensionShutdown();
       await waitFor(() => created.isDisposed
         && !(fixture.registry as unknown as { slots: Map<string, unknown> }).slots.has(created.id), "the disposed session to leave the slot map");
+      const queuedChanges = vi.spyOn((fixture.registry as unknown as { sessionCatalog: { awaitQueuedChanges(): Promise<void> } }).sessionCatalog, "awaitQueuedChanges");
       const reopening = fixture.registry.acquire(created.id);
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      await waitFor(() => queuedChanges.mock.calls.length > 0, "the reopen waits for the queued index row");
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(queuedChanges.mock.settledResults.map((result) => result.type)).toEqual(queuedChanges.mock.calls.map(() => "incomplete"));
       release();
       const reopened = await reopening;
       expect(reopened.id).toBe(created.id);
