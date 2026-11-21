@@ -1188,6 +1188,24 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(allowed(sibling)).toBe(false);
   });
 
+  it("admits only a run directory or its artifact files below the owned runs root", async () => {
+    const delegated = await delegatedFixtureRoot("artifact-path-shape");
+    const runs = join(delegated.delegatedRoot, "async-subagent-runs");
+    const run = join(runs, "run-1");
+    const prefixed = join(delegated.root, "delegatedx", "async-subagent-runs", "run-1");
+    const longer = join(delegated.delegatedRoot, "async-subagent-runsx", "run-1");
+    await Promise.all([run, prefixed, longer, join(run, "nested")].map(path => mkdir(path, { recursive: true })));
+    await Promise.all([join(run, "status.json"), join(run, "other.json"), join(run, "nested", "status.json")].map(path => writeFile(path, "{}")));
+    const fixture = await coldFixture("artifact-path-shape", { delegatedRoot: delegated.delegatedRoot });
+    const projectRun = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", "run-1");
+    await mkdir(projectRun, { recursive: true });
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const allowed = slot.ownedTurns.extensionArtifactPathAllowed.bind(slot.ownedTurns);
+    expect([run, join(run, "status.json")].map(allowed)).toEqual([true, true]);
+    expect([runs, join(run, "other.json"), join(run, "nested"), join(run, "nested", "status.json"), prefixed, longer,
+      projectRun].map(allowed)).toEqual([false, false, false, false, false, false, false]);
+  });
+
   it("retains nonterminal artifact authority until receipt capacity is available", async () => {
     const workRegistry = new GatewayWorkRegistry("epoch", 2);
     const fixture = await coldFixture("artifact-receipt-capacity", { workRegistry });

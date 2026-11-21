@@ -1,26 +1,20 @@
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { mkdir } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import type { Extension, ToolDefinition } from "../pi/coding-agent.js";
 import { piHostPackageRoot } from "../pi/packages.js";
 import type { ExtensionToolOrigin } from "../../protocol/types.js";
 import { isManagedSubagentExtension, MANAGED_SUBAGENTS_VERSION } from "./managed-subagents.js";
 import { attributedToolOwner } from "../host/extension-registration.js";
 import { tronHomePath } from "../../foundation/tron-home-layout.js";
+import { core as pathShape, type Roots } from "../../core/security/path-shape/facade.js";
 
 export const DELEGATED_PROVIDER_TOOL_NAME = "subagent";
 
 export const DELEGATED_SUPERVISOR_TOOL_NAME = "subagent_supervisor";
 
 const DELEGATED_PROVIDER_SOURCE = "pi-subagents";
-
-const DELEGATED_ARTIFACT_FILES = [
-  "status.json",
-  "events.jsonl",
-  "recovery-descriptor.json",
-  "process-terminal.json",
-] as const;
 
 export const DELEGATED_PROVIDER_ROOT_ENV = "PI_SUBAGENTS_TEMP_ROOT";
 
@@ -58,7 +52,7 @@ export async function ensureDelegatedArtifactRoot(root: string): Promise<void> {
   }
 }
 
-const DELEGATED_ARTIFACT_FILE_SET: ReadonlySet<string> = new Set(DELEGATED_ARTIFACT_FILES);
+const ARTIFACT_NAMES = ["status.json", "events.jsonl", "recovery-descriptor.json", "process-terminal.json", "async-subagent-runs"];
 
 function canonical(value: string): string {
   try {
@@ -68,43 +62,25 @@ function canonical(value: string): string {
   }
 }
 
+function artifactShapeAllowed(physical: string, cwd: string, ownedRoot: string | undefined): boolean {
+  const tokens = new Map(ARTIFACT_NAMES.map((name, index) => [name, index]));
+  const token = (name: string): number => tokens.get(name) ?? tokens.set(name, tokens.size).size - 1;
+  const components = (path: string) => path.split(sep).filter(Boolean);
+  const root = (path: string) => components(path).map(token);
+  const roots: Roots = ownedRoot === undefined
+    ? { $: "Shared", temporary: root(canonical(tmpdir())), project: root(join(canonical(cwd), ".pi", "subagents", "async-subagent-runs")) }
+    : { $: "Owned", runs: root(join(ownedRoot, "async-subagent-runs")) };
+  return pathShape.ArtifactAllowed(roots, components(physical).map(name => ({
+    name: token(name),
+    pieces: name.split("\\").filter(Boolean).map(piece => ({ name: token(piece), scoped: piece.startsWith("pi-subagents-") })),
+  })));
+}
+
 export function delegatedArtifactPathAllowed(asyncPath: string, cwd: string, admittedRoot?: string): boolean {
   if (!isAbsolute(asyncPath)) return false;
   const lexicalParts = asyncPath.split(/[\\/]/u).filter(Boolean);
   if (lexicalParts.some((part) => part === "." || part === "..")) return false;
-  const temporaryRoot = canonical(tmpdir());
-  const projectRoot = join(canonical(cwd), ".pi", "subagents", "async-subagent-runs");
   const ownedRoot = admittedRoot === undefined ? undefined : canonical(admittedRoot);
-  const isAllowedShape = (value: string): boolean => {
-    if (ownedRoot !== undefined) {
-      const runsRoot = join(ownedRoot, "async-subagent-runs");
-      const relativeToRuns = relative(runsRoot, value);
-      if (relativeToRuns !== "" && !isAbsolute(relativeToRuns)
-        && relativeToRuns !== ".." && !relativeToRuns.startsWith(`..${sep}`)) {
-        const parts = relativeToRuns.split(/[\\/]/u).filter(Boolean);
-        if (parts.length >= 1 && parts.length <= 2 && parts[0] !== ""
-          && (parts.length === 1 || DELEGATED_ARTIFACT_FILE_SET.has(parts[1]!))) return true;
-      }
-      return false;
-    }
-    const temporaryParts = relative(temporaryRoot, value).split(/[\\/]/u).filter(Boolean);
-    const temporaryRun = temporaryParts[0]?.startsWith("pi-subagents-")
-      && temporaryParts[1] === "async-subagent-runs"
-      && temporaryParts.length >= 3
-      && temporaryParts.length <= 4
-      && temporaryParts[2] !== ""
-      && (temporaryParts.length === 3 || DELEGATED_ARTIFACT_FILE_SET.has(temporaryParts[3]!));
-    if (temporaryRun) return true;
-
-    const projectRelative = relative(projectRoot, value);
-    if (projectRelative === "" || isAbsolute(projectRelative)
-      || projectRelative === ".." || projectRelative.startsWith(`..${sep}`)) return false;
-    const projectParts = projectRelative.split(/[\\/]/u).filter(Boolean);
-    return projectParts.length >= 1
-      && projectParts.length <= 2
-      && projectParts[0] !== ""
-      && (projectParts.length === 1 || DELEGATED_ARTIFACT_FILE_SET.has(projectParts[1]!));
-  };
   const candidate = resolve(asyncPath);
   try {
     if (ownedRoot !== undefined) rejectSymlinkPath(ownedRoot);
@@ -115,7 +91,7 @@ export function delegatedArtifactPathAllowed(asyncPath: string, cwd: string, adm
       const owner = process.getuid?.();
       if (!rootStat.isDirectory() || owner !== undefined && rootStat.uid !== owner || (rootStat.mode & 0o077) !== 0) return false;
     }
-    return isAllowedShape(physical);
+    return artifactShapeAllowed(physical, cwd, ownedRoot);
   } catch {
     return false;
   }

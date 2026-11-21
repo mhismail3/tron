@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -22,4 +22,17 @@ it("answers a missing path not_found and an existing folder conflict, not an int
   expect(await refusal(service.createDirectory(join(root, "gone"), "child"))).toEqual(missing);
   expect(await refusal(service.createDirectory(root, "kept"))).toEqual({ code: "conflict", message: "An item with that name already exists", retryable: false });
   expect(await refusal(service.createDirectory(join(root, "note.txt"), "child"))).toEqual({ code: "invalid_request", message: "Path is not a directory", retryable: false });
+});
+
+it("refuses a sibling whose name extends the root's and an ancestor of the root", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "tron-filesystem-containment-"));
+  roots.push(parent);
+  const root = join(parent, "root");
+  await Promise.all([mkdir(join(root, "inside"), { recursive: true }), mkdir(join(parent, "rootx"))]);
+  const service = new FilesystemService(root);
+  const outside = { code: "invalid_request", message: "Path is outside the allowed workspace root", retryable: false };
+  const refusal = (operation: Promise<unknown>) => operation.then(() => undefined, error => publicError(error));
+  expect((await service.list(join(root, "inside"))).path).toBe(join(await realpath(root), "inside"));
+  expect(await refusal(service.list(join(parent, "rootx")))).toEqual(outside);
+  expect(await refusal(service.list(parent))).toEqual(outside);
 });

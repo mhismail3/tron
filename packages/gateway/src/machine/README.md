@@ -11,7 +11,9 @@ resolution, worktrees, uploads, and the native capture and
 `filesystem-service.ts`, `workspace-inspection-service.ts` (workspace projection),
 `git-worktree-service.ts`, `upload-store.ts`,
 `native-capture-client.ts`, `native-capture-transport.ts`,
-`cua-client.ts`, path containment and workspace bounds.
+`cua-client.ts`, path containment and workspace bounds. Whether a resolved path is within a
+root (`containedWithin`) is decided by the proven block `security/path-shape`
+([packages/core](../../../core/README.md)) over path-component tokens; callers resolve and realpath.
 
 ## Contract
 
