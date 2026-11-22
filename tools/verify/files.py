@@ -39,7 +39,7 @@ def chains(files: list[str]) -> list[list[str]]:
 
 def main(arguments: list[str]) -> int:
     runner, files = RUNNERS[arguments[0]], arguments[1:]
-    order = chains(files)
+    order = chains(files) if arguments[0] == 'python' else [files]
     codes: dict[str, int] = {}
     printing = threading.Lock()
     with tempfile.TemporaryDirectory(prefix='tron-verify-files-') as scratch:
