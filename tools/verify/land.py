@@ -43,6 +43,7 @@ def fetch_main() -> str:
 
 
 def merge(tree: Path, main: str, head: str, message: str) -> str:
+    subprocess.run(["chmod", "-R", "u+w", str(tree)], capture_output=True)
     git("checkout", "--quiet", "--detach", "--force", main, cwd=tree)
     git("clean", "-ffdxq", "-e", "node_modules", cwd=tree)
     merged = subprocess.run(["git", "-C", str(tree), "merge", "--quiet", "--no-ff", "-m", message, head], capture_output=True, text=True)

@@ -43,6 +43,11 @@ if (home / 'hold').exists():
     (home / 'held').write_text(sha)
     while (home / 'hold').exists():
         time.sleep(0.05)
+if (home / 'readonly').exists():
+    left = root / 'test-results/payload/app'
+    left.mkdir(parents=True, exist_ok=True)
+    (left / 'config').write_text('read-only output a test left behind')
+    left.chmod(0o555)
 red = (root / 'RED').exists()
 named = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD^'], text=True).strip() if (home / 'foreign').exists() else sha
 out = root / 'test-results/verify'
@@ -59,6 +64,7 @@ class Land(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = Path(tempfile.mkdtemp(prefix='tron-land-test-'))
         self.addCleanup(shutil.rmtree, self.temporary, True)
+        self.addCleanup(subprocess.run, ['chmod', '-R', 'u+w', str(self.temporary)], capture_output=True)
         self.local, self.mini, self.origin = self.temporary / 'local', self.temporary / 'mini-home', self.temporary / 'origin.git'
         for path in ('scripts/tron', 'tools/verify/land.py', 'tools/verify/mini.py', 'tools/verify/ledger.py', 'scripts/tron-node', '.node-version',
                      'config/ci-toolchain.env'):
@@ -157,6 +163,21 @@ class Land(unittest.TestCase):
         report = json.loads((self.local / 'test-results/land' / self.main() / 'verify.json').read_text())
         self.assertIn('--base', report['args'])
         self.assertEqual(report['args'][report['args'].index('--base') + 1], self.base, 'validated against the main it merged onto')
+
+    def test_a_read_only_output_a_gate_left_in_the_land_tree_never_blocks_the_next_land(self) -> None:
+        """The reused land tree kept a read-only directory a gate's test wrote (the Gateway bundle rebuild), and the next
+        land refused at `git clean` with Permission denied."""
+        self.write('first.txt', 'first\n')
+        self.commit('first')
+        (self.home / 'readonly').write_text('')
+        code, output = self.finish(self.land())
+        self.assertEqual(code, 0, output)
+        (self.home / 'readonly').unlink()
+        self.write('second.txt', 'second\n')
+        head = self.commit('second')
+        code, output = self.finish(self.land())
+        self.assertEqual(code, 0, output)
+        self.assertEqual(self.parents(self.main())[1], head)
 
     def test_a_conflict_is_refused_and_main_stays(self) -> None:
         self.write('.gitignore', 'branch side\n')
