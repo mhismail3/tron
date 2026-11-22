@@ -89,7 +89,7 @@ is also `outcomeUnknown`, while marker-free observation payloads remain valid. T
 outcomes: refusal is not success, and `unverifiable`/partial results remain
 `outcomeUnknown`. It never retries a mutation. Waiter cancellation does not kill
 an already-admitted CLI call; Stop prevents subsequent actions and waits for that
-invocation. A command may complete after Stop was requested. Host/transport loss
+invocation, which its deadline bounds (10 s; `type_text` 125 s). A command may complete after Stop was requested. Host/transport loss
 leaves its effect uncertain, not safe to replay. Crash containment is not a claim
 that process death proves physical key/button release in every failure scenario.
 
