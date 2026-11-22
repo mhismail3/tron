@@ -4,11 +4,11 @@
   "version": "0.42.0",
   "artifact": {
     "path": "third_party/agent-browser/agent-browser-0.42.0-tron.1.tgz",
-    "integrity": "sha512-gzNE3hxiquopNVU+0dJLkoR/5bGaqdvFUSKd1KeaGb42aH5SeH76KDbEKCFs5GFwAi6gqEyUrC1QdZXMtsr2jg=="
+    "integrity": "sha512-aMGGs3O69lID/Ism1isxy8PmxMxCxvz6R4C7l1/urpjbLqSkH/AauGF4gSzrv8MsBjOdz/9fHhFt1UK7RFL4zA=="
   },
   "patch": {
     "path": "third_party/agent-browser/tron.patch",
-    "sha256": "22566889e3099fcba0aabb3f4c4bc66bde8a11b9224a25bdade3897b5eb197eb"
+    "sha256": "9a270fc0d2b988738d82d7bf9444ac106600d083b983da0909cf5cce5ee99a55"
   },
   "license": {
     "path": "third_party/agent-browser/LICENSE",
@@ -27,7 +27,9 @@
   "toolchain": {
     "node": "24.22.0",
     "npm": "11.19.1",
-    "rust": "1.94.1"
+    "rust": "1.94.1",
+    "pnpm": "11.1.3",
+    "macosSdk": "27.2"
   },
-  "removeWhen": "A published agent-browser release sends CDP editing commands for macOS Meta editing chords (select all, copy, cut, paste, undo, redo) so Meta+a then typing replaces an input's value; then drop this pin and the npm override."
+  "removeWhen": "A published agent-browser release sends CDP editing commands for macOS Meta editing chords (select all, copy, cut, paste, undo, redo) so Meta+a then typing replaces an input's value; then remove the agent-browser dependency and override from package.json, this pin, third_party/agent-browser/, scripts/build-agent-browser-engine.mjs, its stage-gateway-app.sh and gateway-install-inputs.mjs entries and the agent-browser pinnedArtifact call in pi-builtins.ts."
 }

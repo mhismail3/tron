@@ -173,11 +173,13 @@ patch context as source whitespace; application still requires the exact pinned 
 Mac payload staging carries the three patch pins and their confined artifacts. The engine is
 Tron's patched `agent-browser` 0.42.0: a direct `file:` dependency that an npm override also
 imposes under the native package, resolved from the managed package, never PATH. Its tarball is the
-registry 0.42.0 package with the darwin arm64/x64 binaries rebuilt from tag v0.42.0 plus
-`third_party/agent-browser/tron.patch` (other platforms dropped); reproduce or rewrite it with
+registry 0.42.0 package with the darwin arm64/x64 binaries (dashboard included) rebuilt from tag
+v0.42.0 plus `third_party/agent-browser/tron.patch`, which also fixes the dashboard's Next.js build
+ID so the build reproduces (other platforms dropped); reproduce or rewrite it with
 `scripts/tron-node exec node packages/gateway/scripts/build-agent-browser-engine.mjs [--write]`
-(needs the pinned Rust toolchain with both darwin targets). The managed builtin refuses to load
-when either artifact, its lock entry or the installed version differs from its pin.
+(needs the pinned Node, npm, pnpm, Rust with both darwin targets and macOS SDK). The managed builtin
+refuses to load when either artifact or its lock entry differs from its pin; the engine's installed
+version check only catches a different release, since stock and patched both report 0.42.0.
 
 The nonreplaceable `builtin:agent-browser` registration supplies the owned persistent
 profile and engine executable. Native alone owns launch/restore/CDP admission and

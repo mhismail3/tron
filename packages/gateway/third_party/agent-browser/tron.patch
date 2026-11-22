@@ -257,6 +257,18 @@ index dd88a6abc8ada4fb5fcd71c0fb15d137590bd49c..b08f0c4c699b10c94e00c4138f11f445
  Unknown commands exit with status 1, including when you request command help.
  
  When the top-level Chrome/CDP `eval` result is a value JSON cannot represent, plain output prints its exact JavaScript token, including `NaN`, `Infinity`, `-Infinity`, `-0`, BigInt literals, and `undefined`. With `--json`, `data.result` stays `null` and sibling `data.unserializable` contains the token. MCP text prints the token, and structured responses expose it at `structuredContent.response.data.unserializable`.
+diff --git a/packages/dashboard/next.config.ts b/packages/dashboard/next.config.ts
+index 33aa316f068968cc5cefe18fd41f4360b51ff286..00ec1d5b3e9f049652b29ceb402c35fe28e3206f 100644
+--- a/packages/dashboard/next.config.ts
++++ b/packages/dashboard/next.config.ts
+@@ -4,6 +4,7 @@ const DAEMON_ORIGIN = process.env.DAEMON_URL || "http://localhost:4848";
+ 
+ const config: NextConfig = {
+   output: "export",
++  generateBuildId: async () => "agent-browser-0.42.0",
+   images: { unoptimized: true },
+   devIndicators: false,
+   env: {
 diff --git a/skill-data/core/references/commands.md b/skill-data/core/references/commands.md
 index cb067c4f3b0ea5c6eff513bbc90a3c46cec23500..d28640c0154a0124ca3dba4d49a7e1887629f867 100644
 --- a/skill-data/core/references/commands.md

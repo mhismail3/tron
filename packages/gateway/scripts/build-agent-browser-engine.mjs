@@ -27,8 +27,9 @@ const patchPath = join(gatewayDir, pin.patch.path);
 if (!write && sha256File(patchPath) !== pin.patch.sha256) throw new Error("patch digest differs from pin");
 const npm = run("npm", ["--version"], { capture: true });
 const rust = run("rustup", ["run", pin.toolchain.rust, "rustc", "--version"], { capture: true }).split(" ")[1];
-if (process.versions.node !== pin.toolchain.node || npm !== pin.toolchain.npm || rust !== pin.toolchain.rust) {
-  throw new Error(`reproduction requires Node ${pin.toolchain.node}, npm ${pin.toolchain.npm} and Rust ${pin.toolchain.rust}`);
+const sdk = run("xcrun", ["--show-sdk-version"], { capture: true });
+if (process.versions.node !== pin.toolchain.node || npm !== pin.toolchain.npm || rust !== pin.toolchain.rust || sdk !== pin.toolchain.macosSdk) {
+  throw new Error(`reproduction requires Node ${pin.toolchain.node}, npm ${pin.toolchain.npm}, Rust ${pin.toolchain.rust} and macOS SDK ${pin.toolchain.macosSdk}`);
 }
 
 const work = mkdtempSync(join(tmpdir(), "tron-agent-browser-"));
@@ -41,6 +42,10 @@ try {
   run("git", ["-C", source, "checkout", "-q", "--detach", pin.upstream.tagCommit]);
   const touched = run("git", ["-C", source, "apply", "--numstat", patchPath], { capture: true }).split("\n").filter(Boolean).map((line) => line.split("\t")[2]);
   run("git", ["-C", source, "apply", patchPath]);
+  const pnpm = ["corepack", `pnpm@${pin.toolchain.pnpm}`];
+  const quiet = { ...process.env, COREPACK_ENABLE_DOWNLOAD_PROMPT: "0" };
+  run(pnpm[0], [pnpm[1], "install", "--frozen-lockfile", "--ignore-scripts", "--filter", "dashboard"], { cwd: source, env: quiet });
+  run(pnpm[0], [pnpm[1], "--filter", "dashboard", "build"], { cwd: source, env: quiet });
   const env = { ...process.env, CARGO_INCREMENTAL: "0", MACOSX_DEPLOYMENT_TARGET: "11.0", SOURCE_DATE_EPOCH: "0",
     RUSTFLAGS: [`--remap-path-prefix=${source}=/agent-browser`, `--remap-path-prefix=${homedir()}/.cargo=/cargo`, `--remap-path-prefix=${homedir()}/.rustup=/rustup`].join(" ") };
   for (const target of pin.targets) {
@@ -56,9 +61,7 @@ try {
   for (const [target, name] of Object.entries(BINARIES)) {
     copyFileSync(join(source, "cli/target", target, "release/agent-browser"), join(packageDir, "bin", name));
   }
-  for (const path of touched) {
-    try { copyFileSync(join(source, path), join(packageDir, path)); } catch (error) { if (error.code !== "ENOENT") throw error; }
-  }
+  for (const path of touched.filter((path) => path.startsWith("skill-data/"))) copyFileSync(join(source, path), join(packageDir, path));
   const output = join(work, "patched");
   mkdirSync(output);
   run("npm", ["pack", "--ignore-scripts", "--pack-destination", output], { cwd: packageDir, capture: true });
