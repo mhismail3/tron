@@ -319,8 +319,9 @@ module (today only the iOS UI tests' spawn edges to the hosted app): its locks a
 that module's rendered tests. `--changed` also adds the importers no compiler checks: a changed
 source file's Python importers (`import`/`from` by module name, or its path handed to
 `importlib`) and JavaScript importers (relative specifiers) in other modules run their module's
-owned tests, or only themselves when the importer is a test (one hop). Typed importers (TypeScript,
-Swift) are left to their compilers. A module with no test declares its proving tests (`verify`, below), usually its
+owned tests, or only themselves when the importer is a test (one hop). A TypeScript test file that imports a changed
+file by relative specifier runs too (one hop). A test that imports a changed file runs before landing even when it is
+serial or slow; other typed importers (TypeScript, Swift) are left to their compilers. A module with no test declares its proving tests (`verify`, below), usually its
 `gateway/e2e` journeys; directory modules may also declare `verify`. A Gateway E2E golden
 selects only the lock in its directory whose `lockPaths(import.meta.url, …)` names it (a computed argument counts when the lock spells the name as a string); a golden no lock reads refuses.
 `--module` does not widen to unrelated kernel locks; `--update-locks` stays with its owner.

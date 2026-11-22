@@ -763,10 +763,10 @@ JS_IMPORT = re.compile(r"""(?:\bfrom|\bimport)\s*\(?\s*["'](\.{1,2}/[^"']+)["']"
 
 
 def importers(changed: list[str], tracked: list[str]) -> dict[str, set[str]]:
-    """Untyped code files that import a changed file, by importer: Python by module name (or by the
-    path it hands importlib), JavaScript by relative specifier, and any script that names a changed
-    JSON data file by its repository path. A typed importer is left to its compiler, which already
-    checks the shapes it uses across modules."""
+    """Code files that import a changed file, by importer: Python by module name (or by the path it
+    hands importlib), JavaScript and TypeScript test files by relative specifier, and any script that
+    names a changed JSON data file by its repository path. A typed importer that is no test is left to
+    its compiler, which checks the shapes it uses; behaviour reaches only tests."""
     names: dict[str, set[str]] = {}
     for path in changed:
         if path.endswith(".py") and Path(path).stem.isidentifier():
@@ -778,7 +778,7 @@ def importers(changed: list[str], tracked: list[str]) -> dict[str, set[str]]:
     for path in tracked:
         file = ROOT / path
         python = path.endswith(".py")
-        if not (python or path.endswith((".mjs", ".js", ".cjs", ".sh"))):
+        if not (python or path.endswith((".mjs", ".js", ".cjs", ".sh", ".test.ts"))):
             if "." in Path(path).name or not path.startswith(("scripts/", "tools/")):
                 continue
             try:
@@ -826,6 +826,7 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
     selected: set[str] = set()
     narrow: set[str] = set()
     deferred: set[str] = set()
+    direct: set[str] = set()
     full_reasons: list[str] = []
     if mode == "full":
         selected |= set(tests)
@@ -904,6 +905,7 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
             if key is None or all(owner.get(hit) == key for hit in hits):
                 continue
             if is_test(importer):
+                direct.add(importer)
                 if importer not in selected:
                     selected.add(importer)
                     reasons.append(f"{importer}: imports changed {', '.join(sorted(hits))}")
@@ -970,7 +972,7 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
                      or (is_lock(path) and owner.get(path) in golden_owners)}
         slow = set(json.loads((ROOT / POST_MERGE).read_text())["files"])
         own = {path for path in selected if owner.get(path) in changes}
-        deferred = (selected & (nested | slow)) - own - set(touched) - immediate - declared_tests
+        deferred = (selected & (nested | slow)) - own - direct - set(touched) - immediate - declared_tests
         selected -= deferred
         if deferred:
             full_reasons.append(f"{len(deferred)} unchanged serial or slow test file(s)")
