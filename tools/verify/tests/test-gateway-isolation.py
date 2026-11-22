@@ -123,6 +123,40 @@ class GatewayTestScratchCleanup(unittest.TestCase):
             self.assertFalse(root.exists(), "a SIGTERMed run left its scratch root")
 
 
+class GatewayTestOrphanReaping(unittest.TestCase):
+    def test_a_test_process_left_in_its_own_session_is_reaped_before_the_runner_returns(self) -> None:
+        """#2648: console-fixture drivers re-parented to launchd escaped the job's process-group kill and stayed on
+        the mini for hours under a removed scratch root, poisoning the next land's Gateway lane."""
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            verify = base / "tools/verify"
+            verify.mkdir(parents=True)
+            for name in ("gateway.py", "vitest_configs.py", "ledger.py", "ledger-host.mjs", "ledger-vitest.mjs"):
+                (verify / name).write_text((ROOT / "tools/verify" / name).read_text())
+            lock = (ROOT / "tools/verify/host_lock.py").read_text()
+            (verify / "host_lock.py").write_text(lock.replace("'/tmp/tron-full-gateway.lock'", repr(str(base / "full.lock"))))
+            node = base / "scripts/tron-node"
+            node.parent.mkdir()
+            fixture_node(node)
+            vitest = base / "packages/gateway/node_modules/.bin/vitest"
+            vitest.parent.mkdir(parents=True)
+            vitest.write_text(f"#!/bin/bash\necho \"$TMPDIR\" > {base}/scratch\n"
+                              "/usr/bin/perl -e 'exit if fork; setpgrp(0, 0); exec {\"/bin/sleep\"} \"$ENV{TMPDIR}/driver.cjs\", \"300\"' </dev/null >/dev/null 2>&1\n")
+            for script in (node, vitest):
+                script.chmod(0o755)
+            commit_fixture(base)
+            ledger = tempfile.TemporaryDirectory(prefix='tron-gateway-ledger-')
+            self.addCleanup(ledger.cleanup)
+            env = {**os.environ, GATEWAY.HELD_BY_CALLER: "1", 'TRON_TEST_LEDGER': str(Path(ledger.name) / 'results.sqlite3')}
+            subprocess.run([sys.executable, str(verify / "gateway.py"), "x.test.ts"], env=env, capture_output=True, timeout=60)
+            root = str(Path((base / "scratch").read_text().strip()).parent)
+            listing = subprocess.run(["/bin/ps", "-U", str(os.getuid()), "-ww", "-E", "-o", "pid=,command="], capture_output=True, text=True).stdout
+            left = [line for line in listing.splitlines() if root + "/" in line]
+            for line in left:
+                os.kill(int(line.split()[0]), signal.SIGKILL)
+            self.assertEqual(left, [])
+
+
 class GatewayTestConfigRouting(unittest.TestCase):
     """`scripts/tron test gateway <file>` runs a file listed by a Gateway Vitest config under that config."""
 

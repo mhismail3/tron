@@ -47,3 +47,10 @@ it("reads a settled task's status while its worker session receives a later cano
   expect(manager.getEntries()).toHaveLength(before + 1);
   expect(status).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" }, reportRef: settled.reportRef });
 });
+
+it("gives a second fixture in one test its own root beside the first, never inside the first's TMPDIR (#2648)", async () => {
+  const first = await fixture();
+  const second = await fixture();
+  expect(second.root.startsWith(`${first.root}/`)).toBe(false);
+  await disposeFixtures();
+});
