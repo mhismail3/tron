@@ -832,7 +832,8 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
         reasons.append(f"--full: every test file ({len(tests)} files)")
         touched, chosen, declared = ["(all)"], set(modules), set(modules)
     elif mode == "files":
-        missing = sorted(set(paths or []) - set(tests))
+        runnable = {path for path in tracked if is_test(path) or (path.startswith("scripts/verify-") and path.endswith(".py"))}
+        missing = sorted(set(paths or []) - runnable)
         if missing:
             raise VerifyError(f"--files names no tracked test file: {', '.join(missing)}")
         selected |= set(paths or [])
