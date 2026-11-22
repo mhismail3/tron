@@ -110,6 +110,7 @@ describe("packaged agent-browser receipts", () => {
     site=createServer((request,response)=>{
       const url=new URL(request.url!, "http://127.0.0.1");
       if(url.pathname==="/login"){response.setHeader("Set-Cookie",`fixture=${cookie}; HttpOnly; Path=/`);response.end("<title>login granted</title>");return;}
+      if(url.pathname==="/editor"){response.end("<title>editor</title><input id=i value=old><div id=c contenteditable=true>old</div>");return;}
       if(url.pathname!=="/protected"){response.writeHead(404);response.end();return;}
       if(request.headers.cookie!==`fixture=${cookie}`){response.writeHead(401);response.end("<title>NOT AUTHENTICATED</title>");return;}
       const nonce=url.searchParams.get("nonce")!; receipts.push(nonce);response.end(`<title>AUTH ${nonce}</title>`);
@@ -160,6 +161,17 @@ describe("packaged agent-browser receipts", () => {
         expect(receipts.at(-1)).toBe(nonce);
         expect(await step("detach-"+i,["close"])).toMatchObject({isError:false});
       }
+    });
+    it("replaces an input and a contenteditable with Meta+a then typing through the managed engine", async () => {
+      const caption="Tron \u00b7 \u201cquoted\u201d https://example.test/a?b=1 \ud83d\ude80 done";
+      expect(await step("editor",["open",base+"/editor"])).toMatchObject({isError:false});
+      for(const target of ["#i","#c"]){
+        expect(await step("focus"+target,["click",target])).toMatchObject({isError:false});
+        expect(await step("select-all"+target,["press","Meta+a"])).toMatchObject({isError:false});
+        expect(await step("type"+target,["keyboard","type",caption])).toMatchObject({isError:false});
+      }
+      const read=await step("editor-read",["eval","JSON.stringify([document.getElementById('i').value,document.getElementById('c').textContent])"]);
+      expect(JSON.stringify(read)).toContain(JSON.stringify(JSON.stringify([caption,caption])).slice(1,-1));
     });
     it("retains authentication through a native and Gateway runtime restart", async () => {
       closeNative(agentDir,sockets);

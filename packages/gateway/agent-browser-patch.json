@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "package": "agent-browser",
+  "version": "0.42.0",
+  "artifact": {
+    "path": "third_party/agent-browser/agent-browser-0.42.0-tron.1.tgz",
+    "integrity": "sha512-gzNE3hxiquopNVU+0dJLkoR/5bGaqdvFUSKd1KeaGb42aH5SeH76KDbEKCFs5GFwAi6gqEyUrC1QdZXMtsr2jg=="
+  },
+  "patch": {
+    "path": "third_party/agent-browser/tron.patch",
+    "sha256": "22566889e3099fcba0aabb3f4c4bc66bde8a11b9224a25bdade3897b5eb197eb"
+  },
+  "license": {
+    "path": "third_party/agent-browser/LICENSE",
+    "spdx": "Apache-2.0"
+  },
+  "upstream": {
+    "repository": "https://github.com/vercel-labs/agent-browser.git",
+    "tag": "v0.42.0",
+    "tagCommit": "e7519957b9067c541825afa21a792fbe1f483047",
+    "registryIntegrity": "sha512-4njBSXKDH75hu+xSOJE4msKFQPIrwcyREFgr/tfDWQ4+vWiibNvEbxA5cH3cbAFG3vJa9vhGCPV2fLp5Py6NzA=="
+  },
+  "targets": [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin"
+  ],
+  "toolchain": {
+    "node": "24.22.0",
+    "npm": "11.19.1",
+    "rust": "1.94.1"
+  },
+  "removeWhen": "A published agent-browser release sends CDP editing commands for macOS Meta editing chords (select all, copy, cut, paste, undo, redo) so Meta+a then typing replaces an input's value; then drop this pin and the npm override."
+}

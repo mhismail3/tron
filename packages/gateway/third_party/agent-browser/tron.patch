@@ -1,0 +1,272 @@
+diff --git a/cli/src/native/cdp/types.rs b/cli/src/native/cdp/types.rs
+index 18364e89156a639b113902b3736384c25abe1700..2ef3bf25307912bcdb8eeeb8138e027ce44ac176 100644
+--- a/cli/src/native/cdp/types.rs
++++ b/cli/src/native/cdp/types.rs
+@@ -490,6 +490,10 @@ pub struct DispatchKeyEventParams {
+     pub windows_virtual_key_code: Option<i32>,
+     #[serde(skip_serializing_if = "Option::is_none")]
+     pub modifiers: Option<i32>,
++    /// Editing commands the page runs for this key, such as `selectAll`. macOS
++    /// Cmd chords need them because CDP key events bypass the native bindings.
++    #[serde(skip_serializing_if = "Option::is_none")]
++    pub commands: Option<Vec<String>>,
+ }
+ 
+ #[derive(Debug, Serialize)]
+diff --git a/cli/src/native/e2e_tests.rs b/cli/src/native/e2e_tests.rs
+index 70939b19a75e7d23abd0e1090e0ab88c10e6f133..b03f3251876be8c949a50cdd5b05a09de2886e95 100644
+--- a/cli/src/native/e2e_tests.rs
++++ b/cli/src/native/e2e_tests.rs
+@@ -3865,6 +3865,7 @@ async fn e2e_press_dispatches_single_keystroke() {
+ 
+     for (i, (key, expected)) in [
+         ("a", "a/KeyA"),
++        ("Meta+a", "a/KeyA"),
+         ("Escape", "Escape/Escape"),
+         ("End", "End/End"),
+         ("Enter", "Enter/Enter"),
+@@ -3906,6 +3907,89 @@ async fn e2e_press_dispatches_single_keystroke() {
+     assert_success(&resp);
+ }
+ 
++#[cfg(target_os = "macos")]
++async fn press_chord(state: &mut DaemonState, id: &str, key: &str) {
++    let resp = execute_command(&json!({ "id": id, "action": "press", "key": key }), state).await;
++    assert_success(&resp);
++}
++
++/// On macOS, Cmd+A selects everything in a focused field, so the next keystroke
++/// replaces the whole value. Cmd+Shift+A has no editing binding and must leave
++/// the caret alone; the step before the select-all checks that.
++#[cfg(target_os = "macos")]
++#[tokio::test]
++#[ignore]
++async fn e2e_press_meta_select_all_replaces_input_and_contenteditable() {
++    let mut state = DaemonState::new();
++
++    let resp = execute_command(
++        &json!({ "id": "1", "action": "launch", "headless": true }),
++        &mut state,
++    )
++    .await;
++    assert_success(&resp);
++
++    let html = concat!(
++        "data:text/html,<html><body>",
++        "<input id=i value=old>",
++        "<div id=c contenteditable=true>old</div>",
++        "</body></html>"
++    );
++    let resp = execute_command(
++        &json!({ "id": "2", "action": "navigate", "url": html }),
++        &mut state,
++    )
++    .await;
++    assert_success(&resp);
++
++    let resp = execute_command(
++        &json!({ "id": "3", "action": "click", "selector": "#i" }),
++        &mut state,
++    )
++    .await;
++    assert_success(&resp);
++    press_chord(&mut state, "4", "End").await;
++    press_chord(&mut state, "5", "Meta+Shift+a").await;
++    press_chord(&mut state, "6", "q").await;
++    assert_evaluate(
++        &mut state,
++        "7",
++        "document.getElementById('i').value",
++        json!("oldq"),
++    )
++    .await;
++
++    press_chord(&mut state, "8", "Meta+a").await;
++    press_chord(&mut state, "9", "r").await;
++    assert_evaluate(
++        &mut state,
++        "10",
++        "document.getElementById('i').value",
++        json!("r"),
++    )
++    .await;
++
++    let resp = execute_command(
++        &json!({ "id": "11", "action": "click", "selector": "#c" }),
++        &mut state,
++    )
++    .await;
++    assert_success(&resp);
++    press_chord(&mut state, "12", "End").await;
++    press_chord(&mut state, "13", "Meta+a").await;
++    press_chord(&mut state, "14", "q").await;
++    assert_evaluate(
++        &mut state,
++        "15",
++        "document.getElementById('c').textContent",
++        json!("q"),
++    )
++    .await;
++
++    let resp = execute_command(&json!({ "id": "99", "action": "close" }), &mut state).await;
++    assert_success(&resp);
++}
++
+ // ---------------------------------------------------------------------------
+ // Raw mouse regressions
+ // ---------------------------------------------------------------------------
+diff --git a/cli/src/native/interaction.rs b/cli/src/native/interaction.rs
+index 315e0712e313c46e4010e72522a67d73a102b4c7..c2d132682c2cb2ca525ae001a93ab31e1dc10af3 100644
+--- a/cli/src/native/interaction.rs
++++ b/cli/src/native/interaction.rs
+@@ -300,6 +300,7 @@ pub async fn type_text_into_active_context(
+                         unmodified_text: text_str,
+                         windows_virtual_key_code: Some(key_code),
+                         modifiers: None,
++                        commands: None,
+                     },
+                     Some(session_id),
+                 )
+@@ -316,6 +317,7 @@ pub async fn type_text_into_active_context(
+                         unmodified_text: None,
+                         windows_virtual_key_code: Some(key_code),
+                         modifiers: None,
++                        commands: None,
+                     },
+                     Some(session_id),
+                 )
+@@ -347,6 +349,28 @@ pub async fn press_key(client: &CdpClient, session_id: &str, key: &str) -> Resul
+     press_key_with_modifiers(client, session_id, key, None).await
+ }
+ 
++/// Editing command for a macOS Cmd chord, sent as CDP `commands` on keyDown.
++///
++/// Chrome on macOS runs Cmd+A/C/V/X/Z through native key bindings, which CDP
++/// key events bypass, so the chord has to name its editing command. Only the
++/// exact chords map (Meta = 4, Shift = 8): Cmd+Shift+Z is redo, and any other
++/// modifier set stays a plain key event.
++fn macos_editing_commands(key: &str, modifiers: i32) -> Option<Vec<String>> {
++    if !cfg!(target_os = "macos") {
++        return None;
++    }
++    let command = match (key.to_ascii_lowercase().as_str(), modifiers) {
++        ("a", 4) => "selectAll",
++        ("c", 4) => "copy",
++        ("x", 4) => "cut",
++        ("v", 4) => "paste",
++        ("z", 4) => "undo",
++        ("z", 12) => "redo",
++        _ => return None,
++    };
++    Some(vec![command.to_string()])
++}
++
+ /// Dispatch a keyDown+keyUp sequence for `key` with an optional CDP modifier bitmask.
+ ///
+ /// Modifier values follow the CDP `Input.dispatchKeyEvent` spec:
+@@ -370,6 +394,7 @@ pub async fn press_key_with_modifiers(
+     } else {
+         key_text(&key_name)
+     };
++    let commands = modifiers.and_then(|m| macos_editing_commands(&key_name, m));
+ 
+     client
+         .send_command_typed::<_, Value>(
+@@ -382,6 +407,7 @@ pub async fn press_key_with_modifiers(
+                 unmodified_text: text.clone(),
+                 windows_virtual_key_code: Some(key_code),
+                 modifiers,
++                commands,
+             },
+             Some(session_id),
+         )
+@@ -398,6 +424,7 @@ pub async fn press_key_with_modifiers(
+                 unmodified_text: None,
+                 windows_virtual_key_code: Some(key_code),
+                 modifiers,
++                commands: None,
+             },
+             Some(session_id),
+         )
+@@ -1301,6 +1328,40 @@ fn named_key_info(key: &str) -> (String, String, i32) {
+ mod tests {
+     use super::*;
+ 
++    /// Cmd chords map to their editing command, and only the exact modifier
++    /// sets do: any extra or missing modifier stays a plain key event.
++    #[cfg(target_os = "macos")]
++    #[test]
++    fn test_macos_editing_commands_match_exact_cmd_chords_only() {
++        let command = |name: &str| Some(vec![name.to_string()]);
++        assert_eq!(macos_editing_commands("a", 4), command("selectAll"));
++        assert_eq!(macos_editing_commands("A", 4), command("selectAll"));
++        assert_eq!(macos_editing_commands("c", 4), command("copy"));
++        assert_eq!(macos_editing_commands("x", 4), command("cut"));
++        assert_eq!(macos_editing_commands("v", 4), command("paste"));
++        assert_eq!(macos_editing_commands("z", 4), command("undo"));
++        assert_eq!(macos_editing_commands("z", 12), command("redo"));
++
++        for (key, modifiers) in [
++            ("a", 0),
++            ("a", 2),
++            ("a", 8),
++            ("a", 5),
++            ("a", 6),
++            ("a", 12),
++            ("c", 12),
++            ("z", 8),
++            ("b", 4),
++            ("Enter", 4),
++        ] {
++            assert_eq!(
++                macos_editing_commands(key, modifiers),
++                None,
++                "{key} with modifiers {modifiers} must not map to an editing command"
++            );
++        }
++    }
++
+     /// Verify that `char_to_key_info` returns the correct (key, code,
+     /// windowsVirtualKeyCode) triple for every character in Playwright's
+     /// USKeyboardLayout.  The expected values below are taken verbatim from
+diff --git a/cli/src/output.rs b/cli/src/output.rs
+index a89c6a33085e7e97cc126f3df1c9ca6190c3ddbd..5961efb212b45d535221a3f7615aba2f3674156c 100644
+--- a/cli/src/output.rs
++++ b/cli/src/output.rs
+@@ -2478,6 +2478,10 @@ Special Keys:
+ Modifiers (combine with +):
+   Control, Alt, Shift, Meta
+ 
++macOS editing:
++  Meta+a selects all; Meta+c/x/v copies, cuts, or pastes.
++  Meta+z undoes; Meta+Shift+z redoes.
++
+ Global Options:
+   --json               Output as JSON
+   --session <name>     Session name: Unicode letters/numbers, hyphens, and underscores only
+diff --git a/docs/content/docs/commands.mdx b/docs/content/docs/commands.mdx
+index dd88a6abc8ada4fb5fcd71c0fb15d137590bd49c..b08f0c4c699b10c94e00c4138f11f44506782b72 100644
+--- a/docs/content/docs/commands.mdx
++++ b/docs/content/docs/commands.mdx
+@@ -5,6 +5,8 @@ navTitle: "Commands"
+ 
+ ## Core
+ 
++On macOS, `press Meta+a` selects all text in the focused input or editable content. The editing chords `Meta+c`, `Meta+x`, `Meta+v`, `Meta+z`, and `Meta+Shift+z` also dispatch their browser editing commands on keydown.
++
+ Unknown commands exit with status 1, including when you request command help.
+ 
+ When the top-level Chrome/CDP `eval` result is a value JSON cannot represent, plain output prints its exact JavaScript token, including `NaN`, `Infinity`, `-Infinity`, `-0`, BigInt literals, and `undefined`. With `--json`, `data.result` stays `null` and sibling `data.unserializable` contains the token. MCP text prints the token, and structured responses expose it at `structuredContent.response.data.unserializable`.
+diff --git a/skill-data/core/references/commands.md b/skill-data/core/references/commands.md
+index cb067c4f3b0ea5c6eff513bbc90a3c46cec23500..d28640c0154a0124ca3dba4d49a7e1887629f867 100644
+--- a/skill-data/core/references/commands.md
++++ b/skill-data/core/references/commands.md
+@@ -95,6 +95,8 @@ agent-browser drag @e1 @e2        # Drag and drop
+ agent-browser upload @e1 file.pdf # Upload files
+ ```
+ 
++On macOS, `press Meta+a` selects all text in the focused input or editable content. `Meta+c`, `Meta+x`, `Meta+v`, `Meta+z`, and `Meta+Shift+z` dispatch copy, cut, paste, undo, and redo.
++
+ For `fill` and `type`, put options before the optional `--` marker. Text after the marker is literal, including values that look like flags. For example, `agent-browser fill @e2 -- --json` fills with `--json`, and `agent-browser type @e2 --clear --delay 10 -- --clear` clears the field, then types `--clear`. MCP `agent_browser_fill` and `agent_browser_type` pass typed `text` values literally, so they do not need the marker.
+ 
+ Visible-label matching treats non-breaking and ordinary spaces equivalently.
