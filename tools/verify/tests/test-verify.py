@@ -226,8 +226,11 @@ class ExternalVerificationTests(VerifyCase):
         planned = r.verify("--files", "scripts/verify-probe.py", "--plan")
         self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
         self.assertEqual(json.loads(planned.stdout[planned.stdout.index("{"):])["groups"], {"python": ["scripts/verify-probe.py"]})
-        refused = r.verify("--files", "scripts/absent.py", "--plan")
+        r.write("scripts/helper.py", "VALUE = 1\n")
+        r.commit("a tracked script that is no test")
+        refused = r.verify("--files", "scripts/helper.py", "--plan")
         self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
+        self.assertIn("no tracked test file", refused.stderr)
 
     def test_gateway_declarations_keep_existing_runner_classification(self) -> None:
         r = self.repo
