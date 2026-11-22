@@ -66,7 +66,9 @@ resource directory, under `/tmp` rather than the caller's TMPDIR, so fixture and
 lengths do not depend on who runs the suite. It waits for Vitest before removing those directories, also
 forwarding cancellation to the owned child. Every tool that stops it (verify, mutate) sends
 SIGTERM first and SIGKILL only after a grace (mutate 10 s, the others 30 s), so a root is left behind
-only by an outside SIGKILL or by a Vitest still tearing down when the grace ends.
+only by an outside SIGKILL or by a Vitest still tearing down when the grace ends. After Vitest exits, on every
+path but its own SIGKILL, it SIGKILLs each of this user's processes whose arguments or environment name the scratch
+root, including ones re-parented to launchd or in their own process group, and fails the run if one survives 5 s.
 It never installs this checkout's missing packages.
 Browser integration tests use the file dependency from
 `pi-agent-browser-native-patch.json`, exactly as production; there is no separate

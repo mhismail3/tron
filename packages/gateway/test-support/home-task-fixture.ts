@@ -20,6 +20,7 @@ import { modelQueueProjectionPath, type ModelQueueRecord } from "../src/provider
 import type { ProviderUsageOwner } from "../src/providers/provider-usage.js";
 import { HOOK_HANG_BOUND_MS, waitFor } from "./wait-for.js";
 
+const SCRATCH = tmpdir();
 const fixtures: Array<{ registry: RuntimeRegistry; root: string; gateway: ModelRuntime }> = [];
 export async function disposeFixtures(): Promise<void> {
   const failures: unknown[] = [];
@@ -79,7 +80,7 @@ export interface FixtureOptions {
 
 export async function fixture(unmanagedProvider = false, codemode = false, contextWindow?: number, managed = false, models?: Record<string, unknown>, options: FixtureOptions = {}) {
   const knowledge = options.knowledge ?? (() => undefined);
-  const root = await mkdtemp(join(tmpdir(), "tron-task-dispatch-"));
+  const root = await mkdtemp(join(SCRATCH, "tron-task-dispatch-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
   const tronHome = join(root, "tron");
