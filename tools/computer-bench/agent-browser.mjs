@@ -12,13 +12,13 @@ function pinnedEngine() {
 }
 
 export function agentBrowser() {
-  let BINARY;
+  let binary;
   const session = `cb2476-${process.pid}`;
   const profileSession = `${session}-profile`;
   let profile;
 
   async function call(args, { sessionName = session, timeoutMs = 30_000, global = [] } = {}) {
-    const result = await run(BINARY, ["--json", "--session", sessionName, ...global, ...args], { timeoutMs });
+    const result = await run(binary, ["--json", "--session", sessionName, ...global, ...args], { timeoutMs });
     let parsed;
     try { parsed = JSON.parse(result.stdout); } catch { parsed = undefined; }
     if (result.timedOut) throw new Error(`timed out: ${args.join(" ")}`);
@@ -35,9 +35,9 @@ export function agentBrowser() {
   return {
     name: "agent-browser",
     async probe() {
-      try { BINARY = process.env.COMPUTER_BENCH_AGENT_BROWSER ?? pinnedEngine(); } catch (error) { return { ok: false, reason: `no pinned engine: ${error.message}` }; }
-      if (!existsSync(BINARY)) return { ok: false, reason: `missing ${BINARY}` };
-      const result = await run(BINARY, ["--version"]);
+      binary = process.env.COMPUTER_BENCH_AGENT_BROWSER ?? pinnedEngine();
+      if (!existsSync(binary)) return { ok: false, reason: `missing ${binary}` };
+      const result = await run(binary, ["--version"]);
       return { ok: result.code === 0, version: result.stdout.trim(), reason: result.stderr.trim() };
     },
     async setup(ctx) { profile = join(ctx.workdir, "agent-browser-profile"); await openForm(ctx); },
