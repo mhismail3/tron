@@ -2331,6 +2331,27 @@ class StepStopTests(unittest.TestCase):
         self.assertEqual(launched.result["status"], "interrupted")
 
 
+class FileRunnerStopTests(VerifyCase):
+    def test_a_stopped_python_group_starts_no_further_file(self) -> None:
+        """verify stops a step by signalling its process group; the parallel file runner's chain thread then started
+        the chain's next file outside that group, which ran until verify's SIGKILL 30 s later."""
+        r = self.repo
+        started, later = Path(self.temp.name) / "started", Path(self.temp.name) / "later"
+        r.write("mods/alpha/test-a-first.py", f"import time\nfrom pathlib import Path\nPath({str(started)!r}).touch()\ntime.sleep(120)\n")
+        r.write("mods/alpha/test-b-second.py", f"from pathlib import Path\nPath({str(later)!r}).touch()\nprint('after test-a-first.py')\n")
+        r.commit("a chain whose first file never ends")
+        runner = subprocess.Popen(["python3", "tools/verify/files.py", "python", "mods/alpha/test-a-first.py", "mods/alpha/test-b-second.py"],
+                                  cwd=r.path, env=r.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        self.addCleanup(lambda: runner.poll() is not None or (os.killpg(runner.pid, signal.SIGKILL), runner.wait()))
+        deadline = time.monotonic() + 30
+        while not started.exists():
+            self.assertLess(time.monotonic(), deadline, "the first file never started")
+            time.sleep(0.05)
+        os.killpg(runner.pid, signal.SIGTERM)
+        self.assertEqual(runner.wait(timeout=10), 128 + signal.SIGTERM)
+        self.assertFalse(later.exists())
+
+
 class MutateTests(VerifyCase):
     def setUp(self) -> None:
         super().setUp()

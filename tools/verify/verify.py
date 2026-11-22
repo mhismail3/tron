@@ -29,6 +29,7 @@ import vitest_configs  # noqa: E402  (the one reader of the Gateway's listing Vi
 import mini  # noqa: E402
 import swift_source
 import ledger
+import files
 
 GATEWAY = "packages/gateway"
 RELAY = "packages/push-relay"
@@ -1142,7 +1143,7 @@ def tap_count(output: str) -> int:
     return int(found[-1]) if found else 0
 
 
-FILE_MARKER = "### verify file: "
+FILE_MARKER = files.MARKER
 
 
 def python_count(output: str) -> int:

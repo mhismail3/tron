@@ -13,6 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 MARKER = '### verify file: '
+STOPPING = threading.Event()
 RUNNERS = {'python': ['python3', 'tools/verify/ledger.py', 'python'],
            'shell': ['python3', 'tools/verify/ledger.py', 'exec', 'shell', 'bash']}
 
@@ -45,19 +46,30 @@ def main(arguments: list[str]) -> int:
     with tempfile.TemporaryDirectory(prefix='tron-verify-files-') as scratch:
         def run(chain: list[str]) -> None:
             for path in chain:
-                output = Path(scratch) / path.replace('/', '__')
-                with output.open('wb') as stream:
-                    code = subprocess.run([*runner, path], cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream,
-                                          stderr=subprocess.STDOUT).returncode
-                with printing:
-                    sys.stdout.buffer.write(f'{MARKER}{path}\n'.encode() + output.read_bytes())
-                    sys.stdout.flush()
+                if STOPPING.is_set():
+                    return
+                if len(order) == 1:
+                    print(f'{MARKER}{path}', flush=True)
+                    code = subprocess.run([*runner, path], cwd=ROOT, stdin=subprocess.DEVNULL, stderr=subprocess.STDOUT).returncode
+                else:
+                    output = Path(scratch) / path.replace('/', '__')
+                    with output.open('wb') as stream:
+                        code = subprocess.run([*runner, path], cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream,
+                                              stderr=subprocess.STDOUT).returncode
+                    with printing:
+                        sys.stdout.buffer.write(f'{MARKER}{path}\n'.encode() + output.read_bytes())
+                        sys.stdout.flush()
                 codes[path] = code if code >= 0 else 128 - code
         with ThreadPoolExecutor(max(1, min(len(order), (os.cpu_count() or 2) // 2))) as pool:
             list(pool.map(run, order))
     return next((codes[path] for path in files if codes[path]), 0)
 
 
+def stop(signum, _frame) -> None:
+    STOPPING.set()
+    sys.exit(128 + signum)
+
+
 if __name__ == '__main__':
-    signal.signal(signal.SIGTERM, lambda signum, _frame: sys.exit(128 + signum))
+    signal.signal(signal.SIGTERM, stop)
     sys.exit(main(sys.argv[1:]))

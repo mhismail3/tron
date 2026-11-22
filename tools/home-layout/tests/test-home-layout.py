@@ -287,36 +287,18 @@ class HomeLayoutTests(unittest.TestCase):
     def test_the_process_scan_reads_processes_caught_between_fork_and_exec(self) -> None:
         """Test files ran in parallel beside this scan; a process between fork and exec answered EIO and the stopped-home
         proof refused with process_owner_unreadable, though nothing held the home."""
-        import ctypes
-        import threading
         sys.path.insert(0, str(ROOT / "tools/home-layout"))
         self.addCleanup(sys.path.remove, str(ROOT / "tools/home-layout"))
         import stopped_home
-        libc = ctypes.CDLL(None, use_errno=True)
-        proc = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
-        buffer = ctypes.create_string_buffer(1 << 20)
-        stop = threading.Event()
-
-        def churn():
-            while not stop.is_set():
-                subprocess.run([sys.executable, "-c", "import os; os.execv('/usr/bin/true', ['true'])"])
-        workers = [threading.Thread(target=churn) for _ in range(8)]
-        for worker in workers:
-            worker.start()
+        churners = [subprocess.Popen(["/bin/sh", "-c", "while :; do /usr/bin/true; done"]) for _ in range(8)]
         try:
-            deadline, reads = time.monotonic() + 5, 0
+            deadline = time.monotonic() + 5
             while time.monotonic() < deadline:
-                pids = (ctypes.c_int * 16384)()
-                used = proc.proc_listpids(4, os.geteuid(), pids, ctypes.sizeof(pids))
-                for pid in pids[:used // 4]:
-                    if pid > 0:
-                        stopped_home.process_arguments(pid, libc, buffer)
-                        reads += 1
+                self.assertEqual(stopped_home.process_owners(str(self.base)), set())
         finally:
-            stop.set()
-            for worker in workers:
-                worker.join()
-        self.assertGreater(reads, 0)
+            for churner in churners:
+                churner.kill()
+                churner.wait()
 
     def test_the_shipped_registry_and_source_check_clean(self) -> None:
         result = subprocess.run(["python3", str(ROOT / TOOL), "check"], cwd=ROOT, capture_output=True, text=True)

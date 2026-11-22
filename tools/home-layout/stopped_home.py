@@ -41,9 +41,9 @@ def process_arguments(pid, libc, buffer):
             for event in events:
                 if event.flags & select.KQ_EV_ERROR and event.data != errno.ESRCH:
                     raise OSError(error, "process_owner_unreadable", str(pid))
-            while error and not any(event.flags & select.KQ_EV_ERROR or event.fflags & select.KQ_NOTE_EXIT for event in events):
+            while error not in (0, errno.ESRCH) and not any(event.flags & select.KQ_EV_ERROR or event.fflags & select.KQ_NOTE_EXIT for event in events):
                 error = read()
-                if error and error != errno.ESRCH:
+                if error not in (0, errno.ESRCH):
                     events = queue.control(None, 4, 1)
                     if not events:
                         raise OSError(error, "process_owner_unreadable", str(pid))
