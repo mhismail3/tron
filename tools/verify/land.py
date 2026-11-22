@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Land this branch on main: merge it --no-ff onto fetched main, run the merge's affected Tier 0 to 2 checks on this host, push it only if they passed."""
+"""Land this branch on main: merge it --no-ff onto fetched main, run the merge's affected checks (here, or on the mini when they select iOS work), push it only if they passed."""
 from __future__ import annotations
 
 import argparse
@@ -87,9 +87,9 @@ def validate(tree: Path, sha: str, main: str) -> tuple[str, dict, Path]:
             raise
     kept = ROOT / "test-results/land" / sha
     found, logs = tree / "test-results/verify" / f"{sha}.json", tree / "test-results/verify" / sha
-    handed = sorted((tree / "test-results/mini").glob(f"{sha[:12]}-*/verify.json"))
+    handed = next((tree / "test-results/mini").glob(f"{sha[:12]}-*/verify.json"), None)
     if handed:
-        found, logs = handed[-1], handed[-1].parent / "verify"
+        found, logs = handed, handed.parent / "verify"
     report = {}
     if found.is_file():
         kept.mkdir(parents=True, exist_ok=True)
@@ -132,7 +132,7 @@ def land(head: str, message: str) -> int:
                 say(f"{head[:12]} is already on main {main[:12]}")
                 return 0
             sha = merge(tree, main, head, message)
-            say(f"validating {sha[:12]}: {head[:12]} --no-ff onto main {main[:12]}, affected Tiers 0 to 2 here")
+            say(f"validating {sha[:12]}: {head[:12]} --no-ff onto main {main[:12]}, its affected checks")
             verdict, report, kept = validate(tree, sha, main)
             if verdict != "passed":
                 why = report.get("message") if report.get("commit") == sha else "no verify report for this commit"

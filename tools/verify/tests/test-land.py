@@ -5,7 +5,8 @@ A disposable checkout lands a task branch onto its own bare origin, validating e
 disposable mini home reached through the `ssh` stand-in of test-mini.py. Each commit's own `tools/verify/verify.py` is a
 stand-in that records the commit it validated, in its HOME, and fails when the tree holds a planted `RED`. The cases check that a red merge, a conflict,
 a report naming another commit, a passed report with a nonzero exit and a refused push each leave main unchanged; that a main moved during validation is merged again and validated again, and only that new
-merge lands; that two concurrent lands wait in arrival order, the second validated on top of the first; and that
+merge lands; that two concurrent lands wait in arrival order, the second validated on top of the first; that an
+iOS-only merge runs its selection on the mini and lands; and that
 `scripts/tron land` runs main's land tool, so a branch cut before it existed still lands.
 """
 from __future__ import annotations
