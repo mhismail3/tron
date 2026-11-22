@@ -251,5 +251,38 @@ class Land(unittest.TestCase):
         self.assertEqual(self.parents(self.main()), [main, head])
 
 
+    def test_a_red_main_is_bisected_to_its_merge_and_reverted_through_land(self) -> None:
+        """The main suite runs every file after landing; a red main names its first red first-parent merge and lands its revert."""
+        shutil.copy2(ROOT / 'tools/verify/main_suite.py', self.local / 'tools/verify/main_suite.py')
+        self.git('checkout', '-q', 'main')
+        self.commit('main suite')
+        self.git('push', '-q', 'origin', 'main')
+        green = self.main()
+        merges = []
+        for name, path in (('first', 'first.txt'), ('broken', 'RED'), ('later', 'later.txt')):
+            self.git('checkout', '-q', '-b', name, 'main')
+            self.write(path, f'{name}\n')
+            head = self.commit(name)
+            self.git('checkout', '-q', 'main')
+            self.git('merge', '-q', '--no-ff', '-m', f'Merge {name}', head)
+            merges.append(self.git('rev-parse', 'HEAD'))
+        self.git('push', '-q', 'origin', 'main')
+        local_home = self.temporary / 'local-home'
+        local_home.mkdir()
+        node = subprocess.check_output([str(ROOT / 'scripts/tron-node')], text=True).strip()
+        env = {**self.env, 'HOME': str(local_home), 'TRON_NODE_BIN': node}
+        suite = subprocess.run(['python3', str(self.local / 'tools/verify/main_suite.py'), '--green', green], cwd=self.local, env=env,
+                               text=True, capture_output=True, timeout=300)
+        self.assertEqual(suite.returncode, 1, suite.stdout + suite.stderr[-3000:])
+        self.assertIn(f'culprit {merges[1][:12]} (Merge broken)', suite.stdout, suite.stderr[-3000:])
+        probed = (local_home / 'runs').read_text().split()
+        self.assertEqual(probed, [merges[2], merges[2], merges[0], merges[1]], 'full suite, red files again, then bisect')
+        landed = self.main()
+        self.assertEqual(self.parents(landed)[0], merges[2], 'the revert lands --no-ff on the red main')
+        self.assertNotIn('RED', self.git('ls-tree', '--name-only', landed, cwd=self.origin).split())
+        self.assertIn('later.txt', self.git('ls-tree', '--name-only', landed, cwd=self.origin).split(), 'only the culprit is reverted')
+        self.assertEqual(self.runs()[-1], landed, 'the revert was validated by land on the mini')
+
+
 if __name__ == '__main__':
     unittest.main()

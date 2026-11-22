@@ -209,6 +209,33 @@ class TierTests(fixture.VerifyCase):
         self.assertEqual((r.path / 'test-results/retirement-consumer').read_text(), 'executed')
         self.assertEqual(r.report()['passingTests'], 2)
 
+    def test_a_slow_file_defers_to_the_main_suite_unless_it_changed_and_a_toolchain_input_runs_every_lock(self):
+        """Land runs only the affected selection; a file over the gate budget (tools/verify/post-merge.json) waits for the
+        main suite, which runs every file after the merge, unless the change edits that file itself."""
+        r = self.repo
+        r.write('mods/alpha/test-slow.py', fixture.PASSING)
+        r.write('packages/gateway/src/store/store.module.json', json.dumps({'layer': 'L3', 'owns': ['**']}))
+        r.write('packages/gateway/src/store/store.lock.integration.test.ts', 'export const lock = true;\n')
+        r.write('tools/verify/post-merge.json', json.dumps({'budgetSeconds': 45, 'files': {'mods/alpha/test-slow.py': 300}}))
+        r.commit('a slow alpha test')
+        r.git('branch', '-f', 'base')
+        r.write('mods/alpha/alpha.py', "VALUE = 'changed'\n")
+        r.commit('alpha source change')
+        plan = self.plan()
+        self.assertIn('mods/alpha/test-alpha.py', plan['selection']['tests'])
+        self.assertNotIn('mods/alpha/test-slow.py', plan['selection']['tests'])
+        self.assertEqual(plan['selection']['deferredTests'], ['mods/alpha/test-slow.py'])
+        self.assertIn('mods/alpha/test-slow.py', self.plan('--full')['selection']['tests'])
+        r.write('mods/alpha/test-slow.py', fixture.PASSING + 'EDITED = True\n')
+        r.commit('the slow test itself changes')
+        self.assertIn('mods/alpha/test-slow.py', self.plan()['selection']['tests'])
+        r.git('reset', '-q', '--hard', 'base')
+        r.write('tools/verify/post-merge.json', json.dumps({'budgetSeconds': 45, 'files': {}}))
+        r.commit('budget list change')
+        widened = self.plan()['selection']
+        self.assertEqual(widened['tier'], 'full')
+        self.assertIn('packages/gateway/src/store/store.lock.integration.test.ts', widened['tests'])
+
     def test_serial_nested_files_defer_to_full_coverage_unless_the_test_itself_changed(self):
         r = self.repo
         root = 'packages/gateway'

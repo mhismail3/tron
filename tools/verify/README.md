@@ -2,7 +2,7 @@
 
 `scripts/tron verify` runs the fast affected checks before merge. The manifests (owners, `verify`
 declarations and `dynamicEdges`) are the selection authority. No hosted CI or GitHub gate is involved;
-[`scripts/tron land`](land.md) runs `--full` Tiers 0 to 2 on the exact merge it pushes to main and is the only landing route. A previous test pass never substitutes for
+[`scripts/tron land`](land.md) runs the affected Tier 0 to 2 checks (`--changed`) on the exact merge it pushes to main and is the only landing route; the main suite (`scripts/tron main-suite`) runs every test file after each merge. A previous test pass never substitutes for
 this change's affected checks; only stamped build products are reused. See the
 [oracle policy](test-oracles.md).
 
@@ -12,7 +12,8 @@ scripts/tron verify --plan                     # tier, paths, reasons and exact 
 scripts/tron verify --changed [--base <ref>]   # explicit diff selection, also used by mutation sampling
 scripts/tron verify --module <id>               # scoped baseline: owner tests + declarations + launching UI locks
 scripts/tron verify --all                       # all locks + serial files deferred by this base..HEAD diff
-scripts/tron verify --full --base <ref>         # every test file in every group: land's suite
+scripts/tron verify --full --base <ref>         # every test file in every group: the main suite
+scripts/tron verify --files <test>...           # exactly these test files: the main suite's bisect probe
 scripts/tron verify --update-locks <id>         # rewrite <id>'s goldens (lock or approved migration slices)
 scripts/tron verify ... --gateway-host mini --ios-host mini # Tron heavy checks: queued mini execution, no local fallback
 scripts/tron test ios checkpoint --only-testing TronMobileUITests/<Class>/<method> # mini by default, build then selected tests
@@ -28,7 +29,8 @@ lock as verification. That lock observes both the runtime system-section preview
 persisted child replay: workspace core instructions, resource instruction assembly, runtime
 projection and the pinned SDK artifact can each change it without changing the lock file.
 These declarations keep that consumer in affected checks with its nested runner rather than
-deferring it to land's `--full` run. Other unchanged serial tests are deferred there. The
+deferring it to the main suite. Other unchanged serial tests, and unchanged files over the gate's per-file budget
+(`tools/verify/post-merge.json`), are deferred there. The
 selection regression calls the shipped planner against the actual ownership graph and each
 producer path; it does not mirror the dependency list in a fixture graph.
 

@@ -10,8 +10,8 @@ Git directory), never the branch's own, so a branch that lacks or predates them 
 2. Fetches `main` into its private `FETCH_HEAD` and makes a `--no-ff` merge of the branch head onto it in a temporary
    linked worktree, so main's first-parent chain stays the landing history. A conflict refuses (exit 2): merge main
    into the branch, commit and land again.
-3. Validates that exact merge commit on the Mac mini through `mini.py verify` under the mini job lock: Tiers 0 to 2,
-   `verify --full --base <main> --skip ios,mac,python-here --gateway-host local`. The returned report must name the
+3. Validates that exact merge commit on the Mac mini through `mini.py verify` under the mini job lock: the affected
+   Tier 0 to 2 checks, `verify --changed --base <main> --skip ios,mac,python-here --gateway-host local`. The returned report must name the
    merge commit; its evidence is kept in `test-results/land/<merge>/`.
 4. Pushes that merge to `main` only when the report passed. A red refuses (exit 1) and a missing or foreign report
    is no result (exit 75); main is unchanged either way. Push is a plain fast-forward, never forced.
@@ -24,6 +24,16 @@ There is no GitHub ruleset, status check, token or hosted CI, and no skip or ove
 the landing process. Not yet covered: Tier 3 (iOS) and the Mac integration tests, which the mini cannot sign, and
 `python-here`, which reads this Mac's session store. `verify --changed` remains the worker's own fast check before
 `land`.
+
+## Main suite
+
+Land runs only what the merge affects; unchanged serial files and unchanged files over the per-file budget in
+`tools/verify/post-merge.json` wait for the main suite. `scripts/tron main-suite [--green <sha>] [--watch <seconds>]`
+runs `verify --full` on each new main commit in one warm checkout under the Git directory (`tron-main-suite/`; `npm ci`
+only when a lockfile changed). Green records that commit. A red reruns only its red files at the same commit: a pass
+there is nondeterminism, reported and left to `scripts/tron flakes`, never reverted or retried. A red that reproduces is
+bisected over main's first-parent merges since the last green with `verify --files`, and the first red merge is reverted
+`--no-ff` through `land`, never by a forced push. The first run records the last known green with `--green`.
 
 `tools/verify/tests/test-land.py` proves the behaviour end to end with the real `land.py`, `mini.py` and
 `host_lock.py`, a disposable origin and a stand-in mini.

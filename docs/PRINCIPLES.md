@@ -22,8 +22,9 @@ boundary check in #2316 T2.9 adds them.
 
 ## P2 Whole-system health is a landing and checkpoint signal
 
-**Rule.** `scripts/tron land` gates main on Tiers 0 to 2 of the exact merge it pushes (`verify --full`, which
-includes every Gateway E2E journey). The iOS suite and the real-UI core journeys (prompt/reply, delegate/result, approval tap,
+**Rule.** `scripts/tron land` gates main on the affected Tier 0 to 2 checks of the exact merge it pushes; the main
+suite (`scripts/tron main-suite`) then runs every test file, including every Gateway E2E journey, on each new main and
+reverts a red merge through land. The iOS suite and the real-UI core journeys (prompt/reply, delegate/result, approval tap,
 settings change, Home wake, reconnect/restart; [map](../tools/verify/core-journeys.md)) run at
 device checkpoints. A red is filed against the module that owns it,
 which fixes it at the root or reverts its change. A retry that passes is evidence of

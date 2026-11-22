@@ -823,6 +823,13 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
         selected |= set(tests)
         reasons.append(f"--full: every test file ({len(tests)} files)")
         touched, chosen, declared = ["(all)"], set(modules), set(modules)
+    elif mode == "files":
+        missing = sorted(set(paths or []) - set(tests))
+        if missing:
+            raise VerifyError(f"--files names no tracked test file: {', '.join(missing)}")
+        selected |= set(paths or [])
+        reasons.append(f"--files: the {len(selected)} named test file(s)")
+        touched, chosen = ["(files)"], set()
     elif mode == "all":
         selected |= set(locks)
         reasons.append(f"--all: every lock ({len(locks)} files)")
@@ -1299,6 +1306,7 @@ def main(argv: list[str]) -> int:
     mode.add_argument("--all", action="store_true")
     mode.add_argument("--full", action="store_true", help="every test file in every group: the main suite")
     mode.add_argument("--update-locks", metavar="ID")
+    mode.add_argument("--files", nargs="*", metavar="TEST", help="exactly these test files and the static checks: the main suite's bisect probe")
     parser.add_argument("--base", default="origin/main")
     parser.add_argument("--ios-host", choices=("local", "mini"), default="local",
                         help="run a verification that selects iOS checks on this host or entirely under the mini lease")
@@ -1318,7 +1326,8 @@ def main(argv: list[str]) -> int:
     skip = {item for item in args.skip.split(",") if item}
     if skip - set(SKIPPABLE):
         parser.error(f"--skip accepts only {', '.join(SKIPPABLE)}")
-    name = "all" if args.all else "full" if args.full else "module" if args.module else "update-locks" if args.update_locks else "changed"
+    name = ("all" if args.all else "full" if args.full else "module" if args.module else "update-locks" if args.update_locks
+            else "files" if args.files is not None else "changed")
     try:
         if not args.plan and git("status", "--porcelain", "--untracked-files=normal").strip():
             raise VerifyError("the worktree has uncommitted or untracked changes; verify reads the committed state, commit first")
@@ -1326,7 +1335,7 @@ def main(argv: list[str]) -> int:
         base = git("merge-base", args.base, "HEAD").strip() if name == "changed" else git("rev-parse", "--verify", args.base).strip()
         result, _ = ownership.check()
         modules = result["modules"]
-        paths = changed_paths(base, working=True) if args.plan and name == "changed" else None
+        paths = args.files if name == "files" else changed_paths(base, working=True) if args.plan and name == "changed" else None
         selection = select(name, args.module or args.update_locks, base, modules, result["tracked"], paths=paths)
         change = delta(base) if name == "changed" else None
     except (VerifyError, ownership.GitError) as error:
