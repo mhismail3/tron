@@ -29,8 +29,9 @@ lock as verification. That lock observes both the runtime system-section preview
 persisted child replay: workspace core instructions, resource instruction assembly, runtime
 projection and the pinned SDK artifact can each change it without changing the lock file.
 These declarations keep that consumer in affected checks with its nested runner rather than
-deferring it to the main suite. Other unchanged serial tests, and unchanged files over the gate's per-file budget
-(`tools/verify/post-merge.json`), are deferred there. The
+deferring it to the main suite. Other unchanged serial tests, and unchanged slow files listed in
+`tools/verify/post-merge.json`, are deferred there unless a changed module owns them: a changed module's own tests
+always run before landing. The
 selection regression calls the shipped planner against the actual ownership graph and each
 producer path; it does not mirror the dependency list in a fixture graph.
 
@@ -346,7 +347,7 @@ A Swift or Gateway string edit is code: its tests and locks run (locks compare l
 
 Test/golden-only narrowing precedes module risk; a manifest/configuration edit still
 requires the full tier. Unchanged files in the existing serial `gateway-nested` list
-are deferred, never dropped, unless explicitly declared as owner verification evidence;
+are deferred, never dropped, unless a changed module owns them or they are declared as owner verification evidence;
 declared tests run immediately. Production changes selecting undeclared serial tests need
 a full tier.
 A changed serial test file and locks selected by a golden edit run immediately.
@@ -362,7 +363,7 @@ An unowned tracked path still fails ownership, not a green partial run. A new mo
 without executable evidence still fails; a tier never turns missing evidence into a pass.
 
 `--plan` prints `selection.tier`, paths, reasons, immediate tests, and
-commands/cwds, `deferredTests` and their exact commands. A successful **full-tier** ordinary run proves affected checks only;
+commands/cwds and `deferredTests`. A successful **full-tier** ordinary run proves affected checks only;
 it does not claim the `--full` run passed. Locks are `*.lock.integration.test.ts`, the
 Pi trace/persisted-state corpus and `UITests/Locks/` and `ViewTests/Locks/`. `ios-app/ui-tests` declares
 `spawn` edges to the hosted app modules, selecting their affected UI locks.

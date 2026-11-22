@@ -34,14 +34,14 @@ def home() -> Path:
     return Path(git("rev-parse", "--path-format=absolute", "--git-common-dir")) / "tron-main-suite"
 
 
-def warm_tree(name: str, sha: str) -> Path:
+def warm_tree(name: str, sha: str, install: bool = True) -> Path:
     """One reused checkout per role: its node_modules stay, and npm ci runs only when a lockfile changed."""
     tree = home() / name
     if not (tree / ".git").exists():
         git("worktree", "add", "--quiet", "--detach", str(tree), sha)
     git("checkout", "--quiet", "--detach", "--force", sha, cwd=tree)
     git("clean", "-ffdxq", "-e", "node_modules", cwd=tree)
-    for package in PACKAGES:
+    for package in PACKAGES if install else ():
         lock = tree / package / "package-lock.json"
         if not lock.is_file():
             continue
@@ -190,7 +190,7 @@ def main(argv: list[str]) -> int:
         with open(home() / "lock", "a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             global ROOT
-            ROOT = warm_tree("tree", git("rev-parse", "HEAD"))
+            ROOT = warm_tree("tree", git("rev-parse", "HEAD"), install=False)
             state_file = home() / "state.json"
             if args.green:
                 state_file.write_text(json.dumps({"green": git("rev-parse", "--verify", args.green)}) + "\n")
