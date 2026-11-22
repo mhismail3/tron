@@ -35,6 +35,11 @@ with open(home / 'runs', 'a') as runs:
 with open(home / 'argv', 'a') as argv:
     argv.write(json.dumps(sys.argv[1:]) + '\n')
 if (home / 'hold').exists():
+    if (home / 'spawn').exists():
+        import signal
+        step = subprocess.Popen(['sleep', '300'], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        (home / 'step').write_text(str(step.pid))
+        signal.signal(signal.SIGTERM, lambda *_: (os.killpg(step.pid, signal.SIGTERM), sys.exit(143)))
     (home / 'held').write_text(sha)
     while (home / 'hold').exists():
         time.sleep(0.05)
@@ -190,6 +195,22 @@ class Land(unittest.TestCase):
         self.assertIn('main is unchanged', output)
         self.assertEqual(self.main(), self.base)
         self.assertEqual(len(self.runs()), 1, 'validated once, never looped')
+
+    def test_a_stopped_land_stops_its_gate_and_the_gate_steps_it_started(self) -> None:
+        """Land runs the gate here; a soft stop of land must reach verify's own handler, which stops the step process
+        groups it started, instead of killing verify and orphaning them in the reused land tree."""
+        self.write('feature.txt', 'feature\n')
+        self.commit('green change')
+        (self.home / 'hold').write_text('')
+        (self.home / 'spawn').write_text('')
+        process = self.land()
+        self.wait_for((self.home / 'held').is_file, 'the gate')
+        step = int((self.home / 'step').read_text())
+        process.terminate()
+        process.communicate(timeout=60)
+        alive = lambda: subprocess.run(['ps', '-o', 'stat=', '-p', str(step)], capture_output=True, text=True).stdout.strip() not in ('', 'Z')
+        self.wait_for(lambda: not alive(), 'the gate step stopping')
+        self.assertEqual(self.main(), self.base)
 
     def test_a_main_moved_during_validation_is_merged_and_validated_again(self) -> None:
         self.write('feature.txt', 'feature\n')

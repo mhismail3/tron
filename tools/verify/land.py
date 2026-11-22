@@ -17,7 +17,7 @@ from host_lock import GATE, LAND_LOCK, wait_for_lock  # noqa: E402  (the one hos
 
 ROOT = Path(subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True).stdout.strip())
 SKIP = "ios,mac,python-here"
-PACKAGES = {"packages/gateway": ("package.json", "package-lock.json", "third_party"), "packages/push-relay": ("package.json", "package-lock.json")}
+PACKAGES = {"packages/gateway": ("package.json", "package-lock.json", ".npmrc", "third_party"), "packages/push-relay": ("package.json", "package-lock.json", ".npmrc")}
 
 
 class Refused(Exception):
@@ -75,8 +75,14 @@ def install(tree: Path) -> None:
 def validate(tree: Path, sha: str, main: str) -> tuple[str, dict, Path]:
     """('passed', 'failed' or 'no result', the report, where its evidence is kept) for the affected Tier 0 to 2 checks at exactly `sha`."""
     install(tree)
-    code = subprocess.run([sys.executable, str(tree / "tools/verify/verify.py"), "--changed", "--base", main, "--skip", SKIP],
-                          cwd=tree, stdin=subprocess.DEVNULL, env={**os.environ, GATE: "1"}).returncode
+    with subprocess.Popen([sys.executable, str(tree / "tools/verify/verify.py"), "--changed", "--base", main, "--skip", SKIP],
+                          cwd=tree, stdin=subprocess.DEVNULL, env={**os.environ, GATE: "1"}) as child:
+        try:
+            code = child.wait()
+        except BaseException:
+            child.terminate()
+            child.wait()
+            raise
     kept, source = ROOT / "test-results/land" / sha, tree / "test-results/verify"
     report = {}
     if (source / f"{sha}.json").is_file():
