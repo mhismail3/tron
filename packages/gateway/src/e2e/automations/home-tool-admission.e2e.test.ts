@@ -42,7 +42,7 @@ vi.mock("node:child_process", async original => {
       if (file === "/usr/bin/osascript" && args.some(arg => arg.includes("CGSSessionScreenIsLocked") && arg.includes("JSON.stringify"))) {
         return { stdout: JSON.stringify({ console: true, locked: false, asleep: false }), stderr: "" };
       }
-      return file === DRIVER && desktop.driver ? run(process.execPath, [desktop.driver, ...args], options) : run(file, args, options);
+      return file === DRIVER ? run(process.execPath, [desktop.driver, ...args], options) : run(file, args, options);
     },
   });
   const spawn = (file: string, args: string[], options: any) => actual.spawn(file,
@@ -375,8 +375,8 @@ it.skipIf(process.platform !== "darwin")("real Gateway: Home observes and acts t
   await writeFile(desktop.driver, `const fs = require('node:fs');
 const tool = process.argv[3], args = JSON.parse(process.argv[4]);
 if (tool === 'start_session') { console.log(JSON.stringify({ active: true, revived: false })); return; }
-if (tool === 'end_session') { console.log(JSON.stringify({ active: false })); return; }
 fs.appendFileSync(${JSON.stringify(dispatched)}, JSON.stringify({ tool, args }) + '\\n');
+if (tool === 'end_session') { console.log(JSON.stringify({ active: false })); return; }
 const window = tool === 'get_window_state' ? { pid: 41, window_id: 7, elements: [{ element_token: 's0000000a:0', role: 'AXButton', label: 'Approve' }] } : {};
 console.log(JSON.stringify({ status: 'completed', ...window }));
 `);
@@ -410,9 +410,11 @@ console.log(JSON.stringify({ status: 'completed', ...window }));
     await gateway.settled(sessionId);
     expect(await refusedCalls(gateway, sessionId)).toEqual([{ tool: "computer", text: WAKE_REFUSAL }]);
     expect((await calls()).map(call => call.tool)).toEqual(["get_window_state", "click"]);
+    await gateway.dispose();
+    owned.splice(owned.indexOf(gateway), 1);
+    expect((await calls()).map(call => call.tool)).toEqual(["get_window_state", "click", "end_session"]);
     evidence.push({ case: "home-computer", dispatched: await calls() });
   } finally {
-    desktop.driver = "";
     await rm(fixture, { recursive: true, force: true });
   }
 });
