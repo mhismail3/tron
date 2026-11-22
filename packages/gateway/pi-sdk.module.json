@@ -1,12 +1,14 @@
 {
   "layer": "L2",
   "owns": [
+    "agent-browser-patch.json",
     "artifacts/**",
     "pi-agent-browser-native-patch.json",
     "pi-coding-agent-patch.json",
     "pi-sdk-baseline.json",
     "pi-sdk.module.json",
     "pi-subagents-pin.json",
+    "scripts/build-agent-browser-engine.mjs",
     "scripts/build-pi-coding-agent-patch.mjs",
     "scripts/build-pi-subagents-closure.integration.test.mjs",
     "scripts/build-pi-subagents-closure.py",
