@@ -84,14 +84,11 @@ process start identity, profile and issued launch nonce before attachment.
 `browser-fork-receipts.integration.test.ts` exercises actual packaged open/get-CDP,
 unrecorded-endpoint refusal, twenty authenticated owned attaches and restart persistence,
 parent resealing, cold reload and cancellation while a nested host tool is pending.
-Raw nested lifecycle
-metadata alone is not authority; `open` is not required to promote it. Per-action routing needs the provider's
-`agent-browser.browser-binding.v1` (`cdpUrl`, `session`, `owned`, `state:
-active|closed`), promoted only from native envelopes. The adapter seals the descriptor
-to the tool call and session with an ephemeral key; copies grant nothing. One exact
-endpoint/generation registration is reused; noncanonical endpoints are rejected; a
-close retires only its generation (manual chips stay, no dead-browser popups). At most
-4,096 generation receipts; exhaustion denies admission.
+Only an explicit `get cdp-url` result from that builtin admits a view; lifecycle
+metadata, `open` and raw endpoints grant nothing. The adapter seals the descriptor to
+the tool call and session with an ephemeral key; copies grant nothing. Noncanonical
+endpoints are rejected. At most 4,096 browser generations are observed per Gateway;
+exhaustion denies admission.
 
 Viewing is authorized only by an admitted display result or sealed browser projection
 on the exact active branch, inside the device credential admission. Frame and DELETE

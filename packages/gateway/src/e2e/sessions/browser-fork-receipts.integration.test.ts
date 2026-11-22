@@ -1,5 +1,5 @@
 import { createTestRegistry } from "../../../test-support/gateway-registry.js";
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { execFile, execFileSync, spawn } from "node:child_process";
@@ -211,7 +211,7 @@ describe("packaged agent-browser receipts", () => {
       expect(unmarked).toContain("owned_launch_required");
       expect(unmarked).toContain("owned-launch prepare <profileDir>");
       await writeFile(join(profile,".tron-owned-profile"),randomUUID(),{mode:0o600});
-      const launch=async(label:string)=>{
+      const launch=async(label:string,probe=false)=>{
         const prepared=await step(label+"-prepare",["owned-launch","prepare",profile]);
         expect(prepared).toMatchObject({isError:false,details:{data:{profile}}});
         const {launchId,args}=prepared.details.data;
@@ -228,12 +228,24 @@ describe("packaged agent-browser receipts", () => {
           expect(await step(label+"-verify",["get","url"])).toMatchObject({isError:false});
           expect(await step(label+"-read",["get","cdp-url"])).toMatchObject({isError:false,details:{data:{cdpUrl:endpoint}}});
           expect(await step(label+"-detach",["close"])).toMatchObject({isError:false});
+          if(probe){
+            const again=JSON.stringify(await step(label+"-prepare-live",["owned-launch","prepare",profile]));
+            expect(again).toContain("owned_launch_live");
+            expect(again).toContain(endpoint);
+            const moved=profile+" moved";
+            await rename(profile,moved);
+            try {
+              const refused=JSON.stringify(await step(label+"-renamed",["connect",endpoint],true));
+              expect(refused).toContain("owned_launch_required");
+              expect(refused).not.toContain("ENOENT");
+            } finally { await rename(moved,profile); }
+          }
         } finally {
           await closeProducer(child,exited,endpoint);
         }
         return {launchId,endpoint:endpoint!};
       };
-      const first=await launch("persistent-first");
+      const first=await launch("persistent-first",true);
       expect(await step("persistent-cleanup",["owned-launch","cleanup",first.launchId])).toMatchObject({isError:true});
       expect(JSON.stringify(await step("persistent-exited",["connect",first.endpoint],true))).toContain("owned_launch_required");
       expect(await readdir(join(agentDir,"browser","profile.launches"))).not.toContain(`${new URL(first.endpoint).port}.json`);
