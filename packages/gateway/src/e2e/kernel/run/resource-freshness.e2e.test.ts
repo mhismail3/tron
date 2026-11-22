@@ -2,7 +2,7 @@ import type { FSWatcher } from "node:fs";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fauxAssistantMessage, getSystemMessageText } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, getSystemMessageText } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setHomeMemoryModels } from "../../../../test-support/settings-dependencies.js";
 import { disposeFixtures, fixture } from "../../../../test-support/home-task-fixture.js";
@@ -107,7 +107,7 @@ async function writePrompt(agentDir: string, name: string, description: string, 
   await writeFile(join(agentDir, "prompts", `${name}.md`), `---\ndescription: ${description}\n---\n${body}\n`);
 }
 
-describe("Home's global skills and prompt templates follow the agent directory live", () => {
+describe("Home's global skills and prompt templates follow the agent directory live", { timeout: 60_000 }, () => {
   it("lists and uses a global prompt and skill added while Home is live, on its next turn", async () => {
     const { f, home, commands, turn, userHome } = await liveHome();
     expect(globalResources(await commands(home.id))).toEqual([]);
@@ -122,7 +122,7 @@ describe("Home's global skills and prompt templates follow the agent directory l
     expect(f.events.some(event => event.topic === "session.resourcesChanged")).toBe(true);
     expect(await turn({ source: "prompt", name: "deeper" }, "now")).toBe("DEEPER PROMPT BODY\n\nnow");
     expect(await turn({ source: "skill", name: "late-skill" }, "apply")).toContain("LATE SKILL BODY");
-  }, 60_000);
+  });
 
   it("lists a skill's frontmatter title for display without changing its name or adding a loader diagnostic", async () => {
     const { f, home, commands, service, client } = await liveHome();
@@ -135,7 +135,41 @@ describe("Home's global skills and prompt templates follow the agent directory l
     expect(skills.map(skill => [skill.name, skill.title])).toEqual([["skill:jev", undefined], ["skill:last30days", "Last 30 Days"]]);
     const resources = await service.invoke(client, "session.resources", { sessionId: home.id }) as { skills: { diagnostics: unknown[] } };
     expect(resources.skills.diagnostics).toEqual([]);
-  }, 60_000);
+  });
+
+  it("reports a malformed skill to Home at write time and in its next turn frame, then the repaired skill as added (#2649)", async () => {
+    const { f, home, commands, service, client } = await liveHome();
+    const path = join(f.agentDir, "skills", "bad-skill", "SKILL.md");
+    const warning = "Nested mappings are not allowed in compact mappings at line 2, column 14";
+    const frames: string[] = [];
+    let written = "";
+    const frameOf = (messages: readonly { role: string; content?: unknown }[]) =>
+      (messages.at(-1)!.content as Array<{ text: string }>)[0]!.text;
+    let sequence = 0;
+    const prompt = async (text: string, responses: Parameters<typeof f.faux.setResponses>[0]) => {
+      const before = frames.length;
+      f.faux.setResponses(responses);
+      await service.invoke(client, "home.prompt", { commandId: `skill-warning-${++sequence}`, text });
+      await waitFor(() => frames.length > before && home.snapshot().operation === undefined, `turn ${sequence} settled`);
+      return frames.at(-1)!;
+    };
+    const plain = (context: { messages: readonly { role: string; content?: unknown }[] }) => { frames.push(frameOf(context.messages)); return fauxAssistantMessage("ok"); };
+    expect(await prompt("baseline", [plain])).not.toContain("Resource");
+    await mkdir(join(f.agentDir, "skills", "bad-skill"), { recursive: true });
+    const completed = () => f.signals.filter(record => record.sessionId === home.id && record.reason === "completed").length;
+    const reloads = completed();
+    await prompt("write the skill", [context => { frames.push(frameOf(context.messages)); return fauxAssistantMessage(
+      [fauxToolCall("write", { path, content: "---\nname: bad-skill\ndescription: Report: what changed\n---\nBODY\n" }, { id: "write-bad-skill" })], { stopReason: "toolUse" }); },
+    context => { written = JSON.stringify(context.messages.filter(message => message.role === "toolResult").at(-1)!.content); return fauxAssistantMessage("written"); }]);
+    expect(written).toContain(`The skill loader reports for ${path}: ${warning}`);
+    await waitFor(() => completed() > reloads, "the malformed skill changes Home's resource digest");
+    const warned = await prompt("next", [plain]);
+    expect(warned).toMatch(new RegExp(`Resource load warnings: [^\\n]*bad-skill/SKILL\\.md: ${warning}`));
+    expect(await prompt("again", [plain])).not.toContain("Resource");
+    await writeSkill(f.agentDir, "bad-skill", "\"Report: what changed\"", "BODY");
+    await waitFor(async () => (await commands(home.id)).some(command => command.name === "skill:bad-skill"), "Home loads the repaired skill");
+    expect(await prompt("after repair", [plain])).toMatch(/Resources added: skill bad-skill \([^)]*bad-skill\/SKILL\.md\)\./);
+  });
 
   it("follows edits and deletions, and lists the same global resources as an ordinary chat", async () => {
     const { f, home, commands, turn } = await liveHome();
@@ -157,7 +191,7 @@ describe("Home's global skills and prompt templates follow the agent directory l
 
     const chat = await f.registry.create(f.cwd);
     expect(globalResources(await commands(chat.id))).toEqual(expected);
-  }, 60_000);
+  });
 
   it("completes a deferred resource reload when the last session RPC mutation settles", async () => {
     const { f, home, commands } = await liveHome();
@@ -177,7 +211,7 @@ describe("Home's global skills and prompt templates follow the agent directory l
     } finally { work.settle(); }
     await waitFor(() => recorded("completed"), "RPC settlement completes the deferred freshness drain");
     expect((await commands(chat.id)).find(command => command.name === "rpc-settlement")?.description).toBe("After settlement");
-  }, 60_000);
+  });
 
   it("does not reload Home for agent-directory writes made before its watchers started (#1694)", async () => {
     const userHome = await mkdtemp(join(tmpdir(), "tron-home-resources-"));
@@ -200,7 +234,7 @@ describe("Home's global skills and prompt templates follow the agent directory l
     await writePrompt(f.agentDir, "after-start", "Written after start", "BODY");
     await waitFor(() => f.events.slice(before).some(event => event.topic === "session.resourcesChanged"), "Home reloads for a write after its watchers started");
     expect(f.events.slice(before).filter(event => event.topic === "session.resourcesChanged")).toHaveLength(1);
-  }, 60_000);
+  });
 
   it("refreshes Home and ordinary sessions, skips unchanged rendered inputs, and watches project resources", async () => {
     const { f, home, commands } = await liveHome();
@@ -271,7 +305,7 @@ describe("Home's global skills and prompt templates follow the agent directory l
     await writePrompt(f.agentDir, "after-link", "Survives dangling resource link", "BODY");
     await waitFor(async () => (await commands(home.id)).some(command => command.name === "after-link")
       && (await commands(chat.id)).some(command => command.name === "after-link"), "dangling link does not prevent either slot refreshing");
-  }, 60_000);
+  });
 
   it("retries a failed reload at the next idle edge and reports successful package reloads", async () => {
     const { f, home, commands } = await liveHome();
@@ -294,7 +328,7 @@ describe("Home's global skills and prompt templates follow the agent directory l
     const before = reload.mock.calls.length;
     await writeFile(manifest, JSON.stringify({ name: "fixture-package", version: "1.0.0", pi: { skills: [] } }));
     await waitFor(async () => reload.mock.calls.length > before && !globalResources(await commands(home.id)).includes("skill:package-skill|Installed package skill"), "package manifest changes loaded resources");
-  }, 60_000);
+  });
 
   it("applies a change made during a Home run once that run settles", async () => {
     const { f, home, commands, service, client } = await liveHome();
@@ -317,5 +351,5 @@ describe("Home's global skills and prompt templates follow the agent directory l
     await home.prompt("next");
     await waitFor(() => system.length > 0, "next activation provider request");
     expect(system).toContain("Skill written mid-run");
-  }, 60_000);
+  });
 });
