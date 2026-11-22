@@ -4,12 +4,19 @@ import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
 import { CuaComputerClient } from "../machine/cua-client.js";
 import type { ConsoleGate } from "../machine/console-probe.js";
 
-export function createTronComputerExtension(input: { sessionId: () => string; gate: ConsoleGate }): ExtensionFactory {
+export function createTronComputerExtension(input: { sessionId: () => string; delegatedTask: () => AbortSignal | undefined; gate: ConsoleGate }): ExtensionFactory {
   return (pi) => {
     const computer = new CuaComputerClient({ canonicalSessionID: input.sessionId(), runtimeLoadID: randomUUID() }, () => input.gate.admit(input.sessionId()));
     pi.on("session_shutdown", async () => { await computer.close(); });
     pi.on("before_agent_start", async () => { computer.invalidateObservation(); });
-    pi.on("agent_end", async () => { await computer.endTurn(); });
+    const watched = new WeakSet<AbortSignal>();
+    pi.on("agent_end", async () => {
+      const task = input.delegatedTask();
+      if (!task || task.aborted) { await computer.endTurn(); return; }
+      if (!watched.has(task)) { watched.add(task); task.addEventListener("abort", () => { void computer.endTurn(); }, { once: true }); }
+      await computer.endTurn(true);
+    });
+    pi.on("agent_settled", async (event) => { if (event.aborted) await computer.endTurn(); });
     pi.registerTool({
       name: "computer", label: "Mac computer",
       annotations: { openWorldHint: true },

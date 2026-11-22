@@ -11,10 +11,11 @@ import { createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { TrustService } from "../../kernel/resources/trust-service.js";
 import { BrowserLiveViewRegistry } from "../../display/browser-live-view.js";
+import { HomeTaskReportOwner } from "../../kernel/delegation/task-report.js";
 import type { NotificationService } from "../../notifications/notification-service.js";
 
 const DRIVER = "/Applications/Tron.app/Contents/Library/Native/cua-driver";
-const boundary = vi.hoisted(() => ({ driver: "", lockFile: "", deadlineScale: 1, probes: 0, host: [] as string[], console: { locked: false, asleep: false } }));
+const boundary = vi.hoisted(() => ({ driver: "", lockFile: "", deadlineScale: 1, probes: 0, host: [] as string[], console: { locked: false, asleep: false } as Record<string, unknown> }));
 vi.mock("../../machine/native-capture-transport.js", () => ({ openNativeCaptureTransport: () => {
   const identity = { bootID: crypto.randomUUID(), connectionID: crypto.randomUUID(), sessionID: crypto.randomUUID() };
   const generation = crypto.randomUUID();
@@ -41,7 +42,7 @@ vi.mock("node:child_process", async original => {
       if (file === "/usr/bin/osascript" && args.some(arg => arg.includes("CGSSessionScreenIsLocked") && arg.includes("JSON.stringify"))) {
         boundary.probes++;
         const lockedByDriver = boundary.lockFile !== "" && (() => { try { readFileSync(boundary.lockFile); return true; } catch { return false; } })();
-        return { stdout: JSON.stringify({ ...boundary.console, locked: boundary.console.locked || lockedByDriver }), stderr: "" };
+        return { stdout: JSON.stringify({ console: true, ...boundary.console, locked: lockedByDriver || boundary.console.locked }), stderr: "" };
       }
       return file === DRIVER ? run(process.execPath, [boundary.driver, ...args], { ...options, timeout: options.timeout && options.timeout / boundary.deadlineScale }) : run(file, args, options);
     },
@@ -117,8 +118,8 @@ async function fixture() {
   await slot.setModel(model.provider, model.id);
   const result = (id: string) => slot.snapshot().transcript.find((item: any) => item.kind === "message" && item.role === "toolResult" && item.toolCallId === id) as any;
   return {
-    slot, result,
-    lockAlerts: () => alerts.filter(alert => /locked|asleep/u.test(`${alert.title} ${alert.message}`)).length,
+    slot, result, registry, faux,
+    lockAlerts: () => alerts.filter(alert => alert.message.startsWith("Tron paused desktop work")).length,
     root,
     mode: (value: "" | "hold" | "lock" | "stale") => writeFile(join(root, "mode"), value),
     dispatched: async () => !!await readFile(dispatched).catch(() => false),
@@ -139,7 +140,8 @@ async function fixture() {
 const desktop = (id: string): [string, string, Record<string, unknown>] => [id, "computer", { tool: "get_desktop_state", arguments: {} }];
 
 describe.skipIf(process.platform !== "darwin")("console admission for computer and native capture through the real Gateway/Pi turn", () => {
-  it.each([["mac_locked", { locked: true, asleep: false }], ["display_asleep", { locked: false, asleep: true }]] as const)(
+  it.each([["mac_locked", { locked: true, asleep: false }], ["display_asleep", { locked: false, asleep: true }],
+    ["no_console_session", { console: false, locked: false, asleep: false }], ["console_unavailable", { locked: "unreadable", asleep: false }]] as const)(
     "refuses computer and native_capture within 1 s with %s, dispatches nothing and notifies once per episode", async (cause, state) => {
     const f = await fixture();
     boundary.console = { ...state };
@@ -191,6 +193,28 @@ describe.skipIf(process.platform !== "darwin")("console admission for computer a
     await prompting;
     await waitFor(async () => await heldAssertions() === 0, "assertion release at turn end");
     if (!stop) expect(f.result("desktop").isError).not.toBe(true);
+  });
+
+  it("keeps the display assertion across a delegated task's turns until the task settles, and releases it then", async () => {
+    const f = await fixture();
+    const report = new HomeTaskReportOwner({ taskId: "desktop-task", homeId: "desktop-home", generation: 1, operationId: "desktop-task-operation" }, async () => {});
+    const lease = await f.registry.delegation.createWorker(f.root, report);
+    await lease.slot.setModel(f.faux.getModel().provider, f.faux.getModel().id);
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("computer", { tool: "get_desktop_state", arguments: {} }, { id: "worker-desktop" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage("Worker turn ends without a report."),
+      fauxAssistantMessage("Still no report."),
+    ]);
+    await new Promise<unknown>((resolve) => {
+      void lease.slot.prompt("Use the fixture desktop for the task", [], undefined, undefined, undefined, {
+        operationId: "desktop-task-operation", signal: report.signal, onTerminal: resolve,
+        origin: { kind: "gateway", ownerId: "desktop-task", title: "Home task", confidence: "boundary" },
+      });
+    });
+    expect(await heldAssertions()).toBe(1);
+    report.retire();
+    await waitFor(async () => await heldAssertions() === 0, "assertion release when the task settles");
+    await f.registry.delegation.acknowledge(lease.slot.id, "desktop-task-operation", lease);
   });
 
   it("ends a driver call that never answers at its deadline as an uncertain effect and leaves no driver process", async () => {

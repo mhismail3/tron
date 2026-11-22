@@ -62,9 +62,9 @@ export class CuaComputerClient {
 
   constructor(private readonly binding: NativeCaptureBinding, private readonly admit: () => Promise<void>) {}
 
-  async endTurn(): Promise<void> {
+  async endTurn(keepDesktopAwake = false): Promise<void> {
     await this.pending?.catch(() => {});
-    await this.activity.release();
+    if (!keepDesktopAwake) await this.activity.release();
   }
 
   invalidateObservation(): void {
