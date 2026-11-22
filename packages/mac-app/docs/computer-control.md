@@ -38,8 +38,8 @@ services available. Retirement seals startup, closes the pipe, and shares one
 retained wait for actual child exit across every caller; it does not equate a
 proxy's exit with native completion.
 
-The shipped driver is pinned to Cua0.33.0, revision
-`1553a3f360ea12155be3bc77e27c427ca62f967a`. GitHub marks this release prerelease.
+The shipped driver is pinned to Cua0.56.9, revision
+`72f5415fe8c229aebc1bc647655c92fb9f5956e2`. GitHub marks this release prerelease.
 Sheet controls belong to their addressed parent window only when AX proves that
 attachment; unrelated windows and stale element tokens remain refused.
 `cua-driver-release.json` is the single release pin used by staging, composition
