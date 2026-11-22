@@ -64,6 +64,7 @@ class Land(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = Path(tempfile.mkdtemp(prefix='tron-land-test-'))
         self.addCleanup(shutil.rmtree, self.temporary, True)
+        self.addCleanup(subprocess.run, ['chmod', '-R', 'u+w', str(self.temporary)], capture_output=True)
         self.local, self.mini, self.origin = self.temporary / 'local', self.temporary / 'mini-home', self.temporary / 'origin.git'
         for path in ('scripts/tron', 'tools/verify/land.py', 'tools/verify/mini.py', 'tools/verify/ledger.py', 'scripts/tron-node', '.node-version',
                      'config/ci-toolchain.env'):

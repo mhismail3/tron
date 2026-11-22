@@ -38,7 +38,6 @@ def warm_tree(name: str, sha: str) -> Path:
     tree = home() / name
     if not (tree / ".git").exists():
         git("worktree", "add", "--quiet", "--detach", str(tree), sha)
-    subprocess.run(["chmod", "-R", "u+w", str(tree)], capture_output=True)
     git("checkout", "--quiet", "--detach", "--force", sha, cwd=tree)
     git("clean", "-ffdxq", cwd=tree)
     return tree
