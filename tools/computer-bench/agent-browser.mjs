@@ -1,19 +1,24 @@
 // Purpose: computer-bench adapter for the agent-browser CLI (the engine behind Tron's agent_browser tool), driving its own managed Chrome for Testing.
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { DOWNLOAD_BODY } from "./fixtures/site.mjs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { CAPTION, DOWNLOAD_BODY } from "./fixtures/site.mjs";
 import { pngSize, run } from "./process.mjs";
 
-const BINARY = process.env.COMPUTER_BENCH_AGENT_BROWSER ?? join(homedir(), ".tron/agent/bin/agent-browser");
+function pinnedEngine() {
+  const gateway = createRequire(new URL("../../packages/gateway/package.json", import.meta.url));
+  const native = dirname(gateway.resolve("pi-agent-browser-native/package.json"));
+  return join(dirname(createRequire(join(native, "package.json")).resolve("agent-browser/package.json")), "bin", "agent-browser.js");
+}
 
 export function agentBrowser() {
+  let binary;
   const session = `cb2476-${process.pid}`;
   const profileSession = `${session}-profile`;
   let profile;
 
   async function call(args, { sessionName = session, timeoutMs = 30_000, global = [] } = {}) {
-    const result = await run(BINARY, ["--json", "--session", sessionName, ...global, ...args], { timeoutMs });
+    const result = await run(binary, ["--json", "--session", sessionName, ...global, ...args], { timeoutMs });
     let parsed;
     try { parsed = JSON.parse(result.stdout); } catch { parsed = undefined; }
     if (result.timedOut) throw new Error(`timed out: ${args.join(" ")}`);
@@ -30,8 +35,9 @@ export function agentBrowser() {
   return {
     name: "agent-browser",
     async probe() {
-      if (!existsSync(BINARY)) return { ok: false, reason: `missing ${BINARY}` };
-      const result = await run(BINARY, ["--version"]);
+      binary = process.env.COMPUTER_BENCH_AGENT_BROWSER ?? pinnedEngine();
+      if (!existsSync(binary)) return { ok: false, reason: `missing ${binary}` };
+      const result = await run(binary, ["--version"]);
       return { ok: result.code === 0, version: result.stdout.trim(), reason: result.stderr.trim() };
     },
     async setup(ctx) { profile = join(ctx.workdir, "agent-browser-profile"); await openForm(ctx); },
@@ -48,6 +54,12 @@ export function agentBrowser() {
         await call(["click", "#prefilled"]); await call(["press", "Meta+a"]); await call(["keyboard", "type", "new value"]);
         const text = await value(["get", "value", "#prefilled"]);
         return { ok: text === "new value", detail: text };
+      },
+      async "caption-exact"(ctx) {
+        await call(["open", `${ctx.site.origin}/composer.html`]);
+        await call(["click", "#composer"]); await call(["press", "Meta+a"]); await call(["keyboard", "type", CAPTION]);
+        const text = await value(["eval", "document.querySelector('#composer').textContent"]);
+        return { ok: text === CAPTION, detail: text === CAPTION ? `${[...text].length} chars exact` : `got ${JSON.stringify(text.slice(0, 80))}` };
       },
       async "form-controls"(ctx) {
         await openForm(ctx);
