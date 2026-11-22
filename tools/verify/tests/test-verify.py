@@ -49,7 +49,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 ARTIFACTS = ROOT / "test-results" / "verify-cli"
-COPIED = ["tools/verify/ledger-node.mjs", "tools/verify/ledger-host.mjs", "tools/verify/ledger-vitest.mjs", "scripts/tron", "scripts/check-documentation-policy.py", "scripts/check-agent-policy.sh", "scripts/personal-info-guard.sh",
+COPIED = ["tools/verify/post-merge.json", "tools/verify/ledger-node.mjs", "tools/verify/ledger-host.mjs", "tools/verify/ledger-vitest.mjs", "scripts/tron", "scripts/check-documentation-policy.py", "scripts/check-agent-policy.sh", "scripts/personal-info-guard.sh",
           "scripts/ios-test-build-identity.py", "tools/work/work.json",
           *[str(p.relative_to(ROOT)) for d in ("tools/verify", "tools/ownership", "tools/metrics", "tools/layers", "tools/work", "tools/docs", "tools/home-layout")
             for p in (ROOT / d).glob("*.py")]]
