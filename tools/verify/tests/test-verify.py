@@ -249,8 +249,7 @@ class ExternalVerificationTests(VerifyCase):
             else:
                 self.assertEqual(node_command[-1:], [files[3]], options)
                 self.assertNotIn("mini.py", " ".join(node_command), options)
-            local_python = "status=0; " + "; ".join(f"echo '### verify file: {path}'; python3 tools/verify/ledger.py python {path} || {{ code=$?; [ \"$status\" -ne 0 ] || status=$code; }}"
-                                       for path in ("mods/alpha/test-alpha.py", "scripts/test-pooled.py")) + '; exit "$status"'
+            local_python = "python3 tools/verify/files.py python mods/alpha/test-alpha.py scripts/test-pooled.py"
             python_command = next(c["command"] for c in plan["commands"] if c["name"] == "tests: python")
             self.assertEqual([python_command[0], Path(python_command[1]).name, *python_command[2:]] if runner == "mini.py"
                              else python_command, ["python3", "mini.py", "python", local_python] if runner == "mini.py"
@@ -681,7 +680,9 @@ class LedgerTests(VerifyCase):
                                 ('mods/alpha/test-fixtures.py::setUpClass (Skipped)', 'skipped'),
                                 ('mods/alpha/test-passed.py', 'passed')])
         r.write('mods/alpha/test-000-status.py', 'import sys\nsys.exit(37)\n')
-        r.commit('first nonzero status with later files')
+        for side, mode in (('reader', 'O_RDONLY'), ('writer', 'O_WRONLY')):
+            r.write(f'mods/alpha/test-pair-{side}.py', "import os, signal, unittest\nfrom pathlib import Path\nFIFO = Path(os.environ['TMPDIR']) / 'tron-pair.fifo'\nclass Pair(unittest.TestCase):\n    def test_meets_its_partner(self):\n        try:\n            os.mkfifo(FIFO)\n        except FileExistsError:\n            pass\n        signal.alarm(60)\n        os.close(os.open(FIFO, os.{}))\n        signal.alarm(0)\n        print('pair met')\nunittest.main()\n".format(mode))
+        r.commit('first nonzero status with later files, and two files that each finish only while the other runs')
         for entry in ('tooling', 'verify'):
             with self.subTest(entry=entry):
                 if entry == 'tooling':
@@ -695,7 +696,24 @@ class LedgerTests(VerifyCase):
                     self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
                     step = next(step for step in r.report()['steps'] if step['name'] == 'tests: python')
                     self.assertEqual(step['exit'], 37)
-                    self.assertIn('file passed', (r.path / step['log']).read_text())
+                    log = (r.path / step['log']).read_text()
+                    self.assertIn('file passed', log)
+                    self.assertEqual(log.count('pair met'), 2, log)
+
+    def test_parallel_first_appenders_to_a_new_ledger_all_record(self) -> None:
+        """Parallel test files each open the ledger; switching a new store to WAL raced, and an appender failed its file with 'database is locked'."""
+        record = ("import sys; sys.path.insert(0, sys.argv[1]); import ledger; ledger.append([{'runId': 'r', 'testId': 't', 'commit': 'c', "
+                  "'tree': 't', 'dirty': 0, 'outcome': 'passed', 'seconds': 0, 'lane': 'python', 'host': 'h', 'cpuIdlePercent': None, "
+                  "'memoryFreePercent': None, 'measuredAt': 'm', 'seenAt': 's', 'contended': 0}])")
+        for trial in range(30):
+            store = Path(self.temp.name) / f'ledger-{trial}' / 'results.sqlite3'
+            env = {**os.environ, 'TRON_TEST_LEDGER': str(store)}
+            appenders = [subprocess.Popen([sys.executable, '-c', record, str(ROOT / 'tools/verify')], env=env, stderr=subprocess.PIPE, text=True)
+                         for _ in range(12)]
+            errors = [error for appender in appenders for _, error in [appender.communicate()] if appender.returncode]
+            self.assertEqual(errors, [], trial)
+            with sqlite3.connect(store) as connection:
+                self.assertEqual(connection.execute('SELECT COUNT(*) FROM results').fetchone()[0], 12)
 
     def test_public_tooling_run_appends_real_cases_and_flakes_means_same_tree_pass_and_fail(self) -> None:
         r = self.repo
@@ -2311,6 +2329,27 @@ class StepStopTests(unittest.TestCase):
             time.sleep(0.05)
         run.stop([launched])
         self.assertEqual(launched.result["status"], "interrupted")
+
+
+class FileRunnerStopTests(VerifyCase):
+    def test_a_stopped_python_group_starts_no_further_file(self) -> None:
+        """verify stops a step by signalling its process group; the parallel file runner's chain thread then started
+        the chain's next file outside that group, which ran until verify's SIGKILL 30 s later."""
+        r = self.repo
+        started, later = Path(self.temp.name) / "started", Path(self.temp.name) / "later"
+        r.write("mods/alpha/test-a-first.py", f"import time\nfrom pathlib import Path\nPath({str(started)!r}).touch()\ntime.sleep(120)\n")
+        r.write("mods/alpha/test-b-second.py", f"from pathlib import Path\nPath({str(later)!r}).touch()\nprint('after test-a-first.py')\n")
+        r.commit("a chain whose first file never ends")
+        runner = subprocess.Popen(["python3", "tools/verify/files.py", "python", "mods/alpha/test-a-first.py", "mods/alpha/test-b-second.py"],
+                                  cwd=r.path, env=r.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        self.addCleanup(lambda: runner.poll() is not None or (os.killpg(runner.pid, signal.SIGKILL), runner.wait()))
+        deadline = time.monotonic() + 30
+        while not started.exists():
+            self.assertLess(time.monotonic(), deadline, "the first file never started")
+            time.sleep(0.05)
+        os.killpg(runner.pid, signal.SIGTERM)
+        self.assertEqual(runner.wait(timeout=10), 128 + signal.SIGTERM)
+        self.assertFalse(later.exists())
 
 
 class MutateTests(VerifyCase):

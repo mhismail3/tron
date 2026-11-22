@@ -371,7 +371,7 @@ Runners are the existing ones:
 |---|---|
 | `gateway` / `gateway-nested` | Gateway vitest, main or `vitest.nested.config.ts` |
 | `node-gateway` / `node` | `node --test` |
-| `python` / `python-here` / `shell` | `python3` / `bash` per file; `python-here` (`PYTHON_HERE`: tests reading this Mac's Pi session store) runs on this Mac, never the mini |
+| `python` / `python-here` / `shell` | `tools/verify/files.py`: one `python3` / `bash` process per file. Python files run on half the host's cores; files that name another selected file (a shared fixture or output) run as one chain in selection order; chains start largest first. Each file's output prints whole, under its `### verify file:` marker, when it ends (one chain streams live); the step's exit is the first nonzero status in selection order. Shell files run one at a time in selection order: `test-bundle-gateway-rebuild.sh` rebuilds the checkout's generated Gateway payload, which `test-gateway-payload-verifier.sh` reads. `python-here` (`PYTHON_HERE`: tests reading this Mac's Pi session store) runs on this Mac, never the mini |
 | `ios` | `scripts/tron-ios-test run --only-testing <target>/<class>/<test>` shards: the UIValidation targets |
 | `ios-journeys` | `scripts/ios-gateway-e2e-test run-ui --only-testing <journey>`: the real-UI journeys |
 | `ios-boundary` | `scripts/ios-gateway-e2e-test check --only-testing <method>`: the Gateway E2E target, with its own build and private fixture |
