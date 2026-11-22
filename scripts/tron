@@ -94,10 +94,10 @@ Commands:
                                     no empty test passes; land, not verify, gates main.
   verify --full [--base <ref>] [--skip ...]
                                     Every test file in every group: the main suite
-  main-suite [--green <sha>]        Every test file on each new main here; bisect a reproduced red
+  main-suite [--green <sha>]        Every test file on each new main, on the mini; bisect a reproduced red
                                     and revert its merge through land (tools/verify/land.md)
   land [-m <message>]               Merge this branch --no-ff onto fetched main, run its affected
-                                    Tiers 0-2 on that exact merge on the mini, push it only if it passed;
+                                    Tiers 0-2 on that exact merge here, push it only if it passed;
                                     one land at a time per host (tools/verify/land.md)
   mutate <gateway-src-file> [--count N] [--seed S] [--timeout SECONDS]
                                     Seeded sampled mutation of one file against the tests

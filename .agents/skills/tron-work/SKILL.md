@@ -36,7 +36,7 @@ Prepare pinned Gateway dependencies only when selected checks need them. Review 
 
 After affected evidence passes, run `scripts/tron land` from the task branch
 ([land](../../../tools/verify/land.md)). It waits its turn on this host, merges `--no-ff` onto
-fetched main, validates that exact merge (affected Tiers 0 to 2 on the mini) and pushes it only if
+fetched main, validates that exact merge (affected Tiers 0 to 2 here; the main suite runs on the mini) and pushes it only if
 green; when main moved meanwhile it merges and validates again. Never push main by hand.
 
 If you pushed the task branch, delete it on origin once main contains it

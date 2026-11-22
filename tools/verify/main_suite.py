@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""The main suite: every test file on each new main commit, off the landing path; a red is bisected over main's first-parent merges and its culprit reverted through land (tools/verify/land.md)."""
+"""The main suite: every test file on each new main commit, on the mini under its job lock, off the landing path; a red is bisected over main's first-parent merges and its culprit reverted through land (tools/verify/land.md)."""
 from __future__ import annotations
 
 import argparse
 import fcntl
-import hashlib
 import json
 import subprocess
 import sys
@@ -12,7 +11,7 @@ from pathlib import Path
 
 ROOT = Path(subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True).stdout.strip())
 SKIP = "ios,mac,python-here"
-PACKAGES = ("packages/gateway", "packages/push-relay")
+ARTIFACTS = "mini: artifacts: "
 
 
 class NoResult(Exception):
@@ -34,35 +33,30 @@ def home() -> Path:
     return Path(git("rev-parse", "--path-format=absolute", "--git-common-dir")) / "tron-main-suite"
 
 
-def warm_tree(name: str, sha: str, install: bool = True) -> Path:
-    """One reused checkout per role: its node_modules stay, and npm ci runs only when a lockfile changed."""
+def warm_tree(name: str, sha: str) -> Path:
+    """One reused checkout per role, exactly at `sha`."""
     tree = home() / name
     if not (tree / ".git").exists():
         git("worktree", "add", "--quiet", "--detach", str(tree), sha)
     git("checkout", "--quiet", "--detach", "--force", sha, cwd=tree)
-    git("clean", "-ffdxq", "-e", "node_modules", cwd=tree)
-    for package in PACKAGES if install else ():
-        lock = tree / package / "package-lock.json"
-        if not lock.is_file():
-            continue
-        digest = hashlib.sha256(lock.read_bytes()).hexdigest()
-        stamp = tree / package / "node_modules/.tron-main-suite-install"
-        if not stamp.is_file() or stamp.read_text() != digest:
-            say(f"{package} lockfile changed; npm ci")
-            if subprocess.run([str(tree / "scripts/tron-node"), "exec", "npm", "--prefix", package, "ci", "--include=dev"], cwd=tree).returncode:
-                raise NoResult(f"npm ci in {package} failed at {sha[:12]}")
-            stamp.parent.mkdir(exist_ok=True)
-            stamp.write_text(digest)
+    git("clean", "-ffdxq", cwd=tree)
     return tree
 
 
 def verify(sha: str, args: list[str]) -> dict:
-    """The commit's own verify at exactly `sha`: its report, or a 'no result' verdict."""
+    """The commit's own verify at exactly `sha` on the mini, under its job lock: its report, or a 'no result' verdict."""
     tree = warm_tree("tree", sha)
-    subprocess.run([sys.executable, str(tree / "tools/verify/verify.py"), *args, "--skip", SKIP, "--gateway-host", "local"],
-                   cwd=tree, stdin=subprocess.DEVNULL)
-    report = tree / "test-results/verify" / f"{sha}.json"
-    data = json.loads(report.read_text()) if report.is_file() else {}
+    artifacts = None
+    with subprocess.Popen([sys.executable, str(tree / "tools/verify/mini.py"), "verify", *args, "--skip", SKIP, "--gateway-host", "local",
+                           "--ios-host", "local"], cwd=tree, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                          text=True) as child:
+        for line in child.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            if line.startswith(ARTIFACTS):
+                artifacts = Path(line[len(ARTIFACTS):].strip())
+    report = artifacts / "verify.json" if artifacts else None
+    data = json.loads(report.read_text()) if report and report.is_file() else {}
     return data if data.get("commit") == sha and data.get("verdict") in ("passed", "failed") else {"verdict": "no result"}
 
 
@@ -190,7 +184,7 @@ def main(argv: list[str]) -> int:
         with open(home() / "lock", "a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             global ROOT
-            ROOT = warm_tree("tree", git("rev-parse", "HEAD"), install=False)
+            ROOT = warm_tree("tree", git("rev-parse", "HEAD"))
             state_file = home() / "state.json"
             if args.green:
                 state_file.write_text(json.dumps({"green": git("rev-parse", "--verify", args.green)}) + "\n")

@@ -60,11 +60,12 @@ class GatewayRuns:
         for script in (node, vitest):
             script.chmod(0o755)
 
-    def start(self, name):
-        inherited = {key: value for key, value in os.environ.items() if key != 'TRON_FULL_GATEWAY_LOCK_HELD'}
+    def start(self, name, gate=False):
+        inherited = {key: value for key, value in os.environ.items() if key not in ('TRON_FULL_GATEWAY_LOCK_HELD', 'TRON_LAND_GATE')}
         with (self.directory / f'{name}.err').open('w') as stderr:
             self.runs[name] = subprocess.Popen(['python3', str(self.gateway), name],
-                                               env={**inherited, 'TRON_TEST_LEDGER': str(Path(self.ledger.name) / 'results.sqlite3')},
+                                               env={**inherited, 'TRON_TEST_LEDGER': str(Path(self.ledger.name) / 'results.sqlite3'),
+                                                    **({'TRON_LAND_GATE': '1'} if gate else {})},
                                                stdout=subprocess.DEVNULL, stderr=stderr)
         return self.runs[name]
 
@@ -178,6 +179,17 @@ class FullGatewayLockQueueTests(unittest.TestCase):
         self.runs.release('holder')
         self.runs.wait_all()
         self.assertEqual(self.runs.names(), ['holder', 'first', 'second', 'third'])
+
+    def test_a_land_gate_run_queues_ahead_of_every_other_waiter(self):
+        """Land's gate runs on this Mac beside other workers' local Gateway runs; it waits only for the holder and earlier gates."""
+        self.runs.start('holder')
+        self.runs.wait_holding('holder')
+        for name, gate in (('worker', False), ('gate', True), ('later-gate', True)):
+            self.runs.start(name, gate=gate)
+            self.runs.wait_queued(name)
+        self.runs.release('holder')
+        self.runs.wait_all()
+        self.assertEqual(self.runs.names(), ['holder', 'gate', 'later-gate', 'worker'])
 
     def test_a_killed_waiter_and_a_killed_holder_lose_their_places(self):
         holder = self.runs.start('holder')
