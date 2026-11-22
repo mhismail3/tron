@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Land this branch on main: merge it --no-ff onto fetched main, validate that exact merge (Tiers 0 to 2 on the mini), push it only if it passed."""
+"""Land this branch on main: merge it --no-ff onto fetched main, run the merge's affected Tier 0 to 2 checks on the mini, push it only if they passed."""
 from __future__ import annotations
 
 import argparse
@@ -52,8 +52,8 @@ def merge(tree: Path, main: str, head: str, message: str) -> str:
 
 
 def validate(tree: Path, sha: str, main: str) -> tuple[str, dict, Path]:
-    """('passed', 'failed' or 'no result', the report, where its evidence is kept) for Tiers 0 to 2 at exactly `sha`."""
-    command = [sys.executable, str(tree / "tools/verify/mini.py"), "verify", "--full", "--base", main, "--skip", SKIP,
+    """('passed', 'failed' or 'no result', the report, where its evidence is kept) for the affected Tier 0 to 2 checks at exactly `sha`."""
+    command = [sys.executable, str(tree / "tools/verify/mini.py"), "verify", "--changed", "--base", main, "--skip", SKIP,
                "--gateway-host", "local", "--ios-host", "local"]
     artifacts = None
     with subprocess.Popen(command, cwd=tree, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) as child:
@@ -86,7 +86,7 @@ def land(head: str, message: str) -> int:
                 say(f"{head[:12]} is already on main {main[:12]}")
                 return 0
             sha = merge(tree, main, head, message)
-            say(f"validating {sha[:12]}: {head[:12]} --no-ff onto main {main[:12]}, Tiers 0 to 2 on the mini")
+            say(f"validating {sha[:12]}: {head[:12]} --no-ff onto main {main[:12]}, affected Tiers 0 to 2 on the mini")
             verdict, report, kept = validate(tree, sha, main)
             if verdict != "passed":
                 why = report.get("message") if report.get("commit") == sha else "no verify report for this commit"

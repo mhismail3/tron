@@ -35,6 +35,7 @@ GATEWAY = "packages/gateway"
 RELAY = "packages/push-relay"
 MAC = "packages/mac-app"
 WIDENING_LAYERS = {"L0", "L1", "L2"}
+POST_MERGE = "tools/verify/post-merge.json"
 WIDENING_MODULES = {"gateway/package", "gateway/test-support", "gateway/pi-sdk"}
 NAMED_LOCKS = {f"{GATEWAY}/src/e2e/sessions/sdk-behavior-trace.integration.test.ts",
                f"{GATEWAY}/src/e2e/sessions/pi-persisted-state-corpus.integration.test.ts"}
@@ -919,8 +920,11 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
                 filename = Path(path).name
                 if path.endswith(".module.json") or filename in {
                     "package.json", "package-lock.json", "project.yml", ".node-version", "layer-baseline.json", "settings-schema.ts"
-                } or filename.startswith("tsconfig"):
+                } or filename.startswith(("tsconfig", "vitest.")) or path in ("config/ci-toolchain.env", POST_MERGE):
                     full_reasons.append(f"graph/toolchain/schema input {path}")
+            if any(reason.startswith("graph/toolchain/schema input") for reason in full_reasons):
+                selected |= set(locks)
+                reasons.append(f"a graph or toolchain input changed: every lock ({len(locks)} files)")
             if full_reasons:
                 reasons.append(f"full tier: {', '.join(full_reasons)}")
         declared |= (chosen - narrow) & modules.keys()
@@ -943,11 +947,12 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
         golden_owners = {owner[path] for path in touched if is_golden(path) and path in owner}
         immediate = {path for path in selected if owner.get(path) in narrow
                      or (is_lock(path) and owner.get(path) in golden_owners)}
-        deferred = (selected & nested) - set(touched) - immediate - declared_tests
+        slow = set(json.loads((ROOT / POST_MERGE).read_text())["files"])
+        deferred = (selected & (nested | slow)) - set(touched) - immediate - declared_tests
         selected -= deferred
         if deferred:
-            full_reasons.append(f"{len(deferred)} unchanged serial nested test file(s)")
-            reasons.append(f"deferred to land's --full run: {len(deferred)} unchanged serial nested test file(s); changed tests still run now")
+            full_reasons.append(f"{len(deferred)} unchanged serial or slow test file(s)")
+            reasons.append(f"deferred to the main suite: {len(deferred)} unchanged serial or slow test file(s) ({POST_MERGE}); changed tests still run now")
     docs_only = mode == "changed" and len(docs) == len(touched)
     doc_inputs = mode in ("all", "full") or any(is_doc(path) or path.endswith(".module.json") for path in touched)
     tier = "none" if docs_only else "full" if mode in ("all", "full") or full_reasons else "partial"
@@ -1292,7 +1297,7 @@ def main(argv: list[str]) -> int:
     mode.add_argument("--changed", action="store_true")
     mode.add_argument("--module", metavar="ID")
     mode.add_argument("--all", action="store_true")
-    mode.add_argument("--full", action="store_true", help="every test file in every group: land's suite")
+    mode.add_argument("--full", action="store_true", help="every test file in every group: the main suite")
     mode.add_argument("--update-locks", metavar="ID")
     parser.add_argument("--base", default="origin/main")
     parser.add_argument("--ios-host", choices=("local", "mini"), default="local",
@@ -1378,7 +1383,7 @@ def main(argv: list[str]) -> int:
     print(f"verify --{name}{' ' + (args.module or args.update_locks) if args.module or args.update_locks else ''} at {sha[:12]}"
           f" (base {base[:12]}): {len(selection['tests'])} test file(s) selected", flush=True)
     print(f"  tier: {selection['tier']} — affected checks now" + (
-        "; full coverage runs in land's --full validation" if selection["tier"] == "full" and name not in ("all", "full") else ""), flush=True)
+        "; the main suite runs every file after the merge" if selection["tier"] == "full" and name not in ("all", "full") else ""), flush=True)
     for reason in selection["reasons"]:
         print(f"  why: {reason}", flush=True)
     if change:
@@ -1656,12 +1661,12 @@ def main(argv: list[str]) -> int:
         if passing == 0 and selection["docsOnly"]:
             return finish("passed", "Empty or documentation-only change: static/documentation checks are its evidence")
         if passing == 0 and selection["deferredTests"]:
-            return finish("passed", f"affected static checks passed; {len(selection['deferredTests'])} serial test file(s) deferred to land's --full run")
+            return finish("passed", f"affected static checks passed; {len(selection['deferredTests'])} serial or slow test file(s) deferred to the main suite")
         if passing == 0:
             return finish("failed", "zero tests ran: an empty selection is not evidence")
         groups_run = len({step["name"].split()[1] for step in run.steps if step["name"].startswith("tests:") and step["status"] == "ok"})
         return finish("passed", f"{passing} passing test(s) across {groups_run} runner group(s)"
-                      + (f"; {len(selection['deferredTests'])} serial file(s) deferred to land's --full run" if selection["deferredTests"] else "")
+                      + (f"; {len(selection['deferredTests'])} serial or slow file(s) deferred to the main suite" if selection["deferredTests"] else "")
                       + (f"; skipped by request: {', '.join(sorted(skip))}" if skip else ""))
 
     except KeyboardInterrupt:

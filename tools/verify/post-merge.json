@@ -1,0 +1,28 @@
+{
+  "budgetSeconds": 45,
+  "files": {
+    "packages/gateway/scripts/update-pi-subagents.integration.test.mjs": 130,
+    "packages/gateway/src/e2e/admin/native-change.e2e.test.ts": 54,
+    "packages/gateway/src/e2e/admin/settings-change.integration.test.ts": 77,
+    "packages/gateway/src/e2e/kernel/run/task-lifecycle.conformance.integration.test.ts": 52,
+    "packages/gateway/src/e2e/modules/home/home-task-dispatch.e2e.test.ts": 151,
+    "packages/gateway/src/e2e/modules/home/home-task-subagents-controls.e2e.test.ts": 89,
+    "packages/gateway/src/e2e/modules/home/home-task-subagents-reports.e2e.test.ts": 65,
+    "packages/gateway/src/e2e/modules/home/home-task-subagents-settlement.e2e.test.ts": 78,
+    "packages/gateway/src/e2e/sessions/home-activation.e2e.test.ts": 99,
+    "packages/gateway/src/e2e/sessions/home-cache-layout.e2e.test.ts": 78,
+    "packages/gateway/src/e2e/sessions/home-memory-browser-scale.e2e.test.ts": 69,
+    "packages/gateway/src/episodic/episodic-memory-recovery.integration.test.ts": 99,
+    "packages/gateway/src/episodic/episodic-memory.e2e.test.ts": 152,
+    "packages/mac-app/scripts/test-bundle-gateway-rebuild.sh": 115,
+    "packages/mac-app/scripts/test-gateway-payload-verifier.sh": 90,
+    "packages/mac-app/scripts/test-tron-gateway-launcher.sh": 57,
+    "scripts/gateway-payload-deploy.test.mjs": 45,
+    "scripts/test-ios-test-infrastructure.py": 492,
+    "scripts/test-tron-fsevents-guard.py": 63,
+    "scripts/test-tron-mac-replace.py": 110,
+    "scripts/test-tron-profile.py": 185,
+    "tools/home-layout/tests/test-home-layout.py": 98,
+    "tools/verify/tests/test-verify.py": 308
+  }
+}
