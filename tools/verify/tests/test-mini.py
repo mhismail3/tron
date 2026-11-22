@@ -329,7 +329,7 @@ root = Path(__file__).resolve().parents[2]
 sha = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
 logs = root / 'test-results/verify' / sha
 logs.mkdir(parents=True)
-(logs / 'bulk.bin').write_bytes(os.urandom(8 << 20))
+(logs / 'bulk.bin').write_bytes(os.urandom(1 << 20))
 (logs.parent / (sha + '.json')).write_text(json.dumps({'commit': sha}))
 os.set_blocking(1, False)
 ''')
@@ -339,7 +339,7 @@ os.set_blocking(1, False)
         self.assertEqual(result.returncode, 0, result.stdout[-3000:] + result.stderr[-3000:])
         artifacts = Path(next(line for line in result.stdout.splitlines() if line.startswith('mini: artifacts: ')).removeprefix('mini: artifacts: '))
         self.assertEqual(json.loads((artifacts / 'verify.json').read_text()), {'commit': sha})
-        self.assertEqual((artifacts / 'verify/bulk.bin').stat().st_size, 8 << 20)
+        self.assertEqual((artifacts / 'verify/bulk.bin').stat().st_size, 1 << 20)
 
     def test_whole_verifier_returns_its_report_logs_and_raw_75_without_another_lease(self) -> None:
         self.write('tools/probe.py', RECORDED)

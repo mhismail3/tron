@@ -267,15 +267,14 @@ def remote_main(job: dict) -> int:
     base = home / BASE
     repository, checkout = base / 'tron.git', base / 'jobs/gateway'
     results = base / 'results' / f'gateway-{nonce}'
-    say = lambda text: print(f'mini: {text}', flush=True)  # noqa: E731
     out = sys.stdout.buffer
 
     def send(data: bytes) -> None:
-        """One frame to the caller, blocking: a lane's process may have left the shared stdout non-blocking."""
-        out.flush()
+        """One write to the caller, blocking: a lane's process may have left the shared stdout non-blocking."""
         os.set_blocking(out.fileno(), True)
         out.write(data)
         out.flush()
+    say = lambda text: send(f'mini: {text}\n'.encode())  # noqa: E731
     cancelled = threading.Event()
     running: list[subprocess.Popen] = []
 
