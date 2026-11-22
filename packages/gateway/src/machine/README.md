@@ -107,17 +107,14 @@ The iPhone pins the private host identity at enrollment
   context (`workspace/tron-core-extension.ts`).
 - **Console admission** (`console-probe.ts`, #1195): before every `computer` dispatch,
   again before publishing any observation image, and before `native_capture`
-  catalog/view, one bounded (<1 s) read of the console session refuses with a typed
-  cause: `no_console_session` (no user on the console), `mac_locked`, `display_asleep`,
-  or `console_unavailable` (the probe failed or returned malformed state). Nothing is
-  sent and no lock-screen picture is returned. The first refusal of each episode
-  queues one iPhone notification; an unlocked read ends the episode. Browser/CDP tools
-  never pass this gate. While `computer` works, one `osascript` child holds a
+  catalog/view, one bounded (<1 s) read of `CGSSessionScreenIsLocked` and main-display
+  sleep refuses with a typed `mac_locked` or `display_asleep` error: nothing is sent and
+  no lock-screen picture is returned. The first refusal of each episode queues one
+  iPhone notification; an unlocked read ends the episode. Browser/CDP tools never pass
+  this gate. While a computer turn runs, one `osascript` child holds a
   `PreventUserIdleDisplaySleep` assertion ("Tron active computer turn"), created only
-  when the display is awake. An ordinary turn releases it at `agent_end`; a delegated
-  Home task keeps it between turns until the task's signal aborts (report, stop or
-  settle), an aborted run, refusal or shutdown, and never longer than 2 h. The OS drops
-  it if the Gateway dies. It never wakes, unlocks or changes power settings.
+  when the display is awake; `agent_end`, Stop, refusal and shutdown kill it, and the OS
+  drops it if the Gateway dies. It never wakes, unlocks or changes power settings.
 - A native executor keeps its tool promise through native cleanup
   ([native-tool settlement](../../docs/native-tool-settlement.md)).
 
