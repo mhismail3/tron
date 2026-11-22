@@ -157,7 +157,10 @@ actual K3 host; native frames do not select product modules or keep another list
   written to JSONL: the Gateway host's local date and timezone, model and thinking, activation (`user`,
   `wake`, `automation`, `task`, `subagent`), tools
   declared since the runtime's previous request, context layers whose system sections or project
-  files changed since then (none on a runtime's first request), and facts modules supply through
+  files changed since then (none on a runtime's first request), skills and prompt templates the
+  resource loader added or removed since then (name and path), load warnings and errors it newly reports
+  for skills, prompts or extensions (path and message; all current ones on a runtime's first request,
+  never again while unchanged), and facts modules supply through
   `SessionContext.turnFacts` (Home's profile facts; a task worker's choice and subagent models). For
   Anthropic the request's last cache mark stays on the input, before the frame, so the next request
   reads the whole history from cache. Pi defers prompt-section changes from tools enabled mid-run to
@@ -265,7 +268,8 @@ redrives at once, so a reload refused as busy is never stranded.
 
 The SDK package resolver runs read-only with missing sources explicitly skipped;
 watching never installs a package. It supplies the same enabled resource paths as
-the loader. SDK skill descriptors exclude skill bodies; prompt/context/extension
+the loader. SDK skill descriptors (excluding skill bodies) and the loader's skill diagnostics, so a
+skill that newly fails to load reloads and reaches the turn frame; prompt/context/extension
 bytes, package sets/manifests and schema-declared effective `reload` settings
 complete the input. `requestLayers` supplies the
 shared process-keyed layer hash, not a separate hashing scheme. The effective Project trust and trusted MCP definitions join the digest for ordinary
@@ -289,7 +293,8 @@ The existing
 Global settings roundtrip and project-lifecycle compensation tests protect this boundary.
 
 The real-slot proof is `src/e2e/kernel/run/resource-freshness.e2e.test.ts`: global
-skill propagation to Home and an ordinary chat, busy-edge adoption, unchanged/body
+skill propagation to Home and an ordinary chat, a malformed skill's warning at write time and
+in Home's next turn frame then its repair as added, busy-edge adoption, unchanged/body
 edits with identical provider system text, failed-reload retry and package manifest
 changes that actually change loaded skills.
 

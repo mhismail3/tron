@@ -2,7 +2,7 @@ import type { FSWatcher } from "node:fs";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fauxAssistantMessage, getSystemMessageText } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, getSystemMessageText } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setHomeMemoryModels } from "../../../../test-support/settings-dependencies.js";
 import { disposeFixtures, fixture } from "../../../../test-support/home-task-fixture.js";
@@ -135,6 +135,40 @@ describe("Home's global skills and prompt templates follow the agent directory l
     expect(skills.map(skill => [skill.name, skill.title])).toEqual([["skill:jev", undefined], ["skill:last30days", "Last 30 Days"]]);
     const resources = await service.invoke(client, "session.resources", { sessionId: home.id }) as { skills: { diagnostics: unknown[] } };
     expect(resources.skills.diagnostics).toEqual([]);
+  }, 60_000);
+
+  it("reports a malformed skill to Home at write time and in its next turn frame, then the repaired skill as added (#2649)", async () => {
+    const { f, home, commands, service, client } = await liveHome();
+    const path = join(f.agentDir, "skills", "bad-skill", "SKILL.md");
+    const warning = "Nested mappings are not allowed in compact mappings at line 2, column 14";
+    const frames: string[] = [];
+    let written = "";
+    const frameOf = (messages: readonly { role: string; content?: unknown }[]) =>
+      (messages.at(-1)!.content as Array<{ text: string }>)[0]!.text;
+    let sequence = 0;
+    const prompt = async (text: string, responses: Parameters<typeof f.faux.setResponses>[0]) => {
+      const before = frames.length;
+      f.faux.setResponses(responses);
+      await service.invoke(client, "home.prompt", { commandId: `skill-warning-${++sequence}`, text });
+      await waitFor(() => frames.length > before && home.snapshot().operation === undefined, `turn ${sequence} settled`);
+      return frames.at(-1)!;
+    };
+    const plain = (context: { messages: readonly { role: string; content?: unknown }[] }) => { frames.push(frameOf(context.messages)); return fauxAssistantMessage("ok"); };
+    expect(await prompt("baseline", [plain])).not.toContain("Resource");
+    await mkdir(join(f.agentDir, "skills", "bad-skill"), { recursive: true });
+    const completed = () => f.signals.filter(record => record.sessionId === home.id && record.reason === "completed").length;
+    const reloads = completed();
+    await prompt("write the skill", [context => { frames.push(frameOf(context.messages)); return fauxAssistantMessage(
+      [fauxToolCall("write", { path, content: "---\nname: bad-skill\ndescription: Report: what changed\n---\nBODY\n" }, { id: "write-bad-skill" })], { stopReason: "toolUse" }); },
+    context => { written = JSON.stringify(context.messages.filter(message => message.role === "toolResult").at(-1)!.content); return fauxAssistantMessage("written"); }]);
+    expect(written).toContain(`The skill loader reports for ${path}: ${warning}`);
+    await waitFor(() => completed() > reloads, "the malformed skill changes Home's resource digest");
+    const warned = await prompt("next", [plain]);
+    expect(warned).toMatch(new RegExp(`Resource load warnings: [^\\n]*bad-skill/SKILL\\.md: ${warning}`));
+    expect(await prompt("again", [plain])).not.toContain("Resource");
+    await writeSkill(f.agentDir, "bad-skill", "\"Report: what changed\"", "BODY");
+    await waitFor(async () => (await commands(home.id)).some(command => command.name === "skill:bad-skill"), "Home loads the repaired skill");
+    expect(await prompt("after repair", [plain])).toMatch(/Resources added: skill bad-skill \([^)]*bad-skill\/SKILL\.md\)\./);
   }, 60_000);
 
   it("follows edits and deletions, and lists the same global resources as an ordinary chat", async () => {
