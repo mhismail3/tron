@@ -169,7 +169,7 @@ describe("Home's global skills and prompt templates follow the agent directory l
     await writeSkill(f.agentDir, "bad-skill", "\"Report: what changed\"", "BODY");
     await waitFor(async () => (await commands(home.id)).some(command => command.name === "skill:bad-skill"), "Home loads the repaired skill");
     expect(await prompt("after repair", [plain])).toMatch(/Resources added: skill bad-skill \([^)]*bad-skill\/SKILL\.md\)\./);
-  }, 60_000);
+  });
 
   it("follows edits and deletions, and lists the same global resources as an ordinary chat", async () => {
     const { f, home, commands, turn } = await liveHome();
