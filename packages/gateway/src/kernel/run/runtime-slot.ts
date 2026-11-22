@@ -1211,6 +1211,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         modelRuntime, profile: () => this.liveProfile(),
         fixedSettings: () => readSessionFixedSettings(this.sessionManager.getBranch()),
         delegatedWorker: () => Boolean(this.ownedTurns.worker),
+        delegatedTask: () => this.ownedTurns.worker?.signal,
         defersRareTools: profile.chapter || Boolean(this.ownedTurns.worker),
         turnFacts: provider => { turnFacts.push(provider); },
         ...(profile.managedSubagents && this.dependencies.managedSubagents ? {

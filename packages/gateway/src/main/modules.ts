@@ -48,8 +48,10 @@ export function gatewayModules(owners: () => ModuleOwners, projectOptions?: Cons
   const projects = projectsModule(new ProjectLifecycle(() => owners().home.trust, projectRuntimePort(registry, () => home.owner().activeTaskTargets()), projectOptions));
   const gate = new ConsoleGate(async (sessionId, cause) => {
     const { notifications, machineId } = owners().home;
-    await notifications?.enqueue({ sessionId, sourceId: `${cause}-${randomUUID()}`, kind: "explicit", title: cause === "mac_locked" ? "Mac locked" : "Mac display asleep",
-      message: `Tron paused desktop work because the Mac ${cause === "mac_locked" ? "is locked. Unlock it" : "display is asleep. Wake it"} to continue; browser work is unaffected.`,
+    const notice: [string, string] = ({ mac_locked: ["Mac locked", "is locked. Unlock it"], display_asleep: ["Mac display asleep", "display is asleep. Wake it"],
+      no_console_session: ["Mac has no console session", "has no user session on its console. Log in"], console_unavailable: ["Mac console unreadable", "console state could not be read. Check the Mac"] } satisfies Record<typeof cause, [string, string]>)[cause];
+    await notifications?.enqueue({ sessionId, sourceId: `${cause}-${randomUUID()}`, kind: "explicit", title: notice[0],
+      message: `Tron paused desktop work because the Mac ${notice[1]} to continue; browser work is unaffected.`,
       ...(machineId ? { route: { sessionId, machineId } } : {}) });
   });
   const providers = createContextWindowModule(() => owners().openAIModelEligibility, owners, () => owners().home.modelQueue);

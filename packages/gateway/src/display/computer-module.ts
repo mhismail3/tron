@@ -10,7 +10,7 @@ export function createComputerModule(gate: ConsoleGate): ModuleDescriptor {
     commands: [],
     start: () => ({
       extension: (session) => (process.platform === "darwin"
-        ? createTronComputerExtension({ sessionId: () => session.sessionId(), gate })
+        ? createTronComputerExtension({ sessionId: () => session.sessionId(), delegatedTask: () => session.delegatedTask(), gate })
         : undefined),
     }),
   };
