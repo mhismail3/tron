@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from host_lock import GATE, LAND_LOCK, wait_for_lock  # noqa: E402  (the one host lock owner)
 
 ROOT = Path(subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True).stdout.strip())
-SKIP = "ios,mac,python-here"
+SKIP = "mac,python-here"
 PACKAGES = {"packages/gateway": ("package.json", "package-lock.json", ".npmrc", "third_party"), "packages/push-relay": ("package.json", "package-lock.json", ".npmrc")}
 
 
@@ -74,9 +74,10 @@ def install(tree: Path) -> None:
 
 
 def validate(tree: Path, sha: str, main: str) -> tuple[str, dict, Path]:
-    """('passed', 'failed' or 'no result', the report, where its evidence is kept) for the affected Tier 0 to 2 checks at exactly `sha`."""
+    """('passed', 'failed' or 'no result', the report, where its evidence is kept) for the affected checks at exactly `sha`:
+    here, or, when they select iOS work, the whole verification on the mini under its lease (`--ios-host mini`)."""
     install(tree)
-    with subprocess.Popen([sys.executable, str(tree / "tools/verify/verify.py"), "--changed", "--base", main, "--skip", SKIP],
+    with subprocess.Popen([sys.executable, str(tree / "tools/verify/verify.py"), "--changed", "--base", main, "--skip", SKIP, "--ios-host", "mini"],
                           cwd=tree, stdin=subprocess.DEVNULL, env={**os.environ, GATE: "1"}) as child:
         try:
             code = child.wait()
@@ -84,13 +85,17 @@ def validate(tree: Path, sha: str, main: str) -> tuple[str, dict, Path]:
             child.terminate()
             child.wait()
             raise
-    kept, source = ROOT / "test-results/land" / sha, tree / "test-results/verify"
+    kept = ROOT / "test-results/land" / sha
+    found, logs = tree / "test-results/verify" / f"{sha}.json", tree / "test-results/verify" / sha
+    handed = sorted((tree / "test-results/mini").glob(f"{sha[:12]}-*/verify.json"))
+    if handed:
+        found, logs = handed[-1], handed[-1].parent / "verify"
     report = {}
-    if (source / f"{sha}.json").is_file():
+    if found.is_file():
         kept.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source / f"{sha}.json", kept / "verify.json")
-        if (source / sha).is_dir():
-            shutil.copytree(source / sha, kept / "verify", dirs_exist_ok=True)
+        shutil.copy2(found, kept / "verify.json")
+        if logs.is_dir():
+            shutil.copytree(logs, kept / "verify", dirs_exist_ok=True)
         report = json.loads((kept / "verify.json").read_text())
     if report.get("commit") != sha:
         return "no result", report, kept

@@ -48,6 +48,16 @@ if (home / 'readonly').exists():
     left.mkdir(parents=True, exist_ok=True)
     (left / 'config').write_text('read-only output a test left behind')
     left.chmod(0o555)
+args = sys.argv[1:]
+if (root / 'IOS').exists():
+    if 'ios' in args[args.index('--skip') + 1].split(','):
+        out = root / 'test-results/verify'
+        out.mkdir(parents=True, exist_ok=True)
+        (out / f'{sha}.json').write_text(json.dumps({'commit': sha, 'verdict': 'failed', 'message': 'zero tests ran: an empty selection is not evidence'}))
+        sys.exit(1)
+    if 'mini' in args and os.environ.get('TRON_VERIFY_EXECUTION_HOST') != 'mini':
+        kept = [word for index, word in enumerate(args) if word != '--ios-host' and (index == 0 or args[index - 1] != '--ios-host')]
+        os.execv(sys.executable, [sys.executable, str(root / 'tools/verify/mini.py'), 'verify', *kept, '--ios-host', 'local'])
 red = (root / 'RED').exists()
 named = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD^'], text=True).strip() if (home / 'foreign').exists() else sha
 out = root / 'test-results/verify'
@@ -178,6 +188,17 @@ class Land(unittest.TestCase):
         code, output = self.finish(self.land())
         self.assertEqual(code, 0, output)
         self.assertEqual(self.parents(self.main())[1], head)
+
+    def test_an_ios_change_runs_its_ios_selection_on_the_mini_and_lands(self) -> None:
+        """An iOS-only change selects only iOS tests; land skipped iOS, so it refused every such change as an empty selection."""
+        self.write('IOS', 'an iOS-only change\n')
+        head = self.commit('ios change')
+        code, output = self.finish(self.land())
+        self.assertEqual(code, 0, output)
+        self.assertEqual(self.parents(self.main()), [self.base, head])
+        self.assertEqual((self.mini / 'runs').read_text().split(), [self.main()], 'the verification ran on the mini')
+        report = json.loads((self.local / 'test-results/land' / self.main() / 'verify.json').read_text())
+        self.assertEqual(report['commit'], self.main())
 
     def test_a_conflict_is_refused_and_main_stays(self) -> None:
         self.write('.gitignore', 'branch side\n')
