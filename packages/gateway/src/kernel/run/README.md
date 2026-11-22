@@ -268,8 +268,8 @@ redrives at once, so a reload refused as busy is never stranded.
 
 The SDK package resolver runs read-only with missing sources explicitly skipped;
 watching never installs a package. It supplies the same enabled resource paths as
-the loader. SDK skill descriptors (excluding skill bodies) and the loader's skill diagnostics, so a
-skill that newly fails to load reloads and reaches the turn frame; prompt/context/extension
+the loader. SDK skill descriptors (excluding skill bodies), the loader's skill diagnostics (so a
+skill that newly fails to load reloads and reaches the turn frame), prompt/context/extension
 bytes, package sets/manifests and schema-declared effective `reload` settings
 complete the input. `requestLayers` supplies the
 shared process-keyed layer hash, not a separate hashing scheme. The effective Project trust and trusted MCP definitions join the digest for ordinary
