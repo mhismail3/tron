@@ -30,8 +30,8 @@ persisted child replay: workspace core instructions, resource instruction assemb
 projection and the pinned SDK artifact can each change it without changing the lock file.
 These declarations keep that consumer in affected checks with its nested runner rather than
 deferring it to the main suite. Other unchanged serial tests, and unchanged slow files listed in
-`tools/verify/post-merge.json`, are deferred there unless a changed module owns them: a changed module's own tests
-always run before landing. The
+`tools/verify/post-merge.json`, are deferred there unless a changed module owns them or they import a changed file: a changed module's own tests and
+a test that imports a changed file always run before landing. The
 selection regression calls the shipped planner against the actual ownership graph and each
 producer path; it does not mirror the dependency list in a fixture graph.
 
@@ -348,7 +348,7 @@ A Swift or Gateway string edit is code: its tests and locks run (locks compare l
 
 Test/golden-only narrowing precedes module risk; a manifest/configuration edit still
 requires the full tier. Unchanged files in the existing serial `gateway-nested` list
-are deferred, never dropped, unless a changed module owns them or they are declared as owner verification evidence;
+are deferred, never dropped, unless a changed module owns them, they import a changed file, or they are declared as owner verification evidence;
 declared tests run immediately. Production changes selecting undeclared serial tests need
 a full tier.
 A changed serial test file and locks selected by a golden edit run immediately.

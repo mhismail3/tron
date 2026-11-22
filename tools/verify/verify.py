@@ -778,7 +778,7 @@ def importers(changed: list[str], tracked: list[str]) -> dict[str, set[str]]:
     for path in tracked:
         file = ROOT / path
         python = path.endswith(".py")
-        if not (python or path.endswith((".mjs", ".js", ".cjs", ".sh", ".test.ts"))):
+        if not (python or path.endswith((".mjs", ".js", ".cjs", ".sh")) or (path.endswith(".test.ts") and is_test(path))):
             if "." in Path(path).name or not path.startswith(("scripts/", "tools/")):
                 continue
             try:
