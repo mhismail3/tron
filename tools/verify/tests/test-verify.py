@@ -896,8 +896,7 @@ class SelectionTests(VerifyCase):
         self.assertEqual(r.verify("--changed").returncode, 0)
 
     def test_kernel_layer_or_unowned_change_widens_to_every_lock(self) -> None:
-        """WP9 (69362f715) changed gateway/host (L2) and landed with its affected checks only; another module's lock
-        (home.lock.integration.test.ts) went red on main. A full-tier change runs every lock before landing."""
+        """A full-tier change runs the locks of the package it changes before landing, every lock when outside a package."""
         r = self.repo
         r.write("mods/core/core.py", "VALUE = 'kernel change'\n")
         r.commit("kernel change")
@@ -922,6 +921,19 @@ class SelectionTests(VerifyCase):
         planned = r.verify("--changed", "--plan")
         plan = json.loads(planned.stdout[planned.stdout.index("{"):])
         self.assertIn("packages/gateway/src/store/store.lock.integration.test.ts", plan["selection"]["tests"])
+        r.git("reset", "-q", "--hard", "base")
+        r.write("packages/gateway/src/kern/kern.module.json", json.dumps({"layer": "L2", "owns": ["**"]}))
+        r.write("packages/gateway/src/kern/kern.ts", "export const value = 1;\n")
+        r.write("packages/push-relay/src/relay/relay.module.json", json.dumps({"layer": "L3", "owns": ["**"]}))
+        r.write("packages/push-relay/src/relay/relay.lock.integration.test.ts", "export const lock = true;\n")
+        r.commit("a Gateway kernel module and another package's lock")
+        r.git("branch", "-f", "base")
+        r.write("packages/gateway/src/kern/kern.ts", "export const value = 2;\n")
+        r.commit("Gateway kernel change")
+        planned = r.verify("--changed", "--plan")
+        tests = json.loads(planned.stdout[planned.stdout.index("{"):])["selection"]["tests"]
+        self.assertIn("packages/gateway/src/store/store.lock.integration.test.ts", tests, "another Gateway module's lock runs")
+        self.assertNotIn("packages/push-relay/src/relay/relay.lock.integration.test.ts", tests, "another package's lock does not")
 
     def test_a_selection_without_tests_fails_as_zero_test(self) -> None:
         r = self.repo

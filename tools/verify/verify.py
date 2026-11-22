@@ -135,6 +135,12 @@ def is_lock(path: str) -> bool:
         re.match(r"packages/ios-app/(UITests|ViewTests)/Locks/", path) is not None and path.endswith("Tests.swift"))
 
 
+def package_root(path: str) -> str | None:
+    """The package a path belongs to (`packages/<name>`); None outside packages, where a change can reach any lock."""
+    parts = path.split("/")
+    return "/".join(parts[:2]) if parts[0] == "packages" and len(parts) > 2 else None
+
+
 def is_test(path: str) -> bool:
     name = path.rsplit("/", 1)[-1]
     if "/test-fixtures/" in path:
@@ -916,26 +922,31 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
             reasons.append(f"{key}: launches a selected module; its {len(spawned)} lock file(s)")
         chosen |= spawners
         if mode == "changed":
+            roots: set[str | None] = set()
             for key in sorted(set(changes) - narrow):
                 module = modules.get(key)
                 if module is None:
                     full_reasons.append(f"deleted module {key}")
+                    roots.add(None)
                     continue
                 risk = module["riskClass"]
                 if module["layer"] in WIDENING_LAYERS or key in WIDENING_MODULES or set(risk) - {"ios-ui"}:
                     full_reasons.append(f"{key} ({module['layer']})" + (f" risk={','.join(risk)}" if risk else ""))
+                    roots |= {package_root(path) for path in changes[key]}
             full_reasons += [f"unowned {path}" for path in unowned]
+            roots |= {None} if unowned else set()
             for path in touched:
                 filename = Path(path).name
                 if path.endswith(".module.json") or filename in {
                     "package.json", "package-lock.json", "project.yml", ".node-version", "layer-baseline.json", "settings-schema.ts"
                 } or filename.startswith(("tsconfig", "vitest.")) or path in ("config/ci-toolchain.env", POST_MERGE):
                     full_reasons.append(f"graph/toolchain/schema input {path}")
+                    roots.add(None)
             if full_reasons:
-                selected |= set(locks)
-                reasons.append(f"a full-tier change: every lock ({len(locks)} files)")
-            if full_reasons:
-                reasons.append(f"full tier: {', '.join(full_reasons)}")
+                widened = set(locks) if None in roots else {path for path in locks if package_root(path) in roots}
+                selected |= widened
+                reasons.append(f"full tier: {', '.join(full_reasons)}; every lock of {'the repository' if None in roots else ', '.join(sorted(roots))} "
+                               f"({len(widened)} files)")
         declared |= (chosen - narrow) & modules.keys()
     if mode != "update-locks":
         jobs, routes = ios_owner_jobs(modules, tracked)
