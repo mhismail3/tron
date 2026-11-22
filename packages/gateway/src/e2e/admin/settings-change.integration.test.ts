@@ -1052,7 +1052,7 @@ describe("outside changes", () => {
     createTronSettingsExtension(() => ({
       applyAgain: (changeId, input) => f.settingsChanges.applyAgain(changeId, { actor: { ...actor, toolCallId: input.toolCallId }, reason: input.reason }),
     }) as never, async () => undefined, settingsGuidePath(f.tronHome))({ registerTool: tool => { tools.push(tool as never); }, on: (event: string) => { handlers.push(event); } } as never);
-    expect(handlers).toEqual(["tool_call"]);
+    expect(handlers).toEqual(["tool_call", "tool_result"]);
     const result = await tools[0]!.execute("apply-again", { action: "applyAgain", changeId: outside.changeId, reason: "Maintainer wants Tron's value back" },
       new AbortController().signal, () => {}, { hasUI: true });
     expect(result.details).toMatchObject({ status: "applied" });
@@ -1303,7 +1303,7 @@ describe("outside changes to MCP servers and custom models", () => {
     }), async ({ apply }) => apply({ deviceId: "device:phone", commandId: "command-mcp-tool" }), settingsGuidePath(f.tronHome));
     const handlers: string[] = [];
     settingsExtension({ registerTool: tool => { tools.push(tool as never); }, on: (event: string) => { handlers.push(event); } } as never);
-    expect(handlers).toEqual(["tool_call"]);
+    expect(handlers).toEqual(["tool_call", "tool_result"]);
     const [tool] = tools;
     const requests = [{ key: "tools.mcp.server", qualifiers: { server: "home-docs" }, layer: "global", op: "set", value: { command: "npx", args: ["-y", "@acme/docs-mcp"] } }];
     const result = await tool!.execute("call-mcp", { action: "change", changes: requests, reason: "Maintainer asked for the docs server" },
