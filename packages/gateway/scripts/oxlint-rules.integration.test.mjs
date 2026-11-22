@@ -33,11 +33,15 @@ test("fails at file and line for each enabled rule and for an unused disable dir
     "dupe-keys.ts": 'export const modes = { mode: "asynchronous", mode: "workflow" };\n',
     "optional-non-null.ts": "export function size(input?: { size: number }): number {\n  return input?.size!;\n}\n",
     "unused-disable.ts": "// oxlint-disable-next-line eslint/no-dupe-keys -- nothing to suppress here\nexport const ok = { mode: \"workflow\" };\n",
+    "debugger.ts": "export function stop(): void {\n  debugger;\n}\n",
+    "self-assign.ts": "export function same(value: { n: number }): void {\n  value.n = value.n;\n}\n",
   });
   assert.notEqual(status, 0);
   assert.match(output, /dupe-keys\.ts:1:\d+: error eslint\(no-dupe-keys\)/u);
   assert.match(output, /optional-non-null\.ts:2:\d+: error typescript\(no-non-null-asserted-optional-chain\)/u);
   assert.match(output, /unused-disable\.ts:1:\d+: warning: Unused oxlint-disable directive/u);
+  assert.match(output, /debugger\.ts:2:\d+: error eslint\(no-debugger\)/u);
+  assert.match(output, /self-assign\.ts:2:\d+: error eslint\(no-self-assign\)/u);
 });
 
 test("passes code that uses the enabled rules' intended forms under the same flags", async () => {
