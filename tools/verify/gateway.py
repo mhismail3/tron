@@ -62,9 +62,10 @@ def provision_chrome_for_testing(node: str) -> Path:
 
 
 def browser_fixture_environment(arguments: list[str], node: str) -> dict[str, str]:
-    files = ('src/e2e/sessions/browser-fork-receipts.integration.test.ts', 'src/e2e/automations/home-tool-admission.e2e.test.ts')
+    files = ('src/e2e/sessions/browser-fork-receipts.integration.test.ts', 'src/e2e/automations/home-tool-admission.e2e.test.ts',
+             'src/e2e/kernel/delegation/child-browser.integration.test.ts')
     config, filters = vitest_selection(arguments, ROOT / 'packages/gateway')
-    if config not in (None, 'vitest.config.ts'):
+    if config not in (None, 'vitest.config.ts', 'vitest.nested.config.ts'):
         return {}
     if filters and not any(filter_selects(relative, path) for _, relative in filters for path in files):
         return {}
