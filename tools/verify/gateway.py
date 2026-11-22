@@ -78,20 +78,18 @@ def browser_fixture_environment(arguments: list[str], node: str) -> dict[str, st
     return {'AGENT_BROWSER_EXECUTABLE_PATH': str(binary), 'AGENT_BROWSER_ARGS': '--password-store=basic,--use-mock-keychain'}
 
 
-def named_processes(names: set[str]) -> list[int]:
-    """This user's processes whose arguments or environment (the kernel's KERN_PROCARGS2 block) name a path under `names`."""
-    libc = ctypes.CDLL(None, use_errno=True)
+def named_processes(root: Path) -> list[int]:
+    """This user's processes whose arguments or environment (the kernel's KERN_PROCARGS2 block) name a path under `root`."""
+    libc = ctypes.CDLL(None)
     listing = subprocess.run(['/usr/bin/pgrep', '-U', str(os.getuid()), '.'], capture_output=True, text=True).stdout
     buffer = ctypes.create_string_buffer(1 << 20)
     found = []
     for pid in (int(word) for word in listing.split()):
-        if pid == os.getpid():
-            continue
         size = ctypes.c_size_t(len(buffer))
         if libc.sysctl((ctypes.c_int * 3)(1, 49, pid), 3, buffer, ctypes.byref(size), None, 0):
             continue
         block = buffer.raw[4:size.value]
-        if any(name.encode() + b'/' in block for name in names):
+        if f'{root}/'.encode() in block:
             found.append(pid)
     return found
 
@@ -99,9 +97,8 @@ def named_processes(names: set[str]) -> list[int]:
 def reap(root: Path) -> None:
     """SIGKILL every process naming the scratch root until none is left: what a test left running, including children
     re-parented to launchd or moved to their own session, which the caller's process-group kill never reaches."""
-    names = {str(root), os.path.realpath(root)}
     for _ in range(50):
-        left = named_processes(names)
+        left = named_processes(root)
         if not left:
             return
         for pid in left:

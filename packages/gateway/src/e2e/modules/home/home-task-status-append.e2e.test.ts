@@ -52,5 +52,4 @@ it("gives a second fixture in one test its own root beside the first, never insi
   const first = await fixture();
   const second = await fixture();
   expect(second.root.startsWith(`${first.root}/`)).toBe(false);
-  await disposeFixtures();
 });

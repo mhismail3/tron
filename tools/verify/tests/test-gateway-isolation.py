@@ -87,7 +87,7 @@ test('HOME resolution and filesystem writes stay outside caller HOME',()=>{
 
 class GatewayTestScratchCleanup(unittest.TestCase):
     def test_a_group_sigterm_mid_run_removes_the_scratch_root(self) -> None:
-        """What verify, probe and mutate send first: the root goes, so nothing needs a reaper."""
+        """What verify, probe and mutate send first: the root goes."""
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary).resolve()
             verify = base / "tools/verify"
@@ -125,16 +125,14 @@ class GatewayTestScratchCleanup(unittest.TestCase):
 
 class GatewayTestOrphanReaping(unittest.TestCase):
     def test_a_test_process_left_in_its_own_session_is_reaped_before_the_runner_returns(self) -> None:
-        """#2648: console-fixture drivers re-parented to launchd escaped the job's process-group kill and stayed on
-        the mini for hours under a removed scratch root, poisoning the next land's Gateway lane."""
+        """A test process in its own process group escapes the caller's group kill; the runner reaps it by its scratch root (#2648)."""
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary).resolve()
             verify = base / "tools/verify"
             verify.mkdir(parents=True)
             for name in ("gateway.py", "vitest_configs.py", "ledger.py", "ledger-host.mjs", "ledger-vitest.mjs"):
                 (verify / name).write_text((ROOT / "tools/verify" / name).read_text())
-            lock = (ROOT / "tools/verify/host_lock.py").read_text()
-            (verify / "host_lock.py").write_text(lock.replace("'/tmp/tron-full-gateway.lock'", repr(str(base / "full.lock"))))
+            (verify / "host_lock.py").write_text((ROOT / "tools/verify/host_lock.py").read_text())
             node = base / "scripts/tron-node"
             node.parent.mkdir()
             fixture_node(node)
