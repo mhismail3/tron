@@ -30,7 +30,8 @@ scripts/tron chat [--session <id>]   # terminal chat attached to the Gateway run
   unsupported ([charter](../../AGENTS.md#architecture-invariants)).
 
 **Lint.** `npm run lint` runs Oxlint (pinned in `devDependencies`) over `src`, `test-support`,
-`test-fixtures` and `scripts`. `.oxlintrc.json` enables only the rules it lists; a rule
+`test-fixtures` and `scripts`. `.oxlintrc.json` enables Oxlint's `correctness` category plus the rules it lists; each
+correctness rule it turns `off` still has findings and joins once it has none (#2647). A rule
 joins only with zero findings, and a disable needs a reason after `--`.
 `npm run test:lint` proves real bad fixtures fail. Type-aware async rules and
 `no-unused-vars` wait on #1227.
