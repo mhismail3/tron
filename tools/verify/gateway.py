@@ -15,7 +15,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from host_lock import FULL_GATEWAY_LOCK, HELD_BY_CALLER, wait_for_lock  # noqa: E402  (the one host lock owner)
+from host_lock import FULL_GATEWAY_LOCK, GATE, HELD_BY_CALLER, wait_for_lock  # noqa: E402  (the one host lock owner)
 from vitest_configs import Refused, filter_selects, vitest_selection, with_own_config  # noqa: E402  (the one Vitest selection classifier)
 import ledger
 
@@ -25,7 +25,8 @@ def hold_full_gateway_lock():
     if os.environ.get(HELD_BY_CALLER) == '1':
         return None
     record = {'pid': os.getpid(), 'worktree': str(ROOT), 'purpose': 'gateway vitest ' + ' '.join(sys.argv[1:])[:200]}
-    return wait_for_lock(FULL_GATEWAY_LOCK, record, lambda line: print(f'gateway tests: {line}', file=sys.stderr, flush=True))
+    return wait_for_lock(FULL_GATEWAY_LOCK, record, lambda line: print(f'gateway tests: {line}', file=sys.stderr, flush=True),
+                         priority=os.environ.get(GATE) == '1')
 
 
 def provision_chrome_for_testing(node: str) -> Path:

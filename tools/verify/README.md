@@ -2,7 +2,7 @@
 
 `scripts/tron verify` runs the fast affected checks before merge. The manifests (owners, `verify`
 declarations and `dynamicEdges`) are the selection authority. No hosted CI or GitHub gate is involved;
-[`scripts/tron land`](land.md) runs `--full` Tiers 0 to 2 on the exact merge it pushes to main and is the only landing route. A previous test pass never substitutes for
+[`scripts/tron land`](land.md) runs the affected Tier 0 to 2 checks (`--changed`) on the exact merge it pushes to main and is the only landing route; the main suite (`scripts/tron main-suite`) runs every test file after each merge. A previous test pass never substitutes for
 this change's affected checks; only stamped build products are reused. See the
 [oracle policy](test-oracles.md).
 
@@ -12,7 +12,8 @@ scripts/tron verify --plan                     # tier, paths, reasons and exact 
 scripts/tron verify --changed [--base <ref>]   # explicit diff selection, also used by mutation sampling
 scripts/tron verify --module <id>               # scoped baseline: owner tests + declarations + launching UI locks
 scripts/tron verify --all                       # all locks + serial files deferred by this base..HEAD diff
-scripts/tron verify --full --base <ref>         # every test file in every group: land's suite
+scripts/tron verify --full --base <ref>         # every test file in every group: the main suite
+scripts/tron verify --files <test>...           # exactly these test files: the main suite's bisect probe
 scripts/tron verify --update-locks <id>         # rewrite <id>'s goldens (lock or approved migration slices)
 scripts/tron verify ... --gateway-host mini --ios-host mini # Tron heavy checks: queued mini execution, no local fallback
 scripts/tron test ios checkpoint --only-testing TronMobileUITests/<Class>/<method> # mini by default, build then selected tests
@@ -28,7 +29,9 @@ lock as verification. That lock observes both the runtime system-section preview
 persisted child replay: workspace core instructions, resource instruction assembly, runtime
 projection and the pinned SDK artifact can each change it without changing the lock file.
 These declarations keep that consumer in affected checks with its nested runner rather than
-deferring it to land's `--full` run. Other unchanged serial tests are deferred there. The
+deferring it to the main suite. Other unchanged serial tests, and unchanged slow files listed in
+`tools/verify/post-merge.json`, are deferred there unless a changed module owns them: a changed module's own tests
+always run before landing. The
 selection regression calls the shipped planner against the actual ownership graph and each
 producer path; it does not mirror the dependency list in a fixture graph.
 
@@ -311,7 +314,7 @@ base). Each module contributes its owned tests:
 Recorders under `test-fixtures/` are never run. A change is gated by its own
 modules' tests ([principles P1](../../docs/PRINCIPLES.md#p1-a-module-owns-its-code-and-its-tests)):
 `--changed` and `--module` add no `dependsOn` consumer's tests; those run in
-`land`'s `--full` run. The one consumer added is a module whose `dynamicEdges` name a selected
+the main suite after the merge. The one consumer added is a module whose `dynamicEdges` name a selected
 module (today only the iOS UI tests' spawn edges to the hosted app): its locks are
 that module's rendered tests. `--changed` also adds the importers no compiler checks: a changed
 source file's Python importers (`import`/`from` by module name, or its path handed to
@@ -340,11 +343,11 @@ A Swift or Gateway string edit is code: its tests and locks run (locks compare l
 |---|---|---|
 | **none** | Empty diff or documentation only | Static/documentation checks; no executable tests |
 | **partial** | Tests/goldens only, or ordinary owned code (including Swift UI) | Changed tests; golden owner's locks; otherwise owner tests, owner declarations and launching UI locks |
-| **full** | Production changes in L0–L2, `gateway/package`, `gateway/test-support`, `gateway/pi-sdk`; declared kernel/contracts/persistence/security/lifecycle/mac-installer risk; manifest/layer-baseline/toolchain/project configuration; unknown ownership | The same affected checks **now**, plus every test file in `land`'s `--full` run of the merge |
+| **full** | Production changes in L0–L2, `gateway/package`, `gateway/test-support`, `gateway/pi-sdk`; declared kernel/contracts/persistence/security/lifecycle/mac-installer risk; manifest/layer-baseline/toolchain/project configuration; unknown ownership | The same affected checks **now**, plus every test file in the main suite after the merge |
 
 Test/golden-only narrowing precedes module risk; a manifest/configuration edit still
 requires the full tier. Unchanged files in the existing serial `gateway-nested` list
-are deferred, never dropped, unless explicitly declared as owner verification evidence;
+are deferred, never dropped, unless a changed module owns them or they are declared as owner verification evidence;
 declared tests run immediately. Production changes selecting undeclared serial tests need
 a full tier.
 A changed serial test file and locks selected by a golden edit run immediately.
@@ -360,7 +363,7 @@ An unowned tracked path still fails ownership, not a green partial run. A new mo
 without executable evidence still fails; a tier never turns missing evidence into a pass.
 
 `--plan` prints `selection.tier`, paths, reasons, immediate tests, and
-commands/cwds, `deferredTests` and their exact commands. A successful **full-tier** ordinary run proves affected checks only;
+commands/cwds and `deferredTests`. A successful **full-tier** ordinary run proves affected checks only;
 it does not claim the `--full` run passed. Locks are `*.lock.integration.test.ts`, the
 Pi trace/persisted-state corpus and `UITests/Locks/` and `ViewTests/Locks/`. `ios-app/ui-tests` declares
 `spawn` edges to the hosted app modules, selecting their affected UI locks.
@@ -371,7 +374,7 @@ Runners are the existing ones:
 |---|---|
 | `gateway` / `gateway-nested` | Gateway vitest, main or `vitest.nested.config.ts` |
 | `node-gateway` / `node` | `node --test` |
-| `python` / `python-here` / `shell` | `python3` / `bash` per file; `python-here` (`PYTHON_HERE`: tests reading this Mac's Pi session store) runs on this Mac, never the mini |
+| `python` / `python-here` / `shell` | `tools/verify/files.py`: one `python3` / `bash` process per file. Python files run on half the host's cores; files that name another selected file (a shared fixture or output) run as one chain in selection order; chains start largest first. Each file's output prints whole, under its `### verify file:` marker, when it ends (one chain streams live); the step's exit is the first nonzero status in selection order. Shell files run one at a time in selection order: `test-bundle-gateway-rebuild.sh` rebuilds the checkout's generated Gateway payload, which `test-gateway-payload-verifier.sh` reads. `python-here` (`PYTHON_HERE`: tests reading this Mac's Pi session store) runs on this Mac, never the mini |
 | `ios` | `scripts/tron-ios-test run --only-testing <target>/<class>/<test>` shards: the UIValidation targets |
 | `ios-journeys` | `scripts/ios-gateway-e2e-test run-ui --only-testing <journey>`: the real-UI journeys |
 | `ios-boundary` | `scripts/ios-gateway-e2e-test check --only-testing <method>`: the Gateway E2E target, with its own build and private fixture |

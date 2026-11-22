@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""scripts/tron land end to end: real land.py, mini.py and host_lock.py, a disposable origin and a stand-in mini.
+"""scripts/tron land end to end: real land.py, main_suite.py, mini.py and host_lock.py, a disposable origin and a stand-in mini.
 
-A disposable checkout lands a task branch onto its own bare origin. The mini is a disposable home reached through
-the `ssh` stand-in of test-mini.py, and the commit's own `tools/verify/verify.py` there is a stand-in that records
-the commit it validated and fails when the tree holds a planted `RED`. The cases check that a red merge, a conflict,
+A disposable checkout lands a task branch onto its own bare origin, validating each merge here; the main suite runs on a
+disposable mini home reached through the `ssh` stand-in of test-mini.py. Each commit's own `tools/verify/verify.py` is a
+stand-in that records the commit it validated, in its HOME, and fails when the tree holds a planted `RED`. The cases check that a red merge, a conflict,
 a report naming another commit, a passed report with a nonzero exit and a refused push each leave main unchanged; that a main moved during validation is merged again and validated again, and only that new
 merge lands; that two concurrent lands wait in arrival order, the second validated on top of the first; and that
 `scripts/tron land` runs main's land tool, so a branch cut before it existed still lands.
@@ -32,7 +32,14 @@ home = Path(os.environ['HOME'])
 sha = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
 with open(home / 'runs', 'a') as runs:
     runs.write(sha + '\n')
+with open(home / 'argv', 'a') as argv:
+    argv.write(json.dumps(sys.argv[1:]) + '\n')
 if (home / 'hold').exists():
+    if (home / 'spawn').exists():
+        import signal
+        step = subprocess.Popen(['sleep', '300'], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        (home / 'step').write_text(str(step.pid))
+        signal.signal(signal.SIGTERM, lambda *_: (os.killpg(step.pid, signal.SIGTERM), sys.exit(143)))
     (home / 'held').write_text(sha)
     while (home / 'hold').exists():
         time.sleep(0.05)
@@ -41,7 +48,9 @@ named = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD^'], 
 out = root / 'test-results/verify'
 out.mkdir(parents=True, exist_ok=True)
 (out / f'{sha}.json').write_text(json.dumps({'commit': named, 'verdict': 'failed' if red else 'passed', 'args': sys.argv[1:],
-                                              'message': 'planted RED' if red else 'Tiers 0 to 2 passed'}))
+                                              'message': 'planted RED' if red else 'Tiers 0 to 2 passed',
+                                              'steps': [{'name': 'tests: python', 'status': 'failed' if red else 'ok'}],
+                                              'groups': {'python': ['RED'] if red else []}}))
 sys.exit(1 if red else 3 if (home / 'exit').exists() else 0)
 '''
 
@@ -79,7 +88,10 @@ class Land(unittest.TestCase):
         node = Path(subprocess.check_output([str(ROOT / 'scripts/tron-node')], text=True).strip())
         (self.mini / '.nvm/versions/node').mkdir(parents=True)
         (self.mini / f'.nvm/versions/node/v{(ROOT / ".node-version").read_text().strip()}').symlink_to(node.parent.parent)
-        self.env = {**os.environ, 'PATH': f'{bin_dir}:{os.environ["PATH"]}', 'MINI_HOME': str(self.mini),
+        self.home = self.temporary / 'local-home'
+        self.home.mkdir()
+        self.env = {**os.environ, 'PATH': f'{bin_dir}:{os.environ["PATH"]}', 'MINI_HOME': str(self.mini), 'HOME': str(self.home),
+                    'TRON_NODE_BIN': str(node),
                     'GIT_AUTHOR_NAME': 't', 'GIT_AUTHOR_EMAIL': 't@example.invalid',
                     'GIT_COMMITTER_NAME': 't', 'GIT_COMMITTER_EMAIL': 't@example.invalid'}
 
@@ -112,7 +124,7 @@ class Land(unittest.TestCase):
         return self.git('rev-parse', 'main', cwd=self.origin)
 
     def runs(self) -> list[str]:
-        path = self.mini / 'runs'
+        path = self.home / 'runs'
         return path.read_text().split() if path.is_file() else []
 
     def wait_for(self, condition, what: str) -> None:
@@ -165,9 +177,9 @@ class Land(unittest.TestCase):
         self.commit('green change')
         for marker in ('foreign', 'exit'):
             with self.subTest(marker):
-                (self.mini / marker).write_text('')
+                (self.home / marker).write_text('')
                 code, output = self.finish(self.land())
-                (self.mini / marker).unlink()
+                (self.home / marker).unlink()
                 self.assertEqual(code, 75, output)
                 self.assertIn('no result', output)
                 self.assertEqual(self.main(), self.base)
@@ -184,18 +196,34 @@ class Land(unittest.TestCase):
         self.assertEqual(self.main(), self.base)
         self.assertEqual(len(self.runs()), 1, 'validated once, never looped')
 
+    def test_a_stopped_land_stops_its_gate_and_the_gate_steps_it_started(self) -> None:
+        """Land runs the gate here; a soft stop of land must reach verify's own handler, which stops the step process
+        groups it started, instead of killing verify and orphaning them in the reused land tree."""
+        self.write('feature.txt', 'feature\n')
+        self.commit('green change')
+        (self.home / 'hold').write_text('')
+        (self.home / 'spawn').write_text('')
+        process = self.land()
+        self.wait_for((self.home / 'held').is_file, 'the gate')
+        step = int((self.home / 'step').read_text())
+        process.terminate()
+        process.communicate(timeout=60)
+        alive = lambda: subprocess.run(['ps', '-o', 'stat=', '-p', str(step)], capture_output=True, text=True).stdout.strip() not in ('', 'Z')
+        self.wait_for(lambda: not alive(), 'the gate step stopping')
+        self.assertEqual(self.main(), self.base)
+
     def test_a_main_moved_during_validation_is_merged_and_validated_again(self) -> None:
         self.write('feature.txt', 'feature\n')
         head = self.commit('green change')
-        (self.mini / 'hold').write_text('')
+        (self.home / 'hold').write_text('')
         process = self.land()
-        self.wait_for((self.mini / 'held').is_file, 'the first validation')
+        self.wait_for((self.home / 'held').is_file, 'the first validation')
         other = self.temporary / 'other'
         self.git('clone', '-q', str(self.origin), str(other))
         self.write('other.txt', 'landed meanwhile\n', other)
         moved = self.commit('landed meanwhile', other)
         self.git('push', '-q', 'origin', 'HEAD:main', cwd=other)
-        (self.mini / 'hold').unlink()
+        (self.home / 'hold').unlink()
         code, output = self.finish(process)
         self.assertEqual(code, 0, output)
         self.assertIn('main moved', output)
@@ -213,13 +241,13 @@ class Land(unittest.TestCase):
         self.git('worktree', 'add', '-q', '-b', 'second', str(second), self.base)
         self.write('second.txt', 'second\n', second)
         second_head = self.commit('second change', second)
-        (self.mini / 'hold').write_text('')
+        (self.home / 'hold').write_text('')
         first = self.land()
-        self.wait_for((self.mini / 'held').is_file, 'the first validation')
+        self.wait_for((self.home / 'held').is_file, 'the first validation')
         waiting = self.land(second)
         self.wait_for(lambda: len(list((self.temporary / 'land.lock.queue').glob('*.ticket'))) == 1, 'the second land queuing')
-        self.assertEqual(self.runs(), [(self.mini / 'held').read_text()], 'the second waits; it validates nothing yet')
-        (self.mini / 'hold').unlink()
+        self.assertEqual(self.runs(), [(self.home / 'held').read_text()], 'the second waits; it validates nothing yet')
+        (self.home / 'hold').unlink()
         (first_code, first_output), (second_code, second_output) = self.finish(first), self.finish(waiting)
         self.assertEqual(first_code, 0, first_output)
         self.assertEqual(second_code, 0, second_output)
@@ -249,6 +277,39 @@ class Land(unittest.TestCase):
         self.assertEqual(code, 0, output)
         self.assertEqual(self.runs(), [self.main()], 'main is exactly the validated commit')
         self.assertEqual(self.parents(self.main()), [main, head])
+
+
+    def test_a_red_main_is_bisected_to_its_merge_and_reverted_through_land(self) -> None:
+        """The main suite runs every file after landing; a red main names its first red first-parent merge and lands its revert."""
+        shutil.copy2(ROOT / 'tools/verify/main_suite.py', self.local / 'tools/verify/main_suite.py')
+        self.git('checkout', '-q', 'main')
+        self.commit('main suite')
+        self.git('push', '-q', 'origin', 'main')
+        green = self.main()
+        merges = []
+        for name, path in (('first', 'first.txt'), ('broken', 'RED'), ('later', 'later.txt')):
+            self.git('checkout', '-q', '-b', name, 'main')
+            self.write(path, f'{name}\n')
+            head = self.commit(name)
+            self.git('checkout', '-q', 'main')
+            self.git('merge', '-q', '--no-ff', '-m', f'Merge {name}', head)
+            merges.append(self.git('rev-parse', 'HEAD'))
+        self.git('push', '-q', 'origin', 'main')
+        suite = subprocess.run(['python3', str(self.local / 'tools/verify/main_suite.py'), '--green', green], cwd=self.local, env=self.env,
+                               text=True, capture_output=True, timeout=300)
+        self.assertEqual(suite.returncode, 0, suite.stdout + suite.stderr[-3000:])
+        self.assertIn(f'culprit {merges[1][:12]} (Merge broken)', suite.stdout, suite.stderr[-3000:])
+        landed = self.main()
+        self.assertIn(f'main {landed[:12]} green', suite.stdout, 'the run goes on to judge the revert it landed')
+        probed = (self.mini / 'runs').read_text().split()
+        self.assertEqual(probed, [merges[2], merges[2], merges[1], landed],
+                         'full suite, its red file again, bisect (the merge before RED existed passes unrun), then the revert')
+        argv = [json.loads(line) for line in (self.mini / 'argv').read_text().splitlines()]
+        self.assertEqual(argv[2][:4], ['--files', 'RED', '--base', f'{merges[1]}^1'], 'a probe compares the merge with its own first parent')
+        self.assertEqual(self.parents(landed)[0], merges[2], 'the revert lands --no-ff on the red main')
+        self.assertNotIn('RED', self.git('ls-tree', '--name-only', landed, cwd=self.origin).split())
+        self.assertIn('later.txt', self.git('ls-tree', '--name-only', landed, cwd=self.origin).split(), 'only the culprit is reverted')
+        self.assertEqual(self.runs()[-1], landed, 'the revert was validated by land here; the suite ran on the mini')
 
 
 if __name__ == '__main__':
