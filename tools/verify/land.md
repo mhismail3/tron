@@ -11,10 +11,12 @@ Git directory), never the branch's own, so a branch that lacks or predates them 
    reused land tree (`<git-common-dir>/tron-land-tree`, whose `node_modules` stay; `npm ci` only when a package's inputs
    or the pinned Node changed), so main's first-parent chain stays the landing history. A conflict refuses (exit 2): merge main
    into the branch, commit and land again.
-3. Validates that exact merge commit on this host: the affected Tier 0 to 2 checks, the merge's own
-   `verify --changed --base <main> --skip ios,mac,python-here`. Its Gateway runs queue on the full-Gateway lock ahead of
-   every other waiter (`TRON_LAND_GATE`), behind only the holder and earlier gates. The report must name the merge
-   commit; its evidence is kept in `test-results/land/<merge>/`.
+3. Validates that exact merge commit with the merge's own `verify --changed --base <main> --skip mac,python-here
+   --ios-host mini`. A merge whose selection has no iOS work runs here: its Gateway runs queue on the full-Gateway lock
+   ahead of every other waiter (`TRON_LAND_GATE`), behind only the holder and earlier gates. A merge that selects iOS
+   work runs whole on the mini under its lease (build, then the selected iOS tests), and its report returns in
+   `test-results/mini/<sha12>-<nonce>/verify.json`. The report must name the merge commit; its evidence is kept in
+   `test-results/land/<merge>/`.
 4. Pushes that merge to `main` only when the report passed. A red refuses (exit 1) and a missing or foreign report
    is no result (exit 75); main is unchanged either way. Push is a plain fast-forward, never forced.
 5. If `main` moved while it validated, the push is refused by Git; land merges the branch onto the new main and
@@ -23,7 +25,8 @@ Git directory), never the branch's own, so a branch that lacks or predates them 
    `git ls-remote origin refs/heads/main` before acting, and never land the same merge blindly again.
 
 There is no GitHub ruleset, status check, token or hosted CI, and no skip or override flag: the validation lives in
-the landing process. Not covered: Tier 3 (iOS), the Mac integration tests and `python-here`, which own their lanes. `verify --changed` remains the worker's own fast check before
+the landing process. Not covered: the Mac integration tests and `python-here`, which own their lanes; a merge that selects only
+those has no runnable test and is refused as an empty selection. `verify --changed` remains the worker's own fast check before
 `land`.
 
 ## Main suite
