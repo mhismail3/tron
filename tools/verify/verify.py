@@ -931,9 +931,9 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
                     "package.json", "package-lock.json", "project.yml", ".node-version", "layer-baseline.json", "settings-schema.ts"
                 } or filename.startswith(("tsconfig", "vitest.")) or path in ("config/ci-toolchain.env", POST_MERGE):
                     full_reasons.append(f"graph/toolchain/schema input {path}")
-            if any(reason.startswith("graph/toolchain/schema input") for reason in full_reasons):
+            if full_reasons:
                 selected |= set(locks)
-                reasons.append(f"a graph or toolchain input changed: every lock ({len(locks)} files)")
+                reasons.append(f"a full-tier change: every lock ({len(locks)} files)")
             if full_reasons:
                 reasons.append(f"full tier: {', '.join(full_reasons)}")
         declared |= (chosen - narrow) & modules.keys()

@@ -896,6 +896,8 @@ class SelectionTests(VerifyCase):
         self.assertEqual(r.verify("--changed").returncode, 0)
 
     def test_kernel_layer_or_unowned_change_widens_to_every_lock(self) -> None:
+        """WP9 (69362f715) changed gateway/host (L2) and landed with its affected checks only; another module's lock
+        (home.lock.integration.test.ts) went red on main. A full-tier change runs every lock before landing."""
         r = self.repo
         r.write("mods/core/core.py", "VALUE = 'kernel change'\n")
         r.commit("kernel change")
@@ -910,6 +912,16 @@ class SelectionTests(VerifyCase):
         self.assertIn("why: full tier: ", stray.stdout)
         self.assertIn("unowned stray/notes.py", stray.stdout)
         self.assertIn("ownership FAILED", r.verify("--changed").stdout)
+        r.git("reset", "-q", "--hard", "base")
+        r.write("packages/gateway/src/store/store.module.json", json.dumps({"layer": "L3", "owns": ["**"]}))
+        r.write("packages/gateway/src/store/store.lock.integration.test.ts", "export const lock = true;\n")
+        r.commit("another module's lock")
+        r.git("branch", "-f", "base")
+        r.write("mods/core/core.py", "VALUE = 'kernel change'\n")
+        r.commit("kernel change beside another module's lock")
+        planned = r.verify("--changed", "--plan")
+        plan = json.loads(planned.stdout[planned.stdout.index("{"):])
+        self.assertIn("packages/gateway/src/store/store.lock.integration.test.ts", plan["selection"]["tests"])
 
     def test_a_selection_without_tests_fails_as_zero_test(self) -> None:
         r = self.repo
