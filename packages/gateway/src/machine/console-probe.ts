@@ -27,7 +27,7 @@ const DESKTOP_TASK_HOLD_MS = 2 * 60 * 60 * 1000;
 
 export class ConsoleUnavailableError extends Error {
   constructor(code: ConsoleCause) {
-    super(`${code}: ${MESSAGES[code]}. Desktop observation, capture and input are refused until the user unlocks or wakes it; nothing was captured or sent. Browser work over CDP is unaffected.`);
+    super(`${code}: ${MESSAGES[code]}. Desktop observation, capture and input are refused until a user is logged in at the Mac and it is unlocked and awake; nothing was captured or sent. Browser work over CDP is unaffected.`);
   }
 }
 
@@ -68,6 +68,7 @@ export class DisplayActivity {
     child.on("error", () => {});
     if (!child.pid) return;
     this.child = child;
+    clearTimeout(this.limit);
     this.limit = setTimeout(() => { void this.release(); }, DESKTOP_TASK_HOLD_MS).unref();
     child.once("exit", () => { if (this.child === child) this.child = undefined; });
   }
