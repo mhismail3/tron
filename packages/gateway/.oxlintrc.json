@@ -1,8 +1,10 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["typescript"],
+  "plugins": [
+    "typescript"
+  ],
   "categories": {
-    "correctness": "off",
+    "correctness": "error",
     "suspicious": "off",
     "pedantic": "off",
     "perf": "off",
@@ -12,6 +14,15 @@
   },
   "rules": {
     "eslint/no-dupe-keys": "error",
-    "typescript/no-non-null-asserted-optional-chain": "error"
+    "typescript/no-non-null-asserted-optional-chain": "error",
+    "eslint/no-control-regex": "off",
+    "eslint/no-unused-vars": "off",
+    "eslint/no-unsafe-finally": "off",
+    "typescript/no-this-alias": "off",
+    "eslint/no-useless-escape": "off",
+    "eslint/no-unused-expressions": "off",
+    "eslint/no-unreachable": "off",
+    "eslint/no-setter-return": "off",
+    "eslint/no-useless-catch": "off"
   }
 }
