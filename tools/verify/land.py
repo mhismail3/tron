@@ -76,8 +76,8 @@ def validate(tree: Path, sha: str, main: str) -> tuple[str, dict, Path]:
 
 
 def start_main_suite(sha: str) -> None:
-    """Start the landed commit's main suite on this host, detached; its lock keeps one run, which judges every main
-    that lands meanwhile."""
+    """Start the landed commit's main suite on this host, detached, from the clone's primary checkout; runs queue on its
+    lock, and each judges the newest main not yet judged."""
     source = subprocess.run(["git", "-C", str(ROOT), "show", f"{sha}:tools/verify/main_suite.py"], capture_output=True, text=True)
     if source.returncode:
         return
@@ -87,7 +87,7 @@ def start_main_suite(sha: str) -> None:
     logs.mkdir(exist_ok=True)
     tool.write_text(source.stdout)
     with open(logs / "main-suite.log", "a") as log:
-        subprocess.Popen([sys.executable, str(tool)], cwd=ROOT, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+        subprocess.Popen([sys.executable, str(tool)], cwd=common.parent, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
                          start_new_session=True)
     say(f"main suite started; log {logs / 'main-suite.log'}")
 

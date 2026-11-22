@@ -42,7 +42,8 @@ commit is not recorded green, the log names the files, and both outcomes stay in
 that reproduces is bisected over main's first-parent merges since the last green, each probed against its own first
 parent; a red file absent at a probed commit passes there. The first red merge is reverted `--no-ff` through `land`,
 never by a forced push, and never twice. A conflict, a refused land or any missing report is no result (exit 75): main
-stays as it is and the run says why. The first run records the last known green with `--green <sha>`.
+stays as it is and the run says why. A clone's first run needs the last known green recorded once, `scripts/tron main-suite --green <sha>`; until then each
+started run exits 2 into its log. The main suite is heavy work on this host and runs whenever a land finishes.
 
 `tools/verify/tests/test-land.py` proves the behaviour end to end with the real `land.py`, `mini.py` and
 `host_lock.py`, a disposable origin and a stand-in mini.

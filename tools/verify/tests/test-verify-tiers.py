@@ -242,7 +242,7 @@ class TierTests(fixture.VerifyCase):
         self.assertEqual(widened['tier'], 'full')
         self.assertIn('packages/gateway/src/store/store.lock.integration.test.ts', widened['tests'])
 
-    def test_serial_nested_files_defer_to_full_coverage_unless_the_test_itself_changed(self):
+    def test_a_changed_modules_serial_files_run_before_landing_and_declared_ones_are_never_deferred(self):
         r = self.repo
         root = 'packages/gateway'
         nested = root + '/src/worker/nested.integration.test.ts'
@@ -260,8 +260,8 @@ class TierTests(fixture.VerifyCase):
         plan = self.plan()
         self.assertEqual(plan['selection']['tier'], 'full')
         self.assertIn(ordinary, plan['selection']['tests'])
-        self.assertNotIn(nested, plan['selection']['tests'])
-        self.assertIn(nested, plan['selection']['deferredTests'])
+        self.assertIn(nested, plan['selection']['tests'], 'a changed module runs its own serial tests before landing (P1)')
+        self.assertNotIn(nested, plan['selection']['deferredTests'])
         covered = self.plan('--all')
         self.assertIn(nested, covered['selection']['tests'])
         r.write(nested, '// A changed serial test must run before landing.\n')

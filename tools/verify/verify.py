@@ -956,8 +956,7 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
                      or (is_lock(path) and owner.get(path) in golden_owners)}
         slow = set(json.loads((ROOT / POST_MERGE).read_text())["files"])
         own = {path for path in selected if owner.get(path) in changes}
-        deferred = (selected & nested) - set(touched) - immediate - declared_tests
-        deferred |= (selected & slow) - own - set(touched) - declared_tests
+        deferred = (selected & (nested | slow)) - own - set(touched) - immediate - declared_tests
         selected -= deferred
         if deferred:
             full_reasons.append(f"{len(deferred)} unchanged serial or slow test file(s)")

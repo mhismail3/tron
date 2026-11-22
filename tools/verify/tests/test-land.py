@@ -32,6 +32,8 @@ home = Path(os.environ['HOME'])
 sha = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
 with open(home / 'runs', 'a') as runs:
     runs.write(sha + '\n')
+with open(home / 'argv', 'a') as argv:
+    argv.write(json.dumps(sys.argv[1:]) + '\n')
 if (home / 'hold').exists():
     (home / 'held').write_text(sha)
     while (home / 'hold').exists():
@@ -282,6 +284,8 @@ class Land(unittest.TestCase):
         probed = (local_home / 'runs').read_text().split()
         self.assertEqual(probed, [merges[2], merges[2], merges[1], landed],
                          'full suite, its red file again, bisect (the merge before RED existed passes unrun), then the revert')
+        argv = [json.loads(line) for line in (local_home / 'argv').read_text().splitlines()]
+        self.assertEqual(argv[2][:4], ['--files', 'RED', '--base', f'{merges[1]}^1'], 'a probe compares the merge with its own first parent')
         self.assertEqual(self.parents(landed)[0], merges[2], 'the revert lands --no-ff on the red main')
         self.assertNotIn('RED', self.git('ls-tree', '--name-only', landed, cwd=self.origin).split())
         self.assertIn('later.txt', self.git('ls-tree', '--name-only', landed, cwd=self.origin).split(), 'only the culprit is reverted')

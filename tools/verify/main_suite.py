@@ -19,8 +19,8 @@ class NoResult(Exception):
     pass
 
 
-def git(*args: str, cwd: Path = ROOT) -> str:
-    done = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True)
+def git(*args: str, cwd: Path | None = None) -> str:
+    done = subprocess.run(["git", "-C", str(cwd or ROOT), *args], capture_output=True, text=True)
     if done.returncode:
         raise NoResult(f"git {' '.join(args)}: {done.stderr.strip()}")
     return done.stdout.strip()
@@ -128,17 +128,18 @@ def revert(main: str, guilty: str, files: list[str]) -> int:
         git("branch", "-D", branch, cwd=tree)
 
 
-def judge(state: dict, main: str) -> tuple[int, dict]:
+def judge(state: dict, main: str, save) -> tuple[int, dict]:
     green = state["green"]
     say(f"main {main[:12]}: every test file, since green {green[:12]}")
     full = verify(main, ["--full", "--base", green])
     if full["verdict"] == "passed":
         say(f"main {main[:12]} green")
         return 0, {**state, "green": main, "judged": main}
+    state = {**state, "judged": main}
+    save(state)
     if full["verdict"] != "failed":
         say(f"main {main[:12]}: no result; not green, nothing reverted")
         return 75, state
-    state = {**state, "judged": main}
     files = red_files(full)
     again = verify(main, checks(files, green))["verdict"]
     if again == "passed":
@@ -148,7 +149,14 @@ def judge(state: dict, main: str) -> tuple[int, dict]:
     if again != "failed":
         say(f"main {main[:12]} red; rerunning its red files gave no result")
         return 75, state
-    guilty = culprit(git("rev-list", "--first-parent", "--reverse", f"{green}..{main}").split(), files)
+    candidates = git("rev-list", "--first-parent", "--reverse", f"{green}..{main}").split()
+    reverts = [index for index, sha in enumerate(candidates) if git("log", "-1", "--format=%s", sha).startswith("Merge main-suite/revert-")]
+    if reverts:
+        boundary = candidates[reverts[-1]]
+        if probe(boundary, files) != "passed":
+            raise NoResult(f"the red files are red at or before the last main-suite revert {boundary[:12]}; nothing reverted")
+        candidates = candidates[reverts[-1] + 1:]
+    guilty = culprit(candidates, files)
     if guilty in state.get("reverted", []):
         say(f"main {main[:12]} red again at {guilty[:12]}, already reverted; nothing reverted twice")
         return 1, state
@@ -169,7 +177,7 @@ def run(state_file: Path) -> int:
         if main == state.get("judged", state["green"]):
             say(f"main {main[:12]} already judged")
             return code
-        code, state = judge(state, main)
+        code, state = judge(state, main, lambda judged: state_file.write_text(json.dumps(judged) + "\n"))
         state_file.write_text(json.dumps(state) + "\n")
 
 
@@ -180,11 +188,9 @@ def main(argv: list[str]) -> int:
     try:
         home().mkdir(exist_ok=True)
         with open(home() / "lock", "a") as lock:
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                say("another main-suite run holds this checkout's lock; it judges every main that lands meanwhile")
-                return 0
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            global ROOT
+            ROOT = warm_tree("tree", git("rev-parse", "HEAD"))
             state_file = home() / "state.json"
             if args.green:
                 state_file.write_text(json.dumps({"green": git("rev-parse", "--verify", args.green)}) + "\n")
