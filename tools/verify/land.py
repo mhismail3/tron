@@ -75,6 +75,23 @@ def validate(tree: Path, sha: str, main: str) -> tuple[str, dict, Path]:
     return ("failed" if report.get("verdict") == "failed" else "no result"), report, kept
 
 
+def start_main_suite(sha: str) -> None:
+    """Start the landed commit's main suite on this host, detached; its lock keeps one run, which judges every main
+    that lands meanwhile."""
+    source = subprocess.run(["git", "-C", str(ROOT), "show", f"{sha}:tools/verify/main_suite.py"], capture_output=True, text=True)
+    if source.returncode:
+        return
+    common = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir"))
+    tool, logs = common / "tron-land-tool" / "main_suite.py", common / "tron-main-suite"
+    tool.parent.mkdir(exist_ok=True)
+    logs.mkdir(exist_ok=True)
+    tool.write_text(source.stdout)
+    with open(logs / "main-suite.log", "a") as log:
+        subprocess.Popen([sys.executable, str(tool)], cwd=ROOT, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                         start_new_session=True)
+    say(f"main suite started; log {logs / 'main-suite.log'}")
+
+
 def land(head: str, message: str) -> int:
     scratch = Path(tempfile.mkdtemp(prefix="tron-land-"))
     tree = scratch / "tree"
@@ -97,6 +114,7 @@ def land(head: str, message: str) -> int:
             now = fetch_main()
             if subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", sha, now]).returncode == 0:
                 say(f"landed {sha[:12]} on main; evidence {kept}")
+                start_main_suite(sha)
                 return 0
             if now == main:
                 raise Refused(f"push of {sha[:12]} failed and main is unchanged: {pushed.stderr.strip()}", 75)

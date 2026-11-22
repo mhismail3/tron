@@ -96,7 +96,7 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 
 ## Validation and landing
 [Principles](docs/PRINCIPLES.md) own delivery policy: a commit is gated by the local tests of the modules
-it touches (P1); `scripts/tron land` gates main on Tiers 0 to 2 of the exact merge it lands; iOS and real-UI journeys are checkpoint signals (P2).
+it touches (P1); `scripts/tron land` gates main on the affected Tier 0 to 2 checks of the exact merge it lands and starts the main suite; iOS and real-UI journeys are checkpoint signals (P2).
 1. Commit in your own worktree; enable rerere. Fetch main into private `FETCH_HEAD` and merge
    deliberately (see [Git/gh skill](.agents/skills/tron-work/SKILL.md)); never rewrite foreign work.
    Every commit is gated by `scripts/tron verify --changed` (the changed modules' tests) plus the E2E journeys that prove any behaviour you delete; add partial

@@ -41,7 +41,9 @@ named = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD^'], 
 out = root / 'test-results/verify'
 out.mkdir(parents=True, exist_ok=True)
 (out / f'{sha}.json').write_text(json.dumps({'commit': named, 'verdict': 'failed' if red else 'passed', 'args': sys.argv[1:],
-                                              'message': 'planted RED' if red else 'Tiers 0 to 2 passed'}))
+                                              'message': 'planted RED' if red else 'Tiers 0 to 2 passed',
+                                              'steps': [{'name': 'tests: python', 'status': 'failed' if red else 'ok'}],
+                                              'groups': {'python': ['RED'] if red else []}}))
 sys.exit(1 if red else 3 if (home / 'exit').exists() else 0)
 '''
 
@@ -273,11 +275,13 @@ class Land(unittest.TestCase):
         env = {**self.env, 'HOME': str(local_home), 'TRON_NODE_BIN': node}
         suite = subprocess.run(['python3', str(self.local / 'tools/verify/main_suite.py'), '--green', green], cwd=self.local, env=env,
                                text=True, capture_output=True, timeout=300)
-        self.assertEqual(suite.returncode, 1, suite.stdout + suite.stderr[-3000:])
+        self.assertEqual(suite.returncode, 0, suite.stdout + suite.stderr[-3000:])
         self.assertIn(f'culprit {merges[1][:12]} (Merge broken)', suite.stdout, suite.stderr[-3000:])
-        probed = (local_home / 'runs').read_text().split()
-        self.assertEqual(probed, [merges[2], merges[2], merges[0], merges[1]], 'full suite, red files again, then bisect')
         landed = self.main()
+        self.assertIn(f'main {landed[:12]} green', suite.stdout, 'the run goes on to judge the revert it landed')
+        probed = (local_home / 'runs').read_text().split()
+        self.assertEqual(probed, [merges[2], merges[2], merges[1], landed],
+                         'full suite, its red file again, bisect (the merge before RED existed passes unrun), then the revert')
         self.assertEqual(self.parents(landed)[0], merges[2], 'the revert lands --no-ff on the red main')
         self.assertNotIn('RED', self.git('ls-tree', '--name-only', landed, cwd=self.origin).split())
         self.assertIn('later.txt', self.git('ls-tree', '--name-only', landed, cwd=self.origin).split(), 'only the culprit is reverted')

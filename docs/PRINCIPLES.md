@@ -30,7 +30,8 @@ device checkpoints. A red is filed against the module that owns it,
 which fixes it at the root or reverts its change. A retry that passes is evidence of
 nondeterminism, not a fix.
 **Evidence.** Each journey's remaining gaps are tracked as #2230–#2235.
-**Enforced by** `scripts/tron land` and the checkpoint device smoke.
+**Enforced by** `scripts/tron land` (affected checks), the main suite it starts after each landing, and the checkpoint
+device smoke.
 
 ## P3 Clear owners, clean modules
 

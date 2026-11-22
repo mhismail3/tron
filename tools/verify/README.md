@@ -313,7 +313,7 @@ base). Each module contributes its owned tests:
 Recorders under `test-fixtures/` are never run. A change is gated by its own
 modules' tests ([principles P1](../../docs/PRINCIPLES.md#p1-a-module-owns-its-code-and-its-tests)):
 `--changed` and `--module` add no `dependsOn` consumer's tests; those run in
-`land`'s `--full` run. The one consumer added is a module whose `dynamicEdges` name a selected
+the main suite after the merge. The one consumer added is a module whose `dynamicEdges` name a selected
 module (today only the iOS UI tests' spawn edges to the hosted app): its locks are
 that module's rendered tests. `--changed` also adds the importers no compiler checks: a changed
 source file's Python importers (`import`/`from` by module name, or its path handed to
@@ -342,7 +342,7 @@ A Swift or Gateway string edit is code: its tests and locks run (locks compare l
 |---|---|---|
 | **none** | Empty diff or documentation only | Static/documentation checks; no executable tests |
 | **partial** | Tests/goldens only, or ordinary owned code (including Swift UI) | Changed tests; golden owner's locks; otherwise owner tests, owner declarations and launching UI locks |
-| **full** | Production changes in L0–L2, `gateway/package`, `gateway/test-support`, `gateway/pi-sdk`; declared kernel/contracts/persistence/security/lifecycle/mac-installer risk; manifest/layer-baseline/toolchain/project configuration; unknown ownership | The same affected checks **now**, plus every test file in `land`'s `--full` run of the merge |
+| **full** | Production changes in L0–L2, `gateway/package`, `gateway/test-support`, `gateway/pi-sdk`; declared kernel/contracts/persistence/security/lifecycle/mac-installer risk; manifest/layer-baseline/toolchain/project configuration; unknown ownership | The same affected checks **now**, plus every test file in the main suite after the merge |
 
 Test/golden-only narrowing precedes module risk; a manifest/configuration edit still
 requires the full tier. Unchanged files in the existing serial `gateway-nested` list

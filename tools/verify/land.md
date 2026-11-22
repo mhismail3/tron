@@ -27,13 +27,22 @@ the landing process. Not yet covered: Tier 3 (iOS) and the Mac integration tests
 
 ## Main suite
 
-Land runs only what the merge affects; unchanged serial files and unchanged files over the per-file budget in
-`tools/verify/post-merge.json` wait for the main suite. `scripts/tron main-suite [--green <sha>] [--watch <seconds>]`
-runs `verify --full` on each new main commit in one warm checkout under the Git directory (`tron-main-suite/`; `npm ci`
-only when a lockfile changed). Green records that commit. A red reruns only its red files at the same commit: a pass
-there is nondeterminism, reported and left to `scripts/tron flakes`, never reverted or retried. A red that reproduces is
-bisected over main's first-parent merges since the last green with `verify --files`, and the first red merge is reverted
-`--no-ff` through `land`, never by a forced push. The first run records the last known green with `--green`.
+Land runs only what the merge affects: a changed module's own tests always, and the tests it reaches through importers,
+consumers and declarations, except unchanged serial `gateway-nested` files and unchanged files listed in
+`tools/verify/post-merge.json` (the slow ones); those wait for the main suite. After each landing, `land` starts the
+landed commit's `scripts/tron main-suite` detached on this host (log `<git-common-dir>/tron-main-suite/main-suite.log`).
+One run at a time holds `tron-main-suite/lock`; it judges every main that lands while it runs, newest first, in one warm
+checkout (`tron-main-suite/tree`, `npm ci` only when a lockfile changed). It runs here, not on the mini, so the mini stays
+free for the gate; its Gateway lanes queue on this host's full-Gateway lock like any local Gateway run.
+
+`verify --full` green records that commit as green. A red reruns only its red files (`verify --files`; every file of a
+group whose failure list is incomplete) once at the same commit. A pass there is nondeterminism: nothing is reverted, the
+commit is not recorded green, the log names the files, and both outcomes stay in the test ledger, where
+`scripts/tron flakes` lists them for an issue. A red
+that reproduces is bisected over main's first-parent merges since the last green, each probed against its own first
+parent; a red file absent at a probed commit passes there. The first red merge is reverted `--no-ff` through `land`,
+never by a forced push, and never twice. A conflict, a refused land or any missing report is no result (exit 75): main
+stays as it is and the run says why. The first run records the last known green with `--green <sha>`.
 
 `tools/verify/tests/test-land.py` proves the behaviour end to end with the real `land.py`, `mini.py` and
 `host_lock.py`, a disposable origin and a stand-in mini.

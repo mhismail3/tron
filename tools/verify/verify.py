@@ -955,7 +955,9 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
         immediate = {path for path in selected if owner.get(path) in narrow
                      or (is_lock(path) and owner.get(path) in golden_owners)}
         slow = set(json.loads((ROOT / POST_MERGE).read_text())["files"])
-        deferred = (selected & (nested | slow)) - set(touched) - immediate - declared_tests
+        own = {path for path in selected if owner.get(path) in changes}
+        deferred = (selected & nested) - set(touched) - immediate - declared_tests
+        deferred |= (selected & slow) - own - set(touched) - declared_tests
         selected -= deferred
         if deferred:
             full_reasons.append(f"{len(deferred)} unchanged serial or slow test file(s)")
@@ -1472,13 +1474,8 @@ def main(argv: list[str]) -> int:
                     commands.append({"name": label, "command": command, "cwd": str(cwd.relative_to(ROOT)),
                                      **({"estimatedSeconds": round(shard.seconds, 1)} if group == "ios" else {})})
         commands.sort(key=lambda step: plan_steps.index(step["name"]))
-        deferred_commands = []
-        if selection["deferredTests"]:
-            command, cwd, _ = test_spec("gateway-nested", selection["deferredTests"], [], ROOT / "test-results/verify" / sha, gateway_host=gateway_host)
-            deferred_commands.append({"name": "tests: gateway-nested", "command": command, "cwd": str(cwd.relative_to(ROOT))})
         print(json.dumps({"selection": selection, "delta": change, "groups": groups, "steps": plan_steps, "commands": commands,
                           "gatewayHost": {"host": gateway_host, "reason": gateway_reason},
-                          "deferredCommands": deferred_commands,
                           "iosJobs": args.ios_jobs,
                           "iosHost": args.ios_host,
                           "iosLanes": [lane or "(this worktree's lane)" for lane in ios_phone_lanes()[:args.ios_jobs]] + [ios_pad_lane()] if "ios" in groups and "ios" not in skip else []}, indent=2))
@@ -1652,8 +1649,8 @@ def main(argv: list[str]) -> int:
             if group in ('gateway', 'gateway-nested'):
                 result['caseOutcomes'], result['caseEvidenceComplete'] = case_outcomes(report)
             if group in ("gateway", "gateway-nested") and result["status"] == "failed":
-                failed, _ = gateway_failures(report, (ROOT / result["log"]).read_text(errors="replace"))
-                result["failedTests"] = list(failed)
+                failed, complete = gateway_failures(report, (ROOT / result["log"]).read_text(errors="replace"))
+                result["failedTests"], result["failedTestsComplete"] = list(failed), complete
                 print("\n".join(f"    failed: {identity}" for identity in failed), flush=True)
             if result["status"] == "failed":
                 reds.append(f"{label} failed")
