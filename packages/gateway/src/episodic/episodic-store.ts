@@ -272,11 +272,11 @@ async function readCheckpoint(paths: StorePaths, maxLineBytes: number): Promise<
   const entryIds = new Set<string>();
   const nodes = new Map<string, EpisodicNodeRecord>();
   await readJsonl<EpisodicMessageRecord>(join(directory, "catalog.jsonl"), maxLineBytes, isCatalogRecord, record => {
-    if (record.revision > watermark || messages.has(record.index) || entryIds.has(record.entryId)) {
+    if (record.revision > watermark || messages.has(record.index) || entryIds.has(`${record.sessionId}\0${record.entryId}`)) {
       throw new EpisodicMemoryError("invalid-store", "Episodic checkpoint catalog is inconsistent with its watermark");
     }
     messages.set(record.index, record);
-    entryIds.add(record.entryId);
+    entryIds.add(`${record.sessionId}\0${record.entryId}`);
   }, true);
   await readJsonl<EpisodicNodeLogRecord>(join(directory, "nodes.jsonl"), maxLineBytes, isNodeLogRecord, record => {
     if ("nodes" in record) throw new EpisodicMemoryError("invalid-store", "Episodic checkpoint contains an invalidation record");
