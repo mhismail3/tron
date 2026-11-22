@@ -832,9 +832,9 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
         reasons.append(f"--full: every test file ({len(tests)} files)")
         touched, chosen, declared = ["(all)"], set(modules), set(modules)
     elif mode == "files":
-        missing = sorted(set(paths or []) - set(tests))
+        missing = sorted(set(paths or []) - set(tracked))
         if missing:
-            raise VerifyError(f"--files names no tracked test file: {', '.join(missing)}")
+            raise VerifyError(f"--files names an untracked file: {', '.join(missing)}")
         selected |= set(paths or [])
         reasons.append(f"--files: the {len(selected)} named test file(s)")
         touched, chosen = ["(files)"], set()

@@ -217,6 +217,18 @@ class ExternalVerificationTests(VerifyCase):
         self.assertNotEqual(refused.returncode, 0)
         self.assertIn("unsupported verify declaration", refused.stdout + refused.stderr)
 
+    def test_the_bisect_probe_runs_a_declared_verification_file_by_name(self) -> None:
+        """The main suite probes a red group's files with --files; a declared scripts/verify-*.py file is not named like a
+        test, and --files refused it, so a red Python group gave no result instead of a bisect."""
+        r = self.repo
+        self.declare("alpha", [self.external("probe", body=PASSING, path="scripts/verify-probe.py")])
+        r.commit("a declared verification file")
+        planned = r.verify("--files", "scripts/verify-probe.py", "--plan")
+        self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
+        self.assertEqual(json.loads(planned.stdout[planned.stdout.index("{"):])["groups"], {"python": ["scripts/verify-probe.py"]})
+        refused = r.verify("--files", "scripts/absent.py", "--plan")
+        self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
+
     def test_gateway_declarations_keep_existing_runner_classification(self) -> None:
         r = self.repo
         files = ["src/main.integration.test.ts", "src/nested.integration.test.ts", "src/mac.integration.test.ts",

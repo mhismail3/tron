@@ -107,7 +107,8 @@ class Land(unittest.TestCase):
         (self.mini / f'.nvm/versions/node/v{(ROOT / ".node-version").read_text().strip()}').symlink_to(node.parent.parent)
         self.home = self.temporary / 'local-home'
         self.home.mkdir()
-        self.env = {**os.environ, 'PATH': f'{bin_dir}:{os.environ["PATH"]}', 'MINI_HOME': str(self.mini), 'HOME': str(self.home),
+        inherited = {key: value for key, value in os.environ.items() if key != 'TRON_VERIFY_EXECUTION_HOST'}
+        self.env = {**inherited, 'PATH': f'{bin_dir}:{os.environ["PATH"]}', 'MINI_HOME': str(self.mini), 'HOME': str(self.home),
                     'TRON_NODE_BIN': str(node),
                     'GIT_AUTHOR_NAME': 't', 'GIT_AUTHOR_EMAIL': 't@example.invalid',
                     'GIT_COMMITTER_NAME': 't', 'GIT_COMMITTER_EMAIL': 't@example.invalid'}
