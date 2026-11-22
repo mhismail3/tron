@@ -1,13 +1,18 @@
 // Purpose: computer-bench adapter for the agent-browser CLI (the engine behind Tron's agent_browser tool), driving its own managed Chrome for Testing.
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { DOWNLOAD_BODY } from "./fixtures/site.mjs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { CAPTION, DOWNLOAD_BODY } from "./fixtures/site.mjs";
 import { pngSize, run } from "./process.mjs";
 
-const BINARY = process.env.COMPUTER_BENCH_AGENT_BROWSER ?? join(homedir(), ".tron/agent/bin/agent-browser");
+function pinnedEngine() {
+  const gateway = createRequire(new URL("../../packages/gateway/package.json", import.meta.url));
+  const native = dirname(gateway.resolve("pi-agent-browser-native/package.json"));
+  return join(dirname(createRequire(join(native, "package.json")).resolve("agent-browser/package.json")), "bin", "agent-browser.js");
+}
 
 export function agentBrowser() {
+  let BINARY;
   const session = `cb2476-${process.pid}`;
   const profileSession = `${session}-profile`;
   let profile;
@@ -30,6 +35,7 @@ export function agentBrowser() {
   return {
     name: "agent-browser",
     async probe() {
+      try { BINARY = process.env.COMPUTER_BENCH_AGENT_BROWSER ?? pinnedEngine(); } catch (error) { return { ok: false, reason: `no pinned engine: ${error.message}` }; }
       if (!existsSync(BINARY)) return { ok: false, reason: `missing ${BINARY}` };
       const result = await run(BINARY, ["--version"]);
       return { ok: result.code === 0, version: result.stdout.trim(), reason: result.stderr.trim() };
@@ -48,6 +54,12 @@ export function agentBrowser() {
         await call(["click", "#prefilled"]); await call(["press", "Meta+a"]); await call(["keyboard", "type", "new value"]);
         const text = await value(["get", "value", "#prefilled"]);
         return { ok: text === "new value", detail: text };
+      },
+      async "caption-exact"(ctx) {
+        await call(["open", `${ctx.site.origin}/composer.html`]);
+        await call(["click", "#composer"]); await call(["press", "Meta+a"]); await call(["keyboard", "type", CAPTION]);
+        const text = await value(["eval", "document.querySelector('#composer').textContent"]);
+        return { ok: text === CAPTION, detail: text === CAPTION ? `${[...text].length} chars exact` : `got ${JSON.stringify(text.slice(0, 80))}` };
       },
       async "form-controls"(ctx) {
         await openForm(ctx);
