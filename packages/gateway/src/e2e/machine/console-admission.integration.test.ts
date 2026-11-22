@@ -79,6 +79,7 @@ async function fixture() {
 (async () => {
   const tool = process.argv[3], args = JSON.parse(process.argv[4]);
   if (tool === 'start_session') return console.log(JSON.stringify({ active: true, revived: false }));
+  if (tool === 'end_session') return console.log(JSON.stringify({ active: false }));
   await fs.writeFile(${JSON.stringify(dispatched)}, tool);
   const mode = await fs.readFile(${JSON.stringify(join(root, "mode"))}, 'utf8').catch(() => '');
   if (mode === 'hold') await fs.readFile(${JSON.stringify(release)});
