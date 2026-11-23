@@ -157,7 +157,7 @@ export class EpisodicMemory {
       }
       for (const record of snapshot.messages.values()) memory.setMessage(record);
       for (const record of snapshot.nodes.values()) memory.setNode(record);
-      for (const record of memory.messages.values()) memory.entryIndex.set(record.entryId, record.index);
+      for (const record of memory.messages.values()) memory.entryIndex.set(entryKey(record.sessionId, record.entryId), record.index);
       memory.revision = snapshot.highestRevision + 1;
       memory.committedRevision = snapshot.highestRevision;
       memory.generation = Math.max(snapshot.state?.generation ?? 0, snapshot.highestGeneration);
@@ -238,11 +238,8 @@ export class EpisodicMemory {
       let result = 0;
       let found: number | undefined;
       for await (const entry of this.dependencies.sessionSource.branchAtCursor(cursor, this.limits)) {
-        const index = this.entryIndex.get(entry.id);
-        if (index !== undefined) {
-          if (this.messages.get(index)?.sessionId !== entry.sourceSessionId) return undefined;
-          result = Math.max(result, index + 1);
-        }
+        const index = this.entryIndex.get(entryKey(entry.sourceSessionId, entry.id));
+        if (index !== undefined) result = Math.max(result, index + 1);
         if (entry.id === entryId) found = result;
       }
       return found;
@@ -552,21 +549,18 @@ export class EpisodicMemory {
     const seen = new Set<string>();
     try {
       for (const message of projection) {
-        seen.add(message.entryId);
-        const existing = this.entryIndex.get(message.entryId);
+        const key = entryKey(message.sourceSessionId, message.entryId);
+        seen.add(key);
+        const existing = this.entryIndex.get(key);
         if (existing === undefined) {
           const index = this.messages.size;
           await this.appendCatalog({ index, ...message, sessionId: message.sourceSessionId });
-          this.entryIndex.set(message.entryId, index);
+          this.entryIndex.set(key, index);
           this.view.push({ level: 0, index, start: index, span: 1 });
           this.fit();
           continue;
         }
         const current = this.messages.get(existing);
-        if (current && current.sessionId !== message.sourceSessionId) {
-          await this.block("source-unavailable", "Canonical entry ID belongs to another physical chapter");
-          return;
-        }
         const sameContent = current?.text === message.text && current.omitted === message.omitted && current.kind === message.kind;
         if (sameContent && current.sourceDigest === message.sourceDigest && current.timestamp === message.timestamp
           && JSON.stringify(current.omissions) === JSON.stringify(message.omissions)) continue;
@@ -575,8 +569,8 @@ export class EpisodicMemory {
       }
 
       if (!cut.incremental) {
-        for (const [entryId, index] of this.entryIndex) {
-          if (seen.has(entryId)) continue;
+        for (const [key, index] of this.entryIndex) {
+          if (seen.has(key)) continue;
           const current = this.messages.get(index);
           if (!current || current.omitted || (cut.scopeSessionId && current.sessionId !== cut.scopeSessionId)) continue;
           const { revision: _superseded, ...draft } = current;
@@ -1247,4 +1241,8 @@ export class EpisodicMemory {
 
 function viewLine(text: string | undefined): string {
   return text === undefined ? EPISODIC_PLACEHOLDER : text.replace(/^(?:user|talk|echo|event|assistant|tool):\s/iu, "").replace(/\n+/gu, " ");
+}
+
+function entryKey(sessionId: string, entryId: string): string {
+  return `${sessionId}\0${entryId}`;
 }

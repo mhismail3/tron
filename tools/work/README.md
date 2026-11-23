@@ -69,7 +69,7 @@ Tests run directly with `scripts/tron test tooling tools/work/tests/test-<name>.
 Fresh worktrees prepare their own pinned Gateway development dependencies before
 Gateway checks; see [verify](../verify/README.md#worktree-dependencies). No shared
 install or global compiler substitutes. Affected checks run before
-[`scripts/tron land`](../verify/land.md), which validates Tiers 0 to 2 of the exact merge before it pushes main;
+[`scripts/tron land`](../verify/land.md), which validates the affected Tier 0 to 2 checks of the exact merge before it pushes main;
 iOS coverage belongs to the device checkpoints
 ([principles P2](../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-landing-and-checkpoint-signal)). Keep evidence under `test-results/`.
 

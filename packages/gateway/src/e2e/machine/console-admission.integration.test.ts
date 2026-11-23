@@ -14,7 +14,7 @@ import { BrowserLiveViewRegistry } from "../../display/browser-live-view.js";
 import type { NotificationService } from "../../notifications/notification-service.js";
 
 const DRIVER = "/Applications/Tron.app/Contents/Library/Native/cua-driver";
-const boundary = vi.hoisted(() => ({ driver: "", lockFile: "", probes: 0, host: [] as string[], console: { locked: false, asleep: false } }));
+const boundary = vi.hoisted(() => ({ driver: "", lockFile: "", deadlineScale: 1, probes: 0, host: [] as string[], console: { locked: false, asleep: false } }));
 vi.mock("../../machine/native-capture-transport.js", () => ({ openNativeCaptureTransport: () => {
   const identity = { bootID: crypto.randomUUID(), connectionID: crypto.randomUUID(), sessionID: crypto.randomUUID() };
   const generation = crypto.randomUUID();
@@ -43,7 +43,7 @@ vi.mock("node:child_process", async original => {
         const lockedByDriver = boundary.lockFile !== "" && (() => { try { readFileSync(boundary.lockFile); return true; } catch { return false; } })();
         return { stdout: JSON.stringify({ ...boundary.console, locked: boundary.console.locked || lockedByDriver }), stderr: "" };
       }
-      return file === DRIVER ? run(process.execPath, [boundary.driver, ...args], options) : run(file, args, options);
+      return file === DRIVER ? run(process.execPath, [boundary.driver, ...args], { ...options, timeout: options.timeout && options.timeout / boundary.deadlineScale }) : run(file, args, options);
     },
   });
   const spawn = (file: string, args: string[], options: any) => actual.spawn(file,
@@ -55,7 +55,7 @@ const execute = promisify(execFile);
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
-  boundary.console = { locked: false, asleep: false }; boundary.probes = 0; boundary.host = []; boundary.lockFile = "";
+  boundary.console = { locked: false, asleep: false }; boundary.deadlineScale = 1; boundary.probes = 0; boundary.host = []; boundary.lockFile = "";
 });
 
 async function heldAssertions(owner = process.pid): Promise<number> {
@@ -77,15 +77,19 @@ async function fixture() {
   await execute("/usr/bin/mkfifo", [release]);
   await writeFile(boundary.driver, `const fs = require('node:fs/promises');
 (async () => {
+  if (process.argv[2] === 'describe') return console.log('name: click\\n\\ninput_schema:\\n' + JSON.stringify({ properties: { session: {}, element_token: {} }, required: ['session'] }));
   const tool = process.argv[3], args = JSON.parse(process.argv[4]);
   if (tool === 'start_session') return console.log(JSON.stringify({ active: true, revived: false }));
+  if (tool === 'end_session') return console.log(JSON.stringify({ active: false }));
   await fs.writeFile(${JSON.stringify(dispatched)}, tool);
   const mode = await fs.readFile(${JSON.stringify(join(root, "mode"))}, 'utf8').catch(() => '');
   if (mode === 'hold') await fs.readFile(${JSON.stringify(release)});
   if (mode === 'lock') await fs.writeFile(${JSON.stringify(boundary.lockFile)}, 'locked');
+  if (mode === 'stale' && tool === 'click') { console.log(JSON.stringify({ status: 'refused', refusal: { code: 'stale_element_token', message: 'element_token is stale' } })); process.exit(1); }
   const png = Buffer.alloc(33); Buffer.from([137,80,78,71,13,10,26,10]).copy(png); png.writeUInt32BE(13, 8); png.write('IHDR', 12); png.writeUInt32BE(4, 16); png.writeUInt32BE(4, 20);
   if (args.screenshot_out_file) await fs.writeFile(args.screenshot_out_file, png);
-  console.log(JSON.stringify({ status: 'completed', ...(args.screenshot_out_file ? { screenshot_file_path: args.screenshot_out_file, screenshot_width: 4, screenshot_height: 4 } : {}) }));
+  const window = tool === 'get_window_state' ? { pid: 1, window_id: 2, elements: [{ element_token: 's00000001:0' }] } : {};
+  console.log(JSON.stringify({ status: 'completed', ...window, ...(args.screenshot_out_file ? { screenshot_file_path: args.screenshot_out_file, screenshot_width: 4, screenshot_height: 4 } : {}) }));
 })().catch(error => { console.error(error); process.exit(1); });
 `);
   const home = join(root, "home"), agentDir = join(home, "agent");
@@ -115,7 +119,8 @@ async function fixture() {
   return {
     slot, result,
     lockAlerts: () => alerts.filter(alert => /locked|asleep/u.test(`${alert.title} ${alert.message}`)).length,
-    mode: (value: "" | "hold" | "lock") => writeFile(join(root, "mode"), value),
+    root,
+    mode: (value: "" | "hold" | "lock" | "stale") => writeFile(join(root, "mode"), value),
     dispatched: async () => !!await readFile(dispatched).catch(() => false),
     release: () => writeFile(release, "released"),
     turn: async (calls: Array<[string, string, Record<string, unknown>]>) => {
@@ -186,6 +191,31 @@ describe.skipIf(process.platform !== "darwin")("console admission for computer a
     await prompting;
     await waitFor(async () => await heldAssertions() === 0, "assertion release at turn end");
     if (!stop) expect(f.result("desktop").isError).not.toBe(true);
+  });
+
+  it("ends a driver call that never answers at its deadline as an uncertain effect and leaves no driver process", async () => {
+    const f = await fixture();
+    await f.mode("hold");
+    boundary.deadlineScale = 20;
+    await f.turn([desktop("desktop")]);
+    expect(f.result("desktop").isError).toBe(true);
+    expect(JSON.stringify(f.result("desktop").content)).toContain("gave no answer within 10 s");
+    expect((await execute("/bin/ps", ["-axo", "command="])).stdout).not.toContain(f.root);
+    await waitFor(async () => await heldAssertions() === 0, "assertion release after the deadline");
+  });
+
+  it("projects help without reserved fields and types a driver-side stale element refusal", async () => {
+    const f = await fixture();
+    await f.turn([["help", "computer", { tool: "help", arguments: { tool: "click" } }]]);
+    const help = JSON.stringify(f.result("help").content);
+    expect(help).toContain("element_token");
+    expect(help).not.toContain("session");
+    await f.mode("stale");
+    await f.turn([["window", "computer", { tool: "get_window_state", arguments: { pid: 1, window_id: 2, include_screenshot: false } }],
+      ["click", "computer", { tool: "click", arguments: { element_token: "s00000001:0", pid: 1, window_id: 2 } }]]);
+    expect(f.result("window").isError).not.toBe(true);
+    expect(f.result("click").isError).toBe(true);
+    expect(JSON.stringify(f.result("click").content)).toContain("stale_element_token");
   });
 
   it("releases the OS assertion when the owning runtime process is killed", async () => {

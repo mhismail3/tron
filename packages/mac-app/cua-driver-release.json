@@ -1,9 +1,9 @@
 {
-  "version": "0.33.0",
-  "revision": "1553a3f360ea12155be3bc77e27c427ca62f967a",
+  "version": "0.56.9",
+  "revision": "72f5415fe8c229aebc1bc647655c92fb9f5956e2",
   "githubPrerelease": true,
   "upstreamSigner": "YCK386LBJ7",
   "architectures": ["arm64", "x86_64"],
-  "archiveSHA256": "313d0c9d845430b9198efff17ae50a6d9475a3586b4453ae0dc54036cb85c09b",
-  "binarySHA256": "a9daa8e9428e7870b4806e31e1d3af8d26259ce1c0bc5bc200ee60d65ee953aa"
+  "archiveSHA256": "0ba9da18c5b782fd1ef6d30c64674a349a188dcc5fa2dffc8b52fbabfc511bdf",
+  "binarySHA256": "71cc29a412bd7720258d87240ca3497556d9b0b4dedce7dd744ff8cb257c5b5c"
 }

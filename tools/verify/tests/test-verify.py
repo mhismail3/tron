@@ -49,7 +49,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 ARTIFACTS = ROOT / "test-results" / "verify-cli"
-COPIED = ["tools/verify/ledger-node.mjs", "tools/verify/ledger-host.mjs", "tools/verify/ledger-vitest.mjs", "scripts/tron", "scripts/check-documentation-policy.py", "scripts/check-agent-policy.sh", "scripts/personal-info-guard.sh",
+COPIED = ["tools/verify/post-merge.json", "tools/verify/ledger-node.mjs", "tools/verify/ledger-host.mjs", "tools/verify/ledger-vitest.mjs", "scripts/tron", "scripts/check-documentation-policy.py", "scripts/check-agent-policy.sh", "scripts/personal-info-guard.sh",
           "scripts/ios-test-build-identity.py", "tools/work/work.json",
           *[str(p.relative_to(ROOT)) for d in ("tools/verify", "tools/ownership", "tools/metrics", "tools/layers", "tools/work", "tools/docs", "tools/home-layout")
             for p in (ROOT / d).glob("*.py")]]
@@ -217,6 +217,21 @@ class ExternalVerificationTests(VerifyCase):
         self.assertNotEqual(refused.returncode, 0)
         self.assertIn("unsupported verify declaration", refused.stdout + refused.stderr)
 
+    def test_the_bisect_probe_runs_a_declared_verification_file_by_name(self) -> None:
+        """The main suite probes a red group's files with --files; a declared scripts/verify-*.py file is not named like a
+        test, and --files refused it, so a red Python group gave no result instead of a bisect."""
+        r = self.repo
+        self.declare("alpha", [self.external("probe", body=PASSING, path="scripts/verify-probe.py")])
+        r.commit("a declared verification file")
+        planned = r.verify("--files", "scripts/verify-probe.py", "--plan")
+        self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
+        self.assertEqual(json.loads(planned.stdout[planned.stdout.index("{"):])["groups"], {"python": ["scripts/verify-probe.py"]})
+        r.write("scripts/helper.py", "VALUE = 1\n")
+        r.commit("a tracked script that is no test")
+        refused = r.verify("--files", "scripts/helper.py", "--plan")
+        self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
+        self.assertIn("no tracked test file", refused.stderr)
+
     def test_gateway_declarations_keep_existing_runner_classification(self) -> None:
         r = self.repo
         files = ["src/main.integration.test.ts", "src/nested.integration.test.ts", "src/mac.integration.test.ts",
@@ -249,8 +264,7 @@ class ExternalVerificationTests(VerifyCase):
             else:
                 self.assertEqual(node_command[-1:], [files[3]], options)
                 self.assertNotIn("mini.py", " ".join(node_command), options)
-            local_python = "status=0; " + "; ".join(f"echo '### verify file: {path}'; python3 tools/verify/ledger.py python {path} || {{ code=$?; [ \"$status\" -ne 0 ] || status=$code; }}"
-                                       for path in ("mods/alpha/test-alpha.py", "scripts/test-pooled.py")) + '; exit "$status"'
+            local_python = "python3 tools/verify/files.py python mods/alpha/test-alpha.py scripts/test-pooled.py"
             python_command = next(c["command"] for c in plan["commands"] if c["name"] == "tests: python")
             self.assertEqual([python_command[0], Path(python_command[1]).name, *python_command[2:]] if runner == "mini.py"
                              else python_command, ["python3", "mini.py", "python", local_python] if runner == "mini.py"
@@ -681,7 +695,9 @@ class LedgerTests(VerifyCase):
                                 ('mods/alpha/test-fixtures.py::setUpClass (Skipped)', 'skipped'),
                                 ('mods/alpha/test-passed.py', 'passed')])
         r.write('mods/alpha/test-000-status.py', 'import sys\nsys.exit(37)\n')
-        r.commit('first nonzero status with later files')
+        for side, mode in (('reader', 'O_RDONLY'), ('writer', 'O_WRONLY')):
+            r.write(f'mods/alpha/test-pair-{side}.py', "import os, signal, unittest\nfrom pathlib import Path\nFIFO = Path(os.environ['TMPDIR']) / 'tron-pair.fifo'\nclass Pair(unittest.TestCase):\n    def test_meets_its_partner(self):\n        try:\n            os.mkfifo(FIFO)\n        except FileExistsError:\n            pass\n        signal.alarm(60)\n        os.close(os.open(FIFO, os.{}))\n        signal.alarm(0)\n        print('pair met')\nunittest.main()\n".format(mode))
+        r.commit('first nonzero status with later files, and two files that each finish only while the other runs')
         for entry in ('tooling', 'verify'):
             with self.subTest(entry=entry):
                 if entry == 'tooling':
@@ -695,7 +711,24 @@ class LedgerTests(VerifyCase):
                     self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
                     step = next(step for step in r.report()['steps'] if step['name'] == 'tests: python')
                     self.assertEqual(step['exit'], 37)
-                    self.assertIn('file passed', (r.path / step['log']).read_text())
+                    log = (r.path / step['log']).read_text()
+                    self.assertIn('file passed', log)
+                    self.assertEqual(log.count('pair met'), 2, log)
+
+    def test_parallel_first_appenders_to_a_new_ledger_all_record(self) -> None:
+        """Parallel test files each open the ledger; switching a new store to WAL raced, and an appender failed its file with 'database is locked'."""
+        record = ("import sys; sys.path.insert(0, sys.argv[1]); import ledger; ledger.append([{'runId': 'r', 'testId': 't', 'commit': 'c', "
+                  "'tree': 't', 'dirty': 0, 'outcome': 'passed', 'seconds': 0, 'lane': 'python', 'host': 'h', 'cpuIdlePercent': None, "
+                  "'memoryFreePercent': None, 'measuredAt': 'm', 'seenAt': 's', 'contended': 0}])")
+        for trial in range(30):
+            store = Path(self.temp.name) / f'ledger-{trial}' / 'results.sqlite3'
+            env = {**os.environ, 'TRON_TEST_LEDGER': str(store)}
+            appenders = [subprocess.Popen([sys.executable, '-c', record, str(ROOT / 'tools/verify')], env=env, stderr=subprocess.PIPE, text=True)
+                         for _ in range(12)]
+            errors = [error for appender in appenders for _, error in [appender.communicate()] if appender.returncode]
+            self.assertEqual(errors, [], trial)
+            with sqlite3.connect(store) as connection:
+                self.assertEqual(connection.execute('SELECT COUNT(*) FROM results').fetchone()[0], 12)
 
     def test_public_tooling_run_appends_real_cases_and_flakes_means_same_tree_pass_and_fail(self) -> None:
         r = self.repo
@@ -845,6 +878,44 @@ class SelectionTests(VerifyCase):
         r.commit("delete alpha")
         deleted = r.verify("--changed", "--plan")
         self.assertIn("repo/beta: imports changed mods/alpha/alpha.py; its 1 owned test file(s)", deleted.stdout)
+        r.git("reset", "-q", "--hard", "base")
+        r.write("packages/gateway/src/admin/admin.module.json", json.dumps({"layer": "L3", "owns": ["**"]}))
+        r.write("packages/gateway/src/admin/extension.ts", "export const handlers = ['tool_call'];\n")
+        r.write("packages/gateway/src/e2e/e2e.module.json", json.dumps({"layer": "L5", "owns": ["**"]}))
+        r.write("packages/gateway/src/e2e/admin/settings.integration.test.ts",
+                "import { handlers } from '../../admin/extension.js';\nexport const seen = handlers;\n")
+        r.write("tools/verify/post-merge.json", json.dumps({"files": ["packages/gateway/src/e2e/admin/settings.integration.test.ts"]}))
+        r.write("packages/gateway/recorder/recorder.module.json", json.dumps({"layer": "L5", "owns": ["**"]}))
+        r.write("packages/gateway/recorder/test-recorder.py", PASSING)
+        r.write("packages/gateway/recorder/test-fixtures/record.integration.test.ts",
+                "import { handlers } from '../../src/admin/extension.js';\nexport const recorded = handlers;\n")
+        r.commit("a TypeScript test in another module imports the extension")
+        r.git("branch", "-f", "base")
+        r.write("packages/gateway/src/admin/extension.ts", "export const handlers = ['tool_call', 'tool_result'];\n")
+        r.commit("the extension gains a handler")
+        planned = r.verify("--changed", "--plan")
+        tests = json.loads(planned.stdout[planned.stdout.index("{"):])["selection"]["tests"]
+        self.assertIn("packages/gateway/src/e2e/admin/settings.integration.test.ts", tests,
+                      "a TypeScript test importing a changed file runs before landing, even when listed slow (#2657)")
+        self.assertNotIn("packages/gateway/recorder/test-recorder.py", tests, "a recorder under test-fixtures is no test and selects nothing")
+
+    def test_a_data_file_change_runs_the_scripts_that_name_its_path(self) -> None:
+        """#2551: a Cua release-pin-only change selected only its owner's tests, never the shell and
+        Python checks in another module that read the pin by its repository path."""
+        r = self.repo
+        r.write("mods/alpha/pin.json", '{"version": "1"}\n')
+        r.write("mods/beta/test-pin.sh", 'grep -q \'"version": "1"\' "$(dirname "$0")/../../mods/alpha/pin.json"\n')
+        r.write("mods/untested/read-pin.py", "import json\nprint(json.load(open('mods/alpha/pin.json')))\n")
+        r.commit("beta and untested read alpha's pin")
+        r.git("branch", "-f", "base")
+        r.write("mods/alpha/pin.json", '{"version": "2"}\n')
+        r.commit("pin moves")
+        failed = r.verify("--changed")
+        self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
+        selection = r.report()["selection"]
+        self.assertEqual(selection["tests"], ["mods/alpha/test-alpha.py", "mods/beta/test-pin.sh"])
+        self.assertIn("mods/beta/test-pin.sh: imports changed mods/alpha/pin.json", selection["reasons"])
+        self.assertIn("repo/untested: imports changed mods/alpha/pin.json; its 0 owned test file(s)", selection["reasons"])
 
     def test_ignored_residue_with_no_named_writer_fails_the_run(self) -> None:
         r = self.repo
@@ -860,6 +931,7 @@ class SelectionTests(VerifyCase):
         self.assertEqual(r.verify("--changed").returncode, 0)
 
     def test_kernel_layer_or_unowned_change_widens_to_every_lock(self) -> None:
+        """A full-tier change runs the locks of the package it changes before landing, every lock when outside a package."""
         r = self.repo
         r.write("mods/core/core.py", "VALUE = 'kernel change'\n")
         r.commit("kernel change")
@@ -874,6 +946,29 @@ class SelectionTests(VerifyCase):
         self.assertIn("why: full tier: ", stray.stdout)
         self.assertIn("unowned stray/notes.py", stray.stdout)
         self.assertIn("ownership FAILED", r.verify("--changed").stdout)
+        r.git("reset", "-q", "--hard", "base")
+        r.write("packages/gateway/src/store/store.module.json", json.dumps({"layer": "L3", "owns": ["**"]}))
+        r.write("packages/gateway/src/store/store.lock.integration.test.ts", "export const lock = true;\n")
+        r.commit("another module's lock")
+        r.git("branch", "-f", "base")
+        r.write("mods/core/core.py", "VALUE = 'kernel change'\n")
+        r.commit("kernel change beside another module's lock")
+        planned = r.verify("--changed", "--plan")
+        plan = json.loads(planned.stdout[planned.stdout.index("{"):])
+        self.assertIn("packages/gateway/src/store/store.lock.integration.test.ts", plan["selection"]["tests"])
+        r.git("reset", "-q", "--hard", "base")
+        r.write("packages/gateway/src/kern/kern.module.json", json.dumps({"layer": "L2", "owns": ["**"]}))
+        r.write("packages/gateway/src/kern/kern.ts", "export const value = 1;\n")
+        r.write("packages/push-relay/src/relay/relay.module.json", json.dumps({"layer": "L3", "owns": ["**"]}))
+        r.write("packages/push-relay/src/relay/relay.lock.integration.test.ts", "export const lock = true;\n")
+        r.commit("a Gateway kernel module and another package's lock")
+        r.git("branch", "-f", "base")
+        r.write("packages/gateway/src/kern/kern.ts", "export const value = 2;\n")
+        r.commit("Gateway kernel change")
+        planned = r.verify("--changed", "--plan")
+        tests = json.loads(planned.stdout[planned.stdout.index("{"):])["selection"]["tests"]
+        self.assertIn("packages/gateway/src/store/store.lock.integration.test.ts", tests, "another Gateway module's lock runs")
+        self.assertNotIn("packages/push-relay/src/relay/relay.lock.integration.test.ts", tests, "another package's lock does not")
 
     def test_a_selection_without_tests_fails_as_zero_test(self) -> None:
         r = self.repo
@@ -2311,6 +2406,27 @@ class StepStopTests(unittest.TestCase):
             time.sleep(0.05)
         run.stop([launched])
         self.assertEqual(launched.result["status"], "interrupted")
+
+
+class FileRunnerStopTests(VerifyCase):
+    def test_a_stopped_python_group_starts_no_further_file(self) -> None:
+        """verify stops a step by signalling its process group; the parallel file runner's chain thread then started
+        the chain's next file outside that group, which ran until verify's SIGKILL 30 s later."""
+        r = self.repo
+        started, later = Path(self.temp.name) / "started", Path(self.temp.name) / "later"
+        r.write("mods/alpha/test-a-first.py", f"import time\nfrom pathlib import Path\nPath({str(started)!r}).touch()\ntime.sleep(120)\n")
+        r.write("mods/alpha/test-b-second.py", f"from pathlib import Path\nPath({str(later)!r}).touch()\nprint('after test-a-first.py')\n")
+        r.commit("a chain whose first file never ends")
+        runner = subprocess.Popen(["python3", "tools/verify/files.py", "python", "mods/alpha/test-a-first.py", "mods/alpha/test-b-second.py"],
+                                  cwd=r.path, env=r.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        self.addCleanup(lambda: runner.poll() is not None or (os.killpg(runner.pid, signal.SIGKILL), runner.wait()))
+        deadline = time.monotonic() + 30
+        while not started.exists():
+            self.assertLess(time.monotonic(), deadline, "the first file never started")
+            time.sleep(0.05)
+        os.killpg(runner.pid, signal.SIGTERM)
+        self.assertEqual(runner.wait(timeout=10), 128 + signal.SIGTERM)
+        self.assertFalse(later.exists())
 
 
 class MutateTests(VerifyCase):

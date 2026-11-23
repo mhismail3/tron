@@ -66,6 +66,7 @@ export type {
   RegisteredTool,
   ResolvedPaths,
   ResolvedResource,
+  ResourceLoader,
   SessionBeforeCompactEvent,
   SessionEntry,
   SessionProjection,

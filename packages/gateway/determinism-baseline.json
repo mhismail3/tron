@@ -78,7 +78,7 @@
       "timeout-literal": 1
     },
     "src/e2e/kernel/run/resource-freshness.e2e.test.ts": {
-      "timeout-literal": 8
+      "timeout-literal": 1
     },
     "src/e2e/kernel/run/shared-prefix.integration.test.ts": {
       "timeout-literal": 1

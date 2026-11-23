@@ -1,5 +1,5 @@
 import { createTestRegistry } from "../../../test-support/gateway-registry.js";
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { execFile, execFileSync, spawn } from "node:child_process";
@@ -110,6 +110,7 @@ describe("packaged agent-browser receipts", () => {
     site=createServer((request,response)=>{
       const url=new URL(request.url!, "http://127.0.0.1");
       if(url.pathname==="/login"){response.setHeader("Set-Cookie",`fixture=${cookie}; HttpOnly; Path=/`);response.end("<title>login granted</title>");return;}
+      if(url.pathname==="/editor"){response.end("<title>editor</title><input id=i value=old><div id=c contenteditable=true>old</div>");return;}
       if(url.pathname!=="/protected"){response.writeHead(404);response.end();return;}
       if(request.headers.cookie!==`fixture=${cookie}`){response.writeHead(401);response.end("<title>NOT AUTHENTICATED</title>");return;}
       const nonce=url.searchParams.get("nonce")!; receipts.push(nonce);response.end(`<title>AUTH ${nonce}</title>`);
@@ -146,6 +147,8 @@ describe("packaged agent-browser receipts", () => {
       const opened=await step("endpoint",["get","cdp-url"]);
       expect(opened).toMatchObject({isError:false});
       endpoint=opened.details.data.cdpUrl;
+      const launch=JSON.parse(await readFile(join(agentDir,"browser","profile.launches",`${new URL(endpoint).port}.json`),"utf8"));
+      expect(execFileSync("/bin/ps",["-o","command=","-p",String(launch.pid)],{encoding:"utf8"})).toMatch(/--disable-backgrounding-occluded-windows.*--disable-renderer-backgrounding.*--disable-background-timer-throttling/);
       sockets=opened.details.managedSessionSocketDir;
       expect(typeof sockets).toBe("string");
     });
@@ -160,6 +163,17 @@ describe("packaged agent-browser receipts", () => {
         expect(receipts.at(-1)).toBe(nonce);
         expect(await step("detach-"+i,["close"])).toMatchObject({isError:false});
       }
+    });
+    it("replaces an input and a contenteditable with Meta+a then typing through the managed engine", async () => {
+      const caption="Tron \u00b7 \u201cquoted\u201d https://example.test/a?b=1 \ud83d\ude80 done";
+      expect(await step("editor",["open",base+"/editor"])).toMatchObject({isError:false});
+      for(const target of ["#i","#c"]){
+        expect(await step("focus"+target,["click",target])).toMatchObject({isError:false});
+        expect(await step("select-all"+target,["press","Meta+a"])).toMatchObject({isError:false});
+        expect(await step("type"+target,["keyboard","type",caption])).toMatchObject({isError:false});
+      }
+      const read=await step("editor-read",["eval","JSON.stringify([document.getElementById('i').value,document.getElementById('c').textContent])"]);
+      expect(JSON.stringify(read)).toContain(JSON.stringify(JSON.stringify([caption,caption])).slice(1,-1));
     });
     it("retains authentication through a native and Gateway runtime restart", async () => {
       closeNative(agentDir,sockets);
@@ -205,12 +219,15 @@ describe("packaged agent-browser receipts", () => {
       if(!chrome) throw new Error("Chrome for Testing is required");
       const profile=join(root,"Studio Chrome");
       await mkdir(profile,{mode:0o700});
-      expect(JSON.stringify(await step("persistent-unmarked",["owned-launch","prepare",profile]))).toContain("owned_launch_required");
+      const unmarked=JSON.stringify(await step("persistent-unmarked",["owned-launch","prepare",profile]));
+      expect(unmarked).toContain("owned_launch_required");
+      expect(unmarked).toContain("owned-launch prepare <profileDir>");
       await writeFile(join(profile,".tron-owned-profile"),randomUUID(),{mode:0o600});
-      const launch=async(label:string)=>{
+      const launch=async(label:string,probe=false)=>{
         const prepared=await step(label+"-prepare",["owned-launch","prepare",profile]);
         expect(prepared).toMatchObject({isError:false,details:{data:{profile}}});
         const {launchId,args}=prepared.details.data;
+        expect(args).toEqual(expect.arrayContaining(["--disable-backgrounding-occluded-windows","--disable-renderer-backgrounding","--disable-background-timer-throttling"]));
         const child=spawn(chrome,["--headless=new","--password-store=basic","--use-mock-keychain",...args,"about:blank"],{stdio:"ignore"});
         const exited=once(child,"exit");
         let endpoint:string|undefined;
@@ -223,12 +240,24 @@ describe("packaged agent-browser receipts", () => {
           expect(await step(label+"-verify",["get","url"])).toMatchObject({isError:false});
           expect(await step(label+"-read",["get","cdp-url"])).toMatchObject({isError:false,details:{data:{cdpUrl:endpoint}}});
           expect(await step(label+"-detach",["close"])).toMatchObject({isError:false});
+          if(probe){
+            const again=JSON.stringify(await step(label+"-prepare-live",["owned-launch","prepare",profile]));
+            expect(again).toContain("owned_launch_live");
+            expect(again).toContain(endpoint);
+            const moved=profile+" moved";
+            await rename(profile,moved);
+            try {
+              const refused=JSON.stringify(await step(label+"-renamed",["connect",endpoint],true));
+              expect(refused).toContain("owned_launch_required");
+              expect(refused).not.toContain("ENOENT");
+            } finally { await rename(moved,profile); }
+          }
         } finally {
           await closeProducer(child,exited,endpoint);
         }
         return {launchId,endpoint:endpoint!};
       };
-      const first=await launch("persistent-first");
+      const first=await launch("persistent-first",true);
       expect(await step("persistent-cleanup",["owned-launch","cleanup",first.launchId])).toMatchObject({isError:true});
       expect(JSON.stringify(await step("persistent-exited",["connect",first.endpoint],true))).toContain("owned_launch_required");
       expect(await readdir(join(agentDir,"browser","profile.launches"))).not.toContain(`${new URL(first.endpoint).port}.json`);

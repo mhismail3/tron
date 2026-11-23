@@ -209,7 +209,40 @@ class TierTests(fixture.VerifyCase):
         self.assertEqual((r.path / 'test-results/retirement-consumer').read_text(), 'executed')
         self.assertEqual(r.report()['passingTests'], 2)
 
-    def test_serial_nested_files_defer_to_full_coverage_unless_the_test_itself_changed(self):
+    def test_a_slow_file_defers_to_the_main_suite_unless_it_changed_and_a_toolchain_input_runs_every_lock(self):
+        """A slow file (tools/verify/post-merge.json) a change reaches only through another module waits for the main suite;
+        a changed module's own slow tests, and an edited slow file, still run before landing."""
+        r = self.repo
+        r.write('mods/alpha/test-slow.py', fixture.PASSING)
+        r.write('packages/gateway/src/store/store.module.json', json.dumps({'layer': 'L3', 'owns': ['**']}))
+        r.write('packages/gateway/src/store/store.lock.integration.test.ts', 'export const lock = true;\n')
+        r.write('tools/verify/post-merge.json', json.dumps({'files': ['mods/alpha/test-slow.py']}))
+        r.commit('a slow alpha test')
+        r.git('branch', '-f', 'base')
+        r.write('mods/alpha/alpha.py', "VALUE = 'changed'\n")
+        r.commit('alpha source change')
+        self.assertIn('mods/alpha/test-slow.py', self.plan()['selection']['tests'], 'a changed module still runs its own slow test')
+        r.git('reset', '-q', '--hard', 'base')
+        r.write('mods/alpha/alpha.py', "import sys\nsys.path.insert(0, '../beta')\nimport beta\n")
+        r.commit('alpha imports beta')
+        r.git('branch', '-f', 'base')
+        r.write('mods/beta/beta.py', "VALUE = 'changed'\n")
+        r.commit('beta change reaches alpha through its importer')
+        plan = self.plan()
+        self.assertIn('mods/alpha/test-alpha.py', plan['selection']['tests'])
+        self.assertNotIn('mods/alpha/test-slow.py', plan['selection']['tests'])
+        self.assertIn('mods/alpha/test-slow.py', self.plan('--full')['selection']['tests'])
+        r.write('mods/alpha/test-slow.py', fixture.PASSING + 'EDITED = True\n')
+        r.commit('the slow test itself changes')
+        self.assertIn('mods/alpha/test-slow.py', self.plan()['selection']['tests'])
+        r.git('reset', '-q', '--hard', 'base')
+        r.write('tools/verify/post-merge.json', json.dumps({'files': []}))
+        r.commit('budget list change')
+        widened = self.plan()['selection']
+        self.assertEqual(widened['tier'], 'full')
+        self.assertIn('packages/gateway/src/store/store.lock.integration.test.ts', widened['tests'])
+
+    def test_a_changed_modules_serial_files_run_before_landing_and_declared_ones_are_never_deferred(self):
         r = self.repo
         root = 'packages/gateway'
         nested = root + '/src/worker/nested.integration.test.ts'
@@ -227,8 +260,8 @@ class TierTests(fixture.VerifyCase):
         plan = self.plan()
         self.assertEqual(plan['selection']['tier'], 'full')
         self.assertIn(ordinary, plan['selection']['tests'])
-        self.assertNotIn(nested, plan['selection']['tests'])
-        self.assertIn(nested, plan['selection']['deferredTests'])
+        self.assertIn(nested, plan['selection']['tests'], 'a changed module runs its own serial tests before landing (P1)')
+        self.assertNotIn(nested, plan['selection']['deferredTests'])
         covered = self.plan('--all')
         self.assertIn(nested, covered['selection']['tests'])
         r.write(nested, '// A changed serial test must run before landing.\n')

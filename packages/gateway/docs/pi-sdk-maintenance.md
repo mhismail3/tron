@@ -34,6 +34,7 @@ Approvals list. Neither is applied automatically.
 | --- | --- | --- |
 | `pi-coding-agent` | `pi-coding-agent-patch.json` (`removeWhen`) | one numbered `third_party/pi-coding-agent/tron.patch`; queue form at its next bump |
 | `pi-agent-browser-native` | `pi-agent-browser-native-patch.json` | ownership admission over the exact native commit; no separate fork or loader |
+| `agent-browser` (engine) | `agent-browser-patch.json` (`removeWhen`) | `third_party/agent-browser/tron.patch` over tag v0.42.0: macOS Meta editing chords send CDP editing commands (#2481) |
 | `pi-subagents` | `pi-subagents-pin.json` | fork commits on v0.76.1, each with tests and a drop condition in TRON-PATCHES.md in the fork; queue form at its next bump |
 
 ## Version authority and checks
@@ -169,8 +170,16 @@ scripts/tron-node exec node packages/gateway/scripts/build-pi-coding-agent-patch
 `--upstream <checkout>` selects a local source, not a different revision; `--write`
 is only for an intentional pin update. Zero-context native patches avoid treating
 patch context as source whitespace; application still requires the exact pinned base.
-Mac payload staging carries both patch pins and their confined artifacts. The native
-engine dependency is pinned to 0.42.0 and resolved from the managed package, never PATH.
+Mac payload staging carries the three patch pins and their confined artifacts. The engine is
+Tron's patched `agent-browser` 0.42.0: a direct `file:` dependency that an npm override also
+imposes under the native package, resolved from the managed package, never PATH. Its tarball is the
+registry 0.42.0 package with the darwin arm64/x64 binaries (dashboard included) rebuilt from tag
+v0.42.0 plus `third_party/agent-browser/tron.patch`, which also fixes the dashboard's Next.js build
+ID so the build reproduces (other platforms dropped); reproduce or rewrite it with
+`scripts/tron-node exec node packages/gateway/scripts/build-agent-browser-engine.mjs [--write]`
+(needs the pinned Node, npm, pnpm, Rust with both darwin targets and macOS SDK). The managed builtin
+refuses to load when either artifact or its lock entry differs from its pin; the engine's installed
+version check only catches a different release, since stock and patched both report 0.42.0.
 
 The nonreplaceable `builtin:agent-browser` registration supplies the owned persistent
 profile and engine executable. Native alone owns launch/restore/CDP admission and

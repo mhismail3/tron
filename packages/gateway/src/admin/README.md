@@ -143,7 +143,9 @@ are installed; schema access never evaluates their late-bound service getter.
   parent directory's realpath and a case-folded name compared, and a path whose realpath is one of those files'
   realpaths refused too). `grep`, `find`, `ls` and `bash` are not guarded: they take directories or arbitrary
   commands that cannot be parsed reliably, so the guard steers agents to the settings tool and is not a security
-  boundary.
+  boundary. Its `tool_result` hook runs the SDK's `loadSkills` on a `SKILL.md` that `write` or `edit` changed
+  and appends the loader's diagnostics to the tool result, so a skill that will not load is reported at write
+  time with the Gateway's own loader.
 
 ## Signals
 

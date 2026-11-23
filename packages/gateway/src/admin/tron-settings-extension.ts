@@ -5,7 +5,7 @@ import { realpathSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { getAgentDir, type ExtensionFactory } from "../kernel/pi/coding-agent.js";
+import { getAgentDir, loadSkills, type ExtensionFactory } from "../kernel/pi/coding-agent.js";
 
 const CHANGE = Type.Object({
   key: Type.String({ minLength: 1, maxLength: 200, description: "A key id from resolve, e.g. run.retry.maxRetries." }),
@@ -118,6 +118,15 @@ export function createTronSettingsExtension(access: () => SettingsToolAccess | u
   return pi => {
     pi.on("tool_call", (event, context) => FILE_TOOLS.has(event.toolName) && agentConfigFile((event.input as { path?: unknown }).path, context.cwd)
       ? { block: true, reason: AGENT_CONFIG_REFUSAL } : undefined);
+    pi.on("tool_result", (event, context) => {
+      const raw = event.input.path;
+      if ((event.toolName !== "write" && event.toolName !== "edit") || event.isError || typeof raw !== "string") return;
+      const path = resolve(context.cwd, piPath(raw));
+      if (basename(path) !== "SKILL.md") return;
+      const { diagnostics } = loadSkills({ cwd: context.cwd, agentDir: getAgentDir(), skillPaths: [path], includeDefaults: false });
+      return diagnostics.length ? { content: [...event.content, { type: "text" as const,
+        text: `The skill loader reports for ${path}: ${diagnostics.map(item => item.message).join("; ")}` }] } : undefined;
+    });
     pi.registerTool({
       name: "settings", label: "Settings",
       description: "Read and change Tron settings through typed writes. Reversible changes apply and are logged. Read durable audit records with history; reverse a change with undo and its changeId. Tron Home alone can update (action update) one configured package to an exact npm version or git commit SHA behind the native install card, which shows any pin change; that is never undoable. Only irreversible effects, trust/authority, privacy expansion, spend and installs need the exact shared native tap. dryRun validates and returns before/after without effects. Home may target its task worker; running workers adopt from the next model request and are signalled.",

@@ -23,22 +23,37 @@ def within(value, home):
     return value == home or value.startswith(home + "/")
 
 
-def retired_process(pid):
-    queue = select.kqueue()
-    try:
-        events = queue.control([select.kevent(pid, filter=select.KQ_FILTER_PROC,
-                                             flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT,
-                                             fflags=select.KQ_NOTE_EXIT)], 1, 0)
-        for event in events:
-            if event.flags & select.KQ_EV_ERROR:
-                return event.data == errno.ESRCH
-            if event.fflags & select.KQ_NOTE_EXIT:
-                return True
-        return False
-    except ProcessLookupError:
-        return True
-    finally:
-        queue.close()
+def process_arguments(pid, libc, buffer):
+    """The kernel's argument block for `pid`, or None once it has exited. A process between fork and exec (EIO) or
+    on its way out (EINVAL) is read again at each exec it makes, until it exits or a second passes without one."""
+    mib = (ctypes.c_int * 3)(1, 49, pid)
+    size = ctypes.c_size_t()
+
+    def read():
+        size.value = len(buffer)
+        return ctypes.get_errno() if libc.sysctl(mib, 3, buffer, ctypes.byref(size), None, 0) else 0
+    error = read()
+    if error and error != errno.ESRCH:
+        queue = select.kqueue()
+        try:
+            events = queue.control([select.kevent(pid, filter=select.KQ_FILTER_PROC, flags=select.KQ_EV_ADD | select.KQ_EV_CLEAR,
+                                                  fflags=select.KQ_NOTE_EXEC | select.KQ_NOTE_EXIT)], 4, 0)
+            for event in events:
+                if event.flags & select.KQ_EV_ERROR and event.data != errno.ESRCH:
+                    raise OSError(error, "process_owner_unreadable", str(pid))
+            while error not in (0, errno.ESRCH) and not any(event.flags & select.KQ_EV_ERROR or event.fflags & select.KQ_NOTE_EXIT for event in events):
+                error = read()
+                if error not in (0, errno.ESRCH):
+                    events = queue.control(None, 4, 1)
+                    if not events:
+                        raise OSError(error, "process_owner_unreadable", str(pid))
+            if error:
+                return None
+        except ProcessLookupError:
+            return None
+        finally:
+            queue.close()
+    return None if error else buffer.raw[:size.value]
 
 
 def process_owners(home):
@@ -62,14 +77,9 @@ def process_owners(home):
     for pid in pids[:used // 4]:
         if pid <= 0 or pid == os.getpid():
             continue
-        mib = (ctypes.c_int * 3)(1, 49, pid)
-        size = ctypes.c_size_t(len(buffer))
-        if libc.sysctl(mib, 3, buffer, ctypes.byref(size), None, 0):
-            error = ctypes.get_errno()
-            if error == errno.ESRCH or retired_process(pid):
-                continue
-            raise OSError(error, "process_owner_unreadable", str(pid))
-        data = buffer.raw[:size.value]
+        data = process_arguments(pid, libc, buffer)
+        if data is None:
+            continue
         if len(data) < 4:
             raise OSError("process_owner_unreadable")
         argc = int.from_bytes(data[:4], sys.byteorder, signed=True)

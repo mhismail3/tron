@@ -320,6 +320,27 @@ raise SystemExit(9 if 'fail' in sys.argv else 0)
         self.assertEqual(self.git('for-each-ref', '--format=%(refname)', 'refs/tron-jobs/submissions/', cwd=repository), '')
         self.assertEqual(list((self.mini / 'tron-ci/results').iterdir()), [])
 
+    def test_a_lane_that_leaves_its_stdout_non_blocking_still_returns_its_report(self) -> None:
+        """A test process left the job's shared stdout O_NONBLOCK; the job's report write then failed with Errno 35 and
+        land got no result for a run that had finished (#2648 bootstrap land)."""
+        self.write('tools/verify/verify.py', '''import json, os, subprocess, sys
+from pathlib import Path
+root = Path(__file__).resolve().parents[2]
+sha = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+logs = root / 'test-results/verify' / sha
+logs.mkdir(parents=True)
+(logs / 'bulk.bin').write_bytes(os.urandom(1 << 20))
+(logs.parent / (sha + '.json')).write_text(json.dumps({'commit': sha}))
+os.set_blocking(1, False)
+''')
+        sha = self.commit('a lane that leaves stdout non-blocking')
+        self.git('update-ref', 'refs/remotes/origin/main', self.git('rev-parse', 'HEAD^'))
+        result = self.lane('verify', '--changed')
+        self.assertEqual(result.returncode, 0, result.stdout[-3000:] + result.stderr[-3000:])
+        artifacts = Path(next(line for line in result.stdout.splitlines() if line.startswith('mini: artifacts: ')).removeprefix('mini: artifacts: '))
+        self.assertEqual(json.loads((artifacts / 'verify.json').read_text()), {'commit': sha})
+        self.assertEqual((artifacts / 'verify/bulk.bin').stat().st_size, 1 << 20)
+
     def test_whole_verifier_returns_its_report_logs_and_raw_75_without_another_lease(self) -> None:
         self.write('tools/probe.py', RECORDED)
         self.write('tools/verify/verify.py', '''import json, subprocess, sys

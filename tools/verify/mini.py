@@ -267,8 +267,14 @@ def remote_main(job: dict) -> int:
     base = home / BASE
     repository, checkout = base / 'tron.git', base / 'jobs/gateway'
     results = base / 'results' / f'gateway-{nonce}'
-    say = lambda text: print(f'mini: {text}', flush=True)  # noqa: E731
     out = sys.stdout.buffer
+
+    def send(data: bytes) -> None:
+        """One write to the caller, blocking: a lane's process may have left the shared stdout non-blocking."""
+        os.set_blocking(out.fileno(), True)
+        out.write(data)
+        out.flush()
+    say = lambda text: send(f'mini: {text}\n'.encode())  # noqa: E731
     cancelled = threading.Event()
     running: list[subprocess.Popen] = []
 
@@ -284,19 +290,18 @@ def remote_main(job: dict) -> int:
     def finish(code: int) -> int:
         ledger_path = results / 'ledger.sqlite3'
         if any((results / name).is_symlink() for name in ('ledger.sqlite3', 'ledger.sqlite3-wal', 'ledger.sqlite3-shm')):
-            out.write(b'\n' + frame(nonce) + b'refused "unsafe mini ledger spool"\n')
+            send(b'\n' + frame(nonce) + b'refused "unsafe mini ledger spool"\n')
             code = EXIT_NO_RESULT
         elif ledger_path.is_file():
             with closing(sqlite3.connect(ledger_path.as_uri() + '?mode=ro', uri=True)) as connection:
                 rows = [list(row) for row in connection.execute('SELECT * FROM results')]
-            out.write(b'\n' + frame(nonce) + b'ledger ' + base64.b64encode(json.dumps(rows).encode()) + b'\n')
-        out.write(b'\n' + frame(nonce) + f'exit {code}\n'.encode())
-        out.flush()
+            send(b'\n' + frame(nonce) + b'ledger ' + base64.b64encode(json.dumps(rows).encode()) + b'\n')
+        send(b'\n' + frame(nonce) + f'exit {code}\n'.encode())
         return code
 
     def refuse(text: str) -> int:
         """No result: the reason in its own frame, so a lane that itself exits 75 is never read as one."""
-        out.write(b'\n' + frame(nonce) + f'refused {json.dumps(text)}\n'.encode())
+        send(b'\n' + frame(nonce) + f'refused {json.dumps(text)}\n'.encode())
         return finish(EXIT_NO_RESULT)
 
     clean = {'HOME': str(home), 'PATH': '/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin', 'PYTHONDONTWRITEBYTECODE': '1',
@@ -460,9 +465,8 @@ def remote_main(job: dict) -> int:
                     with archive.open('rb') as payload_stream:
                         for chunk in iter(lambda: payload_stream.read(64 * 1024), b''):
                             digest.update(chunk)
-                            out.write(b'\n' + frame(nonce) + b'artifact ' + base64.b64encode(chunk) + b'\n')
-                    out.write(frame(nonce) + f'artifact-end {digest.hexdigest()}\n'.encode())
-                    out.flush()
+                            send(b'\n' + frame(nonce) + b'artifact ' + base64.b64encode(chunk) + b'\n')
+                    send(frame(nonce) + f'artifact-end {digest.hexdigest()}\n'.encode())
                     return finish(code)
                 except (OSError, ValueError, tarfile.TarError) as error:
                     return refuse(f'{job["lane"]} invocation/artifacts failed: {error}')
@@ -496,7 +500,7 @@ def remote_main(job: dict) -> int:
                 for index, path in enumerate(files):
                     if path.is_file():
                         content = path.read_text(errors='replace').replace(str(checkout), job['localRoot'])
-                        out.write(b'\n' + frame(nonce) + f'output {index} '.encode() + base64.b64encode(content.encode()) + b'\n')
+                        send(b'\n' + frame(nonce) + f'output {index} '.encode() + base64.b64encode(content.encode()) + b'\n')
                 return finish(code)
             finally:
                 shutil.rmtree(results, ignore_errors=True)
