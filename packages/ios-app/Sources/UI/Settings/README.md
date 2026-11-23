@@ -74,7 +74,7 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   advertised method; the visible sheet owns the operation's prompts, and an answered choice
   restarts with `replaceOperationId` (`ProviderAuthSelectionTrail`). Usage rows reserve a skeleton
   only when `usageSupported`; `localOnly` shows Unlimited; `usageLentTo` hides the lender row.
-  `ProviderUsageLoadingPlaceholder` also wraps dashboard value cells, preserving provider names
+  The shared `TronLoadingPlaceholder` also wraps dashboard value cells, preserving provider names
   and final column geometry; Reduce Motion keeps the same static rectangles.
 - **Models and compaction.** Model names are the catalog's `name`; thinking choices come from the
   model's advertised levels; the default model comes from canonical settings, never catalog order.

@@ -148,6 +148,7 @@ private struct TronScrollEdgeChromeModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .scrollEdgeEffectStyle(.soft, for: .all)
+            .modifier(TronSheetFitScrollModifier())
             .modifier(TronSheetContentRevealModifier())
             .tronTopBlurSurface()
     }
@@ -1483,6 +1484,7 @@ struct TronSettingsRow<Trailing: View>: View {
     let iconIsLoading: Bool
     let title: String
     let subtitle: String?
+    let subtitleIsLoading: Bool
     let subtitleLineLimit: Int?
     let subtitleIsMarkdown: Bool
     let titleIsIdentifier: Bool
@@ -1518,11 +1520,13 @@ struct TronSettingsRow<Trailing: View>: View {
         footnote: String? = nil,
         footnoteIsIdentifier: Bool = false,
         iconIsLoading: Bool = false,
+        subtitleIsLoading: Bool = false,
         @ViewBuilder trailing: () -> Trailing
     ) {
         self.icon = icon
         self.title = title
         self.subtitle = subtitle
+        self.subtitleIsLoading = subtitleIsLoading
         self.subtitleLineLimit = subtitleLineLimit
         self.subtitleIsMarkdown = subtitleIsMarkdown
         self.titleIsIdentifier = titleIsIdentifier
@@ -1626,7 +1630,14 @@ struct TronSettingsRow<Trailing: View>: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .tronListMarker(.title)
                 }
-                if let subtitle {
+                if let subtitle, subtitleIsLoading {
+                    TronLoadingPlaceholder(label: "Loading") {
+                        Text(subtitle)
+                            .font(subtitleFont ?? TronTypography.settingsSubtext(adjustment: secondaryTextSizeAdjustment))
+                            .lineLimit(1)
+                    }
+                    .tronListMarker(.subtext)
+                } else if let subtitle {
                     Text(subtitleIsMarkdown
                          ? MarkdownPresentation.Inline(source: subtitle).attributedString ?? AttributedString(subtitle)
                          : AttributedString(subtitle))

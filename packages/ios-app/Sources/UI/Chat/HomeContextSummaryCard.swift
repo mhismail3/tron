@@ -2,11 +2,11 @@ import SwiftUI
 import TronMobileCore
 
 struct HomeContextSummaryCard: View {
-    let snapshot: SessionContextPresentation
-    let read: HomeManageDTO
+    let snapshot: SessionContextPresentation?
+    let read: HomeManageDTO?
 
     private var usage: SessionContextUsagePresentation {
-        guard let breakdown = read.context.breakdown else { return SessionContextUsagePresentation(snapshot.contextUsage) }
+        guard let breakdown = read?.context.breakdown else { return SessionContextUsagePresentation(snapshot?.contextUsage) }
         return .available(used: breakdown.effectiveTokens, window: breakdown.contextWindow,
                           percent: breakdown.contextWindow > 0
                             ? min(100, Double(breakdown.effectiveTokens) / Double(breakdown.contextWindow) * 100) : 0)
@@ -15,15 +15,26 @@ struct HomeContextSummaryCard: View {
     var body: some View {
         TronGlassCard(accent: .tronPrimary) {
             VStack(alignment: .leading, spacing: TronSpacing.md) {
-                HStack(spacing: TronSpacing.md) {
-                    TronStatusPill(text: HomeStatusLinePresentation.state(read.status), accent: HomeSheet.statusAccent(read.status))
-                        .accessibilityIdentifier("home-manage-state")
-                    let workers = read.status.workers.running
-                    TronStatusPill(text: "\(workers.formatted()) \(workers == 1 ? "worker" : "workers")",
-                                   accent: HomeSheet.hostPressureAccent(read.status.hostPressure.level))
-                        .accessibilityLabel("\(workers.formatted()) \(workers == 1 ? "worker" : "workers")")
-                        .accessibilityValue("Host pressure \(read.status.hostPressure.level.rawValue)")
-                        .accessibilityIdentifier("home-manage-workers")
+                if let read {
+                    HStack(spacing: TronSpacing.md) {
+                        TronStatusPill(text: HomeStatusLinePresentation.state(read.status), accent: HomeSheet.statusAccent(read.status))
+                            .accessibilityIdentifier("home-manage-state")
+                        let workers = read.status.workers.running
+                        TronStatusPill(text: "\(workers.formatted()) \(workers == 1 ? "worker" : "workers")",
+                                       accent: HomeSheet.hostPressureAccent(read.status.hostPressure.level))
+                            .accessibilityLabel("\(workers.formatted()) \(workers == 1 ? "worker" : "workers")")
+                            .accessibilityValue("Host pressure \(read.status.hostPressure.level.rawValue)")
+                            .accessibilityIdentifier("home-manage-workers")
+                    }
+                    .transition(.opacity)
+                } else {
+                    TronLoadingPlaceholder(label: "Loading Home status") {
+                        HStack(spacing: TronSpacing.md) {
+                            TronStatusPill(text: "Ready", accent: .tronSlate)
+                            TronStatusPill(text: "0 workers", accent: .tronSlate)
+                        }
+                    }
+                    .accessibilityIdentifier("home-manage-placeholder")
                 }
                 HStack(spacing: TronSpacing.xl) {
                     SessionContextProgressRing(fraction: percent / 100, accent: .tronPrimary, diameter: TronSpacing.xlarge)
@@ -31,15 +42,15 @@ struct HomeContextSummaryCard: View {
                         .accessibilityLabel("Context used")
                         .accessibilityValue("\(Int(percent.rounded())) percent")
                         .accessibilityIdentifier("home-context-ring")
-                    VStack(alignment: .leading, spacing: TronSpacing.xxs) {
-                        Text(headline).font(SessionSummaryTypography.headline)
-                        Text(detail)
-                            .font(SessionSummaryTypography.usageValue)
-                            .foregroundStyle(Color.tronTextSecondary)
-                            .accessibilityIdentifier("home-context-detail")
+                    if let snapshot {
+                        summary(headline: headline, detail: detail(snapshot))
+                            .transition(.opacity)
+                    } else {
+                        TronLoadingPlaceholder(label: "Loading Home context") {
+                            summary(headline: "000K tokens left", detail: "00K/0M • 0% used · 0.0M total tokens · 00.0% cache hit")
+                        }
+                        .accessibilityIdentifier("home-manage-placeholder")
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .padding(TronSpacing.xxl)
@@ -57,7 +68,19 @@ struct HomeContextSummaryCard: View {
         return "Context pending"
     }
 
-    private var detail: String {
+    private func summary(headline: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: TronSpacing.xxs) {
+            Text(headline).font(SessionSummaryTypography.headline)
+            Text(detail)
+                .font(SessionSummaryTypography.usageValue)
+                .foregroundStyle(Color.tronTextSecondary)
+                .accessibilityIdentifier("home-context-detail")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func detail(_ snapshot: SessionContextPresentation) -> String {
         let context = usage.usedSummary ?? SessionContextUsageRefreshPresentation(
             lastTranscriptKind: snapshot.lastTranscriptKind, assistantMessages: snapshot.stats.assistantMessages).detail
         let tokens = snapshot.stats.tokens

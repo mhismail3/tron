@@ -162,7 +162,7 @@ struct HomeUsageSummaryCard: View {
     @ViewBuilder
     private func usageColumns(_ provider: ProviderSummary, _ snapshot: ProviderUsageSnapshot?) -> some View {
         if isLoading {
-            ProviderUsageLoadingPlaceholder {
+            TronLoadingPlaceholder(label: "Loading account usage") {
                 HStack(alignment: .top, spacing: HomeUsageCardLayout.columnSpacing) {
                     ForEach(ProviderUsagePresentation.loadingPlaceholderParts, id: \.text) { part in
                         usageColumn(part, color: Color.tronTextMuted, minimumWidth: columnMinimumWidth, probe: nil)

@@ -28,7 +28,6 @@ struct ModelSelectionLockInfoLink: View {
                 TronInfoCard(icon: "lock", text: reason, accent: .tronPurple)
                     .padding(18)
             }
-            .tronSheetFitScroll()
             .tronScrollEdgeChrome()
             .tronNavigationTitle("Configuration", accent: .tronPurple)
         } label: {

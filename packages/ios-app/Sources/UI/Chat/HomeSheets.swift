@@ -172,7 +172,6 @@ struct HomeSheet: View {
                     }
                     .padding(18)
                 }
-                .tronSheetFitScroll()
                 .tronScrollEdgeChrome()
             }
         }
@@ -267,7 +266,7 @@ struct HomeSheet: View {
     @ViewBuilder private var loadedContent: some View {
         switch owner.state {
         case .idle, .loading(_, nil):
-            TronSheetLoadingState(label: "Loading Home…", accent: accent)
+            if case .manage = destination { manageSheet(nil) } else { TronSheetLoadingState(label: "Loading Home…", accent: accent) }
         case .failed(_, let error):
             TronPlaceholderState(title: "Home could not be read", detail: error, icon: "exclamationmark.triangle",
                                  actionTitle: "Reload") { reload() }
@@ -282,6 +281,8 @@ struct HomeSheet: View {
                     evidenceSheet(page)
                 case .status, .tasks, .task, .taskHistory, .permissions: EmptyView()
                 }
+            } else if case .manage = destination {
+                manageSheet(nil)
             } else {
                 TronSheetLoadingState(label: "Waiting for Home…", accent: accent)
             }

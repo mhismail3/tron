@@ -48,7 +48,16 @@ struct ManageModelConfigurationCard: View {
                             .frame(maxWidth: .infinity, alignment: .leading).padding(12)
                     }
                 } else {
-                    TronSheetLoadingState(label: "Loading model…")
+                    TronLoadingPlaceholder(label: "Loading model") {
+                        VStack(spacing: 0) {
+                            TronSettingsRow(icon: "cpu", title: "Model name", titleFont: SessionSummaryTypography.headline)
+                            TronSettingsDivider()
+                            TronSettingsRow(icon: "brain", title: "Thinking")
+                            TronSettingsDivider()
+                            TronSettingsRow(icon: "gauge.with.dots.needle.50percent", title: "Context Window")
+                        }
+                    }
+                    .accessibilityIdentifier("home-manage-placeholder")
                 }
             }
         }

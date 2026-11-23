@@ -680,7 +680,6 @@ struct ModelPicker: View {
             }
         }
         .scrollDismissesKeyboard(.interactively)
-        .tronSheetFitScroll()
         .tronScrollEdgeChrome()
         .toolbar {
             ToolbarItemGroup(placement: .topBarLeading) {

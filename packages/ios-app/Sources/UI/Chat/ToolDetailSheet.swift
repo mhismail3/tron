@@ -53,7 +53,6 @@ struct ToolDetailSheet: View {
             .padding(.bottom, 16)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .tronSheetFitScroll()
         .defaultScrollAnchor(.top, for: .initialOffset)
         .defaultScrollAnchor(.top, for: .alignment)
         .defaultScrollAnchor(.top, for: .sizeChanges)

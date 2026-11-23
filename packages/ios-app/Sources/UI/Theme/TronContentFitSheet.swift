@@ -1,70 +1,115 @@
 import SwiftUI
 import UIKit
 
-private struct TronSheetFit: Equatable {
-    let needed: CGFloat
-    let container: CGFloat
-}
-
 private struct TronSheetFitKey: PreferenceKey {
-    static let defaultValue: TronSheetFit? = nil
-    static func reduce(value: inout TronSheetFit?, nextValue: () -> TronSheetFit?) {
+    static let defaultValue: CGFloat? = nil
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
         if let next = nextValue() { value = next }
     }
 }
 
 extension EnvironmentValues {
     @Entry var tronSheetFitsContent = false
+    @Entry var tronSheetMeasuresContent = false
     @Entry var tronSurfaceConcentricBottom = false
 }
 
 private struct TronContentFitSheetModifier: ViewModifier {
-    @State private var height: CGFloat?
-    @State private var largeHeight: CGFloat?
+    @State private var measured: CGFloat?
+    @State private var settled: CGFloat?
+    @State private var loading = false
     @State private var keyboard = false
+    @State private var appeared = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.tronPadSheetScene) private var padScene
 
-    private var forcesLarge: Bool { keyboard || dynamicTypeSize.isAccessibilitySize }
+    private var fitHeight: CGFloat? {
+        guard padScene?.mode == nil, !keyboard, !dynamicTypeSize.isAccessibilitySize, let content = loading ? settled : measured else { return nil }
+        let window = TronSheetWindowMetrics.current
+        let height = (content - window.bottomInset).rounded(.up)
+        return height < window.maximumDetent ? height : nil
+    }
+
+    private var detent: PresentationDetent {
+        if let fitHeight { return .height(fitHeight) }
+        return loading && settled == nil && padScene?.mode == nil && !keyboard && !dynamicTypeSize.isAccessibilitySize ? .medium : .large
+    }
 
     func body(content: Content) -> some View {
         content
-            .environment(\.tronSheetFitsContent, height != nil && !forcesLarge)
-            .onPreferenceChange(TronSheetFitKey.self) { fit in
-                if let fit { resize(fit) }
+            .environment(\.tronSheetFitsContent, !loading && fitHeight != nil)
+            .environment(\.tronSheetMeasuresContent, true)
+            .onPreferenceChange(TronSheetFitKey.self) { next in
+                guard next.map({ abs($0 - (measured ?? -1)) >= 0.5 }) ?? (measured != nil) else { return }
+                resize {
+                    measured = next
+                    if !loading { settled = next }
+                }
+            }
+            .onPreferenceChange(TronSheetLoadingPreferenceKey.self) { request in
+                let next = request != nil
+                guard next != loading else { return }
+                resize {
+                    loading = next
+                    if !next { settled = measured }
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
-                keyboard = true
+                resize { keyboard = true }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-                keyboard = false
+                resize { keyboard = false }
             }
-            .presentationDetents([forcesLarge ? .large : height.map { .height($0) } ?? .large])
+            .onAppear { appeared = true }
+            .presentationDetents([detent])
     }
 
-    private func resize(_ fit: TronSheetFit) {
-        if height == nil, fit.container > 0 { largeHeight = max(largeHeight ?? 0, fit.container) }
-        guard let largeHeight else { return }
-        let target = fit.needed > largeHeight ? nil : fit.needed.rounded(.up)
-        if let target, let height, abs(target - height) < 1 { return }
-        guard target != height else { return }
-        withAnimation(.snappy(duration: 0.28)) { height = target }
+    private func resize(_ change: () -> Void) {
+        guard appeared, !reduceMotion else {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction, change)
+            return
+        }
+        withAnimation(.smooth(duration: 0.35), change)
     }
 }
 
-private struct TronSheetFitScrollModifier: ViewModifier {
-    @State private var fit: TronSheetFit?
+private struct TronSheetWindowMetrics {
+    let bottomInset: CGFloat
+    let maximumDetent: CGFloat
+
+    @MainActor static var current: TronSheetWindowMetrics {
+        guard let window = UIApplication.shared.connectedScenes
+            .compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else {
+            return TronSheetWindowMetrics(bottomInset: 0, maximumDetent: .infinity)
+        }
+        let insets = window.safeAreaInsets
+        return TronSheetWindowMetrics(bottomInset: insets.bottom,
+                                      maximumDetent: window.bounds.height - insets.top - insets.bottom)
+    }
+}
+
+struct TronSheetFitScrollModifier: ViewModifier {
+    @State private var height: CGFloat?
+    @Environment(\.tronSheetMeasuresContent) private var measures
     @Environment(\.tronSheetFitsContent) private var fits
 
     func body(content: Content) -> some View {
-        content
-            .scrollDisabled(fits)
-            .onScrollGeometryChange(for: TronSheetFit.self) { geometry in
-                TronSheetFit(needed: geometry.contentInsets.top + geometry.contentSize.height - geometry.contentInsets.bottom,
-                             container: geometry.containerSize.height)
-            } action: { _, next in
-                fit = next
-            }
-            .preference(key: TronSheetFitKey.self, value: fit)
+        if measures {
+            content
+                .environment(\.tronSheetMeasuresContent, false)
+                .scrollDisabled(fits)
+                .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                    geometry.contentInsets.top + geometry.contentSize.height
+                } action: { _, next in
+                    height = next
+                }
+                .preference(key: TronSheetFitKey.self, value: height)
+        } else {
+            content
+        }
     }
 }
 
@@ -90,10 +135,6 @@ enum TronSurfaceShape {
 extension View {
     func tronContentFitSheet() -> some View {
         modifier(TronContentFitSheetModifier())
-    }
-
-    func tronSheetFitScroll() -> some View {
-        modifier(TronSheetFitScrollModifier())
     }
 
     func tronSheetBottomContainer(_ active: Bool = true) -> some View {
