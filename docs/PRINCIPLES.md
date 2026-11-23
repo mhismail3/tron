@@ -22,15 +22,15 @@ boundary check in #2316 T2.9 adds them.
 
 ## P2 Whole-system health is a landing and checkpoint signal
 
-**Rule.** `scripts/tron land` gates main on the affected Tier 0 to 2 checks of the exact merge it pushes; the main
-suite (`scripts/tron main-suite`) then runs every test file, including every Gateway E2E journey, on each new main and
-reverts a red merge through land. The iOS suite and the real-UI core journeys (prompt/reply, delegate/result, approval tap,
+**Rule.** A change merges `--no-ff` onto main after its focused checks (`scripts/tron verify --changed`); no full-suite
+gate runs before main. Full suites (`scripts/tron verify --full`), including every Gateway E2E journey, run on main
+after the merge, and a red is fixed forward. The iOS suite and the real-UI core journeys (prompt/reply, delegate/result, approval tap,
 settings change, Home wake, reconnect/restart; [map](../tools/verify/core-journeys.md)) run at
 device checkpoints. A red is filed against the module that owns it,
 which fixes it at the root or reverts its change. A retry that passes is evidence of
 nondeterminism, not a fix.
 **Evidence.** Each journey's remaining gaps are tracked as #2230–#2235.
-**Enforced by** `scripts/tron land` (affected checks), the main suite it starts after each landing, and the checkpoint
+**Enforced by** `scripts/tron verify --changed` before the merge, full suites on main, and the checkpoint
 device smoke.
 
 ## P3 Clear owners, clean modules

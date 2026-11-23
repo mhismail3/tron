@@ -88,17 +88,12 @@ Commands:
   verify [--changed] [--base <ref>] | --module <id> | --all | --update-locks <id> [--skip ios,mac,relay] [--plan]
          [--gateway-host local|mini] [--ios-host local|mini]
                                     Mechanical none/partial/full tier; affected checks
-                                    now, every file in the main suite after the merge.
+                                    now; full suites run on main after the merge.
                                     --plan includes dirty paths and exact commands.
                                     Live logs and partial test-results/verify/<sha>.json;
-                                    no empty test passes; land, not verify, gates main.
+                                    no empty test passes.
   verify --full [--base <ref>] [--skip ...]
-                                    Every test file in every group: the main suite
-  main-suite [--green <sha>]        Every test file on each new main, on the mini; bisect a reproduced red
-                                    and revert its merge through land (tools/verify/land.md)
-  land [-m <message>]               Merge this branch --no-ff onto fetched main, run its affected
-                                    Tiers 0-2 on that exact merge here, push it only if it passed;
-                                    one land at a time per host (tools/verify/land.md)
+                                    Every test file in every group: the full suite on main
   mutate <gateway-src-file> [--count N] [--seed S] [--timeout SECONDS]
                                     Seeded sampled mutation of one file against the tests
                                     verify selects for it (lock sensitivity, plan 6.6);
@@ -359,17 +354,6 @@ case "$cmd" in
     ;;
   verify)
     exec python3 "$ROOT/tools/verify/verify.py" "$@"
-    ;;
-  main-suite)
-    exec python3 "$ROOT/tools/verify/main_suite.py" "$@"
-    ;;
-  land)
-    git -C "$ROOT" fetch --quiet --no-tags --refmap= origin refs/heads/main
-    tool="$(git -C "$ROOT" rev-parse --absolute-git-dir)/tron-land-tool"
-    mkdir -p "$tool"
-    for file in land.py host_lock.py; do git -C "$ROOT" show "FETCH_HEAD:tools/verify/$file" >"$tool/$file"; done
-    cd "$ROOT"
-    exec python3 "$tool/land.py" "$@"
     ;;
   mutate)
     exec python3 "$ROOT/tools/verify/mutate.py" "$@"

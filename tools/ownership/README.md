@@ -159,7 +159,7 @@ local changes or unknown ignored data, or in any linked worktree without `lsof`:
 that is another worker's), bytecode, branches merged into `origin/main` (not
 merely into a local main) that no worktree has checked out (printing `git branch <name> <sha>`
 to restore each), and merged worktrees on a branch (a detached worktree belongs to the tool that
-made it, such as land's merge worktree) with no untracked, modified or
+made it, such as a base checkout) with no untracked, modified or
 non-regenerable ignored file (an ignored `.env.local` keeps it), no process whose
 working directory is inside, no HEAD activity for 3 days, and no `test-results/` file the primary checkout lacks
 byte for byte while that folder is unexpired (such a worktree is kept, counted as a decision, and the

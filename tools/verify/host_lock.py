@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""First-come first-served host locks: the one full-Gateway run at a time (`gateway.py`, `mutate`) and the one landing at a time (`land`)."""
+"""First-come first-served host lock: the one full-Gateway run at a time (`gateway.py`, `mutate`)."""
 from pathlib import Path
 import fcntl
 import json
@@ -7,20 +7,17 @@ import os
 import time
 
 FULL_GATEWAY_LOCK = '/tmp/tron-full-gateway.lock'
-LAND_LOCK = '/tmp/tron-land.lock'
 HELD_BY_CALLER = 'TRON_FULL_GATEWAY_LOCK_HELD'
-GATE = 'TRON_LAND_GATE'
 
 
-def wait_for_lock(path, record, announce, priority=False):
+def wait_for_lock(path, record, announce):
     """The open lock file at `path`, exclusively locked once every earlier live waiter has had it.
 
     Waiters take the lock in arrival order: each queues a numbered ticket beside the lock and
     holds that ticket's flock while it waits, so a waiter that dies (even by SIGKILL) gives up
     its place and the next look at the queue deletes its ticket. Only the earliest live ticket
     tries the lock, whose own flock the kernel likewise drops for a dead holder. The queue
-    directory's flock serializes numbering and pruning. A `priority` waiter (land's gate) queues ahead of every
-    other waiter, behind earlier priority ones. Never interrupts the holder, and waits indefinitely.
+    directory's flock serializes numbering and pruning. Never interrupts the holder, and waits indefinitely.
     """
     queue = Path(path + '.queue')
     queue.mkdir(exist_ok=True)
@@ -46,8 +43,8 @@ def wait_for_lock(path, record, announce, priority=False):
         return tickets
 
     def enqueue():
-        number = max((int(path.stem[1:]) for path in live()), default=-1) + 1
-        ticket = (queue / f'{0 if priority else 1}{number:012d}.ticket').open('x')
+        number = max((int(path.stem) for path in live()), default=-1) + 1
+        ticket = (queue / f'{number:012d}.ticket').open('x')
         fcntl.flock(ticket, fcntl.LOCK_EX)
         ticket.write(json.dumps(record))
         ticket.flush()

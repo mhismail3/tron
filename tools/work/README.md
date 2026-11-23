@@ -68,11 +68,10 @@ Closing an issue never deletes branches or worktrees.
 Tests run directly with `scripts/tron test tooling tools/work/tests/test-<name>.py`.
 Fresh worktrees prepare their own pinned Gateway development dependencies before
 Gateway checks; see [verify](../verify/README.md#worktree-dependencies). No shared
-install or global compiler substitutes. Affected checks run before
-[`scripts/tron land`](../verify/land.md), which validates the affected Tier 0 to 2 checks of the exact merge before it pushes main;
-iOS coverage belongs to the device checkpoints
+install or global compiler substitutes. Affected checks run before a
+`git merge --no-ff` onto main and push; full suites run on main after the merge; iOS coverage belongs to the device checkpoints
 ([principles P2](../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-landing-and-checkpoint-signal)). Keep evidence under `test-results/`.
 
 Mac, iOS and Gateway lifecycle contracts stay with their development guides.
 Nothing here installs, deploys, replaces, restarts or promotes Stable. Never add an
-automatic release or automatic revert to this workflow; main is pushed only by `scripts/tron land`.
+automatic release or automatic revert to this workflow.
