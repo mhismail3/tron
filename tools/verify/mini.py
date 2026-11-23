@@ -177,9 +177,8 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
     wait = os.environ.get('TRON_MINI_JOB_WAIT_SECONDS')
     seconds = None
     if lane == 'verify':
-        sys.path.insert(0, str(ROOT / 'tools/verify'))
         import ledger
-        seconds = ledger.method_seconds('swift')
+        seconds = {test: value for test, value in ledger.method_seconds('swift').items() if test.startswith('TronMobile')}
     job = json.dumps({'sha': sha, 'main': main, 'lane': lane, 'args': mapped, 'outputs': len(paths), 'nonce': nonce, 'localRoot': str(ROOT),
                       'iosSeconds': seconds,
                       'lockWaitSeconds': float(wait) if wait else None, 'contended': os.environ.get('TRON_TEST_CONTENDED', '0'),

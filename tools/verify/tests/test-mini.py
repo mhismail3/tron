@@ -369,6 +369,7 @@ raise SystemExit(75 if '--incomplete' in sys.argv else 0)
                  'outcome': outcome, 'seconds': seconds, 'lane': 'swift', 'host': 'h', 'cpuIdlePercent': None,
                  'memoryFreePercent': None, 'measuredAt': 'm', 'seenAt': 's', 'contended': 0}
                 for name, outcome, seconds in (('testA', 'passed', 4.0), ('testA', 'failed', 9.0), ('testB', 'skipped', 50.0))]
+        rows.append({**rows[0], 'testId': 'TronMacIntegrationTests/MacQuitGatewayTests/restartControl()', 'seconds': 30.0})
         subprocess.run(['/usr/bin/python3', '-c', f"import json, sys; sys.path.insert(0, {str(ROOT / 'tools/verify')!r}); import ledger; "
                         f"ledger.append(json.loads({json.dumps(rows)!r}))"], env=self.env, check=True)
         measured = {'TronMobileUITests/Fixture/testA': 9.0}
@@ -391,7 +392,8 @@ raise SystemExit(75 if '--incomplete' in sys.argv else 0)
         self.assertTrue(Path(self.env['TRON_TEST_LEDGER']).is_file())
         with sqlite3.connect(self.env['TRON_TEST_LEDGER']) as connection:
             rows = connection.execute('SELECT test_id, commit_sha, outcome FROM results').fetchall()
-        self.assertEqual([row for row in rows if row[0].startswith('tools/')], [('tools/probe.py::Probe.test_case', sha, 'passed')] * 2)
+        self.assertEqual(len(rows), 6, rows)
+        self.assertEqual(rows[4:], [('tools/probe.py::Probe.test_case', sha, 'passed')] * 2)
         for flag in ('--unsafe-verify', '--unsafe-e2e'):
             with self.subTest(source=flag):
                 result = self.lane('verify', flag)

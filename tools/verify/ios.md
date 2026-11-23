@@ -31,11 +31,11 @@ parsing only; selection does not build an app or use a simulator.
 estimates fit 570 s: twice that plus 60 s of process launch is the runner's unchanged 1200 s
 focused deadline, so a shard keeps it even if every method takes twice its estimate. A method's
 estimate is the longest passed or failed run the caller's test ledger records for it (lane `swift`,
-every host); a verification handed to the mini carries that map with its job, so the mini packs by the
-submitting Mac's history. A method with no record counts 190 s, so unmeasured methods run three to a
-process. When the 570 s cut leaves fewer phone shards than `--ios-jobs` lanes (less one for a
-whole-class shard), the cut tightens to the smallest bound that still yields at most that many, so
-the lanes finish together. A method estimated above 570 s runs alone; a class run whole counts
+every host); a verification handed to the mini carries the iOS app's entries of that map with its
+job, so the mini packs by the submitting Mac's history. A method with no record counts 190 s, so
+unmeasured methods run at most three to a process. When the 570 s cut leaves fewer phone shards than
+`--ios-jobs` lanes (less one for a whole-class shard), the cut tightens to the smallest bound that
+still yields at most that many, so the lanes finish together. A method estimated above 570 s runs alone; a class run whole counts
 the full 570 s. Estimates only pack processes: they never select, skip, order within a process or
 judge a test. `--plan` prints each shard's `estimatedSeconds`, its command as it runs alone, and the
 lanes shards may use beside each other (`iosLanes`), plus the concurrency limit (`iosJobs`).
@@ -44,7 +44,7 @@ lanes shards may use beside each other (`iosLanes`), plus the concurrency limit 
 (default 1); phone and iPad shards run one at a time unless the caller explicitly widens it.
 Home plans heavy work within the three-slot ceiling; follow the brief's "Heavy work" paragraph.
 The option changes neither selection nor the runner's three host-wide slots; packing only
-spreads measured methods across the lanes it allows. `scripts/tron land` passes `--ios-jobs 3`: its
+spreads methods across the lanes it allows, and iPad shards share the same job limit. `scripts/tron land` passes `--ios-jobs 3`: its
 verification runs alone under the mini's job lock.
 Shards run longest estimate first on up to that many phone lanes: the worktree's own lane, then
 this worktree's `verify-iphone2-<hash>` and `verify-iphone3-<hash>` lanes (the canonical iPhone;
