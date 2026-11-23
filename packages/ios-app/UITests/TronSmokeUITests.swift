@@ -1261,17 +1261,14 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(thinking.isEnabled, "Thinking remains available to inspect while configuration is settling")
         keepScreenshot(named: "configuration-lock-\(appearance)")
         thinking.tap()
-        let high = app.buttons["settings-option-High"]
-        XCTAssertTrue(high.waitForExistence(timeout: 3), app.debugDescription)
-        high.tap()
+        selectHighThinking(app)
         app.buttons["Complete superseded thinking"].tap()
         XCTAssertFalse(app.staticTexts["Superseded receipt delivered"].exists,
                        "A locked Thinking selection must not reach the Gateway mutation socket")
         app.buttons["Release terminal settlement"].tap()
         wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
         thinking.tap()
-        XCTAssertTrue(high.waitForExistence(timeout: 3), app.debugDescription)
-        high.tap()
+        selectHighThinking(app)
         wait(for: [expectation(for: NSPredicate(format: "enabled == false"), evaluatedWith: thinking)], timeout: 5)
         let modelReset = app.buttons["settings-row-model.ref_role_chat_-reset"]
         XCTAssertTrue(modelReset.exists)
@@ -1311,6 +1308,16 @@ final class TronSmokeUITests: XCTestCase {
         wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
         XCTAssertEqual(thinking.value as? String, "Off")
         XCTAssertFalse(app.buttons["Why configuration is unavailable"].exists)
+    }
+
+    @MainActor
+    private func selectHighThinking(_ app: XCUIApplication) {
+        let slider = app.descendants(matching: .any)["settings-choice-slider"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 3), app.debugDescription)
+        slider.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        XCTAssertEqual(slider.value as? String, "High")
+        app.navigationBars.staticTexts["Manage Session"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(slider.waitForNonExistence(timeout: 3), "Dismissing the slider saves its selection")
     }
 
     @MainActor
@@ -1423,19 +1430,19 @@ final class TronSmokeUITests: XCTestCase {
         let thinking = app.buttons.matching(identifier: "settings-choice-control").buttons["Thinking"]
         wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
         thinking.tap()
-        let high = app.buttons["settings-option-High"]
-        XCTAssertTrue(high.waitForExistence(timeout: 3), app.debugDescription)
-        high.tap()
+        selectHighThinking(app)
         wait(for: [expectation(for: NSPredicate(format: "enabled == false"), evaluatedWith: thinking)], timeout: 5)
         app.buttons["Complete superseded thinking"].tap()
         XCTAssertTrue(app.staticTexts["Superseded receipt delivered"].waitForExistence(timeout: 5))
         wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
         XCTAssertTrue(thinking.value as? String == "Off")
         thinking.tap()
-        XCTAssertTrue(high.waitForExistence(timeout: 3), "Another edit must work without reopening Manage Session")
+        let slider = app.descendants(matching: .any)["settings-choice-slider"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 3), "Another edit must work without reopening Manage Session")
+        XCTAssertEqual(slider.value as? String, "Off")
         keepScreenshot(named: "superseded-thinking-receipt-ready")
-        app.navigationBars.buttons["Done"].firstMatch.tap()
-        XCTAssertTrue(high.waitForNonExistence(timeout: 5), "Done first closes the owning choice sheet, not Manage Session")
+        app.navigationBars.staticTexts["Manage Session"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(slider.waitForNonExistence(timeout: 5), "Dismissal closes the owning slider, not Manage Session")
         XCTAssertTrue(thinking.exists)
     }
 
@@ -1465,7 +1472,8 @@ final class TronSmokeUITests: XCTestCase {
         wait(for: [expectation(for: NSPredicate(format: "value == %@", ""), evaluatedWith: switchModel)], timeout: 5)
         XCTAssertTrue(thinking.isEnabled)
         thinking.tap()
-        XCTAssertTrue(app.buttons["settings-option-High"].waitForExistence(timeout: 3), app.debugDescription)
+        selectHighThinking(app)
+        wait(for: [expectation(for: NSPredicate(format: "enabled == false"), evaluatedWith: thinking)], timeout: 5)
         keepScreenshot(named: "post-stop-configuration-ready")
     }
 

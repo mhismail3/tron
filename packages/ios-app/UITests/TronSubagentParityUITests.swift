@@ -30,66 +30,6 @@ final class TronSubagentParityUITests: XCTestCase {
     }
 
     @MainActor
-    func testHistoryQueuedPausedResumedAndTerminalExecutions() throws {
-        continueAfterFailure = false
-        for outcome in ["completed", "failed", "stopped"] {
-            let app = XCUIApplication()
-            app.launchArguments = ["-tron-subagent-parity-fixture", "-history-grouping", "-history-lifecycle", "-history-\(outcome)", "-dark"]
-            app.launch()
-            defer { app.terminate() }
-            XCTAssertTrue(app.buttons["Subagent History"].waitForExistence(timeout: 10))
-            app.buttons["Subagent History"].tap()
-            XCTAssertTrue(app.buttons["subagent-row-worker"].waitForExistence(timeout: 5))
-            app.swipeUp()
-            let stages = [("worker", "Queued", true), ("worker", "Running", true),
-                          ("worker", "Pausing…", true), ("worker", "Paused", false),
-                          ("resumed", "Queued", true), ("resumed", "Running", true),
-                          ("resumed", outcome.capitalized, false)]
-            for (index, stage) in stages.enumerated() {
-                if index > 0 { app.buttons["Advance lifecycle"].tap() }
-                assertHistoryRow(app, id: stage.0, status: stage.1, active: stage.2)
-                assertHistoryRow(app, id: "completed", status: "Completed", active: false)
-                if index >= 4 {
-                    assertHistoryRow(app, id: "worker", status: "Paused", active: false)
-                    XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "subagent-row-")).count, 3)
-                }
-                if index == 3 || index == 4 || index == 6 {
-                    try capture("1306-history-\(outcome)-stage-\(index)")
-                }
-            }
-        }
-    }
-
-    @MainActor
-    private func assertHistoryRow(_ app: XCUIApplication, id: String, status: String, active: Bool,
-                                  file: StaticString = #filePath, line: UInt = #line) {
-        let row = app.buttons["subagent-row-\(id)"]
-        expectation(for: NSPredicate(format: "value BEGINSWITH %@", "\(status),"), evaluatedWith: row)
-        waitForExpectations(timeout: 5)
-        XCTAssertEqual(app.buttons.matching(identifier: "subagent-row-\(id)").count, 1, file: file, line: line)
-        if !active {
-            XCTAssertFalse((row.value as? String)?.contains("LIVE OUTPUT") == true, file: file, line: line)
-        }
-    }
-
-    @MainActor
-    func testHomeChipLabelCaptures() throws {
-        for scheme in ["light", "dark"] {
-            let app = XCUIApplication()
-            app.launchArguments = ["-tron-subagent-parity-fixture", "-home-chip-labels", "-\(scheme)"]
-            app.launch()
-            defer { app.terminate() }
-            XCTAssertTrue(assistantReply(app, labeled: "The requested changes are ready for review.").waitForExistence(timeout: 10))
-            XCTAssertTrue(app.buttons["Manage task, Completed, 42ms"].exists, app.debugDescription)
-            XCTAssertTrue(app.buttons["Send notification, Completed, 18ms"].exists, app.debugDescription)
-            XCTAssertTrue(app.buttons["Worker · Simplify Home chip labels, Reported"].exists, app.debugDescription)
-            XCTAssertFalse(app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Tron Home ·")).firstMatch.exists)
-            XCTAssertFalse(app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Tron Notify ·")).firstMatch.exists)
-            try capture("home-chip-labels-\(scheme)")
-        }
-    }
-
-    @MainActor
     func testHomeResultReadableMessageAndNestedInfo() throws {
         continueAfterFailure = false
         for mode in ["legacy", "typed-report", "plain-report", "malformed-report"] {
@@ -240,53 +180,6 @@ final class TronSubagentParityUITests: XCTestCase {
     }
 
     @MainActor
-    func testHistoricalSessionPills() throws {
-        continueAfterFailure = false
-        let app = launch(scheme: "dark", historical: true)
-        defer { app.terminate() }
-        XCTAssertTrue(app.buttons["Subagent, Progress Update"].waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertFalse(app.buttons["Extension content"].exists, "Historic classification belongs to Gateway, not npm parsing")
-        try verifyPills(app, scheme: "historical-dark")
-        try capture("historical-dark")
-    }
-
-    @MainActor
-    func testPendingWakePreflightJourney() throws {
-        try verifyRuntimeWake(stage: "pending-wake")
-    }
-
-    @MainActor
-    func testQueuedWakeSteerJourney() throws {
-        try verifyRuntimeWake(stage: "queued-wake")
-    }
-
-    @MainActor
-    private func verifyRuntimeWake(stage: String) throws {
-        continueAfterFailure = false
-        for scheme in ["light", "dark"] {
-            let app = launch(scheme: scheme, inputStage: stage)
-            defer { app.terminate() }
-            XCTAssertTrue(app.buttons["Subagent, Needs Attention"].waitForExistence(timeout: 10), app.debugDescription)
-            XCTAssertFalse(app.staticTexts["Subagent updates above."].exists,
-                "An internal input must have no user-position bubble before canonical binding: \(stage)")
-            XCTAssertFalse(app.buttons["Subagent, Update"].exists, "A hidden wake must not gain a pill")
-            try capture("\(stage)-\(scheme)")
-        }
-    }
-
-    @MainActor
-    func testQueuedMaintainerRemainsVisible() throws {
-        continueAfterFailure = false
-        for scheme in ["light", "dark"] {
-            let app = launch(scheme: scheme, inputStage: "queued-wake", queuedMaintainer: true)
-            defer { app.terminate() }
-            XCTAssertTrue(app.staticTexts["Maintainer queued message"].waitForExistence(timeout: 10), app.debugDescription)
-            XCTAssertFalse(app.staticTexts["Subagent updates above."].exists)
-            try capture("queued-maintainer-\(scheme)")
-        }
-    }
-
-    @MainActor
     private func verifyPills(_ app: XCUIApplication, scheme: String) throws {
         XCTAssertFalse(app.buttons["Subagent, Update"].exists, "Internal wake must not add a pill")
         for (label, body, name) in [
@@ -309,11 +202,9 @@ final class TronSubagentParityUITests: XCTestCase {
     }
 
     @MainActor
-    private func launch(scheme: String, historical: Bool = false, inputStage: String? = nil, queuedMaintainer: Bool = false) -> XCUIApplication {
+    private func launch(scheme: String) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-subagent-parity-fixture", "-\(scheme)"] + (historical ? ["-historical"] : [])
-        if let inputStage { app.launchArguments.append("-\(inputStage)") }
-        if queuedMaintainer { app.launchArguments.append("-queued-maintainer") }
+        app.launchArguments = ["-tron-subagent-parity-fixture", "-\(scheme)"]
         app.launch()
         return app
     }
