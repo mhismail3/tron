@@ -209,8 +209,8 @@ class TierTests(fixture.VerifyCase):
         self.assertEqual((r.path / 'test-results/retirement-consumer').read_text(), 'executed')
         self.assertEqual(r.report()['passingTests'], 2)
 
-    def test_a_slow_file_defers_to_the_main_suite_unless_it_changed_and_a_toolchain_input_runs_every_lock(self):
-        """A slow file (tools/verify/post-merge.json) a change reaches only through another module waits for the main suite;
+    def test_a_slow_file_defers_to_the_full_suite_on_main_unless_it_changed_and_a_toolchain_input_runs_every_lock(self):
+        """A slow file (tools/verify/post-merge.json) a change reaches only through another module waits for the full suite on main;
         a changed module's own slow tests, and an edited slow file, still run before landing."""
         r = self.repo
         r.write('mods/alpha/test-slow.py', fixture.PASSING)

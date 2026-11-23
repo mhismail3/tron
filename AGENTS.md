@@ -96,14 +96,13 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 
 ## Validation and landing
 [Principles](docs/PRINCIPLES.md) own delivery policy: a commit is gated by the local tests of the modules
-it touches (P1); `scripts/tron land` gates main on Tiers 0 to 2 of the exact merge it lands; iOS and real-UI journeys are checkpoint signals (P2).
+it touches (P1); full suites run on main after the merge and a red is fixed forward; iOS and real-UI journeys are checkpoint signals (P2).
 1. Commit in your own worktree; enable rerere. Fetch main into private `FETCH_HEAD` and merge
    deliberately (see [Git/gh skill](.agents/skills/tron-work/SKILL.md)); never rewrite foreign work.
    Every commit is gated by `scripts/tron verify --changed` (the changed modules' tests) plus the E2E journeys that prove any behaviour you delete; add partial
-   or full checks as needed; serial or long checks run once in `land`. Obtain required ACCEPTs. Never retry-to-green.
-2. Land only with `scripts/tron land` ([land](tools/verify/land.md)): it merges `--no-ff` onto fetched main, validates
-   that exact merge and pushes it only if green, revalidating when main moved; never push main by hand or force-push. Landing bar: no worse than fetched main — every remaining red also fails on main and has a filed issue; never a new red. A batch red is filed
-   against its owning module, which root-fixes it or reverts its change.
+   or full checks as needed; serial or long checks run on main after the merge. Obtain required ACCEPTs. Never retry-to-green.
+2. Land: `git merge --no-ff` onto fetched main and push; never force-push. No full-suite gate before main. A red on main
+   is filed against its owning module, which fixes it forward or reverts its change.
 3. Close the issue with the change, what it deleted or retired, actual commands and results, and residual risk; link long logs (`test-results/`, internal workspace).
    Incidents also name the one-step diagnosing signal, added to its owning test and a row in its module README Signals (`packages/gateway/docs/observability.md`).
    Each landed slice posts a 3-line #2173 retro: biggest time cost; one proposed process/architecture fix; SHA/evidence. Speed before scope: fix those costs (green main, changed-test selection, cycle time) before new deletion slices. [check: review only]

@@ -105,7 +105,7 @@ Node runtimes and the locked gateway production tree.
 ## Development
 
 ```bash
-# Run relevant tests directly; independent workers land with scripts/tron land
+# Run relevant tests directly, then merge --no-ff onto main and push
 scripts/tron test gateway <test-file>
 scripts/tron test ios run --only-testing TronMobileUITests/<Class>/<method>
 
