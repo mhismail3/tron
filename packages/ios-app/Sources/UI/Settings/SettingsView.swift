@@ -114,22 +114,6 @@ struct SettingsView: View {
     }
 }
 
-enum TronSheetDetentPolicy {
-    case fixed(Set<PresentationDetent>)
-    case contentFit
-}
-
-private struct TronSheetDetentPolicyModifier: ViewModifier {
-    let policy: TronSheetDetentPolicy
-
-    func body(content: Content) -> some View {
-        switch policy {
-        case .fixed(let detents): content.presentationDetents(detents)
-        case .contentFit: content.tronContentFitDetents()
-        }
-    }
-}
-
 struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
     let accessibilityLabel: String
     let identity: String
@@ -137,7 +121,6 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
     let label: Label
     let accent: Color?
     let surfaceAccent: Color?
-    let detents: TronSheetDetentPolicy
     let onDismiss: (() -> Void)?
     private let fileID: String
     private let line: Int
@@ -149,7 +132,6 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
         identity: String? = nil,
         accent: Color? = nil,
         surfaceAccent: Color? = nil,
-        detents: TronSheetDetentPolicy = .fixed([.medium, .large]),
         onDismiss: (() -> Void)? = nil,
         fileID: String = #fileID,
         line: Int = #line,
@@ -163,7 +145,6 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
         _isPresented = PresentationState(wrappedValue: false, key: "\(self.identity)@\(fileID):\(line)")
         self.accent = accent
         self.surfaceAccent = surfaceAccent
-        self.detents = detents
         self.onDismiss = onDismiss
         self.destination = destination
         self.label = label()
@@ -197,7 +178,7 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
                 .tronTopBlur(.sheet)
                 .tronPresentation()
                 .tronSettingsLayout()
-                .modifier(TronSheetDetentPolicyModifier(policy: detents))
+                .tronContentFitSheet()
                 .presentationDragIndicator(.hidden)
             }
     }

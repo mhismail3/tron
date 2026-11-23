@@ -133,7 +133,6 @@ struct HomeSheet: View {
     var identity: HomeSheetReadIdentity? { model.homeSheetReadIdentity(profileID: profileID, surfaceToken: token) }
     var accent: Color { visualTheme?.accent ?? .tronPrimary }
     private var isEvidence: Bool { if case .evidence = destination { true } else { false } }
-    private var detents: Set<PresentationDetent> { [.medium, .large] }
     var active: Bool { PresentationPublicationPolicy.allows(ambient: activity, coordinator: coordinator, token: token) }
     var body: some View {
         Group {
@@ -148,13 +147,13 @@ struct HomeSheet: View {
             } else if destination.isTaskSurface {
                 HomeTaskSheet(destination: destination, profileID: profileID, onOpenSession: onOpenSession)
             } else if isEvidence {
-                TronDocumentSheet(title: destination.title, detents: detents) { sheetContent }
+                TronDocumentSheet(title: destination.title, detents: [.large]) { sheetContent }
             } else {
                 NavigationStack { sheetContent }
             }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents(detents)
+        .tronContentFitSheet()
         .presentationDragIndicator(.hidden)
         .environment(\.tronSettingsVisualTheme, visualTheme ?? TronSettingsVisualTheme(
             accent: .tronPrimary, surfaceAccent: .tronPrimarySurface))
@@ -173,6 +172,7 @@ struct HomeSheet: View {
                     }
                     .padding(18)
                 }
+                .tronSheetFitScroll()
                 .tronScrollEdgeChrome()
             }
         }

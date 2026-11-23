@@ -66,7 +66,7 @@ struct HostedSixSmallUIFixture: View {
             WorkspaceInspectorSheet(sessionID: "fixture-chat")
                 .frame(maxWidth: HostedLaunch.arguments.contains("-six-ui-narrow") ? 320 : .infinity)
         case "checkin", "checkin-blocked":
-            ToolDetailSheet(tool: Self.checkin(blocked: surface == "checkin-blocked"), density: .expanded)
+            ToolDetailSheet(tool: Self.checkin(blocked: surface == "checkin-blocked"))
                 .tronNavigationTitle("Checkin")
         default:
             Text("Simulator preview · primary theme reference")

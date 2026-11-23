@@ -15,7 +15,7 @@ extension HomeSheet {
         return TronSettingsSections(alignment: .leading, spacing: 18) {
             usageHeader(read)
             if let sessionID { ManageModelConfigurationCard(sessionID: sessionID, home: true) }
-            manageRows(read, unresolved: unresolved)
+            manageRows(read, unresolved: unresolved).tronSheetBottomContainer()
         }
     }
 

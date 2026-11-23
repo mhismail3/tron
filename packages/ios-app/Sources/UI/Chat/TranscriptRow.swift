@@ -742,6 +742,7 @@ struct ThinkingTraceDetailSheet: View {
                     .padding(18)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
+                .tronSheetFitScroll()
                 .defaultScrollAnchor(.top)
                 .tronScrollEdgeChrome()
                 .onAppear {
@@ -773,7 +774,7 @@ struct ThinkingTraceDetailSheet: View {
             }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
+        .tronContentFitSheet()
         .presentationDragIndicator(.hidden)
     }
 }

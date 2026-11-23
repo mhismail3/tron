@@ -194,11 +194,13 @@ private struct TronGlassSurfaceModifier: ViewModifier {
     let interactive: Bool
     let respectsSettingsTheme: Bool
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+    @Environment(\.tronSurfaceConcentricBottom) private var concentricBottom
 
     func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let shape = TronSurfaceShape.resolve(cornerRadius: cornerRadius, concentricBottom: concentricBottom)
         let resolvedAccent = respectsSettingsTheme ? settingsTheme?.surfaceAccent ?? accent : accent
         content
+            .environment(\.tronSurfaceConcentricBottom, false)
             .contentShape(shape)
             .glassEffect(
                 .regular.tint(resolvedAccent.opacity(tintOpacity)).interactive(interactive),
@@ -212,11 +214,13 @@ private struct TronScrollSurfaceModifier: ViewModifier {
     let cornerRadius: CGFloat
     let tintOpacity: Double
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+    @Environment(\.tronSurfaceConcentricBottom) private var concentricBottom
 
     func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let shape = TronSurfaceShape.resolve(cornerRadius: cornerRadius, concentricBottom: concentricBottom)
         let resolvedAccent = settingsTheme?.surfaceAccent ?? accent
         content
+            .environment(\.tronSurfaceConcentricBottom, false)
             .contentShape(shape)
             .background {
                 shape

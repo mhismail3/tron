@@ -8,40 +8,45 @@ struct HostedWorkerToolFixture: View {
 
     var body: some View {
         Color.clear.tronManagedSheet(isPresented: $showing, identity: "worker-tool-review.\(surface)") {
-            Group {
-                if surface == "worker-identities" {
-                    ToolRunDetailSheet(run: ChatToolRunPresentation(tools: Self.identityTools), tools: Self.identityTools)
-                } else {
-                    NavigationStack {
-                        Group {
-                            if surface == "worker-chips" {
-                                ScrollView {
-                                    VStack(alignment: .leading, spacing: 18) {
-                                        Text("Worker progress").font(TronTypography.headline)
-                                        Text("The shared tool sheets are ready for review.").font(TronTypography.bodySM)
-                                        ForEach(Self.tools.prefix(2)) { tool in ToolCard(data: tool) }
-                                        ToolActivityChip(run: ChatToolRunPresentation(tools: Self.tools), action: {})
-                                    }.padding(16)
-                                }.tronNavigationTitle("Transcript")
-                            } else {
-                                let tool = surface == "worker-report" ? Self.reportForReview : HostedSixSmallUIFixture.checkin(blocked: true)
-                                ToolDetailSheet(tool: tool, density: .expanded)
-                                    .toolbar { ToolbarItem(placement: .principal) { ToolDetailNavigationTitle(tool: tool) } }
-                            }
+            if surface == "worker-identities" || surface == "worker-tools-short" {
+                let tools = surface == "worker-identities" ? Self.identityTools : Array(Self.identityTools.prefix(2))
+                ToolRunDetailSheet(run: ChatToolRunPresentation(tools: tools), tools: tools).tronSettingsLayout()
+            } else if surface.hasPrefix("worker-thinking") {
+                ThinkingTraceDetailSheet(inline: MarkdownPresentation.Inline(source: surface == "worker-thinking-long"
+                    ? Array(repeating: Self.thought, count: 12).joined(separator: "\n\n") : Self.thought),
+                    identity: surface, streaming: false)
+            } else {
+                NavigationStack {
+                    Group {
+                        if surface == "worker-chips" {
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 18) {
+                                    Text("Worker progress").font(TronTypography.headline)
+                                    Text("The shared tool sheets are ready for review.").font(TronTypography.bodySM)
+                                    ForEach(Self.tools.prefix(2)) { tool in ToolCard(data: tool) }
+                                    ToolActivityChip(run: ChatToolRunPresentation(tools: Self.tools), action: {})
+                                }.padding(16)
+                            }.tronNavigationTitle("Transcript")
+                        } else {
+                            let tool = surface == "worker-report" ? Self.reportForReview : HostedSixSmallUIFixture.checkin(blocked: true)
+                            ToolDetailSheet(tool: tool)
+                                .toolbar { ToolbarItem(placement: .principal) { ToolDetailNavigationTitle(tool: tool) } }
                         }
-                        .tronToolDetailNavigationChrome()
-                        .toolbar {
-                            ToolbarItem(placement: .confirmationAction) {
-                                Button { showing = false } label: { Image(systemName: "checkmark").tronToolbarAction() }.accessibilityLabel("Done")
-                            }
+                    }
+                    .tronToolDetailNavigationChrome()
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button { showing = false } label: { Image(systemName: "checkmark").tronToolbarAction() }.accessibilityLabel("Done")
                         }
                     }
                 }
+                .tronTopBlur(.toolDetail).tronPresentation().tronSettingsLayout()
+                .presentationDetents([.large]).presentationDragIndicator(.hidden)
             }
-            .tronTopBlur(.toolDetail).tronPresentation().tronSettingsLayout()
-            .presentationDetents([.large]).presentationDragIndicator(.hidden)
         }
     }
+
+    static let thought = "The user wants the sheet to fit its content. I should measure the scroll content, not the sheet, so the height cannot feed back into itself."
 
     static var reportForReview: ChatToolPresentation {
         let args = HostedLaunch.arguments
