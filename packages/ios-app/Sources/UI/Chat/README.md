@@ -9,8 +9,9 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
 
 - Shell and dashboard: `SessionShellView` (`SessionShellProfileRouteOwner`), session rows and
   swipe actions, `ArchivedSessionsSection`, `SessionTitleSearch`, `HomePinnedRow`, `HomeUsageSummaryCard`,
-  `ArtifactsSheet` (`artifacts.list`, newest first; a row opens the tailnet page in the in-app
-  browser, its menu in Safari).
+  `ArtifactsSheet` (`artifacts.list`: a `TronFeed` with a Tools section by last update and Reports
+  grouped by day; a row opens the page in the in-app WebKit viewer, its menu and the viewer's
+  toolbar in Safari).
 - Chat route: `ChatView` (composition and lifecycle root), `ChatRoutes`, `ChatTranscriptSheetRoutes`,
   `ChatSessionPresentation`, `ChatTranscriptScrollView`, `ChatTranscriptOrientation`,
   `ChatScrollCoordinator`, `ChatComposerView`, `ChatTranscriptPresentationStore`,

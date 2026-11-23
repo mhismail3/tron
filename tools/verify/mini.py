@@ -176,6 +176,7 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
     print(f'mini: pushed in {time.time() - started:.1f}s', flush=True)
     wait = os.environ.get('TRON_MINI_JOB_WAIT_SECONDS')
     job = json.dumps({'sha': sha, 'main': main, 'lane': lane, 'args': mapped, 'outputs': len(paths), 'nonce': nonce, 'localRoot': str(ROOT),
+                      'iosSeconds': os.environ.get('TRON_IOS_METHOD_SECONDS'),
                       'lockWaitSeconds': float(wait) if wait else None, 'contended': os.environ.get('TRON_TEST_CONTENDED', '0'),
                       'requester': {'host': platform.node(), 'worktree': str(ROOT), 'pid': os.getpid()}})
     source = Path(__file__).read_text()
@@ -433,7 +434,8 @@ def remote_main(job: dict) -> int:
                            'TRON_VERIFY_EXECUTION_HOST': 'mini',
                            'TRON_IOS_TEST_RESULTS_DIR': str(results / 'ios'),
                            'TRON_PROFILE_RESULTS_DIR': str(results / 'profiles'),
-                           'TRON_IOS_E2E_STATE_DIR': str(checkout / '.scratch/mini-e2e')}
+                           'TRON_IOS_E2E_STATE_DIR': str(checkout / '.scratch/mini-e2e'),
+                           **({'TRON_IOS_METHOD_SECONDS': job['iosSeconds']} if job['iosSeconds'] is not None else {})}
                     code = stream(*command, cwd=checkout, env=env)
                     if job['lane'] == 'verify':
                         report = checkout / 'test-results/verify' / f'{sha}.json'

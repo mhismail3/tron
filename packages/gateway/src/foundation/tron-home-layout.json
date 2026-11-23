@@ -89,6 +89,7 @@
     "workspace/files": {"owner": "gateway/workspace", "container": true, "subtree": true},
     "workspace/files/Profile.json": {"owner": "gateway/home"},
     "workspace/artifacts": {"owner": "gateway/artifacts", "subtree": true},
+    "workspace/reports": {"owner": "gateway/artifacts", "subtree": true},
     "workspace/state": {"owner": "gateway/workspace", "container": true},
     "workspace/state/episodic": {"owner": "gateway/episodic", "subtree": true},
     "workspace/state/x-library": {"owner": "extension x-library", "subtree": true},

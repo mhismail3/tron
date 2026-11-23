@@ -12,9 +12,9 @@ Git directory), never the branch's own, so a branch that lacks or predates them 
    or the pinned Node changed), so main's first-parent chain stays the landing history. A conflict refuses (exit 2): merge main
    into the branch, commit and land again.
 3. Validates that exact merge commit with the merge's own `verify --changed --base <main> --skip mac,python-here
-   --ios-host mini`. A merge whose selection has no iOS work runs here: its Gateway runs queue on the full-Gateway lock
+   --ios-host mini --ios-jobs 3`. A merge whose selection has no iOS work runs here: its Gateway runs queue on the full-Gateway lock
    ahead of every other waiter (`TRON_LAND_GATE`), behind only the holder and earlier gates. A merge that selects iOS
-   work runs whole on the mini under its lease (build, then the selected iOS tests), and its report returns in
+   work runs whole on the mini under its lease (build, then the selected iOS tests on its three simulator lanes), and its report returns in
    `test-results/mini/<sha12>-<nonce>/verify.json`. The report must name the merge commit; its evidence is kept in
    `test-results/land/<merge>/`.
 4. Pushes that merge to `main` only when the report passed. A red refuses (exit 1) and a missing or foreign report

@@ -358,12 +358,15 @@ if '--unsafe-verify' in sys.argv or '--unsafe-e2e' in sys.argv:
     directory.mkdir(parents=True, exist_ok=True)
     (directory / 'outside-link').symlink_to(outside)
 main = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'origin/main'], text=True).strip()
-(logs.parent / (sha + '.json')).write_text(json.dumps({'commit': sha, 'main': main, 'args': sys.argv[1:]}))
+import os
+(logs.parent / (sha + '.json')).write_text(json.dumps({'commit': sha, 'main': main, 'args': sys.argv[1:], 'seconds': json.loads(os.environ['TRON_IOS_METHOD_SECONDS'])}))
 raise SystemExit(75 if '--incomplete' in sys.argv else 0)
 ''')
         sha = self.commit('whole-verifier boundary fixture')
         main = self.git('rev-parse', 'HEAD^')
         self.git('update-ref', 'refs/remotes/origin/main', main)
+        measured = {'TronMobileUITests/Fixture/testA': 9.0}
+        self.env['TRON_IOS_METHOD_SECONDS'] = json.dumps(measured)
         for args in (['--update-locks', 'owner'],):
             denied = self.lane('verify', *args)
             self.assertEqual(denied.returncode, NO_RESULT, denied.stdout + denied.stderr)
@@ -376,7 +379,8 @@ raise SystemExit(75 if '--incomplete' in sys.argv else 0)
                 self.assertIsNone(self.reader().no_result_reason(result.returncode, result.stdout + result.stderr))
                 line = next(line for line in result.stdout.splitlines() if line.startswith('mini: artifacts: '))
                 artifacts = Path(line.removeprefix('mini: artifacts: '))
-                self.assertEqual(json.loads((artifacts / 'verify.json').read_text()), {'commit': sha, 'main': main, 'args': args})
+                self.assertEqual(json.loads((artifacts / 'verify.json').read_text()), {'commit': sha, 'main': main, 'args': args, 'seconds': measured},
+                                 'the handed-off iOS timings reach the mini verifier')
                 self.assertEqual((artifacts / 'verify/first-failure.log').read_text(), 'native boundary fixture')
                 self.assertFalse((artifacts / 'ledger.sqlite3').exists())
         self.assertTrue(Path(self.env['TRON_TEST_LEDGER']).is_file())

@@ -77,7 +77,7 @@ def validate(tree: Path, sha: str, main: str) -> tuple[str, dict, Path]:
     """('passed', 'failed' or 'no result', the report, where its evidence is kept) for the affected checks at exactly `sha`:
     here, or, when they select iOS work, the whole verification on the mini under its lease (`--ios-host mini`)."""
     install(tree)
-    with subprocess.Popen([sys.executable, str(tree / "tools/verify/verify.py"), "--changed", "--base", main, "--skip", SKIP, "--ios-host", "mini"],
+    with subprocess.Popen([sys.executable, str(tree / "tools/verify/verify.py"), "--changed", "--base", main, "--skip", SKIP, "--ios-host", "mini", "--ios-jobs", "3"],
                           cwd=tree, stdin=subprocess.DEVNULL, env={**os.environ, GATE: "1"}) as child:
         try:
             code = child.wait()
