@@ -36,6 +36,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         for prefix, folder in mounts.items():
             if route == prefix or route.startswith(prefix + "/"):
                 root, route = folder, route[len(prefix):]
+                break
         if "\x00" in route:
             return None
         candidate = os.path.join(root, *[part for part in route.split("/") if part])

@@ -239,7 +239,6 @@ struct TronListSection<Row: Identifiable> {
 struct TronListGroup<Row: Identifiable, RowView: View>: View {
     let sections: [TronListSection<Row>]
     @Environment(\.tronSettingsSectionCount) private var sectionCount
-    @Environment(\.tronSettingsVisualTheme) private var theme
     var hasLeading = false
     var identifier: String?
     @ViewBuilder let row: (Row) -> RowView

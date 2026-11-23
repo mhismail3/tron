@@ -196,6 +196,8 @@ runpy.run_path(sys.argv.pop(1), run_name='__main__')
         (artifacts / "status" / ".private").mkdir()
         (artifacts / "status" / ".private" / "note.txt").write_text("hidden folder")
         (artifacts / "status" / "public").symlink_to(artifacts / "status" / ".private")
+        (artifacts / "reports").mkdir()
+        (artifacts / "reports" / "index.html").write_text("<title>tool named reports</title>")
         (reports / "2026-11-23_weekly").mkdir(parents=True)
         (reports / "2026-11-23_weekly" / "index.html").write_text("<title>weekly report</title>")
         (reports / "2026-11-23_escape").symlink_to(tmp / "workspace")
@@ -234,6 +236,8 @@ runpy.run_path(sys.argv.pop(1), run_name='__main__')
             report, report_type = fetch(local + "/reports/2026-11-23_weekly/")
             check(report == b"<title>weekly report</title>" and report_type.startswith("text/html"),
                   "a report folder's index.html is served under /reports/<name>/")
+            named, _ = fetch(local + "/artifacts/reports/")
+            check(named == b"<title>tool named reports</title>", "a tool named reports is served from the artifacts folder")
             check(status(local + "/artifacts/") == 404 and status(local + "/reports/") == 404,
                   "the artifacts and reports folders are never listed")
             check(status(local + "/artifacts/status/.secret") == 404

@@ -239,7 +239,7 @@ selected primary theme; semantic statuses keep their colors.
   12 pt subtext, then tags and time; a row with neither status nor time carries its tags top-right
   (below the title when both do not fit); a row with only a title and time keeps both on one line
   (the time below at accessibility sizes). The Artifacts sheet is such a feed: a Tools section by
-  last update, then Reports grouped by day, each headed by the `TronListGroup` section header. Actions are in the detail and a matching long-press menu.
+  last update, then Reports grouped by day, each headed by the shared `TronListSectionHeader`. Actions are in the detail and a matching long-press menu.
   Instructions subsheet entries are `TronSettingsRow`s: centred icon, trailing source tag.
   Manage Home's Memory subtitle counts catalog messages and current tree-view lines (built
   plus unbuilt), not stored summary nodes or the last activation's frozen view. Chapters

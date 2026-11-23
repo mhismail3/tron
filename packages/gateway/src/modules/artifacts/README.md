@@ -16,8 +16,8 @@ content, logic and data; this module knows only the folder convention.
   listed; `artifacts/shared/` holds styles and data pages reuse.
 - `artifacts.list` (read, no parameters) returns `{tools, reports}`, at most 500 of each.
   Each entry is `{name, title, updatedAt, url}`; reports add `day` (`yyyy-mm-dd` from the
-  name). `title` is the page's `<title>` (first 16 KiB, entities decoded) or the folder
-  name; `updatedAt` is the later of the folder's and `index.html`'s modification times.
+  name). `title` is the page's `<title>` (first 16 KiB, entities decoded, whitespace collapsed,
+  at most 200 characters) or the folder name; `updatedAt` is the later of the folder's and `index.html`'s modification times.
   Tools sort by `updatedAt`, newest first; reports by `day`, then `updatedAt`, newest
   first. `url` is `https://<this Mac's tailnet name>:8443/artifacts/<name>/` or
   `.../reports/<name>/`. With pages present but no tailnet name it refuses with

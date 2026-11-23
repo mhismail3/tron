@@ -43,7 +43,8 @@ private struct ArtifactsListing: Decodable {
         return items
     }
 
-    static func dayTitle(_ day: String, now: Date = .now) -> String {
+    static func dayTitle(_ day: String) -> String {
+        let now = Date.now
         let parts = day.split(separator: "-").compactMap { Int($0) }
         guard parts.count == 3, let date = Calendar.current.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2])) else { return day }
         if Calendar.current.isDate(date, inSameDayAs: now) { return "Today" }
@@ -53,15 +54,18 @@ private struct ArtifactsListing: Decodable {
                                        : .dateTime.weekday(.abbreviated).month(.abbreviated).day().year())
     }
 
-    static func toolRow(_ tool: ArtifactEntry, now: Date = .now) -> TronListRowContent {
+    static func toolRow(_ tool: ArtifactEntry) -> TronListRowContent {
         TronListRowContent(leading: .icon("square.grid.2x2", .tronPrimary), title: tool.title,
-                           timestamp: TronListTime.short(iso: tool.updatedAt, now: now),
+                           timestamp: TronListTime.short(iso: tool.updatedAt),
                            accessibilityHint: "Opens the tool. Touch and hold to open it in Safari.")
     }
 
     static func reportRow(_ report: ArtifactEntry) -> TronListRowContent {
-        TronListRowContent(leading: .icon("doc.text", .tronPrimary), title: report.title,
-                           timestamp: GatewayTimestamp.parse(report.updatedAt)?.formatted(date: .omitted, time: .shortened),
+        let updated = GatewayTimestamp.parse(report.updatedAt)
+        let sameDay = updated.map { String(format: "%04d-%02d-%02d", Calendar.current.component(.year, from: $0),
+            Calendar.current.component(.month, from: $0), Calendar.current.component(.day, from: $0)) == report.day } ?? false
+        return TronListRowContent(leading: .icon("doc.text", .tronPrimary), title: report.title,
+                           timestamp: sameDay ? updated?.formatted(date: .omitted, time: .shortened) : updated.map { "Updated \(TronListTime.short($0))" },
                            accessibilityHint: "Opens the report. Touch and hold to open it in Safari.")
     }
 }
@@ -171,7 +175,7 @@ struct ArtifactsSheet: View {
 
     private func card(_ entry: ArtifactEntry, _ content: TronListRowContent) -> some View {
         TronFeedCard {
-            TronListButton(content, identifier: "artifact-row-\(entry.name)", action: { opened = entry }) {
+            TronListButton(content, identifier: "artifact-row-\(entry.name)", action: { if active, store.identity == identity { opened = entry } }) {
                 Button("Open in Safari", systemImage: "safari") { openURL(entry.url) }
             }
         }
@@ -204,7 +208,7 @@ private struct ArtifactViewer: View {
                 TronPlaceholderState(title: "The page could not be opened", detail: failure, icon: "exclamationmark.triangle")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ArtifactWebView(url: entry.url) { failure = $0 }
+                ArtifactWebView(url: entry.url, external: { openURL($0) }) { failure = $0 }
             }
         }
     }
@@ -212,9 +216,10 @@ private struct ArtifactViewer: View {
 
 private struct ArtifactWebView: UIViewRepresentable {
     let url: URL
+    let external: @MainActor (URL) -> Void
     let failed: @MainActor (String) -> Void
 
-    func makeCoordinator() -> Coordinator { Coordinator(failed: failed) }
+    func makeCoordinator() -> Coordinator { Coordinator(origin: url, external: external, failed: failed) }
 
     func makeUIView(context: Context) -> WKWebView {
         let view = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
@@ -230,8 +235,24 @@ private struct ArtifactWebView: UIViewRepresentable {
     func updateUIView(_ view: WKWebView, context: Context) {}
 
     @MainActor final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+        let origin: URL
+        let external: @MainActor (URL) -> Void
         let failed: @MainActor (String) -> Void
-        init(failed: @escaping @MainActor (String) -> Void) { self.failed = failed }
+        private var committed = false
+        init(origin: URL, external: @escaping @MainActor (URL) -> Void, failed: @escaping @MainActor (String) -> Void) {
+            self.origin = origin; self.external = external; self.failed = failed
+        }
+
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                     decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
+            guard let target = navigationAction.request.url else { return decisionHandler(.cancel) }
+            let inside = target.scheme == origin.scheme && target.host == origin.host && target.port == origin.port
+            if inside || target.scheme == "about" || navigationAction.targetFrame?.isMainFrame == false { return decisionHandler(.allow) }
+            if navigationAction.navigationType == .linkActivated { external(target) }
+            decisionHandler(.cancel)
+        }
+
+        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { committed = true }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {
             report(error)
@@ -248,7 +269,7 @@ private struct ArtifactWebView: UIViewRepresentable {
         }
 
         private func report(_ error: any Error) {
-            guard (error as NSError).code != NSURLErrorCancelled else { return }
+            guard !committed, (error as NSError).code != NSURLErrorCancelled else { return }
             failed(error.localizedDescription)
         }
     }
