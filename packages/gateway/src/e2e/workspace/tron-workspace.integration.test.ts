@@ -101,8 +101,9 @@ describe("Tron workspace through the pinned runtime", () => {
       expect(text).toContain(JSON.stringify(f.cwd));
       expect(text).toContain(JSON.stringify(internal));
       expect(text).toContain("tmp/<taskId>/");
+      expect(text).toContain("artifacts/yyyy-mm-dd_<slug>/");
+      expect(text).toContain(":8443/artifacts/<name>/");
       expect(text).toContain("files/<topic>-<date>/");
-      expect(text).toContain("files/INDEX.md");
       expect(text).toContain("state/<name>/");
       expect(text).toContain("14 days");
       expect(text).toContain("maintainer approval");

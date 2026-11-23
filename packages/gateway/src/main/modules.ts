@@ -15,6 +15,7 @@ import { askUserModule } from "../extensions/ask-user-module.js";
 import { randomUUID } from "node:crypto";
 import { createComputerModule } from "../display/computer-module.js";
 import { ConsoleGate } from "../machine/console-probe.js";
+import { createArtifactsModule } from "../modules/artifacts/module.js";
 import { workspaceModule } from "../workspace/workspace-module.js";
 import { createCoreModule } from "../workspace/core-module.js";
 import { createDisplayModule, createNativeCaptureModule, type DisplayOwner } from "../display/display-modules.js";
@@ -64,6 +65,7 @@ export function gatewayModules(owners: () => ModuleOwners, projectOptions?: Cons
     projects,
     askUserModule,
     createDisplayModule(() => owners().display),
+    createArtifactsModule(),
     createNativeCaptureModule(() => owners().display, gate),
     createComputerModule(gate),
     createScheduleModule(() => owners().scheduleToolOperations),

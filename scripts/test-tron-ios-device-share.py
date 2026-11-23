@@ -3,7 +3,9 @@
 
 1. Publisher and server, in a temp fixture: the real publish script lays out
    builds behind the real loopback server; retention, the latest manifest, the
-   index, escaping and served content types are checked over a socket.
+   index, escaping and served content types are checked over a socket, and an
+   artifact page is served under /artifacts/ with no listing, hidden files,
+   symlink escape or traversal.
 2. Share-host disable ownership, in a temp HOME with fixture `tailscale` and
    `launchctl` executables first on PATH: the real `share-host disable` entry
    point removes only its own exact :8443 handler and LaunchAgent, refuses
@@ -184,9 +186,15 @@ runpy.run_path(sys.argv.pop(1), run_name='__main__')
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
         sock.close()
+        artifacts = tmp / "workspace" / "artifacts"
+        (artifacts / "2026-11-23_status").mkdir(parents=True)
+        (artifacts / "2026-11-23_status" / "index.html").write_text("<title>status artifact</title>")
+        (artifacts / "2026-11-23_status" / ".secret").write_text("hidden")
+        (tmp / "workspace" / "private.txt").write_text("outside artifacts")
+        (artifacts / "2026-11-23_escape").symlink_to(tmp / "workspace")
         server_log = served.parent / "share-server.log"
         with server_log.open("w") as server_errors:
-            server = subprocess.Popen([sys.executable, str(SERVER), str(served), str(port)], stderr=server_errors)
+            server = subprocess.Popen([sys.executable, str(SERVER), str(served), str(artifacts), str(port)], stderr=server_errors)
         try:
             local = f"http://127.0.0.1:{port}"
             for _ in range(50):
@@ -213,6 +221,13 @@ runpy.run_path(sys.argv.pop(1), run_name='__main__')
             body, ipa_type = fetch(f"{local}/builds/{builds[-1]}/TronMobile.ipa")
             check(body == ipa.read_bytes() and ipa_type == "application/octet-stream", "IPA is served byte-identical")
             check(status(local + "/builds/") == 404, "directories are never listed")
+            artifact, artifact_type = fetch(local + "/artifacts/2026-11-23_status/")
+            check(artifact == b"<title>status artifact</title>" and artifact_type.startswith("text/html"),
+                  "an artifact folder's index.html is served under /artifacts/<name>/")
+            check(status(local + "/artifacts/") == 404, "the artifacts folder is never listed")
+            check(status(local + "/artifacts/2026-11-23_status/.secret") == 404, "hidden artifact files are not served")
+            check(status(local + "/artifacts/2026-11-23_escape/private.txt") == 404
+                  and status(local + "/artifacts/..%2fprivate.txt") == 404, "symlinks and traversal cannot leave the artifacts folder")
             for link in links:
                 url = manifest_url(link)
                 parsed = urllib.parse.urlparse(url)

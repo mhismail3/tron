@@ -1,8 +1,10 @@
 # Static webpages
 
 Small, shared HTML/CSS patterns for Tron's generated webpages. No framework,
-package install, build chain, hosting service or app registry. The real first
-consumer is the remote iOS development-build page.
+package install, build chain, hosting service or app registry. Consumers are the
+remote iOS development-build page and workspace artifacts
+([artifacts](../../packages/gateway/src/modules/artifacts/README.md)), which may embed
+`tron.css` or a copy in `artifacts/shared/`.
 
 ## Canonical locations
 

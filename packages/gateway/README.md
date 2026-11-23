@@ -87,8 +87,8 @@ See [providers](src/providers/README.md#contract).
 
 ## Internal workspace
 
-See [workspace module](src/workspace/README.md) and [internal
-workspace](docs/internal-workspace.md).
+See [workspace module](src/workspace/README.md), [internal
+workspace](docs/internal-workspace.md) and [artifacts](src/modules/artifacts/README.md).
 
 ## Tron Home
 
