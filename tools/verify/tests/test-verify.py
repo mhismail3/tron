@@ -878,6 +878,26 @@ class SelectionTests(VerifyCase):
         r.commit("delete alpha")
         deleted = r.verify("--changed", "--plan")
         self.assertIn("repo/beta: imports changed mods/alpha/alpha.py; its 1 owned test file(s)", deleted.stdout)
+        r.git("reset", "-q", "--hard", "base")
+        r.write("packages/gateway/src/admin/admin.module.json", json.dumps({"layer": "L3", "owns": ["**"]}))
+        r.write("packages/gateway/src/admin/extension.ts", "export const handlers = ['tool_call'];\n")
+        r.write("packages/gateway/src/e2e/e2e.module.json", json.dumps({"layer": "L5", "owns": ["**"]}))
+        r.write("packages/gateway/src/e2e/admin/settings.integration.test.ts",
+                "import { handlers } from '../../admin/extension.js';\nexport const seen = handlers;\n")
+        r.write("tools/verify/post-merge.json", json.dumps({"files": ["packages/gateway/src/e2e/admin/settings.integration.test.ts"]}))
+        r.write("packages/gateway/recorder/recorder.module.json", json.dumps({"layer": "L5", "owns": ["**"]}))
+        r.write("packages/gateway/recorder/test-recorder.py", PASSING)
+        r.write("packages/gateway/recorder/test-fixtures/record.integration.test.ts",
+                "import { handlers } from '../../src/admin/extension.js';\nexport const recorded = handlers;\n")
+        r.commit("a TypeScript test in another module imports the extension")
+        r.git("branch", "-f", "base")
+        r.write("packages/gateway/src/admin/extension.ts", "export const handlers = ['tool_call', 'tool_result'];\n")
+        r.commit("the extension gains a handler")
+        planned = r.verify("--changed", "--plan")
+        tests = json.loads(planned.stdout[planned.stdout.index("{"):])["selection"]["tests"]
+        self.assertIn("packages/gateway/src/e2e/admin/settings.integration.test.ts", tests,
+                      "a TypeScript test importing a changed file runs before landing, even when listed slow (#2657)")
+        self.assertNotIn("packages/gateway/recorder/test-recorder.py", tests, "a recorder under test-fixtures is no test and selects nothing")
 
     def test_a_data_file_change_runs_the_scripts_that_name_its_path(self) -> None:
         """#2551: a Cua release-pin-only change selected only its owner's tests, never the shell and

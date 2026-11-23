@@ -30,8 +30,8 @@ persisted child replay: workspace core instructions, resource instruction assemb
 projection and the pinned SDK artifact can each change it without changing the lock file.
 These declarations keep that consumer in affected checks with its nested runner rather than
 deferring it to the main suite. Other unchanged serial tests, and unchanged slow files listed in
-`tools/verify/post-merge.json`, are deferred there unless a changed module owns them: a changed module's own tests
-always run before landing. The
+`tools/verify/post-merge.json`, are deferred there unless a changed module owns them or they import a changed file: a changed module's own tests and
+a test that imports a changed file always run before landing. The
 selection regression calls the shipped planner against the actual ownership graph and each
 producer path; it does not mirror the dependency list in a fixture graph.
 
@@ -319,8 +319,9 @@ module (today only the iOS UI tests' spawn edges to the hosted app): its locks a
 that module's rendered tests. `--changed` also adds the importers no compiler checks: a changed
 source file's Python importers (`import`/`from` by module name, or its path handed to
 `importlib`) and JavaScript importers (relative specifiers) in other modules run their module's
-owned tests, or only themselves when the importer is a test (one hop). Typed importers (TypeScript,
-Swift) are left to their compilers. A module with no test declares its proving tests (`verify`, below), usually its
+owned tests, or only themselves when the importer is a test (one hop). A TypeScript test file that imports a changed
+file by relative specifier runs too (one hop). A test that imports a changed file runs before landing even when it is
+serial or slow; other typed importers (TypeScript, Swift) are left to their compilers. A module with no test declares its proving tests (`verify`, below), usually its
 `gateway/e2e` journeys; directory modules may also declare `verify`. A Gateway E2E golden
 selects only the lock in its directory whose `lockPaths(import.meta.url, …)` names it (a computed argument counts when the lock spells the name as a string); a golden no lock reads refuses.
 `--module` does not widen to unrelated kernel locks; `--update-locks` stays with its owner.
@@ -347,7 +348,7 @@ A Swift or Gateway string edit is code: its tests and locks run (locks compare l
 
 Test/golden-only narrowing precedes module risk; a manifest/configuration edit still
 requires the full tier. Unchanged files in the existing serial `gateway-nested` list
-are deferred, never dropped, unless a changed module owns them or they are declared as owner verification evidence;
+are deferred, never dropped, unless a changed module owns them, they import a changed file, or they are declared as owner verification evidence;
 declared tests run immediately. Production changes selecting undeclared serial tests need
 a full tier.
 A changed serial test file and locks selected by a golden edit run immediately.
