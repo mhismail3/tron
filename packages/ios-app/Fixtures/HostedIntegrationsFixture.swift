@@ -16,6 +16,7 @@ struct HostedIntegrationsFixtureView: View {
     @State private var mcpReplacementCounters = "add:0 token:0 retargets:0 released:0"
     @State private var hasReplacedMCPAuthority = false
     @State private var showingOllamaDetails = false
+    @State private var showingArtifacts = false
     private let scenario: String
 
     init() {
@@ -47,7 +48,14 @@ struct HostedIntegrationsFixtureView: View {
             } else if scenario.hasPrefix("connection-") {
                 HostedConnectionRetryFixture(scenario: scenario)
             } else if ready {
-                if scenario == "ollama-detail" {
+                if scenario == "artifacts" {
+                    NavigationStack {
+                        Button("Artifacts") { showingArtifacts = true }
+                            .tronManagedSheet(isPresented: $showingArtifacts, identity: "dashboard.artifacts") { ArtifactsSheet() }
+                    }
+                    .environment(model)
+                    .tronPresentation()
+                } else if scenario == "ollama-detail" {
                     NavigationStack {
                         Button("Details for Ollama") { showingOllamaDetails = true }
                             .tronManagedSheet(isPresented: $showingOllamaDetails, identity: "fixture.ollama-detail") {
@@ -173,6 +181,11 @@ actor HostedIntegrationsGateway {
         if method == "session.close" { return (.object(["closed": .bool(true)]), nil) }
         if method == "session.commands" { return (.object(["commands": .array([])]), nil) }
         if method == "session.attention.read" { return (.object(["completionRevision": .number(0), "attentionRevision": .number(0), "isUnread": .bool(false)]), nil) }
+        if method == "artifacts.list" {
+            let base = HostedLaunch.arguments.drop(while: { $0 != "-artifacts-base-url" }).dropFirst().first ?? "https://mac.example.ts.net:8443"
+            let names = ["2026-11-23_weekly-status", "2026-11-21_release-guide", "2026-11-18_gapyear-schedule"]
+            return (.object(["artifacts": .array(names.map { .object(["name": .string($0), "url": .string("\(base)/artifacts/\($0)/")]) })]), nil)
+        }
         if method == "mcp.list" {
             let servers: [JSONValue] = scenario.hasPrefix("mcp-auth-") ? [.object([
                 "name": .string("fixture-auth-server"), "scope": .string("global"), "enabled": .bool(true),

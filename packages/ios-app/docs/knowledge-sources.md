@@ -2,7 +2,7 @@
 
 Research sources are ordinary workspace Markdown with original JSON and attachment
 files. There is no native Knowledge library, source detail, search or coverage
-settings sheet. The dashboard menu keeps Settings, Automations, Apps and New Session.
+settings sheet. The dashboard menu keeps Settings, Automations, Artifacts and New Session.
 
 ## Retention
 

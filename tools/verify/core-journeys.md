@@ -48,8 +48,6 @@ canonical-message check; the Process/Native rows assert presence, not exactly-on
 |---|---|---|---|
 | `packages/gateway/src/e2e/admin/native-change.e2e.test.ts` › typed changes and exact native acceptance › publishes the exact built-in card, refuses local/generic/stale answers… | Registry | Card published; two concurrent exact answers → one applies, other `not_found`; settings file written once; one history entry; replay of same command returns same result | Wrong digest / local / generic → `invalid_request`; retired epoch / revision → `conflict`; no history before acceptance |
 | same file › decline or Stop before acceptance has no effect (both); an unanswered exact change card expires…; recovers the actual native response receipt after a fixture kill at pending/effects/completion | Registry | No file/history change; late tap refused | Kill-cut recovery without replaying effects |
-| `packages/gateway/src/e2e/modules/apps/apps-install.integration.test.ts` › … › offers without installing, reviews exact source/config, installs once… | Registry | Offer → `apps.list` empty; reviewed install creates once, same command idempotent | Stale install `conflict`; crash-cut cases without replay |
-| `TronMobileUITests/RealGatewayPairAndChatUITests/testPendingAppReviewInstallLight` | Native | Real `swift_app` offer → no app directory through review; explicit confirm tap creates `app.json`, pending row leaves | — |
 
 **GAP #2232:** stale/wrong-digest/double-tap refusals are proven only through in-process
 `GatewayService.invoke`; no socket or native case for the shared change card.

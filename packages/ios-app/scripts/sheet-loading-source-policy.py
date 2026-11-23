@@ -21,8 +21,6 @@ SPINNER_ALLOWED = {
     "UI/Chat/ChatDisplayViews.swift",
     "UI/Chat/HomePinnedRow.swift",
     "UI/Chat/SessionShellView.swift",
-    "UI/SwiftApps/SwiftAppDisplayCard.swift",
-    "UI/SwiftApps/SwiftAppViews.swift",
 }
 TEXT_ALLOWED = {
     ("UI/Chat/ChatTranscriptEventViews.swift", "Preparing details…"),

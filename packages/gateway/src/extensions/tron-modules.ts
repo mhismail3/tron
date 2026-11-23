@@ -12,7 +12,6 @@ export const ORDINARY_MODULE_NAMES: readonly string[] = [
   "tron-projects",
   "tron-ask-user",
   "tron-display",
-  "tron-swift-apps",
   "tron-native-capture",
   "tron-computer",
   "tron-schedule",

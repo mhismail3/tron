@@ -169,7 +169,6 @@ scripts/tron-ios-test run \
   --only-testing TronMobileViewTests/IntegrationSheetsViewTests
 scripts/ios-gateway-e2e-test all
 scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground
-scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallLight
 ```
 
 The first set drives the selected lifecycle and dashboard pool with a byte transport and an

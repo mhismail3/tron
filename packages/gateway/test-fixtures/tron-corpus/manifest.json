@@ -68,13 +68,6 @@
       ]
     },
     {
-      "module": "gateway/apps",
-      "lock": "store-swift-apps",
-      "paths": [
-        "workspace/state/apps"
-      ]
-    },
-    {
       "module": "gateway/home",
       "lock": "store-home-designation",
       "paths": [
@@ -129,8 +122,6 @@
     "state/workspace-state",
     "workspace",
     "workspace/state",
-    "workspace/state/apps",
-    "workspace/state/apps/corpus-counter",
     "workspace/state/episodic",
     "workspace/state/episodic/01a00000-0000-7000-8000-00000000c0a1"
   ],
@@ -156,13 +147,9 @@
     "state/session-attention.json": "b6df86b20e7c5b32d2f8ea7c19de32de4cd592082c223bc166177be8777e3aab",
     "state/settings/changes/000000.jsonl": "971050866bd50e441cbce8058811ef92aa58d7d16fc36eba5ef7e5d92e8456f2",
     "state/settings/changes/index.json": "68367de7bf446cbc4adbff5391d4f946551fd8ac44586786a7d2827a6994e98d",
-    "state/workspace-state/apps-initialized.json": "4b8894d57dfa621e534ef4eb25263e8f00254cbcb4327f1f98796314ac279dde",
     "state/workspace-state/episodic-initialized.json": "4b8894d57dfa621e534ef4eb25263e8f00254cbcb4327f1f98796314ac279dde",
     "state/workspace-state/home-tasks-initialized.json": "4b8894d57dfa621e534ef4eb25263e8f00254cbcb4327f1f98796314ac279dde",
     "state/workspace-state/initialized.json": "4b8894d57dfa621e534ef4eb25263e8f00254cbcb4327f1f98796314ac279dde",
-    "workspace/state/apps/corpus-counter/app.json": "1817c687513e5c604bb970cafc24cd46e62bf9d6bc2265e4e7d20a3553edad26",
-    "workspace/state/apps/corpus-counter/App.swift": "95476ff64ef0e735bf94770540c78b1f5cb31b4142e849f750ebd0f56f2b1fef",
-    "workspace/state/apps/corpus-counter/data.sqlite": "06830f3af7a47da455fa657b008c82199beccd56729bb6f012f3f8fdc0fba20e",
     "workspace/state/episodic/01a00000-0000-7000-8000-00000000c0a1/catalog.jsonl": "cf4ec05dd26749ddbf42ca5bbeeda10d8852824a9b3c69768370a7c28479bd78",
     "workspace/state/episodic/01a00000-0000-7000-8000-00000000c0a1/initialized.json": "4b05a6021d8d518264e43cb798678e4e513c9a2d24ebc27b73f710bd6e9de82c",
     "workspace/state/episodic/01a00000-0000-7000-8000-00000000c0a1/nodes.jsonl": "fa3767c1d8e6c16a88f2be8d05b30019d0b46075ea448fdcc9a20b6a14a1fb6b",
