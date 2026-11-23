@@ -8,12 +8,6 @@ export const HOME_TOOL_NAMES: readonly string[] = [
 
 export const HOME_DEFAULT_TOOL_NAMES: readonly string[] = HOME_TOOL_NAMES.filter(name => name !== "projects");
 
-const MAINTAINER_TURN_TOOLS = new Set(["write", "edit", "bash", "computer", "agent_browser"]);
-
-export function homeToolAvailable(name: string, kind: "user" | "wake" | undefined): boolean {
-  return HOME_TOOL_NAMES.includes(name) && (kind === "user" || !MAINTAINER_TURN_TOOLS.has(name));
-}
-
 export function homeToolCatalog(
   runtimes: ReadonlyArray<readonly [string, Pick<RuntimeSlot, "isDisposed" | "settingsToolCatalog">]>,
   isLineageMember: (sessionId: string) => boolean,
