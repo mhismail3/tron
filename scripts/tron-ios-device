@@ -39,7 +39,7 @@ Usage:
   scripts/tron-ios-device stop [--device-id ID] [--device-name NAME]
   scripts/tron-ios-device status [--device-id ID] [--device-name NAME]
   scripts/tron-ios-device source             # resolve fetched origin/main, no build/install
-  scripts/tron-ios-device share --title TITLE --notes NOTES [--fast-debug]
+  scripts/tron-ios-device share --title TITLE --notes NOTES [--ref BRANCH] [--fast-debug]
   scripts/tron-ios-device share-host enable|status|disable
   scripts/tron-ios-device compile [--fast-debug]
 
@@ -51,7 +51,8 @@ Environment overrides:
   --fast-debug              Use the separate unoptimized UI-iteration build (both modes compile incrementally)
 
 Install and share build fetched origin/main in a disposable worktree, not a
-check receipt or the caller\'s branch. compile remains worktree-local for validation.
+check receipt or the caller\'s branch; share --ref BRANCH builds fetched
+origin/BRANCH instead. compile remains worktree-local for validation.
 The only install pair is Tron Device + LocalDevice. Release and
 DevicePerformance are never ordinary install targets.
   TRON_IOS_REQUIRED_SDK_MAJOR
@@ -614,7 +615,7 @@ share_build() {
     [[ -n "$SHARE_TITLE" && -n "$SHARE_NOTES" ]] || die "share requires --title and --notes"
     [[ -z "$(git -C "$ROOT_DIR" status --porcelain)" ]] || die "working tree is dirty: commit before sharing a build"
     local url branch commit
-    branch="$(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD)"
+    branch="${TRON_MAIN_SOURCE_REF:?share runs only through run-main-source.py}"
     commit="$(git -C "$ROOT_DIR" rev-parse HEAD)"
     url="$(share_base_url)"
     share_host_reachable "$url" \

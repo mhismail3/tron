@@ -638,7 +638,10 @@ struct TronReadOnlyTextView: UIViewRepresentable {
         return view
     }
 
+    func makeCoordinator() -> TronTopBlurScrollObservation { TronTopBlurScrollObservation() }
+
     func updateUIView(_ view: TronDocumentTextView, context: Context) {
+        context.coordinator.attach(view, feed: context.environment.tronTopBlurFeed)
         view.scrollsToTop = !context.environment.chatOwnsStatusBar
         if view.text != text { view.text = text }
         let size = style == .code ? TronTypography.sizeBody3 : TronTypography.sizeBody

@@ -50,8 +50,8 @@ final class TronSheetBackgroundUITests: XCTestCase {
         let baseline = profile(first)
         guard let header = baseline.first, let body = baseline.last else { return }
         let contrast = zip(header, body).map { dark ? $1 - $0 : $0 - $1 }.reduce(0, +) / 3
-        XCTAssertGreaterThan(contrast, dark ? 3 : 6,
-                             "\(name): pre-#1608 top blur/fade is missing: \(baseline)")
+        XCTAssertLessThan(contrast, dark ? 3 : 6,
+                          "\(name): the top blur/fade shows at rest: \(baseline)")
         let initial = XCTAttachment(screenshot: first)
         initial.name = "1631-\(name)-loading"; initial.lifetime = .keepAlways; add(initial)
         var samples = [baseline]

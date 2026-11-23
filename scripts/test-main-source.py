@@ -28,7 +28,7 @@ def main():
         script.write_text('''#!/bin/sh
 set -eu
 git rev-parse HEAD > "$SOURCE_REPORT"
-printf "%s\\n" "$TRON_MAIN_SOURCE_ROOT" "$@" >> "$SOURCE_REPORT"
+printf "%s\\n" "$TRON_MAIN_SOURCE_ROOT" "$TRON_MAIN_SOURCE_REF" "$@" >> "$SOURCE_REPORT"
 nested=packages/ios-app/build/DerivedData-fast-debug/SourcePackages/checkouts/generated
 mkdir -p "$nested"
 git -C "$nested" init -q
@@ -62,12 +62,27 @@ exit "${BUILD_STATUS:-0}"
                 assert result.returncode == status, (operation, status, result.returncode, result.stdout, result.stderr)
                 report = (root / "report").read_text().splitlines()
                 assert report[0] == main_sha and not Path(report[1]).exists(), report
-                assert report[2:] == [operation, "--fast-debug"], report
+                assert report[2:] == ["main", operation, "--fast-debug"], report
                 assert git(repo, "status", "--porcelain") == before
                 assert git(user, "rev-parse", "HEAD") == user_sha
                 assert (user / "dirty").read_text() == "keep caller draft"
                 registrations = git(repo, "worktree", "list", "--porcelain")
                 assert len(registrations.split("worktree ")) == 2, registrations
+        git(repo, "checkout", "-q", "-b", "candidate", main_sha)
+        (repo / "candidate").write_text("candidate")
+        git(repo, "add", "candidate"); git(repo, "commit", "-m", "candidate"); git(repo, "push", "origin", "candidate")
+        candidate_sha = git(repo, "rev-parse", "HEAD")
+        git(repo, "checkout", "-q", "worker")
+        result = subprocess.run([script, "share", "--ref", "candidate", "--fast-debug"], env=env,
+                                text=True, capture_output=True, timeout=15)
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        report = (root / "report").read_text().splitlines()
+        assert report[0] == candidate_sha != main_sha and report[2:] == ["candidate", "share", "--fast-debug"], report
+        (root / "report").unlink()
+        for refused in (["install", "--ref", "candidate"], ["share", "--ref"], ["share", "--ref", "absent"]):
+            result = subprocess.run([script, *refused], env=env, text=True, capture_output=True, timeout=15)
+            assert result.returncode != 0 and not (root / "report").exists(), (refused, result.stdout, result.stderr)
+        assert len(git(repo, "worktree", "list", "--porcelain").split("worktree ")) == 2
         driver = (
             "import importlib.util, os, signal, subprocess, sys, time\n"
             "spec = importlib.util.spec_from_file_location('source', sys.argv[1])\n"
@@ -96,7 +111,7 @@ exit "${BUILD_STATUS:-0}"
         assert resolved == main_sha
         artifact = ROOT / "test-results/main-source.json"
         artifact.parent.mkdir(exist_ok=True)
-        artifact.write_text(json.dumps({"revision": main_sha, "cases": ["real install/share entry points", "success/failure nested-clone cleanup", "dirty caller and unpublished nested work preserved", "no receipts", "read-only source resolution", "signal while the build awaits reaping"]}, indent=2) + "\n")
+        artifact.write_text(json.dumps({"revision": main_sha, "cases": ["real install/share entry points", "success/failure nested-clone cleanup", "dirty caller and unpublished nested work preserved", "no receipts", "read-only source resolution", "signal while the build awaits reaping", "share --ref builds the fetched branch; install --ref, bare and absent refs refused"]}, indent=2) + "\n")
         print(f"Passed fetched-main source journey; evidence: {artifact}")
 
 
