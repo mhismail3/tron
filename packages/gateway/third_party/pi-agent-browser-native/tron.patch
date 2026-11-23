@@ -13,6 +13,107 @@ index 15a57c6..799b18a 100644
 +
 +Personal profile selection/copying, auto-discovered or unrecorded endpoints, imported browser state, opaque plugin/flow runners and system-browser-opening commands are refused. Attachments must be standalone so their receipt precedes page work; batches may operate on an already attached owned browser. Existing personal-Chrome login state is unavailable and is never copied. New logins in the owned profile persist through native close/restart.
 +
+diff --git a/docs/COMMAND_REFERENCE.md b/docs/COMMAND_REFERENCE.md
+index e643937..cd3a9d1 100644
+--- a/docs/COMMAND_REFERENCE.md
++++ b/docs/COMMAND_REFERENCE.md
+@@ -497 +497 @@ Full public guide: [`ELECTRON.md`](ELECTRON.md). Use it as the entry point when
+-Enable `electron` and use `agent_browser_electron` with flat fields when the wrapper should discover, launch, attach to, probe, and clean up a desktop Electron app. The wrapper owns only launches it created. It uses an isolated temporary `userDataDir`, `--remote-debugging-port=0`, and safe launch defaults; it does **not** reuse the app's normal signed-in profile or attach to an already-running authenticated app. For already-authenticated desktop app content, do not stop at the isolated-launch warning: when host tools are available and the app is not already running, launch the normal app with a debug port (macOS example: `open -a Slack --args --remote-debugging-port=9222 --remote-allow-origins='*'`), verify the port, then attach with `{ "args": ["connect", "9222"], "sessionMode": "fresh" }`; if the app is already running without a debug port, ask before relaunching it. Remote debugging still exposes app content, so use caller-owned `allow` / `deny` lists for sensitive app policies when needed. `electron.list` may annotate common private-data apps as `[likely sensitive: …]`; this is advisory metadata only and does not block `launch` or replace caller policy.
++Enable `electron` and use `agent_browser_electron` with flat fields when the wrapper should discover, launch, attach to, probe, and clean up a desktop Electron app. The wrapper owns only launches it created. It uses an isolated temporary `userDataDir`, `--remote-debugging-port=0`, and safe launch defaults; it does **not** reuse the app's normal signed-in profile or attach to an already-running authenticated app. Tron admits only recorded owned launches: for signed-in state use `owned-launch prepare <profileDir>` (a private directory holding a `.tron-owned-profile` marker), launch Chrome with the returned args, `owned-launch record <launchId> <pid> <profileDir>`, then `connect` the returned endpoint. A normal app or browser started with `--remote-debugging-port` is refused with `owned_launch_required`. Remote debugging still exposes app content, so use caller-owned `allow` / `deny` lists for sensitive app policies when needed. `electron.list` may annotate common private-data apps as `[likely sensitive: …]`; this is advisory metadata only and does not block `launch` or replace caller policy.
+@@ -519 +519 @@ After launch, prefer the exact `details.nextActions` payloads when present: `sta
+-Manual path for externally launched apps: if you started the Electron app yourself with a debug port or DevTools URL, skip the wrapper lifecycle and attach directly with upstream `connect`. In this path you own app shutdown and profile cleanup; do not use `electron.cleanup`. close commands (`close`, `quit`, or `exit`) only close the browser/CDP session and do not quit the manually launched app or remove explicit artifacts.
++Recorded external launches: run `owned-launch prepare <profileDir>`, launch Chrome with the returned args, `owned-launch record <launchId> <pid> <profileDir>`, then attach with upstream `connect` to the returned endpoint. You own that browser's shutdown; do not use `electron.cleanup`. close commands (`close`, `quit`, or `exit`) only close the browser/CDP session.
+@@ -522 +522 @@ Manual path for externally launched apps: if you started the Electron app yourse
+-{ "args": ["connect", "9222"], "sessionMode": "fresh" }
++{ "args": ["connect", "<recorded endpoint>"], "sessionMode": "fresh" }
+@@ -1102 +1102 @@ Browser defaults are scoped: global/override `defaultProfile` with `policy: "alw
+-- `--auto-connect`: connect to a running Chrome to reuse auth state. Environment: `AGENT_BROWSER_AUTO_CONNECT`. Optional booleans use separated tokens (`--auto-connect false`); the wrapper rejects `--auto-connect=false` before dispatch.
++- `--auto-connect`: connect to a running Chrome; Tron refuses it (`owned_launch_required`), so use a recorded owned launch for signed-in state. Environment: `AGENT_BROWSER_AUTO_CONNECT`. Optional booleans use separated tokens (`--auto-connect false`); the wrapper rejects `--auto-connect=false` before dispatch.
+diff --git a/docs/ELECTRON.md b/docs/ELECTRON.md
+index 25be383..d9a72a1 100644
+--- a/docs/ELECTRON.md
++++ b/docs/ELECTRON.md
+@@ -42 +42 @@ Two ownership modes coexist:
+-2. **Manually launched apps** — you start the Electron app yourself (for example with `open -a Slack --args --remote-debugging-port=9222 --remote-allow-origins='*'`), then attach with `{ "args": ["connect", "9222"], "sessionMode": "fresh" }`. The wrapper does not own that process; **you** are responsible for shutting it down and cleaning its profile.
++2. **Recorded external launches** — Tron admits only recorded owned launches: for signed-in state use `owned-launch prepare <profileDir>` (a private directory holding a `.tron-owned-profile` marker), launch Chrome with the returned args, `owned-launch record <launchId> <pid> <profileDir>`, then `connect` the returned endpoint. A normal app or browser started with `--remote-debugging-port` is refused with `owned_launch_required`.
+@@ -44 +44 @@ Two ownership modes coexist:
+-Choosing between the two is a real decision, not a stylistic one. See [Wrapper-owned vs manually launched](#wrapper-owned-vs-manually-launched).
++Choosing between the two is a real decision, not a stylistic one. See [Wrapper-owned vs recorded external launches](#wrapper-owned-vs-recorded-external-launches).
+@@ -68 +68 @@ For a quick "is the app actually showing what we expect?" smoke check after atta
+-## Wrapper-owned vs manually launched
++## Wrapper-owned vs recorded external launches
+@@ -70,34 +70 @@ For a quick "is the app actually showing what we expect?" smoke check after atta
+-Pick the mode that matches the **state you need**.
+-
+-|                     | `electron.launch` (wrapper-owned)                                                                                   | `args: ["connect", …]` (manual host launch)                                  |
+-| ------------------- | ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+-| Profile             | Isolated temporary `userDataDir`                                                                                    | The app's normal profile (your real signed-in state)                         |
+-| Debug port          | OS-chosen via `--remote-debugging-port=0` and `DevToolsActivePort`                                                  | Caller-supplied port (for example `9222`)                                    |
+-| Signed-in state     | **No** — first-run or empty profile                                                                                 | **Yes** — whatever is in the launched profile                                |
+-| Already-running app | Cannot attach to it                                                                                                 | Required (or relaunch yourself with a debug port)                            |
+-| Lifecycle ownership | Wrapper owns shutdown and profile cleanup                                                                           | **You** own shutdown and profile cleanup                                     |
+-| When to use         | Anything you can do against a fresh app: tooling, UX flows, scripted local QA, exploring panels, packaged debugging | Tasks that explicitly need the user's signed-in Slack/Obsidian/VS Code state |
+-| How to clean up     | `electron.cleanup` with the returned `launchId`                                                                     | Close the app yourself; do **not** call `electron.cleanup`                   |
+-
+-### Manual host-launch pattern
+-
+-When the explicit goal is the user's signed-in local app state and the app is not already running:
+-
+-```bash
+-# macOS example
+-open -a Slack --args --remote-debugging-port=9222 --remote-allow-origins='*'
+-```
+-
+-Then attach and choose a ready target before using refs:
+-
+-```json
+-{ "args": ["connect", "9222"], "sessionMode": "fresh" }
+-{ "args": ["tab", "list"] }
+-{ "args": ["tab", "t2"] }
+-{ "args": ["snapshot", "-i"] }
+-{ "attached": true, "expectedText": "Channels" }
+-```
+-
+-A successful `connect` means the CDP endpoint accepted the session; it does **not** prove the app has an active rendered page yet. Prefer `details.nextActions` when present: `verify-connected-session-url` performs the only page read allowed while the attached target is unverified, and `list-connected-session-tabs` inspects attached targets. A verified target clears the guard; otherwise navigate explicitly or select the intended tab. After the read-only list, select or confirm a stable `t<N>` target, verify it with `get url`, and run `snapshot -i` explicitly before trusting refs. If the first `snapshot -i` says `No active page`, follow `list-tabs-after-no-active-page`. If it returns no useful refs without that error, manually run `tab list`, select a stable `t<N>` id for the app surface, then retry a condition wait or `snapshot -i` on that selected target.
+-
+-If the app is already running without a debug port, ask before relaunching it — relaunching may lose unsaved state and Electron's single-instance behavior will silently drop a second invocation's `--remote-debugging-port` flag.
++`electron.launch` gives an isolated temporary profile that the wrapper owns and cleans up with `electron.cleanup`. For signed-in state, use `owned-launch prepare <profileDir>`, launch the browser with the returned args, `owned-launch record <launchId> <pid> <profileDir>`, then `connect` the returned endpoint; a debug-port attach to a normal app or browser is refused (`owned_launch_required`); you own that browser's shutdown, and `electron.cleanup` never touches it.
+@@ -333 +300 @@ The app writes to mode-0600 `stdout.log` and `stderr.log` inside its isolated pr
+-Single-instance Electron behavior is a common cause of `timeout` and `upstream-error`. Many Electron apps enforce a single running instance and silently drop a second invocation's `--remote-debugging-port` flag. If the app is already running without a debug port, quit it first or use the manual host-launch path against the existing instance instead.
++Single-instance Electron behavior is a common cause of `timeout` and `upstream-error`. Many Electron apps enforce a single running instance and silently drop a second invocation's `--remote-debugging-port` flag. If the app is already running without a debug port, quit it first; for signed-in state use a recorded owned launch (see [Wrapper-owned vs recorded external launches](#wrapper-owned-vs-recorded-external-launches)).
+diff --git a/docs/REFERENCE.md b/docs/REFERENCE.md
+index 9e42acb..4d59957 100644
+--- a/docs/REFERENCE.md
++++ b/docs/REFERENCE.md
+@@ -532 +532 @@ QA defaults to `domcontentloaded`. URL QA clears enabled network/console buffers
+-Electron launch uses a new temporary app profile and does not inherit the normal app's signed-in state. Use `agent_browser_electron` to list, launch, probe/status, then clean up its returned `launchId`. A manually launched debug-enabled app uses native `connect` and stays host-owned. Read [the Electron guide](ELECTRON.md) for lifecycle and timeout details.
++Electron launch uses a new temporary app profile and does not inherit the normal app's signed-in state. Use `agent_browser_electron` to list, launch, probe/status, then clean up its returned `launchId`. For signed-in state, use `owned-launch prepare <profileDir>`, launch the browser with the returned args, `owned-launch record <launchId> <pid> <profileDir>`, then `connect` the returned endpoint; a debug-port attach to a normal app or browser is refused (`owned_launch_required`). Read [the Electron guide](ELECTRON.md) for lifecycle and timeout details.
+@@ -610 +610 @@ Use these rules:
+-- For non-Chrome Chromium browsers such as Brave, Edge, Arc, or Vivaldi, use `--executable-path <path>` when upstream can launch that executable. If you need that browser's existing login state, use the browser's real profile/user-data directory path when upstream accepts it, or attach with `--auto-connect` / `connect` to a debug-enabled running browser when appropriate.
++- For non-Chrome Chromium browsers such as Brave, Edge, Arc, or Vivaldi, use `--executable-path <path>` when upstream can launch that executable. For signed-in state, use `owned-launch prepare <profileDir>`, launch the browser with the returned args, `owned-launch record <launchId> <pid> <profileDir>`, then `connect` the returned endpoint; a debug-port attach to a normal app or browser is refused (`owned_launch_required`).
+diff --git a/docs/REQUIREMENTS.md b/docs/REQUIREMENTS.md
+index bd123ee..ab7ff63 100644
+--- a/docs/REQUIREMENTS.md
++++ b/docs/REQUIREMENTS.md
+@@ -124 +124 @@ The design should comfortably support workflows such as:
+-- desktop Electron targets using `agent_browser_electron` for discover → isolated launch → attach → probe/cleanup, or raw `args: ["connect", …]` when the operator launches the real app with a debug port for signed-in state (see [`TOOL_CONTRACT.md`](TOOL_CONTRACT.md#agent_browser_electron) and [`COMMAND_REFERENCE.md`](COMMAND_REFERENCE.md#electron-desktop-apps))
++- desktop Electron targets using `agent_browser_electron` for discover → isolated launch → attach → probe/cleanup, or, for signed-in state, a recorded owned launch (`owned-launch prepare|record`, then `connect`) (see [`TOOL_CONTRACT.md`](TOOL_CONTRACT.md#agent_browser_electron) and [`COMMAND_REFERENCE.md`](COMMAND_REFERENCE.md#electron-desktop-apps))
+diff --git a/docs/TOOL_CONTRACT.md b/docs/TOOL_CONTRACT.md
+index 87f7dc9..15caf23 100644
+--- a/docs/TOOL_CONTRACT.md
++++ b/docs/TOOL_CONTRACT.md
+@@ -229 +229 @@ URL-less `open` is executed as native `get url`, including effective raw/stdin b
+-- `--executable-path <path>` selects a custom Chromium-compatible browser executable when upstream can launch it. Use it with `sessionMode: "fresh"` when switching from an already-active implicit session. For non-Chrome Chromium login state, use a full profile/user-data directory path only when upstream accepts it, or attach to a debug-enabled running browser with `--auto-connect` / `connect` when appropriate.
++- `--executable-path <path>` selects a custom Chromium-compatible browser executable when upstream can launch it. Use it with `sessionMode: "fresh"` when switching from an already-active implicit session. For signed-in state, use `owned-launch prepare <profileDir>`, launch the browser with the returned args, `owned-launch record <launchId> <pid> <profileDir>`, then `connect` the returned endpoint; a debug-port attach to a normal app or browser is refused (`owned_launch_required`).
+@@ -245 +245 @@ URL-less `open` is executed as native `get url`, including effective raw/stdin b
+-- For authenticated or user-specific content explicitly requested by the user, such as feeds, inboxes, account pages, or private dashboards, use a real profile only when the user/config asks for it or profiles have been inspected; do not assume --profile Default exists on every machine. Do not use a real profile for public pages just because they are dashboards. Treat visible page content from real profiles as model-visible transcript data. On macOS, copied Chrome profiles may omit encrypted cookies, so profile selection alone is not proof of authentication; verify the target page and use a user-approved headed login once when needed. Use --auto-connect only if profile-based reuse is unavailable or the task is specifically about attaching to a running debug-enabled browser. If profile/user-data-dir resolution fails, stop retrying opens, run profiles and/or doctor through agent_browser, then report what the user needs to configure.
++- For authenticated or user-specific content explicitly requested by the user, such as feeds, inboxes, account pages, or private dashboards, use a real profile only when the user/config asks for it or profiles have been inspected; do not assume --profile Default exists on every machine. Do not use a real profile for public pages just because they are dashboards. Treat visible page content from real profiles as model-visible transcript data. On macOS, copied Chrome profiles may omit encrypted cookies, so profile selection alone is not proof of authentication; verify the target page and use a user-approved headed login once when needed. Tron refuses --auto-connect and attachment to a running debug-enabled browser (`owned_launch_required`); for signed-in state use `owned-launch prepare <profileDir>`, launch the browser with the returned args, `owned-launch record <launchId> <pid> <profileDir>`, then `connect` the returned endpoint. If profile/user-data-dir resolution fails, stop retrying opens, run profiles and/or doctor through agent_browser, then report what the user needs to configure.
+@@ -261 +261 @@ URL-less `open` is executed as native `get url`, including effective raw/stdin b
+-- For Electron desktop apps, load agent_browser_electron (tool_search, or call it from codemode) for wrapper-owned discovery, isolated launch, status, compact probe, and cleanup: list first, treat likely-sensitive annotations as hints rather than enforcement, launch with the default snapshot handoff unless handoff: "tabs" is the safer diagnostic starting point, use agent_browser_electron probe or snapshot -i/agent_browser_qa attached:true for current-session state, and always cleanup the returned launchId when done. agent_browser_electron launch uses an isolated temporary profile; it does not reuse the app's normal signed-in profile or attach to an already-running authenticated app. For signed-in local app state, host-launch the normal app with --remote-debugging-port when appropriate, then use raw args connect <port|url>; after connect, run get url to verify the active target before page-content reads, inspect tab list, select the stable tab id such as tab t2, verify it again with get url, then run a condition wait or snapshot -i before using refs. close commands (`close`, `quit`, or `exit`) only close the browser/CDP session; leave manually launched app shutdown, profile cleanup, and explicit artifacts to the host owner.
++- For Electron desktop apps, load agent_browser_electron (tool_search, or call it from codemode) for wrapper-owned discovery, isolated launch, status, compact probe, and cleanup: list first, treat likely-sensitive annotations as hints rather than enforcement, launch with the default snapshot handoff unless handoff: "tabs" is the safer diagnostic starting point, use agent_browser_electron probe or snapshot -i/agent_browser_qa attached:true for current-session state, and always cleanup the returned launchId when done. agent_browser_electron launch uses an isolated temporary profile; it does not reuse the app's normal signed-in profile or attach to an already-running authenticated app. For signed-in state, Tron admits only recorded owned launches: owned-launch prepare <profileDir>, launch Chrome with the returned args, owned-launch record <launchId> <pid> <profileDir>, then connect the returned endpoint; a debug-port attach to a normal app or browser is refused (owned_launch_required). After connect, run get url to verify the active target before page-content reads, inspect tab list, select the stable tab id such as tab t2, verify it again with get url, then run a condition wait or snapshot -i before using refs. close commands (`close`, `quit`, or `exit`) only close the browser/CDP session; leave manually launched app shutdown, profile cleanup, and explicit artifacts to the host owner.
+@@ -380 +380 @@ Enable `electron`. Inputs are flat `{ action, ...fields, outputPath? }`; caller
+-`handoff` defaults to `snapshot`; `tabs` verifies/discovers targets without an interactive snapshot, and `connect` stops after attach. `targetType` is `page` by default, or `webview`/`any`. CDP readiness and debug-port liveness require `/json/version` to contain a nonempty, non-whitespace `Browser` or `browser` string; other version metadata is optional. Launch cannot reuse the normal signed-in app profile or an existing app; use host launch plus direct native `connect` for that. Windows launch requires a verifiable path rather than scan-based name resolution; this is not Windows qualification evidence.
++`handoff` defaults to `snapshot`; `tabs` verifies/discovers targets without an interactive snapshot, and `connect` stops after attach. `targetType` is `page` by default, or `webview`/`any`. CDP readiness and debug-port liveness require `/json/version` to contain a nonempty, non-whitespace `Browser` or `browser` string; other version metadata is optional. Launch cannot reuse the normal signed-in app profile or an existing app; for signed-in state, use `owned-launch prepare <profileDir>`, launch the browser with the returned args, `owned-launch record <launchId> <pid> <profileDir>`, then `connect` the returned endpoint; a debug-port attach to a normal app or browser is refused (`owned_launch_required`). Windows launch requires a verifiable path rather than scan-based name resolution; this is not Windows qualification evidence.
 diff --git a/extensions/agent-browser/index.ts b/extensions/agent-browser/index.ts
 index 7b8bd4a..ba49647 100644
 --- a/extensions/agent-browser/index.ts
@@ -49,6 +150,13 @@ index ac3f3e5..59b3aee 100644
 @@ -352 +361 @@ class ElectronLaunchAttempt {
 -				record: this.record(port, metadata.version),
 +				record,
+diff --git a/extensions/agent-browser/lib/orchestration/browser-run/final-result-electron.ts b/extensions/agent-browser/lib/orchestration/browser-run/final-result-electron.ts
+index b3d4588..914a386 100644
+--- a/extensions/agent-browser/lib/orchestration/browser-run/final-result-electron.ts
++++ b/extensions/agent-browser/lib/orchestration/browser-run/final-result-electron.ts
+@@ -251 +251 @@ export function formatElectronLaunchText(
+-		"For already-authenticated desktop app content, do not stop here: if host tools are allowed and the app is not running, launch the normal app with --remote-debugging-port=<port>, verify the port, then run agent_browser connect <port>; if it is already running without a debug port, ask before relaunching it.",
++		"For already-authenticated web content, do not attach to a normal browser or app with a debug port: Tron admits only recorded owned launches. Use agent_browser owned-launch prepare <profileDir> (a private directory holding a .tron-owned-profile marker), launch Chrome with the returned args, run owned-launch record <launchId> <pid> <profileDir>, then connect the returned endpoint.",
 diff --git a/extensions/agent-browser/lib/orchestration/browser-run/managed-session-close.ts b/extensions/agent-browser/lib/orchestration/browser-run/managed-session-close.ts
 index 49d3bb1..b3ece4f 100644
 --- a/extensions/agent-browser/lib/orchestration/browser-run/managed-session-close.ts
@@ -69,6 +177,16 @@ index 49d3bb1..b3ece4f 100644
 +	) {
 +		return undefined;
 +	}
+diff --git a/extensions/agent-browser/lib/orchestration/electron-host/discovery.ts b/extensions/agent-browser/lib/orchestration/electron-host/discovery.ts
+index 7c45247..6b4cdc7 100644
+--- a/extensions/agent-browser/lib/orchestration/electron-host/discovery.ts
++++ b/extensions/agent-browser/lib/orchestration/electron-host/discovery.ts
+@@ -12 +12 @@ const ELECTRON_EXISTING_AUTH_GUIDANCE =
+-	"For already-authenticated desktop app content, do not stop here: if host tools are allowed and the app is not running, launch the normal app with --remote-debugging-port=<port>, verify the port, then run agent_browser connect <port>; if it is already running without a debug port, ask before relaunching it.";
++	"For already-authenticated web content, do not attach to a normal browser or app with a debug port: Tron admits only recorded owned launches. Use agent_browser owned-launch prepare <profileDir> (a private directory holding a .tron-owned-profile marker), launch Chrome with the returned args, run owned-launch record <launchId> <pid> <profileDir>, then connect the returned endpoint.";
+@@ -16,2 +15,0 @@ export const ELECTRON_PROFILE_ISOLATION_DETAILS = {
+-	hostDebugLaunchExample:
+-		"macOS: open -a <App Name> --args --remote-debugging-port=9222 --remote-allow-origins='*'; then agent_browser connect 9222 with sessionMode=fresh",
 diff --git a/extensions/agent-browser/lib/orchestration/extension-command-admission.ts b/extensions/agent-browser/lib/orchestration/extension-command-admission.ts
 index 392bd0a..5a04e99 100644
 --- a/extensions/agent-browser/lib/orchestration/extension-command-admission.ts
@@ -147,10 +265,10 @@ index 0f54a91..3652e5c 100644
 +		await currentOwnedBrowser()?.settings(this.input.toolArgs, this.env, this.identity);
 diff --git a/extensions/agent-browser/lib/owned-browser.ts b/extensions/agent-browser/lib/owned-browser.ts
 new file mode 100644
-index 0000000..79d22c7
+index 0000000..9085002
 --- /dev/null
 +++ b/extensions/agent-browser/lib/owned-browser.ts
-@@ -0,0 +1,421 @@
+@@ -0,0 +1,431 @@
 +import { AsyncLocalStorage } from "node:async_hooks";
 +import { join, dirname, resolve } from "node:path";
 +import { randomUUID } from "node:crypto";
@@ -166,7 +284,12 @@ index 0000000..79d22c7
 +import { withAgentBrowserProcessEnvironment } from "./process-environment.js";
 +import { isRecord } from "./parsing.js";
 +import type { ProcessRunResult } from "./process-child.js";
-+import { OwnedLaunches, refuseOwnedLaunch as refuse, type Launch } from "./owned-launches.js";
++import {
++	BACKGROUND_FLAGS,
++	OwnedLaunches,
++	refuseOwnedLaunch as refuse,
++	type Launch,
++} from "./owned-launches.js";
 +
 +const context = new AsyncLocalStorage<OwnedBrowser>();
 +
@@ -255,7 +378,7 @@ index 0000000..79d22c7
 +	token: string,
 +): readonly string[] {
 +	const occurrence = scanUpstreamGlobalFlagOccurrences(args, "--args").at(-1);
-+	const value = `${occurrence?.value ?? env.AGENT_BROWSER_ARGS ?? ""},--tron-owned-launch=${token}`;
++	const value = [occurrence?.value ?? env.AGENT_BROWSER_ARGS ?? "", ...BACKGROUND_FLAGS, `--tron-owned-launch=${token}`].join(",");
 +	const changed = [...args];
 +	if (occurrence) {
 +		if ((args[occurrence.index] ?? "").startsWith("--args=")) {
@@ -439,7 +562,7 @@ index 0000000..79d22c7
 +		}
 +		const known = await this.target(args, env, session);
 +		if (known && known.master !== session) {
-+			return { args, env, session, attached: known };
++			return { args, env: { ...env, AGENT_BROWSER_CDP: known.endpoint }, session, attached: known };
 +		}
 +		if (known && cdpInspection(args)) {
 +			return { args, env, session, attached: known };
@@ -474,10 +597,15 @@ index 0000000..79d22c7
 +			if (!prepared.root) {
 +				return prepared;
 +			}
-+			return (
-+				(await this.launchRoot(options)) ??
-+				(await this.prepare(options.args, options.env, options.stdin))
-+			);
++			const launched = await this.launchRoot(options);
++			if (launched) {
++				return launched;
++			}
++			const replanned = await this.prepare(options.args, options.env, options.stdin);
++			if (replanned.root) {
++				refuse();
++			}
++			return replanned;
 +		} catch (error) {
 +			return {
 +				aborted: false,
@@ -574,10 +702,10 @@ index 0000000..79d22c7
 +}
 diff --git a/extensions/agent-browser/lib/owned-launches.ts b/extensions/agent-browser/lib/owned-launches.ts
 new file mode 100644
-index 0000000..2bdcdbe
+index 0000000..817a9b1
 --- /dev/null
 +++ b/extensions/agent-browser/lib/owned-launches.ts
-@@ -0,0 +1,479 @@
+@@ -0,0 +1,499 @@
 +import { execFile } from "node:child_process";
 +import { randomUUID, createHash } from "node:crypto";
 +import { mkdir, readFile, readdir, rename, rm, writeFile, lstat, realpath } from "node:fs/promises";
@@ -602,6 +730,12 @@ index 0000000..2bdcdbe
 +
 +const execute = promisify(execFile);
 +
++export const BACKGROUND_FLAGS = [
++	"--disable-backgrounding-occluded-windows",
++	"--disable-renderer-backgrounding",
++	"--disable-background-timer-throttling",
++] as const;
++
 +const launchSchema = Type.Object({
 +	endpoint: Type.String(),
 +	pid: Type.Integer({ minimum: 2 }),
@@ -618,7 +752,7 @@ index 0000000..2bdcdbe
 +
 +export function refuseOwnedLaunch(): never {
 +	throw new Error(
-+		"owned_launch_required: endpoint requires a recorded Tron-owned launch; personal browser attachment and profile copying are unavailable",
++		"owned_launch_required: endpoint requires a recorded Tron-owned launch; personal browser attachment and profile copying are unavailable. For a persistent signed-in profile: owned-launch prepare <profileDir> (a private directory holding a .tron-owned-profile marker), launch Chrome with the returned args, owned-launch record <launchId> <pid> <profileDir>, then connect the returned endpoint.",
 +	);
 +}
 +
@@ -812,8 +946,15 @@ index 0000000..2bdcdbe
 +			{ timeout: 5000 },
 +		);
 +		const command = ` ${stdout.trim()} `;
++		const real = await realpath(launch.profile).catch((error: unknown) => {
++			if (error instanceof Error && "code" in error && error.code === "ENOENT") {
++				return undefined;
++			}
++			throw error;
++		});
 +		if (
-+			![launch.profile, await realpath(launch.profile)].some((profile) =>
++			real === undefined ||
++			![launch.profile, real].some((profile) =>
 +				command.includes(` --user-data-dir=${profile} `),
 +			)
 +		) {
@@ -917,6 +1058,12 @@ index 0000000..2bdcdbe
 +			await mkdir(profile, { mode: 0o700 });
 +		} else {
 +			profile = await this.persistentProfile(persistent);
++			const running = (await this.active()).find((item) => item.profile === profile);
++			if (running) {
++				throw new Error(
++					`owned_launch_live: ${profile} already has a live recorded browser at ${running.endpoint}; connect to it, or close it before preparing again`,
++				);
++			}
 +			await rm(join(profile, "DevToolsActivePort"), { force: true });
 +		}
 +		return {
@@ -925,6 +1072,7 @@ index 0000000..2bdcdbe
 +			args: [
 +				`--user-data-dir=${profile}`,
 +				"--remote-debugging-port=0",
++				...BACKGROUND_FLAGS,
 +				`--tron-owned-launch=${token}`,
 +			],
 +		};
@@ -979,7 +1127,7 @@ index 0000000..2bdcdbe
 +		const record = (await this.records()).find(
 +			(item) => item.profile === path && item.token === token,
 +		);
-+		if (!record || (await readProcessStartIdentity(record.pid)) === record.start) {
++		if (!record || (await this.live(record))) {
 +			refuseOwnedLaunch();
 +		}
 +		await rm(profile, { recursive: true });
@@ -1142,3 +1290,32 @@ index 1c5324e..cbacadc 100644
 +		"dist/extensions/agent-browser/index.d.ts",
 @@ -149,0 +153 @@
 +		"agent-browser": "0.42.0",
+diff --git a/test/agent-browser.extension-electron-lifecycle.test.ts b/test/agent-browser.extension-electron-lifecycle.test.ts
+index 83449df..08ed81e 100644
+--- a/test/agent-browser.extension-electron-lifecycle.test.ts
++++ b/test/agent-browser.extension-electron-lifecycle.test.ts
+@@ -127 +127 @@ process.stdout.write(JSON.stringify({ success: true, data: "should not run" }));
+-							/For already-authenticated desktop app content, do not stop here/,
++							/For already-authenticated web content, do not attach to a normal browser or app with a debug port/,
+@@ -131 +131 @@ process.stdout.write(JSON.stringify({ success: true, data: "should not run" }));
+-							/launch the normal app with --remote-debugging-port=<port>/,
++							/owned-launch prepare <profileDir>/,
+@@ -143,4 +142,0 @@ process.stdout.write(JSON.stringify({ success: true, data: "should not run" }));
+-						assert.match(
+-							readString(readRecord(electronDetails.profileIsolation).hostDebugLaunchExample ?? ""),
+-							/open -a <App Name> --args --remote-debugging-port=9222/,
+-						);
+@@ -556 +552 @@ nodeTest(
+-						/do not stop here: if host tools are allowed/,
++						/do not attach to a normal browser or app with a debug port/,
+@@ -560 +556 @@ nodeTest(
+-						/then run agent_browser connect <port>/,
++						/owned-launch record <launchId> <pid> <profileDir>, then connect the returned endpoint/,
+@@ -588,7 +583,0 @@ nodeTest(
+-					assert.match(
+-						readString(
+-							readRecord(readRecord(launchDetails.electron).profileIsolation)
+-								.hostDebugLaunchExample ?? "",
+-						),
+-						/agent_browser connect 9222/,
+-					);

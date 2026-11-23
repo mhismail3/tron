@@ -13,6 +13,7 @@ export const FUNCTIONS = [
   ["click", "Click a page button"],
   ["type", "Type into a page field"],
   ["replace", "Select-all and replace a page field's text"],
+  ["caption-exact", "Replace a contenteditable with a 280-char Unicode caption, read back byte-exact"],
   ["form-controls", "Select a dropdown option and check a box"],
   ["upload", "Upload a file through a file input"],
   ["download", "Download a file to a chosen path"],
@@ -70,7 +71,7 @@ async function runTool(name, options, ctx) {
         try { outcome = await adapter.tasks[id](ctx); } catch (error) { outcome = { ok: false, detail: String(error.message ?? error).slice(0, 400) }; }
         const ms = Math.round(performance.now() - started);
         const status = outcome.status ?? (outcome.ok ? "pass" : "fail");
-        (tool.tasks[id] ??= []).push({ status, ms, ...(outcome.code ? { code: outcome.code } : {}), ...(Number.isFinite(outcome.attachMs) ? { attachMs: outcome.attachMs } : {}), detail: outcome.detail?.replace(/\s+/gu, " ").trim(), stoleFocus: outcome.stoleFocus ?? false });
+        (tool.tasks[id] ??= []).push({ status, ms, detail: outcome.detail?.replace(/\s+/gu, " ").trim(), stoleFocus: outcome.stoleFocus ?? false });
         process.stderr.write(`${name} ${id} #${rep + 1}: ${status} ${ms}ms ${outcome.detail ?? ""}\n`);
       }
     }

@@ -2,6 +2,7 @@
 """Own the temporary HOME and scratch directory of one Gateway Vitest process."""
 from __future__ import annotations
 from pathlib import Path
+import ctypes
 import fcntl
 import json
 import os
@@ -10,10 +11,11 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from host_lock import FULL_GATEWAY_LOCK, HELD_BY_CALLER, wait_for_lock  # noqa: E402  (the one host lock owner)
+from host_lock import FULL_GATEWAY_LOCK, GATE, HELD_BY_CALLER, wait_for_lock  # noqa: E402  (the one host lock owner)
 from vitest_configs import Refused, filter_selects, vitest_selection, with_own_config  # noqa: E402  (the one Vitest selection classifier)
 import ledger
 
@@ -23,7 +25,8 @@ def hold_full_gateway_lock():
     if os.environ.get(HELD_BY_CALLER) == '1':
         return None
     record = {'pid': os.getpid(), 'worktree': str(ROOT), 'purpose': 'gateway vitest ' + ' '.join(sys.argv[1:])[:200]}
-    return wait_for_lock(FULL_GATEWAY_LOCK, record, lambda line: print(f'gateway tests: {line}', file=sys.stderr, flush=True))
+    return wait_for_lock(FULL_GATEWAY_LOCK, record, lambda line: print(f'gateway tests: {line}', file=sys.stderr, flush=True),
+                         priority=os.environ.get(GATE) == '1')
 
 
 def provision_chrome_for_testing(node: str) -> Path:
@@ -76,6 +79,38 @@ def browser_fixture_environment(arguments: list[str], node: str) -> dict[str, st
     return {'AGENT_BROWSER_EXECUTABLE_PATH': str(binary), 'AGENT_BROWSER_ARGS': '--password-store=basic,--use-mock-keychain'}
 
 
+def named_processes(root: Path) -> list[int]:
+    """This user's processes whose arguments or environment (the kernel's KERN_PROCARGS2 block) name a path under `root`."""
+    libc = ctypes.CDLL(None)
+    listing = subprocess.run(['/usr/bin/pgrep', '-U', str(os.getuid()), '.'], capture_output=True, text=True).stdout
+    buffer = ctypes.create_string_buffer(1 << 20)
+    found = []
+    for pid in (int(word) for word in listing.split()):
+        size = ctypes.c_size_t(len(buffer))
+        if libc.sysctl((ctypes.c_int * 3)(1, 49, pid), 3, buffer, ctypes.byref(size), None, 0):
+            continue
+        block = buffer.raw[4:size.value]
+        if f'{root}/'.encode() in block:
+            found.append(pid)
+    return found
+
+
+def reap(root: Path) -> None:
+    """SIGKILL every process naming the scratch root until none is left: what a test left running, including children
+    re-parented to launchd or moved to their own session, which the caller's process-group kill never reaches."""
+    for _ in range(50):
+        left = named_processes(root)
+        if not left:
+            return
+        for pid in left:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        time.sleep(0.1)
+    raise SystemExit(f'gateway tests: processes under {root} survived SIGKILL')
+
+
 def main() -> int:
     node = subprocess.check_output([str(ROOT / "scripts/tron-node")], text=True).strip()
     vitest = ROOT / "packages/gateway/node_modules/.bin/vitest"
@@ -114,6 +149,7 @@ def main() -> int:
                 for sig, handler in previous.items():
                     signal.signal(sig, handler)
                 try:
+                    reap(root)
                     capture.events(report)
                 finally:
                     if lock:

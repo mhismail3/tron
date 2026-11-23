@@ -2,80 +2,6 @@ import XCTest
 
 final class TronProjectTrustUITests: XCTestCase {
     @MainActor
-    func testEarlierTrustReceiptCannotReplaceLaterCanonicalBlock() {
-        let app = launch(scenario: "held")
-        defer { app.terminate() }
-        acceptTrustThenBlock(app)
-        app.buttons["fixture.release-trust"].tap()
-        XCTAssertTrue(counts(app, contain: "firstReply:1"))
-        assertBlockedWithoutLateTrust(app, screenshot: "358-trust-earlier-receipt-after-current-block")
-        assertOriginalCommands(app, count: 2)
-    }
-
-    @MainActor
-    func testEarlierInspectCannotReplaceLaterCanonicalBlock() {
-        let app = launch(scenario: "inspect-value-held")
-        defer { app.terminate() }
-        holdOlderInspectThenBlock(app)
-        app.buttons["fixture.release-trust-reads"].tap()
-        XCTAssertTrue(counts(app, contain: "releasedReads:2"), app.debugDescription)
-        assertBlockedWithoutLateTrust(app, screenshot: "358-trust-earlier-inspect-after-current-block")
-        assertOriginalCommands(app, count: 2)
-    }
-
-    @MainActor
-    func testEarlierInspectErrorCannotPublishAfterLaterCanonicalBlock() {
-        let app = launch(scenario: "inspect-error-held")
-        defer { app.terminate() }
-        holdOlderInspectThenBlock(app)
-        app.buttons["fixture.release-trust-reads"].tap()
-        XCTAssertTrue(counts(app, contain: "releasedReads:2"), app.debugDescription)
-        let staleError = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Earlier trust read failure"),
-                                                   object: app.staticTexts["fixture.trust-notices"])
-        let observed = XCTWaiter.wait(for: [staleError], timeout: 2)
-        keepScreenshot(app, name: "358-trust-earlier-inspect-error-retired")
-        XCTAssertEqual(observed, .timedOut, "An earlier trust read cannot publish an error into the newer inspection")
-        XCTAssertTrue(app.staticTexts["Resources blocked"].exists)
-        assertOriginalCommands(app, count: 2)
-    }
-
-    @MainActor
-    private func holdOlderInspectThenBlock(_ app: XCUIApplication) {
-        app.buttons["Trust Project"].tap()
-        XCTAssertTrue(counts(app, contain: "heldReads:2"), app.debugDescription)
-        app.buttons["Do Not Load Project Resources"].tap()
-        XCTAssertTrue(positiveCount(app, field: "readsFalse"), app.debugDescription)
-        XCTAssertTrue(app.staticTexts["Resources blocked"].waitForExistence(timeout: 10), app.debugDescription)
-    }
-
-    @MainActor
-    func testMatchingSingleBlockSettlesWithoutAnotherCommand() {
-        let app = launch(scenario: "ordered")
-        defer { app.terminate() }
-        XCTAssertTrue(app.staticTexts["Applies to project root"].waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(app.staticTexts["/fixture"].exists, app.debugDescription)
-        app.buttons["Do Not Load Project Resources"].tap()
-        XCTAssertTrue(app.staticTexts["Resources blocked"].waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(counts(app, contain: "canonical:false"))
-        assertOriginalCommands(app, count: 1)
-        keepScreenshot(app, name: "358-trust-matching-single-block")
-    }
-
-    @MainActor
-    func testOrderedTrustThenBlockShowsBothCanonicalResults() {
-        let app = launch(scenario: "ordered")
-        defer { app.terminate() }
-        app.buttons["Trust Project"].tap()
-        XCTAssertTrue(app.staticTexts["Trusted"].waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(positiveCount(app, field: "readsTrue"))
-        app.buttons["Do Not Load Project Resources"].tap()
-        XCTAssertTrue(app.staticTexts["Resources blocked"].waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(positiveCount(app, field: "readsFalse"))
-        assertOriginalCommands(app, count: 2)
-        keepScreenshot(app, name: "358-trust-ordered-results")
-    }
-
-    @MainActor
     func testBackgroundReconciliationKeepsLatestBlockWithoutResending() {
         let app = launch(scenario: "held")
         defer { app.terminate() }
@@ -87,22 +13,6 @@ final class TronProjectTrustUITests: XCTestCase {
         app.buttons["fixture.release-trust"].tap()
         assertBlockedWithoutLateTrust(app, screenshot: "358-trust-latest-block-after-background")
         assertOriginalCommands(app, count: 2)
-    }
-
-    @MainActor
-    func testOriginalTrustCannotAttachToReplacementMacWithSameCWD() {
-        let app = launch(scenario: "held")
-        defer { app.terminate() }
-        app.buttons["Trust Project"].tap()
-        XCTAssertTrue(counts(app, contain: "held:1"))
-        XCTAssertTrue(app.staticTexts["Trusted"].waitForExistence(timeout: 10), app.debugDescription)
-        app.buttons["fixture.replace-trust-profile"].tap()
-        XCTAssertTrue(positiveCount(app, field: "readsFalse", id: "fixture.trust-replacement"), app.debugDescription)
-        XCTAssertTrue(app.staticTexts["Resources blocked"].waitForExistence(timeout: 10), app.debugDescription)
-        app.buttons["fixture.release-trust"].tap()
-        assertBlockedWithoutLateTrust(app, screenshot: "358-trust-replacement-mac-colliding-cwd")
-        assertOriginalCommands(app, count: 1)
-        XCTAssertTrue(counts(app, id: "fixture.trust-replacement", contain: "sets:0 commands:0 repeats:0"))
     }
 
     @MainActor

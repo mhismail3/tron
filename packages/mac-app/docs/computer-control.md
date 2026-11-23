@@ -38,8 +38,8 @@ services available. Retirement seals startup, closes the pipe, and shares one
 retained wait for actual child exit across every caller; it does not equate a
 proxy's exit with native completion.
 
-The shipped driver is pinned to Cua0.33.0, revision
-`1553a3f360ea12155be3bc77e27c427ca62f967a`. GitHub marks this release prerelease.
+The shipped driver is pinned to Cua0.56.9, revision
+`72f5415fe8c229aebc1bc647655c92fb9f5956e2`. GitHub marks this release prerelease.
 Sheet controls belong to their addressed parent window only when AX proves that
 attachment; unrelated windows and stale element tokens remain refused.
 `cua-driver-release.json` is the single release pin used by staging, composition
@@ -89,7 +89,7 @@ is also `outcomeUnknown`, while marker-free observation payloads remain valid. T
 outcomes: refusal is not success, and `unverifiable`/partial results remain
 `outcomeUnknown`. It never retries a mutation. Waiter cancellation does not kill
 an already-admitted CLI call; Stop prevents subsequent actions and waits for that
-invocation. A command may complete after Stop was requested. Host/transport loss
+invocation, which its deadline bounds (10 s; `type_text` 125 s). A command may complete after Stop was requested. Host/transport loss
 leaves its effect uncertain, not safe to replay. Crash containment is not a claim
 that process death proves physical key/button release in every failure scenario.
 

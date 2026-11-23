@@ -2,7 +2,6 @@ import { StringEnum } from "../kernel/pi/ai.js";
 import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
 import { Type } from "../kernel/pi/ai.js";
 import type { SessionContext } from "../kernel/host/module-host.js";
-import { currentInvocationContext } from "../kernel/host/extension-execution-context.js";
 import type { JsonValue } from "../protocol/types.js";
 
 export interface ScheduleToolRequest {
@@ -70,16 +69,10 @@ export function createTronScheduleExtension(input: {
       promptGuidelines: [
         "Use schedule for authorized durable automations. Home may manage them directly; interactive sessions require user confirmation; delegated workers cannot mutate them.",
         "The schedule tool manages the current persisted Tron session, a new session in its current workspace per prompt run, or an attributed Home message; it cannot schedule shell commands, deployments, or Gateway lifecycle actions.",
-        "Do not use schedule from inside a scheduled automation to create or mutate another automation.",
       ],
       parameters,
       executionMode: "sequential",
       execute: async (toolCallId, request, _signal, _onUpdate, ctx) => {
-        const context = currentInvocationContext();
-        if (request.action !== "list" && request.action !== "show"
-          && (context?.operationId?.startsWith("automation:") || context?.trigger)) {
-          throw new Error("Scheduled automation turns cannot mutate automations");
-        }
         if (request.action !== "list" && request.action !== "show" && input.session.delegatedWorker()) {
           throw new Error("Delegated workers and their subagents cannot mutate automations");
         }

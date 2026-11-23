@@ -51,8 +51,7 @@ A tool counts on a surface only when it is a first-class tool there; `shell` mea
 
 | Surface | agent-browser | Functions passing (any first-class tool) |
 |---|---|---|
-| home: Home maintainer-initiated turn | first-class | 12/24 |
-| home-wake: Home trigger / automation / task-result wake | none | 0/24 |
+| home: Home turn (maintainer, trigger, automation or task-result wake) | first-class | 12/24 |
 | worker: Delegated Home task worker / ordinary interactive session / newSessionInWorkspace automation run | first-class | 12/24 |
 | subagent: pi-subagents child run (worker agent definition) | first-class | 12/24 |
 

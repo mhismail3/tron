@@ -63,6 +63,43 @@ final class SheetTintViewTests: ShuffledTestCase {
         }
     }
 
+    func testSheetTopBlurTracksScrollFromInvisibleAtRest() async throws {
+        try await mounted(["-tron-settings-navigation-fixture"], contentSize: .accessibilityExtraExtraExtraLarge) { @MainActor app in
+            var found: UIScrollView?
+            try await app.until("the Settings scroll view") {
+                found = MountedFixture.views(UIScrollView.self, in: app.top)
+                    .filter { $0.contentSize.height + $0.adjustedContentInset.top + $0.adjustedContentInset.bottom
+                        - $0.bounds.height > TronTopBlurStyle.sheet.height + 8 }
+                    .max { $0.bounds.height < $1.bounds.height }
+                return found != nil
+            }
+            let scroll = try XCTUnwrap(found)
+            let top = -scroll.adjustedContentInset.top
+            @MainActor func blur(at offset: CGFloat) async throws -> Float {
+                scroll.setContentOffset(CGPoint(x: 0, y: top + offset), animated: false)
+                var opacity: Float = -1
+                try await app.until("the top blur at \(offset)") {
+                    let next = MountedFixture.views(VariableBackdropBlurView.self, in: app.top).map { view in
+                        sequence(first: view.layer, next: \.superlayer).reduce(Float(1)) { $0 * $1.opacity }
+                    }.max() ?? 0
+                    defer { opacity = next }
+                    return next == opacity
+                }
+                return opacity
+            }
+            let rest = try await blur(at: 0)
+            XCTAssertEqual(rest, 0, accuracy: 0.01, "The sheet top blur shows at rest")
+            let pull = try await blur(at: -40)
+            XCTAssertEqual(pull, 0, accuracy: 0.01, "Pull-down overscroll shows the top blur")
+            let mid = try await blur(at: TronTopBlurStyle.sheet.height / 2)
+            XCTAssertEqual(mid, 0.5, accuracy: 0.05, "The top blur is not proportional to the scroll")
+            let full = try await blur(at: TronTopBlurStyle.sheet.height + 8)
+            XCTAssertEqual(full, 1, accuracy: 0.01, "The top blur does not reach full strength after scrolling")
+            let back = try await blur(at: 0)
+            XCTAssertEqual(back, 0, accuracy: 0.01, "The top blur still shows after scrolling back")
+        }
+    }
+
     @discardableResult
     func assertToolbarTint(_ app: MountedFixture, title: String, file: StaticString = #filePath,
                            line: UInt = #line) async throws -> [Double] {

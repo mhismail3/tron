@@ -229,6 +229,7 @@ struct NativeTerminal: UIViewRepresentable {
     }
 
     func updateUIView(_ view: TronNativeTerminalView, context: Context) {
+        context.coordinator.topBlur.attach(view, feed: context.environment.tronTopBlurFeed)
         applyColors(to: view)
         context.coordinator.keyboard = keyboard
         context.coordinator.onSend = onSend
@@ -274,6 +275,7 @@ struct NativeTerminal: UIViewRepresentable {
         var onResize: (Int, Int) -> Void
         var chunks: [TerminalChunk] = []
         var isLaidOut = false
+        let topBlur = TronTopBlurScrollObservation()
 
         @MainActor func feed(_ view: TronNativeTerminalView) {
             for chunk in chunks.replaySuffix(after: emulator.lastSequence) {

@@ -29,11 +29,13 @@ import vitest_configs  # noqa: E402  (the one reader of the Gateway's listing Vi
 import mini  # noqa: E402
 import swift_source
 import ledger
+import files
 
 GATEWAY = "packages/gateway"
 RELAY = "packages/push-relay"
 MAC = "packages/mac-app"
 WIDENING_LAYERS = {"L0", "L1", "L2"}
+POST_MERGE = "tools/verify/post-merge.json"
 WIDENING_MODULES = {"gateway/package", "gateway/test-support", "gateway/pi-sdk"}
 NAMED_LOCKS = {f"{GATEWAY}/src/e2e/sessions/sdk-behavior-trace.integration.test.ts",
                f"{GATEWAY}/src/e2e/sessions/pi-persisted-state-corpus.integration.test.ts"}
@@ -131,6 +133,12 @@ def require_gateway_compiler() -> None:
 def is_lock(path: str) -> bool:
     return path.endswith(".lock.integration.test.ts") or path in NAMED_LOCKS or (
         re.match(r"packages/ios-app/(UITests|ViewTests)/Locks/", path) is not None and path.endswith("Tests.swift"))
+
+
+def package_root(path: str) -> str | None:
+    """The package a path belongs to (`packages/<name>`); None outside packages, where a change can reach any lock."""
+    parts = path.split("/")
+    return "/".join(parts[:2]) if parts[0] == "packages" and len(parts) > 2 else None
 
 
 def is_test(path: str) -> bool:
@@ -755,20 +763,22 @@ JS_IMPORT = re.compile(r"""(?:\bfrom|\bimport)\s*\(?\s*["'](\.{1,2}/[^"']+)["']"
 
 
 def importers(changed: list[str], tracked: list[str]) -> dict[str, set[str]]:
-    """Untyped code files that import a changed file, by importer: Python by module name (or by the
-    path it hands importlib), JavaScript by relative specifier. A typed importer is left to its
-    compiler, which already checks the shapes it uses across modules."""
+    """Code files that import a changed file, by importer: Python by module name (or by the path it
+    hands importlib), JavaScript and TypeScript test files by relative specifier, and any script that
+    names a changed JSON data file by its repository path. A typed importer that is no test is left to
+    its compiler, which checks the shapes it uses; behaviour reaches only tests."""
     names: dict[str, set[str]] = {}
     for path in changed:
         if path.endswith(".py") and Path(path).stem.isidentifier():
             names.setdefault(Path(path).stem, set()).add(path)
     python_paths = [path for path in changed if path.endswith(".py")]
+    data = [path for path in changed if path.endswith(".json") and "/" in path]
     targets = set(changed)
     found: dict[str, set[str]] = {}
     for path in tracked:
         file = ROOT / path
         python = path.endswith(".py")
-        if not (python or path.endswith((".mjs", ".js", ".cjs"))):
+        if not (python or path.endswith((".mjs", ".js", ".cjs", ".sh")) or (path.endswith(".test.ts") and is_test(path))):
             if "." in Path(path).name or not path.startswith(("scripts/", "tools/")):
                 continue
             try:
@@ -782,14 +792,14 @@ def importers(changed: list[str], tracked: list[str]) -> dict[str, set[str]]:
             source = file.read_text(errors="replace")
         except OSError:
             continue
-        hits = set()
+        hits = {target for target in data if target in source}
         if python:
             for first, listed in PYTHON_IMPORT.findall(source):
                 for name in [first] if first else [part.split()[0].split(".")[0] for part in listed.split(",") if part.split()]:
                     hits |= names.get(name, set())
             if "spec_from_file_location" in source:
                 hits |= {target for target in python_paths if target in source}
-        else:
+        elif not path.endswith(".sh"):
             for specifier in JS_IMPORT.findall(source):
                 resolved = os.path.normpath(str(Path(path).parent / specifier))
                 candidates = {resolved, resolved + ".js", resolved + ".mjs", resolved + ".ts", f"{resolved}/index.js"}
@@ -816,11 +826,20 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
     selected: set[str] = set()
     narrow: set[str] = set()
     deferred: set[str] = set()
+    direct: set[str] = set()
     full_reasons: list[str] = []
     if mode == "full":
         selected |= set(tests)
         reasons.append(f"--full: every test file ({len(tests)} files)")
         touched, chosen, declared = ["(all)"], set(modules), set(modules)
+    elif mode == "files":
+        runnable = {path for path in tracked if is_test(path) or (path.startswith("scripts/verify-") and path.endswith(".py"))}
+        missing = sorted(set(paths or []) - runnable)
+        if missing:
+            raise VerifyError(f"--files names no tracked test file: {', '.join(missing)}")
+        selected |= set(paths or [])
+        reasons.append(f"--files: the {len(selected)} named test file(s)")
+        touched, chosen = ["(files)"], set()
     elif mode == "all":
         selected |= set(locks)
         reasons.append(f"--all: every lock ({len(locks)} files)")
@@ -886,6 +905,7 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
             if key is None or all(owner.get(hit) == key for hit in hits):
                 continue
             if is_test(importer):
+                direct.add(importer)
                 if importer not in selected:
                     selected.add(importer)
                     reasons.append(f"{importer}: imports changed {', '.join(sorted(hits))}")
@@ -905,23 +925,31 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
             reasons.append(f"{key}: launches a selected module; its {len(spawned)} lock file(s)")
         chosen |= spawners
         if mode == "changed":
+            roots: set[str | None] = set()
             for key in sorted(set(changes) - narrow):
                 module = modules.get(key)
                 if module is None:
                     full_reasons.append(f"deleted module {key}")
+                    roots.add(None)
                     continue
                 risk = module["riskClass"]
                 if module["layer"] in WIDENING_LAYERS or key in WIDENING_MODULES or set(risk) - {"ios-ui"}:
                     full_reasons.append(f"{key} ({module['layer']})" + (f" risk={','.join(risk)}" if risk else ""))
+                    roots |= {package_root(path) for path in changes[key]}
             full_reasons += [f"unowned {path}" for path in unowned]
+            roots |= {None} if unowned else set()
             for path in touched:
                 filename = Path(path).name
                 if path.endswith(".module.json") or filename in {
                     "package.json", "package-lock.json", "project.yml", ".node-version", "layer-baseline.json", "settings-schema.ts"
-                } or filename.startswith("tsconfig"):
+                } or filename.startswith(("tsconfig", "vitest.")) or path in ("config/ci-toolchain.env", POST_MERGE):
                     full_reasons.append(f"graph/toolchain/schema input {path}")
+                    roots.add(None)
             if full_reasons:
-                reasons.append(f"full tier: {', '.join(full_reasons)}")
+                widened = set(locks) if None in roots else {path for path in locks if package_root(path) in roots}
+                selected |= widened
+                reasons.append(f"full tier: {', '.join(full_reasons)}; every lock of {'the repository' if None in roots else ', '.join(sorted(roots))} "
+                               f"({len(widened)} files)")
         declared |= (chosen - narrow) & modules.keys()
     if mode != "update-locks":
         jobs, routes = ios_owner_jobs(modules, tracked)
@@ -942,11 +970,13 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
         golden_owners = {owner[path] for path in touched if is_golden(path) and path in owner}
         immediate = {path for path in selected if owner.get(path) in narrow
                      or (is_lock(path) and owner.get(path) in golden_owners)}
-        deferred = (selected & nested) - set(touched) - immediate - declared_tests
+        slow = set(json.loads((ROOT / POST_MERGE).read_text())["files"])
+        own = {path for path in selected if owner.get(path) in changes}
+        deferred = (selected & (nested | slow)) - own - direct - set(touched) - immediate - declared_tests
         selected -= deferred
         if deferred:
-            full_reasons.append(f"{len(deferred)} unchanged serial nested test file(s)")
-            reasons.append(f"deferred to land's --full run: {len(deferred)} unchanged serial nested test file(s); changed tests still run now")
+            full_reasons.append(f"{len(deferred)} unchanged serial or slow test file(s)")
+            reasons.append(f"deferred to the main suite: {len(deferred)} unchanged serial or slow test file(s) ({POST_MERGE}); changed tests still run now")
     docs_only = mode == "changed" and len(docs) == len(touched)
     doc_inputs = mode in ("all", "full") or any(is_doc(path) or path.endswith(".module.json") for path in touched)
     tier = "none" if docs_only else "full" if mode in ("all", "full") or full_reasons else "partial"
@@ -1142,7 +1172,7 @@ def tap_count(output: str) -> int:
     return int(found[-1]) if found else 0
 
 
-FILE_MARKER = "### verify file: "
+FILE_MARKER = files.MARKER
 
 
 def python_count(output: str) -> int:
@@ -1168,9 +1198,8 @@ def ios_owner_count(output: str) -> int:
     return sum(int(count) for count in ran)
 
 
-def per_file(interpreter: str, files: list[str]) -> str:
-    runner = 'python3 tools/verify/ledger.py ' + ('python' if interpreter == 'python3' else 'exec shell bash')
-    return "status=0; " + "; ".join(f"echo {shlex.quote(FILE_MARKER + path)}; {runner} {shlex.quote(path)} || {{ code=$?; [ \"$status\" -ne 0 ] || status=$code; }}" for path in files) + '; exit "$status"'
+def per_file(kind: str, files: list[str]) -> str:
+    return shlex.join(["python3", "tools/verify/files.py", kind, *files])
 
 
 def test_step_names(group: str, shards: list[list[str]], skipped: bool) -> list[str]:
@@ -1225,11 +1254,11 @@ def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, ga
         return ([sys.executable, str(ROOT / 'tools/verify/ledger.py'), 'exec', 'node', *node, 'node', '--test', '--test-concurrency=1',
                  '--test-reporter=' + str(ROOT / 'tools/verify/ledger-node.mjs'), *files], ROOT, tap_count)
     if group == "python-here":
-        return (per_file("python3", files), ROOT, python_count)
+        return (per_file("python", files), ROOT, python_count)
     if group == "python":
-        command = per_file("python3", files)
+        command = per_file("python", files)
         return (["python3", str(ROOT / "tools/verify/mini.py"), "python", command] if gateway_host == "mini" else command, ROOT, python_count)
-    return (per_file("bash", files), ROOT, lambda _out: len(files))
+    return (per_file("shell", files), ROOT, lambda _out: len(files))
 
 
 IOS_POLL_SECONDS = 0.5
@@ -1292,8 +1321,9 @@ def main(argv: list[str]) -> int:
     mode.add_argument("--changed", action="store_true")
     mode.add_argument("--module", metavar="ID")
     mode.add_argument("--all", action="store_true")
-    mode.add_argument("--full", action="store_true", help="every test file in every group: land's suite")
+    mode.add_argument("--full", action="store_true", help="every test file in every group: the main suite")
     mode.add_argument("--update-locks", metavar="ID")
+    mode.add_argument("--files", nargs="*", metavar="TEST", help="exactly these test files and the static checks: the main suite's bisect probe")
     parser.add_argument("--base", default="origin/main")
     parser.add_argument("--ios-host", choices=("local", "mini"), default="local",
                         help="run a verification that selects iOS checks on this host or entirely under the mini lease")
@@ -1313,7 +1343,8 @@ def main(argv: list[str]) -> int:
     skip = {item for item in args.skip.split(",") if item}
     if skip - set(SKIPPABLE):
         parser.error(f"--skip accepts only {', '.join(SKIPPABLE)}")
-    name = "all" if args.all else "full" if args.full else "module" if args.module else "update-locks" if args.update_locks else "changed"
+    name = ("all" if args.all else "full" if args.full else "module" if args.module else "update-locks" if args.update_locks
+            else "files" if args.files is not None else "changed")
     try:
         if not args.plan and git("status", "--porcelain", "--untracked-files=normal").strip():
             raise VerifyError("the worktree has uncommitted or untracked changes; verify reads the committed state, commit first")
@@ -1321,7 +1352,7 @@ def main(argv: list[str]) -> int:
         base = git("merge-base", args.base, "HEAD").strip() if name == "changed" else git("rev-parse", "--verify", args.base).strip()
         result, _ = ownership.check()
         modules = result["modules"]
-        paths = changed_paths(base, working=True) if args.plan and name == "changed" else None
+        paths = args.files if name == "files" else changed_paths(base, working=True) if args.plan and name == "changed" else None
         selection = select(name, args.module or args.update_locks, base, modules, result["tracked"], paths=paths)
         change = delta(base) if name == "changed" else None
     except (VerifyError, ownership.GitError) as error:
@@ -1378,7 +1409,7 @@ def main(argv: list[str]) -> int:
     print(f"verify --{name}{' ' + (args.module or args.update_locks) if args.module or args.update_locks else ''} at {sha[:12]}"
           f" (base {base[:12]}): {len(selection['tests'])} test file(s) selected", flush=True)
     print(f"  tier: {selection['tier']} — affected checks now" + (
-        "; full coverage runs in land's --full validation" if selection["tier"] == "full" and name not in ("all", "full") else ""), flush=True)
+        "; the main suite runs every file after the merge" if selection["tier"] == "full" and name not in ("all", "full") else ""), flush=True)
     for reason in selection["reasons"]:
         print(f"  why: {reason}", flush=True)
     if change:
@@ -1458,13 +1489,8 @@ def main(argv: list[str]) -> int:
                     commands.append({"name": label, "command": command, "cwd": str(cwd.relative_to(ROOT)),
                                      **({"estimatedSeconds": round(shard.seconds, 1)} if group == "ios" else {})})
         commands.sort(key=lambda step: plan_steps.index(step["name"]))
-        deferred_commands = []
-        if selection["deferredTests"]:
-            command, cwd, _ = test_spec("gateway-nested", selection["deferredTests"], [], ROOT / "test-results/verify" / sha, gateway_host=gateway_host)
-            deferred_commands.append({"name": "tests: gateway-nested", "command": command, "cwd": str(cwd.relative_to(ROOT))})
         print(json.dumps({"selection": selection, "delta": change, "groups": groups, "steps": plan_steps, "commands": commands,
                           "gatewayHost": {"host": gateway_host, "reason": gateway_reason},
-                          "deferredCommands": deferred_commands,
                           "iosJobs": args.ios_jobs,
                           "iosHost": args.ios_host,
                           "iosLanes": [lane or "(this worktree's lane)" for lane in ios_phone_lanes()[:args.ios_jobs]] + [ios_pad_lane()] if "ios" in groups and "ios" not in skip else []}, indent=2))
@@ -1638,8 +1664,8 @@ def main(argv: list[str]) -> int:
             if group in ('gateway', 'gateway-nested'):
                 result['caseOutcomes'], result['caseEvidenceComplete'] = case_outcomes(report)
             if group in ("gateway", "gateway-nested") and result["status"] == "failed":
-                failed, _ = gateway_failures(report, (ROOT / result["log"]).read_text(errors="replace"))
-                result["failedTests"] = list(failed)
+                failed, complete = gateway_failures(report, (ROOT / result["log"]).read_text(errors="replace"))
+                result["failedTests"], result["failedTestsComplete"] = list(failed), complete
                 print("\n".join(f"    failed: {identity}" for identity in failed), flush=True)
             if result["status"] == "failed":
                 reds.append(f"{label} failed")
@@ -1656,12 +1682,12 @@ def main(argv: list[str]) -> int:
         if passing == 0 and selection["docsOnly"]:
             return finish("passed", "Empty or documentation-only change: static/documentation checks are its evidence")
         if passing == 0 and selection["deferredTests"]:
-            return finish("passed", f"affected static checks passed; {len(selection['deferredTests'])} serial test file(s) deferred to land's --full run")
+            return finish("passed", f"affected static checks passed; {len(selection['deferredTests'])} serial or slow test file(s) deferred to the main suite")
         if passing == 0:
             return finish("failed", "zero tests ran: an empty selection is not evidence")
         groups_run = len({step["name"].split()[1] for step in run.steps if step["name"].startswith("tests:") and step["status"] == "ok"})
         return finish("passed", f"{passing} passing test(s) across {groups_run} runner group(s)"
-                      + (f"; {len(selection['deferredTests'])} serial file(s) deferred to land's --full run" if selection["deferredTests"] else "")
+                      + (f"; {len(selection['deferredTests'])} serial or slow file(s) deferred to the main suite" if selection["deferredTests"] else "")
                       + (f"; skipped by request: {', '.join(sorted(skip))}" if skip else ""))
 
     except KeyboardInterrupt:

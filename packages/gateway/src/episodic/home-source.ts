@@ -353,16 +353,11 @@ export async function* readCanonicalHomeIndex(snapshot: HomeSourceSnapshot, curs
   signal?: AbortSignal, proofs = new HomeSourceProofs()): AsyncIterable<{ id: string; sourceSessionId: string }> {
   await validateSnapshot(snapshot, cursor);
   proofs.retain(new Set(snapshot.chapters.map(chapter => chapter.sessionId)));
-  const ids = new Set<string>();
   for (const [index, chapterCursor] of cursor.home.chapters.entries()) {
     const chapter = snapshot.chapters[index]!;
     signal?.throwIfAborted();
     const proof = await proofs.prove(chapter, chapterCursor, limits, signal);
-    for (const id of proof.branch) {
-      if (ids.has(id)) fail("Home source repeats a canonical entry ID across chapters");
-      ids.add(id);
-      yield { id, sourceSessionId: chapter.sessionId };
-    }
+    for (const id of proof.branch) yield { id, sourceSessionId: chapter.sessionId };
   }
 }
 

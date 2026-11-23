@@ -79,21 +79,27 @@ it("real Home uses the standard schedule lifecycle without confirmation and reta
   expect((await call({ action: "delete", automationId: lapsed.details.id, expectedRevision: lapsedUpdate.details.revision })).isError).not.toBe(true);
   expect((await phone.request("automation.list", {})).result.items).toHaveLength(0);
 });
-it("real Home automation-triggered turns cannot mutate automations", async () => {
+it("real Home automation-triggered turns run shell and manage automations like maintainer turns, deleting their own automation", async () => {
   const { gateway, phone, call } = await fixture();
   const created = await call({ ...create, activate: false });
   expect(created.isError, JSON.stringify(created)).not.toBe(true);
   const automation = created.details;
+  const probe = join(gateway.cwd, "trigger-shell.txt");
   const before = gateway.record().providerRequests.length;
-  gateway.script([() => fauxAssistantMessage([fauxToolCall("schedule", create)], { stopReason: "toolUse" }), () => fauxAssistantMessage("Trigger is not authority.")]);
+  gateway.script([
+    () => fauxAssistantMessage([fauxToolCall("bash", { command: `printf trigger-shell > '${probe}'` }), fauxToolCall("schedule", { ...create, name: "Sibling work" })], { stopReason: "toolUse" }),
+    () => fauxAssistantMessage([fauxToolCall("schedule", { action: "delete", automationId: automation.id, expectedRevision: automation.revision })], { stopReason: "toolUse" }),
+    () => fauxAssistantMessage("Trigger turn finished its own automation."),
+  ]);
   expect((await phone.request("automation.runNow", { commandId: gateway.commandId(), automationId: automation.id, expectedRevision: automation.revision })).ok).toBe(true);
-  await waitFor(() => gateway.record().providerRequests.length >= before + 2, "trigger refusal result");
+  await waitFor(() => gateway.record().providerRequests.length >= before + 3, "trigger turn tool results");
   const slot = await gateway.registry.acquire((await phone.request("home.status", {})).result.sessionId);
   await gateway.settled(slot.id);
-  const result = slot.canonicalSessionEntries().findLast(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "schedule") as any;
-  expect(result.message.isError).toBe(true);
-  expect(JSON.stringify(result.message.content)).toContain("Scheduled automation turns cannot mutate automations");
-  expect((await phone.request("automation.list", {})).result.items).toHaveLength(1);
+  const results = slot.canonicalSessionEntries().flatMap(entry => entry.type === "message" && entry.message.role === "toolResult"
+    && ["bash", "schedule"].includes(entry.message.toolName) ? [entry.message] : []).slice(-3) as any[];
+  expect(results.map(result => [result.toolName, result.isError === true]), JSON.stringify(results)).toEqual([["bash", false], ["schedule", false], ["schedule", false]]);
+  expect(await readFile(probe, "utf8")).toBe("trigger-shell");
+  expect((await phone.request("automation.list", {})).result.items.map((item: { name: string }) => item.name)).toEqual(["Sibling work"]);
 });
 it("real delegated workers cannot mutate standard automations", async () => {
   const { gateway, phone, sessionId } = await fixture();

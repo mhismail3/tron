@@ -56,7 +56,8 @@ Configurations, schemes, identities and push routes: the skill's
 ### Over-the-air development install
 
 `share` publishes the validated `Tron Device` + `LocalDevice` artifact, built from fetched
-`origin/main` in a disposable worktree, to a tailnet-only install page; only when the user asks.
+`origin/main` (or `--ref BRANCH`, share only) in a disposable worktree, to a tailnet-only install page
+showing that ref and SHA; only when the user asks.
 The maintainer-approved share host owns only port 8443's `/` entry.
 Each publication gets its own UUID-bearing build ID and immutable manifest/IPA URLs,
 even for concurrent calls sharing a revision and clock value. Retention reads publication
