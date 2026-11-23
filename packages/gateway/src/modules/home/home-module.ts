@@ -51,7 +51,6 @@ interface HomeModuleServices {
   requestPolicy: RequestPolicyHook;
   inputAdmission: InputAdmissionPolicy;
   profile: HomeSessionProfileServices;
-  activation(sessionId: string): "user" | "wake" | undefined;
   appendGuard: HomeAppendGuardServices;
   memory(sessionId: string): HomeMemoryToolAccess | undefined;
   delegate(sessionId: string, request: HomeTaskDispatchRequest, signal?: AbortSignal, confirm?: ConfirmChange): Promise<HomeTaskHandle>;
@@ -201,7 +200,6 @@ function homeModuleServices(owner: HomeOwner, platform: HomeComposition, session
     return evidence?.activationOpen ? evidence.kind : undefined;
   };
   return {
-    activation,
     knowledge: platform.knowledge(), read: (request, signal) => readHomeSessionEntry(sessions, owner, request, signal),
     delegate: (sessionId, request, signal, confirm) => dispatchWithWorkerChoice(owner, workerChoice, sessionId, request, signal, confirm),
     inputAdmission: homeInputAdmission(owner, platform.homeTaskDiagnostic),
@@ -309,7 +307,6 @@ function createHomeModule(services: () => HomeModuleServices, started: (host: Ga
         (request, signal, confirm) => owners.delegate(session.sessionId(), request, signal, confirm),
         (request, confirm) => owners.task(session.sessionId(), request, confirm),
         () => owners.knowledge, () => owners.profileChanges(session), session.requestChange,
-        () => owners.activation(session.sessionId()),
         (callId, request) => owners.obligation(session.sessionId(), callId, request));
     } }; },
   };

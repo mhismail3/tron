@@ -65,7 +65,7 @@ const HOME_EXTENSIONS = [
   "<inline:tron-display> | tools display | on tool_result×1,agent_end×1,session_shutdown×1",
   "<inline:tron-notify> | tools push_retry,notify",
   "<inline:tron-computer> | tools computer | on session_shutdown×1,before_agent_start×1,agent_end×1",
-  "<inline:tron-home> | tools zoom,date,memory_search,profile,obligation,delegate,task | on tool_call×1,cache_warming_decision×1,before_provider_request×1",
+  "<inline:tron-home> | tools zoom,date,memory_search,profile,obligation,delegate,task | on cache_warming_decision×1,before_provider_request×1",
   "<inline:tron-home-research> | tools session_search,session_read",
   "<inline:tron-web-research> | tools web_search | on session_start×1,session_shutdown×1",
   "<inline:tron-tool-search> | tools tool_search",

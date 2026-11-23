@@ -100,7 +100,7 @@ sampling windows explicitly, then observes actual task completion and persisted
 ## Home's host reading
 
 Home's `task` tool adds `host` to `list` (and `status` without a task) and to `status {taskId}`,
-so Home sees the Mac on every wake, including wakes where its shell is refused:
+so Home sees the Mac on every wake:
 
 ```json
 {"sampledAt": "2026-11-13T08:28:31.301Z", "cpuBusyPercent": 20, "memoryFreePercent": 77,
