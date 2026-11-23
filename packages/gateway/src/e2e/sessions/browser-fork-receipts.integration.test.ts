@@ -246,11 +246,12 @@ describe("packaged agent-browser receipts", () => {
             expect(again).toContain(endpoint);
             const moved=profile+" moved";
             await rename(profile,moved);
+            await chmod(root,0o500);
             try {
               const refused=JSON.stringify(await step(label+"-renamed",["connect",endpoint],true));
               expect(refused).toContain("owned_launch_required");
               expect(refused).not.toContain("ENOENT");
-            } finally { await rename(moved,profile); }
+            } finally { await chmod(root,0o700); await rename(moved,profile); }
           }
         } finally {
           await closeProducer(child,exited,endpoint);
