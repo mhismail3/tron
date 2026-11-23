@@ -53,6 +53,7 @@ final class DashboardHeaderState {
 struct DashboardChrome<Content: View>: View {
     let header: DashboardHeaderState
     let onOpenAutomations: @MainActor () -> Void
+    let onOpenArtifacts: @MainActor () -> Void
     let actions: DashboardMenuActions
     let home: DashboardHomeControl?
     private let content: Content
@@ -60,12 +61,14 @@ struct DashboardChrome<Content: View>: View {
     init(
         header: DashboardHeaderState,
         onOpenAutomations: @escaping @MainActor () -> Void,
+        onOpenArtifacts: @escaping @MainActor () -> Void,
         actions: DashboardMenuActions,
         home: DashboardHomeControl? = nil,
         @ViewBuilder content: () -> Content
     ) {
         self.header = header
         self.onOpenAutomations = onOpenAutomations
+        self.onOpenArtifacts = onOpenArtifacts
         self.actions = actions
         self.home = home
         self.content = content()
@@ -77,6 +80,7 @@ struct DashboardChrome<Content: View>: View {
             DashboardBackdrop(state: header)
             DashboardModeMenuButton(
                 onOpenAutomations: onOpenAutomations,
+                onOpenArtifacts: onOpenArtifacts,
                 actions: actions,
                 home: home
             )

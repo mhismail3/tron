@@ -131,6 +131,7 @@ struct HostedAutomationFixtureView: View {
                     if ready {
                         DashboardModeMenuButton(
                             onOpenAutomations: { automationsPresented = true },
+                            onOpenArtifacts: {},
                             actions: .init(settings: {}, creation: [])
                         )
                         .tronDashboardFloatingCircle(accent: .tronEmerald)

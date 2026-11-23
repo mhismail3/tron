@@ -14,7 +14,7 @@ struct HostedDashboardMenuFixtureView: View {
             Spacer()
             HStack {
                 Spacer()
-                DashboardModeMenuButton(onOpenAutomations: { selected = true }, actions: .init(
+                DashboardModeMenuButton(onOpenAutomations: { selected = true }, onOpenArtifacts: {}, actions: .init(
                     settings: {},
                     creation: [.init(title: "New Session \(revision)", symbol: "plus", perform: {})]
                 ))

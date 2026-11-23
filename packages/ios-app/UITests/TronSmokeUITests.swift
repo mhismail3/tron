@@ -1712,7 +1712,7 @@ final class TronSmokeUITests: XCTestCase {
         let updates = expectation(for: finished, evaluatedWith: app.staticTexts["menu-fixture-revision"])
         wait(for: [updates], timeout: 10)
         XCTAssertTrue(automations.isHittable, "Parent updates must not dismiss the native menu")
-        XCTAssertTrue(app.buttons["New Session 0"].exists, app.debugDescription)
+        XCTAssertTrue(app.buttons["Artifacts"].exists && app.buttons["New Session 0"].exists, app.debugDescription)
         XCTAssertFalse(app.buttons["Knowledge"].exists, "Retired Knowledge has no dashboard entry")
         keepScreenshot(named: "dashboard-menu-after-updates")
         automations.tap()

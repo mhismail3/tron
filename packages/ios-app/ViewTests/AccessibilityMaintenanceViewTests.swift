@@ -155,7 +155,7 @@ final class AccessibilityMaintenanceViewTests: ShuffledTestCase {
                 let titles = menuActionTitles(try await dashboardMenu(app))
                 XCTAssertFalse(titles.contains("Knowledge"))
                 XCTAssertNil(app.button("Knowledge"))
-                for title in ["Settings", "Automations", "New Session"] {
+                for title in ["Settings", "Automations", "Artifacts", "New Session"] {
                     XCTAssertTrue(titles.contains(title))
                 }
                 try await performDashboardAction(app, "Settings")

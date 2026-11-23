@@ -74,6 +74,7 @@ struct SessionShellView: View {
     @State private var newSessionDetent: PresentationDetent = .medium
     @State private var showSettings = false
     @State private var showingAutomations = false
+    @State private var showingArtifacts = false
     @State private var projectSettings: ProjectSettingsRoute?
     @State private var presentedSession: AppModel.SessionNavigationRoute?
     @State private var sessionToDelete: CatalogSession?
@@ -159,6 +160,9 @@ struct SessionShellView: View {
                 preferences: automationViewPreferencesBinding,
                 onOpenSession: openAutomationSession
             )
+            .tronManagedSheet(isPresented: $showingArtifacts, identity: "dashboard.artifacts") {
+                ArtifactsSheet()
+            }
             .tronManagedSheet(
                 isPresented: $showSettings,
                 identity: "dashboard.settings"
@@ -299,6 +303,7 @@ struct SessionShellView: View {
         DashboardChrome(
             header: dashboardHeader,
             onOpenAutomations: { showingAutomations = true },
+            onOpenArtifacts: { showingArtifacts = true },
             actions: dashboardMenuActions,
             home: showsHomeFloatingButton
                 ? DashboardHomeControl(state: HomeButtonIndicatorState(status: model.homeStatus.status), open: openHome)
@@ -410,6 +415,7 @@ struct SessionShellView: View {
         showNewSession = false
         showSettings = false
         showingAutomations = false
+        showingArtifacts = false
         projectSettings = nil
 
         do {
