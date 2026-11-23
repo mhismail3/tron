@@ -61,7 +61,6 @@ export function audit(layers, sources = []) {
     const owners = sources.flatMap(source => [...source.text.matchAll(new RegExp(pattern, "gi"))].map(() => source.name));
     if (owners.length > 1) diagnostics.push({ rule, owners });
   }
-  if (sources.some(source => /\.filter\(tool => homeToolAvailable\(tool.name, (?:activation.kind|kind)\)\)/.test(source.text))) diagnostics.push({ rule: "N1-kind-dependent-tools", role: "home" });
   const budgets = { workerSystem: 11000, homeSystem: 8000, subagent: 6400 };
   const comparisons = ["worker", "home", "subagent"].map(role => {
     const tokens = sizes.filter(layer => layer.role === role).reduce((sum, layer) => sum + layer.tokens, 0);

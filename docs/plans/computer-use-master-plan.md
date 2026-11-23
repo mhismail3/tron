@@ -53,7 +53,7 @@ cannot act, it says why within a second.
 | R3 | **Native apps on the unlocked console:** read, click, type, replace, pop-up select, sheet or modal, file dialog and permission prompt. Background first; foreground only when refused, and the frontmost app is restored afterwards. | Native rows 3/3; action median ≤ 0.5 s; modal ≤ 1 s |
 | R4 | **Honest failure.** Locked, asleep, no console, a hung driver, a stale token or an uncertain effect each gives a finite typed result in < 1 s (a hang is bounded at 10 s). No lock-screen image is returned and no call hangs. | Refusal rows 3/3 |
 | R5 | **No mid-task lock** while Tron is actively working. Locked use (acting on the real desktop while locked) happens only if Mohsin approves it (D3). | `idle-lock-held`; `unlock-and-relock` if D3 |
-| R6 | **Every surface:** Home maintainer turns, task workers, interactive sessions, automations and subagent children that ask for them. Home wake turns stay without these tools by design. | Surface rows ≥ 19/24 measured, not declared |
+| R6 | **Every surface:** Home maintainer turns, task workers, interactive sessions, automations and subagent children that ask for them. | Surface rows ≥ 19/24 measured, not declared |
 | R7 | **Measured on the product path.** The bench calls the same adapter the agent uses, on the installed driver. | Scorecard regenerated per package |
 
 ## 2. Acceptance scorecard
@@ -270,11 +270,10 @@ Owner: `packages/gateway/src/machine/cua-client.ts`.
 ### RC6. Tools are not equally available on every surface
 
 - **#2478 (Home row).** Source is landed (`d3c87b960`, `726e2247f`): Home has `computer` and `agent_browser`
-  on maintainer turns.
+  on every activation.
   - Root cause of "0/25", PROVEN: the scorecard projects declarations from `surfaces.json`. No Home E2E calls
     `computer` (`home-tool-admission.e2e.test.ts` covers lists and refusals only).
   - This is a measurement gap, not a capability gap.
-  - Home wake turns are excluded by design.
 - **#2484 (subagent children lack `computer`).**
   - PR nicobailon/pi-subagents#3281 is **closed, not merged** (2026-11-15). The maintainer said a child can
     already opt in through `subagentOnlyExtensions`/`extensions`.
