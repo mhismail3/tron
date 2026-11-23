@@ -773,8 +773,6 @@ struct ThinkingTraceDetailSheet: View {
             }
         }
         .tronTopBlur(.sheet)
-        .tronContentFitSheet()
-        .presentationDragIndicator(.hidden)
     }
 }
 

@@ -69,8 +69,6 @@ struct SettingsView: View {
             }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
         .tronManagedSheet(
             isPresented: $showsNotifications,
             identity: "settings.notifications"
@@ -178,8 +176,6 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
                 .tronTopBlur(.sheet)
                 .tronPresentation()
                 .tronSettingsLayout()
-                .tronContentFitSheet()
-                .presentationDragIndicator(.hidden)
             }
     }
 

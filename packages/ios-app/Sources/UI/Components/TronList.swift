@@ -458,6 +458,7 @@ struct TronFeedEmptyState<Header: View, Placeholder: View>: View {
                 .frame(minHeight: proxy.size.height)
             }
             .tronScrollEdgeChrome()
+            .environment(\.tronSheetMeasuresContent, false)
             .accessibilityIdentifier(identifier)
         }
     }

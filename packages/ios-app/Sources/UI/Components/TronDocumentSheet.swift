@@ -2,11 +2,8 @@ import SwiftUI
 
 struct TronDocumentSheet<Content: View>: View {
     let title: String
-    var detents: Set<PresentationDetent>
-    let initialDetent: PresentationDetent?
     let leadingAction: TronDocumentSheetAction?
     let hostsNavigation: Bool
-    @State private var selectedDetent: PresentationDetent // view-local: a rebuilt sheet starts at its initial detent
     @ViewBuilder let content: () -> Content
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
@@ -14,18 +11,13 @@ struct TronDocumentSheet<Content: View>: View {
 
     init(
         title: String,
-        detents: Set<PresentationDetent> = [.large],
-        initialDetent: PresentationDetent? = nil,
         leadingAction: TronDocumentSheetAction? = nil,
         hostsNavigation: Bool = true,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.title = title
-        self.detents = detents
-        self.initialDetent = initialDetent
         self.leadingAction = leadingAction
         self.hostsNavigation = hostsNavigation
-        _selectedDetent = State(initialValue: initialDetent ?? .large)
         self.content = content
     }
 
@@ -42,12 +34,6 @@ struct TronDocumentSheet<Content: View>: View {
         }
         .tint(resolvedAccent)
         .tronTopBlur(.sheet)
-        .modifier(TronDocumentSheetDetents(
-            detents: detents,
-            hasInitialSelection: initialDetent != nil,
-            selection: $selectedDetent
-        ))
-        .presentationDragIndicator(.hidden)
         .tronPresentation()
     }
 }
@@ -107,19 +93,4 @@ struct TronDocumentSheetAction {
     let systemImage: String
     let accessibilityLabel: String
     let action: () -> Void
-}
-
-private struct TronDocumentSheetDetents: ViewModifier {
-    let detents: Set<PresentationDetent>
-    let hasInitialSelection: Bool
-    @Binding var selection: PresentationDetent
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if hasInitialSelection {
-            content.presentationDetents(detents, selection: $selection)
-        } else {
-            content.presentationDetents(detents)
-        }
-    }
 }

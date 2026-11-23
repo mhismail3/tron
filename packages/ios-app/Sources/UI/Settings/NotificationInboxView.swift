@@ -74,8 +74,6 @@ struct NotificationInboxView: View {
         }
         .tronTopBlur(.sheet)
         .tronPresentation()
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
         .task(id: PresentationActivityTaskID(
             source: "notifications/inbox",
             presentationActive: presentationActivity.allowsPresentationPublication
@@ -320,8 +318,6 @@ private struct NotificationInboxHistoryView: View {
         }
         .tronTopBlur(.sheet)
         .tronPresentation()
-        .presentationDetents([.large])
-        .presentationDragIndicator(.hidden)
         .tronManagedSheet(
             item: $selectedItem,
             identity: { "notifications.history.detail.\($0.id)" }
@@ -481,8 +477,6 @@ private struct NotificationInboxDetailView: View {
         }
         .tronTopBlur(.sheet)
         .tronPresentation()
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
     }
 
     private var formattedDate: String {

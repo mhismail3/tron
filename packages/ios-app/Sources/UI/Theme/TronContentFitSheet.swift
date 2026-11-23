@@ -63,6 +63,7 @@ private struct TronContentFitSheetModifier: ViewModifier {
             }
             .onAppear { appeared = true }
             .presentationDetents([detent])
+            .presentationDragIndicator(.hidden)
     }
 
     private func resize(_ change: () -> Void) {
@@ -94,17 +95,17 @@ private struct TronSheetWindowMetrics {
 struct TronSheetFitScrollModifier: ViewModifier {
     @State private var height: CGFloat?
     @Environment(\.tronSheetMeasuresContent) private var measures
-    @Environment(\.tronSheetFitsContent) private var fits
 
     func body(content: Content) -> some View {
         if measures {
             content
                 .environment(\.tronSheetMeasuresContent, false)
-                .scrollDisabled(fits)
-                .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                    geometry.contentInsets.top + geometry.contentSize.height
+                .scrollBounceBehavior(.basedOnSize, axes: .vertical)
+                .onScrollGeometryChange(for: CGFloat?.self) { geometry in
+                    let insets = geometry.contentInsets
+                    return insets.top > 0 || insets.bottom > 0 ? insets.top + geometry.contentSize.height : nil
                 } action: { _, next in
-                    height = next
+                    if let next { height = next }
                 }
                 .preference(key: TronSheetFitKey.self, value: height)
         } else {

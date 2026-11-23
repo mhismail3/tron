@@ -12,6 +12,15 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         }
     }
 
+    func testAccessibilityTextOpensLarge() async throws {
+        try await mounted(["-tron-settings-fixture", "-settings-expanded-review", "-six-ui-surface", "worker-tools-short"],
+                          contentSize: .accessibilityExtraExtraExtraLarge) { app in
+            let trace = try await SheetTrace.record(app, frames: 60)
+            trace.assertStill("Accessibility text opens large")
+            XCTAssertLessThan(trace.final.minY, 120, "\(trace)")
+        }
+    }
+
     func testOverflowingSheetOpensLargeWithoutResizing() async throws {
         try await mounted(["-tron-settings-fixture", "-settings-expanded-review", "-six-ui-surface", "worker-thinking-long"]) { app in
             let trace = try await SheetTrace.record(app, frames: 90)

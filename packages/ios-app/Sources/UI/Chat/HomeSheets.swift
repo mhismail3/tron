@@ -147,14 +147,12 @@ struct HomeSheet: View {
             } else if destination.isTaskSurface {
                 HomeTaskSheet(destination: destination, profileID: profileID, onOpenSession: onOpenSession)
             } else if isEvidence {
-                TronDocumentSheet(title: destination.title, detents: [.large]) { sheetContent }
+                TronDocumentSheet(title: destination.title) { sheetContent }
             } else {
                 NavigationStack { sheetContent }
             }
         }
         .tronTopBlur(.sheet)
-        .tronContentFitSheet()
-        .presentationDragIndicator(.hidden)
         .environment(\.tronSettingsVisualTheme, visualTheme ?? TronSettingsVisualTheme(
             accent: .tronPrimary, surfaceAccent: .tronPrimarySurface))
         .tint(accent)
@@ -228,7 +226,7 @@ struct HomeSheet: View {
         }
         .tronManagedSheet(isPresented: $showingMemoryInfo, identity: "home.\(profileID).memory-info.\(destination.id)") {
             if let metadata = memoryMetadata {
-                TronDocumentSheet(title: "Technical details", detents: [.medium, .large]) {
+                TronDocumentSheet(title: "Technical details") {
                     ScrollView {
                         TronTechnicalMetadataSection(title: "Memory", items: metadata, accent: accent)
                             .padding(18)
@@ -324,7 +322,7 @@ struct HomeTextReader: View {
     let reading: HomeTextReading
 
     var body: some View {
-        TronDocumentSheet(title: reading.title, detents: [.medium, .large]) {
+        TronDocumentSheet(title: reading.title) {
             ScrollView {
                 TronMarkdownView(text: reading.text, streaming: false)
                     .textSelection(.enabled)

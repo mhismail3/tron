@@ -147,8 +147,6 @@ struct ProviderConfigurationSheet: View {
         }
         .tronPresentation()
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
         .interactiveDismissDisabled(disablesInteractiveDismissal)
         .onAppear {
             if owningProfileID == nil { owningProfileID = model.profiles.selected?.id }

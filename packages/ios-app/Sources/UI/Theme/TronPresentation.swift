@@ -841,33 +841,28 @@ struct TronSheetTitle: View {
 struct TronDashboardFilterSheet<Content: View, LeadingActions: View>: View {
     let title: String
     let accent: Color
-    let detents: Set<PresentationDetent>
     let onDone: () -> Void
     private let content: Content
     private let leadingActions: LeadingActions
-    @State private var selectedDetent: PresentationDetent = .medium
 
     init(
         title: String,
         accent: Color,
-        detents: Set<PresentationDetent>,
         onDone: @escaping () -> Void,
         @ViewBuilder content: () -> Content
     ) where LeadingActions == EmptyView {
-        self.init(title: title, accent: accent, detents: detents, onDone: onDone, leadingActions: { EmptyView() }, content: content)
+        self.init(title: title, accent: accent, onDone: onDone, leadingActions: { EmptyView() }, content: content)
     }
 
     init(
         title: String,
         accent: Color,
-        detents: Set<PresentationDetent>,
         onDone: @escaping () -> Void,
         @ViewBuilder leadingActions: () -> LeadingActions,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
         self.accent = accent
-        self.detents = detents
         self.onDone = onDone
         self.leadingActions = leadingActions()
         self.content = content()
@@ -902,9 +897,6 @@ struct TronDashboardFilterSheet<Content: View, LeadingActions: View>: View {
         }
         .tronSettingsVisualTheme(accent: accent)
         .tronTopBlur(.sheet)
-        .presentationDetents(detents, selection: $selectedDetent)
-        .presentationContentInteraction(.resizes)
-        .presentationDragIndicator(.hidden)
     }
 }
 
@@ -1150,8 +1142,6 @@ struct TronConfirmationSheet: View {
             }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
     }
 
     private var confirmButton: some View {

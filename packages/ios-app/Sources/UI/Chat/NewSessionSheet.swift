@@ -162,8 +162,6 @@ struct NewSessionSheet: View {
                     inspectionFailed: gitInspectionFailed
                 )
                 .tronTopBlur(.sheet)
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.hidden)
             }
             .tronManagedSheet(isPresented: $showServers, identity: "new-session.servers") {
                 NavigationStack {
@@ -209,8 +207,6 @@ struct NewSessionSheet: View {
                 }
                 .tronTopBlur(.sheet)
                 .tronSettingsVisualTheme(accent: .tronPrimary)
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.hidden)
             }
             .tronManagedSheet(isPresented: $showModels, identity: "new-session.models") {
                 NavigationStack {
@@ -233,8 +229,6 @@ struct NewSessionSheet: View {
                 }
                 .tronTopBlur(.sheet)
                 .tronSettingsVisualTheme(accent: .tronPrimary)
-                .tronContentFitSheet()
-                .presentationDragIndicator(.hidden)
             }
             .onChange(of: model.knowledgePresentationIdentity) { _, _ in publishCreatedRouteIfAdmitted() }
             .onChange(of: presentationActivity) { _, _ in publishCreatedRouteIfAdmitted() }

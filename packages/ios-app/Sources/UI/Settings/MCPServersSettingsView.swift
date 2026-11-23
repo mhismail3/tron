@@ -202,7 +202,7 @@ struct MCPServersSettingsView: View {
                         Task { await setToken(submittedToken, server: submittedServer, destination: destination) }
                     }.buttonStyle(TronActionButtonStyle(role: .primary)).disabled(working || token.isEmpty)
                     Spacer(minLength: 0)
-                }.padding(18).tronNavigationTitle("MCP Token").tronPresentation().presentationDetents([.medium]).presentationDragIndicator(.hidden)
+                }.padding(18).tronNavigationTitle("MCP Token").tronPresentation()
             }.tronSettingsVisualTheme(accent: accent)
         }
     }
@@ -456,8 +456,6 @@ struct MCPAddServerForm: View {
             .tronScrollEdgeChrome()
             .tronNavigationTitle("Add MCP Server")
             .tronPresentation()
-            .presentationDetents([.large])
-            .presentationDragIndicator(.hidden)
         }
         .tronSettingsVisualTheme(accent: accent)
     }

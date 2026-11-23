@@ -94,8 +94,6 @@ struct HostedToolSheetsPolishFixture: View {
                 }
         }
         .tronTopBlur(.toolDetail)
-        .presentationDetents([.large])
-        .presentationDragIndicator(.hidden)
         .tronPresentation()
     }
 

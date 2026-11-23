@@ -308,7 +308,6 @@ struct HomeUsageProvidersSheet: View {
         TronDashboardFilterSheet(
             title: "Usage Providers",
             accent: .tronPrimary,
-            detents: [.medium, .large],
             onDone: onDone
         ) {
             TronDashboardFilterSectionTitle(

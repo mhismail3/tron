@@ -9,7 +9,6 @@ struct ChangeReviewSheet: View {
     let close: (() -> Void)?
     let approve: () -> Void
     let cancel: () -> Void
-    @PresentationState private var detent: PresentationDetent = .medium
 
     init(review: ChangeReview, submitting: Bool = false, secret: Binding<String>? = nil, failure: String? = nil,
          close: (() -> Void)? = nil, approve: @escaping () -> Void, cancel: @escaping () -> Void) {
@@ -97,8 +96,6 @@ struct ChangeReviewSheet: View {
             }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large], selection: $detent)
-        .presentationDragIndicator(.hidden)
         .interactiveDismissDisabled(close != nil || submitting)
     }
 

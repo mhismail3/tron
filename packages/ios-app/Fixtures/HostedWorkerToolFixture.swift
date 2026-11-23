@@ -41,7 +41,6 @@ struct HostedWorkerToolFixture: View {
                     }
                 }
                 .tronTopBlur(.toolDetail).tronPresentation().tronSettingsLayout()
-                .presentationDetents([.large]).presentationDragIndicator(.hidden)
             }
         }
     }

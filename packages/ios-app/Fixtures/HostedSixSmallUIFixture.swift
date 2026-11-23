@@ -31,8 +31,6 @@ struct HostedSixSmallUIFixture: View {
                 .tronTopBlur(.sheet)
                 .tronPresentation()
                 .tronSettingsLayout()
-                .presentationDetents([.large])
-                .presentationDragIndicator(.hidden)
             }
             .background {
                 if surface == "toast" {

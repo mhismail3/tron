@@ -674,7 +674,6 @@ struct ComposerResourceDetailSheet: View {
     @PresentationState private var loadRevision = 0
     @PresentationState private var detailGeneration = 0
     @PresentationState private var loadedIdentity: String?
-    @PresentationState private var detent: PresentationDetent = .medium
     @PresentationState private var showsResourceInfo = false
 
     var body: some View {
@@ -726,8 +725,6 @@ struct ComposerResourceDetailSheet: View {
             await loadDetail()
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large], selection: $detent)
-        .presentationDragIndicator(.hidden)
         .tronPresentation()
     }
 

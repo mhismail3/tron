@@ -17,7 +17,7 @@ final class SessionHistoryEntryViewTests: ShuffledTestCase {
                 app.navigationTitle("History Entry") != nil && entryText(app) { $0.hasSuffix(" characters") } != nil
             }
             let title = try XCTUnwrap(app.navigationTitle("History Entry"))
-            XCTAssertGreaterThan(title.accessibilityFrame.minY, app.window.bounds.height * 0.35, "Exercise the medium detent")
+            XCTAssertGreaterThan(title.accessibilityFrame.minY, 120, "Exercise a partial-height, content-fit sheet")
             let done = try XCTUnwrap(app.toolbarActions(around: title).first { $0.accessibilityLabel == "Done" })
             let response = try XCTUnwrap(entryText(app) { $0.hasPrefix("Response") })
             XCTAssertGreaterThanOrEqual(response.accessibilityFrame.minY, done.accessibilityFrame.maxY,

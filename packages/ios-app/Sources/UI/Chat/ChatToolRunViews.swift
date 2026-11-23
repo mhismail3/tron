@@ -380,8 +380,6 @@ struct LiveToolRunDetails: View {
                         }
                 }
                 .tronTopBlur(.toolDetail)
-                .tronContentFitSheet()
-                .presentationDragIndicator(.hidden)
                 .tronPresentation()
             } else {
                 ToolRunDetailSheet(run: run, tools: tools, onDisplay: onDisplay)
@@ -434,8 +432,6 @@ struct ReadOnlyToolRunView: View {
                     }
                 }
                 .tronTopBlur(.toolDetail)
-                .tronContentFitSheet()
-                .presentationDragIndicator(.hidden)
                 .tronPresentation()
             } else {
                 ToolRunDetailSheet(run: run, tools: resolvedTools)
@@ -601,8 +597,6 @@ struct ToolRunDetailSheet: View {
             selectedToolPresentation = newestTool
         }
         .tronTopBlur(.toolDetail)
-        .tronContentFitSheet()
-        .presentationDragIndicator(.hidden)
         .tronPresentation()
     }
 }
@@ -631,8 +625,6 @@ private struct ToolRunSelectedDetailSheet: View {
                 }
             }
             .tronTopBlur(.toolDetail)
-            .tronContentFitSheet()
-            .presentationDragIndicator(.hidden)
             .tronPresentation()
         }
     }
@@ -1246,8 +1238,6 @@ private struct ToolDetailSheetHost: ViewModifier {
                     }
                 }
                 .tronTopBlur(.toolDetail)
-                .tronContentFitSheet()
-                .presentationDragIndicator(.hidden)
                 .tronPresentation()
             }
         }

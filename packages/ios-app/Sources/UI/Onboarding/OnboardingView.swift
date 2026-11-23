@@ -27,18 +27,15 @@ struct OnboardingView: View {
 
     @Environment(AppModel.self) private var model
     private static let defaultModelKey = "model.ref[role=chat]"
-    @Binding var selectedDetent: PresentationDetent
     let onComplete: () -> Void
     let mode: Mode
     @PresentationState private var step: Step
 
     init(
         mode: Mode = .setup,
-        selectedDetent: Binding<PresentationDetent>,
         onComplete: @escaping () -> Void
     ) {
         self.mode = mode
-        self._selectedDetent = selectedDetent
         self.onComplete = onComplete
         self._step = PresentationState(wrappedValue: mode == .addServer ? .pair : .welcome)
     }
@@ -179,10 +176,7 @@ struct OnboardingView: View {
             }
         }
         .task {
-            if mode == .addServer {
-                applyDetent()
-                return
-            }
+            if mode == .addServer { return }
             selectedWorkspace = model.defaultWorkspace ?? ""
             if isPaired && !model.setupComplete {
                 step = .workspace
@@ -190,19 +184,14 @@ struct OnboardingView: View {
             } else if model.connectionState == .unauthorized {
                 step = .pair
             }
-            applyDetent()
         }
         .onChange(of: step) { _, value in
-            applyDetent()
             if value == .model, selectedModel == nil {
                 Task {
                     let configured = await configuredDefaultModel()
                     selectedModel = configured ?? model.preferredAvailableModel(for: .global)
                 }
             }
-        }
-        .onChange(of: showManualPairing) { _, visible in
-            withAnimation(.snappy(duration: 0.28)) { selectedDetent = visible ? .large : .medium }
         }
         .onChange(of: model.connectionState) { _, state in
             if mode == .setup,
@@ -440,9 +429,6 @@ struct OnboardingView: View {
         if step == .model { Task { await finish() }; return }
         guard let next = Step(rawValue: step.rawValue + 1), next.rawValue <= (isPaired ? Step.model.rawValue : Step.pair.rawValue) else { return }
         withAnimation(.snappy(duration: 0.24)) { step = next }
-    }
-    private func applyDetent() {
-        withAnimation(.snappy(duration: 0.28)) { selectedDetent = step.rawValue < Step.workspace.rawValue ? .medium : .large }
     }
     private func connectManually() {
         pairingFieldFocused = false

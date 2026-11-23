@@ -500,8 +500,6 @@ struct ChatDetailSheet<Content: View>: View {
             }
         }
         .tronTopBlur(.toolDetail)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
         .tronPresentation()
     }
 }
@@ -517,7 +515,6 @@ struct ToolTextSheet: View {
     let text: String
     let accent: Color
     @Environment(\.dismiss) private var dismiss
-    @PresentationState private var detent: PresentationDetent = .large
 
     var body: some View {
         NavigationStack {
@@ -540,8 +537,6 @@ struct ToolTextSheet: View {
                 }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large], selection: $detent)
-        .presentationDragIndicator(.hidden)
         .tint(accent)
     }
 }

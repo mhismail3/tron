@@ -20,7 +20,7 @@ struct ArtifactsSheet: View {
     private struct Listing: Decodable { let artifacts: [ArtifactEntry] }
 
     var body: some View {
-        TronDocumentSheet(title: "Artifacts", detents: [.medium, .large], initialDetent: .large) {
+        TronDocumentSheet(title: "Artifacts") {
             ScrollView {
                 TronSettingsSections(hidesLoneHeading: true) {
                     if let failure {
@@ -55,8 +55,6 @@ struct ArtifactsSheet: View {
                 TronSafariView(url: artifact.url)
                     .ignoresSafeArea(.container, edges: .all)
                     .accessibilityIdentifier("artifact-browser")
-                    .presentationDetents([.large])
-                    .presentationDragIndicator(.hidden)
             }
         }
     }

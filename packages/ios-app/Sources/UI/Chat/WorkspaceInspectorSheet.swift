@@ -206,7 +206,6 @@ struct WorkspaceInspectorSheet: View {
     @PresentationState private var diffRoute: WorkspaceDiffRoute?
     @PresentationState private var commitRoute: WorkspaceCommitRoute?
     @PresentationState private var detailRequests = WorkspaceDetailRequestOwner()
-    @PresentationState private var detent: PresentationDetent = .medium
 
     var body: some View {
         NavigationStack {
@@ -298,8 +297,6 @@ struct WorkspaceInspectorSheet: View {
             }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large], selection: $detent)
-        .presentationDragIndicator(.hidden)
         .tronSettingsVisualTheme(accent: .tronPrimary)
         .tint(Color.tronPrimary)
     }
@@ -799,8 +796,6 @@ private struct WorkspaceGitDiffSheet: View {
             }
         }
         .tronTopBlur(.toolDetail)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
         .tronPresentation()
     }
 }
@@ -889,8 +884,6 @@ private struct WorkspaceCommitDetailSheet: View {
             .onDisappear { detailRequests.cancel() }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
     }
 
     private var messageBody: String? {

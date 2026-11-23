@@ -21,7 +21,6 @@ struct ExtensionFormSheet: View {
     @PresentationState private var submitting = false
     @PresentationState private var errorMessage: String?
     @PresentationState private var now = Date()
-    @PresentationState private var selectedDetent: PresentationDetent = .medium
     @PresentationState private var pendingOtherFocusQuestionID: String?
     @State private var pageDragOffset: CGFloat = 0 // view-local: a rebuilt view has no active finger drag
     @State private var peekQuestionIndex: Int? // view-local: the transient drag neighbour resets with the gesture
@@ -101,9 +100,6 @@ struct ExtensionFormSheet: View {
             }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large], selection: $selectedDetent)
-        .presentationDragIndicator(.hidden)
-        .presentationContentInteraction(.scrolls)
         .interactiveDismissDisabled(submitting)
         .onAppear { reset() }
         .onChange(of: ExtensionInteractionScope(interaction)) { _, _ in reset() }
@@ -113,12 +109,6 @@ struct ExtensionFormSheet: View {
         }
         .onChange(of: expired) { _, expired in
             if expired { focusedQuestionID = nil }
-        }
-        .onChange(of: focusedQuestionID) { _, questionID in
-            guard questionID != nil else { return }
-            withAnimation(reduceMotion ? nil : ChatMotion.extensionSelectionControl) {
-                selectedDetent = .large
-            }
         }
         .task(id: PresentationActivityTaskID(
             source: ExtensionInteractionScope(interaction),
@@ -477,7 +467,6 @@ struct ExtensionFormSheet: View {
         errorMessage = nil
         focusedQuestionID = nil
         pendingOtherFocusQuestionID = nil
-        selectedDetent = .medium
         now = Date()
     }
 
