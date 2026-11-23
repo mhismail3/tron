@@ -233,11 +233,20 @@ export class AuthBroker {
         operation.modelRuntime === modelRuntime && operation.providerId === providerId);
       for (const operation of logins) {
         operation.controller.abort();
-        this.retire(operation, "Provider signed out");
+        const completion: AuthCompletion = {
+          operationId: operation.id,
+          providerId: operation.providerId,
+          ...(operation.target === undefined ? {} : { target: operation.target }),
+          success: false,
+          error: "Provider signed out",
+        };
+        if (this.retire(operation, "Provider signed out", completion)) {
+          this.emitToOperation(operation, "auth.completed", completion as unknown as JsonValue);
+        }
       }
       await this.awaitPredecessor(Promise.all(logins.map(operation => operation.settled)).then(() => {}));
       const oauth = modelRuntime.getProvider(providerId)?.auth.oauth;
-      if (oauth && "logout" in oauth) {
+      if (oauth && "logout" in oauth && oauth.logout !== undefined) {
         if (typeof oauth.logout !== "function") throw new GatewayError("unsupported", "Provider sign-out hook is invalid");
         await oauth.logout();
       }

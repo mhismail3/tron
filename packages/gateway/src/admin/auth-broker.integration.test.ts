@@ -142,7 +142,10 @@ describe("AuthBroker", () => {
       expect(() => broker.start("phone", "logout-race", "oauth")).toThrow(expect.objectContaining({ code: "busy" }));
       await waitFor(() => steps.includes("cleanup"), "provider cleanup");
       expect(steps).toEqual(["login-ended", "cleanup"]);
-      expect(broker.resume("phone", "phone", operation.operationId)).toMatchObject({ state: "cancelled" });
+      expect(events.filter(event => event.topic === "auth.completed")).toEqual([
+        expect.objectContaining({ client: "phone", payload: expect.objectContaining({ success: false, error: "Provider signed out" }) }),
+      ]);
+      expect(broker.resume("phone", "phone", operation.operationId)).toMatchObject({ state: "completed", success: false });
     } finally { finishCleanup(); await logout; }
     expect(await runtime.getAuth("logout-race")).toBeUndefined();
     expect(broker.activeOperationCount).toBe(0);
