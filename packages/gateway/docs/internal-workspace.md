@@ -28,8 +28,8 @@ time is state. To present living data, publish only the requested finished view 
 files, not a second canonical collection.
 
 Gateway-managed stores retain their owners: `files/Profile.json` is edited only
-through Profile actions; episodic memory, Home tasks and `state/apps/` use their
-owning interfaces (`swift_app` for installed apps). A skill cannot take over these
+through Profile actions; episodic memory and Home tasks use their owning
+interfaces. A skill cannot take over these
 namespaces. Pi's agent directory, Gateway state and existing extension stores stay
 canonical where they are. A folder's name grants no new mutation authority.
 

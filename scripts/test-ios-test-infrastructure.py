@@ -4260,9 +4260,7 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         for name in ("package.json", "package-lock.json"):
             shutil.copy2(ROOT / "packages/gateway" / name, worktree / "packages/gateway" / name)
         for name in ("packages/mac-app/Sources/Server/Paths/GatewayPayloadStore.swift",
-                     "packages/mac-app/native-gateway-client/node-headers.json",
-                     "packages/gateway/src/modules/apps/fixtures/InstalledPersistence.swift",
-                     "tools/web/apps/builds/Builds.swift"):
+                     "packages/mac-app/native-gateway-client/node-headers.json"):
             (worktree / name).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / name, worktree / name)
         return worktree
@@ -5011,11 +5009,6 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         gateway.mkdir(parents=True)
         for name in ("package.json", "package-lock.json"):
             shutil.copy2(ROOT / "packages/gateway" / name, gateway / name)
-        for fixture in ("packages/gateway/src/modules/apps/fixtures/InstalledPersistence.swift",
-                        "tools/web/apps/builds/Builds.swift"):
-            destination = worktree / fixture
-            destination.parent.mkdir(parents=True)
-            shutil.copy2(ROOT / fixture, destination)
         shutil.copy2(ROOT / ".node-version", worktree / ".node-version")
         (worktree / ".gitignore").write_text("node_modules/\n")
 

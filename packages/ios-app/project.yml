@@ -126,24 +126,6 @@ targets:
         # extension-safe API.
         APPLICATION_EXTENSION_API_ONLY: YES
 
-  # The Swift-app interpreter (#889): lexer, parser, runtime, values and the
-  # value-to-SwiftUI conversions, with no Tron presentation or state. Its own
-  # module. The runner sheet and node views that host it in Tron's chrome stay
-  # in the app.
-  TronSwiftAppEngine:
-    type: framework.static
-    platform: iOS
-    sources:
-      - path: SwiftAppEngine
-        excludes:
-          - "**/*.module.json"
-          - "**/README.md"
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.swiftappengine
-        GENERATE_INFOPLIST_FILE: YES
-        SWIFT_PACKAGE_NAME: TronIOSApp
-
   TronMobile:
     type: application
     platform: iOS
@@ -191,8 +173,6 @@ targets:
         embed:
           codeSign: true
           removeHeadersOnCopy: true
-      - target: TronSwiftAppEngine
-        embed: false
       - package: SwiftTerm
       - package: MacTerminalSSH
         product: MacTerminalSSH
@@ -356,30 +336,6 @@ targets:
         TEST_TARGET_NAME: TronMobile
         SWIFT_PACKAGE_NAME: TronIOSApp
 
-  # Displayed Swift app journeys (#889), independently runnable as their own bundle.
-  TronSwiftAppUITests:
-    type: bundle.ui-testing
-    platform: iOS
-    sources:
-      - path: SwiftAppUITests
-        excludes:
-          - "**/*.module.json"
-          - "**/README.md"
-      # The shared sheet-tint assertion every UI test target uses.
-      - path: UITests/SheetTintAssertions.swift
-      # Canonical mini-app source the journeys run byte for byte (#1339). A
-      # folder reference: Xcode will not copy a loose .swift file as a resource.
-      - path: ../../tools/web/apps/builds-preview
-        type: folder
-        buildPhase: resources
-    dependencies:
-      - target: TronMobile
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.swiftappuitests
-        GENERATE_INFOPLIST_FILE: YES
-        TEST_TARGET_NAME: TronMobile
-
 schemes:
   Tron Development:
     build:
@@ -414,7 +370,6 @@ schemes:
         TronMobile: all
         TronShareExtension: all
         TronMobileUITests: [test]
-        TronSwiftAppUITests: [test]
         TronMobileViewTests: [test]
         TronMobileE2ETests: [test]
     run:

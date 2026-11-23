@@ -466,8 +466,6 @@ start_fresh_fixture() {
   tron_home="$(realpath "$tron_home")"
   workspace="$(realpath "$workspace")"
   printf '# E2E Project Rules\n\nKeep the boundary fixture honest.\n' >"$workspace/AGENTS.md"
-  cp "$repo_root/packages/gateway/src/modules/apps/fixtures/InstalledPersistence.swift" "$workspace/InstalledPersistence.swift"
-  cp "$repo_root/tools/web/apps/builds/Builds.swift" "$workspace/Builds.swift"
   python3 - "$tron_home/state/gateway.json" <<'PY'
 import json, os, sys
 path = sys.argv[1]

@@ -1,10 +1,10 @@
 {
   "layer": "L5",
-  "purpose": "Web and SwiftUI app sources the iOS share host and swift-app previews serve: the Builds app, its design previews and the shared stylesheet.",
+  "purpose": "The shared stylesheet Tron's generated webpages and artifacts embed.",
   "owns": [
     "**"
   ],
   "verify": [
-    "scripts/tron test ios run --only-testing TronSwiftAppUITests/TronSwiftAppUITests --only-testing TronMobileUITests/TronAppsInstallDesignUITests"
+    "python3 scripts/test-tron-ios-device-share.py"
   ]
 }

@@ -90,7 +90,6 @@
     "workspace/files/Profile.json": {"owner": "gateway/home"},
     "workspace/state": {"owner": "gateway/workspace", "container": true},
     "workspace/state/episodic": {"owner": "gateway/episodic", "subtree": true},
-    "workspace/state/apps": {"owner": "gateway/apps", "subtree": true},
     "workspace/state/x-library": {"owner": "extension x-library", "subtree": true},
 
     "internal": {"owner": "repo/ios", "class": "scratch", "container": true},
@@ -130,6 +129,8 @@
     "state/mac-terminal": {"owner": "gateway/security", "class": "keep", "credential": true, "subtree": true}
   },
   "retired": [
+    {"from": "workspace/state/apps", "to": "~/.tron-maintenance/backups/2026-11-23-swift-apps/state-apps"},
+    {"from": "state/workspace-state/apps-initialized.json", "to": "~/.tron-maintenance/backups/2026-11-23-swift-apps/apps-initialized.json"},
     {"from": "state/upload-imports", "to": "~/.tron-maintenance/backups/2026-11-20-upload-imports"},
     {"from": "logs/device-exports", "to": "~/.tron-maintenance/backups/2026-11-19-device-exports"},
     {"from": "gateway/layout-migration", "to": "~/.tron-maintenance/backups/2026-11-07-2313-layout-connections"},

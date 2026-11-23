@@ -108,10 +108,6 @@ struct HostedFixtureRoot: View {
                 HostedAskUserFixtureView()
             } else if HostedLaunch.arguments.contains("-tron-session-pagination-fixture") {
                 HostedSessionPaginationFixture()
-            } else if HostedLaunch.arguments.contains("-tron-apps-install-design-fixture") {
-                HostedAppsInstallDesignFixture().environment(hostedModel)
-            } else if HostedLaunch.arguments.contains("-tron-apps-design-fixture") {
-                HostedAppsDesignFixture().environment(hostedModel)
             } else if HostedLaunch.arguments.contains("-tron-automation-fixture") {
                 HostedAutomationFixtureView()
             } else if HostedLaunch.arguments.contains("-tron-session-archive-fixture") {

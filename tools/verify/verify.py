@@ -41,7 +41,7 @@ NAMED_LOCKS = {f"{GATEWAY}/src/e2e/sessions/sdk-behavior-trace.integration.test.
                f"{GATEWAY}/src/e2e/sessions/pi-persisted-state-corpus.integration.test.ts"}
 SKIPPABLE = ("ios", "mac", "relay", "python-here")
 IOS = "packages/ios-app"
-IOS_TARGETS = {"UITests": "TronMobileUITests", "SwiftAppUITests": "TronSwiftAppUITests", "ViewTests": "TronMobileViewTests"}
+IOS_TARGETS = {"UITests": "TronMobileUITests", "ViewTests": "TronMobileViewTests"}
 IOS_HARNESSED = {"RealGatewayPairAndChatUITests": "scripts/ios-gateway-e2e-test",
                  "TronMacTerminalUITests": "scripts/ios-mac-terminal-journey"}
 NOT_DRIVEN = ("ios-lanes",)
@@ -146,7 +146,7 @@ def is_test(path: str) -> bool:
     if "/test-fixtures/" in path:
         return False
     if path.startswith("packages/") and path.endswith(".swift"):
-        return any(part in path.split("/") for part in ("UITests", "E2ETests", "ProfilingTests", "SwiftAppUITests", "ViewTests", "Tests")) \
+        return any(part in path.split("/") for part in ("UITests", "E2ETests", "ProfilingTests", "ViewTests", "Tests")) \
             and name.endswith("Tests.swift")
     return bool(re.search(r"\.test\.(ts|mjs)$", name)) or bool(re.match(r"test-.*\.(py|sh)$", name))
 

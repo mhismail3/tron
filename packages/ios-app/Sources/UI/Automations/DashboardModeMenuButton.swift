@@ -21,7 +21,6 @@ struct DashboardModeMenuButton: UIViewRepresentable {
     static let menuHoldDuration: TimeInterval = 0.2
 
     let onOpenAutomations: @MainActor () -> Void
-    let onOpenApps: @MainActor () -> Void
     let actions: DashboardMenuActions
     var home: DashboardHomeControl? = nil
 
@@ -101,7 +100,6 @@ struct DashboardModeMenuButton: UIViewRepresentable {
             }
             groups.append(UIMenu(options: .displayInline, children: [
                 sheetAction("Automations", symbol: "clock.badge.checkmark", accent: .tronPrimary, perform: parent.onOpenAutomations),
-                sheetAction("Apps", symbol: "square.grid.2x2", accent: .tronPrimary, perform: parent.onOpenApps),
             ]))
             groups.append(UIMenu(options: .displayInline, children: actions.creation.map(action)))
             return UIMenu(children: groups)

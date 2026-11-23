@@ -38,20 +38,9 @@ after each new watch, so a write in the next tens of milliseconds can be missed;
 that edits a file under a newly armed watch awaits `live()` first, with the probe still
 open, instead of sleeping.
 
-`native-exec-stall-capture.ts` runs a native engine fixture binary through
-`execFileSync` with stdin input, unchanged, while a separate process group watches it:
-past 5 s it writes host load, the parent and child, the child's stdio endpoints and a
-stack sample of each to `test-results/native-exec-stalls/` and names the record on
-stderr (#2226).
-
 `catalog-metadata-crash-child.ts` saves two synthetic catalog cuts from
 `catalog-metadata-fixture.ts` alternately until its parent kills it, so a
 SIGKILL lands at an arbitrary point of a sharded catalog save.
-
-`apps-crash-child.ts` and its preload hold Apps receipt/publication cuts in a real
-Registry process. The fixture releases its workspace lease before the parent kills
-it; this proves Apps recovery at those cuts, not whole-Gateway ungraceful crash,
-stale-lock or power-loss recovery.
 
 ## Contract
 

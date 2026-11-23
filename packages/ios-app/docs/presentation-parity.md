@@ -76,7 +76,7 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   UI, default sheets) moves to one generic content-sized custom sheet, built ground-up as the
   managed-sheet owner. Until it lands, managed sheets keep the medium/large detents below
   (`TronPadSheetMode` on iPadOS 27); a surface never gets its own sheet patch.
-- **Presentation haptics.** Managed sheets (including nested and interpreted Swift-app sheets)
+- **Presentation haptics.** Managed sheets (including nested sheets)
   and system pickers play one medium, full-intensity impact through `TronHaptics`, respecting System Haptics.
   Semantic interaction patterns and exclusions are in the [UI haptic map](../Sources/UI/README.md#haptic-map).
   Presenters adopt already-presented state silently; detent changes, replacements, re-renders and
@@ -115,7 +115,7 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   usable). The pulse leaves without a fade and content fades and rises 8 points with
   `ChatMotion.transcriptViewReveal` (Reduce Motion: fade only). Owners request it only while they
   have no content, so cached or refreshed content is never hidden or replayed. Non-scroll sheets
-  (media, terminal, camera, Swift-app preparation) keep their own preparation surfaces.
+  (media, terminal, camera) keep their own preparation surfaces.
 - **Chat details.** Provider-error and nested tool-call details reuse `ChatDetailSheet` for
   navigation, Done, top chrome, insets and detents. Single errors and runs share one layout of
   standard groups: a summary row, then per occurrence (newest first) a details group (model, type,
@@ -133,7 +133,7 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 ## Confirmations, entry and notices
 
 - App-owned confirmations, acknowledgements and rename/bookmark entry use `TronConfirmationSheet`,
-  `tronConfirmation` and `tronTextEntrySheet` (including interpreted Swift apps' alerts), with a
+  `tronConfirmation` and `tronTextEntrySheet`, with a
   grey leading cancel. A short primary label stays in toolbar glass; a long, multi-line or
   accessibility-size label moves to the shared glass action container below the content.
   Destructive roles stay red, and each destructive confirmation shows its own action glyph through

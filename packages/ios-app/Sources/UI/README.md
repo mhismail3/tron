@@ -21,7 +21,7 @@ reusable components. Its binding rules are [presentation parity](../../docs/pres
 
 The feature folders under `UI/` are their own modules with their own READMEs: [Chat](Chat/README.md),
 [Settings](Settings/README.md), [Automations](Automations/README.md),
-[Onboarding](Onboarding/README.md), [Terminal](Terminal/README.md), [Swift apps](SwiftApps/README.md).
+[Onboarding](Onboarding/README.md), [Terminal](Terminal/README.md).
 
 ## Contract
 
