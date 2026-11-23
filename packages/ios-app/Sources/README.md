@@ -18,7 +18,7 @@ module.
   presentation-state root (`TronPresentationStateRoot`) and the in-app notice window;
   `ProductionSceneRoot` feeds network-path facts to lifecycle recovery hints and diagnostics.
   Everything else is composed by the owning modules ([State](State/README.md), [`UI`](UI/README.md)).
-- The app embeds `TronMobileCore` and links `TronSwiftAppEngine` statically; module rules are in
+- The app embeds `TronMobileCore`; module rules are in
   [Core](../Core/README.md#contract).
 - Backgrounding checkpoints the composer draft and the snapshot cache inside one UIApplication
   assertion; it retires the transport epoch but never tears down accepted Gateway work.

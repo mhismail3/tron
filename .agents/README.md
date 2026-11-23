@@ -27,10 +27,10 @@ configuration changes follow their owning contributor/package runbooks.
 
 ## Webpages and mini-app source
 
-[Static webpage guidance](../tools/web/README.md) owns canonical CSS/page source,
-the safe fixture-preview/approval/test flow and the stable internal
-`files/mini-apps/` artifact index. Read it before editing or generating reusable
-webpages; workspace previews and live OTA output are not maintained source.
+[Static webpage guidance](../tools/web/README.md) owns canonical CSS/page source and
+the safe fixture-preview/approval/test flow. Read it before editing or generating
+reusable webpages; workspace artifacts, previews and live OTA output are not
+maintained source.
 
 ## Maintaining guidance
 

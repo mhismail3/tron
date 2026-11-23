@@ -5,7 +5,6 @@ import ImageIO
 import UniformTypeIdentifiers
 import SwiftUI
 import TronMobileCore
-import TronSwiftAppEngine
 
 struct HostedReadonlyAttachmentFixture: View {
     @Environment(\.scenePhase) private var scenePhase
@@ -71,16 +70,9 @@ struct HostedReadonlyAttachmentFixture: View {
             }
             .frame(maxHeight: localAttachment == nil && pendingStrip.isEmpty ? nil : .infinity, alignment: .top)
         }
-        .environment(\.openURL, OpenURLAction { url in
-            SwiftAppLinkTestProbe.shared.opened.append(url.absoluteString)
-            return .handled
-        })
         .environment(model)
         .tronPresentation()
         .preferredColorScheme(scenario.contains("-light") ? .light : .dark)
-        .background {
-            if scenario.contains("install-review") { HostedInstallReviewProbe().frame(width: 1, height: 1) }
-        }
         .background(ReadonlyPreviewNativeRecorder { value in
             if value.contains("height:640") || value == "file retired:true" { poisonPublished = true }
             if native != value { native = value }
@@ -158,7 +150,6 @@ private actor ReadonlyAttachmentGateway {
     private let file: Data
     private var displayRows: [TranscriptItem] = []
     private var videoData: Data?
-    private var installFixture = HostedInstallReviewGateway()
 
     @MainActor init(scenario: String) {
         self.scenario = scenario
@@ -172,19 +163,6 @@ private actor ReadonlyAttachmentGateway {
             var artifact = display["artifact"] as! [String: Any]
             artifact["kind"] = "text"; artifact["name"] = "readonly.txt"; artifact["mimeType"] = "text/plain"
             display["artifact"] = artifact; rows[1]["display"] = display
-        } else if let swiftFile = HostedSwiftAppFixtureSource.file(for: scenario) {
-            var display = rows[1]["display"] as! [String: Any]
-            display["kind"] = "code"; display["title"] = swiftFile.name
-            display["altText"] = "\(swiftFile.name), a single-file SwiftUI app"
-            display["eligibleSurfaces"] = ["sheet", "inline"]
-            display["presentation"] = ["requestedSurface": scenario.contains("-inline") ? "inline" : "sheet", "inlineTapAction": "sheet"]
-            if scenario.contains("builds-preview-inline") {
-                display["title"] = "Tron builds"
-                display["caption"] = "Historical preview · Oct 16 snapshot, not live"
-            }
-            var artifact = display["artifact"] as! [String: Any]
-            artifact["kind"] = "code"; artifact["name"] = swiftFile.name; artifact["mimeType"] = "text/plain; charset=utf-8"
-            display["artifact"] = artifact; rows[1]["display"] = display
         } else if scenario.contains("display-video") {
             var display = rows[1]["display"] as! [String: Any]
             display["kind"] = "video"
@@ -196,23 +174,12 @@ private actor ReadonlyAttachmentGateway {
             artifact["kind"] = "video"; artifact["name"] = "fixture.mp4"; artifact["mimeType"] = "video/mp4"
             display["artifact"] = artifact; rows[1]["display"] = display
         }
-        if scenario.contains("install-review") {
-            var calls = rows[0]["content"] as! [[String: Any]]
-            calls[0]["name"] = "swift_app"
-            rows[0]["content"] = calls
-            rows[1]["toolName"] = "swift_app"
-            var display = rows[1]["display"] as! [String: Any]
-            display["title"] = "Builds"
-            display["caption"] = "Review to Install App"
-            rows[1]["display"] = display
-        }
         if !scenario.contains("display-video") {
             displayRows = try! JSONDecoder.gateway.decode([TranscriptItem].self, from: JSONSerialization.data(withJSONObject: rows))
         }
         image = scenario.contains("16bit") ? Self.highDepthImage() : scenario.contains("invalid-image") ? Data("Not an image".utf8) : Self.image(height: 320)
         poison = Self.image(height: 640)
-        file = HostedSwiftAppFixtureSource.file(for: scenario).map { Data($0.source.utf8) }
-            ?? Data((0..<300).map { "Readonly fixture row \($0): preserved native selection and viewport." }.joined(separator: "\n").utf8)
+        file = Data((0..<300).map { "Readonly fixture row \($0): preserved native selection and viewport." }.joined(separator: "\n").utf8)
     }
     @MainActor fileprivate static func image(height: Int) -> Data {
         let format = UIGraphicsImageRendererFormat(); format.scale = 1
@@ -344,7 +311,6 @@ private actor ReadonlyAttachmentGateway {
         return 200 + index * 10
     }
     func handle(_ method: String, params: [String: JSONValue]) -> JSONValue? {
-        if scenario.contains("install-review"), let result = installFixture.handle(method, params: params, source: file) { return result }
         switch method {
         case "session.open":
             opens += 1; publish()

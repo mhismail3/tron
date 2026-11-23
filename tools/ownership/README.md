@@ -120,7 +120,7 @@ checks it in the same pass, and each message names the fix:
   do not count. `--ledger` prints that line.
 - **Tests** sit beside the code they prove: none in the root, `docs/`, `config/`,
   `.agents/` or `.github/`; Swift `*Tests.swift` only in `UITests/`, `E2ETests/`,
-  `ProfilingTests/`, `SwiftAppUITests/` or `Tests/`.
+  `ProfilingTests/`, `ViewTests/` or `Tests/`.
 
 `root` and `scriptsTop` were seeded from the tree that declared them and only
 shrink. An entry with nothing left to allow is stale and must be removed. The CLI

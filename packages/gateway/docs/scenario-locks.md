@@ -203,7 +203,6 @@ Knowledge lock.
 | Learned profile (tagged Knowledge notes, their record entries) | profile change path | `gateway/home` store-home-profile (live) |
 | `workspace/state/episodic/<session>/` | `EpisodicStore` | `gateway/episodic` |
 | `state/display-artifacts/` | `DisplayArtifactStore` | `gateway/display` (live) |
-| `workspace/state/apps/` (manifest, source, SQLite state) | `SwiftAppStore` | `gateway/apps` |
 | `cache/session-search.sqlite` (contentless postings, reuse stamps) | `SessionSearchIndex` | `gateway/session-search` |
 | `state/model-queue.json`, `state/model-queue-sessions/` (children's projection) | `ModelQueueOwner`, read by `projectionSource` | `gateway/providers` store-model-queue |
 | `cache/model-release-dates.json` (models.dev cache) | `ModelReleaseDateCatalog` | `gateway/providers` store-model-release-dates |

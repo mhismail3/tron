@@ -450,12 +450,11 @@ package struct MessageTranscriptItem: TranscriptPayload {
         display = try values.decodeIfPresent(DisplayProjection.self, forKey: .display)
         if let display {
             guard role == .toolResult,
-                  toolName == "display" || (toolName == "agent_browser" && display.kind == .browserLive)
-                    || (toolName == "swift_app" && display.kind == .code && display.artifact?.name.lowercased().hasSuffix(".swift") == true) else {
+                  toolName == "display" || (toolName == "agent_browser" && display.kind == .browserLive) else {
                 throw DecodingError.dataCorruptedError(
                     forKey: .display,
                     in: values,
-                    debugDescription: "Display metadata requires a display result, a Swift app source offer or a live-browser result"
+                    debugDescription: "Display metadata requires a display result or a live-browser result"
                 )
             }
         }

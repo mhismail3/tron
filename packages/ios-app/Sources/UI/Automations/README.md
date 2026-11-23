@@ -13,7 +13,7 @@ The Tron menu and the Automations sheet (list, detail, run detail, create/edit) 
 ## Contract
 
 - **Tron menu.** Sessions is the only dashboard. The Tron logo opens one native menu: Settings;
-  Automations and Apps, each a sheet over the dashboard; New Session. On the Home dashboard
+  Automations and Artifacts, each a sheet over the dashboard; New Session. On the Home dashboard
   the one floating Tron button is Home's: a tap opens the Home chat; a 0.2 s hold
   (`menuHoldDuration`) opens the same menu through a menu-primary sibling button, its only
   presenter: a menu on the touch button adds UIKit's own context-menu hold and opens late without

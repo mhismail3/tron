@@ -9,7 +9,7 @@ it("workspace-state-paths: initialize, mark features, admission and availability
   onTestFinished(() => rm(join(home, ".."), { recursive: true, force: true }));
   const state = join(home, "state", "workspace-state");
   const root = join(home, "workspace");
-  const features: TronWorkspaceFeature[] = ["profile", "episodic", "home-tasks", "apps"];
+  const features: TronWorkspaceFeature[] = ["profile", "episodic", "home-tasks"];
   const opened: TronWorkspace[] = [];
   onTestFinished(async () => { for (const workspace of opened) await workspace.dispose().catch(() => {}); });
   const open = () => {
@@ -35,7 +35,7 @@ it("workspace-state-paths: initialize, mark features, admission and availability
   expect(await availability(first), "initialize a fresh home").toEqual({ describe: available, causes: [] });
   expect(await markers(), "initialization writes only the shared record").toEqual({ "initialized.json": v1 });
   expect(await TronWorkspace.describeExisting(home), "describe the existing workspace").toEqual(available);
-  expect(await initialized(first.workspace), "no feature is initialized").toEqual({ profile: false, episodic: false, "home-tasks": false, apps: false });
+  expect(await initialized(first.workspace), "no feature is initialized").toEqual({ profile: false, episodic: false, "home-tasks": false });
 
   await expect(first.workspace.markFeatureInitialized("home-tasks")).resolves.toBeUndefined();
   expect(await markers()).toEqual({ "home-tasks-initialized.json": v1, "initialized.json": v1 });
@@ -44,11 +44,11 @@ it("workspace-state-paths: initialize, mark features, admission and availability
   await expect(first.workspace.markFeatureInitialized("profile")).resolves.toBeUndefined();
   expect(await markers(), "Profile writes its separate feature record")
     .toEqual({ "home-tasks-initialized.json": v1, "initialized.json": v1, "profile-initialized.json": v1 });
-  expect(await Promise.all([first.workspace.markFeatureInitialized("apps"), first.workspace.markFeatureInitialized("apps")]), "mark apps twice at once")
+  expect(await Promise.all([first.workspace.markFeatureInitialized("episodic"), first.workspace.markFeatureInitialized("episodic")]), "mark episodic twice at once")
     .toEqual([undefined, undefined]);
-  const marked = { "apps-initialized.json": v1, "home-tasks-initialized.json": v1, "initialized.json": v1, "profile-initialized.json": v1 };
+  const marked = { "episodic-initialized.json": v1, "home-tasks-initialized.json": v1, "initialized.json": v1, "profile-initialized.json": v1 };
   expect(await markers()).toEqual(marked);
-  expect(await initialized(first.workspace), "marked features are initialized").toEqual({ profile: true, episodic: false, "home-tasks": true, apps: true });
+  expect(await initialized(first.workspace), "marked features are initialized").toEqual({ profile: true, episodic: true, "home-tasks": true });
   expect(await availability(open()), "a second owner of the same home is unavailable")
     .toEqual({ describe: unavailable("owned_elsewhere"), causes: ["owned-elsewhere"] });
 

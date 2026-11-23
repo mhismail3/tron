@@ -1,5 +1,5 @@
 import { TEST_SETTINGS_SCHEMA } from "./settings-schema.js";
-import { chmod, cp, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -8,7 +8,6 @@ import { SettingsChangePath } from "../src/kernel/settings/settings-change.js";
 import { SettingsModel } from "../src/kernel/settings/settings-model.js";
 import { SettingsChangeRecord } from "../src/kernel/settings/settings-record.js";
 import { TrustService } from "../src/kernel/resources/trust-service.js";
-import { SwiftAppStore } from "../src/modules/apps/swift-app-store.js";
 import { AutomationStore } from "../src/automations/automation-store.js";
 import { HomeOwner } from "../src/modules/home/home-owner.js";
 import { homeTaskPolicy } from "../src/modules/home/home-task-worker-choice.js";
@@ -44,7 +43,6 @@ export const CORPUS_IDS = {
   task: "corpus-task",
   note: "corpus-note",
   source: "corpus-source",
-  app: "corpus-counter",
 };
 
 export interface StoreSpec {
@@ -290,22 +288,6 @@ export const STORES: readonly StoreSpec[] = [
       const tasks = new HomeTaskStore(home, workspace);
       await tasks.initialize();
       return { task: await tasks.read(CORPUS_IDS.task), page: await tasks.page({ limit: 10 }) };
-    }),
-  },
-  {
-    module: "gateway/apps", name: "store-swift-apps",
-    paths: ["workspace/state/apps"],
-    record: (home) => withWorkspace(home, async (workspace) => {
-      const destination = join((await workspace.describe()).root, "state/apps");
-      await cp(join(import.meta.dirname, "../test-fixtures/tron-corpus/home/workspace/state/apps"), destination, { recursive: true });
-      await chmod(destination, 0o700);
-      const directory = join(destination, CORPUS_IDS.app); await chmod(directory, 0o700);
-      for (const name of ["app.json", "App.swift", "data.sqlite"]) await chmod(join(directory, name), 0o600);
-      await workspace.markFeatureInitialized("apps");
-    }),
-    read: (home) => withWorkspace(home, async (workspace) => {
-      const apps = new SwiftAppStore(workspace, () => { throw new Error("The v1 corpus has no display offers"); });
-      return { list: await apps.list(), app: await apps.get(CORPUS_IDS.app), state: await apps.state(CORPUS_IDS.app) };
     }),
   },
   {

@@ -7,7 +7,6 @@
     "two-way ios-app/chat <-> ios-app/presentation",
     "two-way ios-app/chat <-> ios-app/settings",
     "two-way ios-app/chat <-> ios-app/state",
-    "two-way ios-app/chat <-> ios-app/swift-apps",
     "two-way ios-app/onboarding <-> ios-app/settings",
     "two-way ios-app/presentation <-> ios-app/settings",
     "two-way ios-app/presentation <-> ios-app/state",
