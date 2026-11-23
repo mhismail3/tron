@@ -17,13 +17,11 @@ struct HostedIntegrationsFixtureView: View {
     @State private var hasReplacedMCPAuthority = false
     @State private var showingOllamaDetails = false
     private let scenario: String
-    private let dark: Bool
 
     init() {
         let arguments = HostedLaunch.arguments
         let scenario = arguments.drop(while: { $0 != "-integrations-scenario" }).dropFirst().first ?? "mcp-held-add"
         self.scenario = scenario
-        dark = arguments.contains("-ui-dark-mode")
         let gateway = HostedIntegrationsGateway(scenario: scenario)
         _gateway = State(initialValue: gateway)
         let replacementGateway = HostedIntegrationsGateway(scenario: "mcp-replacement")
@@ -85,7 +83,7 @@ struct HostedIntegrationsFixtureView: View {
             } else if let error { Text(error) }
             else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
         }
-        .preferredColorScheme(dark ? .dark : .light)
+        .preferredColorScheme(.light)
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .background:
