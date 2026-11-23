@@ -6,8 +6,8 @@ depends on a checkout path. Tailscale Serve terminates HTTPS with the node's
 *.ts.net certificate and proxies to it; the macOS Tailscale app cannot serve a
 directory itself (sandbox). It binds loopback only, serves files, never lists
 directories, and disables caching so pages always show the newest content.
-`/artifacts/` maps to the internal workspace's artifacts folder; every other
-path maps to the builds folder. Hidden names, traversal and symlinks that
+`/artifacts/` and `/reports/` map to the internal workspace's folders of the
+same names; every other path maps to the builds folder. Hidden names, traversal and symlinks that
 leave their folder are not found.
 """
 
@@ -18,7 +18,8 @@ import posixpath
 import sys
 import urllib.parse
 
-directory, artifacts, port = sys.argv[1], sys.argv[2], int(sys.argv[3])
+directory, artifacts, reports, port = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+mounts = {"/artifacts": artifacts, "/reports": reports}
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -32,8 +33,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def translate_path(self, path):
         route = posixpath.normpath(urllib.parse.unquote(urllib.parse.urlsplit(path).path))
         root = self.directory
-        if route == "/artifacts" or route.startswith("/artifacts/"):
-            root, route = artifacts, route[len("/artifacts"):]
+        for prefix, folder in mounts.items():
+            if route == prefix or route.startswith(prefix + "/"):
+                root, route = folder, route[len(prefix):]
         if "\x00" in route:
             return None
         candidate = os.path.join(root, *[part for part in route.split("/") if part])

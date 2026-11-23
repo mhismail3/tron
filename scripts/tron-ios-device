@@ -23,6 +23,7 @@ LOCKER="$ROOT_DIR/scripts/ios-test-lock.py"
 DEVICE_LEASE_DIR="$HOME/.tron/internal/run"
 SHARE_DIR="$HOME/.tron/workspace/builds/ios-ota"
 ARTIFACTS_DIR="$HOME/.tron/workspace/artifacts"
+REPORTS_DIR="$HOME/.tron/workspace/reports"
 COMPILE_PRODUCTS_ROOT="$HOME/Library/Developer/Tron/ios/device-compile-derived-data"
 SHARE_HTTPS_PORT=8443
 SHARE_BACKEND_PORT=8444
@@ -85,10 +86,10 @@ with Developer Mode on. It keeps the newest 5 builds.
 
 `share-host enable` (once, maintainer-approved) installs the loopback server
 LaunchAgent com.tron.ios-builds (127.0.0.1:8444, serving ~/.tron/workspace/builds/ios-ota
-at / and ~/.tron/workspace/artifacts at /artifacts/) and runs
-`tailscale serve --bg --https=8443 http://127.0.0.1:8444`, so both are reachable
+at /, ~/.tron/workspace/artifacts at /artifacts/ and ~/.tron/workspace/reports at /reports/) and runs
+`tailscale serve --bg --https=8443 http://127.0.0.1:8444`, so all three are reachable
 only from the tailnet at https://<this Mac>.ts.net:8443/ with Tailscale's
-certificate. An existing agent picks up /artifacts/ when enable runs again. `disable` reverses both and keeps the builds;
+certificate. An existing agent picks up a new route when enable runs again. `disable` reverses both and keeps the builds;
 both refuse, changing nothing, when :8443 serves anything else as well.
 USAGE
 }
@@ -564,13 +565,13 @@ share_host_enable() {
     fi
     mkdir -p "$SHARE_DIR" "$HOME/Library/LaunchAgents" "$HOME/.tron/logs"
     python3 - "$SHARE_AGENT_PLIST" "$SHARE_AGENT_LABEL" "$ROOT_DIR/scripts/ios-share-server.py" \
-        "$SHARE_DIR" "$ARTIFACTS_DIR" "$SHARE_BACKEND_PORT" "$HOME/.tron/logs/ios-builds.log" <<'PY'
+        "$SHARE_DIR" "$ARTIFACTS_DIR" "$REPORTS_DIR" "$SHARE_BACKEND_PORT" "$HOME/.tron/logs/ios-builds.log" <<'PY'
 import plistlib, sys
-plist, label, source, directory, artifacts, port, log = sys.argv[1:]
+plist, label, source, directory, artifacts, reports, port, log = sys.argv[1:]
 with open(plist, "wb") as handle:
     plistlib.dump({
         "Label": label,
-        "ProgramArguments": ["/usr/bin/python3", "-c", open(source).read(), directory, artifacts, port],
+        "ProgramArguments": ["/usr/bin/python3", "-c", open(source).read(), directory, artifacts, reports, port],
         "RunAtLoad": True,
         "KeepAlive": True,
         "ProcessType": "Background",
