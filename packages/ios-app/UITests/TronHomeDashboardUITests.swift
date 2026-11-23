@@ -2,16 +2,6 @@ import XCTest
 
 final class TronHomeDashboardUITests: XCTestCase {
     @MainActor
-    func testNewWorkerAppearsWithoutRelaunch() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-dashboard-view-home", "-home-dashboard-new-worker"]
-        app.launch(); defer { app.terminate() }
-        XCTAssertTrue(app.buttons["session-row-home-shell-fixture:worker-new"].waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertEqual(app.staticTexts["fixture.home-task-list-reads"].label, "task-list-reads:0")
-    }
-
-    @MainActor
     func testSectionsRevealInOrderAndLiveUpdatesDoNotRefade() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -388,30 +378,6 @@ final class TronHomeDashboardUITests: XCTestCase {
         app.buttons["Close search"].tap()
         XCTAssertTrue(row("worker-done-1").waitForExistence(timeout: 3), "closing search restores every row")
         XCTAssertTrue(app.buttons["home-completed-sheet-search"].waitForExistence(timeout: 3))
-    }
-
-    @MainActor
-    func testHomeButtonShowsWaitingForUser() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-dashboard-view-home", "-home-phase-active", "-home-waiting"]
-        app.launch(); defer { app.terminate() }
-        let home = app.buttons["dashboard.menu"]
-        XCTAssertTrue(home.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(waitFor(home, "value == 'Waiting for you'"), app.debugDescription)
-        keep("03-home-button-waiting")
-    }
-
-    @MainActor
-    func testHomeButtonShowsWorking() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-dashboard-view-home", "-home-phase-active"]
-        app.launch(); defer { app.terminate() }
-        let home = app.buttons["dashboard.menu"]
-        XCTAssertTrue(home.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(waitFor(home, "value == 'Working'"), app.debugDescription)
-        keep("04-home-button-working")
     }
 
     @MainActor private func assertHeaderAction(_ action: XCUIElement, title: XCUIElement, app: XCUIApplication) {

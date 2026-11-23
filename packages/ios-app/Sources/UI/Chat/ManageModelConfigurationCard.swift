@@ -212,7 +212,9 @@ struct SettingsModelPicker: View {
             },
             set: { ref in
                 guard let ref, selectionAvailability.canSelect else { return }
-                onChoose(.object(["provider": .string(ref.provider), "id": .string(ref.id)]))
+                if ref != selection.wrappedValue {
+                    onChoose(.object(["provider": .string(ref.provider), "id": .string(ref.id)]))
+                }
                 dismiss()
             }
         )

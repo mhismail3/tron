@@ -1369,9 +1369,7 @@ class IosLaneTests(VerifyCase):
         r = self.repo
         products = Path(self.temp.name) / "products"
         calls = Path(self.temp.name) / "ios-calls.txt"
-        (Path(self.temp.name) / "ios-runs").mkdir()
-        r.env.update(TRON_IOS_TEST_DERIVED_DATA=str(products), FIXTURE_IOS_CALLS=str(calls),
-                     TRON_IOS_TEST_RESULTS_DIR=str(Path(self.temp.name) / "ios-runs"))
+        r.env.update(TRON_IOS_TEST_DERIVED_DATA=str(products), FIXTURE_IOS_CALLS=str(calls))
         tooling = json.loads((r.path / "tooling.module.json").read_text())
         tooling["owns"] += ["scripts/tron-ios-test", "scripts/ios-test-lock.py"]
         r.write("tooling.module.json", json.dumps(tooling))
@@ -1424,13 +1422,24 @@ class IosLaneTests(VerifyCase):
     def test_mini_ios_handoff_moves_the_whole_verification_without_nested_lease_or_local_build(self) -> None:
         r = self.repo
         calls = self.ios_fixture()
-        r.write("tools/verify/mini.py", "import json, sys\nif __name__ == '__main__':\n    print(json.dumps(sys.argv[1:]))\n    raise SystemExit(75)\n")
+        r.write("tools/verify/mini.py", "import json, os, sys\nif __name__ == '__main__':\n"
+                "    print(json.dumps([sys.argv[1:], json.loads(os.environ['TRON_IOS_METHOD_SECONDS'])]))\n    raise SystemExit(75)\n")
         r.write("packages/ios-app/Sources/UI/Chat/ChatView.swift", "struct ChatView { let value = 1 }\n")
         r.commit("selected remote iOS work")
+        rows = [{"runId": "r", "testId": test, "commit": "c", "tree": "t", "dirty": 0, "outcome": outcome, "seconds": seconds,
+                 "lane": "swift", "host": "h", "cpuIdlePercent": None, "memoryFreePercent": None, "measuredAt": "m", "seenAt": "s",
+                 "contended": 0} for test, outcome, seconds in (
+                     ("TronMobileUITests/A/testA", "passed", 4.0), ("TronMobileUITests/A/testA", "failed", 9.0),
+                     ("TronSwiftAppUITests/B/testB", "passed", 7.0), ("TronMobileViewTests/C/testC", "skipped", 50.0),
+                     ("TronMacIntegrationTests/MacQuitGatewayTests/restartControl()", "passed", 30.0))]
+        subprocess.run([sys.executable, "-c", f"import json, sys; sys.path.insert(0, {str(ROOT / 'tools/verify')!r}); import ledger; "
+                        f"ledger.append(json.loads({json.dumps(rows)!r}))"], env=r.env, check=True)
         result = r.verify("--changed", "--ios-host", "mini", "--gateway-host", "mini")
         self.assertEqual(result.returncode, 75, result.stdout + result.stderr)
-        self.assertEqual(json.loads(result.stdout), ["verify", "--changed", "--base", r.git("rev-parse", "base"),
-                                                    "--ios-host", "local", "--gateway-host", "local"])
+        self.assertEqual(json.loads(result.stdout), [["verify", "--changed", "--base", r.git("rev-parse", "base"),
+                                                     "--ios-host", "local", "--gateway-host", "local"],
+                                                    {"TronMobileUITests/A/testA": 9.0, "TronSwiftAppUITests/B/testB": 7.0}],
+                         "the handoff carries every iOS target's longest passed or failed timing and nothing else")
         self.assertFalse(calls.exists(), "no iOS build or test runs on the submitting host")
         self.assertFalse((r.path / "test-results/verify").exists(), "the mini owns the report, not an outer local verifier")
 
@@ -2193,9 +2202,9 @@ class IosLaneTests(VerifyCase):
 
     def test_a_class_larger_than_one_shard_runs_every_method_in_bounded_processes_on_concurrent_lanes(self) -> None:
         """#2173: a selected class runs as method shards, each its own runner process under the
-        unchanged deadline, packed by the longest time this Mac's runner logs record for each method
-        (unmeasured methods three to a process). One lane is the default; explicit parallelism
-        preserves selection and deadlines. A red shard does not stop the rest, an unexpected slot
+        unchanged deadline, packed by the longest passed or failed time the test ledger records for each
+        method (unmeasured methods three to a process) and, when that leaves lanes idle, spread across
+        them. One lane is the default; explicit parallelism preserves selection and deadlines. A red shard does not stop the rest, an unexpected slot
         refusal fails, and SIGTERM stops every lane."""
         r = self.repo
         calls = self.ios_fixture()
@@ -2219,8 +2228,8 @@ class IosLaneTests(VerifyCase):
         selectors = lambda names: " ".join(f"--only-testing {owner}/{name}" for name in names)  # noqa: E731
         lane = lambda kind: f"verify-{kind}-" + hashlib.sha256(str(r.path.resolve()).encode()).hexdigest()[:12]  # noqa: E731
 
-        def planned_shards() -> list[str]:
-            planned = r.verify("--module", "ios-app/ui-tests", "--plan")
+        def planned_shards(*jobs: str) -> list[str]:
+            planned = r.verify("--module", "ios-app/ui-tests", "--plan", *jobs)
             plan = json.loads(planned.stdout[planned.stdout.index("{"):])
             return [" ".join(c["command"][2:]) for c in plan["commands"] if c["name"].startswith("tests: ios") and "command" in c]
 
@@ -2296,28 +2305,36 @@ class IosLaneTests(VerifyCase):
         self.assertEqual(locks, [f"run --lane {lane('iphone2')} --only-testing {lock}"])
         self.assertNotIn("requeued", refused.stdout)
 
-        results = Path(self.temp.name) / "ios-runs"
-        case = lambda name, outcome, seconds: f"Test Case '-[TronMobileUITests.FixtureJourneyUITests {name}]' {outcome} ({seconds} seconds).\n"  # noqa: E731
-        (results / "a-run.1").mkdir()
-        (results / "a-run.1/test.log").write_text(case(ordered[0], "passed", "0.5") + case(ordered[1], "passed", "0.5")
-                                                 + case(ordered[2], "passed", shipped.IOS_SHARD_SECONDS + 100))
-        (results / "b-run.2").mkdir()
-        (results / "b-run.2/test.log").write_text(case(ordered[1], "failed", shipped.IOS_SHARD_SECONDS) + case(ordered[3], "passed", "0.5"))
+        store = Path(r.env["HOME"]) / ".tron-maintenance/test-ledger/results.sqlite3"
+
+        def measured(*cases: tuple[str, str, float]) -> None:
+            store.unlink(missing_ok=True)
+            rows = [{"runId": "r", "testId": f"{owner}/{name}", "commit": "c", "tree": "t", "dirty": 0, "outcome": outcome,
+                     "seconds": seconds, "lane": "swift", "host": "h", "cpuIdlePercent": None, "memoryFreePercent": None,
+                     "measuredAt": "m", "seenAt": "s", "contended": 0} for name, outcome, seconds in cases]
+            subprocess.run([sys.executable, "-c", f"import json, sys; sys.path.insert(0, {str(ROOT / 'tools/verify')!r}); import ledger; "
+                            f"ledger.append(json.loads({json.dumps(rows)!r}))"], env=r.env, check=True)
+        measured((ordered[0], "passed", 0.5), (ordered[1], "passed", 0.5), (ordered[2], "passed", shipped.IOS_SHARD_SECONDS + 100),
+                 (ordered[1], "failed", shipped.IOS_SHARD_SECONDS), (ordered[3], "passed", 0.5), (ordered[4], "skipped", 1000))
         self.assertEqual(planned_shards(), [f"{selectors(ordered[:1])}",
                                             f"{selectors(ordered[1:2])}",
                                             f"{selectors(ordered[2:3])}",
                                             f"{selectors(ordered[3:])}",
                                             f"--only-testing {lock}"])
+        measured(*((name, "passed", 10) for name in ordered))
+        self.assertEqual(planned_shards(), [f"{selectors(ordered)}", f"--only-testing {lock}"])
+        self.assertEqual(planned_shards("--ios-jobs", "3"), [f"{selectors(ordered[:3])}", f"{selectors(ordered[3:])}",
+                                                             f"--only-testing {lock}"],
+                         "measured methods fill every lane the whole-class shard leaves free")
         calls.write_text("")
         r.env.update(FIXTURE_IOS_BUSY_IN="")
         refused = r.verify("--module", "ios-app/ui-tests", "--skip", "mac")
         self.assertEqual(refused.returncode, 1, refused.stdout + refused.stderr)
         self.assertEqual(r.report()["verdict"], "failed", refused.stdout)
         self.assertEqual({step["status"] for step in r.report()["steps"] if step["name"].startswith("tests: ios")}, {"failed"})
-        self.assertEqual(len([step for step in r.report()["steps"] if step["name"].startswith("tests: ios")]), 5)
+        self.assertEqual(len([step for step in r.report()["steps"] if step["name"].startswith("tests: ios")]), 2)
         r.env.pop("FIXTURE_IOS_BUSY"); r.env.pop("FIXTURE_IOS_BUSY_IN")
-        for item in results.iterdir():
-            shutil.rmtree(item)
+        store.unlink()
 
         pids = Path(self.temp.name) / "pids.txt"
         calls.write_text("")
