@@ -192,6 +192,9 @@ runpy.run_path(sys.argv.pop(1), run_name='__main__')
         (artifacts / "2026-11-23_status" / ".secret").write_text("hidden")
         (tmp / "workspace" / "private.txt").write_text("outside artifacts")
         (artifacts / "2026-11-23_escape").symlink_to(tmp / "workspace")
+        (artifacts / "2026-11-23_status" / ".private").mkdir()
+        (artifacts / "2026-11-23_status" / ".private" / "note.txt").write_text("hidden folder")
+        (artifacts / "2026-11-23_status" / "public").symlink_to(artifacts / "2026-11-23_status" / ".private")
         server_log = served.parent / "share-server.log"
         with server_log.open("w") as server_errors:
             server = subprocess.Popen([sys.executable, str(SERVER), str(served), str(artifacts), str(port)], stderr=server_errors)
@@ -225,9 +228,12 @@ runpy.run_path(sys.argv.pop(1), run_name='__main__')
             check(artifact == b"<title>status artifact</title>" and artifact_type.startswith("text/html"),
                   "an artifact folder's index.html is served under /artifacts/<name>/")
             check(status(local + "/artifacts/") == 404, "the artifacts folder is never listed")
-            check(status(local + "/artifacts/2026-11-23_status/.secret") == 404, "hidden artifact files are not served")
-            check(status(local + "/artifacts/2026-11-23_escape/private.txt") == 404
-                  and status(local + "/artifacts/..%2fprivate.txt") == 404, "symlinks and traversal cannot leave the artifacts folder")
+            check(status(local + "/artifacts/2026-11-23_status/.secret") == 404
+                  and status(local + "/artifacts/2026-11-23_status/public/note.txt") == 404,
+                  "hidden artifact files are not served, directly or through a symlink")
+            check(status(local + "/artifacts/2026-11-23_escape/private.txt") == 404,
+                  "a symlink cannot leave the artifacts folder")
+            check(status(local + "/artifacts/2026-11-23_status/%00") == 404, "a NUL in the path is not found")
             for link in links:
                 url = manifest_url(link)
                 parsed = urllib.parse.urlparse(url)

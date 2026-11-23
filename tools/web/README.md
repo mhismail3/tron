@@ -68,7 +68,7 @@ color-independent status. Check actual composited contrast, not swatches alone.
    static-server script against **only this fixture**, on an unused loopback port:
 
    ```sh
-   python3 scripts/ios-share-server.py "$PWD/build/web-preview/ios-builds/review-1" 8765
+   python3 scripts/ios-share-server.py "$PWD/build/web-preview/ios-builds/review-1" "$PWD/build/web-preview/artifacts" 8765
    ```
 
    Open `http://127.0.0.1:8765/`. This is a foreground disposable preview, not

@@ -71,7 +71,7 @@ notification inbox.
   in-flight same-profile reconnect at transport activation. A tap on the chapter the Gateway's
   `home.status` names opens Home itself, which sends through `home.prompt`. A tap for the presented
   conversation keeps that chat; any other target mounts only after the presented chat retires, so
-  its restoring open never contends with the target. A tap from Automations or Apps switches
+  its restoring open never contends with the target. A tap from Automations or Artifacts switches
   to Sessions first. A background or cold tap is held in memory only, never persisted.
 - **Inbox.** `notification-inbox.v1`. `NotificationInboxCoordinator` keeps a bounded projection of
   two server windows per profile (`all`, `unread`, the latter the server's own page), merges

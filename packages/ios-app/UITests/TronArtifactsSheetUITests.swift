@@ -24,7 +24,6 @@ final class TronArtifactsSheetUITests: XCTestCase {
         let host = ProcessInfo.processInfo.environment["TRON_ARTIFACTS_BASE_URL"].flatMap { URL(string: $0)?.host } ?? "mac.example.ts.net"
         XCTAssertTrue(app.descendants(matching: .any).containing(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", host, host))
             .firstMatch.waitForExistence(timeout: 15), app.debugDescription)
-        Thread.sleep(forTimeInterval: 2)
         keepScreenshot(app, "artifacts-open-artifact")
     }
 

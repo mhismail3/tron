@@ -45,13 +45,6 @@ lock_owner="$repo_root/scripts/ios-test-lock.py"
 die() { echo "error: $*" >&2; exit 1; }
 
 ui_owned_journeys=(
-  'TronMobileUITests/RealGatewayPairAndChatUITests/testPendingAppReviewInstallLight'
-  'TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallLight'
-  'TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallLightXXXL'
-  'TronMobileUITests/RealGatewayPairAndChatUITests/testCaptureAppsAndManageDark'
-  'TronMobileUITests/RealGatewayPairAndChatUITests/testRefusedSaveAfterAnAppUpdateIsShownAndKeptUntilDiscarded'
-  'TronMobileUITests/RealGatewayPairAndChatUITests/testManageRenamesClearsDataAndRemovesOnlyAfterConfirmation'
-  'TronMobileUITests/RealGatewayPairAndChatUITests/testTronMenuListsInstalledAppAndKeepsItsValuesAcrossReopen'
   'TronMobileUITests/RealGatewayPairAndChatUITests/testHomeAutomationEditorAndAttributedMessageLight'
   "TronMobileUITests/RealGatewayPairAndChatUITests/testHomeStatusShowsHostPressureAndWorkers"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground"
@@ -83,7 +76,7 @@ ui_journey_is_owned() {
 ui_journey_connections() {
   case "$1" in
     *testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground) echo "2 yes" ;;
-    *testPendingAppReviewInstallLight|*testHomeStatusShowsHostPressureAndWorkers|*testTronMenuListsInstalledAppAndKeepsItsValuesAcrossReopen|*testRefusedSaveAfterAnAppUpdateIsShownAndKeptUntilDiscarded|*testManageRenamesClearsDataAndRemovesOnlyAfterConfirmation|*testCaptureAppsAndManageDark|*testBuildsInstallLight|*testBuildsInstallLightXXXL) echo "1 no" ;;
+    *testHomeStatusShowsHostPressureAndWorkers) echo "1 no" ;;
     *testGatewayRestartWaitsForLiveWorkThenRestartsIdleAndReconnects) echo "3 yes" ;;
     *testForegroundAndReconnectKeepSheetsAndTheirContent|*testProviderLoginSurvivesSafariAndReconnect|*testStreamedReplyAppearsExactlyOnceAcrossReconnect) echo "2 yes" ;;
     *) echo "0 no" ;;

@@ -4611,7 +4611,7 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
 
     def three_ui_journeys(self) -> list[str]:
         return [*self.owned_ui_journeys(),
-                "TronMobileUITests/RealGatewayPairAndChatUITests/testPendingAppReviewInstallLight"]
+                "TronMobileUITests/RealGatewayPairAndChatUITests/testHomeStatusShowsHostPressureAndWorkers"]
 
     def ui_runs(self, environment: dict[str, str]) -> list[dict[str, Any]]:
         return [entry for entry in self.xcodebuild_invocations(environment) if entry["action"] == "run"]

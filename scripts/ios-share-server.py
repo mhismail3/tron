@@ -34,12 +34,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         root = self.directory
         if route == "/artifacts" or route.startswith("/artifacts/"):
             root, route = artifacts, route[len("/artifacts"):]
-        parts = [part for part in route.split("/") if part]
-        if any(part.startswith(".") for part in parts):
+        if "\x00" in route:
             return None
-        candidate = os.path.join(root, *parts)
-        real_root = os.path.realpath(root)
-        if os.path.commonpath([real_root, os.path.realpath(candidate)]) != real_root:
+        candidate = os.path.join(root, *[part for part in route.split("/") if part])
+        real_root, real = os.path.realpath(root), os.path.realpath(candidate)
+        if os.path.commonpath([real_root, real]) != real_root:
+            return None
+        if any(part.startswith(".") for part in os.path.relpath(real, real_root).split(os.sep) if part != "."):
             return None
         return candidate + "/" if path.split("?", 1)[0].endswith("/") else candidate
 

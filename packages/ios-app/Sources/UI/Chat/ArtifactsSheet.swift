@@ -38,7 +38,6 @@ struct ArtifactsSheet: View {
                                                        timestamp: artifact.date, accessibilityHint: "Opens the artifact. Touch and hold to open it in Safari."),
                                     identifier: "artifact-row-\(artifact.name)", action: { opened = artifact }
                                 ) {
-                                    Button("Open", systemImage: "doc.richtext") { opened = artifact }
                                     Button("Open in Safari", systemImage: "safari") { openURL(artifact.url) }
                                 }
                             }
