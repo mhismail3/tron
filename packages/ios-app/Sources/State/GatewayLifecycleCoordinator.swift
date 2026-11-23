@@ -104,6 +104,7 @@ final class GatewayLifecycleCoordinator {
     @ObservationIgnored private var reconnectAttemptInFlightLoop: String?
     @ObservationIgnored private var reconnectLoopID: String?
     private var connectionAdmissionTask: Task<Void, Never>?
+    @ObservationIgnored private var retryRequestedDuringConnect = false
     private var connectionAdmissionGeneration = 0
     private var reconnectAttemptGeneration = 0
     private var reconnectCanBeAccelerated = false
@@ -630,18 +631,21 @@ final class GatewayLifecycleCoordinator {
 
     func retryReconnect() {
         guard phase.admitsWork, !sceneIsBackgrounded,
-              reconnectTask == nil || reconnectCanBeAccelerated,
-              connectionAdmissionTask == nil,
-              committedConnectionTask == nil,
               foregroundReconciliationTask == nil,
               deferredProjectionTask == nil,
               backgroundRetirementTask == nil,
               let profile = profiles.selected, case .token(let token) = readToken(profile) else { return }
-        nonRetryableRecoveryFailure = false
         if reconnectTask != nil, reconnectCanBeAccelerated {
+            nonRetryableRecoveryFailure = false
             reconnectSchedule.accelerate()
             return
         }
+        if connectionAdmissionTask != nil || committedConnectionTask != nil {
+            retryRequestedDuringConnect = true
+            return
+        }
+        guard reconnectTask == nil else { return }
+        nonRetryableRecoveryFailure = false
         cancelReconnect()
         continueCommittedConnection(profile: profile, token: token, generation: phase.generation)
     }
@@ -916,6 +920,7 @@ final class GatewayLifecycleCoordinator {
         let connectAttemptGeneration = connectionAdmissionGeneration
         let failurePresentationGeneration = connectionFailureClassifier.beginAttempt()
         activatedConnectionID = nil
+        retryRequestedDuringConnect = false
         connectionState = .connecting
         let attemptStartedAt = clock.now()
         let diagnosticSequence = await client.latestDiagnosticSequence()
@@ -1034,7 +1039,8 @@ final class GatewayLifecycleCoordinator {
                 ) {
                     delegate?.lifecycleConnectionFailurePresentationDidChange()
                 }
-                scheduleReconnect()
+                scheduleReconnect(immediate: retryRequestedDuringConnect)
+                retryRequestedDuringConnect = false
             }
         }
     }
