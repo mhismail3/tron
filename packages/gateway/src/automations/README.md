@@ -108,8 +108,8 @@ uses those same identity codecs as the scheduler, executor and cold catalog.
 - **`schedule` tool** targets its own persisted session, a new session in its
   workspace, or `home` for an attributed Home message, and dedupes by tool-call identity. One tool authority check uses live session profile
   and delegated-worker facts: Home mutates without confirmation, delegated workers
-  (including their subagents) cannot mutate, and ordinary interactive sessions retain
-  their UI confirmation. A trigger grants no approval authority. Paired credentials are machine-administrator
+  (including their subagents) cannot mutate, and ordinary sessions retain
+  their UI confirmation on every turn, automation-originated included. A trigger grants no approval authority. Paired credentials are machine-administrator
   credentials, so any paired client may manage any automation. Read-only `show` with
   `automationId` and `runId` returns the immutable run snapshot’s prompt or notification
   text as model-visible JSON pages (`offset`/`limit` in UTF-8 bytes, maximum 4096;
