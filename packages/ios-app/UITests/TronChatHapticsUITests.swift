@@ -55,17 +55,6 @@ final class TronChatHapticsUITests: XCTestCase {
         assertHaptics(app, expected, "a stopped run plays no completion")
     }
 
-    @MainActor func testAttachmentTicksAreOnePerPhotoAndCapped() {
-        continueAfterFailure = false
-        for (photos, ticks) in [(1, 1), (9, 6)] {
-            let app = launch(photos: photos); defer { app.terminate() }
-            paste(app, into: openComposer(app))
-            let expected = Array(repeating: "attachmentAdded", count: ticks).joined(separator: ",")
-            XCTAssertTrue(waitHaptics(app, expected), "\(photos) photo(s): \(haptics(app))")
-            assertHaptics(app, expected, "\(photos) photo(s) tick \(ticks) time(s)")
-        }
-    }
-
     @MainActor func testRestoredAndBackgroundEventsPlayNone() {
         continueAfterFailure = false
         let app = launch(photos: 0, ["-chat-haptics-history"]); defer { app.terminate() }

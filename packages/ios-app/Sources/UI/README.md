@@ -162,7 +162,8 @@ scripts/tron-ios-test run \
 packages/ios-app/scripts/test-source-policy.sh
 scripts/tron-ios-test run --only-testing TronMobileUITests/TronChatHapticsUITests \
   --only-testing TronMobileUITests/TronInteractionHapticsUITests \
-  --only-testing TronMobileUITests/TronSubsheetReliabilityUITests
+  --only-testing TronMobileUITests/TronSubsheetReliabilityUITests \
+  --only-testing TronMobileViewTests/ChatHapticsViewTests
 ```
 
 The loading journey samples rendered material, not accessibility geometry; the paged-list journey
