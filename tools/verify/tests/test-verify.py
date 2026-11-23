@@ -1422,13 +1422,24 @@ class IosLaneTests(VerifyCase):
     def test_mini_ios_handoff_moves_the_whole_verification_without_nested_lease_or_local_build(self) -> None:
         r = self.repo
         calls = self.ios_fixture()
-        r.write("tools/verify/mini.py", "import json, sys\nif __name__ == '__main__':\n    print(json.dumps(sys.argv[1:]))\n    raise SystemExit(75)\n")
+        r.write("tools/verify/mini.py", "import json, os, sys\nif __name__ == '__main__':\n"
+                "    print(json.dumps([sys.argv[1:], json.loads(os.environ['TRON_IOS_METHOD_SECONDS'])]))\n    raise SystemExit(75)\n")
         r.write("packages/ios-app/Sources/UI/Chat/ChatView.swift", "struct ChatView { let value = 1 }\n")
         r.commit("selected remote iOS work")
+        rows = [{"runId": "r", "testId": test, "commit": "c", "tree": "t", "dirty": 0, "outcome": outcome, "seconds": seconds,
+                 "lane": "swift", "host": "h", "cpuIdlePercent": None, "memoryFreePercent": None, "measuredAt": "m", "seenAt": "s",
+                 "contended": 0} for test, outcome, seconds in (
+                     ("TronMobileUITests/A/testA", "passed", 4.0), ("TronMobileUITests/A/testA", "failed", 9.0),
+                     ("TronSwiftAppUITests/B/testB", "passed", 7.0), ("TronMobileViewTests/C/testC", "skipped", 50.0),
+                     ("TronMacIntegrationTests/MacQuitGatewayTests/restartControl()", "passed", 30.0))]
+        subprocess.run([sys.executable, "-c", f"import json, sys; sys.path.insert(0, {str(ROOT / 'tools/verify')!r}); import ledger; "
+                        f"ledger.append(json.loads({json.dumps(rows)!r}))"], env=r.env, check=True)
         result = r.verify("--changed", "--ios-host", "mini", "--gateway-host", "mini")
         self.assertEqual(result.returncode, 75, result.stdout + result.stderr)
-        self.assertEqual(json.loads(result.stdout), ["verify", "--changed", "--base", r.git("rev-parse", "base"),
-                                                    "--ios-host", "local", "--gateway-host", "local"])
+        self.assertEqual(json.loads(result.stdout), [["verify", "--changed", "--base", r.git("rev-parse", "base"),
+                                                     "--ios-host", "local", "--gateway-host", "local"],
+                                                    {"TronMobileUITests/A/testA": 9.0, "TronSwiftAppUITests/B/testB": 7.0}],
+                         "the handoff carries every iOS target's longest passed or failed timing and nothing else")
         self.assertFalse(calls.exists(), "no iOS build or test runs on the submitting host")
         self.assertFalse((r.path / "test-results/verify").exists(), "the mini owns the report, not an outer local verifier")
 

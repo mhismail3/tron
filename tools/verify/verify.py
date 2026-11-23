@@ -527,11 +527,13 @@ class IosShard(list):
 
 
 def ios_method_seconds() -> dict[str, float]:
-    """`Target/Class/testMethod` to the longest passed or failed run the caller's test ledger records for it; on the
-    mini, that map arrives with the job (TRON_IOS_METHOD_SECONDS). An estimate for packing only: it never selects,
+    """`Target/Class/testMethod` of the iOS test targets to the longest passed or failed run the caller's test ledger
+    records for it; a verification handed to the mini carries that map with its job (TRON_IOS_METHOD_SECONDS). An estimate for packing only: it never selects,
     skips or judges a test."""
     carried = os.environ.get("TRON_IOS_METHOD_SECONDS")
-    return json.loads(carried) if carried is not None else ledger.method_seconds("swift")
+    if carried is not None:
+        return json.loads(carried)
+    return {test: value for test, value in ledger.method_seconds("swift").items() if test.split("/")[0] in IOS_TARGETS.values()}
 
 
 def ios_pack(methods: list[str], seconds: dict[str, float], lanes: int) -> list[IosShard]:
@@ -1405,6 +1407,7 @@ def main(argv: list[str]) -> int:
         ancestor = git("merge-base", base, "HEAD").strip()
         command = [sys.executable, str(ROOT / "tools/verify/mini.py"), "verify", *forwarded,
                    "--base", ancestor, "--ios-host", "local", "--gateway-host", "local"]
+        os.environ["TRON_IOS_METHOD_SECONDS"] = json.dumps(ios_method_seconds())
         os.execv(sys.executable, command)
     gateway_touched = (name == "all" and any(key.startswith("gateway/") for key in modules)) or any(key.startswith("gateway/") for key in selection["modules"]) \
         or any(path.startswith(f"{GATEWAY}/") for path in selection["tests"])
