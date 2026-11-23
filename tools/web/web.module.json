@@ -5,6 +5,6 @@
     "**"
   ],
   "verify": [
-    "python3 scripts/test-tron-ios-device-share.py"
+    "scripts/tron test tooling scripts/test-tron-ios-device-share.py"
   ]
 }

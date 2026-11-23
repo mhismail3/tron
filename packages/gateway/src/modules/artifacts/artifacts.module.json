@@ -5,7 +5,7 @@
   ],
   "verify": [
     "scripts/tron test gateway src/modules/artifacts/artifacts.integration.test.ts",
-    "python3 scripts/test-tron-ios-device-share.py"
+    "scripts/tron test tooling scripts/test-tron-ios-device-share.py"
   ],
   "dependsOn": [
     "gateway/foundation",
