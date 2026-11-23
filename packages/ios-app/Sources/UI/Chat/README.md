@@ -143,7 +143,7 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   `ChatCompactPillSurface` enforces interactive Liquid Glass, with semantic red tint and stronger
   error ink; only non-tappable informational pills may retain a flat surface.
   The existing transcript notification route keeps its sheet live above lazy rows.
-  `ChatDetailSheet`, shared with nested tool details, owns navigation/Done, medium/large detents,
+  `ChatDetailSheet`, shared with nested tool details, owns navigation/Done, content-fit sizing,
   top chrome and insets. Single errors and runs share one layout of themed standard groups: a
   summary row (runs: totals and first/last times, then the Breakdown list), then per occurrence, newest
   first and always visible, a details group (model, type, time, request ID, HTTP status rows) and

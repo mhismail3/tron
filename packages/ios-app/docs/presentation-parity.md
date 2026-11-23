@@ -74,8 +74,8 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   [Presentation-scoped state](#presentation-scoped-state).
 - **Sheet direction.** All progressive disclosure (pickers, skill/command containers, custom chat
   UI, default sheets) moves to one generic content-sized custom sheet, built ground-up as the
-  managed-sheet owner. Until it lands, managed sheets keep the medium/large detents below
-  (`TronPadSheetMode` on iPadOS 27); a surface never gets its own sheet patch.
+  managed-sheet owner. Until it lands, every managed sheet is sized by `tronContentFitSheet`
+  (see Detents; `TronPadSheetMode` on iPadOS 27); a surface never gets its own sheet patch.
 - **Presentation haptics.** Managed sheets (including nested sheets)
   and system pickers play one medium, full-intensity impact through `TronHaptics`, respecting System Haptics.
   Semantic interaction patterns and exclusions are in the [UI haptic map](../Sources/UI/README.md#haptic-map).
@@ -94,8 +94,7 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 - **Info.** Every sheet with technical or metadata details opens them from the top-leading
   `TronSheetInfoButton`.
 - **Documents.** Document-style sheets use `TronDocumentSheet` (`TronSheetTitle`/Done, shared top chrome,
-  hidden drag indicator, `tronPresentation`); an explicit initial detent keeps the other detents
-  draggable. Content that owns its own stacks passes `hostsNavigation: false` and applies
+  `tronPresentation`). Content that owns its own stacks passes `hostsNavigation: false` and applies
   `tronDocumentSheetChrome` at each stack root, never nesting a second NavigationStack.
 - **Top blur.** One shared backdrop with a continuous proportional fade, never a solid band;
   `TronTopBlurStyle` owns the depths, radius and adaptive tint. `tronTopBlurSurface` attaches it
@@ -114,15 +113,25 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   `tronSheetContentLoading`, hiding every `tronScrollEdgeChrome` scroll view (title and Done stay
   usable). The pulse leaves without a fade and content fades and rises 8 points with
   `ChatMotion.transcriptViewReveal` (Reduce Motion: fade only). Owners request it only while they
-  have no content, so cached or refreshed content is never hidden or replayed. Non-scroll sheets
+  have no content, so cached or refreshed content is never hidden or replayed. A sheet whose
+  structure is known (Manage Home) lays out every card at once and renders values still loading
+  with the shared `TronLoadingPlaceholder` (the dashboard Usage skeleton) instead. Non-scroll sheets
   (media, terminal, camera) keep their own preparation surfaces.
 - **Chat details.** Provider-error and nested tool-call details reuse `ChatDetailSheet` for
   navigation, Done, top chrome, insets and detents. Single errors and runs share one layout of
   standard groups: a summary row, then per occurrence (newest first) a details group (model, type,
   time, request ID, HTTP status rows) and a Message group with the full selectable text; runs add
   the Breakdown list. No disclosures or a lone container.
-- **Detents.** Progressive and Home sub-sheets open at medium and drag to large; a presentation's
-  managed scope owns its chosen detent, so refreshes and child round trips do not reset it.
+- **Detents.** The managed-sheet presenter applies `tronContentFitSheet` once; no surface sets
+  detents. Each `tronScrollEdgeChrome` scroll that carries a sheet inset reports its top inset plus
+  content height (never its bottom inset, which animates while a sheet presents), and the sheet
+  takes one `.height` detent at that size, or `.large` when it overflows, at accessibility text
+  sizes or with the keyboard up. While a `TronSheetLoadingState` is shown the sheet holds its last
+  settled height (medium before the first), so it opens at its final size; genuine changes after
+  appearance animate with `.smooth` (none under Reduce Motion). The drag indicator is hidden.
+  Scrolls that fill their viewport (`TronFeedEmptyState`) or are nested opt out through
+  `tronSheetMeasuresContent`. `ContentFitSheetViewTests` samples the presented frame per display
+  frame and fails on any overshoot or post-open move.
 - **iPad sheets.** On iPadOS 27 `TronPadSheetMode` replaces every managed sheet's detents (iPhone
   and earlier iPadOS keep them). A scene at least 1100 pt wide (every full-screen landscape iPad)
   shows a full-height 420 pt trailing column without dimming; the scene or route surface that
