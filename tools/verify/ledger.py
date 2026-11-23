@@ -62,6 +62,16 @@ def append(records: list[dict]) -> None:
         connection.executemany('INSERT INTO results VALUES (:runId, :testId, :commit, :tree, :dirty, :outcome, :seconds, :lane, :host, :cpuIdlePercent, :memoryFreePercent, :measuredAt, :seenAt, :contended)', records)
 
 
+def method_seconds(lane: str) -> dict[str, float]:
+    """Each test in `lane` to its longest recorded passed or failed run."""
+    connection = database()
+    if connection is None:
+        return {}
+    with closing(connection):
+        return {row[0]: round(row[1], 1) for row in connection.execute(
+            "SELECT test_id, MAX(seconds) FROM results WHERE lane = ? AND outcome IN ('passed', 'failed') GROUP BY test_id", (lane,))}
+
+
 def append_rows(rows: list[list]) -> None:
     if rows:
         with closing(database(write=True)) as connection, connection:

@@ -58,8 +58,6 @@ IOS_DEADLINE_SECONDS = 1200
 IOS_LAUNCH_SECONDS = 60
 IOS_SHARD_SECONDS = (IOS_DEADLINE_SECONDS - IOS_LAUNCH_SECONDS) / 2
 IOS_UNMEASURED_SECONDS = IOS_SHARD_SECONDS / 3
-IOS_RESULTS_ROOT = Path(os.environ.get("TRON_IOS_TEST_RESULTS_DIR") or Path.home() / "Library/Developer/Tron/ios/test-runs")
-IOS_CASE_LINE = re.compile(rb"^Test Case '-\[(\w+)\.(\w+) (\w+)\]' (?:passed|failed) \((\d+(?:\.\d+)?) seconds\)", re.M)
 IOS_PAD_GATE = re.compile(r"XCTSkipUnless\(\s*UIDevice\.current\.userInterfaceIdiom\s*==\s*\.pad\b")
 IOS_PAD_DEVICE_TYPE = "iPad Pro 13-inch (M5)"
 
@@ -528,47 +526,52 @@ class IosShard(list):
     seconds = 0.0
 
 
-def ios_method_seconds(results: Path = IOS_RESULTS_ROOT) -> dict[str, float]:
-    """`Target/Class/testMethod` to the longest it took in any runner log under `results`. An
-    estimate for packing only: it never selects, skips or judges a test."""
-    longest: dict[str, float] = {}
-    try:
-        entries = list(os.scandir(results))
-    except OSError:
-        return longest
-    for entry in entries:
-        try:
-            text = (Path(entry.path) / "test.log").read_bytes()
-        except OSError:
-            continue
-        for target, owner, method, seconds in IOS_CASE_LINE.findall(text):
-            key = f"{target.decode()}/{owner.decode()}/{method.decode()}"
-            longest[key] = max(longest.get(key, 0.0), float(seconds))
-    return longest
+def ios_method_seconds() -> dict[str, float]:
+    """`Target/Class/testMethod` to the longest passed or failed run the caller's test ledger records for it; on the
+    mini, that map arrives with the job (TRON_IOS_METHOD_SECONDS). An estimate for packing only: it never selects,
+    skips or judges a test."""
+    carried = os.environ.get("TRON_IOS_METHOD_SECONDS")
+    return json.loads(carried) if carried is not None else ledger.method_seconds("swift")
 
 
-def ios_shards(selectors: list[str], seconds: dict[str, float]) -> list[IosShard]:
-    """The selected classes' test methods in selection order, iPhone methods first, then iPad-only
-    methods in their own shards, cut into consecutive runs whose estimates (`seconds`, else
-    IOS_UNMEASURED_SECONDS) fit IOS_SHARD_SECONDS; a method estimated above it runs alone. Classes
-    whose methods cannot be read run whole, together, in one final shard."""
+def ios_pack(methods: list[str], seconds: dict[str, float], lanes: int) -> list[IosShard]:
+    """Consecutive runs of `methods` whose estimates fit IOS_SHARD_SECONDS; when that leaves fewer runs than
+    `lanes`, the smallest bound that still cuts at most `lanes` runs, so the lanes finish together."""
+    estimates = [seconds.get(method, IOS_UNMEASURED_SECONDS) for method in methods]
+
+    def cut(bound: float) -> list[IosShard]:
+        shards: list[IosShard] = []
+        for method, estimate in zip(methods, estimates):
+            if not shards or shards[-1].seconds + estimate > bound:
+                shards.append(IosShard())
+            shards[-1].append(method)
+            shards[-1].seconds += estimate
+        return shards
+    shards = cut(IOS_SHARD_SECONDS)
+    low, high = max(estimates, default=0.0), IOS_SHARD_SECONDS
+    if len(shards) >= lanes or low >= high:
+        return shards
+    for _ in range(40):
+        middle = (low + high) / 2
+        low, high = (low, middle) if len(cut(middle)) <= lanes else (middle, high)
+    return cut(high)
+
+
+def ios_shards(selectors: list[str], seconds: dict[str, float], lanes: int) -> list[IosShard]:
+    """The selected classes' test methods in selection order, iPhone methods first packed for `lanes` phone lanes,
+    less the one a whole-class shard takes, then iPad-only methods packed for the one iPad lane (`ios_pack`, estimates
+    from `seconds`, else IOS_UNMEASURED_SECONDS; a method estimated above IOS_SHARD_SECONDS runs alone). Classes whose
+    methods cannot be read run whole, together, in one final shard."""
     methods, pad_methods, whole = [], [], []
     for owner in selectors:
         found, pad = ios_test_methods(owner)
         methods += [method for method in found if method not in pad]
         pad_methods += [method for method in found if method in pad]
         whole += [] if found else [owner]
-    shards: list[IosShard] = []
-    for group, is_pad in ((methods, False), (pad_methods, True)):
-        shard = None
-        for method in group:
-            estimate = seconds.get(method, IOS_UNMEASURED_SECONDS)
-            if shard is None or (shard and shard.seconds + estimate > IOS_SHARD_SECONDS):
-                shard = IosShard()
-                shard.pad = is_pad
-                shards.append(shard)
-            shard.append(method)
-            shard.seconds += estimate
+    shards = ios_pack(methods, seconds, max(1, lanes - bool(whole)))
+    for shard in ios_pack(pad_methods, seconds, 1):
+        shard.pad = True
+        shards.append(shard)
     if whole:
         shards.append(IosShard(whole))
         shards[-1].seconds = IOS_SHARD_SECONDS
@@ -1373,7 +1376,7 @@ def main(argv: list[str]) -> int:
                     validate_profile_methods(files)
         boundaries = boundary_selectors(groups.get("ios-boundary", [])) if "ios" not in skip else []
         selectors = ios_selectors(groups.get("ios", [])) if "ios" not in skip else []
-        shards = ios_shards(selectors, ios_method_seconds() if selectors else {})
+        shards = ios_shards(selectors, ios_method_seconds() if selectors else {}, args.ios_jobs)
         journey_paths = groups.get("ios-journeys", [])
         journey_base = base if name == "changed" and all(
             is_doc(path) or path in journey_paths or path == JOURNEY_HARNESS for path in selection["paths"]) else None
