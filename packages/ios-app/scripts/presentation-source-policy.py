@@ -19,7 +19,6 @@ import re
 import sys
 
 OWNER = pathlib.PurePosixPath("State/ManagedSheetPresentation.swift")
-INTERPRETED = pathlib.PurePosixPath("UI/SwiftApps/SwiftAppViews.swift")
 NON_CODE = re.compile(r'//[^\n]*|/\*[\s\S]*?\*/|"""[\s\S]*?"""|"(?:\\.|[^"\\])*"')
 PRESENTATION = re.compile(r"\.\s*(sheet|fullScreenCover)\s*\(")
 SYSTEM_CONFIRMATION = re.compile(r"\.\s*(?:alert|confirmationDialog|actionSheet)\s*\(|\b(?:Alert|ActionSheet|UIActionSheet|UIAlertController|UIAlertAction)\b")
@@ -101,7 +100,7 @@ def violations(relative_path, text):
         f"{relative_path}:{code.count(chr(10), 0, match.start()) + 1}: "
         f"raw {match.group(1)} must use the managed presentation owner"
         for match in PRESENTATION.finditer(code)
-        if pathlib.PurePosixPath(relative_path) not in (OWNER, INTERPRETED)
+        if pathlib.PurePosixPath(relative_path) != OWNER
     ] + [
         f"{relative_path}:{code.count(chr(10), 0, match.start()) + 1}: "
         "system confirmation must use the shared Tron confirmation sheet"

@@ -57,15 +57,6 @@ The typed descriptor contains no CDP URL, host path, browser port or input chann
 
 The transcript decoder admits typed display metadata only on `toolResult` rows from `display`, or from `agent_browser` when its kind is `browser_live`. Gateway provider/call/session admission remains the authority; iOS does not promote raw `details` or verify ephemeral provider receipts. This rule applies at the enclosing transcript boundary, not just the descriptor decoder, so a valid browser action cannot invalidate `session.open`, live snapshots, or history/cache decode. Negative cases retain rejection of other tools/roles, non-live browser displays and malformed descriptors.
 
-## `.swift` apps
-
-A displayed
-`.swift` code artifact gains a play control in its document sheet that runs
-the file as an interpreted, native SwiftUI app (#889). With the inline
-surface the display becomes a small app card whose tap runs it
-(`DisplayRoute.runsSwiftApp`, #1339). The [Swift apps](swift-apps.md) document
-owns the card, runtime boundaries and supported subset.
-
 ## Surfaces
 
 The model requests a surface, but native policy resolves it by typed content kind and advertised eligibility:

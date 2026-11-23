@@ -84,7 +84,6 @@ const WORKER_EXTENSIONS = [
   "<inline:tron-projects> | tools projects",
   "<inline:tron-ask-user> | tools ask_user",
   "<inline:tron-display> | tools display | on tool_result×1,agent_end×1,session_shutdown×1",
-  "<inline:tron-swift-apps> | tools swift_app",
   "<inline:tron-computer> | tools computer | on session_shutdown×1,before_agent_start×1,agent_end×1",
   "<inline:tron-notify> | tools push_retry,notify",
   "<inline:tron-model-queue> | on session_start×3,agent_before_settle×2,before_agent_start×1,session_shutdown×1,tool_call×1",

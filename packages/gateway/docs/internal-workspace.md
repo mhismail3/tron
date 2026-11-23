@@ -12,24 +12,30 @@ its contents, or load it as global instructions. Secrets stay in their owned sto
   finishing, retain useful results in files or state and delete remaining task-owned
   scratch. Scratch untouched for over 14 days may be removed without asking after
   checking it is not in use; age never overrides a running task's ownership.
-- `files/<topic>-<date>/`: finished things someone will open again: reports, plans,
-  review screenshots and exports. Add one line per deliverable to `files/INDEX.md`
-  with a relative link and its purpose. Never put scratch here.
+- `artifacts/yyyy-mm-dd_<slug>/`: finished work for the user or other agents
+  (reports, plans, guides, docs, dashboards, videos, sites) as a mobile-responsive
+  page with an `index.html` entry, served on the tailnet and listed newest first in
+  the iPhone Artifacts sheet ([artifacts](../src/modules/artifacts/README.md)). Shared
+  styles and data live in `artifacts/shared/`. The producing agent decides the page's
+  logic and backend, keeps it minimal and verifies it before presenting it.
+- `files/<topic>-<date>/`: raw retained files an artifact does not show: logs,
+  exports, evidence. Add one line per deliverable to `files/INDEX.md` with a relative
+  link and its purpose. Never put scratch here.
 - `state/<name>/`: living data read and refreshed over time, such as libraries,
   bookmarks or memory. One skill or capability owns each folder; its short README
   names the owner and explains how to read and refresh it. A skill needs no Gateway
   code owner or generic storage framework. Use its existing reader/writer; choose
   serialization and safe publication appropriate to its actual mutation risks.
 
-Never delete from files or state without maintainer approval. Issue closure and
+Never delete from artifacts, files or state without maintainer approval. Issue closure and
 old timestamps alone are not deletion permission. Read-only tasks stay read-only.
 A downloaded snapshot is a finished export; a collection refreshed and queried over
 time is state. To present living data, publish only the requested finished view in
 files, not a second canonical collection.
 
 Gateway-managed stores retain their owners: `files/Profile.json` is edited only
-through Profile actions; episodic memory, Home tasks and `state/apps/` use their
-owning interfaces (`swift_app` for installed apps). A skill cannot take over these
+through Profile actions; episodic memory and Home tasks use their owning
+interfaces. A skill cannot take over these
 namespaces. Pi's agent directory, Gateway state and existing extension stores stay
 canonical where they are. A folder's name grants no new mutation authority.
 

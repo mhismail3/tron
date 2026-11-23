@@ -7,7 +7,7 @@ import { readSecureJson } from "../foundation/secure-json.js";
 import { durableAtomicWriteJson, syncDurably } from "../foundation/durable-json.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
 
-export type TronWorkspaceFeature = "profile" | "episodic" | "home-tasks" | "apps";
+export type TronWorkspaceFeature = "profile" | "episodic" | "home-tasks";
 
 export type TronWorkspaceUnavailableCause =
   | "invalid-record" | "unsafe-directory" | "missing-root"

@@ -1,18 +1,24 @@
-"""Loopback static server for over-the-air development builds.
+"""Loopback static server for over-the-air development builds and Tron artifacts.
 
 `scripts/tron-ios-device share-host enable` embeds this source in the
 com.tron.ios-builds LaunchAgent (`python3 -c`), so the running server never
 depends on a checkout path. Tailscale Serve terminates HTTPS with the node's
 *.ts.net certificate and proxies to it; the macOS Tailscale app cannot serve a
 directory itself (sandbox). It binds loopback only, serves files, never lists
-directories, and disables caching so the index always shows the newest build.
+directories, and disables caching so pages always show the newest content.
+`/artifacts/` maps to the internal workspace's artifacts folder; every other
+path maps to the builds folder. Hidden names, traversal and symlinks that
+leave their folder are not found.
 """
 
 import functools
 import http.server
+import os
+import posixpath
 import sys
+import urllib.parse
 
-directory, port = sys.argv[1], int(sys.argv[2])
+directory, artifacts, port = sys.argv[1], sys.argv[2], int(sys.argv[3])
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -22,6 +28,27 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         ".ipa": "application/octet-stream",
         ".json": "application/json",
     }
+
+    def translate_path(self, path):
+        route = posixpath.normpath(urllib.parse.unquote(urllib.parse.urlsplit(path).path))
+        root = self.directory
+        if route == "/artifacts" or route.startswith("/artifacts/"):
+            root, route = artifacts, route[len("/artifacts"):]
+        if "\x00" in route:
+            return None
+        candidate = os.path.join(root, *[part for part in route.split("/") if part])
+        real_root, real = os.path.realpath(root), os.path.realpath(candidate)
+        if os.path.commonpath([real_root, real]) != real_root:
+            return None
+        if any(part.startswith(".") for part in os.path.relpath(real, real_root).split(os.sep) if part != "."):
+            return None
+        return candidate + "/" if path.split("?", 1)[0].endswith("/") else candidate
+
+    def send_head(self):
+        if self.translate_path(self.path) is None:
+            self.send_error(404)
+            return None
+        return super().send_head()
 
     def end_headers(self):
         self.send_header("Cache-Control", "no-store")

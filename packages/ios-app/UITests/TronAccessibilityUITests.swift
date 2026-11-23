@@ -61,7 +61,7 @@ final class TronAccessibilityUITests: XCTestCase {
             menu.tap()
             XCTAssertFalse(app.buttons["Search"].exists)
             XCTAssertFalse(app.buttons["Filter"].exists)
-            let titles = ["Settings", "Automations", "Apps", "New Session"]
+            let titles = ["Settings", "Automations", "Artifacts", "New Session"]
             for label in titles { XCTAssertTrue(app.buttons[label].waitForExistence(timeout: 3)) }
             XCTAssertFalse(app.buttons["Sessions"].exists, "The menu has no Sessions entry")
             let frames = titles.map { app.buttons[$0].frame }

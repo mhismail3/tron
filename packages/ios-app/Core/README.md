@@ -28,9 +28,9 @@ the hosted test targets link.
 
 ## Contract
 
-- **Module boundary.** The app is three Swift modules: the application `TronMobile`, this framework
+- **Module boundary.** The app is two Swift modules: the application `TronMobile` and this framework
   (embedded, loaded by the share extension from the app's `Frameworks/`, hence
-  `APPLICATION_EXTENSION_API_ONLY`) and the static `TronSwiftAppEngine`. A lower module cannot see
+  `APPLICATION_EXTENSION_API_ONLY`). A lower module cannot see
   a higher one: a Core file that reaches for State or UI fails to compile.
 - **Foundation-only.** Core may import Foundation and nondrawing system frameworks (CryptoKit,
   Network, OSLog, Security, AVFoundation for camera authorization), never SwiftUI, UIKit,

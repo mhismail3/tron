@@ -228,7 +228,6 @@ struct AttachmentFilePreviewSheet: View {
     @PresentationState private var phase: Phase = .loading
     @PresentationState private var loadGeneration = 0
     @PresentationState private var loadedSourceID: String?
-    @PresentationState private var swiftApp: SwiftAppLaunch?
 
     private var resolvedAccent: Color { TronSheetTint.resolve(nil, theme: settingsTheme) }
 
@@ -239,8 +238,7 @@ struct AttachmentFilePreviewSheet: View {
     }
 
     var body: some View {
-        TronDocumentSheet(title: title ?? name, leadingAction: runAction) { content }
-        .tronManagedSheet(item: $swiftApp, identity: { "attachment.swift-app.\($0.id)" }) { launch in SwiftAppRunnerSheet(launch: launch) }
+        TronDocumentSheet(title: title ?? name) { content }
         .task(id: PresentationActivityTaskID(
             source: "\(source.loadID)-\(model.knowledgePresentationIdentity)-ready:\(model.connectionState == .connected)",
             presentationActive: presentationActivity.allowsPresentationPublication
@@ -250,16 +248,6 @@ struct AttachmentFilePreviewSheet: View {
                model.chatMediaDestinationIdentity(blobID: identity.blobID, sessionID: identity.sessionID) != identity { dismiss() }
         }
         .onDisappear { cancelRemoteLoad() }
-    }
-
-    private var runAction: TronDocumentSheetAction? {
-        guard SwiftAppDisplay.runs(fileNamed: name),
-              case .prepared(let preview) = phase,
-              case .code(let source) = preview.content,
-              !preview.isTruncated else { return nil }
-        return TronDocumentSheetAction(systemImage: "play.fill", accessibilityLabel: "Run \(name)") {
-            swiftApp = SwiftAppLaunch(name: name, source: source, linkHost: model.profiles.selected?.host)
-        }
     }
 
     @ViewBuilder
