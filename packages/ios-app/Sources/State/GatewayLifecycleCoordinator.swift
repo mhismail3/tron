@@ -576,7 +576,7 @@ final class GatewayLifecycleCoordinator {
         if reconnectTask != nil {
             if pathChanged {
                 reconnectPathChangedDuringAttempt = true
-                reconnectSchedule.restartForPathChange()
+                reconnectSchedule.reset()
             }
             return
         }
@@ -1040,7 +1040,6 @@ final class GatewayLifecycleCoordinator {
                     delegate?.lifecycleConnectionFailurePresentationDidChange()
                 }
                 scheduleReconnect(immediate: retryRequestedDuringConnect)
-                retryRequestedDuringConnect = false
             }
         }
     }
