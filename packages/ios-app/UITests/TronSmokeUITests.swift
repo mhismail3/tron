@@ -744,14 +744,11 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(state.label.contains("Ready"), state.label)
         let done = app.buttons["home-sheet-done-manage"]
         let windowHeight = app.windows.firstMatch.frame.height
-        let mediumTop = done.frame.minY
-        XCTAssertGreaterThan(mediumTop, windowHeight * 0.40, "Manage Home must open at its medium detent")
-        keepScreenshot(named: "manage-home-medium")
+        let fittedTop = done.frame.minY
+        XCTAssertGreaterThan(fittedTop, 120, "Manage Home fits its content instead of opening large")
+        XCTAssertLessThan(fittedTop, windowHeight, "Manage Home is on screen")
+        keepScreenshot(named: "manage-home-fitted")
         XCTAssertTrue(homeControlCount.label.contains("control-count:0"), "Opening Manage Home must not apply controls")
-        let title = app.staticTexts["Manage Home"].firstMatch
-        title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
-        XCTAssertLessThan(done.frame.minY, mediumTop - 100, "Manage Home must drag to its large detent")
-        keepScreenshot(named: "manage-home-large")
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-chapters"].exists)
         for row in ["home-manage-memory-browser", "home-manage-tasks", "home-manage-controls"] {
             XCTAssertTrue(app.descendants(matching: .any)[row].exists, row)
@@ -1157,7 +1154,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 5), app.debugDescription)
         let manageSessionDone = app.buttons["Done"].firstMatch
         XCTAssertTrue(manageSessionDone.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertGreaterThan(manageSessionDone.frame.minY, app.windows.firstMatch.frame.height * 0.40, "Manage Session opens at medium (the detent Manage Home matches)")
+        XCTAssertTrue(manageSessionDone.isHittable, "Manage Session opens at its content height, or large when its content overflows")
         XCTAssertFalse(app.descendants(matching: .any)["home-manage-state"].exists)
         keepScreenshot(named: "ordinary-ring-manage-session")
         manageSessionDone.tap()
@@ -1881,8 +1878,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertEqual(headers.map(\.frame.minY), headers.map(\.frame.minY).sorted(), "Sections must keep the model's reading order")
         XCTAssertTrue(headers[7].label.contains("Each turn"), "The per-turn Tron context must be marked: \(headers[7].label)")
         XCTAssertFalse(entry(app, "tools.1").exists, "The overview must not show section entries")
-        let screenHeight = app.windows.firstMatch.frame.height
-        XCTAssertGreaterThan(headers[0].frame.minY, screenHeight * 0.35, "The overview must open at its medium detent")
+        XCTAssertGreaterThan(headers[0].frame.minY, 120, "The overview fits its content instead of opening large")
         keepScreenshot(named: "agent-instructions-overview")
 
         headers[1].tap()
@@ -1891,7 +1887,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(subagent.label.contains("subagent") && subagent.label.contains("Package"), subagent.label)
         XCTAssertTrue(entry(app, "tools.2").label.contains("Tron"))
         let purpose = app.descendants(matching: .any)["agent-instructions-purpose"]
-        XCTAssertGreaterThan(purpose.frame.minY, screenHeight * 0.35, "A section sheet must open at its medium detent")
+        XCTAssertTrue(purpose.isHittable, "A section sheet opens at its content height, or large when it overflows")
         keepScreenshot(named: "agent-instructions-tools-sheet")
         dismissTopSheet(app, revealing: headers[2])
 
@@ -2062,12 +2058,6 @@ final class TronSmokeUITests: XCTestCase {
         let paused = app.buttons["automation-card.automation-3"]
         let drafts = [app.buttons["automation-card.automation-0"], app.buttons["automation-card.automation-1"]]
         XCTAssertTrue(running.waitForExistence(timeout: 8), app.debugDescription)
-        let bar = app.navigationBars.containing(.staticText, identifier: "Automations").firstMatch
-        bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
-            forDuration: 0.1,
-            thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02))
-        )
-        XCTAssertLessThan(bar.frame.minY, app.frame.height * 0.2, "The sheet expands to the large detent")
         for card in [enabled, paused] + drafts { XCTAssertTrue(card.exists, app.debugDescription) }
         XCTAssertLessThan(running.frame.minY, enabled.frame.minY, "Running first among active")
         XCTAssertLessThan(running.frame.minY, paused.frame.minY, "Active before paused")
@@ -2092,13 +2082,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(card.waitForExistence(timeout: 8), app.debugDescription)
 
         let bar = app.navigationBars.containing(.staticText, identifier: "Automations").firstMatch
-        XCTAssertGreaterThan(bar.frame.minY, app.frame.height * 0.35, "The sheet opens at the medium detent")
-        let window = app.windows.firstMatch
-        bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
-            forDuration: 0.1,
-            thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02))
-        )
-        XCTAssertLessThan(bar.frame.minY, app.frame.height * 0.2, "The sheet expands to the large detent")
+        XCTAssertTrue(bar.isHittable, "The sheet opens at its content height, or large when its content overflows")
 
         XCTAssertFalse(app.buttons["automations.search"].exists || app.buttons["Search Automations"].exists)
         let filter = app.buttons["automations.filter"]

@@ -144,25 +144,19 @@ final class TronSubsheetReliabilityUITests: XCTestCase {
         XCTAssertTrue(element(app, "home-evidence-text").waitForExistence(timeout: 8))
         let title = app.navigationBars.staticTexts["Canonical transcript"].firstMatch
         XCTAssertTrue(title.waitForExistence(timeout: 8))
-        let height = app.windows.firstMatch.frame.height
-        XCTAssertGreaterThan(title.frame.minY, height * 0.4,
-                             "Canonical transcript opens at the shared medium detent, not large")
-        title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
-        let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in title.frame.minY < height * 0.2 }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 10), .completed, "Canonical transcript expands to large")
+        let opened = title.frame.minY
         XCUIDevice.shared.press(.home)
         XCTAssertTrue(app.wait(for: .runningBackground, timeout: 15))
         app.activate()
         XCTAssertTrue(title.waitForExistence(timeout: 10))
-        XCTAssertLessThan(title.frame.minY, height * 0.2, "Foreground retains the expanded transcript")
+        XCTAssertEqual(title.frame.minY, opened, accuracy: 2, "Foreground retains the transcript's height")
         closeTopSheet(app)
         XCTAssertTrue(title.waitForNonExistence(timeout: 8))
         canonical.tap()
         XCTAssertTrue(title.waitForExistence(timeout: 8))
-        XCTAssertGreaterThan(title.frame.minY, height * 0.4, "A fresh presentation resets to medium")
+        XCTAssertEqual(title.frame.minY, opened, accuracy: 2, "A fresh presentation opens at the same content height")
         let capture = XCTAttachment(screenshot: app.screenshot())
-        capture.name = "Canonical transcript reopened at medium"
+        capture.name = "Canonical transcript reopened"
         capture.lifetime = .keepAlways
         add(capture)
     }

@@ -49,6 +49,7 @@ struct ExtensionFormSheet: View {
                             .offset(x: CGFloat(index - currentQuestionIndex) * pageWidth + pageDragOffset)
                             .allowsHitTesting(current)
                             .accessibilityHidden(!current)
+                            .transformEnvironment(\.tronSheetMeasuresContent) { $0 = $0 && current }
                             .transition(reduceMotion ? .opacity : .identity)
                     }
                 } else {
@@ -232,7 +233,7 @@ struct ExtensionFormSheet: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .scrollEdgeEffectStyle(.soft, for: .all)
-        .scrollBounceBehavior(.basedOnSize)
+        .modifier(TronSheetFitScrollModifier())
         .scrollDismissesKeyboard(.interactively)
         .accessibilityLabel("Question \(index + 1) of \(form.questions.count)")
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in

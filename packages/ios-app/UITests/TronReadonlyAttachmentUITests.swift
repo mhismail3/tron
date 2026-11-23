@@ -188,7 +188,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         keepEvidence(app, name: "348-readonly-display-image-after")
     }
 
-    @MainActor func testVideoDisplaySheetOpensAtMediumPlaysAndExpandsToLarge() {
+    @MainActor func testVideoDisplaySheetOpensAtItsOneHeightAndPlays() {
         continueAfterFailure = false
         for scenario in ["display-video", "display-video-light", "display-video-accessibility", "display-video-light-accessibility"] {
             let app = launch(scenario); defer { app.terminate() }
@@ -200,13 +200,12 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
             XCTAssertTrue(done.waitForExistence(timeout: 10), "\(scenario): shared document sheet chrome is installed")
             let sheetPlayer = app.otherElements["display.video.sheet.player"]
             XCTAssertTrue(sheetPlayer.waitForExistence(timeout: 10), "\(scenario): video player is visible in the sheet")
-            let mediumTop = done.frame.minY
-            XCTAssertGreaterThan(mediumTop, app.windows.firstMatch.frame.height * 0.40, "\(scenario): sheet begins at medium")
-            let mediumPlayerFrame = sheetPlayer.frame
-            XCTAssertGreaterThanOrEqual(mediumPlayerFrame.height, 220, "\(scenario): the player has its bounded viewport at medium")
-            XCTAssertGreaterThanOrEqual(mediumPlayerFrame.minY, done.frame.maxY, "\(scenario): player begins below the shared title and top blur")
-            XCTAssertLessThanOrEqual(mediumPlayerFrame.maxY, app.windows.firstMatch.frame.maxY, "\(scenario): player remains inside the medium sheet")
-            XCTAssertTrue(sheetPlayer.isHittable, "\(scenario): player controls can receive interaction at medium")
+            let sheetTop = done.frame.minY
+            let playerFrame = sheetPlayer.frame
+            XCTAssertGreaterThanOrEqual(playerFrame.height, 220, "\(scenario): the player has its bounded viewport")
+            XCTAssertGreaterThanOrEqual(playerFrame.minY, done.frame.maxY, "\(scenario): player begins below the shared title and top blur")
+            XCTAssertLessThanOrEqual(playerFrame.maxY, app.windows.firstMatch.frame.maxY, "\(scenario): player remains inside the sheet")
+            XCTAssertTrue(sheetPlayer.isHittable, "\(scenario): player controls can receive interaction")
 
             let clocks = app.staticTexts.matching(identifier: "display.video.sheet.playback-time")
             XCTAssertTrue(clocks.firstMatch.waitForExistence(timeout: 10))
@@ -219,7 +218,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
                 RunLoop.current.run(until: Date().addingTimeInterval(0.1))
             }
             XCTAssertTrue(advanced, "\(scenario): playback advances without enlarging the sheet")
-            XCTAssertGreaterThan(done.frame.minY, app.windows.firstMatch.frame.height * 0.40, "\(scenario): playback leaves the sheet at medium")
+            XCTAssertEqual(done.frame.minY, sheetTop, accuracy: 2, "\(scenario): playback leaves the sheet's height unchanged")
             RunLoop.current.run(until: Date().addingTimeInterval(5.5))
             keepScreenshot(app, "520-video-medium-playing-\(scenario)")
             assertGeneratedVideoEdge(in: app, player: sheetPlayer, scenario: scenario)
@@ -227,27 +226,13 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
             sheetPlayer.tap()
             let playPause = app.buttons["Play/Pause"]
             XCTAssertTrue(playPause.waitForExistence(timeout: 3), "\(scenario): visible native playback controls are reachable")
-            XCTAssertTrue(playPause.isHittable, "\(scenario): native play/pause control is reachable at medium")
+            XCTAssertTrue(playPause.isHittable, "\(scenario): native play/pause control is reachable")
             if playPause.label == "Pause" { playPause.tap() }
             XCTAssertEqual(playPause.label, "Play", "\(scenario): native control reports the paused state")
             let pausedTime = Double(clock.label) ?? 0
             RunLoop.current.run(until: Date().addingTimeInterval(0.6))
-            XCTAssertEqual(Double(clock.label) ?? pausedTime, pausedTime, accuracy: 0.05, "\(scenario): playback can be paused at medium")
+            XCTAssertEqual(Double(clock.label) ?? pausedTime, pausedTime, accuracy: 0.05, "\(scenario): playback can be paused")
             keepScreenshot(app, "520-video-medium-paused-controls-\(scenario)")
-
-            app.swipeUp()
-            let expanded = NSPredicate { element, _ in
-                guard let button = element as? XCUIElement else { return false }
-                return button.frame.minY < mediumTop - 100
-            }
-            expectation(for: expanded, evaluatedWith: done)
-            waitForExpectations(timeout: 8)
-            XCTAssertTrue(sheetPlayer.exists && sheetPlayer.isHittable, "\(scenario): player survives the large detent")
-            XCTAssertGreaterThan(sheetPlayer.frame.height, mediumPlayerFrame.height + 100, "\(scenario): the player re-lays out with the expanded detent")
-            let largePlayPause = app.buttons["Play/Pause"]
-            if largePlayPause.label == "Play" { largePlayPause.tap() }
-            RunLoop.current.run(until: Date().addingTimeInterval(5.5))
-            keepScreenshot(app, "520-video-large-\(scenario)")
             assertGeneratedVideoEdge(in: app, player: sheetPlayer, scenario: scenario)
         }
     }
