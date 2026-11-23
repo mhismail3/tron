@@ -749,6 +749,7 @@ export class AuthBroker {
   }
 
   private complete(operation: AuthOperation, success: boolean, error?: unknown): void {
+    if (this.providerLogouts.get(operation.modelRuntime)?.has(operation.providerId)) return;
     if (this.operations.get(operation.id) !== operation && operation.controller.signal.aborted
       && error instanceof CredentialSynchronizationError && error.providerId === operation.providerId
       && error.operation === "login" && error.credential?.type === operation.authType

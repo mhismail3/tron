@@ -103,6 +103,10 @@ describe("AuthBroker", () => {
     await broker.logout("external-oauth");
     expect(upstreamSignedIn).toBe(false);
     expect(await runtime.getAuth("external-oauth")).toBeUndefined();
+    runtime.registerNativeProvider({ ...provider, auth: { oauth: { ...provider.auth.oauth, logout: undefined } } });
+    await runtime.login("external-oauth", "oauth", { prompt: async () => "", notify() {} });
+    await broker.logout("external-oauth");
+    expect(await runtime.getAuth("external-oauth")).toBeUndefined();
     await runtime.login("anthropic", "api_key", { prompt: async () => "fixture-key", notify() {} });
     await broker.logout("anthropic");
     expect(await runtime.getAuth("anthropic")).toBeUndefined();
@@ -621,7 +625,7 @@ describe("AuthBroker", () => {
     expect(registry.size).toBe(1);
   });
 
-  it.each(["cancellation", "timeout", "synchronization failure"] as const)("projects a committed credential truthfully after %s", async (ending) => {
+  it.each(["cancellation", "timeout", "synchronization failure", "sign-out"] as const)("projects a committed credential truthfully after %s", async (ending) => {
     const root = await mkdtemp(join(tmpdir(), "tron-auth-committed-"));
     const work = new GatewayWorkRegistry("auth-committed", 8);
     let broker: AuthBroker | undefined;
@@ -669,7 +673,10 @@ describe("AuthBroker", () => {
     await waitFor(() => resolvingCommittedCredential, "the SDK's post-commit auth resolution");
     const committed = await readFile(authPath);
     expect(JSON.parse(committed.toString("utf8"))).toMatchObject({ [provider.id]: { type: "api_key", key: "committed-key" } });
-    if (ending === "cancellation") {
+    let signOut: Promise<void> | undefined;
+    if (ending === "sign-out") {
+      signOut = broker.logout(provider.id);
+    } else if (ending === "cancellation") {
       expect(broker.cancel("phone", operationId)).toBe(true);
       expect(broker.resume("phone", "phone", operationId)).toMatchObject({ state: "cancelled" });
     } else if (ending === "timeout") {
@@ -682,6 +689,18 @@ describe("AuthBroker", () => {
 
     release();
     await work.waitUntilSettled();
+    await signOut;
+    if (ending === "sign-out") {
+      expect(events.filter(event => event.topic === "auth.completed")).toEqual([
+        expect.objectContaining({ payload: expect.objectContaining({ operationId, success: false, error: "Provider signed out" }) }),
+      ]);
+      expect(broker.resume("phone", "phone", operationId)).toMatchObject({ state: "completed", success: false });
+      expect(broadcasts).toEqual([]);
+      expect(await runtime.getAuth(provider.id)).toBeUndefined();
+      expect(JSON.parse(await readFile(authPath, "utf8"))).not.toHaveProperty(provider.id);
+      expect(JSON.stringify({ events, logs })).not.toContain("committed-key");
+      return;
+    }
     const success = ending !== "synchronization failure";
     const completion = expect.objectContaining({ payload: expect.objectContaining({ operationId, success }) });
     expect(events.filter(event => event.topic === "auth.completed")).toEqual(ending === "timeout"

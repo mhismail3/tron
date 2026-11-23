@@ -29,7 +29,9 @@ Durable stores: `<tronHome>/state/settings/` (`changes/`,
 
 ## Contract
 
-Provider sign-out runs through `AuthBroker.logout`: it blocks new sign-in for the same runtime/provider, cancels and joins pending sign-in, awaits the native provider\'s optional `auth.oauth.logout()` cleanup hook, then deletes Pi\'s credential marker. Cleanup failure is a failed sign-out; the marker is retained for retry. Ordinary providers without external credential storage need no hook. Hooks take no arguments, return `Promise<void>`, and own their external credentials, active processes and saved account/session state. The broker holds global provider-resource refresh until sign-out settles. `auth-broker.integration.test.ts` proves native-provider hook composition, cleanup-failure propagation, marker deletion and cancellation ordering at the actual ModelRuntime boundary; its two sign-out journeys add under one second.\n\nThe pinned `tron:pi-subagents@…#…` package source identifies Tron's bundled payload, not a
+Provider sign-out runs through `AuthBroker.logout`: it blocks new sign-in for the same runtime/provider, cancels and joins pending sign-in, awaits the native provider's optional `auth.oauth.logout()` cleanup hook, then deletes Pi's credential marker. Cleanup failure is a failed sign-out; the marker is retained for retry. Ordinary providers without external credential storage need no hook. Hooks take no arguments, return `Promise<void>`, and own their external credentials, active processes and saved account/session state. The broker holds global provider-resource refresh until sign-out settles.
+
+The pinned `tron:pi-subagents@…#…` package source identifies Tron's bundled payload, not a
 user-managed package. The settings tool's package `update` refuses that exact source before
 admission; `package-node-requirement.integration.test.ts` verifies the refusal and the unchanged
 managed receipt. Packages are added and removed through `sources.packages` (install card).
