@@ -69,14 +69,12 @@ measured: a real TCC prompt changes system permissions and refusal needs a locke
 
 [`surfaces.json`](surfaces.json) records, with code citations, whether each tool is a
 first-class tool (`first-class`), reachable only through bash (`shell`) or absent (`none`)
-on Home maintainer turns, Home wake turns, delegated workers and ordinary/automation
-sessions, and pi-subagents children. Home admits `computer` and its managed native browser
-only on maintainer turns; trigger, automation and task-result wakes admit neither. A tool
+on Home turns, delegated workers and ordinary/automation sessions, and pi-subagents
+children. Home admits `computer` and its managed native browser on every activation. A tool
 scores on a surface only where it is first-class: an availability gap is a failure.
 Update the file in the same change that moves a tool onto or off a surface.
 
 Surface rows project the measured engine functions through declared tool admission;
-they are not live Home or subagent interaction timings. The Home admission E2E owns
-the maintainer/wake boundary. Delegation startup and end-to-end Home task latency are
+they are not live Home or subagent interaction timings. Delegation startup and end-to-end Home task latency are
 not measured by this harness. Home browser admission is proved through the actual pinned
 wrapper on a local fixture; the matrix still projects engine coverage rather than timing Home.

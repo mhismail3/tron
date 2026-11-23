@@ -62,8 +62,8 @@ The investigation's private packet is evidence for this task, not a runtime depe
 Reuse #2156's generic Automations definitions, durable run/outbox and Home target,
 not a new monitor owner. A maintainer-authorized Home Automation sends a finite,
 attributed self-check objective at an agreed cadence/expiry. No cadence or definition
-is installed by this slice. A trigger cannot create/mutate other schedules, grant
-file/shell rights, renew task grants, approve changes or override pauses.
+is installed by this slice. A trigger cannot renew task grants, approve changes or
+override pauses.
 
 On that wake, Home reads the task metrics, then:
 

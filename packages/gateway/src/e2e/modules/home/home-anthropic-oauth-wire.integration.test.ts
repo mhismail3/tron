@@ -64,7 +64,7 @@ async function anthropicEndpoint(): Promise<{ port: number; requests: Captured[]
 function homeBeforeProviderRequest(): (payload: unknown, model: Model) => unknown {
   const handlers = new Map<string, (event: { payload: unknown }, ctx: { model: Model }) => unknown>();
   const unused = async () => { throw new Error("not used on the wire"); };
-  createTronHomeExtension(() => undefined, unused, unused, () => undefined, () => undefined, unused as never, () => "user", unused)(
+  createTronHomeExtension(() => undefined, unused, unused, () => undefined, () => undefined, unused as never, unused)(
     { on: (name: string, handler: never) => handlers.set(name, handler), registerTool: () => {} } as never);
   const hook = handlers.get("before_provider_request")!;
   return (payload, model) => hook({ payload }, { model });
