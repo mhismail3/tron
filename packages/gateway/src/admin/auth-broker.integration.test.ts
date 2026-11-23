@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 import net, { type AddressInfo } from "node:net";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import { fauxProvider, type Provider } from "@earendil-works/pi-ai";
+import { fauxProvider, type OAuthCredential, type Provider } from "@earendil-works/pi-ai";
 import type { JsonValue } from "../protocol/types.js";
 import { AuthBroker } from "./auth-broker.js";
 import { GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
@@ -70,6 +70,84 @@ function remapChatGptCallbackPort(): { port: () => number | undefined; restore: 
 }
 
 describe("AuthBroker", () => {
+  it("sign-out clears provider-owned credentials before deleting the Pi marker and refuses failed cleanup", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-provider-logout-"));
+    onTestFinished(() => rm(root, { recursive: true, force: true }));
+    const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
+    const fixture = fauxProvider({ provider: "external-oauth" }).provider;
+    let upstreamSignedIn = true;
+    let denyCleanup = true;
+    const provider = {
+      ...fixture,
+      auth: {
+        oauth: {
+          name: "External OAuth",
+          async login() { return { type: "oauth" as const, refresh: "marker", access: "marker", expires: Number.MAX_SAFE_INTEGER }; },
+          async refresh(credential: OAuthCredential) { return credential; },
+          async toAuth() { return { apiKey: "marker" }; },
+          async logout() {
+            expect(await runtime.getAuth("external-oauth")).toBeDefined();
+            if (denyCleanup) throw new Error("External credential store refused deletion");
+            upstreamSignedIn = false;
+          },
+        },
+      },
+    };
+    runtime.registerNativeProvider(provider);
+    await runtime.login("external-oauth", "oauth", { prompt: async () => "", notify() {} });
+    const broker = new AuthBroker(runtime, () => {});
+    await expect(broker.logout("external-oauth")).rejects.toThrow("External credential store refused deletion");
+    expect(upstreamSignedIn).toBe(true);
+    expect(await runtime.getAuth("external-oauth")).toBeDefined();
+    denyCleanup = false;
+    await broker.logout("external-oauth");
+    expect(upstreamSignedIn).toBe(false);
+    expect(await runtime.getAuth("external-oauth")).toBeUndefined();
+    await runtime.login("anthropic", "api_key", { prompt: async () => "fixture-key", notify() {} });
+    await broker.logout("anthropic");
+    expect(await runtime.getAuth("anthropic")).toBeUndefined();
+  });
+
+  it("sign-out settles a cancelled login before provider cleanup and blocks overlapping sign-in", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-provider-logout-race-"));
+    onTestFinished(() => rm(root, { recursive: true, force: true }));
+    const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
+    const fixture = fauxProvider({ provider: "logout-race" }).provider;
+    const steps: string[] = [];
+    let finishCleanup!: () => void;
+    const cleanup = new Promise<void>((resolve) => { finishCleanup = resolve; });
+    const provider = {
+      ...fixture,
+      auth: {
+        oauth: {
+          name: "Logout race",
+          async login(interaction: LoginInteraction) {
+            try { await interaction.prompt({ type: "manual_code", message: "Paste callback" }); }
+            finally { steps.push("login-ended"); }
+            return { type: "oauth" as const, refresh: "marker", access: "marker", expires: Number.MAX_SAFE_INTEGER };
+          },
+          async refresh(credential: OAuthCredential) { return credential; },
+          async toAuth() { return { apiKey: "marker" }; },
+          async logout() { steps.push("cleanup"); await cleanup; },
+        },
+      },
+    };
+    runtime.registerNativeProvider(provider);
+    const { events, emit } = authEvents();
+    const broker = new AuthBroker(runtime, emit);
+    const operation = broker.start("phone", "logout-race", "oauth");
+    await waitFor(() => events.some((event) => event.topic === "auth.prompt"), "the login prompt");
+    const logout = broker.logout("logout-race");
+    try {
+      expect(() => broker.start("phone", "logout-race", "oauth")).toThrow(expect.objectContaining({ code: "busy" }));
+      await waitFor(() => steps.includes("cleanup"), "provider cleanup");
+      expect(steps).toEqual(["login-ended", "cleanup"]);
+      expect(broker.resume("phone", "phone", operation.operationId)).toMatchObject({ state: "cancelled" });
+    } finally { finishCleanup(); await logout; }
+    expect(await runtime.getAuth("logout-race")).toBeUndefined();
+    expect(broker.activeOperationCount).toBe(0);
+  });
+
   afterEach(() => vi.useRealTimers());
   it("routes an MCP authorization URL to its targeted operation and relays only its callback to loopback", async () => {
     let receivedQuery = "";
