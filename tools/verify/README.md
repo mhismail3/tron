@@ -15,7 +15,7 @@ seconds).
 Checks: the privacy guard, the shrink-only determinism baseline (no new `.skip`/`.only`/sleeps), `scripts/tron ownership`, the protocol contract, documentation and agent
 policy, no added code comments, the gate's own tests,
 Gateway production and test-support typecheck, oxlint, and the fixed Gateway suite named in
-`gate.py` (`GATEWAY_TESTS`; `LONG_TESTS` and `PROCESS_TESTS` each run as their own parallel step): caught regressions (extension artifact discovery,
+`gate.py` (`GATEWAY_TESTS`, `PROCESS_TESTS`): caught regressions (extension artifact discovery,
 Home task tool), authorization and privacy, migrations, crash recovery, concurrency/receipts, and real
 Gateway-process boundaries. A test joins the gate only if it caught a real regression or guards
 one of those classes, and only if the gate still fits its deadline.
