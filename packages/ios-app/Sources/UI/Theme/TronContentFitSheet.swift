@@ -11,7 +11,6 @@ private struct TronSheetFitKey: PreferenceKey {
 extension EnvironmentValues {
     @Entry var tronSheetFitsContent = false
     @Entry var tronSheetMeasuresContent = false
-    @Entry var tronSheetFloor: CGFloat = 0
 }
 
 private struct TronContentFitSheetModifier: ViewModifier {
@@ -23,19 +22,18 @@ private struct TronContentFitSheetModifier: ViewModifier {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.tronPadSheetScene) private var padScene
-    @Environment(\.tronSheetFloor) private var floor
 
     private var fitHeight: CGFloat? {
         guard padScene?.mode == nil, !keyboard, !dynamicTypeSize.isAccessibilitySize else { return nil }
         let window = TronSheetWindowMetrics.current
-        guard let content = loading ? settled : measured else { return floor > 0 && floor < window.maximumDetent ? floor : nil }
-        let height = max((content - window.bottomInset).rounded(.up), floor)
+        guard let content = loading ? settled : measured else { return nil }
+        let height = (content - window.bottomInset).rounded(.up)
         return height < window.maximumDetent ? height : nil
     }
 
     private var target: TronSheetDetentDriver.Target {
         if let fitHeight { return .fit(fitHeight) }
-        let opensMedium = loading && settled == nil && floor == 0 && padScene?.mode == nil && !keyboard && !dynamicTypeSize.isAccessibilitySize
+        let opensMedium = loading && settled == nil && padScene?.mode == nil && !keyboard && !dynamicTypeSize.isAccessibilitySize
         return opensMedium ? .medium : .large
     }
 
@@ -49,7 +47,6 @@ private struct TronContentFitSheetModifier: ViewModifier {
         content
             .environment(\.tronSheetFitsContent, !loading && fitHeight != nil)
             .environment(\.tronSheetMeasuresContent, true)
-            .environment(\.tronSheetFloor, fitHeight ?? .infinity)
             .onPreferenceChange(TronSheetFitKey.self) { next in
                 guard next.map({ abs($0 - (measured ?? -1)) >= 0.5 }) ?? (measured != nil) else { return }
                 update {
@@ -85,10 +82,15 @@ private struct TronSheetDetentDriver: UIViewControllerRepresentable {
         var animated = false
         private var applied: Target?
 
+        override func viewDidLayoutSubviews() {
+            super.viewDidLayoutSubviews()
+            apply()
+        }
+
         func apply() {
             var root: UIViewController = self
             while let parent = root.parent { root = parent }
-            guard !root.isBeingDismissed, let sheet = root.sheetPresentationController else { return }
+            guard !root.isBeingDismissed, root.presentedViewController == nil, let sheet = root.sheetPresentationController else { return }
             let detent: UISheetPresentationController.Detent = switch target {
             case .fit(let height): .custom(identifier: .init("tron.content-fit")) { _ in height }
             case .medium: .medium()
@@ -173,3 +175,4 @@ extension View {
         modifier(TronContentFitSheetModifier())
     }
 }
+
