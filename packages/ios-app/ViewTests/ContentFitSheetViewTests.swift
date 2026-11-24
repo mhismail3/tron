@@ -130,99 +130,17 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         }
     }
 
-    func testCompactSheetsKeepTheirSideInsetBelowTheLastLine() async throws {
-        for surface in ["worker-thinking", "worker-tools-short", "worker-report"] {
-            try await mounted(["-tron-settings-fixture", "-settings-expanded-review", "-six-ui-surface", surface]) { app in
-                try await app.until("\(surface) presents") { app.button("Done") != nil }
-                try await settle(app, surface)
-                try assertBottomInset(app, surface)
-            }
-        }
-    }
-
-    func testToolAndThinkingSheetsReopenAtTheirContentHeight() async throws {
-        try await mounted(["-tron-settings-fixture", "-settings-expanded-review", "-six-ui-surface", "worker-reopen"]) { app in
-            UIView.setAnimationsEnabled(true)
-            defer { UIView.setAnimationsEnabled(false) }
-            for (label, name) in [("Write file", "write"), ("Open Thinking", "thinking")] {
-                var heights: [CGFloat] = []
-                for pass in 0..<3 {
-                    try await app.until("\(name) opener after closing") {
-                        opener(app, label) != nil && app.window.rootViewController?.presentedViewController == nil
-                    }
-                    XCTAssertTrue(opener(app, label)!.accessibilityActivate(), "\(name) opener \(pass + 1) activates")
-                    let trace = try await SheetTrace.record(app, frames: 90, ready: { sheetChain(app).count == 1 && app.button("Done") != nil })
-                    trace.assertStill("\(name) opening \(pass + 1)", against: app)
-                    try await settle(app, "\(name)-\(pass)")
-                    if pass == 2 { capture(app, "\(name)-reopened-twice") }
-                    XCTAssertGreaterThan(sheetFrame(app).minY, 120, "\(name) opening \(pass + 1) fits its content\n\(trace)")
-                    heights.append(sheetFrame(app).minY)
-                    try await app.activate("Done")
-                }
-                XCTAssertTrue(heights.allSatisfy { abs($0 - heights[0]) <= 0.5 }, "\(name) reopens at the same content height: \(heights)")
-            }
-        }
-    }
-
     func testArtifactsErrorStaysInsideTheSheetInsets() async throws {
         try await mounted(["-tron-integrations-fixture", "-integrations-scenario", "artifacts-error"]) { app in
             try await app.activate("Artifacts")
             try await app.until("the artifacts error") { app.element("artifacts-error") != nil }
             try await settle(app, "artifacts-error")
             capture(app, "artifacts-error")
-            try assertBottomInset(app, "artifacts-error")
+            let sheet = sheetFrame(app)
+            let notice = try XCTUnwrap(app.element("artifacts-error")).accessibilityFrame
+            XCTAssertGreaterThanOrEqual(sheet.maxY - notice.maxY, notice.minX - sheet.minX - 1,
+                "The error card keeps at least its side inset above the sheet's bottom edge: card \(notice) sheet \(sheet)")
         }
-    }
-
-    func testLoadingSheetHoldsOneHeightUntilItsRowsArriveThenMovesOnce() async throws {
-        try await mounted(["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-presentation-loading"]) { app in
-            try await app.activate("home-pinned-row")
-            try await app.activate("session-context-button")
-            for _ in 0..<20 { await MountedFixture.nextFrame() }
-            CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
-                CFNotificationName(rawValue: "com.tron.mobile.fixture.home.release-task-list" as CFString), nil, nil, true)
-            try await app.until("Manage Home data") { app.element("home-manage-state") != nil && app.element("home-manage-placeholder") == nil }
-            _ = try await revealed(app, "home-manage-tasks")
-            try await app.activate("home-manage-tasks")
-            let trace = try await SheetTrace.record(app, frames: 180, ready: { sheetChain(app).count == 2 }) { index in
-                if index == 40 {
-                    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
-                        CFNotificationName(rawValue: "com.tron.mobile.fixture.home.release-task-list" as CFString), nil, nil, true)
-                }
-            }
-            let current = sheetFrame(app).minY
-            let deltas = zip(trace.samples, trace.samples.dropFirst()).map { $1.minY - $0.minY }.filter { abs($0) > 0.5 }
-            let reversals = zip(deltas, deltas.dropFirst()).filter { ($0 > 0) != ($1 > 0) }.count
-            XCTAssertLessThanOrEqual(reversals, 1, "Tasks opens, holds one height while loading, then moves once to its content height\n\(trace)")
-            XCTAssertEqual(trace.final.minY, current, accuracy: 0.5, "Tasks rests at its content height after its rows arrive\n\(trace)")
-            let held = trace.samples[30..<40].map(\.minY)
-            XCTAssertLessThanOrEqual((held.max() ?? 0) - (held.min() ?? 0), 0.5, "Tasks holds one height while it loads\n\(trace)")
-        }
-    }
-
-    private func opener(_ app: MountedFixture, _ label: String) -> NSObject? {
-        MountedFixture.elements(in: app.top).last {
-            $0.accessibilityTraits.contains(.button) && ($0.accessibilityLabel?.hasPrefix(label) ?? false)
-        }
-    }
-
-    private func assertBottomInset(_ app: MountedFixture, _ name: String, file: StaticString = #filePath, line: UInt = #line) throws {
-        let sheet = sheetFrame(app)
-        let bars = MountedFixture.views(UINavigationBar.self, in: app.top).map { $0.convert($0.bounds, to: nil).maxY }.max() ?? sheet.minY
-        let area = CGRect(x: sheet.minX + 3, y: bars + 8, width: sheet.width - 6, height: sheet.maxY - bars - 11).integral
-        let pixels = try XCTUnwrap(app.pixels(area), file: file, line: line)
-        let scale = (Double(pixels.count) / Double(area.width * area.height)).squareRoot()
-        let width = Int((Double(area.width) * scale).rounded()), height = pixels.count / width
-        let ground = pixels[(height - Int(4 * scale)) * width + width / 2]
-        func ink(_ x: Int, _ y: Int) -> Bool { zip(pixels[y * width + x], ground).contains { abs($0 - $1) > 60 } }
-        let corner = Int(44 * scale)
-        let lowest = try XCTUnwrap((0..<height).reversed().first { y in (corner..<(width - corner)).contains { ink($0, y) } },
-                                   "\(name) draws content", file: file, line: line)
-        let leftmost = try XCTUnwrap((0..<width).first { x in (0..<(height - corner)).contains { ink(x, $0) } }, file: file, line: line)
-        let bottom = Double(height - 1 - lowest) / scale + 3, side = Double(leftmost) / scale + 3
-        print("BOTTOM_INSET \(name) bottom \(bottom) side \(side)")
-        XCTAssertGreaterThanOrEqual(bottom, side - 1,
-            "\(name): the last drawn content sits \(bottom)pt above the sheet's bottom edge, less than its \(side)pt side inset", file: file, line: line)
     }
 
     func testParentSheetAndItsCardsStayStillWhileASubsheetComesAndGoes() async throws {

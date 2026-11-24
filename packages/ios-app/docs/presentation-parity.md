@@ -133,7 +133,8 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   from full height; Reduce Motion applies it instantly. A nested sheet opens at its own content
   height like any other, and a sheet's height preference never reaches the sheet that presented it.
   Opening a child never changes its parent's detent; UIKit tucks a taller parent down behind a
-  shorter child, and closing the child restores the parent's height. The drag indicator is hidden.
+  shorter child, and closing the child restores the parent's height. A covered sheet never
+  drives its detent; it reapplies its own height once uncovered. The drag indicator is hidden.
   The measured scroll extends under the bottom safe area; a fitted sheet adds no bottom content
   margin, so content never exceeds its frame and the sheet cannot scroll or bounce. While a sheet fits,
   every `tronGlassSurface`/`tronScrollSurface` uses `ConcentricRectangle` bottom corners

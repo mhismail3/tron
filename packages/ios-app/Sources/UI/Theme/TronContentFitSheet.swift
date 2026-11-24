@@ -87,6 +87,11 @@ private struct TronSheetDetentDriver: UIViewControllerRepresentable {
             apply()
         }
 
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            apply()
+        }
+
         func apply() {
             var root: UIViewController = self
             while let parent = root.parent { root = parent }

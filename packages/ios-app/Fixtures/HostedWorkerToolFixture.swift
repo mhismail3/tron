@@ -6,26 +6,7 @@ struct HostedWorkerToolFixture: View {
     let surface: String
     @State private var showing = true
 
-    @State private var thinking = false
-
     var body: some View {
-        if surface == "worker-reopen" {
-            VStack(spacing: 24) {
-                ToolCard(data: Self.write)
-                Button("Open Thinking") { thinking = true }
-                    .tronManagedSheet(isPresented: $thinking, identity: "worker-reopen.thinking") {
-                        ThinkingTraceDetailSheet(inline: MarkdownPresentation.Inline(source: Self.thought), identity: "worker-reopen", streaming: false)
-                    }
-            }
-        } else {
-            review
-        }
-    }
-
-    static let write = tool("write", request: .object(["path": .string("/work/tron/notes.md"), "content": .string("# Notes\n\nThe sheet fits its content.")]),
-                            content: "Successfully wrote 38 bytes to /work/tron/notes.md")
-
-    private var review: some View {
         Color.clear.tronManagedSheet(isPresented: $showing, identity: "worker-tool-review.\(surface)") {
             if surface == "worker-identities" || surface == "worker-tools-short" {
                 let tools = surface == "worker-identities" ? Self.identityTools : Array(Self.identityTools.prefix(2))
