@@ -41,12 +41,7 @@ async function settleWorkEntry(predicate: () => boolean): Promise<void> {
   if (!predicate()) throw new Error("auth work did not settle");
 }
 
-async function remapChatGptCallbackPort(): Promise<() => Promise<void>> {
-  const holder = net.createServer();
-  const held = await new Promise<boolean>((resolve, reject) => {
-    holder.once("error", (error: NodeJS.ErrnoException) => error.code === "EADDRINUSE" ? resolve(false) : reject(error));
-    holder.listen(1455, "127.0.0.1", () => resolve(true));
-  });
+function remapChatGptCallbackPort(): { port: () => number | undefined; restore: () => void } {
   const listen = net.Server.prototype.listen;
   const connect = net.Socket.prototype.connect;
   let port: number | undefined;
@@ -65,10 +60,12 @@ async function remapChatGptCallbackPort(): Promise<() => Promise<void>> {
     }
     return (connect as (...values: unknown[]) => net.Socket).apply(this, args);
   } as typeof connect;
-  return async () => {
-    net.Server.prototype.listen = listen;
-    net.Socket.prototype.connect = connect;
-    if (held) await new Promise<void>((resolve) => holder.close(() => resolve()));
+  return {
+    port: () => port,
+    restore: () => {
+      net.Server.prototype.listen = listen;
+      net.Socket.prototype.connect = connect;
+    },
   };
 }
 
@@ -663,8 +660,8 @@ describe("AuthBroker", () => {
       modelsPath: null,
       refreshOnCreate: false,
     });
-    const restorePort = await remapChatGptCallbackPort();
-    onTestFinished(restorePort);
+    const callbackPort = remapChatGptCallbackPort();
+    onTestFinished(callbackPort.restore);
     const originalFetch = globalThis.fetch;
     const requests: Array<{ url: string; body: string }> = [];
     vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
@@ -682,6 +679,7 @@ describe("AuthBroker", () => {
       await waitFor(() => events.some((event) => event.topic === "auth.event" || event.topic === "auth.completed"), "an auth event or completion");
       const event = events.find((item) => item.topic === "auth.event")?.payload as Record<string, JsonValue> | undefined;
       expect(event).toBeDefined();
+      expect(callbackPort.port()).toEqual(expect.any(Number));
       const authEvent = event.event as Record<string, JsonValue>;
       const authorization = new URL(authEvent.url as string);
       expect(authorization.searchParams.get("ext_agent_host_id")).toBe(`urn:uuid:${settingsManager.getOrCreateDeviceId()}`);
