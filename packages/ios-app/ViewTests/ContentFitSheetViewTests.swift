@@ -134,8 +134,7 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         try await mounted(["-tron-integrations-fixture", "-integrations-scenario", "artifacts-error"]) { app in
             try await app.activate("Artifacts")
             try await app.until("the artifacts error") { app.element("artifacts-error") != nil }
-            try await settle(app, "artifacts-error")
-            capture(app, "artifacts-error")
+            try await assertFitted(app, "artifacts-error")
             let sheet = sheetFrame(app)
             let notice = try XCTUnwrap(app.element("artifacts-error")).accessibilityFrame
             XCTAssertGreaterThanOrEqual(sheet.maxY - notice.maxY, notice.minX - sheet.minX - 1,
