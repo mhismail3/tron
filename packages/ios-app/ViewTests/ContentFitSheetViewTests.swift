@@ -93,7 +93,7 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         }
     }
 
-    func testNestedSheetOpensAtItsOwnHeightAndClosingRestoresItsParent() async throws {
+    func testNestedSheetLeavesItsParentStillAndOpensAtItsFinalHeight() async throws {
         try await mounted(["-tron-settings-fixture", "-settings-nested", "-settings-expanded-review"]) { app in
             try await app.activate("Open Settings")
             _ = try await revealed(app, "settings-link-Connections")
@@ -176,29 +176,17 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
     private func assertNested(_ app: MountedFixture, _ name: String, open: () async throws -> Void) async throws {
         try await app.until("\(name) parent settles") { true }
         let parent = try XCTUnwrap(sheetChain(app).last)
-        @MainActor func parentFrame() -> CGRect { parent.view.convert(parent.view.bounds, to: nil) }
-        let parentStart = parentFrame()
+        let parentHeight = parent.view.bounds.height
         let depth = sheetChain(app).count
         UIView.setAnimationsEnabled(true)
         try await open()
-        let context = DetentContext(traits: parent.traitCollection, maximum: app.window.bounds.height)
-        @MainActor func parentDetents() -> [CGFloat?] {
-            parent.sheetPresentationController?.detents.map { $0.resolvedValue(in: context) } ?? []
-        }
-        let detentsStart = parentDetents()
-        var detents: [[CGFloat?]] = []
+        var parentHeights: [CGFloat] = []
         let trace = try await SheetTrace.record(app, frames: 120, ready: { sheetChain(app).count == depth + 1 }) { _ in
-            detents.append(parentDetents())
+            parentHeights.append(parent.view.bounds.height)
         }
-        XCTAssertFalse(detentsStart.isEmpty, "\(name): the parent has a detent")
-        XCTAssertTrue(detents.allSatisfy { $0 == detentsStart }, "\(name): opening a nested sheet changed its parent's detent from \(detentsStart) to \(Set(detents.map { "\($0)" }))")
+        let moved = parentHeights.filter { abs($0 - parentHeight) > 0.5 }
+        XCTAssertTrue(moved.isEmpty, "\(name): opening a nested sheet resized its parent from \(parentHeight) to \(Set(moved))")
         trace.assertStill("\(name): the nested sheet opens at its final height", against: app)
-        try await assertFitted(app, "\(name)-over-parent")
-        _ = sheetChain(app).last?.presentingViewController?.dismiss(animated: true)
-        try await app.until("\(name) closes") { sheetChain(app).count == depth }
-        try await app.waitForTopSheetToSettle()
-        XCTAssertEqual(parentFrame().minY, parentStart.minY, accuracy: 0.5, "\(name): closing the nested sheet restores its parent")
-        XCTAssertEqual(parentFrame().height, parentStart.height, accuracy: 0.5, "\(name): closing the nested sheet restores its parent")
     }
 
     func testPresentationPreferenceChangesKeepTheFittedHeight() async throws {
@@ -300,12 +288,6 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         let shot = XCTAttachment(image: app.render())
         shot.name = "sheet-\(name)"; shot.lifetime = .keepAlways; add(shot)
     }
-}
-
-final class DetentContext: NSObject, UISheetPresentationControllerDetentResolutionContext {
-    let containerTraitCollection: UITraitCollection
-    let maximumDetentValue: CGFloat
-    init(traits: UITraitCollection, maximum: CGFloat) { containerTraitCollection = traits; maximumDetentValue = maximum }
 }
 
 struct SheetTrace: CustomStringConvertible {

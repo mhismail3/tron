@@ -12,11 +12,14 @@ final class SessionHistoryEntryViewTests: ShuffledTestCase {
             try await app.activate("Session History")
             try await app.until("the history row") { app.element("history-row-h-6732") != nil }
             try await app.waitForTopSheetToSettle()
+            let historyTop = app.top.convert(app.top.bounds, to: nil).minY
             try await app.activate("history-row-h-6731")
             try await app.until("History Entry opens") {
                 app.navigationTitle("History Entry") != nil && entryText(app) { $0.hasSuffix(" characters") } != nil
             }
             let title = try XCTUnwrap(app.navigationTitle("History Entry"))
+            XCTAssertLessThanOrEqual(app.top.convert(app.top.bounds, to: nil).minY, historyTop + 0.5,
+                                     "A nested sheet opens no shorter than the sheet it covers")
             let done = try XCTUnwrap(app.toolbarActions(around: title).first { $0.accessibilityLabel == "Done" })
             let response = try XCTUnwrap(entryText(app) { $0.hasPrefix("Response") })
             XCTAssertGreaterThanOrEqual(response.accessibilityFrame.minY, done.accessibilityFrame.maxY,
