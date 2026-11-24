@@ -126,6 +126,11 @@ class GateTests(unittest.TestCase):
         self.assertEqual((code, ran), (0, [tip]))
         self.assertEqual(git(self.work, 'symbolic-ref', 'HEAD'), before)
 
+    def test_the_tron_entry_point_passes_its_arguments_to_the_gate(self) -> None:
+        result = subprocess.run([str(Path(__file__).resolve().parents[3] / 'scripts/tron'), 'gate', '--nope'],
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual((result.returncode, result.stderr.strip()), (2, 'usage: scripts/tron gate [--check]'))
+
 
 if __name__ == '__main__':
     unittest.main()
