@@ -34,7 +34,7 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
             try await app.activate("home-pinned-row")
             UIView.setAnimationsEnabled(true)
             try await app.activate("session-context-button")
-            let structure = ["home-context-summary", "home-model-summary", "home-manage-tasks", "home-manage-controls"]
+            let structure = ["home-context-summary", "home-model-summary", "home-manage-tasks"]
             var opened: [String: Bool] = [:]
             let trace = try await SheetTrace.record(app, frames: 240, ready: { app.element("home-sheet-done-manage") != nil }) { index in
                 if index == 0 {
@@ -101,8 +101,8 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         }
         try await mounted(["-tron-home-dashboard-fixture", "-home-shell-ready"]) { app in
             try await openManageHome(app)
-            _ = try await revealed(app, "home-manage-controls")
-            try await assertNested(app, "manage-home-controls") { try await app.activate("home-manage-controls") }
+            try await app.until("the Disable Home toolbar control") { app.element("home-manage-disable") != nil }
+            try await assertNested(app, "manage-home-disable-confirmation") { try await app.activate("home-manage-disable") }
         }
     }
 

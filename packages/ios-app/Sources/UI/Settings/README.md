@@ -55,8 +55,8 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   are disabled, and its change gate serializes writes. Every other setting, outside-change recovery
   (`applyAgain`) and Undo go through the agent's `settings` tool. The Gateway supplies override
   presence and permissions; rows never infer ownership from value equality.
-- **Manage Home and the chat model card.** Manage Home lists Controls (`HomeControlsSection`) as a navigation
-  row beside Profile, Memory, Chapters and Tasks.
+- **Manage Home and the chat model card.** Manage Home lists Profile, Memory, Chapters and Tasks; its toolbar
+  leads with the Pause/Resume memory and Disable Home controls, each confirmed in a `TronConfirmationSheet`.
   The chat model card (`ManageModelConfigurationCard`, `session-model-summary` or `home-model-summary`) reads
   `settings.resolve` for the three chat-model keys. Switch Model lists the catalog, Thinking lists the session's
   thinking levels, and Context Window lists the selected model's limits. Writes are `settings.change` at the

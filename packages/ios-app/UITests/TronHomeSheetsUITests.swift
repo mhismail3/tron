@@ -151,12 +151,6 @@ final class TronHomeSheetsUITests: XCTestCase {
         XCTAssertFalse(element(app, "home-manage-context").exists, "Home Context is part of Manage Home")
         assertCompactHomeSummary(app)
 
-        app.swipeUp()
-        let controls = element(app, "home-manage-controls"), tasks = element(app, "home-manage-tasks")
-        XCTAssertTrue(controls.waitForExistence(timeout: 3))
-        XCTAssertGreaterThan(controls.frame.minY, tasks.frame.maxY, "Controls follows Tasks in Manage Home's navigation card")
-        keep("01b-manage-bottom")
-        app.swipeDown()
 
         let memoryRow = element(app, "home-manage-memory-browser"), window = app.windows.firstMatch
         for _ in 0..<3 where memoryRow.frame.maxY > window.frame.height - 60 {

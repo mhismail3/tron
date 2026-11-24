@@ -15,7 +15,6 @@ enum HomeSheetDestination: Identifiable {
     case task(String)
     case taskHistory(String)
     case checkin(HomeTaskHistoryItem)
-    case controls
 
     var id: String {
         switch self {
@@ -32,7 +31,6 @@ enum HomeSheetDestination: Identifiable {
         case .task: "task"
         case .taskHistory: "task-history"
         case .checkin: "checkin"
-        case .controls: "controls"
         }
     }
 
@@ -46,7 +44,6 @@ enum HomeSheetDestination: Identifiable {
         case .tasks, .task: "Tasks"
         case .taskHistory: "Check-ins"
         case .checkin: "Check-in"
-        case .controls: "Controls"
         }
     }
 
@@ -62,7 +59,6 @@ enum HomeSheetDestination: Identifiable {
         case .tasks: .tasks(nil)
         case .task(let id): .task(id)
         case .taskHistory(let id): .taskHistory(id, cursor: nil)
-        case .controls: .status
         }
     }
 
@@ -71,7 +67,7 @@ enum HomeSheetDestination: Identifiable {
     }
 
     var loadsPage: Bool {
-        switch self { case .memoryItem, .chapter, .checkin, .controls: false; default: true }
+        switch self { case .memoryItem, .chapter, .checkin: false; default: true }
     }
 }
 
@@ -119,6 +115,11 @@ struct HomeSheet: View {
     @PresentationState private var returnsFromBrowsing = false
     @PresentationState private var sliderPresentation = ConfigurationSliderPresentation()
     @PresentationState var profileEdit = HomeProfileEditState()
+    @PresentationState var pendingControl: HomeManagePendingControl?
+    @PresentationState var controlFailure: String?
+    #if HOSTED_TEST
+    @Environment(\.hostedHomeActionProbe) var hostedActionProbe
+    #endif
 
     init(destination: HomeSheetDestination, profileID: String, sessionID: String? = nil,
          onOpenSession: ((String) -> Void)? = nil, onChanged: (() -> Void)? = nil) {
@@ -184,6 +185,9 @@ struct HomeSheet: View {
                     .accessibilityIdentifier("home-memory-info")
                 }
             }
+            if let status = manageStatus {
+                ToolbarItemGroup(placement: .topBarLeading) { manageControls(status) }
+            }
             if !isEvidence {
             ToolbarItem(placement: .principal) { TronSheetTitle(title: destination.title, accent: accent) }
             ToolbarItem(placement: .confirmationAction) {
@@ -240,6 +244,12 @@ struct HomeSheet: View {
         .tronManagedSheet(item: $reading, identity: { "home.\(profileID).reading.\($0.id)" }) { reading in
             HomeTextReader(reading: reading).tronSettingsVisualTheme(accent: accent, surfaceAccent: visualTheme?.surfaceAccent ?? .tronPrimarySurface)
         }
+        .tronManagedSheet(item: $pendingControl, identity: { "home.\(profileID).\($0.id)-confirmation" }) { pending in
+            controlConfirmation(pending)
+        }
+        #if HOSTED_TEST
+        .onAppear { if case .manage = destination { hostedActionProbe?.pause = { performControl(.pauseMemory) } } }
+        #endif
     }
 
     @ViewBuilder private var content: some View {
@@ -247,7 +257,6 @@ struct HomeSheet: View {
         case .memoryItem(let item): memoryDetail(item)
         case .chapter(let chapter, let limits): chapterDetail(chapter, limits: limits)
         case .profileItem(let item): profileItemDetail(loadedProfileItem(item))
-        case .controls: HomeControlsSection(profileID: profileID)
         default:
             loadedContent
         }
@@ -277,7 +286,7 @@ struct HomeSheet: View {
                 case .memory(let view): memory(view)
                 case .evidence(let page):
                     evidenceSheet(page)
-                case .status, .tasks, .task, .taskHistory, .permissions: EmptyView()
+                case .tasks, .task, .taskHistory, .permissions: EmptyView()
                 }
             } else if case .manage = destination {
                 manageSheet(nil)
