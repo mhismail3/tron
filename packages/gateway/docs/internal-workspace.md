@@ -12,12 +12,15 @@ its contents, or load it as global instructions. Secrets stay in their owned sto
   finishing, retain useful results in files or state and delete remaining task-owned
   scratch. Scratch untouched for over 14 days may be removed without asking after
   checking it is not in use; age never overrides a running task's ownership.
-- `artifacts/yyyy-mm-dd_<slug>/`: finished work for the user or other agents
-  (reports, plans, guides, docs, dashboards, videos, sites) as a mobile-responsive
-  page with an `index.html` entry, served on the tailnet and listed newest first in
-  the iPhone Artifacts sheet ([artifacts](../src/modules/artifacts/README.md)). Shared
-  styles and data live in `artifacts/shared/`. The producing agent decides the page's
-  logic and backend, keeps it minimal and verifies it before presenting it.
+- `artifacts/<slug>/`: durable tools that stay useful and current on their own (mini
+  apps, dashboards), and `reports/yyyy-mm-dd_<slug>/`: one-off finished pages for the
+  user or other agents (reports, plans, guides, proof pages). Each is a
+  mobile-responsive page with an `index.html` entry whose `<title>` names it, served on
+  the tailnet and listed in the iPhone Artifacts sheet, tools by last update and
+  reports by day ([artifacts](../src/modules/artifacts/README.md)). Shared styles and
+  data live in `artifacts/shared/`. The producing agent decides the page's logic and
+  backend, keeps it minimal and verifies it before presenting it; a tool whose content
+  has gone stale is fixed or removed.
 - `files/<topic>-<date>/`: raw retained files an artifact does not show: logs,
   exports, evidence. Add one line per deliverable to `files/INDEX.md` with a relative
   link and its purpose. Never put scratch here.
@@ -27,7 +30,7 @@ its contents, or load it as global instructions. Secrets stay in their owned sto
   code owner or generic storage framework. Use its existing reader/writer; choose
   serialization and safe publication appropriate to its actual mutation risks.
 
-Never delete from artifacts, files or state without maintainer approval. Issue closure and
+Never delete from artifacts, reports, files or state without maintainer approval. Issue closure and
 old timestamps alone are not deletion permission. Read-only tasks stay read-only.
 A downloaded snapshot is a finished export; a collection refreshed and queried over
 time is state. To present living data, publish only the requested finished view in

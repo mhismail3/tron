@@ -3,9 +3,9 @@
 
 1. Publisher and server, in a temp fixture: the real publish script lays out
    builds behind the real loopback server; retention, the latest manifest, the
-   index, escaping and served content types are checked over a socket, and an
-   artifact page is served under /artifacts/ with no listing, hidden files,
-   symlink escape or traversal.
+   index, escaping and served content types are checked over a socket, and
+   tool and report pages are served under /artifacts/ and /reports/ with no
+   listing, hidden files, symlink escape or traversal.
 2. Share-host disable ownership, in a temp HOME with fixture `tailscale` and
    `launchctl` executables first on PATH: the real `share-host disable` entry
    point removes only its own exact :8443 handler and LaunchAgent, refuses
@@ -187,17 +187,23 @@ runpy.run_path(sys.argv.pop(1), run_name='__main__')
         port = sock.getsockname()[1]
         sock.close()
         artifacts = tmp / "workspace" / "artifacts"
-        (artifacts / "2026-11-23_status").mkdir(parents=True)
-        (artifacts / "2026-11-23_status" / "index.html").write_text("<title>status artifact</title>")
-        (artifacts / "2026-11-23_status" / ".secret").write_text("hidden")
+        reports = tmp / "workspace" / "reports"
+        (artifacts / "status").mkdir(parents=True)
+        (artifacts / "status" / "index.html").write_text("<title>status artifact</title>")
+        (artifacts / "status" / ".secret").write_text("hidden")
         (tmp / "workspace" / "private.txt").write_text("outside artifacts")
-        (artifacts / "2026-11-23_escape").symlink_to(tmp / "workspace")
-        (artifacts / "2026-11-23_status" / ".private").mkdir()
-        (artifacts / "2026-11-23_status" / ".private" / "note.txt").write_text("hidden folder")
-        (artifacts / "2026-11-23_status" / "public").symlink_to(artifacts / "2026-11-23_status" / ".private")
+        (artifacts / "escape").symlink_to(tmp / "workspace")
+        (artifacts / "status" / ".private").mkdir()
+        (artifacts / "status" / ".private" / "note.txt").write_text("hidden folder")
+        (artifacts / "status" / "public").symlink_to(artifacts / "status" / ".private")
+        (artifacts / "reports").mkdir()
+        (artifacts / "reports" / "index.html").write_text("<title>tool named reports</title>")
+        (reports / "2026-11-23_weekly").mkdir(parents=True)
+        (reports / "2026-11-23_weekly" / "index.html").write_text("<title>weekly report</title>")
+        (reports / "2026-11-23_escape").symlink_to(tmp / "workspace")
         server_log = served.parent / "share-server.log"
         with server_log.open("w") as server_errors:
-            server = subprocess.Popen([sys.executable, str(SERVER), str(served), str(artifacts), str(port)], stderr=server_errors)
+            server = subprocess.Popen([sys.executable, str(SERVER), str(served), str(artifacts), str(reports), str(port)], stderr=server_errors)
         try:
             local = f"http://127.0.0.1:{port}"
             for _ in range(50):
@@ -224,16 +230,23 @@ runpy.run_path(sys.argv.pop(1), run_name='__main__')
             body, ipa_type = fetch(f"{local}/builds/{builds[-1]}/TronMobile.ipa")
             check(body == ipa.read_bytes() and ipa_type == "application/octet-stream", "IPA is served byte-identical")
             check(status(local + "/builds/") == 404, "directories are never listed")
-            artifact, artifact_type = fetch(local + "/artifacts/2026-11-23_status/")
+            artifact, artifact_type = fetch(local + "/artifacts/status/")
             check(artifact == b"<title>status artifact</title>" and artifact_type.startswith("text/html"),
-                  "an artifact folder's index.html is served under /artifacts/<name>/")
-            check(status(local + "/artifacts/") == 404, "the artifacts folder is never listed")
-            check(status(local + "/artifacts/2026-11-23_status/.secret") == 404
-                  and status(local + "/artifacts/2026-11-23_status/public/note.txt") == 404,
+                  "a tool folder's index.html is served under /artifacts/<name>/")
+            report, report_type = fetch(local + "/reports/2026-11-23_weekly/")
+            check(report == b"<title>weekly report</title>" and report_type.startswith("text/html"),
+                  "a report folder's index.html is served under /reports/<name>/")
+            named, _ = fetch(local + "/artifacts/reports/")
+            check(named == b"<title>tool named reports</title>", "a tool named reports is served from the artifacts folder")
+            check(status(local + "/artifacts/") == 404 and status(local + "/reports/") == 404,
+                  "the artifacts and reports folders are never listed")
+            check(status(local + "/artifacts/status/.secret") == 404
+                  and status(local + "/artifacts/status/public/note.txt") == 404,
                   "hidden artifact files are not served, directly or through a symlink")
-            check(status(local + "/artifacts/2026-11-23_escape/private.txt") == 404,
-                  "a symlink cannot leave the artifacts folder")
-            check(status(local + "/artifacts/2026-11-23_status/%00") == 404, "a NUL in the path is not found")
+            check(status(local + "/artifacts/escape/private.txt") == 404
+                  and status(local + "/reports/2026-11-23_escape/private.txt") == 404,
+                  "a symlink cannot leave the artifacts or reports folder")
+            check(status(local + "/artifacts/status/%00") == 404, "a NUL in the path is not found")
             for link in links:
                 url = manifest_url(link)
                 parsed = urllib.parse.urlparse(url)
