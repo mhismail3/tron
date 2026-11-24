@@ -141,6 +141,11 @@ describe("ambient extension artifact discovery change detection", () => {
     const owner = discovery(slots, { delegatedArtifactRoot: delegatedRoot });
     await passesUntil(owner, () => offers.includes(join(runsRoot, changed)), "first offer of the terminal run");
     offers.length = 0;
+    await passesUntil({ runPass: async () => {
+      await writeStatus(runsRoot, changed, "complete", Date.now() - 60_000);
+      return owner.runPass();
+    } }, () => offers.includes(join(runsRoot, changed)), "watcher observes a post-inventory write");
+    offers.length = 0;
 
     await writeStatus(runsRoot, changed, "failed", Date.now());
     await passesUntil(owner, () => offers.includes(join(runsRoot, changed)), "rewritten terminal run");

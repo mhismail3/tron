@@ -2,6 +2,7 @@
 """Own the temporary HOME and scratch directory of one Gateway Vitest process."""
 from __future__ import annotations
 from pathlib import Path
+import ctypes
 import fcntl
 import json
 import os
@@ -10,20 +11,9 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from host_lock import FULL_GATEWAY_LOCK, HELD_BY_CALLER, wait_for_lock  # noqa: E402  (the one host lock owner)
-from vitest_configs import Refused, filter_selects, vitest_selection, with_own_config  # noqa: E402  (the one Vitest selection classifier)
-import ledger
-
-
-def hold_full_gateway_lock():
-    """The open, exclusively locked lock file, after waiting its turn behind any holder and earlier waiters; None when the caller holds it."""
-    if os.environ.get(HELD_BY_CALLER) == '1':
-        return None
-    record = {'pid': os.getpid(), 'worktree': str(ROOT), 'purpose': 'gateway vitest ' + ' '.join(sys.argv[1:])[:200]}
-    return wait_for_lock(FULL_GATEWAY_LOCK, record, lambda line: print(f'gateway tests: {line}', file=sys.stderr, flush=True))
 
 
 def provision_chrome_for_testing(node: str) -> Path:
@@ -62,19 +52,43 @@ def provision_chrome_for_testing(node: str) -> Path:
 
 
 def browser_fixture_environment(arguments: list[str], node: str) -> dict[str, str]:
-    files = ('src/e2e/sessions/browser-fork-receipts.integration.test.ts', 'src/e2e/automations/home-tool-admission.e2e.test.ts',
-             'src/e2e/kernel/delegation/child-browser.integration.test.ts')
-    config, filters = vitest_selection(arguments, ROOT / 'packages/gateway')
-    if config not in (None, 'vitest.config.ts', 'vitest.nested.config.ts'):
-        return {}
-    if filters and not any(filter_selects(relative, path) for _, relative in filters for path in files):
-        return {}
-    if not any((ROOT / 'packages/gateway' / path).is_file() for path in files):
+    files = ('browser-fork-receipts.integration.test.ts', 'home-tool-admission.e2e.test.ts', 'child-browser.integration.test.ts')
+    if not any(name in word for word in arguments for name in files):
         return {}
     binary = provision_chrome_for_testing(node)
-    if not binary.is_file():
-        raise SystemExit('Gateway browser fixtures require cached Chrome for Testing; no personal browser fallback')
     return {'AGENT_BROWSER_EXECUTABLE_PATH': str(binary), 'AGENT_BROWSER_ARGS': '--password-store=basic,--use-mock-keychain'}
+
+
+def named_processes(root: Path) -> list[int]:
+    """This user's processes whose arguments or environment (the kernel's KERN_PROCARGS2 block) name a path under `root`."""
+    libc = ctypes.CDLL(None)
+    listing = subprocess.run(['/usr/bin/pgrep', '-U', str(os.getuid()), '.'], capture_output=True, text=True).stdout
+    buffer = ctypes.create_string_buffer(1 << 20)
+    found = []
+    for pid in (int(word) for word in listing.split()):
+        size = ctypes.c_size_t(len(buffer))
+        if libc.sysctl((ctypes.c_int * 3)(1, 49, pid), 3, buffer, ctypes.byref(size), None, 0):
+            continue
+        block = buffer.raw[4:size.value]
+        if f'{root}/'.encode() in block:
+            found.append(pid)
+    return found
+
+
+def reap(root: Path) -> None:
+    """SIGKILL every process naming the scratch root until none is left: what a test left running, including children
+    re-parented to launchd or moved to their own session, which the caller's process-group kill never reaches."""
+    for _ in range(50):
+        left = named_processes(root)
+        if not left:
+            return
+        for pid in left:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        time.sleep(0.1)
+    raise SystemExit(f'gateway tests: processes under {root} survived SIGKILL')
 
 
 def main() -> int:
@@ -82,27 +96,14 @@ def main() -> int:
     vitest = ROOT / "packages/gateway/node_modules/.bin/vitest"
     if not vitest.is_file():
         raise SystemExit("Gateway Vitest is missing; prepare this worktree's pinned dependencies first")
-    try:
-        arguments = with_own_config(sys.argv[1:], ROOT / 'packages/gateway')
-    except Refused as refusal:
-        print(refusal, file=sys.stderr)
-        return 2
+    arguments = sys.argv[1:]
     browser = browser_fixture_environment(arguments, node)
-    lock = hold_full_gateway_lock()
-    capture = ledger.Capture('gateway-nested' if 'vitest.nested.config.ts' in arguments else 'gateway')
     signal.signal(signal.SIGTERM, lambda signum, _frame: sys.exit(128 + signum))
     with tempfile.TemporaryDirectory(prefix="tron-gateway-tests-", dir="/tmp") as temporary:
         root = Path(temporary)
         home, scratch = root / "home", root / "tmp"
         home.mkdir(); scratch.mkdir()
-        report = root / 'cases.jsonl'
-        environment = {**os.environ, **browser, "HOME": str(home), "TMPDIR": str(scratch), "TRON_NODE_BIN": node,
-                       'TRON_TEST_LEDGER_CASES': str(report), 'TRON_TEST_LEDGER_CPU_IDLE': str(capture.context['cpuIdlePercent'])}
-        if not any(word.startswith('--reporter') for word in arguments):
-            defaults = subprocess.check_output([node, '-p', "JSON.stringify(require('vitest/config').configDefaults.reporters)"],
-                                               cwd=ROOT / 'packages/gateway', env=environment, text=True)
-            arguments.extend('--reporter=' + reporter for reporter in json.loads(defaults))
-        arguments.append('--reporter=' + str(ROOT / 'tools/verify/ledger-vitest.mjs'))
+        environment = {**os.environ, **browser, "HOME": str(home), "TMPDIR": str(scratch), "TRON_NODE_BIN": node}
         with subprocess.Popen([str(ROOT / "scripts/tron-node"), "exec", str(vitest), "run", *arguments],
                               cwd=ROOT / "packages/gateway", env=environment) as child:
             def forward(signum, _frame):
@@ -114,11 +115,7 @@ def main() -> int:
             finally:
                 for sig, handler in previous.items():
                     signal.signal(sig, handler)
-                try:
-                    capture.events(report)
-                finally:
-                    if lock:
-                        lock.close()
+                reap(root)
 
 
 if __name__ == "__main__":

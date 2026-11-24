@@ -69,13 +69,11 @@ private struct TronPadSheetPresentationModifier: ViewModifier {
             switch mode {
             case .sideColumn:
                 content
-                    .presentationDetents([.large])
                     .presentationSizing(.form)
                     .presentationPlacement(.trailing)
                     .presentationBackgroundInteraction(.enabled(upThrough: .large))
             case .centeredCard:
                 content
-                    .presentationDetents([.large])
                     .presentationSizing(.page)
                     .presentationPlacement(.center)
             }

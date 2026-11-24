@@ -1,8 +1,10 @@
 # Static webpages
 
 Small, shared HTML/CSS patterns for Tron's generated webpages. No framework,
-package install, build chain, hosting service or app registry. The real first
-consumer is the remote iOS development-build page.
+package install, build chain, hosting service or app registry. Consumers are the
+remote iOS development-build page and workspace artifacts
+([artifacts](../../packages/gateway/src/modules/artifacts/README.md)), which may embed
+`tron.css` or a copy in `artifacts/shared/`.
 
 ## Canonical locations
 
@@ -12,9 +14,6 @@ consumer is the remote iOS development-build page.
 | OTA page markup, escaped metadata and install links | [`scripts/ios-share-publish.py`](../../scripts/ios-share-publish.py), `render_index`; do not copy its template into an app directory |
 | Fixture preview and publisher/server journey | [`scripts/test-tron-ios-device-share.py`](../../scripts/test-tron-ios-device-share.py) |
 | Real-browser delivery/layout and keyboard/zoom journeys | [`scripts/test-ios-share-browser.js`](../../scripts/test-ios-share-browser.js), run through `agent_browser` below |
-| Maintained mini apps (plain HTML or single-file SwiftUI) | `tools/web/apps/<app-id>/` (create only for a real app); keep its source and concise purpose/update/preview/validation instructions version-controlled here. First Swift app: [`apps/builds-preview/`](apps/builds-preview/README.md), presented in chat as an inline app card ([Swift apps](../../packages/ios-app/docs/swift-apps.md#inline-mini-app-card-1339)) |
-| Artifact/discovery root (default Stable installation) | `~/.tron/workspace/files/mini-apps/README.md`: small index linking back to these repository owners, not a second source tree |
-| App-specific review artifacts | `~/.tron/workspace/files/mini-apps/<app-id>/previews/<review-id>/` for generated pages; `evidence/<review-id>/` for labeled screenshots/results |
 
 Debug/custom installations have their own resolved workspace root. Internal
 files are deliberately retained outputs, not an installed runtime. Never keep an
@@ -69,7 +68,7 @@ color-independent status. Check actual composited contrast, not swatches alone.
    static-server script against **only this fixture**, on an unused loopback port:
 
    ```sh
-   python3 scripts/ios-share-server.py "$PWD/build/web-preview/ios-builds/review-1" 8765
+   python3 scripts/ios-share-server.py "$PWD/build/web-preview/ios-builds/review-1" "$PWD/build/web-preview/artifacts" 8765
    ```
 
    Open `http://127.0.0.1:8765/`. This is a foreground disposable preview, not

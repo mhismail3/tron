@@ -67,7 +67,6 @@ struct CommandLifecycleView: View {
 private struct CommandLifecycleDetailsSheet: View {
     let item: TranscriptItem
     @Environment(\.dismiss) private var dismiss
-    @PresentationState private var detent: PresentationDetent = .medium
 
     private let accent = ChatSemanticPillRole.command.accent
     private var resource: ComposerResourceInvocation? { item.semantic?.resourceInvocations?.first }
@@ -146,8 +145,6 @@ private struct CommandLifecycleDetailsSheet: View {
             }
         }
         .tronTopBlur(.toolDetail)
-        .presentationDetents([.medium, .large], selection: $detent)
-        .presentationDragIndicator(.hidden)
         .tronPresentation()
     }
 }

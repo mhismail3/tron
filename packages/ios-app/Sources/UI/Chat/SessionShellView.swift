@@ -71,10 +71,9 @@ struct SessionShellView: View {
     @Environment(\.tronPresentationActivityCoordinator) private var presentationActivityCoordinator
     @State private var dashboardHeader = DashboardHeaderState()
     @State private var showNewSession = false
-    @State private var newSessionDetent: PresentationDetent = .medium
     @State private var showSettings = false
     @State private var showingAutomations = false
-    @State private var showingApps = false
+    @State private var showingArtifacts = false
     @State private var projectSettings: ProjectSettingsRoute?
     @State private var presentedSession: AppModel.SessionNavigationRoute?
     @State private var sessionToDelete: CatalogSession?
@@ -152,16 +151,14 @@ struct SessionShellView: View {
                     present(route)
                 }
                     .tronTopBlur(.sheet)
-                    .presentationDetents([.medium, .large], selection: $newSessionDetent)
-                    .presentationDragIndicator(.hidden)
             }
             .automationsSheet(
                 isPresented: $showingAutomations,
                 preferences: automationViewPreferencesBinding,
                 onOpenSession: openAutomationSession
             )
-            .tronManagedSheet(isPresented: $showingApps, identity: "dashboard.apps") {
-                InstalledAppsSheet()
+            .tronManagedSheet(isPresented: $showingArtifacts, identity: "dashboard.artifacts") {
+                ArtifactsSheet()
             }
             .tronManagedSheet(
                 isPresented: $showSettings,
@@ -171,7 +168,6 @@ struct SessionShellView: View {
                     showSettings = false
                     present(route)
                 })
-                .presentationDragIndicator(.hidden)
             }
             .tronManagedSheet(item: $projectSettings, identity: { "dashboard.project-settings.\($0.id)" }) { route in
                 ProjectSettingsSheet(route: route)
@@ -303,7 +299,7 @@ struct SessionShellView: View {
         DashboardChrome(
             header: dashboardHeader,
             onOpenAutomations: { showingAutomations = true },
-            onOpenApps: { showingApps = true },
+            onOpenArtifacts: { showingArtifacts = true },
             actions: dashboardMenuActions,
             home: showsHomeFloatingButton
                 ? DashboardHomeControl(state: HomeButtonIndicatorState(status: model.homeStatus.status), open: openHome)
@@ -415,7 +411,7 @@ struct SessionShellView: View {
         showNewSession = false
         showSettings = false
         showingAutomations = false
-        showingApps = false
+        showingArtifacts = false
         projectSettings = nil
 
         do {

@@ -92,17 +92,6 @@ export function eligibleDisplaySurfaces(kind: DisplayKind, artifactSize?: number
 export function admitToolDisplayProjection(
   toolName: string | undefined, value: unknown, toolCallId: unknown, sessionId?: string,
 ): DisplayProjection | undefined {
-  if (toolName === "swift_app" && value && typeof value === "object" && !Array.isArray(value)) {
-    const details = value as Record<string, unknown>;
-    if (hasOnlyKeys(details, ["offer", "display"]) && details.offer && typeof details.offer === "object") {
-      const offer = details.offer as Record<string, unknown>;
-      if (offer.version === 1 && typeof offer.id === "string" && /^[a-f0-9]{64}$/.test(offer.id)
-        && typeof offer.sourceSha256 === "string" && /^[a-f0-9]{64}$/.test(offer.sourceSha256)) {
-        const admitted = admitDisplayProjection("display", { display: details.display });
-        return admitted?.kind === "code" && admitted.artifact?.name.toLowerCase().endsWith(".swift") ? admitted : undefined;
-      }
-    }
-  }
   const reference = admitBrowserToolReference(toolName, toolCallId, value, sessionId);
   if (!reference) return admitDisplayProjection(toolName, value);
   const liveView = reference.descriptor;

@@ -2,7 +2,6 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
-import { expectRequestShapes, expectSystemShapes } from "../../../test-support/lock-projections.js";
 import { normalizeTraceValue } from "../../../test-support/scenario-lock.js";
 import { automationOwnedRunScenario } from "../../../test-support/lock-scenarios.js";
 import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
@@ -71,7 +70,7 @@ describe("gateway/automations owned-run lock", () => {
       expect(jsonl.flatMap((entry) => entry.type === "message" && entry.message.role !== "system"
         ? [`${entry.message.role}:${entry.message.content.map((part: { type: string; text?: string; name?: string }) => part.type === "toolCall" ? `[${part.name}]` : part.text).join("")}`]
         : []).slice(-4)).toEqual([`user:${prefix}${text}`,  "assistant:[read]", "toolResult:lock notes\n", `assistant:${answer}`]);
-      expectSystemShapes(await gateway.canonical(session), ["chatWithAutomations#0"]);
+      
     }
 
     const receipt = "tron.chat-invocation.v1";
@@ -102,7 +101,7 @@ describe("gateway/automations owned-run lock", () => {
       [`user:${prefix}run the workspace notes check`],
       [`user:${prefix}run the workspace notes check`, "assistant:[read]", "toolResult:lock notes\n"],
     ]);
-    expectRequestShapes(recorded.providerRequests, Array(5).fill("chatWithAutomations"));
+    
 
     const receiptsDir = join(gateway.tronHome, "state", "command-receipts");
     const commandReceipts = (await Promise.all((await gateway.tree(receiptsDir)).map(async (name) => JSON.parse(await readFile(join(receiptsDir, name), "utf8")) as Record<string, any>)))

@@ -941,8 +941,7 @@ struct ChatToolPayloadIndex: Hashable, Sendable {
 
 struct ChatToolPresentation: Hashable, Identifiable, Sendable {
     var isDisplayTool: Bool {
-        toolName == "display" || (toolName == "swift_app" && (display != nil
-            || DisplayPresentationPolicy.invocationSurface(toolName: toolName, request: request) != nil))
+        toolName == "display"
     }
     let id: String
     let toolName: String?

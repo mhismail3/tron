@@ -4,8 +4,7 @@ Every tracked path has exactly one owning module. A module is declared by a
 co-located `<name>.module.json` manifest (format B′), or as a whole directory by
 an ancestor's [`directories`](#directory-modules) entry.
 `scripts/tron ownership` checks the whole repository and the [layout](#layout)
-`root.module.json` declares. It is read-only; `scripts/tron verify` runs it as its
-first static step.
+`root.module.json` declares. It is read-only; `scripts/tron gate` runs it.
 
 ```bash
 scripts/tron ownership             # index paths, working-tree manifest contents
@@ -57,7 +56,6 @@ are the tracked paths ending in `.module.json`. There is no central registry.
   | `dependsOn` | no | other module ids |
   | `dynamicEdges` | no | `{to, kind, via?, why}`: `to` is another module id; `kind` is `registration`, `spawn`, `fs-read`, `generated` or `wire`; `via` is a tracked repo-relative path; `why` is non-empty |
   | `verify` | no | `scripts/tron …` commands |
-  | `iosLanes` | no | class-owned Python validator declarations: `classes` holds exact `Target/Class` identities; `command` is an argument list starting with a tracked `.py` script this module owns ([execution contract](../verify/README.md#owner-declared-ios-validation)) |
   | `riskClass` | no | `kernel`, `contracts`, `persistence`, `security`, `lifecycle`, `ios-ui`, `mac-installer` |
   | `directories` | no | whole-directory modules below this manifest: `{"<dir>": {"name", "layer", "verify"?}}`; see [Directory modules](#directory-modules) |
 
@@ -120,7 +118,7 @@ checks it in the same pass, and each message names the fix:
   do not count. `--ledger` prints that line.
 - **Tests** sit beside the code they prove: none in the root, `docs/`, `config/`,
   `.agents/` or `.github/`; Swift `*Tests.swift` only in `UITests/`, `E2ETests/`,
-  `ProfilingTests/`, `SwiftAppUITests/` or `Tests/`.
+  `ProfilingTests/`, `ViewTests/` or `Tests/`.
 
 `root` and `scriptsTop` were seeded from the tree that declared them and only
 shrink. An entry with nothing left to allow is stale and must be removed. The CLI
@@ -150,22 +148,24 @@ means something needs a decision; `--json` prints the same report.
 ignored paths with no named writer, any `.scratch/` or loose `.pi/` entry, and worktrees
 pi-subagents left under `<checkout>-worktrees/worktrees/<this worktree>/`. It exits 1 until
 they are gone; an agent runs it before it reports or parks. `--here --landing` checks only
-untracked files and unnamed ignored residue, and is a `scripts/tron verify` step, so residue
-cannot land.
+untracked files and unnamed ignored residue.
 
 `--prune` deletes only expired scratch and evidence (never through a symlinked
 `.scratch` or `test-results`, and never in a linked worktree with a live process,
 local changes or unknown ignored data, or in any linked worktree without `lsof`:
-that is another worker's), bytecode, branches merged into `origin/main` (not
-merely into a local main) that no worktree has checked out (printing `git branch <name> <sha>`
-to restore each), and merged worktrees on a branch (a detached worktree belongs to the tool that
-made it, such as land's merge worktree) with no untracked, modified or
+that is another worker's), bytecode, and merged worktrees on a branch (a detached worktree belongs to the tool that
+made it, such as a base checkout) with no untracked, modified or
 non-regenerable ignored file (an ignored `.env.local` keeps it), no process whose
 working directory is inside, no HEAD activity for 3 days, and no `test-results/` file the primary checkout lacks
 byte for byte while that folder is unexpired (such a worktree is kept, counted as a decision, and the
 `rsync --ignore-existing` that keeps its evidence is named; first-failure logs are evidence). It makes the read-only Gateway payload writable first. Without `lsof` it
-prunes no worktree. Unmerged branches, residue and orphan directories are only
-reported. Other stores keep their owners: `scripts/tron-ios-test prune` owns
+prunes no worktree. It fetches `origin` first and then deletes, locally and on `origin`
+(with an expected-SHA lease), every branch no worktree has checked out whose every commit is on
+`origin/main` or patch-equivalent to one there, and every other branch idle over 30 days, after writing
+them all to one bundle in `<git-common-dir>/tidy-archive/`; each deletion prints its restore command.
+Deleting an origin branch closes a pull request whose head it is. Worktrees count as merged by the same rule.
+Unmerged branches younger than that, residue and orphan directories are only reported, so the weekly run
+leaves every branch merged, deleted, or under 30 days old. Other stores keep their owners: `scripts/tron-ios-test prune` owns
 `~/Library/Developer/Tron/ios`.
 
 ## Verify

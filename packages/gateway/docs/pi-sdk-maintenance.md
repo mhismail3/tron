@@ -34,6 +34,7 @@ Approvals list. Neither is applied automatically.
 | --- | --- | --- |
 | `pi-coding-agent` | `pi-coding-agent-patch.json` (`removeWhen`) | one numbered `third_party/pi-coding-agent/tron.patch`; queue form at its next bump |
 | `pi-agent-browser-native` | `pi-agent-browser-native-patch.json` | ownership admission over the exact native commit; no separate fork or loader |
+| `agent-browser` (engine) | `agent-browser-patch.json` (`removeWhen`) | `third_party/agent-browser/tron.patch` over tag v0.42.0: macOS Meta editing chords send CDP editing commands (#2481) |
 | `pi-subagents` | `pi-subagents-pin.json` | fork commits on v0.76.1, each with tests and a drop condition in TRON-PATCHES.md in the fork; queue form at its next bump |
 
 ## Version authority and checks
@@ -169,8 +170,16 @@ scripts/tron-node exec node packages/gateway/scripts/build-pi-coding-agent-patch
 `--upstream <checkout>` selects a local source, not a different revision; `--write`
 is only for an intentional pin update. Zero-context native patches avoid treating
 patch context as source whitespace; application still requires the exact pinned base.
-Mac payload staging carries both patch pins and their confined artifacts. The native
-engine dependency is pinned to 0.42.0 and resolved from the managed package, never PATH.
+Mac payload staging carries the three patch pins and their confined artifacts. The engine is
+Tron's patched `agent-browser` 0.42.0: a direct `file:` dependency that an npm override also
+imposes under the native package, resolved from the managed package, never PATH. Its tarball is the
+registry 0.42.0 package with the darwin arm64/x64 binaries (dashboard included) rebuilt from tag
+v0.42.0 plus `third_party/agent-browser/tron.patch`, which also fixes the dashboard's Next.js build
+ID so the build reproduces (other platforms dropped); reproduce or rewrite it with
+`scripts/tron-node exec node packages/gateway/scripts/build-agent-browser-engine.mjs [--write]`
+(needs the pinned Node, npm, pnpm, Rust with both darwin targets and macOS SDK). The managed builtin
+refuses to load when either artifact or its lock entry differs from its pin; the engine's installed
+version check only catches a different release, since stock and patched both report 0.42.0.
 
 The nonreplaceable `builtin:agent-browser` registration supplies the owned persistent
 profile and engine executable. Native alone owns launch/restore/CDP admission and
@@ -263,8 +272,7 @@ artifact checks. Browser live views are admitted only from `builtin:agent-browse
   not repaired from result files or step counts. Control and admission readers remain strict.
   Fork test entrypoints allocate a fresh root rather than inheriting the runtime's
   `PI_SUBAGENTS_TEMP_ROOT`; only nested test processes reuse their loader-owned root.
-- **Proof:** `delegation.lock.integration.test.ts` (native skill paths and serialized managed-provider
-  identity; pin changes re-record only their intended identity hunks through the scenario-lock owner),
+- **Proof:** `delegation.lock.integration.test.ts` (a real child runs to completion and returns its answer),
   `managed-subagents.install.integration.test.ts`,
   `managed-subagents-warm-process.e2e.test.ts` (fresh home, real Gateway process),
   `managed-subagents.transform.integration.test.ts` (fresh build, no Gateway-thread transform),
@@ -304,12 +312,6 @@ switches over ends in a `never` default (`compatibility-manifest.ts`, `projectio
 persist and send: one faux-provider scenario through the real `RuntimeRegistry`/`RuntimeSlot`
 with codemode, tool search and MCP (text and thinking, direct and nested tools,
 `models.classify()` and `image()`, MCP tools, steer and follow-up, abort, manual compaction, a
-Chat model change), normalized and compared with
-`test-fixtures/pi-sdk/sdk-behavior-trace.golden.json`; a busy-loop replay must match too. The
-scenario-lock projection omits shared tool descriptions and parameter schemas already covered by
-the Home activation lock; this changes only the compared projection, not the captured runtime
-transcript or provider schemas. Run
-`npm run test:sdk-behavior-trace` (a mismatch keeps `test-results/sdk-behavior-trace.diff`);
-update deliberately with `npm run update:sdk-behavior-trace` ([scenario locks](scenario-locks.md)).
-The golden is darwin-specific and includes Tron prompt text, so tool snippet changes update it in
-the same change. For an SDK candidate review each hunk; one nobody can explain is the stop.
+Chat model change), asserting each tool succeeds, nested image and classifier results, and the
+persisted codemode image path; a busy-loop replay must pass the same assertions. Run
+`npm run test:sdk-behavior-trace`.

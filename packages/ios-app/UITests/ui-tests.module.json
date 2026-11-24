@@ -89,18 +89,6 @@
       "why": "The UI journeys and locks launch the hosted TronMobile app, which this module's code builds into"
     },
     {
-      "to": "ios-app/swift-app-engine",
-      "kind": "spawn",
-      "via": "packages/ios-app/project.yml",
-      "why": "The UI journeys and locks launch the hosted TronMobile app, which this module's code builds into"
-    },
-    {
-      "to": "ios-app/swift-apps",
-      "kind": "spawn",
-      "via": "packages/ios-app/project.yml",
-      "why": "The UI journeys and locks launch the hosted TronMobile app, which this module's code builds into"
-    },
-    {
       "to": "ios-app/terminal",
       "kind": "spawn",
       "via": "packages/ios-app/project.yml",

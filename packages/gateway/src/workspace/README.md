@@ -15,8 +15,7 @@ delegated children receive those facts.
 initialize/dispose order around Home), `core-module.ts` (core descriptor, per-runtime Jev)
 and `tron-core-extension.ts`. `web-research-module.ts` composes the shared public-web
 owner for all runtime profiles and its explicit scoped native-child socket bridge. The workspace layout, recovery, display and managed-state
-guidance is [internal-workspace.md](../../docs/internal-workspace.md); installed Swift
-apps under `state/apps/` are [swift-apps.md](../../docs/swift-apps.md).
+guidance is [internal-workspace.md](../../docs/internal-workspace.md).
 
 The `resourceRoot` policy supplies this same workspace to the native kernel's
 critical lifetime and context reads; capability stores use the module contract.
@@ -88,7 +87,7 @@ preamble, `tron` section and child handoff registration).
 ## Verify
 
 ```bash
-scripts/tron verify --module gateway/workspace
+scripts/tron gate --check
 scripts/tron test gateway src/e2e/workspace/tron-workspace.integration.test.ts
 ```
 

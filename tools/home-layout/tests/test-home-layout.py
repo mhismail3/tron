@@ -284,6 +284,22 @@ class HomeLayoutTests(unittest.TestCase):
         self.base = Path(tempfile.mkdtemp(prefix="home-layout-"))
         self.addCleanup(shutil.rmtree, self.base, True)
 
+    def test_the_process_scan_reads_processes_caught_between_fork_and_exec(self) -> None:
+        """Test files ran in parallel beside this scan; a process between fork and exec answered EIO and the stopped-home
+        proof refused with process_owner_unreadable, though nothing held the home."""
+        sys.path.insert(0, str(ROOT / "tools/home-layout"))
+        self.addCleanup(sys.path.remove, str(ROOT / "tools/home-layout"))
+        import stopped_home
+        churners = [subprocess.Popen(["/bin/sh", "-c", "while :; do /usr/bin/true; done"]) for _ in range(8)]
+        try:
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                self.assertEqual(stopped_home.process_owners(str(self.base)), set())
+        finally:
+            for churner in churners:
+                churner.kill()
+                churner.wait()
+
     def test_the_shipped_registry_and_source_check_clean(self) -> None:
         result = subprocess.run(["python3", str(ROOT / TOOL), "check"], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

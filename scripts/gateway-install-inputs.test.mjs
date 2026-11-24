@@ -12,7 +12,8 @@ const execFileAsync = promisify(execFile);
 const lock = {
   name: "@tron/gateway", version: "1.0.0", lockfileVersion: 3,
   packages: {
-    "": { name: "@tron/gateway", version: "1.0.0", dependencies: { required: "1.0.0" }, devDependencies: { compiler: "1.0.0" } },
+    "": { name: "@tron/gateway", version: "1.0.0", dependencies: { required: "1.0.0" }, devDependencies: { compiler: "1.0.0" },
+      optionalDependencies: { "optional-native": "1.0.0", "other-platform": "1.0.0" } },
     "node_modules/required": { version: "1.0.0", resolved: "https://registry.npmjs.org/required/-/required-1.0.0.tgz", integrity: "sha512-required", dependencies: {} },
     "node_modules/compiler": { version: "1.0.0", resolved: "https://registry.npmjs.org/compiler/-/compiler-1.0.0.tgz", integrity: "sha512-compiler", dev: true },
     "node_modules/optional-native": { version: "1.0.0", resolved: "https://registry.npmjs.org/optional-native/-/optional-native-1.0.0.tgz", integrity: "sha512-optional", optional: true, os: ["darwin"], cpu: ["arm64"] },
@@ -27,6 +28,7 @@ async function fixture(t, mutate = () => {}) {
     name: lock.name, version: lock.version,
     dependencies: lock.packages[""].dependencies,
     devDependencies: lock.packages[""].devDependencies,
+    optionalDependencies: lock.packages[""].optionalDependencies,
   }));
   await writeFile(join(root, "package-lock.json"), JSON.stringify(lock));
   const installed = structuredClone(lock);
@@ -156,6 +158,32 @@ async function driftedInstall(t) {
 }
 
 const cli = fileURLToPath(new URL("./gateway-install-inputs.mjs", import.meta.url));
+
+test("Build input check accepts npm skipping what only an incompatible optional package needs", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "gateway-install-optional-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const env = { ...process.env, HOME: join(root, "home"), npm_config_cache: join(root, "npm-cache"),
+    npm_config_audit: "false", npm_config_fund: "false", npm_config_update_notifier: "false" };
+  const npm = (args, cwd) => execFileAsync(process.execPath, [join(dirname(process.execPath), "npm"), ...args], { cwd, env });
+  const pack = async (manifest) => {
+    const source = join(root, manifest.name);
+    await mkdir(source, { recursive: true });
+    await writeFile(join(source, "package.json"), JSON.stringify({ version: "1.0.0", ...manifest }));
+    await npm(["pack", "--pack-destination", root], source);
+    return `file:${join(root, `${manifest.name}-1.0.0.tgz`)}`;
+  };
+  const helper = await pack({ name: "tron-neutral-helper" });
+  const binding = await pack({ name: "tron-wasm-binding", cpu: ["wasm32"], dependencies: { "tron-neutral-helper": helper } });
+  const plain = await pack({ name: "tron-plain" });
+  const gateway = join(root, "gateway");
+  await mkdir(gateway);
+  await writeFile(join(gateway, "package.json"), JSON.stringify({ name: "@tron/gateway", version: "1.0.0",
+    dependencies: { "tron-plain": plain }, optionalDependencies: { "tron-wasm-binding": binding } }));
+  await npm(["install", "--offline"], gateway);
+  assert.ok(JSON.parse(await readFile(join(gateway, "package-lock.json"), "utf8")).packages["node_modules/tron-neutral-helper"]);
+  const { stdout } = await execFileAsync(process.execPath, [cli, "check", gateway, "full"], { env });
+  assert.equal(stdout.trim(), "Gateway full installed inputs match package-lock.json");
+});
 
 test("Rebuild from Source repairs node_modules drift from package-lock with npm ci", async (t) => {
   const { gateway, env, tracked } = await driftedInstall(t);

@@ -266,7 +266,6 @@ struct HomeSheetReadIdentity: Hashable {
 
 enum HomeSheetReadQuery: Hashable, Sendable {
     case manage
-    case status
     case tasks(String?, filter: HomeTaskFilter = .open), task(String), permissions
     case taskHistory(String, cursor: String?)
     case chapters
@@ -278,7 +277,6 @@ enum HomeSheetReadQuery: Hashable, Sendable {
 
 enum HomeSheetContent {
     case manage(HomeManageDTO)
-    case status(HomeStatus)
     case tasks(HomeTaskPage?, HomeStatus), task(HomeTaskStatusResult?, HomeStatus), permissions(HomeTaskPermissionsDTO?, HomeStatus)
     case taskHistory(HomeTaskHistoryPage)
     case chapters(HomeChapterList)

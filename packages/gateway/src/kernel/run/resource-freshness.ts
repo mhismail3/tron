@@ -222,7 +222,7 @@ export class ResourceFreshness {
       }
     }
     const skills = loadSkills({ cwd: slot.cwd, agentDir, skillPaths: resolved.skills.filter(entry => entry.enabled).map(entry => entry.path), includeDefaults: true });
-    inputs.push(["skills", skills.skills]);
+    inputs.push(["skills", skills]);
     for (const root of packages) await file(join(root, "package.json"), inputs);
     inputs.push(["packages", settings.getPackages()]);
     if (!profile.resources.noContextFiles) {

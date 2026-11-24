@@ -1378,6 +1378,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           },
           facts: async () => (await Promise.all([homeRequestPolicy?.turnFrame()?.facts, ...turnFacts.map(provider => provider())]))
             .filter(Boolean).join("\n") || undefined,
+          resources: () => created.session.resourceLoader,
         },
         ...(this.dependencies.requestRecord ? { record: outcome => this.dependencies.requestRecord?.({ sessionId: this.id, kind: taskWorker ? "worker" : profile.name,
           skillIndex: created.session.getActiveToolNames().includes("read") && this.advertisedSkills().length > 0, ...outcome }) } : {}),

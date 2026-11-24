@@ -89,18 +89,6 @@
       "why": "The in-process view tests run inside the hosted TronMobile app process, which this module's code builds into"
     },
     {
-      "to": "ios-app/swift-app-engine",
-      "kind": "spawn",
-      "via": "packages/ios-app/project.yml",
-      "why": "The in-process view tests run inside the hosted TronMobile app process, which this module's code builds into"
-    },
-    {
-      "to": "ios-app/swift-apps",
-      "kind": "spawn",
-      "via": "packages/ios-app/project.yml",
-      "why": "The in-process view tests run inside the hosted TronMobile app process, which this module's code builds into"
-    },
-    {
       "to": "ios-app/terminal",
       "kind": "spawn",
       "via": "packages/ios-app/project.yml",

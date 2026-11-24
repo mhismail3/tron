@@ -3,13 +3,15 @@
 
   scripts/tron tidy            # read-only report; exit 1 when something needs a decision
   scripts/tron tidy --json     # the same report, machine-readable
-  scripts/tron tidy --prune    # also delete expired scratch/evidence, bytecode, merged branches and worktrees
+  scripts/tron tidy --prune    # also delete expired scratch/evidence, bytecode, merged worktrees, local and origin
+                               # branches main has, and bundle then delete branches idle over 30 days
   scripts/tron tidy --here     # this worktree only: what its agent must clean before it reports (exit 1 if any)
   scripts/tron tidy --here --landing  # only what may not land: untracked files and ignored residue (verify runs it)
 
-Pruning never touches tracked files, unmerged commits, worktrees holding local files or a live
-process, unknown ignored paths or directories that are not registered worktrees. Every branch it
-deletes is printed with its restore command (tools/ownership/README.md, "Workspace hygiene").
+Pruning never touches tracked files, worktrees holding local files or a live process, unknown ignored
+paths or directories that are not registered worktrees. An unmerged branch is deleted only after 30
+idle days and only once it is in a bundle under the Git directory. Every branch it deletes is printed
+with its restore command (tools/ownership/README.md, "Workspace hygiene").
 """
 
 from __future__ import annotations
@@ -29,7 +31,8 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 DAY = 86400
 SCRATCH, SCRATCH_DAYS = ".scratch", 7
 EVIDENCE, EVIDENCE_DAYS = "test-results", 14
-IDLE_DAYS, BRANCH_IDLE_DAYS = 3, 14
+IDLE_DAYS, BRANCH_IDLE_DAYS, STALE_DAYS = 3, 14, 30
+ARCHIVE = "tidy-archive"
 REGENERABLE = {
     SCRATCH, EVIDENCE, ".ci-tools", "packages/gateway/node_modules", "packages/gateway/dist",
     "packages/push-relay/node_modules", "packages/push-relay/dist", "packages/push-relay/dist-sandbox",
@@ -151,8 +154,10 @@ def live_cwds() -> set[str] | None:
 
 
 def merged(sha: str) -> bool:
-    return subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", sha, "refs/remotes/origin/main"],
-                          capture_output=True).returncode == 0
+    """Every commit is on origin/main or patch-equivalent to one there (a squash or cherry-pick)."""
+    cherry = subprocess.run(["git", "-C", str(ROOT), "cherry", "refs/remotes/origin/main", sha],
+                            capture_output=True, text=True)
+    return cherry.returncode == 0 and not any(line.startswith("+") for line in cherry.stdout.splitlines())
 
 
 def dead_tooling() -> list[str]:
@@ -199,6 +204,9 @@ def report(prune: bool) -> dict:
     primary = Path(trees[0]["worktree"])
     out: dict[str, list] = {k: [] for k in ("untracked", "residue", "tracked_ignored", "expired", "bytecode", "dead_tooling",
                                             "orphan_worktree_dirs", "hook", "worktrees", "branches", "notes", "pruned")}
+    if prune and subprocess.run(["git", "-C", str(ROOT), "fetch", "--quiet", "--prune", "origin"],
+                                capture_output=True).returncode:
+        out["notes"].append("could not fetch origin; branches are judged against the last fetched origin/main")
     cwds = live_cwds()
     if cwds is None:
         out["notes"].append("lsof is unavailable; no worktree is pruned")
@@ -259,13 +267,17 @@ def report(prune: bool) -> dict:
                                        if e.is_dir() and os.path.realpath(e) not in registered]
 
     checked_out = {str(w.get("branch", "")).removeprefix("refs/heads/") for w in trees}
-    for line in git("for-each-ref", "--format=%(refname:short) %(objectname) %(committerdate:unix)", "refs/heads").splitlines():
-        name, sha, when = line.split(" ")
-        if name in PROTECTED_BRANCHES or name in checked_out:
-            continue
-        idle = round((time.time() - int(when)) / DAY)
-        if merged(sha) or idle > BRANCH_IDLE_DAYS:
-            out["branches"].append({"branch": name, "sha": sha, "merged": merged(sha), "idleDays": idle})
+    for space in ("refs/heads/", "refs/remotes/origin/"):
+        for line in git("for-each-ref", "--format=%(refname) %(objectname) %(committerdate:unix)", space).splitlines():
+            ref, sha, when = line.split(" ")
+            name = ref.removeprefix(space)
+            if name in PROTECTED_BRANCHES | {"HEAD"} or name in checked_out:
+                continue
+            idle = round((time.time() - int(when)) / DAY)
+            done = merged(sha)
+            if done or idle > BRANCH_IDLE_DAYS:
+                out["branches"].append({"branch": name, "remote": space != "refs/heads/", "ref": ref, "sha": sha,
+                                        "merged": done, "idleDays": idle})
 
     out["dead_tooling"] = dead_tooling()
     out["hook"] = hook_drift()
@@ -296,15 +308,49 @@ def report(prune: bool) -> dict:
                     out["pruned"].append(f"worktree {w['path']} (branch {w['branch']} is on main)")
                 else:
                     out["notes"].append(f"could not remove worktree {w['path']}: {removed.stderr.strip()}")
-        for b in out["branches"]:
-            if b["merged"] and subprocess.run(["git", "-C", str(ROOT), "branch", "-d", b["branch"]],
-                                              capture_output=True).returncode == 0:
-                out["pruned"].append(f"branch {b['branch']} (restore: git branch {b['branch']} {b['sha']})")
+        prune_branches(out)
         pruned = set(out["pruned"])
         for key in ("expired", "bytecode"):
             out[key] = [p for p in out[key] if p not in pruned]
     return out
 
+
+def prune_branches(out: dict) -> None:
+    """Bundle, then delete, local and origin branches main has and those idle over STALE_DAYS."""
+    checked_out = {str(w.get("branch", "")).removeprefix("refs/heads/") for w in worktrees()}
+    doomed = [b for b in out["branches"] if (b["merged"] or b["idleDays"] > STALE_DAYS)
+              and (b["remote"] or b["branch"] not in checked_out)]
+    if not doomed:
+        return
+    common = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir").strip())
+    bundle = common / ARCHIVE / f"{time.strftime('%Y%m%d-%H%M%S')}.bundle"
+    bundle.parent.mkdir(exist_ok=True)
+    made = subprocess.run(["git", "-C", str(ROOT), "bundle", "create", str(bundle), *[b["ref"] for b in doomed]],
+                          capture_output=True, text=True)
+    if made.returncode:
+        out["notes"].append(f"kept {len(doomed)} branch(es): could not bundle them: {made.stderr.strip()}")
+        return
+    gone = set()
+    for b in doomed:
+        if not b["remote"] and subprocess.run(["git", "-C", str(ROOT), "update-ref", "-d", b["ref"], b["sha"]],
+                                              capture_output=True).returncode == 0:
+            gone.add(b["ref"])
+            out["pruned"].append(f"branch {b['branch']} (restore: git fetch {bundle} {b['ref']}:{b['ref']})")
+    remote = [b for b in doomed if b["remote"]]
+    if remote:
+        pushed = subprocess.run(["git", "-C", str(ROOT), "push", "--porcelain", "origin",
+                                 *[f"--force-with-lease=refs/heads/{b['branch']}:{b['sha']}" for b in remote],
+                                 *[f":refs/heads/{b['branch']}" for b in remote]], capture_output=True, text=True)
+        deleted = {line.split("\t")[1].removeprefix(":refs/heads/") for line in pushed.stdout.splitlines()
+                   if line.startswith("-\t")}
+        for b in remote:
+            if b["branch"] in deleted:
+                gone.add(b["ref"])
+                out["pruned"].append(f"branch origin/{b['branch']} (restore: git fetch {bundle} {b['ref']} && "
+                                     f"git push origin {b['sha']}:refs/heads/{b['branch']})")
+            else:
+                out["notes"].append(f"could not delete origin/{b['branch']}: {pushed.stderr.strip() or 'push refused'}")
+    out["branches"] = [b for b in out["branches"] if b["ref"] not in gone]
 
 FIXES = {
     "untracked": "commit it with an owner, move it to .scratch/, or delete it",
@@ -382,7 +428,7 @@ def main(argv: list[str]) -> int:
     started = time.monotonic()
     result = report("--prune" in argv)
     drift = sum(len(result[key]) for key in FIXES) \
-        + sum(1 for b in result["branches"] if not b["merged"] or "--prune" not in argv) \
+        + len(result["branches"]) \
         + sum(1 for w in result["worktrees"] if not w["merged"] and not w["live"] and w["idleDays"] > BRANCH_IDLE_DAYS) \
         + sum(1 for w in result["worktrees"] if w["merged"] and w["evidence"] and not w["live"] and w["idleDays"] >= IDLE_DAYS)
     if "--json" in argv:
@@ -397,9 +443,10 @@ def main(argv: list[str]) -> int:
         state = ("merged" if w["merged"] else "unmerged") + (" dirty" if w["dirty"] else "") + (" live" if w["live"] else "") \
             + (f" {w['evidence']} evidence file(s) not in the primary checkout" if w["evidence"] else "")
         print(f"tidy: worktree {w['path']} [{w['branch']}] {state}, last activity {w['idleDays']}d ago")
-    merged_count = sum(1 for b in result["branches"] if b["merged"])
-    print(f"tidy: branches: {merged_count} merged into origin/main (--prune deletes them), "
-          f"{len(result['branches']) - merged_count} unmerged and idle over {BRANCH_IDLE_DAYS}d (their owner decides)")
+    for b in result["branches"]:
+        state = "on main (--prune deletes it)" if b["merged"] else \
+            f"unmerged ({'--prune bundles and deletes it' if b['idleDays'] > STALE_DAYS else 'its owner merges or deletes it'})"
+        print(f"tidy: branch {'origin/' if b['remote'] else ''}{b['branch']} {b['sha'][:9]} {state}, idle {b['idleDays']}d")
     for item in result["pruned"]:
         print(f"tidy: pruned {item}")
     print(f"tidy: {drift} item(s) need a decision ({time.monotonic() - started:.1f}s)")

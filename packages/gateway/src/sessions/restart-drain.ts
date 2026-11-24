@@ -1,4 +1,5 @@
 import type { AdministrativeDrainBlockerSummary, AdministrativeDrainSnapshot } from "../protocol/types.js";
+import { core as drain, type Blocker, type Time, type Tracked } from "../core/sessions/restart-drain/facade.js";
 
 export const DRAIN_WAIT_LOG_INTERVAL_MS = 15_000;
 
@@ -41,54 +42,37 @@ export async function waitForStopDrain(
 type RestartDrainDecision =
   | { outcome: "completed" }
   | { outcome: "waiting" }
-  | { outcome: "unresolved-owners"; owners: AdministrativeDrainBlockerSummary[] }
+  | { outcome: "unresolved-owners" }
   | { outcome: "stalled"; blocker: AdministrativeDrainBlockerSummary; ageMs: number };
 
 export class RestartDrainProgress {
-  private tracked: { id: string; state: string; progressAt?: string; admittedAt?: string; sinceMs: number } | undefined;
+  private tracked: { name: string; at: Extract<Tracked, { $: "Tracking" }> } | undefined;
 
   evaluate(snapshot: AdministrativeDrainSnapshot, nowMs: number, stallLimitMs: number): RestartDrainDecision {
-    if (snapshot.blockerCount === 0) {
-      this.tracked = undefined;
-      return { outcome: "completed" };
-    }
-    const owners = unresolvedOwners(snapshot);
-    if (owners) {
-      this.tracked = undefined;
-      return { outcome: "unresolved-owners", owners };
-    }
-    const oldest = snapshot.blockers.reduce<AdministrativeDrainBlockerSummary | undefined>((result, blocker) => {
-      if (!result) return blocker;
-      if (!blocker.admittedAt) return result;
-      if (!result.admittedAt || blocker.admittedAt < result.admittedAt) return blocker;
-      return result;
-    }, undefined);
-    if (!oldest) return { outcome: "waiting" };
-
-    const progressAt = oldest.sessionId === undefined ? oldest.progressAt : snapshot.blockers
-      .filter((blocker) => blocker.sessionId === oldest.sessionId)
-      .reduce<string | undefined>((latest, blocker) =>
-        blocker.progressAt && (!latest || blocker.progressAt > latest) ? blocker.progressAt : latest, undefined);
-    const signatureChanged = this.tracked?.id !== oldest.id
-      || this.tracked.state !== oldest.state
-      || this.tracked.progressAt !== progressAt
-      || this.tracked.admittedAt !== oldest.admittedAt;
-    if (signatureChanged) {
-      const signalAt = progressAt ?? oldest.admittedAt;
-      const signalMs = signalAt ? Date.parse(signalAt) : Number.NaN;
-      this.tracked = {
-        id: oldest.id,
-        state: oldest.state,
-        ...(progressAt ? { progressAt } : {}),
-        ...(oldest.admittedAt ? { admittedAt: oldest.admittedAt } : {}),
-        sinceMs: Number.isFinite(signalMs) ? signalMs : nowMs,
-      };
-    }
-    const tracked = this.tracked;
-    if (!tracked) return { outcome: "waiting" };
-    const ageMs = Math.max(0, nowMs - tracked.sinceMs);
-    return ageMs >= stallLimitMs ? { outcome: "stalled", blocker: oldest, ageMs } : { outcome: "waiting" };
+    const tokens = new Map<string, number>();
+    const names: string[] = [];
+    const token = (value: string): number => tokens.get(value) ?? tokens.set(value, names.push(value) - 1).get(value)!;
+    const blockers = snapshot.blockers.map((blocker): Blocker => ({
+      id: token(blocker.id), receipt: blocker.category === "terminal-receipt-persistence",
+      session: blocker.sessionId === undefined ? { $: "NoSession" } : { $: "InSession", session: token(blocker.sessionId) },
+      state: blocker.state, admitted: instant(blocker.admittedAt), progress: instant(blocker.progressAt),
+    }));
+    const step = drain.Evaluate(snapshot.blockerCount, blockers,
+      this.tracked ? { ...this.tracked.at, id: token(this.tracked.name) } : { $: "Untracked" }, nowMs, stallLimitMs);
+    this.tracked = step.tracked.$ === "Tracking" ? { name: names[step.tracked.id]!, at: step.tracked } : undefined;
+    const outcome = step.outcome;
+    if (outcome.$ === "Completed") return { outcome: "completed" };
+    if (outcome.$ === "UnresolvedOwners") return { outcome: "unresolved-owners" };
+    if (outcome.$ === "Waiting") return { outcome: "waiting" };
+    return { outcome: "stalled", blocker: snapshot.blockers.find((blocker) => blocker.id === names[outcome.blocker])!, ageMs: outcome.age };
   }
+}
+
+function instant(value: string | undefined): Time {
+  if (value === undefined) return { $: "Unset" };
+  const ms = Date.parse(value);
+  if (new Date(ms).toISOString() !== value) throw new RangeError(`Drain blocker time is not an ISO instant: ${JSON.stringify(value)}`);
+  return { $: "At", ms };
 }
 
 export function logUnresolvedDrainOwners(
@@ -98,12 +82,4 @@ export function logUnresolvedDrainOwners(
   for (const owner of owners) {
     if (owner.sessionId) log(owner.sessionId, owner.category);
   }
-}
-
-function unresolvedOwners(snapshot: AdministrativeDrainSnapshot): AdministrativeDrainBlockerSummary[] | undefined {
-  if (snapshot.blockerCount !== snapshot.blockers.length || snapshot.blockers.length === 0) return undefined;
-  const owners = snapshot.blockers.filter((blocker) =>
-    blocker.category === "terminal-receipt-persistence" && blocker.state === "suspect" && blocker.sessionId,
-  );
-  return owners.length === snapshot.blockers.length ? owners : undefined;
 }

@@ -55,8 +55,8 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   are disabled, and its change gate serializes writes. Every other setting, outside-change recovery
   (`applyAgain`) and Undo go through the agent's `settings` tool. The Gateway supplies override
   presence and permissions; rows never infer ownership from value equality.
-- **Manage Home and the chat model card.** Manage Home lists Controls (`HomeControlsSection`) as a navigation
-  row beside Profile, Memory, Chapters and Tasks.
+- **Manage Home and the chat model card.** Manage Home lists Profile, Memory, Chapters and Tasks; its toolbar
+  leads with the Pause/Resume memory and Disable Home controls, each confirmed in a `TronConfirmationSheet`.
   The chat model card (`ManageModelConfigurationCard`, `session-model-summary` or `home-model-summary`) reads
   `settings.resolve` for the three chat-model keys. Switch Model lists the catalog, Thinking lists the session's
   thinking levels, and Context Window lists the selected model's limits. Writes are `settings.change` at the
@@ -74,7 +74,7 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   advertised method; the visible sheet owns the operation's prompts, and an answered choice
   restarts with `replaceOperationId` (`ProviderAuthSelectionTrail`). Usage rows reserve a skeleton
   only when `usageSupported`; `localOnly` shows Unlimited; `usageLentTo` hides the lender row.
-  `ProviderUsageLoadingPlaceholder` also wraps dashboard value cells, preserving provider names
+  The shared `TronLoadingPlaceholder` also wraps dashboard value cells, preserving provider names
   and final column geometry; Reduce Motion keeps the same static rectangles.
 - **Models and compaction.** Model names are the catalog's `name`; thinking choices come from the
   model's advertised levels; the default model comes from canonical settings, never catalog order.
@@ -125,10 +125,7 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
 
 ```bash
 scripts/tron-ios-test run \
-  --only-testing TronMobileUITests/TronIntegrationSheetsUITests \
-  --only-testing TronMobileUITests/TronMCPServerSheetsUITests \
-  --only-testing TronMobileUITests/TronProjectTrustUITests \
-  --only-testing TronMobileUITests/TronSmokeUITests/testIphoneDashboardPreferencesPersistAcrossRoutesAndRelaunch
+  --only-testing TronMobileUITests/TronIntegrationSheetsUITests
 scripts/ios-gateway-e2e-test run-ui \
   --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testOutsideMcpAdditionReachesTheOpenMcpScreen \
   --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSourcesTextDoneAndRoutes
@@ -136,9 +133,6 @@ scripts/ios-gateway-e2e-test run-ui \
 
 Gateway `native-change.e2e.test.ts` owns agent numeric-map changes, next-Pi-session admission, spend-card
 acceptance and Undo.
-The surviving memory/provider/queued-editor journeys in
-`TronForegroundCaptureUITests` own native-stack refresh, draft/focus preservation and invalid-child
-retirement; retired Worker thinking and Transport editor cases do not define that lifecycle.
 
 Hosted values are scripted,
 not persistence evidence. Real-UI journeys read their key inventory

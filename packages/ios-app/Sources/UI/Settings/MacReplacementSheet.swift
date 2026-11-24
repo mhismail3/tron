@@ -83,7 +83,6 @@ struct MacReplacementSheet: View {
     @PresentationState private var status: MacReplacementStatus?
     @PresentationState private var resuming: Set<String> = []
     @PresentationState private var loadGeneration = 0
-    @PresentationState private var detent: PresentationDetent = .large
 
     init(profile: GatewayProfile?, status: MacReplacementStatus? = nil) {
         self.profile = profile
@@ -130,8 +129,6 @@ struct MacReplacementSheet: View {
             }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large], selection: $detent)
-        .presentationDragIndicator(.hidden)
         .tronPresentation()
         .task(id: PresentationActivityTaskID(
             source: "\(profile?.id ?? "fixed"):\(connected):\(model.foregroundReconciliationGeneration):\(scenePhase == .active)",

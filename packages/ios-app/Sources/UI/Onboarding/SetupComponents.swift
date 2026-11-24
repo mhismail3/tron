@@ -147,8 +147,6 @@ struct ProviderConfigurationSheet: View {
         }
         .tronPresentation()
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
         .interactiveDismissDisabled(disablesInteractiveDismissal)
         .onAppear {
             if owningProfileID == nil { owningProfileID = model.profiles.selected?.id }
@@ -608,7 +606,6 @@ enum ModelPickerLayout {
     static let headerFont = TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold)
     static let sectionGap: CGFloat = 10
     static let contentTopPadding: CGFloat = 12
-    static let railsBottomMargin: CGFloat = 14
     static let rowTransition = AnyTransition.asymmetric(
         insertion: .opacity.combined(with: .offset(y: -10)),
         removal: .opacity.animation(.easeOut(duration: 0.12))
@@ -625,8 +622,6 @@ struct ModelPicker: View {
     @PresentationState private var providerExpansion = ModelProviderExpansionStore.shared
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(AppModel.self) private var model
-    @PresentationState private var railsHeight: CGFloat = 0
-    @PresentationState private var scrollTopInset: CGFloat = 0
     @PresentationState private var openingSelection: ModelRef??
     @PresentationState private var heldRecents: [RecentModelRef]?
     @PresentationState private var sectionsCache = ModelPickerSectionsCache()
@@ -647,7 +642,6 @@ struct ModelPicker: View {
                             cardRail(sections.latest)
                         }
                     }
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { railsHeight = $0 }
                 }
                 ForEach(Array(sections.providers.enumerated()), id: \.element.id) { index, section in
                     let isExpanded = isSectionExpanded(section.provider)
@@ -684,10 +678,6 @@ struct ModelPicker: View {
             }
         }
         .scrollDismissesKeyboard(.interactively)
-        .onScrollGeometryChange(for: CGFloat.self) { $0.contentInsets.top } action: { _, inset in
-            scrollTopInset = inset
-        }
-        .preference(key: TronSheetFitHeightKey.self, value: fitHeight)
         .tronScrollEdgeChrome()
         .toolbar {
             ToolbarItemGroup(placement: .topBarLeading) {
@@ -725,12 +715,6 @@ struct ModelPicker: View {
                 closingSearch = false
             }
         }
-    }
-
-    private var fitHeight: CGFloat? {
-        guard railsHeight > 0, scrollTopInset > 0, !showingSearch else { return nil }
-        return scrollTopInset + ModelPickerLayout.contentTopPadding + railsHeight
-            + ModelPickerLayout.railsBottomMargin
     }
 
     private var anchorSelection: ModelRef? {

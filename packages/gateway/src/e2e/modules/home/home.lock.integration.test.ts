@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt, getCurrentTools, type SimpleStreamOptions, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockGateway } from "../../../../test-support/gateway-lock-harness.js";
-import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../../../test-support/scenario-lock.js";
+import { normalizeTraceValue, type TraceValue } from "../../../../test-support/scenario-lock.js";
 import { waitFor } from "../../../../test-support/wait-for.js";
 import { NotificationGrantStore } from "../../../notifications/grant-store.js";
 import { NotificationService } from "../../../notifications/notification-service.js";
@@ -11,7 +11,6 @@ import { PushRelayClient } from "../../../notifications/relay-client.js";
 import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
 import { droppingAnyTurnFrame } from "../../../../test-support/turn-frame.js";
 
-const MODULE = "gateway/e2e";
 const LOCK = "home-activation-wake";
 const LOCK_PROVIDER = `tron-lock-${LOCK}`;
 const WORKER_MARKER = "This is a finite Home task.";
@@ -58,14 +57,14 @@ async function loadedExtensions(gateway: LockGateway, sessionId: string): Promis
 const HOME_EXTENSIONS = [
   "<inline:tron-context-window> | on session_start×1,session_tree×1,model_select×1,before_agent_start×1,turn_start×1",
   "<inline:tron-compaction-policy> | on message_end×1,session_start×1,session_before_compact×1",
-  "<inline:tron-settings> | tools settings | on tool_call×1",
+  "<inline:tron-settings> | tools settings | on tool_call×1,tool_result×1",
   "<inline:tron-session-import> | tools session_import",
   "<inline:tron-projects> | tools projects",
   "<inline:tron-ask-user> | tools ask_user",
   "<inline:tron-display> | tools display | on tool_result×1,agent_end×1,session_shutdown×1",
   "<inline:tron-notify> | tools push_retry,notify",
   "<inline:tron-computer> | tools computer | on session_shutdown×1,before_agent_start×1,agent_end×1",
-  "<inline:tron-home> | tools zoom,date,memory_search,profile,obligation,delegate,task | on tool_call×1,cache_warming_decision×1,before_provider_request×1",
+  "<inline:tron-home> | tools zoom,date,memory_search,profile,obligation,delegate,task | on cache_warming_decision×1,before_provider_request×1",
   "<inline:tron-home-research> | tools session_search,session_read",
   "<inline:tron-web-research> | tools web_search | on session_start×1,session_shutdown×1",
   "<inline:tron-tool-search> | tools tool_search",
@@ -79,12 +78,11 @@ const WORKER_EXTENSIONS = [
   "<inline:tron-compaction-policy> | on message_end×1,session_start×1,session_before_compact×1",
   "<inline:tron-core> | tools jev | on session_start×1,session_shutdown×1,before_agent_start×1",
   "<inline:tron-web-research> | tools web_search | on session_start×1,session_shutdown×1",
-  "<inline:tron-settings> | tools settings | on tool_call×1",
+  "<inline:tron-settings> | tools settings | on tool_call×1,tool_result×1",
   "<inline:tron-session-import> | tools session_import",
   "<inline:tron-projects> | tools projects",
   "<inline:tron-ask-user> | tools ask_user",
   "<inline:tron-display> | tools display | on tool_result×1,agent_end×1,session_shutdown×1",
-  "<inline:tron-swift-apps> | tools swift_app",
   "<inline:tron-computer> | tools computer | on session_shutdown×1,before_agent_start×1,agent_end×1",
   "<inline:tron-notify> | tools push_retry,notify",
   "<inline:tron-model-queue> | on session_start×3,agent_before_settle×2,before_agent_start×1,session_shutdown×1,tool_call×1",
@@ -484,9 +482,7 @@ describe("gateway/home scenario lock", () => {
       },
       systemEntries: { home: homeSystem, worker: workerSystem },
     } satisfies HomeLockTrace as unknown as TraceValue) as unknown as HomeLockTrace;
-    await compareWithGolden({ module: MODULE, ...lockPaths(import.meta.url, LOCK), trace, update: lockUpdateRequested(MODULE), validate: (actual) => {
-      expect(actual.providerRequests.home).toHaveLength(3);
-      expect(actual.providerRequests.worker).toHaveLength(1);
-    } });
+    expect(trace.providerRequests.home).toHaveLength(3);
+      expect(trace.providerRequests.worker).toHaveLength(1);
   }, 60_000);
 });

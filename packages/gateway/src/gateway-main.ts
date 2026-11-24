@@ -685,7 +685,7 @@ async function runRestartDrain(restartNow: boolean): Promise<void> {
             event: "gateway.restart-drain.stalled", source: "lifecycle",
           });
         } else if (decision.outcome === "unresolved-owners") {
-          logUnresolvedDrainOwners(decision.owners, (sessionId, category) => {
+          logUnresolvedDrainOwners(snapshot.blockers, (sessionId, category) => {
             logger.log("error", `Gateway restart proceeding with unresolved owner category=${category}`, {
               event: "gateway.restart-drain.unresolved-owner", source: "lifecycle", sessionId,
             });

@@ -1,0 +1,104 @@
+{
+  "block": "sessions/restart-drain",
+  "tier": "high-stakes",
+  "tierReason": "run lifecycle and availability: decides when a restart drain completes, proceeds over unresolved owners or stalls, so a wrong answer restarts the Gateway over live runs or kills work (LAW-WRITING: task and run lifecycles are high-stakes)",
+  "impl": "blocks/sessions/restart-drain/Block.dfy",
+  "symbols": [
+    "SameState",
+    "SameTime",
+    "AllOwners",
+    "OldestOf",
+    "LatestFor",
+    "Evaluate"
+  ],
+  "verify": [
+    "blocks/sessions/restart-drain/Block.dfy"
+  ],
+  "laws": {
+    "C1 completed": [
+      "SessionsRestartDrain.C1Completed"
+    ],
+    "U1 unresolved-owners": [
+      "SessionsRestartDrain.U1UnresolvedOwners",
+      "SessionsRestartDrain.AllOwnersSpec"
+    ],
+    "W1 unlisted": [
+      "SessionsRestartDrain.W1Unlisted"
+    ],
+    "O1 oldest-tracked": [
+      "SessionsRestartDrain.O1OldestTracked",
+      "SessionsRestartDrain.Facts",
+      "SessionsRestartDrain.OldestSpec",
+      "SessionsRestartDrain.OldestWalk",
+      "SessionsRestartDrain.LatestSpec",
+      "SessionsRestartDrain.ProgressSpec"
+    ],
+    "R1 timer-reset": [
+      "SessionsRestartDrain.R1TimerReset",
+      "SessionsRestartDrain.SameSpec"
+    ],
+    "T1 stalled": [
+      "SessionsRestartDrain.T1Stalled"
+    ]
+  },
+  "helpers": [
+    "ElemsCons",
+    "OldestUnique",
+    "LaterAssoc"
+  ],
+  "translate": "blocks/sessions/restart-drain/Block.dfy",
+  "accepted": {
+    "LatestFor/boundary/>->>=#1": {
+      "kind": "equivalent",
+      "reason": "on equal milliseconds both keep a time At(ms) of the same value, so the running latest is the same Time either way",
+      "reviewer": "law reviewer (REVIEW.json acceptedMutants)",
+      "hint": "if bs.Cons? { var h := bs.head; LatestFor__equiv(bs.tail, s, if h.session.InSession? && h.session.session == s && h.progress.At? && (latest.Unset? || h.progress.ms > latest.ms) then h.progress else latest); }"
+    },
+    "Evaluate/swap-args/tracked.state, o.state->o.state, tracked.state#1": {
+      "kind": "equivalent",
+      "reason": "SameState and SameTime are symmetric (each is equality, SameSpec), so swapping the tracked and the current value cannot change which branch Evaluate takes",
+      "reviewer": "law reviewer (REVIEW.json acceptedMutants)"
+    },
+    "Evaluate/swap-args/tracked.progress, p->p, tracked.progress#1": {
+      "kind": "equivalent",
+      "reason": "SameState and SameTime are symmetric (each is equality, SameSpec), so swapping the tracked and the current value cannot change which branch Evaluate takes",
+      "reviewer": "law reviewer (REVIEW.json acceptedMutants)"
+    },
+    "Evaluate/swap-args/tracked.admitted, o.admitted->o.admitted, tracked.admitted#1": {
+      "kind": "equivalent",
+      "reason": "SameState and SameTime are symmetric (each is equality, SameSpec), so swapping the tracked and the current value cannot change which branch Evaluate takes",
+      "reviewer": "law reviewer (REVIEW.json acceptedMutants)"
+    },
+    "Evaluate/boundary/<=-><#1": {
+      "kind": "equivalent",
+      "reason": "when now equals since both give the age 0 (now - since is 0)",
+      "reviewer": "law reviewer (REVIEW.json acceptedMutants)"
+    }
+  },
+  "report": "blocks/sessions/restart-drain/MUTATION.json",
+  "kinds": {
+    "safety": [
+      "C1 completed",
+      "U1 unresolved-owners",
+      "T1 stalled"
+    ],
+    "progress": [
+      "C1 completed",
+      "T1 stalled"
+    ],
+    "recovery": "n/a: process-local; a Gateway restart starts a new drain with nothing tracked (Assumption A3), and the tracked value is an explicit input each poll",
+    "stale-inputs": [
+      "R1 timer-reset",
+      "W1 unlisted"
+    ],
+    "exact-results": [
+      "C1 completed",
+      "U1 unresolved-owners",
+      "W1 unlisted",
+      "O1 oldest-tracked",
+      "R1 timer-reset",
+      "T1 stalled"
+    ],
+    "uncertain-outcomes": "n/a: no effects; the block returns a decision and the shell restarts or polls again (Assumption A3)"
+  }
+}
