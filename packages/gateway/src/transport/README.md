@@ -135,7 +135,7 @@ heartbeat-refreshed memory reading with its age.
 ## Verify
 
 ```bash
-scripts/tron verify --module gateway/transport
+scripts/tron gate --check
 scripts/tron test gateway src/transport/sync-protocol.integration.test.ts \
   src/transport/server-capacity.integration.test.ts
 ```

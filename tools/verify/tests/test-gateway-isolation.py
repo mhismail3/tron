@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Gateway test CLI and actual migration fixture, with a synthetic caller HOME and TMPDIR."""
 from pathlib import Path
-import importlib.util
 import os
 import signal
 import subprocess
@@ -11,9 +10,6 @@ import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
-_spec = importlib.util.spec_from_file_location("tron_gateway_runner", ROOT / "tools/verify/gateway.py")
-GATEWAY = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(GATEWAY)
 
 
 def fixture_node(node: Path) -> None:
@@ -36,17 +32,11 @@ class GatewayTestHomeIsolation(unittest.TestCase):
         scratch.mkdir(parents=True)
         node = subprocess.check_output([str(ROOT / "scripts/tron-node")], text=True).strip()
         env = {**os.environ, "HOME": str(caller_home), "TMPDIR": str(scratch),
-               'TRON_TEST_LEDGER': str(caller_home / '.tron-maintenance/test-ledger/results.sqlite3'),
                "TRON_NODE_BIN": node, "ISOLATION_CALLER_HOME": str(caller_home),
                "ISOLATION_CALLER_TMPDIR": str(scratch)}
-        lock = GATEWAY.hold_full_gateway_lock()
-        try:
-            result = subprocess.run([str(ROOT / "scripts/tron"), "test", "gateway", *arguments],
-                                    cwd=ROOT, env={**env, GATEWAY.HELD_BY_CALLER: "1"}, text=True,
-                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=180)
-        finally:
-            if lock:
-                lock.close()
+        result = subprocess.run([str(ROOT / "scripts/tron"), "test", "gateway", *arguments],
+                                cwd=ROOT, env=env, text=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=180)
         evidence = ROOT / "test-results/gateway-home-isolation"
         evidence.mkdir(parents=True, exist_ok=True)
         (evidence / (self._testMethodName + ".log")).write_text(result.stdout)
@@ -87,16 +77,12 @@ test('HOME resolution and filesystem writes stay outside caller HOME',()=>{
 
 class GatewayTestScratchCleanup(unittest.TestCase):
     def test_a_group_sigterm_mid_run_removes_the_scratch_root(self) -> None:
-        """What verify, probe and mutate send first: the root goes."""
+        """A SIGTERM mid-run removes the scratch root."""
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary).resolve()
             verify = base / "tools/verify"
             verify.mkdir(parents=True)
-            for name in ("gateway.py", "vitest_configs.py", "ledger.py", "ledger-host.mjs", "ledger-vitest.mjs"):
-                (verify / name).write_text((ROOT / "tools/verify" / name).read_text())
-            lock = (ROOT / "tools/verify/host_lock.py").read_text()
-            self.assertIn("'/tmp/tron-full-gateway.lock'", lock)
-            (verify / "host_lock.py").write_text(lock.replace("'/tmp/tron-full-gateway.lock'", repr(str(base / "full.lock"))))
+            (verify / "gateway.py").write_text((ROOT / "tools/verify/gateway.py").read_text())
             node = base / "scripts/tron-node"
             node.parent.mkdir()
             fixture_node(node)
@@ -106,11 +92,7 @@ class GatewayTestScratchCleanup(unittest.TestCase):
             for script in (node, vitest):
                 script.chmod(0o755)
             commit_fixture(base)
-            ledger = tempfile.TemporaryDirectory(prefix='tron-gateway-ledger-')
-            self.addCleanup(ledger.cleanup)
-            env = {key: value for key, value in os.environ.items() if key != GATEWAY.HELD_BY_CALLER}
-            env['TRON_TEST_LEDGER'] = str(Path(ledger.name) / 'results.sqlite3')
-            runner = subprocess.Popen([sys.executable, str(verify / "gateway.py"), "x.test.ts"], env=env,
+            runner = subprocess.Popen([sys.executable, str(verify / "gateway.py"), "x.test.ts"],
                                       stderr=subprocess.DEVNULL, start_new_session=True)
             deadline = time.monotonic() + 30
             while not (base / "home").exists() or not (base / "home").read_text().strip():
@@ -130,9 +112,7 @@ class GatewayTestOrphanReaping(unittest.TestCase):
             base = Path(temporary).resolve()
             verify = base / "tools/verify"
             verify.mkdir(parents=True)
-            for name in ("gateway.py", "vitest_configs.py", "ledger.py", "ledger-host.mjs", "ledger-vitest.mjs"):
-                (verify / name).write_text((ROOT / "tools/verify" / name).read_text())
-            (verify / "host_lock.py").write_text((ROOT / "tools/verify/host_lock.py").read_text())
+            (verify / "gateway.py").write_text((ROOT / "tools/verify/gateway.py").read_text())
             node = base / "scripts/tron-node"
             node.parent.mkdir()
             fixture_node(node)
@@ -143,69 +123,13 @@ class GatewayTestOrphanReaping(unittest.TestCase):
             for script in (node, vitest):
                 script.chmod(0o755)
             commit_fixture(base)
-            ledger = tempfile.TemporaryDirectory(prefix='tron-gateway-ledger-')
-            self.addCleanup(ledger.cleanup)
-            env = {**os.environ, GATEWAY.HELD_BY_CALLER: "1", 'TRON_TEST_LEDGER': str(Path(ledger.name) / 'results.sqlite3')}
-            subprocess.run([sys.executable, str(verify / "gateway.py"), "x.test.ts"], env=env, capture_output=True, timeout=60)
+            subprocess.run([sys.executable, str(verify / "gateway.py"), "x.test.ts"], capture_output=True, timeout=60)
             root = str(Path((base / "scratch").read_text().strip()).parent)
             listing = subprocess.run(["/bin/ps", "-U", str(os.getuid()), "-ww", "-E", "-o", "pid=,command="], capture_output=True, text=True).stdout
             left = [line for line in listing.splitlines() if root + "/" in line]
             for line in left:
                 os.kill(int(line.split()[0]), signal.SIGKILL)
             self.assertEqual(left, [])
-
-
-class GatewayTestConfigRouting(unittest.TestCase):
-    """`scripts/tron test gateway <file>` runs a file listed by a Gateway Vitest config under that config."""
-
-    def run_files(self, base: Path, *words: str):
-        (base / "argv").unlink(missing_ok=True)
-        ledger = tempfile.TemporaryDirectory(prefix='tron-gateway-ledger-')
-        self.addCleanup(ledger.cleanup)
-        result = subprocess.run([sys.executable, str(base / "tools/verify/gateway.py"), *words], cwd=base / "packages/gateway",
-                                env={**os.environ, GATEWAY.HELD_BY_CALLER: "1", "TRON_TEST_LEDGER": str(Path(ledger.name) / "results.sqlite3")}, capture_output=True, text=True, timeout=60)
-        return result, (base / "argv").read_text() if (base / "argv").exists() else None
-
-    def test_a_listed_file_runs_under_its_own_config_and_a_mixed_list_is_refused(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            base = Path(temporary).resolve()
-            verify = base / "tools/verify"
-            verify.mkdir(parents=True)
-            for source in [*(ROOT / 'tools/verify').glob('*.py'), *(ROOT / 'tools/verify').glob('ledger-*.mjs')]:
-                (verify / source.name).write_text(source.read_text())
-            node = base / "scripts/tron-node"
-            node.parent.mkdir()
-            fixture_node(node)
-            gateway = base / "packages/gateway"
-            vitest = gateway / "node_modules/.bin/vitest"
-            vitest.parent.mkdir(parents=True)
-            vitest.write_text(f'#!/bin/bash\necho "$*" > {base}/argv\n')
-            for script in (node, vitest):
-                script.chmod(0o755)
-            (gateway / "vitest.nested.config.ts").write_text('export const nestedTestFiles = [\n  "src/a/nested.e2e.test.ts",\n];\n')
-            (gateway / "vitest.mac-terminal.config.ts").write_text('export const macTerminalTestFiles = ["src/b/terminal.e2e.test.ts"];\n')
-            for path in ("src/a/nested.e2e.test.ts", "src/a/plain.test.ts", "src/b/terminal.e2e.test.ts"):
-                (gateway / path).parent.mkdir(parents=True, exist_ok=True)
-                (gateway / path).write_text("")
-            commit_fixture(base)
-            nested, terminal = ["--config", "vitest.nested.config.ts"], ["--config", "vitest.mac-terminal.config.ts"]
-            for words, config in ((["src/a/nested.e2e.test.ts"], nested),
-                                  (["packages/gateway/src/b/terminal.e2e.test.ts", "-t", "x"], terminal),
-                                  ([str(gateway / "src/a/nested.e2e.test.ts:12")], nested),
-                                  (["src/a/plain.test.ts"], []), (["plain"], []),
-                                  ([*nested, "src/a/nested.e2e.test.ts"], [])):
-                with self.subTest(words=words):
-                    result, argv = self.run_files(base, *words)
-                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                    actual = argv.strip().split()
-                    self.assertEqual(actual, ['run', *config, *words, '--reporter=default', '--reporter=' + str(base / 'tools/verify/ledger-vitest.mjs')])
-            for words in (["src/a/nested.e2e.test.ts", "src/a/plain.test.ts"], ["src/a/"], ["SRC/A/"]):
-                with self.subTest(words=words):
-                    result, argv = self.run_files(base, *words, "-t", "x")
-                    self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-                    self.assertIsNone(argv, "a mixed list ran Vitest")
-                    self.assertIn("scripts/tron test gateway --config vitest.nested.config.ts -t x", result.stderr)
-                    self.assertIn("scripts/tron test gateway --config vitest.config.ts -t x ", result.stderr)
 
 
 if __name__ == "__main__":

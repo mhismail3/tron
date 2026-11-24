@@ -15,23 +15,18 @@ it deletes.
 files (55,866 lines) booted the whole Gateway registry (#2316 baseline). Under that coupling the full
 suite (about 16 minutes) became the gate, and load-sensitive reds blocked unrelated work: 21 flake
 issues were open.
-**Enforced by** `scripts/tron verify --changed`, which runs the changed modules' owned tests, those of
-modules whose untyped code imports a changed file, and each TypeScript test that imports a changed file.
+**Enforced by** review; the gate runs no per-module selection.
 **Not yet enforced:** the public-interface rule and the deleted-behaviour E2E proof. The
 boundary check in #2316 T2.9 adds them.
 
 ## P2 Whole-system health is a landing and checkpoint signal
 
-**Rule.** A change merges `--no-ff` onto main after its focused checks (`scripts/tron verify --changed`); no full-suite
-gate runs before main. Full suites (`scripts/tron verify --full`), including every Gateway E2E journey, run on main
-after the merge, and a red is fixed forward. The iOS suite and the real-UI core journeys (prompt/reply, delegate/result, approval tap,
-settings change, Home wake, reconnect/restart; [map](../tools/verify/core-journeys.md)) run at
-device checkpoints. A red is filed against the module that owns it,
-which fixes it at the root or reverts its change. A retry that passes is evidence of
-nondeterminism, not a fix.
-**Evidence.** Each journey's remaining gaps are tracked as #2230–#2235.
-**Enforced by** `scripts/tron verify --changed` before the merge, full suites on main, and the checkpoint
-device smoke.
+**Rule.** Every change reaches main through `scripts/tron gate`: one bounded run, under 60 s from
+invocation to the main update or refusal. No second landing run or full suite follows; what the gate
+does not run is not a gate. Simulator and real-UI journeys are on-demand proof and device checkpoints.
+A red is filed against the module that owns it, which fixes it at the root or reverts its change. A
+retry that passes is evidence of nondeterminism, not a fix.
+**Enforced by** the gate and its pre-push hook, by convention only (`--no-verify` bypasses it).
 
 ## P3 Clear owners, clean modules
 
@@ -93,13 +88,8 @@ Gateway refusing a mismatched client.
 ## P6 Tests are deterministic and own their resources
 
 **Rule.** A test owns its HOME, TMPDIR, ports and children, and uses events or injected clocks
-instead of sleeps. Each test run records its identity, commit/tree, outcome, duration and execution-host
-CPU idle/free-memory reading in the external [test ledger](../tools/verify/README.md#test-ledger).
-A test is flaky only when it both passes and fails on the same committed tree; an always-failing
-test is broken. Mark known contention with `TRON_TEST_CONTENDED=1`: flake ranking excludes those
-records, while verify retains raw verdicts. Host readings inform that annotation;
-concurrency or a load threshold does not classify it automatically. Use `scripts/tron flakes` to
-triage same-tree evidence, preserve first failures and measure repeat counts before and after a fix.
+instead of sleeps. A test is flaky only when it both passes and fails on the same committed tree; an always-failing
+test is broken. Preserve first failures and measure repeat counts before and after a fix.
 A flake is its module's bug: it gets one timeboxed root-cause attempt, then shipped logging
 that catches the next occurrence, and then the case is deleted with a non-author ACCEPT that names
 the surviving check. It never blocks another module.

@@ -12,11 +12,9 @@ behaviour across modules, so they belong to no single module.
 
 - **Layout.** A journey keeps the path of the module it mainly exercises:
   `src/e2e/<path under src>/`. A red journey is filed against that module.
-- **When it runs.** The full suite on main (`verify --full`) runs every journey after each merge in its Gateway lanes (the default
-  pass, and the serial `vitest.nested.config.ts` pass); `mac-terminal.e2e.test.ts` needs a
-  tailnet host: `npm run test:mac-terminal`, or `verify --changed` on this Mac. `verify --changed` runs a
-  journey when the journey itself changes, or when a changed module's manifest declares it
-  as that module's verification; a module with no test of its own declares the tests that
+- **When it runs.** The gate runs the fixed set in `tools/verify/gate.py`; every other journey is
+  on-demand proof (`scripts/tron test gateway <file>`); `mac-terminal.e2e.test.ts` needs a
+  tailnet host (`npm run test:mac-terminal`); a module with no test of its own declares the tests that
   prove it that way. A module's own tests stay in the module. Scenario locks live here at
   `src/e2e/<path>`; store locks (`*.store.lock.integration.test.ts`) stay with their store's
   owner.

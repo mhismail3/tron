@@ -155,7 +155,7 @@ composition a test registry takes, with deferred registry-owned module ports).
 ## Verify
 
 ```bash
-scripts/tron verify --module gateway/test-support
+scripts/tron gate --check
 cd packages/gateway && npx vitest run --config vitest.nested.config.ts <file>
 ```
 

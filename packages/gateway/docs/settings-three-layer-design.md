@@ -203,7 +203,7 @@ readable in Global Changes; no request, Undo or Apply again writes Project setti
   private packet. After visual approval: real-Gateway precedence, trust, safety, stale-override,
   unavailable-model, inheritance/reset/undo, taskId and migration tests; precise XCUITest row/pill/info
   and Changes filter assertions. Show reproducing RED before GREEN for fixes, preserve E2E artifacts.
-- Run relevant tests directly and `scripts/tron verify --changed`; review golden diffs with maintainer.
+- Run relevant tests directly and admit through `scripts/tron gate`.
   Checkpoint/rebase onto active E5 and iOS work, plain Git landing; no install/OTA/restart. Report needed
   Gateway+iOS rebuilds only when all workers have stopped. Product feature-paused kernel seams require
   an existing target owner or a separate maintainer/module decision before implementation.

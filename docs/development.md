@@ -267,29 +267,18 @@ its manifest updated in the same change. [Ownership rules](../tools/ownership/RE
 `scripts/tron layers [gateway|ios]` checks a package's dependency graph against
 manifest layers and `dependsOn`. The Gateway graph comes from the pinned TypeScript
 compiler; the iOS graph comes from the Xcode index store of a fresh
-`scripts/tron test ios build` of the current commit (stale evidence is refused). With
-`verify --ios-host mini`, both the build and index validation run on the mini; returning test artifacts
-does not copy the build's DerivedData or make its index local.
-Existing upward and two-way pairs live in the shrink-only
+`scripts/tron test ios build` of the current commit (stale evidence is refused). Existing upward and two-way pairs live in the shrink-only
 `packages/<pkg>/layer-baseline.json`; a new one or a new unindexed file fails
 (file-edge counts are only reported), and a fixed one must be removed with
 `--update`. Undeclared pairs are reported only, and imports into L0/L1 are
 always allowed.
 [Layer rules](../tools/layers/README.md).
 
-Run the focused checks (`scripts/tron verify --changed`), then `git merge --no-ff` onto fetched main and push ([Git/gh skill](../.agents/skills/tron-work/SKILL.md)); full suites run on main after the merge and a red is fixed forward; device checkpoints own device coverage ([principles P2](PRINCIPLES.md#p2-whole-system-health-is-a-landing-and-checkpoint-signal)).
-Markdown-only changes need static/docs evidence. [Verify](../tools/verify/README.md)
-owns selection and `test-results/verify/<sha>.json`; the [oracle policy](../tools/verify/test-oracles.md)
-owns fail-before/pass-after in the owning test, consolidation, and test changes with independent ACCEPT. Reds need
-root fixes or causal reverts, not exemptions; no maintainer test-text approval or retry-to-green.
-
-Tron heavy tests, including simulator tests, run serially on the Mac mini through the normal lease.
-Use `scripts/tron verify ... --gateway-host mini --ios-host mini` or `scripts/tron test ios ...`
-(mini by default), from a clean committed tree. A verification selecting iOS work runs entirely on the
-mini, keeping cheap checks, build identity and index validation with the tests. Output and native
-artifacts return to a unique `test-results/mini/<sha-prefix>-<nonce>/`; a busy mini queues and an
-unreachable or incomplete mini never falls back here. [Mini execution](../tools/verify/README.md#ios-checks-on-the-mini)
-owns setup, result layout and cancellation.
+Admit every change to main with `scripts/tron gate` ([gate](../tools/verify/README.md#gate)): it merges onto
+fetched main, runs every gate check in parallel and pushes within 58 s, or refuses. There is no
+later full suite; simulator and other journeys are on-demand proof. The [oracle policy](../tools/verify/test-oracles.md)
+owns fail-before/pass-after in the owning test and test changes with independent ACCEPT. Reds need
+root fixes or causal reverts; no retry-to-green.
 
 Home plans the queue (`packages/gateway/docs/host-load.md`). The host-local iOS runner, profiler,
 Gateway E2E harness and Development simulator helper still take their native simulator lease and one

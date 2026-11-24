@@ -35,7 +35,7 @@ Reopening an index derives current text instead of publishing a retired branch.
 
 ## Verify
 
-`scripts/tron verify --module gateway/session-search` selects the persisted-store
+`scripts/tron gate --check` selects the persisted-store
 lock, query-cancellation/reopen lock, and existing Home research/legacy journeys
 through the manifest's explicit consumer declarations. Those unchanged real
 Home tools prove edited citations, redacted persisted results, chapter exclusion

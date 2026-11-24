@@ -170,7 +170,7 @@ are installed; schema access never evaluates their late-bound service getter.
 ## Verify
 
 ```bash
-scripts/tron verify --module gateway/admin
+scripts/tron gate --check
 scripts/tron test gateway src/e2e/admin/settings-model.integration.test.ts \
   src/e2e/admin/settings-change.integration.test.ts src/e2e/admin/settings-gate.e2e.test.ts
 scripts/tron docs check

@@ -89,10 +89,7 @@ whose workload or render check diverged. Scenarios: `ProfilingTests/`
 dashboard filter through `AppLocalBehaviorSettings`, the mounted dashboard's settings owner;
 writing its persisted preferences alone does not update a live dashboard.
 
-Verify runs the scenarios of each `ProfilingTests` class that `scripts/profile.module.json` declares in
-`iosScenarios` once (`--iterations 1`) on each change, and passes them only on their functional receipts
-([verify](../../../tools/verify/README.md#owner-declared-profiling-scenarios)). Measured numbers stay diagnostic:
-`--self-test` and `compare` are never validation gates.
+`ProfilingTests` scenarios run on demand; measured numbers stay diagnostic and are never gates.
 
 #### Attribution: finding the owner
 
