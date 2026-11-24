@@ -106,6 +106,30 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         }
     }
 
+    func testEditingTheProviderKeyKeepsTheFittedHeight() async throws {
+        try await mounted(["-tron-ask-user-fixture", "-tron-provider-key-fixture"]) { app in
+            try await app.until("the provider-key review") { app.element("change-review-secret") != nil }
+            try await app.waitForTopSheetToSettle()
+            let field = try XCTUnwrap(MountedFixture.views(UITextField.self, in: app.top).first)
+            let idle = try XCTUnwrap(mainScroll(app)).contentSize.height
+            field.inputView = UIView(frame: .zero)
+            field.inputAssistantItem.leadingBarButtonGroups = []
+            field.inputAssistantItem.trailingBarButtonGroups = []
+            XCTAssertTrue(field.becomeFirstResponder())
+            field.insertText("sk-fixture-typed-key")
+            for _ in 0..<30 { await MountedFixture.nextFrame() }
+            NotificationCenter.default.post(name: UIResponder.keyboardWillHideNotification, object: nil)
+            try await app.waitForTopSheetToSettle()
+            XCTAssertTrue(field.isFirstResponder, "the key field is still editing")
+            XCTAssertEqual(try XCTUnwrap(mainScroll(app)).contentSize.height, idle, accuracy: 0.5,
+                           "The key row keeps its height while its field editor is up")
+            let trace = try await SheetTrace.record(app, frames: 90)
+            trace.assertStill("Editing the provider key keeps the fitted height", against: app)
+            try await assertFitted(app, "provider-key-editing")
+            field.resignFirstResponder()
+        }
+    }
+
     func testParentSheetAndItsCardsStayStillWhileASubsheetComesAndGoes() async throws {
         try await mounted(["-tron-settings-fixture", "-settings-expanded-review", "-six-ui-surface", "worker-report"]) { app in
             try await app.until("the report sheet") { app.button("Technical details") != nil && sheetChain(app).count == 1 }
@@ -157,7 +181,13 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         let depth = sheetChain(app).count
         UIView.setAnimationsEnabled(true)
         try await open()
-        let trace = try await SheetTrace.record(app, frames: 120, ready: { sheetChain(app).count == depth + 1 })
+        var parentFrames: [CGRect] = []
+        let trace = try await SheetTrace.record(app, frames: 120, ready: { sheetChain(app).count == depth + 1 }) { _ in
+            let layer = parent.view.layer.presentation() ?? parent.view.layer
+            parentFrames.append(layer.convert(layer.bounds, to: nil))
+        }
+        let moved = parentFrames.filter { abs($0.minY - parentStart.minY) > 0.5 || abs($0.height - parentStart.height) > 0.5 }
+        XCTAssertTrue(moved.isEmpty, "\(name): opening a nested sheet moved its parent from \(parentStart) to \(moved)")
         trace.assertStill("\(name): the nested sheet opens at its final height", against: app)
         try await assertFitted(app, "\(name)-over-parent")
         _ = sheetChain(app).last?.presentingViewController?.dismiss(animated: true)

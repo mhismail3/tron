@@ -38,14 +38,16 @@ struct ChangeReviewSheet: View {
                         TronSettingsGroup("API key") {
                             Text(verbatim: "Paste API key")
                                 .hidden()
-                                .frame(maxWidth: .infinity)
+                                .modifier(ReviewRowInsets())
                                 .overlay {
                                     SecureField("Paste API key", text: secret)
                                         .textContentType(.password).textInputAutocapitalization(.never).autocorrectionDisabled()
                                         .tronTextEntryDone()
+                                        .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
+                                        .frame(maxHeight: .infinity)
+                                        .contentShape(Rectangle())
+                                        .accessibilityIdentifier("change-review-secret")
                                 }
-                                .modifier(ReviewRowInsets())
-                                .accessibilityIdentifier("change-review-secret")
                         }
                         .tronSettingsCaption("Sent once to your Mac and stored in its Keychain. It is never shown again.")
                     }

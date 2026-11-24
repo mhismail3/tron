@@ -220,7 +220,7 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 ## Exact review presentation
 
 `ChangeReviewSheet` (`UI/Components/ChangeReviewSheet.swift`) is the one plaintext before/after
-review. It opens at medium and composes standard sections: a summary row (title, reason), one
+review. It opens at its content height (see Detents) and composes standard sections: a summary row (title, reason), one
 Before/After group per item with its detail caption, an always-visible monospaced Exact values
 section, and, for intent `provider-api-key`, one `SecureField` for the provider's API key; Approve
 stays disabled until it holds text, and the approving answer alone carries it (`secret`), never
@@ -303,8 +303,7 @@ separate:
   can be reused within one canvas update and would inherit the old sheet node's state. `TronNativeSheetCanvas`, mounted at each scene/surface root, contains scope-owned
   `RetainedNativeSheetHost` nodes in one retained SwiftUI hosting controller per surface. Native
   sheet nodes mount while their presenters are idle, before the first binding request; the first
-  tap changes an existing node rather than installing an already-presenting graph. Home destinations
-  share medium/large detents, including Canonical transcript's document chrome. Keeping child
+  tap changes an existing node rather than installing an already-presenting graph. Keeping child
   controllers under a disposable container does not retain their presentations. Hosts forward
   inherited environment and transactions; explicit scene-phase and dependency-read observation keep
   activation/freshness live. Invisible mounting stays outside control labels. Native chrome, detents,
