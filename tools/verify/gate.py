@@ -61,6 +61,7 @@ class Gate:
         self.steps: list[dict] = []
         self.running: list[subprocess.Popen] = []
         self.streams: list = []
+        self.cleanup: list[Path] = []
 
     def left(self) -> float:
         left = self.deadline - time.monotonic()
@@ -147,7 +148,8 @@ class Gate:
         finally:
             self.stop()
             subprocess.run(['git', 'worktree', 'remove', '--force', str(tree)], cwd=self.root, capture_output=True)
-            shutil.rmtree(tree, ignore_errors=True)
+            for path in [tree, *self.cleanup]:
+                shutil.rmtree(path, ignore_errors=True)
             receipt = {'outcome': outcome, 'reason': reason, 'base': base, 'tip': tip, 'merged': merged,
                        'seconds': round(time.monotonic() - self.started, 2), 'steps': self.steps}
             (self.output / 'result.json').write_text(json.dumps(receipt, indent=2) + '\n')
@@ -164,7 +166,8 @@ def checks(gate: Gate, tree: Path, base: str, merged: str) -> None:
     node = subprocess.run([str(tree / 'scripts/tron-node')], capture_output=True, text=True).stdout.strip()
     if not node:
         raise Refused('no pinned Node; see scripts/tron-node')
-    home = Path(tempfile.mkdtemp(prefix='home-', dir=tree))
+    home = Path(tempfile.mkdtemp(prefix='tron-gate-home-'))
+    gate.cleanup.append(home)
     env = dict(os.environ, HOME=str(home), TMPDIR=str(home), PYTHONDONTWRITEBYTECODE='1',
                PATH=str(Path(node).parent) + os.pathsep + os.environ['PATH'])
     gateway = tree / 'packages/gateway'
