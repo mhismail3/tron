@@ -11,6 +11,7 @@ export const nestedTestFiles = [
   "src/e2e/admin/settings-process.e2e.test.ts",
   "src/e2e/admin/native-change-process.e2e.test.ts",
   "src/e2e/workspace/web-research-child.integration.test.ts",
+  "src/e2e/kernel/delegation/child-browser.integration.test.ts",
   "src/e2e/workspace/web-research-resume.integration.test.ts",
   "src/e2e/kernel/delegation/managed-subagents.rollback.integration.test.ts",
   "src/kernel/delegation/managed-subagents.install.integration.test.ts",

@@ -199,7 +199,10 @@ cookies now outlive browser close, so a session-only login lasts until the site 
 saved state is removed, rather than ending when the browser quits.
 Only a user-scope declaration of `pi-agent-browser-native` (npm or its GitHub fork source)
 enables the browser: `managedBrowserEnabled` then registers the managed builtin for ordinary
-sessions, Home (`builtin:agent-browser`) and the admin catalog. The declared source itself is
+sessions, Home (`builtin:agent-browser`) and the admin catalog. A session with managed subagents also
+registers it as a host-required child extension (`tron-agent-browser`, `kernel/host/agent-browser-child.ts`),
+so every child loads the same pinned wrapper, pinned engine and owned profile under the agent directory;
+an agent lists `agent_browser` in `tools` and needs no `extensions` or `subagentOnlyExtensions` path. The declared source itself is
 never loaded. While the builtin is loaded, `agent_browser*` tool names are reserved to it; without
 the declaration Tron registers no browser, reserves no browser names and never runs the builtin's
 artifact checks. Browser live views are admitted only from `builtin:agent-browser` either way.

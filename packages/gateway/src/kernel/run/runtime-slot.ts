@@ -1241,10 +1241,10 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       const managedLoaderOptions = await managedSubagents?.loaderOptions(settingsManager,
         (content, options, owner, messages) => this.admitSubagentWake(content, options, owner, messages));
       const extensionFactories = profile.extensions !== "ordinary"
-        ? [...this.dependencies.modules.registrations(profile.extensions, sessionContext), ...managedBrowserExtensions(this.dependencies.agentDir, settingsManager),
+        ? [...this.dependencies.modules.registrations(profile.extensions, sessionContext), ...managedBrowserExtensions(this.dependencies.agentDir, settingsManager, sessionContext.requireChildExtensions),
           ...(sessionContext.defersRareTools ? [{ name: "tron-tool-search", factory: toolSearchExtension(false).factory }] : [])]
         : [
-            ...managedBrowserExtensions(this.dependencies.agentDir, settingsManager),
+            ...managedBrowserExtensions(this.dependencies.agentDir, settingsManager, sessionContext.requireChildExtensions),
             ...(managedLoaderOptions?.extensionFactories ?? []),
             ...piBuiltinExtensions(this.dependencies.agentDir, (url) => {
               const operationId = currentMcpAuthOperationId();

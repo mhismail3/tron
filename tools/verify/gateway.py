@@ -52,7 +52,7 @@ def provision_chrome_for_testing(node: str) -> Path:
 
 
 def browser_fixture_environment(arguments: list[str], node: str) -> dict[str, str]:
-    files = ('browser-fork-receipts.integration.test.ts', 'home-tool-admission.e2e.test.ts')
+    files = ('browser-fork-receipts.integration.test.ts', 'home-tool-admission.e2e.test.ts', 'child-browser.integration.test.ts')
     if not any(name in word for word in arguments for name in files):
         return {}
     binary = provision_chrome_for_testing(node)
