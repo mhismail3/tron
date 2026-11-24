@@ -15,7 +15,6 @@ extension EnvironmentValues {
 }
 
 private struct TronContentFitSheetModifier: ViewModifier {
-    static let feedbackBand: CGFloat = 2
     @State private var measured: CGFloat?
     @State private var settled: CGFloat?
     @State private var loading = false
@@ -52,7 +51,7 @@ private struct TronContentFitSheetModifier: ViewModifier {
             .environment(\.tronSheetMeasuresContent, true)
             .environment(\.tronSheetFloor, fitHeight ?? .infinity)
             .onPreferenceChange(TronSheetFitKey.self) { next in
-                guard next.map({ abs($0 - (measured ?? -Self.feedbackBand)) >= Self.feedbackBand }) ?? (measured != nil) else { return }
+                guard next.map({ abs($0 - (measured ?? -1)) >= 0.5 }) ?? (measured != nil) else { return }
                 update {
                     measured = next
                     if !loading { settled = next }

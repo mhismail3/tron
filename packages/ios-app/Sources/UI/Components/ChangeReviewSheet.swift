@@ -36,9 +36,14 @@ struct ChangeReviewSheet: View {
                     }
                     if let secret {
                         TronSettingsGroup("API key") {
-                            SecureField("Paste API key", text: secret)
-                                .textContentType(.password).textInputAutocapitalization(.never).autocorrectionDisabled()
-                                .tronTextEntryDone()
+                            Text(verbatim: "Paste API key")
+                                .hidden()
+                                .frame(maxWidth: .infinity)
+                                .overlay {
+                                    SecureField("Paste API key", text: secret)
+                                        .textContentType(.password).textInputAutocapitalization(.never).autocorrectionDisabled()
+                                        .tronTextEntryDone()
+                                }
                                 .modifier(ReviewRowInsets())
                                 .accessibilityIdentifier("change-review-secret")
                         }
