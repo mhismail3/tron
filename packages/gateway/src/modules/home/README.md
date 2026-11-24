@@ -35,7 +35,7 @@ Native change cards wait in the requesting turn and consume the paired tap throu
 - **Tasks and wake inbox:** `home-task-*.ts`, `home-wake-inbox.ts`; contract in
   [tasks.md](tasks.md). Generic subagent receipt/artifact proof belongs to
   [kernel delegation](../../kernel/delegation/delegated-activity.md), not Home policy.
-  Also `home-diagnostic.ts`, `host-pressure.ts`, `task-command-sweep.ts` ([task command scopes](../../../docs/host-load.md#task-command-scopes)), `locks/` (goldens).
+  Also `home-diagnostic.ts`, `host-pressure.ts`, `task-command-sweep.ts` ([task command scopes](../../../docs/host-load.md#task-command-scopes)).
 
 ## Contract
 

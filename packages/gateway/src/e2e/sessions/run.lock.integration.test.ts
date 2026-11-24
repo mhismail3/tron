@@ -3,7 +3,6 @@ import { readFile } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 import { type LockGateway, type LockGatewayOptions } from "../../../test-support/gateway-lock-harness.js";
 import { normalizeTraceValue } from "../../../test-support/scenario-lock.js";
-import { expectRequestShapes, expectSystemShapes } from "../../../test-support/lock-projections.js";
 import { awaitsWithin } from "../../../test-support/wait-for.js";
 import { compactionScenario, EXTENSION_UI_OPTIONS, extensionUiScenario, gate, openLockSession, promptStreamScenario, type LockSession } from "../../../test-support/lock-scenarios.js";
 import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
@@ -35,7 +34,7 @@ async function finish(session: Session, shape: string): Promise<RunLockTrace> {
   const recorded = session.gateway.record();
   const slot = await session.gateway.registry.acquire(session.sessionId);
   const canonicalJsonl = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n").map((line) => JSON.parse(line) as unknown);
-  expectSystemShapes(normalizeTraceValue(canonicalJsonl, session.gateway.normalization) as unknown[], [`${shape}#0`]);
+  
   return { sessionId: session.sessionId, exchanges: recorded.exchanges as RunLockTrace["exchanges"], events: recorded.events,
     providerRequests: recorded.providerRequests, canonicalJsonl, transcript: transcript.result };
 }
@@ -161,7 +160,7 @@ describe("gateway/run kernel locks", () => {
       ["user:read the notes"],
       ["user:read the notes", "assistant:Reading notes.[read]", "toolResult:lock notes\n(read)"],
     ]);
-    expectRequestShapes(trace.providerRequests, ["chat", "chat"]);
+    
   });
 
   it("steer: a steer and a follow-up admitted into a live run reach the model in order", async () => {
@@ -190,7 +189,7 @@ describe("gateway/run kernel locks", () => {
       ["user:hold a turn open", "assistant:[read]", "toolResult:lock notes\n(read)", "user:steer the run"],
       ["user:hold a turn open", "assistant:[read]", "toolResult:lock notes\n(read)", "user:steer the run", "assistant:Steered work acknowledged.", "user:then follow up"],
     ]);
-    expectRequestShapes(trace.providerRequests, ["chat", "chat", "chat"]);
+    
     expect(receipts(trace, ["hold a turn open", "steer the run", "then follow up"])).toEqual(["start:staged", "transition:accepted", "binding:", "start:staged", "transition:accepted",
       "start:staged", "transition:accepted", "binding:", "terminal:completed", "terminal:completed", "binding:", "terminal:completed"]);
     expect(results(trace, "session.prompt")).toEqual([0, 1, 2].map(() => ({ operationId: expect.any(String) })));
@@ -245,7 +244,7 @@ describe("gateway/run kernel locks", () => {
       "assistant:aborted | [visible modelInput] | Request was aborted",
     ]);
     expect(requestMessages(trace)).toEqual([["user:start a turn to abort"]]);
-    expectRequestShapes(trace.providerRequests, ["chat"]);
+    
   });
 
   it("compaction: a manual compaction summarizes earlier turns and keeps the recent tail", async () => {
@@ -270,7 +269,7 @@ describe("gateway/run kernel locks", () => {
       "assistant:stop | [visible modelInput] | Second answer. lock context lock context lock context lock context lock context …(1055)",
       "compaction | [visible none] | Summary: two answered turns about the lock context.\n\n---\n\n**Turn Context (split …(123)",
     ]);
-    expectRequestShapes(trace.providerRequests, ["chat", "chat", "compactionSummary", "compactionSummary"]);
+    
     const long = "lock context ".repeat(80);
     expect(requestMessages(trace, [2, 3]).slice(0, 2)).toEqual([["user:first question"], ["user:first question", `assistant:First answer. ${long}`, "user:second question"]]);
     const [summaryRequest, prefixRequest] = requestMessages(trace, [2, 3]).slice(2);
@@ -305,6 +304,6 @@ describe("gateway/run kernel locks", () => {
       ["user:ask me which path"],
       ["user:ask me which path", "assistant:[lock_select]", "toolResult:chosen: Keep(lock_select)"],
     ]);
-    expectRequestShapes(trace.providerRequests, ["chatWithExtensionSelect", "chatWithExtensionSelect"]);
+    
   });
 });

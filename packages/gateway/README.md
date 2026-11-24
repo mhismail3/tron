@@ -21,7 +21,7 @@ scripts/tron docs signals                    # Signals rows of every module READ
 Cross-module contracts live in [`docs/`](docs): wire families (below), [settings
 contract](docs/settings-contract.md), [Pi SDK maintenance](docs/pi-sdk-maintenance.md),
 [connection resilience](docs/connection-resilience.md),
-[observability](docs/observability.md), [scenario locks](docs/scenario-locks.md).
+[observability](docs/observability.md).
 Each heading below keeps its inbound anchor and links to the current owner.
 
 ## Chat semantics

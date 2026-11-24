@@ -248,17 +248,11 @@
     "src/e2e/sessions/sdk-behavior-trace.integration.test.ts": {
       "sleep": 1
     },
-    "src/e2e/sessions/session-entries.lock.integration.test.ts": {
-      "timeout-literal": 1
-    },
     "src/e2e/sessions/session-heap.lock.integration.test.ts": {
       "timeout-literal": 2
     },
     "src/e2e/sessions/session-search.privacy.lock.integration.test.ts": {
       "timeout-literal": 2
-    },
-    "src/e2e/sessions/session-shapes.lock.integration.test.ts": {
-      "timeout-literal": 1
     },
     "src/e2e/transport/gateway-process-prompt.e2e.test.ts": {
       "timeout-literal": 1
@@ -360,9 +354,6 @@
       "wall-clock-expect": 1
     },
     "test-fixtures/pi-sdk/record-corpus.integration.test.ts": {
-      "timeout-literal": 1
-    },
-    "test-fixtures/tron-corpus/record-tron-corpus.integration.test.ts": {
       "timeout-literal": 1
     },
     "test-support/package-source-fixtures.ts": {

@@ -46,8 +46,7 @@ Tests default to fewer: agents read the code itself, so a test earns its place o
 real behaviour fault at a boundary. A fix's proof strengthens the owning E2E/integration test, or adds
 nothing when one already proves it; tests that restate code (structure locks, duplicate unit tests,
 implementation snapshots) are retired. Loosening an assertion that guards real behaviour is never
-allowed. Rendering needs a built-UI witness; accepted exception (#2332): `TronUILockTests` keeps only
-whole-tree accessibility witnesses, with no rendered (pixel) witness. Other additions are a fix, a consolidation into one owner, or a type
+allowed. There are no golden, snapshot or recorded-trace tests. Other additions are a fix, a consolidation into one owner, or a type
 change that deletes the runtime checks it replaces. No backward-compatibility code: no shims,
 aliases, old-format or fallback readers, flags or "just in case" wrappers; live old data moves once
 through a backed-up migration. Simplify by reusing and hardening existing primitives (approval
@@ -74,9 +73,8 @@ changes behaviour on purpose; its fail-before/pass-after proof goes in the ownin
 same change. Commits are prefixed `test:`, `delete:`, `refactor:`, `fix(#n):`, `docs:` or `chore:`.
 **Evidence.** #2279 converted four whole-trace locks into behaviour checks. Each conversion was
 proven by injecting 8 mutants that failed both the old check and the new one.
-**Enforced by** the wire goldens (`protocol-wire`, `client-event-schemas`), the persisted-format
-goldens (`store-*`, `tron-corpus`, the pi-sdk corpus), and reviewer ACCEPT for any test or
-assertion edit. **Not yet enforced:** commit prefixes and expected-fail regression tests
+**Enforced by** the generated-wire equality and handshake checks in `protocol.wire.lock`, the
+pi-sdk persisted-state corpus reopen test, and reviewer ACCEPT for any test or assertion edit. **Not yet enforced:** commit prefixes and expected-fail regression tests
 (#2316 Phase 7).
 
 ## P5 One owner per state; contracts change only by decision

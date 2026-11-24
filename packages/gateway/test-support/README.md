@@ -10,8 +10,8 @@ fixtures. Its manifest is `../test-support.module.json` (it also owns fixtures u
 ## Owns
 
 `wait-for.ts`, `network-isolation.ts`, `fixture-process-owner.mjs`,
-`runtime-registry-fixture.ts`, `gateway-lock-harness.ts`, `gateway-process.ts`, `gateway-registry.ts`, `scenario-lock.ts`,
-`tron-store-*.ts`, the Tron-home environment guard and preflight, and the Home task
+`runtime-registry-fixture.ts`, `gateway-lock-harness.ts`, `gateway-process.ts`, `gateway-registry.ts`, `scenario-lock.ts` (trace normalization),
+the Tron-home environment guard and preflight, and the Home task
 and crash fixtures. `settings-action-crash-child.ts` runs the real approval engine
 against a file-backed action, exposing the effect/before-settlement cut so its parent
 can kill and reopen it to prove interrupted actions are not replayed. Its lifecycle
@@ -144,7 +144,7 @@ SIGKILL lands at an arbitrary point of a sharded catalog save.
 
 `waitFor`, `awaitsWithin`, `initializeRegistry` and `createColdRegistryFixture`
 (`runtime-registry-fixture.ts`), `createTestRegistry` (`gateway-registry.ts`: the production module
-composition a test registry takes, with deferred registry-owned module ports), `scenario-lock.ts` ([scenario locks](../docs/scenario-locks.md)).
+composition a test registry takes, with deferred registry-owned module ports).
 
 ## Signals
 

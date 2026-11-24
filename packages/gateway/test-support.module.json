@@ -8,7 +8,6 @@
     "test-fixtures/mac-terminal-keys-process.mjs",
     "test-fixtures/mcp-stdio-fixture.mjs",
     "test-fixtures/synthetic-image.ts",
-    "test-fixtures/tron-corpus/**",
     "test-support.module.json",
     "test-support/README.md",
     "test-support/attention-recovery-hold-preload.mjs",
@@ -16,7 +15,6 @@
     "test-support/catalog-metadata-fixture.ts",
     "test-support/session-settings-change.ts",
     "test-support/lock-scenarios.ts",
-    "test-support/lock-projections.ts",
     "test-support/episodic-chapter-source.ts",
     "test-support/fixed-recording.ts",
     "test-support/fixture-process-owner.mjs",
@@ -50,9 +48,6 @@
     "test-support/settings-schema.ts",
     "test-support/tron-home-environment-guard.ts",
     "test-support/tron-home-environment-preflight.mjs",
-    "test-support/tron-store-corpus.ts",
-    "test-support/tron-store-specs-derived.ts",
-    "test-support/tron-store-specs.ts",
     "test-support/turn-frame.ts",
     "test-support/wait-for.ts"
   ]

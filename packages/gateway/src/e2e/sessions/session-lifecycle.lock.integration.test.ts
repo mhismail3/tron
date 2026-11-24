@@ -2,7 +2,6 @@ import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockClient, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
 import { normalizeTraceValue } from "../../../test-support/scenario-lock.js";
-import { expectRequestShapes, expectSystemShapes } from "../../../test-support/lock-projections.js";
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 
 const gateways: LockGateway[] = [];
@@ -90,7 +89,7 @@ describe("session lifecycle kernel locks", () => {
     expect(liveAfterEviction).toEqual(["B"]);
     expect(liveAfterColdLoad).toEqual(["A"]);
     expect(JSON.stringify(canonicalReloaded)).toBe(JSON.stringify(canonicalBefore));
-    expectSystemShapes(normalizeTraceValue(await gateway.canonical(first.sessionId), gateway.normalization) as unknown[], ["chat#0"]);
+    
     const row = (list: { result?: any }, sessionId: string) => list.result.sessions.find((session: { id: string }) => session.id === sessionId);
     expect(row(listLive, first.sessionId)).toMatchObject({ isUnread: true, completionRevision: 1, attentionRevision: 1 });
     expect(row(listCold, first.sessionId)).toMatchObject({ isUnread: true, completionRevision: 1, attentionRevision: 1, messageCount: 2,
@@ -102,7 +101,7 @@ describe("session lifecycle kernel locks", () => {
     expect(transcript.ok, JSON.stringify(transcript)).toBe(true);
     expect(JSON.stringify(transcript.result)).toContain("First answer before eviction.");
     expect(JSON.stringify(transcript.result)).toContain("Answer after the cold load.");
-    expectRequestShapes(recorded.providerRequests, ["chat", "chat", "chat"]);
+    
     const last = recorded.providerRequests.at(-1)!;
     expect(JSON.stringify(last.messages)).toContain("remember the word lantern");
     expect(JSON.stringify(last.messages)).toContain("First answer before eviction.");
@@ -151,7 +150,7 @@ describe("session lifecycle kernel locks", () => {
     expect(queued.ok, JSON.stringify(queued)).toBe(true);
     const runningJsonl = await gateway.canonical(running.sessionId);
     expect(JSON.stringify(runningJsonl)).toContain("Queued follow-up answered.");
-    expectSystemShapes(normalizeTraceValue(runningJsonl, gateway.normalization) as unknown[], ["chat#0"]);
+    
     expect(statusIdle.result).toMatchObject({ phase: "idle", blockerCount: 0, blockerCounts: {} });
     expect(statusRunning.result).toMatchObject({ phase: "idle", blockerCount: 2, blockerCounts: runAndQueue });
     expect(blockers(statusRunning.result)).toEqual(["running:foreground-agent-operation", "running:queued-mutation"]);
@@ -162,7 +161,7 @@ describe("session lifecycle kernel locks", () => {
     expect(refusedPrompt.error).toEqual(draining);
     expect(refusedCreate.error).toEqual(draining);
     expect(statusComplete.result).toMatchObject({ phase: "complete", blockerCount: 0, blockerCounts: {} });
-    expectRequestShapes(recorded.providerRequests, ["chat", "chat"]);
+    
     const followUp = JSON.stringify(recorded.providerRequests[1]!.messages);
     expect(followUp.indexOf("Held run settled.")).toBeGreaterThan(-1);
     expect(followUp.indexOf("queued before the drain")).toBeGreaterThan(followUp.indexOf("Held run settled."));

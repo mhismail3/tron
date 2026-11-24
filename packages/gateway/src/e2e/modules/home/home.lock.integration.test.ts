@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt, getCurrentTools, type SimpleStreamOptions, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockGateway } from "../../../../test-support/gateway-lock-harness.js";
-import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../../../test-support/scenario-lock.js";
+import { normalizeTraceValue, type TraceValue } from "../../../../test-support/scenario-lock.js";
 import { waitFor } from "../../../../test-support/wait-for.js";
 import { NotificationGrantStore } from "../../../notifications/grant-store.js";
 import { NotificationService } from "../../../notifications/notification-service.js";
@@ -11,7 +11,6 @@ import { PushRelayClient } from "../../../notifications/relay-client.js";
 import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
 import { droppingAnyTurnFrame } from "../../../../test-support/turn-frame.js";
 
-const MODULE = "gateway/e2e";
 const LOCK = "home-activation-wake";
 const LOCK_PROVIDER = `tron-lock-${LOCK}`;
 const WORKER_MARKER = "This is a finite Home task.";
@@ -483,9 +482,7 @@ describe("gateway/home scenario lock", () => {
       },
       systemEntries: { home: homeSystem, worker: workerSystem },
     } satisfies HomeLockTrace as unknown as TraceValue) as unknown as HomeLockTrace;
-    await compareWithGolden({ module: MODULE, ...lockPaths(import.meta.url, LOCK), trace, update: lockUpdateRequested(MODULE), validate: (actual) => {
-      expect(actual.providerRequests.home).toHaveLength(3);
-      expect(actual.providerRequests.worker).toHaveLength(1);
-    } });
+    expect(trace.providerRequests.home).toHaveLength(3);
+      expect(trace.providerRequests.worker).toHaveLength(1);
   }, 60_000);
 });

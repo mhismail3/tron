@@ -177,8 +177,7 @@ scripts/tron docs check
 scripts/tron test gateway src/e2e/admin/settings-change.integration.test.ts -t 'reconciles missed global MCP drift'
 ```
 
-Behavior locks: `src/e2e/admin/admin.lock.integration.test.ts` and
-`admin.store.lock.integration.test.ts` against `locks/*.golden.json`.
+Behavior lock: `src/e2e/admin/admin.lock.integration.test.ts`.
 `settings-change.integration.test.ts` covers every key at every allowed layer,
 the record, undo, outside changes and project git states;
 `native-change.e2e.test.ts` covers exact paired-native admission, callback settlement,
