@@ -122,7 +122,7 @@ struct ArtifactsSheet: View {
                                 placeholder
                             }
                         }
-                        .padding(.horizontal, 16).padding(.top, 4)
+                        .tronFeedInsets()
                     }
                     .tronScrollEdgeChrome()
                     .accessibilityIdentifier("artifacts-viewport")

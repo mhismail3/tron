@@ -139,6 +139,8 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   every `tronGlassSurface`/`tronScrollSurface` uses `ConcentricRectangle` bottom corners
   (fixed card radius as the minimum), so only the card nearest the sheet's bottom edge grows to
   share the sheet corners' centres; no surface marks itself as last.
+  Feeds and their loading, empty and error states share one inset owner, `tronFeedInsets`, so a
+  failure card keeps the same bottom inset as the rows it replaces.
   Scrolls that fill their viewport (`TronFeedEmptyState`) or are nested opt out through
   `tronSheetMeasuresContent`. `ContentFitSheetViewTests` samples the presented frame per display
   frame and fails on any overshoot or post-open move.

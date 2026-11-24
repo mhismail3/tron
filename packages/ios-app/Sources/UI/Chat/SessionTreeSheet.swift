@@ -228,7 +228,7 @@ struct SessionTreeSheet: View {
                                 TronSheetLoadingState(label: "Loading history…", accent: .tronPrimary)
                             }
                         }
-                        .padding(.horizontal, 16).padding(.top, 4)
+                        .tronFeedInsets()
                     }
                     .tronScrollEdgeChrome()
                     .accessibilityIdentifier("session-history-viewport")
