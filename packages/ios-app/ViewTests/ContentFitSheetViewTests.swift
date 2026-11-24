@@ -181,13 +181,17 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         let depth = sheetChain(app).count
         UIView.setAnimationsEnabled(true)
         try await open()
-        var parentFrames: [CGRect] = []
-        let trace = try await SheetTrace.record(app, frames: 120, ready: { sheetChain(app).count == depth + 1 }) { _ in
-            let layer = parent.view.layer.presentation() ?? parent.view.layer
-            parentFrames.append(layer.convert(layer.bounds, to: nil))
+        let context = DetentContext(traits: parent.traitCollection, maximum: app.window.bounds.height)
+        @MainActor func parentDetents() -> [CGFloat?] {
+            parent.sheetPresentationController?.detents.map { $0.resolvedValue(in: context) } ?? []
         }
-        let moved = parentFrames.filter { abs($0.minY - parentStart.minY) > 0.5 || abs($0.height - parentStart.height) > 0.5 }
-        XCTAssertTrue(moved.isEmpty, "\(name): opening a nested sheet moved its parent from \(parentStart) to \(moved)")
+        let detentsStart = parentDetents()
+        var detents: [[CGFloat?]] = []
+        let trace = try await SheetTrace.record(app, frames: 120, ready: { sheetChain(app).count == depth + 1 }) { _ in
+            detents.append(parentDetents())
+        }
+        XCTAssertFalse(detentsStart.isEmpty, "\(name): the parent has a detent")
+        XCTAssertTrue(detents.allSatisfy { $0 == detentsStart }, "\(name): opening a nested sheet changed its parent's detent from \(detentsStart) to \(Set(detents.map { "\($0)" }))")
         trace.assertStill("\(name): the nested sheet opens at its final height", against: app)
         try await assertFitted(app, "\(name)-over-parent")
         _ = sheetChain(app).last?.presentingViewController?.dismiss(animated: true)
@@ -296,6 +300,12 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         let shot = XCTAttachment(image: app.render())
         shot.name = "sheet-\(name)"; shot.lifetime = .keepAlways; add(shot)
     }
+}
+
+final class DetentContext: NSObject, UISheetPresentationControllerDetentResolutionContext {
+    let containerTraitCollection: UITraitCollection
+    let maximumDetentValue: CGFloat
+    init(traits: UITraitCollection, maximum: CGFloat) { containerTraitCollection = traits; maximumDetentValue = maximum }
 }
 
 struct SheetTrace: CustomStringConvertible {
