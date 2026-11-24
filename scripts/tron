@@ -135,8 +135,9 @@ Commands:
                                     path, module, layer and purpose per tracked path
   tidy [--json] [--prune]           Report untracked files, residue, expired .scratch/
                                     and test-results/, unnamed tooling, worktrees,
-                                    branches and hook drift; --prune deletes only what
-                                    main already has (tools/ownership/tidy.py)
+                                    branches and hook drift; --prune deletes what main
+                                    has (local and origin) and bundles, then deletes,
+                                    branches idle over 30 days (tools/ownership/tidy.py)
   work bootstrap [--apply [--prune]] [--report <path>]
                                     Plan or converge GitHub labels and the tracking
                                     Project to tools/work/work.json (tools/work); reports

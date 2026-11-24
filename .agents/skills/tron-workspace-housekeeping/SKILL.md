@@ -38,7 +38,8 @@ untracked files, unowned ignored residue, expired `.scratch/` and `test-results/
 entries, orphan worktree directories, hook drift, and each worktree's and branch's
 merged, dirty, live and idle state ([workspace hygiene](../../../tools/ownership/README.md#workspace-hygiene)).
 `scripts/tron tidy --prune` is a destructive action under the authority above; it
-deletes only what `origin/main` already has. Use the commands below to inspect what
+deletes local and `origin` branches `origin/main` already has, and bundles, then deletes,
+branches idle over 30 days. Home runs it weekly. Use the commands below to inspect what
 it reports or to decide what it leaves.
 
 Resolve the repository root and common Git directory first. Run from that root;
@@ -267,8 +268,7 @@ Prune does not reclaim a Gateway E2E fixture or DerivedData; only that
 worktree's `scripts/ios-gateway-e2e-test clean` does, so run it before removal.
 
 Finish with removed/retained/blocked counts, exact removed targets, integration
-proof, remaining reasons, and any owner action needed. Recommend this bounded
-pass after feature integration and periodically as requested—not an automatic
-schedule. Future feature work should establish an owner and isolated worktree at
+proof, remaining reasons, and any owner action needed. Home's weekly `tidy --prune` covers merged and
+30-day-stale branches; run this deeper pass for younger branches when asked. Future feature work should establish an owner and isolated worktree at
 creation, retain its handoff through review/merge, then explicitly release it for
 this same evidence-based cleanup.
