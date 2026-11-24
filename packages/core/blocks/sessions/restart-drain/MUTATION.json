@@ -1,0 +1,135 @@
+{
+ "summary": {
+  "block": "sessions/restart-drain",
+  "tier": "high-stakes",
+  "laws": "blocks/sessions/restart-drain/Block.dfy",
+  "toolHash": "ac4ab6d9eb34842e",
+  "mutants": 133,
+  "stillborn": 28,
+  "valid": 105,
+  "killed": 100,
+  "survived": 0,
+  "accepted": 5,
+  "seconds": 96,
+  "score": 0.952,
+  "unknown": 0,
+  "stillbornRatio": 0.211,
+  "filter": null,
+  "generated": 133,
+  "pass": true,
+  "inputsHash": "828f2b535b690753"
+ },
+ "perLaw": [
+  {
+   "law": "C1 completed",
+   "killed": 12,
+   "only": 3
+  },
+  {
+   "law": "U1 unresolved-owners",
+   "killed": 31,
+   "only": 8
+  },
+  {
+   "law": "W1 unlisted",
+   "killed": 12,
+   "only": 0
+  },
+  {
+   "law": "O1 oldest-tracked",
+   "killed": 27,
+   "only": 11
+  },
+  {
+   "law": "R1 timer-reset",
+   "killed": 24,
+   "only": 10
+  },
+  {
+   "law": "T1 stalled",
+   "killed": 32,
+   "only": 10
+  }
+ ],
+ "statuses": "c1167956fbf94fb20d56485c02f427f80d9a9d71b25702998e70d5b43087084f",
+ "notKilled": [
+  {
+   "id": "LatestFor/boundary/>->>=#1",
+   "sym": "LatestFor",
+   "op": "boundary",
+   "line": 33,
+   "col": 48,
+   "from": ">",
+   "to": ">=",
+   "status": "survived",
+   "accepted": "equivalent (proven): on equal milliseconds both keep a time At(ms) of the same value, so the running latest is the same Time either way [law reviewer (REVIEW.json acceptedMutants)]",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null
+  },
+  {
+   "id": "Evaluate/swap-args/tracked.state, o.state->o.state, tracked.state#1",
+   "sym": "Evaluate",
+   "op": "swap-args",
+   "line": 44,
+   "col": 76,
+   "from": "tracked.state, o.state",
+   "to": "o.state, tracked.state",
+   "note": "SameState args 1<->2",
+   "status": "survived",
+   "accepted": "equivalent (proven): SameState and SameTime are symmetric (each is equality, SameSpec), so swapping the tracked and the current value cannot change which branch Evaluate takes [law reviewer (REVIEW.json acceptedMutants)]",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null
+  },
+  {
+   "id": "Evaluate/swap-args/tracked.progress, p->p, tracked.progress#1",
+   "sym": "Evaluate",
+   "op": "swap-args",
+   "line": 45,
+   "col": 21,
+   "from": "tracked.progress, p",
+   "to": "p, tracked.progress",
+   "note": "SameTime args 1<->2",
+   "status": "survived",
+   "accepted": "equivalent (proven): SameState and SameTime are symmetric (each is equality, SameSpec), so swapping the tracked and the current value cannot change which branch Evaluate takes [law reviewer (REVIEW.json acceptedMutants)]",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null
+  },
+  {
+   "id": "Evaluate/swap-args/tracked.admitted, o.admitted->o.admitted, tracked.admitted#1",
+   "sym": "Evaluate",
+   "op": "swap-args",
+   "line": 45,
+   "col": 54,
+   "from": "tracked.admitted, o.admitted",
+   "to": "o.admitted, tracked.admitted",
+   "note": "SameTime args 1<->2",
+   "status": "survived",
+   "accepted": "equivalent (proven): SameState and SameTime are symmetric (each is equality, SameSpec), so swapping the tracked and the current value cannot change which branch Evaluate takes [law reviewer (REVIEW.json acceptedMutants)]",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null
+  },
+  {
+   "id": "Evaluate/boundary/<=-><#1",
+   "sym": "Evaluate",
+   "op": "boundary",
+   "line": 47,
+   "col": 25,
+   "from": "<=",
+   "to": "<",
+   "status": "survived",
+   "accepted": "equivalent (proven): when now equals since both give the age 0 (now - since is 0) [law reviewer (REVIEW.json acceptedMutants)]",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null
+  }
+ ]
+}

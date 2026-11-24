@@ -124,6 +124,19 @@ describe("Managed subagents: intentional stop drain", () => {
     expect(new RestartDrainProgress().evaluate(snapshot, Date.parse(heldAt) + limit, limit)).toEqual({ outcome: "waiting" });
     expect(new RestartDrainProgress().evaluate(snapshot, Date.parse(runProgress) + limit, limit))
       .toMatchObject({ outcome: "stalled", blocker: { sessionId: run.sessionId }, ageMs: limit });
+    const untimed = { ...snapshot, blockerCount: 1, blockers: [{ id: task.id, category: task.category, state: task.state }] };
+    const carried = new RestartDrainProgress();
+    expect(carried.evaluate(untimed, 1_000, limit)).toEqual({ outcome: "waiting" });
+    expect(carried.evaluate(untimed, 1_000 + limit, limit)).toMatchObject({ outcome: "stalled", blocker: { id: task.id }, ageMs: limit });
+    const successor = { ...snapshot, blockerCount: 1, blockers: [{ id: `${task.id}-next`, category: task.category, state: task.state }] };
+    expect(carried.evaluate(successor, 1_000 + limit, limit)).toEqual({ outcome: "waiting" });
+    const owner = { ...task, category: "terminal-receipt-persistence" as const, state: "suspect" as const };
+    expect(new RestartDrainProgress().evaluate({ ...snapshot, blockerCount: 1, blockers: [owner] }, 0, limit))
+      .toEqual({ outcome: "unresolved-owners" });
+    const expanded = { ...snapshot, blockerCount: 1, blockers: [{ ...task, progressAt: new Date(8.64e15).toISOString() }] };
+    expect(new RestartDrainProgress().evaluate(expanded, Date.parse(heldAt) + limit, limit)).toEqual({ outcome: "waiting" });
+    const unparsed = { ...snapshot, blockers: snapshot.blockers.map(entry => ({ ...entry, progressAt: heldAt.replace(/\.\d{3}Z$/u, "Z") })) };
+    expect(() => new RestartDrainProgress().evaluate(unparsed, 0, limit)).toThrow(/not an ISO instant/u);
     child.releaseHeld();
     await run.completion.catch(() => {});
   }, 60_000);
