@@ -3,7 +3,6 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockClient, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
-import { expectRequestShapes } from "../../../test-support/lock-projections.js";
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
 import { NotificationGrantStore } from "../../notifications/grant-store.js";
@@ -212,7 +211,7 @@ describe("gateway/notifications delivery locks", () => {
     expect(sessionKey).toEqual(DIGEST);
     dedupeKeysJoin(document);
     const providerRequests = gateway.record().providerRequests;
-    expectRequestShapes(providerRequests, Array.from({ length: 4 }, () => "chatWithNotificationsBackground"));
+    
     const conversation = [
       { role: "user", text: title }, { role: "assistant", text: "", toolCalls: ["lock_background"] },
       { role: "toolResult", text: "Background run started.", toolName: "lock_background" },

@@ -95,8 +95,12 @@ The iPhone pins the private host identity at enrollment
   per-generation socket the Native Host owns; the Gateway gets only a read-only
   `{socket, generation}` bootstrap and accepts no endpoint, environment or session
   from model input. Refused, malformed, non-zero or disconnected results are refusal
-  or `outcomeUnknown`, never success or replay. Actions need fresh observations from
-  the same load; accepted calls outlive a waiter's Stop. Observation images come from
+  or `outcomeUnknown`, never success or replay. Every driver process has a 10 s deadline
+  (`type_text` 125 s, past the driver's own 120 s request bound); a call that never answers
+  is killed and reported as an uncertain effect, so Stop waits at most that long;
+  `close()` gives up after 10 s. Help strips the reserved
+  fields from the driver schema; driver and adapter staleness both say
+  `stale_element_token`. Actions need fresh observations from the same load. Observation images come from
   disposable files removed before publication. Cua telemetry is off; missing Cua
   assets disable only this tool. Before foreground input, inspect the whole desktop
   for system dialogs; the agent handles permission prompts itself under the operating
@@ -136,7 +140,7 @@ The iPhone pins the private host identity at enrollment
 ## Verify
 
 ```bash
-scripts/tron verify --module gateway/machine
+scripts/tron gate --check
 scripts/tron test gateway src/e2e/kernel/resources/project-root.integration.test.ts
 cd packages/gateway && npm run test:mac-terminal   # needs the tailnet and Swift 6.2
 ```

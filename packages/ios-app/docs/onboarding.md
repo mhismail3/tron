@@ -5,9 +5,8 @@ host. The ordinary session shell mounts first, then presents setup in Tron's
 established non-dismissible sheet only after launch credential resolution says
 pairing or setup is required. A paired, completed installation never flashes the
 sheet while Keychain and the gateway connection are still being checked.
-Preparation/pairing pages prefer the medium
-detent; workspace/provider/model pages expand to large. The drag indicator stays
-hidden while the native upward sheet gesture remains available.
+Each page sizes the sheet to its content through the shared content-fit sheet (large when it
+overflows or the keyboard is up). The drag indicator stays hidden.
 
 1. **Welcome** explains the private Mac/iPhone connection.
 2. **Tailscale** preserves the established private-network preparation page.

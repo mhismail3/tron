@@ -26,7 +26,7 @@ append preserve that precedence. These helpers do not install or restart anythin
 
 ```bash
 scripts/tron test gateway src/kernel/run/direct-bash-process-owner.integration.test.ts
-scripts/tron verify --module gateway/runtime
+scripts/tron gate --check
 ```
 
 ## Not here

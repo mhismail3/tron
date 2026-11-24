@@ -72,10 +72,10 @@ async function watcherDelivers(outside: OutsideChanges, agentDir: string): Promi
   };
   try {
     await waitFor(async () => {
+      if (rescans > 0) return true;
       await writeFile(settings, bytes);
-      await new Promise(resolve => setTimeout(resolve, 400));
-      return rescans > 0;
-    }, "the settings directory watcher delivers an event", { intervalMs: 0 });
+      return false;
+    }, "the settings directory watcher delivers an event");
   } finally {
     delete (outside as { reconcile?: unknown }).reconcile;
   }
@@ -1052,7 +1052,7 @@ describe("outside changes", () => {
     createTronSettingsExtension(() => ({
       applyAgain: (changeId, input) => f.settingsChanges.applyAgain(changeId, { actor: { ...actor, toolCallId: input.toolCallId }, reason: input.reason }),
     }) as never, async () => undefined, settingsGuidePath(f.tronHome))({ registerTool: tool => { tools.push(tool as never); }, on: (event: string) => { handlers.push(event); } } as never);
-    expect(handlers).toEqual(["tool_call"]);
+    expect(handlers).toEqual(["tool_call", "tool_result"]);
     const result = await tools[0]!.execute("apply-again", { action: "applyAgain", changeId: outside.changeId, reason: "Maintainer wants Tron's value back" },
       new AbortController().signal, () => {}, { hasUI: true });
     expect(result.details).toMatchObject({ status: "applied" });
@@ -1130,16 +1130,12 @@ describe("outside changes", () => {
     f.outside.startWatching(() => {});
     await row(f, { kind: "global" }, "run.retry.maxRetries");
     await watcherDelivers(f.outside, f.agentDir);
-    const until = async (done: () => boolean | Promise<boolean>) => {
-      for (let attempt = 0; attempt < 100 && !(await done()); attempt += 1) await new Promise(resolve => setTimeout(resolve, 50));
-    };
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), retry: { maxRetries: 8 } }));
-    await until(() => f.broadcasts.some(event => event.topic === "settings.changed" && JSON.stringify(event.payload).includes("run.retry.maxRetries")));
+    await waitFor(() => f.broadcasts.some(event => event.topic === "settings.changed" && JSON.stringify(event.payload).includes("run.retry.maxRetries")), "the file event's settings.changed broadcast");
     expect((await f.record.page({ limit: 10 })).entries.map(entry => [entry.key, entry.status])).toEqual([["run.retry.maxRetries", "outside"]]);
     expect(f.pushes).toEqual([]);
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), packages: ["npm:outside-package"] }));
-    await until(() => f.published("sources.packages"));
-    expect(await f.published("sources.packages")).toBe(true);
+    await waitFor(() => f.published("sources.packages"), "the file event publishes sources.packages");
     expect(f.pushes).toEqual([]);
   });
 
@@ -1191,7 +1187,7 @@ describe("outside changes to MCP servers and custom models", () => {
   const until = async (stage: string, done: () => boolean | Promise<boolean>) => {
     const started = performance.now();
     try {
-      for (let attempt = 0; attempt < 100 && !(await done()); attempt += 1) await new Promise(resolve => setTimeout(resolve, 50));
+      await waitFor(done, stage);
     } finally {
       transcript.push({ case: "outside mcp and models stage", detail: { stage, ms: Math.round(performance.now() - started) } });
     }
@@ -1230,10 +1226,7 @@ describe("outside changes to MCP servers and custom models", () => {
     for (const watcher of native.watchers.values()) {
       watcher.on("change", (_event, name) => { filenames.push(String(name)); });
     }
-    const hint = async () => {
-      await writeFile(join(f.agentDir, filename), "{}\n");
-      await new Promise(resolve => setTimeout(resolve, 400));
-    };
+    const hint = async () => { await writeFile(join(f.agentDir, filename), "{}\n"); };
     try {
       await waitFor(async () => { await hint(); return filenames.includes(filename); }, "the native auth-file directory event");
       await waitFor(() => native.timers.size === 0 && native.reconciliations.size === 0, "initial native rescans settle before controlled drift");
@@ -1310,7 +1303,7 @@ describe("outside changes to MCP servers and custom models", () => {
     }), async ({ apply }) => apply({ deviceId: "device:phone", commandId: "command-mcp-tool" }), settingsGuidePath(f.tronHome));
     const handlers: string[] = [];
     settingsExtension({ registerTool: tool => { tools.push(tool as never); }, on: (event: string) => { handlers.push(event); } } as never);
-    expect(handlers).toEqual(["tool_call"]);
+    expect(handlers).toEqual(["tool_call", "tool_result"]);
     const [tool] = tools;
     const requests = [{ key: "tools.mcp.server", qualifiers: { server: "home-docs" }, layer: "global", op: "set", value: { command: "npx", args: ["-y", "@acme/docs-mcp"] } }];
     const result = await tool!.execute("call-mcp", { action: "change", changes: requests, reason: "Maintainer asked for the docs server" },

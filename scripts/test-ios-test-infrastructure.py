@@ -97,12 +97,6 @@ if table.exists():
 }
 
 
-def copy_ledger(checkout: Path) -> None:
-    target = checkout / 'tools/verify/ledger.py'
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(ROOT / 'tools/verify/ledger.py', target)
-
-
 def host_slot_count() -> int:
     """The cap the lease entry point itself enforces, read from its one constant."""
     specification = importlib.util.spec_from_file_location("ios_test_lock", LOCK)
@@ -121,7 +115,6 @@ def device_process(udid: str, elapsed: str = "00:05") -> str:
 
 
 CONTAINMENT_VARIABLES = (
-    "TRON_TEST_LEDGER",
     "HOME",
     "TRON_IOS_TEST_STATE_DIR",
     "TRON_IOS_TEST_DISCOVERY_ROOT",
@@ -311,7 +304,6 @@ class ContainedFixture:
         environment = os.environ.copy()
         environment.update({
             "HOME": str(home),
-            "TRON_TEST_LEDGER": str(home / '.tron-maintenance/test-ledger/results.sqlite3'),
             "TRON_IOS_TEST_STATE_DIR": str(home / ".tron/internal/ios-test"),
             "TRON_IOS_TEST_RESULTS_DIR": str(home / "Library/Developer/Tron/ios/test-runs"),
             "TRON_IOS_TEST_SIMSLIM": "0",
@@ -1172,7 +1164,6 @@ shutil.copytree(source, clone)
         checkout = self.root.resolve() / "checkout"
         ignore = shutil.ignore_patterns("__pycache__")
         shutil.copytree(ROOT / "scripts", checkout / "scripts", ignore=ignore)
-        copy_ledger(checkout)
         shutil.copytree(ROOT / "config", checkout / "config", ignore=ignore)
         (checkout / "tools/work").mkdir(parents=True)
         shutil.copy2(ROOT / ".node-version", checkout / ".node-version")
@@ -4233,7 +4224,6 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         other = self.root / "other-worktree"
         ignore = shutil.ignore_patterns("__pycache__")
         shutil.copytree(ROOT / "scripts", other / "scripts", ignore=ignore)
-        copy_ledger(other)
         shutil.copytree(ROOT / "config", other / "config", ignore=ignore)
         (other / "tools/work").mkdir(parents=True)
         shutil.copy2(ROOT / ".node-version", other / ".node-version")
@@ -4250,7 +4240,6 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         worktree = self.root / ("long-" + "w" * 120) / ("tree-" + "x" * 120)
         ignore = shutil.ignore_patterns("__pycache__")
         shutil.copytree(ROOT / "scripts", worktree / "scripts", ignore=ignore)
-        copy_ledger(worktree)
         shutil.copytree(ROOT / "config", worktree / "config", ignore=ignore)
         shutil.copy2(ROOT / ".node-version", worktree / ".node-version")
         (worktree / "packages/mac-app/scripts").mkdir(parents=True)
@@ -4260,9 +4249,7 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         for name in ("package.json", "package-lock.json"):
             shutil.copy2(ROOT / "packages/gateway" / name, worktree / "packages/gateway" / name)
         for name in ("packages/mac-app/Sources/Server/Paths/GatewayPayloadStore.swift",
-                     "packages/mac-app/native-gateway-client/node-headers.json",
-                     "packages/gateway/src/modules/apps/fixtures/InstalledPersistence.swift",
-                     "tools/web/apps/builds/Builds.swift"):
+                     "packages/mac-app/native-gateway-client/node-headers.json"):
             (worktree / name).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / name, worktree / name)
         return worktree
@@ -4613,7 +4600,7 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
 
     def three_ui_journeys(self) -> list[str]:
         return [*self.owned_ui_journeys(),
-                "TronMobileUITests/RealGatewayPairAndChatUITests/testPendingAppReviewInstallLight"]
+                "TronMobileUITests/RealGatewayPairAndChatUITests/testHomeStatusShowsHostPressureAndWorkers"]
 
     def ui_runs(self, environment: dict[str, str]) -> list[dict[str, Any]]:
         return [entry for entry in self.xcodebuild_invocations(environment) if entry["action"] == "run"]
@@ -5005,23 +4992,17 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         worktree = self.root / "clean-worktree"
         ignore = shutil.ignore_patterns("__pycache__")
         shutil.copytree(ROOT / "scripts", worktree / "scripts", ignore=ignore)
-        copy_ledger(worktree)
         shutil.copytree(ROOT / "config", worktree / "config", ignore=ignore)
         gateway = worktree / "packages/gateway"
         gateway.mkdir(parents=True)
         for name in ("package.json", "package-lock.json"):
             shutil.copy2(ROOT / "packages/gateway" / name, gateway / name)
-        for fixture in ("packages/gateway/src/modules/apps/fixtures/InstalledPersistence.swift",
-                        "tools/web/apps/builds/Builds.swift"):
-            destination = worktree / fixture
-            destination.parent.mkdir(parents=True)
-            shutil.copy2(ROOT / fixture, destination)
         shutil.copy2(ROOT / ".node-version", worktree / ".node-version")
         (worktree / ".gitignore").write_text("node_modules/\n")
 
         subprocess.run(["git", "init", "--quiet"], cwd=worktree, env=self.environment, check=True)
         subprocess.run(
-            ["git", "add", ".gitignore", ".node-version", "scripts", "config", "packages/gateway", "tools/verify/ledger.py"],
+            ["git", "add", ".gitignore", ".node-version", "scripts", "config", "packages/gateway"],
             cwd=worktree, env=self.environment, check=True,
         )
         subprocess.run([
@@ -5821,7 +5802,6 @@ class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):
         ignore = shutil.ignore_patterns("__pycache__")
         for relative in ("scripts", "config"):
             shutil.copytree(ROOT / relative, self.primary / relative, ignore=ignore)
-        copy_ledger(self.primary)
         shutil.copy2(ROOT / ".node-version", self.primary / ".node-version")
         (self.primary / "tools/work").mkdir(parents=True)
         self.git(self.primary, "init", "-q")

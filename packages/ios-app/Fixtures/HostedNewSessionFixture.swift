@@ -52,7 +52,6 @@ struct HostedNewSessionFixture: View {
                 showing = false
             }
             .environment(model)
-            .presentationDetents([.large])
         }
         .environment(\.tronPresentationActivityCoordinator, activity)
         .task {

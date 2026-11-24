@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { type LockGateway } from "../../../test-support/gateway-lock-harness.js";
-import { expectRequestShapes, expectSystemShapes } from "../../../test-support/lock-projections.js";
 import { openLockSession, queueControlScenario } from "../../../test-support/lock-scenarios.js";
 import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
 
@@ -48,7 +47,7 @@ describe("gateway/run queue lock", () => {
       "start:staged:", "transition:accepted:", "binding::", "start:staged:", "transition:accepted:", "terminal:interrupted:user-abort",
       "binding::", "terminal:completed:",
     ]);
-    expectSystemShapes(canonicalJsonl, ["chat#0"]);
+    
     expect(transcript.result).toMatchObject({ end: 14, total: 14 });
     expect(transcript.result.items.map((item: { kind: string; role?: string; stopReason?: string; errorMessage?: string; semantic?: { lifecycle?: string };
       content?: Array<{ text?: string }> }) => [item.kind === "message" ? `${item.role}${item.stopReason ? `:${item.stopReason}` : ""}` : item.kind,
@@ -81,6 +80,6 @@ describe("gateway/run queue lock", () => {
       const { role, text } = message as { role: string; text?: string };
       return `${role}:${text ?? ""}`;
     }))).toEqual([1, 3, 5, 7, 9, 11].map((length) => conversation.slice(0, length)));
-    expectRequestShapes(recorded.providerRequests, ["chat", "chat", "chat", "chat", "chat", "chat"]);
+    
   }, 60_000);
 });

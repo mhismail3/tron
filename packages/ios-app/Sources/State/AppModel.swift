@@ -198,7 +198,6 @@ final class AppModel {
     let gitInspection: GatewayGitInspection
     private let logUploader: AppLogUploader
     let workspaceInspection: WorkspaceInspectionService
-    let installedApps: InstalledSwiftApps
     private let diagnostics: AppDiagnostics
     private let metricKitDiagnostics: IOSMetricKitDiagnostics?
     let chatInteractionTrace: ChatInteractionTrace
@@ -585,7 +584,6 @@ final class AppModel {
                 )
             }
         })
-        let installedApps = InstalledSwiftApps.gateway(client: client, lifecycle: lifecycle, mutations: mutationExecutor)
         let workspaceInspection = WorkspaceInspectionService(client: client)
         let chatMedia = ChatMediaLoader(
             fetch: chatMediaFetch ?? { identity in
@@ -620,7 +618,6 @@ final class AppModel {
         self.gitInspection = gitInspection
         self.logUploader = logUploader
         self.workspaceInspection = workspaceInspection
-        self.installedApps = installedApps
         self.chatMedia = chatMedia
         self.chatMediaMemoryPressureObserver = chatMediaMemoryPressureObserver
         self.sessionPresentation = sessionPresentation
@@ -654,7 +651,6 @@ final class AppModel {
         lifecycle.delegate = self
         sessionPresentation.delegate = self
         providerAuth.delegate = self
-        installedApps.onFailure = { [weak self] error in self?.surface(error) }
         let events = client.events
         eventTask = Task { [weak self, events] in
             for await delivery in events {
@@ -3947,8 +3943,6 @@ extension AppModel {
         case .task(let id):
             let status = try await readTaskStatus()
             return .task(status.admitsTaskReads ? try HomeTaskStatusResult.validated(try await read("home.taskStatus", .object(["taskId": .string(id)])), taskID: id) : nil, status)
-        case .status:
-            return .status(try await readTaskStatus())
         case .permissions:
             let status = try await readTaskStatus()
             return .permissions(status.admitsTaskReads ? try HomeTaskPermissionsDTO.decode(try await read("home.taskPermissions")) : nil, status)

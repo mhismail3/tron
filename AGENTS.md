@@ -78,9 +78,10 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
   test; add nothing when a test already proves it, and a new file only when no owner exists. Retiring tests that
   restate code (structure locks, duplicate unit tests, implementation snapshots) or duplicate another's fault, naming
   the survivor, is not weakening; loosening an assertion that guards real behaviour is. Preserve the first failure.
-- Test and golden additions, edits and retirements need no maintainer tap, only an exact-SHA non-author ACCEPT
-  against `verify`'s delta (what was deleted; why a new file is not its owner; any compat wording).
-  Subjective design goes to the maintainer. See the [oracle policy](tools/verify/test-oracles.md).
+- No golden, snapshot or recorded-trace tests. A test lives only if it caught a real regression or guards
+  authorization, privacy, migration, concurrency or a process boundary; delete change detectors, duplicates
+  and view/layout/pixel tests. Test additions, edits and retirements need no maintainer tap, only an exact-SHA
+  non-author ACCEPT naming what was deleted and why a new file is not its owner. See the [oracle policy](tools/verify/test-oracles.md).
 - Deterministic reds: root fix or causal revert. Flaky/unrootable reds: one ~2h attempt, then
   ship logging that catches the next occurrence and delete the case; issue stays open. Retain first-failure `test-results/` logs and raw counts.
 
@@ -89,24 +90,22 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 - The Mac is shared. Inspect `scripts/tron-ios-test status --all`; reuse resources and
   stop/remove only what you start, on every exit. Isolate suite `HOME`/`TMPDIR`; tooling
   owns lanes (never hand-erase). Never `git stash`. Prefer commands that exit; long workflows show live progress, fail early and loudly, and keep partial results. [check: review only]
-- Tron heavy tests, including simulator tests, run serially on the Mac mini through its normal lease: `scripts/tron verify ... --gateway-host mini --ios-host mini`, or `scripts/tron test ios ...` (mini by default). Commit first; never bypass the lease with SSH-run tests or fall back to this Mac when the mini is busy. This Mac remains available for editing, Git, cheap checks and other projects under their briefs. Home plans the queue; follow your brief's "Heavy work" paragraph and the global Shared machines rules. `verify` uses one simulator lane unless the brief explicitly permits `--ios-jobs 2|3`. Native iOS helpers remain host-local execution owners; their 3 host slots are a ceiling, not a number to fill.
+- Simulator and other heavy proof is on demand, never admission: `scripts/tron test ios ...`, one heavy job per host, under the global Shared machines rules. Native iOS helpers remain host-local execution owners; their 3 host slots are a ceiling, not a number to fill.
 - No broad kills (`pkill node`, `simctl shutdown all`). Stop only what you started; ask
   when unsure; never touch another session's process, lane or lease, nor Stable or its
   children. Reproduce load in-process; if the Mac is slow, take a host reading (`host-resources` skill) and report what is using it.
 
 ## Validation and landing
-[Principles](docs/PRINCIPLES.md) own delivery policy: a commit is gated by the local tests of the modules
-it touches (P1); `scripts/tron land` gates main on Tiers 0 to 2 of the exact merge it lands; iOS and real-UI journeys are checkpoint signals (P2).
-1. Commit in your own worktree; enable rerere. Fetch main into private `FETCH_HEAD` and merge
-   deliberately (see [Git/gh skill](.agents/skills/tron-work/SKILL.md)); never rewrite foreign work.
-   Every commit is gated by `scripts/tron verify --changed` (the changed modules' tests) plus the E2E journeys that prove any behaviour you delete; add partial
-   or full checks as needed; serial or long checks run once in `land`. Obtain required ACCEPTs. Never retry-to-green.
-2. Land only with `scripts/tron land` ([land](tools/verify/land.md)): it merges `--no-ff` onto fetched main, validates
-   that exact merge and pushes it only if green, revalidating when main moved; never push main by hand or force-push. Landing bar: no worse than fetched main — every remaining red also fails on main and has a filed issue; never a new red. A batch red is filed
-   against its owning module, which root-fixes it or reverts its change.
+[Principles](docs/PRINCIPLES.md) own delivery policy. There is one gate and every change reaches main through it.
+1. Commit in your own worktree; enable rerere. Never rewrite foreign work. Obtain required ACCEPTs. Never retry-to-green.
+2. Land with `scripts/tron gate` ([gate](tools/verify/README.md#gate)): it merges `--no-ff` onto fetched main, runs every
+   gate check in parallel and pushes that exact merge only if all pass within 58 s end to end, else refuses and leaves main
+   unchanged. No later full suite or landing run. The pre-push hook (`scripts/install-hooks.sh`) runs the same gate; it is
+   convention, not server enforcement: never bypass it (`--no-verify`) and never push main by hand or force-push.
+   A gate that no longer fits 60 s is fixed by deleting or speeding checks, never by raising the budget.
 3. Close the issue with the change, what it deleted or retired, actual commands and results, and residual risk; link long logs (`test-results/`, internal workspace).
    Incidents also name the one-step diagnosing signal, added to its owning test and a row in its module README Signals (`packages/gateway/docs/observability.md`).
-   Each landed slice posts a 3-line #2173 retro: biggest time cost; one proposed process/architecture fix; SHA/evidence. Speed before scope: fix those costs (green main, changed-test selection, cycle time) before new deletion slices. [check: review only]
+   Each landed slice posts a 3-line #2173 retro: biggest time cost; one proposed process/architecture fix; SHA/evidence. Speed before scope: fix those costs (green main, gate time) before new deletion slices. [check: review only]
 
 ## Work tracking
 
@@ -125,7 +124,7 @@ it touches (P1); `scripts/tron land` gates main on Tiers 0 to 2 of the exact mer
 - A blocker is a bug in the system. Unblock it right away. If the same kind of failure
   has happened before, or the fix is cheap, fix the mechanism behind it, changing an existing script,
   test or rule before adding one. Otherwise record it and move on. Delete guards that cost more than they prevent.
-- Home decides objective gates; verify has [no exemptions](tools/verify/README.md#no-exemptions). Review scales with risk: full independent ACCEPT for test changes, persisted data/`~/.tron`, wire protocol, security, data-loss and irreversible changes; visual-only changes whose screenshots the maintainer approved get a light diff review.
+- Home decides objective gates; the gate has no exemptions, retries or skips. Review scales with risk: full independent ACCEPT for test changes, persisted data/`~/.tron`, wire protocol, security, data-loss and irreversible changes; visual-only changes whose screenshots the maintainer approved get a light diff review.
 - Keep one file owner and downward layer/cycle/Pi-seam ratchets, not phase handshakes,
   file-length targets or blanket base-lock runs. Build ahead on branches. [Health](docs/HEALTH.md) metrics are signals, never gates; never drop a capability to move a metric.
 - Default 2h tasks; land at the no-worse-than-main bar or settle in ≤25 lines.

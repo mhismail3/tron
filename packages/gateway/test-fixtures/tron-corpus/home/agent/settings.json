@@ -1,8 +1,0 @@
-{
-  "retry": {
-    "maxRetries": 2
-  },
-  "images": {
-    "blockImages": true
-  }
-}

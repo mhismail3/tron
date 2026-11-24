@@ -20,7 +20,7 @@ never edit measured results.
 
 | Adapter | What it drives | How |
 |---|---|---|
-| `agent-browser` | The engine behind Tron's `agent_browser` tool | `~/.tron/agent/bin/agent-browser --json --session cb2476-<pid>`; its own managed Chrome for Testing |
+| `agent-browser` | The engine behind Tron's `agent_browser` tool | the Gateway's pinned engine (`packages/gateway/node_modules`, resolved through `pi-agent-browser-native` exactly as the managed builtin does; prepare Gateway dependencies first) with `--json --session cb2476-<pid>`; its own managed Chrome for Testing. `COMPUTER_BENCH_AGENT_BROWSER` selects a candidate engine |
 | `cua` | The embedded Cua driver behind Tron's `computer` tool | `cua-driver call` on the Native Host socket (`$(getconf DARWIN_USER_TEMP_DIR)/tron-cua-*/s`), using only operations `computer` admits (`packages/gateway/src/machine/cua-client.ts`), element tokens from a fresh observation, and Tron's 200-element/16-depth observation cap |
 | `browser-use` | browser-use 1.0 / browser-harness, only if a venv already exists | `<venv>/bin/browser-use` with Python on stdin, its own headless Chrome for Testing on a free port; `BH_HOME` in the run directory; telemetry, update checks and domain skills off. Default venv `~/Workspace/browser-use-eval-20261110/.venv` (`COMPUTER_BENCH_BROWSER_USE_VENV`) |
 
@@ -39,6 +39,8 @@ Everything uses local fixtures. Nothing signs in to a real account, attaches to 
 
 - **Fixture site** (`fixtures/site.mjs`, `127.0.0.1:<random>`): form fields, a prefilled field,
   a counter button, select and checkbox, file input, download link, `target=_blank` link,
+  a contenteditable composer for `caption-exact` (a fixed 280-character caption with `·`,
+  curly quotes, a URL and emoji, read back byte-exact over the page),
   `confirm()` dialog, a cookie login and `/whoami`, and a consent page that redirects to a
   second origin (`localhost`) with a code.
 - **Scratch window** (`fixtures/scratch-window.swift`, compiled per run): an accessory AppKit
@@ -67,14 +69,12 @@ measured: a real TCC prompt changes system permissions and refusal needs a locke
 
 [`surfaces.json`](surfaces.json) records, with code citations, whether each tool is a
 first-class tool (`first-class`), reachable only through bash (`shell`) or absent (`none`)
-on Home maintainer turns, Home wake turns, delegated workers and ordinary/automation
-sessions, and pi-subagents children. Home admits `computer` and its managed native browser
-only on maintainer turns; trigger, automation and task-result wakes admit neither. A tool
+on Home turns, delegated workers and ordinary/automation sessions, and pi-subagents
+children. Home admits `computer` and its managed native browser on every activation. A tool
 scores on a surface only where it is first-class: an availability gap is a failure.
 Update the file in the same change that moves a tool onto or off a surface.
 
 Surface rows project the measured engine functions through declared tool admission;
-they are not live Home or subagent interaction timings. The Home admission E2E owns
-the maintainer/wake boundary. Delegation startup and end-to-end Home task latency are
+they are not live Home or subagent interaction timings. Delegation startup and end-to-end Home task latency are
 not measured by this harness. Home browser admission is proved through the actual pinned
 wrapper on a local fixture; the matrix still projects engine coverage rather than timing Home.

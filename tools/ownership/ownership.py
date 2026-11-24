@@ -16,7 +16,7 @@ STEM = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 LAYERS = {f"L{n}" for n in range(6)}
 EDGE_KINDS = {"registration", "spawn", "fs-read", "generated", "wire"}
 RISK_CLASSES = {"kernel", "contracts", "persistence", "security", "lifecycle", "ios-ui", "mac-installer"}
-FIELDS = {"layer", "purpose", "owns", "dependsOn", "dynamicEdges", "verify", "iosLanes", "iosScenarios", "riskClass", "layout", "directories"}
+FIELDS = {"layer", "purpose", "owns", "dependsOn", "dynamicEdges", "verify", "riskClass", "layout", "directories"}
 ROOT_MANIFEST = "root.module.json"
 EDGE_FIELDS = {"to", "kind", "via", "why"}
 FORBIDDEN = set("[]{}\\")
@@ -147,7 +147,7 @@ def directory_modules(manifest: str, data: dict, problems: list[str]) -> dict[st
         elif not isinstance(entry, dict) or not {"name", "layer"} <= set(entry) or set(entry) - {"name", "layer", "verify"} or not isinstance(entry["name"], str) \
                 or not STEM.fullmatch(entry["name"]) or not one_of(entry["layer"], LAYERS) \
                 or ("verify" in entry and (not isinstance(entry["verify"], list) or any(not isinstance(command, str) or not command.startswith("scripts/tron ") for command in entry["verify"]))):
-            problems.append(f"{label} must declare name/layer and may declare scripts/tron verify commands")
+            problems.append(f"{label} must declare name/layer and may declare scripts/tron commands")
         else:
             path = directory if folder == "." else f"{folder}/{directory}"
             found[f"{manifest}#{directory}"] = (module_id(f"{path}/{entry['name']}{SUFFIX}"), path, entry["layer"], entry.get("verify", []))
@@ -200,34 +200,6 @@ def strings(value: object, field: str, errors: list[str]) -> list[str]:
 
 def one_of(value: object, options) -> bool:
     return isinstance(value, str) and value in options
-
-
-def ios_lane_problems(value, owned) -> list[str]:
-    if not isinstance(value, list):
-        return ["iosLanes must be a list"]
-    problems = []
-    for entry in value:
-        if not isinstance(entry, dict) or set(entry) != {"classes", "command"}:
-            problems.append("iosLanes entries require only classes and command")
-            continue
-        classes, command = entry["classes"], entry["command"]
-        if not isinstance(classes, list) or not classes or any(not isinstance(name, str) or not re.fullmatch(r"\w+/\w+", name) for name in classes):
-            problems.append("iosLanes classes must name exact Target/Class identities")
-        elif len(set(classes)) != len(classes):
-            problems.append("iosLanes classes must be unique")
-        if not isinstance(command, list) or not command or any(not isinstance(arg, str) or not arg or "\0" in arg for arg in command):
-            problems.append("iosLanes command must be a nonempty argument list")
-        elif command[0] not in owned or not command[0].endswith(".py"):
-            problems.append("iosLanes command must start with a tracked Python script owned by this module")
-    return problems
-
-
-def ios_scenario_problems(value) -> list[str]:
-    if not isinstance(value, list) or not value or any(not isinstance(name, str) or not re.fullmatch(r"\w+", name) for name in value):
-        return ["iosScenarios must be a nonempty list of ProfilingTests class names"]
-    if len(set(value)) != len(value):
-        return ["iosScenarios class names must be unique"]
-    return []
 
 
 def reject_duplicate_keys(pairs):
@@ -356,9 +328,6 @@ def check(rev: str | None = None, shrink: bool = False) -> tuple[dict, list[str]
         for command in strings(data.get("verify", []), "verify", problems):
             if not command.startswith("scripts/tron "):
                 problems.append(f"verify {command!r} must be a 'scripts/tron …' command")
-        problems.extend(ios_lane_problems(data.get("iosLanes", []), module["owned"]))
-        if "iosScenarios" in data:
-            problems.extend(ios_scenario_problems(data["iosScenarios"]))
         for risk in unique_list(data.get("riskClass", []), "riskClass", problems):
             if not one_of(risk, RISK_CLASSES):
                 problems.append(f"riskClass {risk!r} must be one of {', '.join(sorted(RISK_CLASSES))}")

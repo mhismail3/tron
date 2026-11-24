@@ -88,6 +88,21 @@ it("continues two chapters across replay/restart and freezes exact message and n
   await writeFile("test-results/home-memory/continuity.json", JSON.stringify(report, null, 2) + "\n");
 });
 
+it("keeps a later chapter's entry whose ID an earlier chapter already used and places activations after it", async () => {
+  const fx = await fixture(); const memory = await fx.open();
+  await appendFile(fx.chapters[1]!.path, entry("a", "d", "second chapter reused id teal fact"));
+  await memory.entriesCommitted("home");
+  expect(memory.status().blocked).toBeNull();
+  expect(memory.status().messages).toBe(3);
+  expect(await memory.cutAtEntry("a")).toBe(3);
+  expect(memory.searchMessages("violet", 0, 10)?.matches).toBe(1);
+  expect(memory.searchMessages("teal", 0, 10)?.matches).toBe(1);
+  await memory.dispose(); memories.splice(memories.indexOf(memory), 1);
+  const restarted = await fx.open(); await restarted.entriesCommitted("home");
+  expect(restarted.status().messages).toBe(3);
+  expect(await restarted.cutAtEntry("a")).toBe(3);
+});
+
 it("repairs only a proven header relocation, preserves summaries across reopen and ingests the active tail", async () => {
   const fx = await fixture();
   const summarize = vi.fn(async () => fauxAssistantMessage("summary"));

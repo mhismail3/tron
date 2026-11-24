@@ -143,7 +143,9 @@ are installed; schema access never evaluates their late-bound service getter.
   parent directory's realpath and a case-folded name compared, and a path whose realpath is one of those files'
   realpaths refused too). `grep`, `find`, `ls` and `bash` are not guarded: they take directories or arbitrary
   commands that cannot be parsed reliably, so the guard steers agents to the settings tool and is not a security
-  boundary.
+  boundary. Its `tool_result` hook runs the SDK's `loadSkills` on a `SKILL.md` that `write` or `edit` changed
+  and appends the loader's diagnostics to the tool result, so a skill that will not load is reported at write
+  time with the Gateway's own loader.
 
 ## Signals
 
@@ -168,15 +170,14 @@ are installed; schema access never evaluates their late-bound service getter.
 ## Verify
 
 ```bash
-scripts/tron verify --module gateway/admin
+scripts/tron gate --check
 scripts/tron test gateway src/e2e/admin/settings-model.integration.test.ts \
   src/e2e/admin/settings-change.integration.test.ts src/e2e/admin/settings-gate.e2e.test.ts
 scripts/tron docs check
 scripts/tron test gateway src/e2e/admin/settings-change.integration.test.ts -t 'reconciles missed global MCP drift'
 ```
 
-Behavior locks: `src/e2e/admin/admin.lock.integration.test.ts` and
-`admin.store.lock.integration.test.ts` against `locks/*.golden.json`.
+Behavior lock: `src/e2e/admin/admin.lock.integration.test.ts`.
 `settings-change.integration.test.ts` covers every key at every allowed layer,
 the record, undo, outside changes and project git states;
 `native-change.e2e.test.ts` covers exact paired-native admission, callback settlement,

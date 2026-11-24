@@ -114,13 +114,20 @@ final class MountedFixture {
         await Self.nextFrame()
     }
 
-    func expandTopSheet() async throws {
+    func waitForTopSheetToSettle() async throws {
         var controller: UIViewController = host
         while let next = controller.presentedViewController { controller = next }
-        guard let sheet = controller.sheetPresentationController, sheet.selectedDetentIdentifier != .large,
-              sheet.detents.contains(where: { $0.identifier == .large }) else { return }
-        sheet.selectedDetentIdentifier = .large
-        try await until("the sheet reaches its large detent") { controller.view.convert(controller.view.bounds, to: nil).minY < 120 }
+        guard let detent = controller.sheetPresentationController?.detents.last else {
+            throw FixtureNotReady(description: "the top controller is not a sheet")
+        }
+        if detent.identifier == .large {
+            try await until("the sheet reaches its large detent") { controller.view.convert(controller.view.bounds, to: nil).minY < 120 }
+        } else {
+            try await until("the sheet rests at its one content-fit detent") {
+                let frame = controller.view.convert(controller.view.bounds, to: nil)
+                return frame.minY > 0 && frame.maxY <= window.bounds.maxY + 0.5 && window.bounds.maxY - frame.maxY <= 12
+            }
+        }
     }
 
     func navigationTitle(_ title: String) -> NSObject? {

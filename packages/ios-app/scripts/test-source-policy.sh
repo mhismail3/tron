@@ -41,10 +41,8 @@ generated_project="$generated_root/TronMobile.xcodeproj/project.pbxproj"
 grep -Fq 'tron-notification.caf' "$generated_project" \
   || fail "generated project omitted the notification sound"
 
-for sources in "$ROOT/Sources" "$ROOT/SwiftAppEngine"; do
-  /usr/bin/python3 "$ROOT/scripts/presentation-source-policy.py" "$sources" \
-    || fail "raw native sheet escaped its managed owner"
-done
+/usr/bin/python3 "$ROOT/scripts/presentation-source-policy.py" "$ROOT/Sources" \
+  || fail "raw native sheet escaped its managed owner"
 
 /usr/bin/python3 - "$ROOT/scripts/presentation-source-policy.py" "$generated_root" <<'PY'
 import pathlib, shutil, subprocess, sys
@@ -58,12 +56,10 @@ probes = [
     ("UI/Probe.swift", "let value: ActionSheet?"),
     ("UI/Probe.swift", "let value = UIActionSheet()"),
     ("State/ManagedSheetPresentation.swift", "let controller: UIAlertController?"),
-    ("UI/SwiftApps/SwiftAppViews.swift", "let action = UIAlertAction(title: title)"),
 ]
 cases = [({relative: source}, "shared Tron confirmation sheet") for relative, source in probes]
 cases += [
     ({"State/ManagedSheetPresentation.swift": "view.sheet (item: $route) {}",
-      "UI/SwiftApps/SwiftAppViews.swift": "view.sheet(item: $route) {}",
       "UI/Probe.swift": '// .sheet(x)\nlet x = ".sheet(x)"\nswitch surface ?? .sheet { case .sheet: break }'}, None),
 ]
 for source in ["view.sheet(item: $route) {}", "view.\n sheet\n(item: $route) {}", "view.fullScreenCover(isPresented: $flag) {}"]:
@@ -95,10 +91,8 @@ PY
 
 /usr/bin/python3 "$ROOT/scripts/sheet-loading-source-policy.py" --self-test \
   || fail "sheet loading policy regressions failed"
-for sources in "$ROOT/Sources" "$ROOT/SwiftAppEngine"; do
-  /usr/bin/python3 "$ROOT/scripts/sheet-loading-source-policy.py" "$sources" \
-    || fail "ad-hoc sheet loading UI escaped the shared pulse"
-done
+/usr/bin/python3 "$ROOT/scripts/sheet-loading-source-policy.py" "$ROOT/Sources" \
+  || fail "ad-hoc sheet loading UI escaped the shared pulse"
 
 core_ui_imports() {
   grep -rnE '^[[:space:]]*(@[A-Za-z_]+[[:space:]]+)*import[[:space:]]+(SwiftUI|UIKit|Observation|UserNotifications)\b' "$1" --include='*.swift'

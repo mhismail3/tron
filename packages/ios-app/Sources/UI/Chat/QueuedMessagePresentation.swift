@@ -586,8 +586,6 @@ struct QueuedMessageEditorSheet: View {
             }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
         .interactiveDismissDisabled(isSaving)
         .tint(accent)
         .tronSettingsVisualTheme(

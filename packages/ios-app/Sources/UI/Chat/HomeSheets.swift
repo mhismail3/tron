@@ -15,7 +15,6 @@ enum HomeSheetDestination: Identifiable {
     case task(String)
     case taskHistory(String)
     case checkin(HomeTaskHistoryItem)
-    case controls
 
     var id: String {
         switch self {
@@ -32,7 +31,6 @@ enum HomeSheetDestination: Identifiable {
         case .task: "task"
         case .taskHistory: "task-history"
         case .checkin: "checkin"
-        case .controls: "controls"
         }
     }
 
@@ -46,7 +44,6 @@ enum HomeSheetDestination: Identifiable {
         case .tasks, .task: "Tasks"
         case .taskHistory: "Check-ins"
         case .checkin: "Check-in"
-        case .controls: "Controls"
         }
     }
 
@@ -62,7 +59,6 @@ enum HomeSheetDestination: Identifiable {
         case .tasks: .tasks(nil)
         case .task(let id): .task(id)
         case .taskHistory(let id): .taskHistory(id, cursor: nil)
-        case .controls: .status
         }
     }
 
@@ -71,7 +67,7 @@ enum HomeSheetDestination: Identifiable {
     }
 
     var loadsPage: Bool {
-        switch self { case .memoryItem, .chapter, .checkin, .controls: false; default: true }
+        switch self { case .memoryItem, .chapter, .checkin: false; default: true }
     }
 }
 
@@ -119,6 +115,11 @@ struct HomeSheet: View {
     @PresentationState private var returnsFromBrowsing = false
     @PresentationState private var sliderPresentation = ConfigurationSliderPresentation()
     @PresentationState var profileEdit = HomeProfileEditState()
+    @PresentationState var pendingControl: HomeManagePendingControl?
+    @PresentationState var controlFailure: String?
+    #if HOSTED_TEST
+    @Environment(\.hostedHomeActionProbe) var hostedActionProbe
+    #endif
 
     init(destination: HomeSheetDestination, profileID: String, sessionID: String? = nil,
          onOpenSession: ((String) -> Void)? = nil, onChanged: (() -> Void)? = nil) {
@@ -133,7 +134,6 @@ struct HomeSheet: View {
     var identity: HomeSheetReadIdentity? { model.homeSheetReadIdentity(profileID: profileID, surfaceToken: token) }
     var accent: Color { visualTheme?.accent ?? .tronPrimary }
     private var isEvidence: Bool { if case .evidence = destination { true } else { false } }
-    private var detents: Set<PresentationDetent> { [.medium, .large] }
     var active: Bool { PresentationPublicationPolicy.allows(ambient: activity, coordinator: coordinator, token: token) }
     var body: some View {
         Group {
@@ -148,14 +148,12 @@ struct HomeSheet: View {
             } else if destination.isTaskSurface {
                 HomeTaskSheet(destination: destination, profileID: profileID, onOpenSession: onOpenSession)
             } else if isEvidence {
-                TronDocumentSheet(title: destination.title, detents: detents) { sheetContent }
+                TronDocumentSheet(title: destination.title) { sheetContent }
             } else {
                 NavigationStack { sheetContent }
             }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents(detents)
-        .presentationDragIndicator(.hidden)
         .environment(\.tronSettingsVisualTheme, visualTheme ?? TronSettingsVisualTheme(
             accent: .tronPrimary, surfaceAccent: .tronPrimarySurface))
         .tint(accent)
@@ -186,6 +184,9 @@ struct HomeSheet: View {
                     }
                     .accessibilityIdentifier("home-memory-info")
                 }
+            }
+            if let status = manageStatus {
+                ToolbarItemGroup(placement: .topBarLeading) { manageControls(status) }
             }
             if !isEvidence {
             ToolbarItem(placement: .principal) { TronSheetTitle(title: destination.title, accent: accent) }
@@ -229,7 +230,7 @@ struct HomeSheet: View {
         }
         .tronManagedSheet(isPresented: $showingMemoryInfo, identity: "home.\(profileID).memory-info.\(destination.id)") {
             if let metadata = memoryMetadata {
-                TronDocumentSheet(title: "Technical details", detents: [.medium, .large]) {
+                TronDocumentSheet(title: "Technical details") {
                     ScrollView {
                         TronTechnicalMetadataSection(title: "Memory", items: metadata, accent: accent)
                             .padding(18)
@@ -243,6 +244,12 @@ struct HomeSheet: View {
         .tronManagedSheet(item: $reading, identity: { "home.\(profileID).reading.\($0.id)" }) { reading in
             HomeTextReader(reading: reading).tronSettingsVisualTheme(accent: accent, surfaceAccent: visualTheme?.surfaceAccent ?? .tronPrimarySurface)
         }
+        .tronManagedSheet(item: $pendingControl, identity: { "home.\(profileID).\($0.id)-confirmation" }) { pending in
+            controlConfirmation(pending)
+        }
+        #if HOSTED_TEST
+        .onAppear { if case .manage = destination { hostedActionProbe?.pause = { performControl(.pauseMemory) } } }
+        #endif
     }
 
     @ViewBuilder private var content: some View {
@@ -250,7 +257,6 @@ struct HomeSheet: View {
         case .memoryItem(let item): memoryDetail(item)
         case .chapter(let chapter, let limits): chapterDetail(chapter, limits: limits)
         case .profileItem(let item): profileItemDetail(loadedProfileItem(item))
-        case .controls: HomeControlsSection(profileID: profileID)
         default:
             loadedContent
         }
@@ -267,7 +273,7 @@ struct HomeSheet: View {
     @ViewBuilder private var loadedContent: some View {
         switch owner.state {
         case .idle, .loading(_, nil):
-            TronSheetLoadingState(label: "Loading Home…", accent: accent)
+            if case .manage = destination { manageSheet(nil) } else { TronSheetLoadingState(label: "Loading Home…", accent: accent) }
         case .failed(_, let error):
             TronPlaceholderState(title: "Home could not be read", detail: error, icon: "exclamationmark.triangle",
                                  actionTitle: "Reload") { reload() }
@@ -280,8 +286,10 @@ struct HomeSheet: View {
                 case .memory(let view): memory(view)
                 case .evidence(let page):
                     evidenceSheet(page)
-                case .status, .tasks, .task, .taskHistory, .permissions: EmptyView()
+                case .tasks, .task, .taskHistory, .permissions: EmptyView()
                 }
+            } else if case .manage = destination {
+                manageSheet(nil)
             } else {
                 TronSheetLoadingState(label: "Waiting for Home…", accent: accent)
             }
@@ -323,7 +331,7 @@ struct HomeTextReader: View {
     let reading: HomeTextReading
 
     var body: some View {
-        TronDocumentSheet(title: reading.title, detents: [.medium, .large]) {
+        TronDocumentSheet(title: reading.title) {
             ScrollView {
                 TronMarkdownView(text: reading.text, streaming: false)
                     .textSelection(.enabled)

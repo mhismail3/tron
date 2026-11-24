@@ -2,7 +2,7 @@
 
 Research sources are ordinary workspace Markdown with original JSON and attachment
 files. There is no native Knowledge library, source detail, search or coverage
-settings sheet. The dashboard menu keeps Settings, Automations, Apps and New Session.
+settings sheet. The dashboard menu keeps Settings, Automations, Artifacts and New Session.
 
 ## Retention
 
@@ -20,10 +20,7 @@ Home memory, chapters, zoom and memory search keep their existing owners.
 
 ## Validation
 
-`AccessibilityMaintenanceViewTests/testKnowledgeProductIsAbsentFromDashboardAndConnectedServices`
-checks route absence through the menu and Settings in Light/Dark/large type.
-`TronSmokeUITests/testDashboardMenuStaysOpenDuringParentUpdates` keeps the existing
-native-menu continuity/selection proof using Automations.
+Route absence is verified by reading `DashboardDestination` and Settings sources.
 
 The [Knowledge files contract](../../../docs/development.md#knowledge-files)
 describes ordinary reads and the retained maintainer-only recovery artifacts.

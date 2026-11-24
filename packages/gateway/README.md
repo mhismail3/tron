@@ -21,7 +21,7 @@ scripts/tron docs signals                    # Signals rows of every module READ
 Cross-module contracts live in [`docs/`](docs): wire families (below), [settings
 contract](docs/settings-contract.md), [Pi SDK maintenance](docs/pi-sdk-maintenance.md),
 [connection resilience](docs/connection-resilience.md),
-[observability](docs/observability.md), [scenario locks](docs/scenario-locks.md).
+[observability](docs/observability.md).
 Each heading below keeps its inbound anchor and links to the current owner.
 
 ## Chat semantics
@@ -88,7 +88,7 @@ See [providers](src/providers/README.md#contract).
 ## Internal workspace
 
 See [workspace module](src/workspace/README.md), [internal
-workspace](docs/internal-workspace.md) and [Swift apps](docs/swift-apps.md).
+workspace](docs/internal-workspace.md) and [artifacts](src/modules/artifacts/README.md).
 
 ## Tron Home
 
@@ -168,9 +168,9 @@ has a README; every other Gateway module's rows are in its own README
 | Signal | Level | Meaning |
 |---|---|---|
 | `probe process join failed; staging preserved` / `Refusing fixture removal after process join failure` | updater or probe stderr; `TRON_TEST_PROCESS_OWNER_FAILURE` record | A fixture process could not be joined after TERM/KILL; staging stays owned and publications are restored. Settle those exact PIDs before retiring staging; never retry the removal |
-| `ENOTEMPTY` removing a fixture's `home/.npm/_logs` | fixture teardown | Run `scripts/tron test gateway --mini src/e2e/transport/gateway-process-prompt.e2e.test.ts`: its held global npm lookup must have exited before Gateway restart continues. The provider's advertisement owner cancels and joins lookup processes on shutdown; never retry fixture removal |
+| `ENOTEMPTY` removing a fixture's `home/.npm/_logs` | fixture teardown | Run `scripts/tron test gateway src/e2e/transport/gateway-process-prompt.e2e.test.ts`: its held global npm lookup must have exited before Gateway restart continues. The provider's advertisement owner cancels and joins lookup processes on shutdown; never retry fixture removal |
 | `pi-subagents update failed` | `npm run update:pi-subagents` stderr | Dependency preparation failed, not activation; the suffix names dirty inputs, source, release, packaging or check failure. Candidates are rolled back |
 | `pi-subagents update failed: … execution gate failed` / `… rollback probe failed` | updater stderr, before publication | The unpublished candidate cannot execute, or the return leg cannot discover, execute or resume; the original pin stays |
 | `pi-subagents pin check failed` during payload staging/verification | bundler or checker stderr | Selected pin metadata, archive, lock or closure is missing or invalid; reject the payload before startup |
-| `home.task.producer-refused` with `reason: unverified-provider` after a pin change | finite Home task admission | Run `scripts/tron verify --module gateway/pi-sdk --gateway-host mini --ios-host mini`: its declared Home managed-child/report journey checks the canonical pin against `REVIEWED_HOME_TASK_PROVIDER_VERSION`, installed-owner identity and missing-pin refusal; never bypass the review fence |
+| `home.task.producer-refused` with `reason: unverified-provider` after a pin change | finite Home task admission | Run `scripts/tron test gateway src/e2e/modules/home/home-task-subagents-reports.e2e.test.ts`: the Home managed-child/report journey checks the canonical pin against `REVIEWED_HOME_TASK_PROVIDER_VERSION`, installed-owner identity and missing-pin refusal; never bypass the review fence |
 | `Status coverage is incomplete.` | managed subagent status/fleet tool error | Readable runs remain visible; named unreadable records and their markers are unchanged, with liveness and completion unknown. Fork test entrypoints must allocate their own root instead of inheriting the runtime store |

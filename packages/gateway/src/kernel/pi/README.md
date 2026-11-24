@@ -74,7 +74,7 @@ None.
 ## Verify
 
 ```bash
-scripts/tron verify --module gateway/pi
+scripts/tron gate --check
 ```
 
 The seam is exercised by every lock: the Pi SDK behavior trace and persisted-state

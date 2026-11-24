@@ -49,8 +49,6 @@ struct ToolChangesSheet: View {
             }
         }
         .tronTopBlur(.toolDetail)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
         .tronPresentation()
     }
 }

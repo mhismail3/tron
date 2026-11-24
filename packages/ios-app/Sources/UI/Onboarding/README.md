@@ -60,10 +60,6 @@ None of its own.
 ## Verify
 
 ```bash
-scripts/tron-ios-test run \
-  --only-testing TronMobileUITests/TronSmokeUITests/testOnboardingPreservesPagedSheetAndPairingJourney \
-  --only-testing TronMobileUITests/TronSmokeUITests/testPairingValidationIsAccessibleAndDoesNotLeaveOnboarding \
-  --only-testing TronMobileUITests/TronSmokeUITests/testModelAcknowledgementResolvesWithoutDismissingPicker
 scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground
 ```
 

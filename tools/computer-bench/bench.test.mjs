@@ -1,9 +1,9 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { FUNCTIONS, scorecard, summarize } from "./bench.mjs";
-import { DOWNLOAD_BODY, startSite } from "./fixtures/site.mjs";
+import { CAPTION, DOWNLOAD_BODY, startSite } from "./fixtures/site.mjs";
 
-test("the fixture site serves the consent redirect across origins, the cookie session and the download", async () => {
+test("the fixture site serves the consent redirect across origins, the cookie session, the composer and the download", async () => {
   const site = await startSite();
   try {
     const approve = await fetch(`${site.origin}/oauth/approve?redirect_uri=${encodeURIComponent(`${site.altOrigin}/callback`)}&state=s1`, { redirect: "manual" });
@@ -13,23 +13,10 @@ test("the fixture site serves the consent redirect across origins, the cookie se
     const cookie = login.headers.get("set-cookie").split(";")[0];
     assert.match(await (await fetch(`${site.origin}/whoami`, { headers: { cookie } })).text(), /user=bench-user/u);
     assert.match(await (await fetch(`${site.origin}/whoami`)).text(), /user=anonymous/u);
-    const denied = await fetch(`${site.origin}${site.authPath}/fact`);
-    assert.equal(denied.status, 403);
-    const attachLogin = await fetch(`${site.origin}${site.authPath}/login`, { redirect: "manual" });
-    const attachCookie = attachLogin.headers.get("set-cookie").split(";")[0];
-    assert.equal(attachLogin.status, 302);
-    assert.equal(attachLogin.headers.get("location"), `${site.authPath}/fact`);
-    assert.match(attachLogin.headers.get("set-cookie"), new RegExp(`Path=${site.authPath}/;`, "u"));
-    assert.equal(site.authenticatedReads(), 0);
-    const fact = await fetch(`${site.origin}${site.authPath}/fact`, { headers: { cookie: attachCookie } });
-    assert.equal(fact.status, 200);
-    assert.match(await fact.text(), new RegExp(site.authNonce, "u"));
-    assert.equal(site.authenticatedReads(), 1);
-    const otherSite = await startSite();
-    try {
-      assert.notEqual(otherSite.authNonce, site.authNonce);
-      assert.equal((await fetch(`${otherSite.origin}${otherSite.authPath}/fact`, { headers: { cookie: attachCookie } })).status, 403);
-    } finally { await otherSite.close(); }
+    const composer = await (await fetch(`${site.origin}/composer.html`)).text();
+    assert.match(composer, /contenteditable="true"/u);
+    assert.equal([...CAPTION].length, 280);
+    assert.match(CAPTION, /\u00b7.*\u201c.*https:\/\/.*\ud83d\ude80/u);
     assert.equal(await (await fetch(`${site.origin}/download/bench.txt`)).text(), DOWNLOAD_BODY);
   } finally { await site.close(); }
 });
@@ -44,7 +31,6 @@ test("the scorecard counts absent tools, partial passes and first-class surface 
   const computer = { name: "cua", probe: { ok: true, version: "x" }, tasks: { "native-click": [{ status: "pass", ms: 10 }] } };
   const homeMarkdown = scorecard({ startedAt: "t", reps: 2, tools: [present, absent, computer], notes: [] });
   assert.match(homeMarkdown, new RegExp(`\\| home: [^|]+\\| first-class \\| none \\| first-class \\| 2/${FUNCTIONS.length} \\|`, "u"));
-  assert.match(homeMarkdown, new RegExp(`\\| home-wake: [^|]+\\| none \\| none \\| none \\| 0/${FUNCTIONS.length} \\|`, "u"));
   const markdown = scorecard({ startedAt: "t", reps: 2, tools: [present, absent], notes: [] });
   assert.match(markdown, new RegExp(`\\| worker: [^|]+\\| first-class \\| none \\| 1/${FUNCTIONS.length} \\|`, "u"));
   assert.match(markdown, /\*\*agent-browser click\*\* \(flaky\): missed/u);

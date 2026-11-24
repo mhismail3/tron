@@ -62,8 +62,8 @@ The investigation's private packet is evidence for this task, not a runtime depe
 Reuse #2156's generic Automations definitions, durable run/outbox and Home target,
 not a new monitor owner. A maintainer-authorized Home Automation sends a finite,
 attributed self-check objective at an agreed cadence/expiry. No cadence or definition
-is installed by this slice. A trigger cannot create/mutate other schedules, grant
-file/shell rights, renew task grants, approve changes or override pauses.
+is installed by this slice. A trigger cannot renew task grants, approve changes or
+override pauses.
 
 On that wake, Home reads the task metrics, then:
 
@@ -150,7 +150,6 @@ admissions. They use records actually produced by the Gateway fixture, not a cop
 algorithm or live private data. Existing task-history tests retain the complete-history
 oracle; metrics deliberately does not replace it.
 
-Run `scripts/tron verify --changed` on the committed diff, retain counts/logs and obtain
-independent acceptance of test edits. Home owns broad post-land runtime/full-tier
-checkpoints. No full Gateway suite, Debug/Stable restart, install, live state mutation,
+Admit the committed change with `scripts/tron gate`, retain counts/logs and obtain
+independent acceptance of test edits. No full Gateway suite, Debug/Stable restart, install, live state mutation,
 self-check Automation or brief-template behavior change belongs to this implementation.

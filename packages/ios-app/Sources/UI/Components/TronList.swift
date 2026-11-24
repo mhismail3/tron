@@ -89,7 +89,7 @@ struct TronListRow: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                if !tagsOnTitleLine && (!content.tags.isEmpty || content.timestamp != nil) { metadataLine }
+                if !tagsOnTitleLine && !timeOnTitleLine && (!content.tags.isEmpty || content.timestamp != nil) { metadataLine }
             }
         }
         .padding(.horizontal, TronListMetrics.horizontalPadding)
@@ -103,9 +103,18 @@ struct TronListRow: View {
     }
 
     private var tagsOnTitleLine: Bool { content.status == nil && content.timestamp == nil && !content.tags.isEmpty }
+    private var timeOnTitleLine: Bool {
+        content.status == nil && content.tags.isEmpty && content.timestamp != nil && (content.subtext ?? "").isEmpty
+            && content.detailLines.isEmpty && !dynamicTypeSize.isAccessibilitySize
+    }
 
     @ViewBuilder private var titleLine: some View {
-        if tagsOnTitleLine {
+        if timeOnTitleLine, let timestamp = content.timestamp {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                titleText
+                timestampText(timestamp).tronListMarker(.metadata)
+            }
+        } else if tagsOnTitleLine {
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: 10) { titleText; TronListTags(tags: content.tags) }
                 VStack(alignment: .leading, spacing: TronListMetrics.lineGap) { titleText; TronListTags(tags: content.tags) }
@@ -128,7 +137,7 @@ struct TronListRow: View {
             .font(content.monoTitle ? TronTypography.code(size: TronTypography.sizeBody3)
                 : TronTypography.sans(size: TronTypography.sizeBody, weight: content.preview ? .regular : .semibold))
             .foregroundStyle(Color.tronTextPrimary)
-            .lineLimit(content.preview ? 3 : 2)
+            .lineLimit(content.preview ? 3 : timeOnTitleLine ? 1 : 2)
             .frame(maxWidth: .infinity, alignment: .leading)
             .tronListMarker(.title)
     }
@@ -136,17 +145,19 @@ struct TronListRow: View {
     private var metadataLine: some View {
         HStack(alignment: .center, spacing: 8) {
             TronListTags(tags: content.tags).frame(maxWidth: .infinity, alignment: .leading)
-            if let timestamp = content.timestamp {
-                Text(timestamp)
-                    .font(TronTypography.bodySM)
-                    .foregroundStyle(Color.tronTextMuted)
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .fixedSize()
-            }
+            if let timestamp = content.timestamp { timestampText(timestamp) }
         }
         .padding(.top, 2)
         .tronListMarker(.metadata)
+    }
+
+    private func timestampText(_ timestamp: String) -> some View {
+        Text(timestamp)
+            .font(TronTypography.bodySM)
+            .foregroundStyle(Color.tronTextMuted)
+            .monospacedDigit()
+            .lineLimit(1)
+            .fixedSize()
     }
 
 }
@@ -228,7 +239,6 @@ struct TronListSection<Row: Identifiable> {
 struct TronListGroup<Row: Identifiable, RowView: View>: View {
     let sections: [TronListSection<Row>]
     @Environment(\.tronSettingsSectionCount) private var sectionCount
-    @Environment(\.tronSettingsVisualTheme) private var theme
     var hasLeading = false
     var identifier: String?
     @ViewBuilder let row: (Row) -> RowView
@@ -248,14 +258,8 @@ struct TronListGroup<Row: Identifiable, RowView: View>: View {
             ForEach(Array(sections.enumerated()), id: \.offset) { index, section in
                 VStack(alignment: .leading, spacing: TronListMetrics.headerGap) {
                     if sectionCount != 1 || sections.count > 1, let title = section.title {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(title).font(TronTypography.sheetSectionHeader).foregroundStyle(section.tint ?? theme?.accent ?? .tronAccentText)
-                            Spacer(minLength: 8)
-                            Text(section.rows.count.formatted()).font(TronTypography.bodySM).foregroundStyle(Color.tronTextMuted)
-                        }
-                        .accessibilityElement(children: .combine)
-                        .accessibilityAddTraits(.isHeader)
-                        .accessibilityIdentifier(identifier.map { "\($0)-header-\(index)" } ?? "")
+                        TronListSectionHeader(title: title, count: section.rows.count, tint: section.tint)
+                            .accessibilityIdentifier(identifier.map { "\($0)-header-\(index)" } ?? "")
                     }
                     container(section, index: index)
                 }
@@ -279,6 +283,23 @@ struct TronListGroup<Row: Identifiable, RowView: View>: View {
         .clipShape(RoundedRectangle(cornerRadius: TronListMetrics.cornerRadius, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(identifier.map { "\($0)-section-\(index)" } ?? "")
+    }
+}
+
+struct TronListSectionHeader: View {
+    let title: String
+    let count: Int
+    var tint: Color?
+    @Environment(\.tronSettingsVisualTheme) private var theme
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title).font(TronTypography.sheetSectionHeader).foregroundStyle(tint ?? theme?.accent ?? .tronAccentText)
+            Spacer(minLength: 8)
+            Text(count.formatted()).font(TronTypography.bodySM).foregroundStyle(Color.tronTextMuted)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -441,6 +462,12 @@ struct TronFeedPositionChip: View {
     }
 }
 
+extension View {
+    func tronFeedInsets() -> some View {
+        padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 24)
+    }
+}
+
 struct TronFeedEmptyState<Header: View, Placeholder: View>: View {
     let identifier: String
     @ViewBuilder let header: () -> Header
@@ -454,10 +481,11 @@ struct TronFeedEmptyState<Header: View, Placeholder: View>: View {
                     VStack(spacing: TronListMetrics.feedGap) { placeholder() }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 24)
+                .tronFeedInsets()
                 .frame(minHeight: proxy.size.height)
             }
             .tronScrollEdgeChrome()
+            .environment(\.tronSheetMeasuresContent, false)
             .accessibilityIdentifier(identifier)
         }
     }
@@ -493,7 +521,7 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
                     TronFeedChipSpace(position: position)
                 }
                 .scrollTargetLayout()
-                .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 24)
+                .tronFeedInsets()
             }
             .accessibilityIdentifier(identifier)
             .overlay(alignment: .bottom) {

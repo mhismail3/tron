@@ -7,7 +7,6 @@ struct ComposerResourceInfoSheet: View {
     let technicalValue: JSONValue?
     let technicalTitle: String?
     @Environment(\.dismiss) private var dismiss
-    @PresentationState private var detent: PresentationDetent = .medium
 
     init(items: [TronTechnicalMetadataItem], accent: Color, technicalValue: JSONValue? = nil, technicalTitle: String? = nil) {
         self.items = items
@@ -47,8 +46,6 @@ struct ComposerResourceInfoSheet: View {
             .tint(accent)
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large], selection: $detent)
-        .presentationDragIndicator(.hidden)
         .tronPresentation()
     }
 }

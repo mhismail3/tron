@@ -148,6 +148,7 @@ private struct TronScrollEdgeChromeModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .scrollEdgeEffectStyle(.soft, for: .all)
+            .modifier(TronSheetFitScrollModifier())
             .modifier(TronSheetContentRevealModifier())
             .tronTopBlurSurface()
     }
@@ -194,11 +195,15 @@ private struct TronGlassSurfaceModifier: ViewModifier {
     let interactive: Bool
     let respectsSettingsTheme: Bool
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+    @Environment(\.tronSheetFitsContent) private var fits
 
     func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let shape = TronSurfaceShape.resolve(cornerRadius: cornerRadius, inFittedSheet: fits)
         let resolvedAccent = respectsSettingsTheme ? settingsTheme?.surfaceAccent ?? accent : accent
         content
+            #if HOSTED_TEST
+            .background { Color.clear.accessibilityElement().accessibilityIdentifier("tron-sheet-surface") }
+            #endif
             .contentShape(shape)
             .glassEffect(
                 .regular.tint(resolvedAccent.opacity(tintOpacity)).interactive(interactive),
@@ -212,11 +217,15 @@ private struct TronScrollSurfaceModifier: ViewModifier {
     let cornerRadius: CGFloat
     let tintOpacity: Double
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+    @Environment(\.tronSheetFitsContent) private var fits
 
     func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let shape = TronSurfaceShape.resolve(cornerRadius: cornerRadius, inFittedSheet: fits)
         let resolvedAccent = settingsTheme?.surfaceAccent ?? accent
         content
+            #if HOSTED_TEST
+            .background { Color.clear.accessibilityElement().accessibilityIdentifier("tron-sheet-surface") }
+            #endif
             .contentShape(shape)
             .background {
                 shape
@@ -638,7 +647,10 @@ struct TronReadOnlyTextView: UIViewRepresentable {
         return view
     }
 
+    func makeCoordinator() -> TronTopBlurScrollObservation { TronTopBlurScrollObservation() }
+
     func updateUIView(_ view: TronDocumentTextView, context: Context) {
+        context.coordinator.attach(view, feed: context.environment.tronTopBlurFeed)
         view.scrollsToTop = !context.environment.chatOwnsStatusBar
         if view.text != text { view.text = text }
         let size = style == .code ? TronTypography.sizeBody3 : TronTypography.sizeBody
@@ -833,33 +845,28 @@ struct TronSheetTitle: View {
 struct TronDashboardFilterSheet<Content: View, LeadingActions: View>: View {
     let title: String
     let accent: Color
-    let detents: Set<PresentationDetent>
     let onDone: () -> Void
     private let content: Content
     private let leadingActions: LeadingActions
-    @State private var selectedDetent: PresentationDetent = .medium
 
     init(
         title: String,
         accent: Color,
-        detents: Set<PresentationDetent>,
         onDone: @escaping () -> Void,
         @ViewBuilder content: () -> Content
     ) where LeadingActions == EmptyView {
-        self.init(title: title, accent: accent, detents: detents, onDone: onDone, leadingActions: { EmptyView() }, content: content)
+        self.init(title: title, accent: accent, onDone: onDone, leadingActions: { EmptyView() }, content: content)
     }
 
     init(
         title: String,
         accent: Color,
-        detents: Set<PresentationDetent>,
         onDone: @escaping () -> Void,
         @ViewBuilder leadingActions: () -> LeadingActions,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
         self.accent = accent
-        self.detents = detents
         self.onDone = onDone
         self.leadingActions = leadingActions()
         self.content = content()
@@ -894,9 +901,6 @@ struct TronDashboardFilterSheet<Content: View, LeadingActions: View>: View {
         }
         .tronSettingsVisualTheme(accent: accent)
         .tronTopBlur(.sheet)
-        .presentationDetents(detents, selection: $selectedDetent)
-        .presentationContentInteraction(.resizes)
-        .presentationDragIndicator(.hidden)
     }
 }
 
@@ -1142,8 +1146,6 @@ struct TronConfirmationSheet: View {
             }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
     }
 
     private var confirmButton: some View {
@@ -1476,6 +1478,7 @@ struct TronSettingsRow<Trailing: View>: View {
     let iconIsLoading: Bool
     let title: String
     let subtitle: String?
+    let subtitleIsLoading: Bool
     let subtitleLineLimit: Int?
     let subtitleIsMarkdown: Bool
     let titleIsIdentifier: Bool
@@ -1511,11 +1514,13 @@ struct TronSettingsRow<Trailing: View>: View {
         footnote: String? = nil,
         footnoteIsIdentifier: Bool = false,
         iconIsLoading: Bool = false,
+        subtitleIsLoading: Bool = false,
         @ViewBuilder trailing: () -> Trailing
     ) {
         self.icon = icon
         self.title = title
         self.subtitle = subtitle
+        self.subtitleIsLoading = subtitleIsLoading
         self.subtitleLineLimit = subtitleLineLimit
         self.subtitleIsMarkdown = subtitleIsMarkdown
         self.titleIsIdentifier = titleIsIdentifier
@@ -1619,7 +1624,14 @@ struct TronSettingsRow<Trailing: View>: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .tronListMarker(.title)
                 }
-                if let subtitle {
+                if let subtitle, subtitleIsLoading {
+                    TronLoadingPlaceholder(label: "Loading") {
+                        Text(subtitle)
+                            .font(subtitleFont ?? TronTypography.settingsSubtext(adjustment: secondaryTextSizeAdjustment))
+                            .lineLimit(1)
+                    }
+                    .tronListMarker(.subtext)
+                } else if let subtitle {
                     Text(subtitleIsMarkdown
                          ? MarkdownPresentation.Inline(source: subtitle).attributedString ?? AttributedString(subtitle)
                          : AttributedString(subtitle))

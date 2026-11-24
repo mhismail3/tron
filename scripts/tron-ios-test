@@ -3,11 +3,6 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if [[ -z "${TRON_TEST_LEDGER_WRAPPED:-}" ]]; then
-  case "${1:-}" in
-    run|checkpoint|prepare|diagnose) exec python3 "$ROOT/tools/verify/ledger.py" exec swift "$ROOT/scripts/tron-ios-test" "$@" ;;
-  esac
-fi
 IOS="$ROOT/packages/ios-app"
 # shellcheck disable=SC1091
 source "$ROOT/config/ci-toolchain.env"
@@ -72,7 +67,7 @@ Commands:
 
 Selectors:
   --only-testing OWNER  Repeat without shell-generated command fragments, for example:
-                        --only-testing TronMobileUITests/TronSmokeUITests/testIntegrationDestinationsHaveOneDoneButtonThroughSettings
+                        --only-testing TronMobileUITests/TronIntegrationSheetsUITests/testRetryConnectionRecoversUnreachableDetails
                         Without a selector, run, checkpoint and prepare run the smoke set (SMOKE_ONLY_TESTING).
 
 Options:
@@ -256,9 +251,7 @@ simulator_args=(
 test_scheme="Tron UI Validation"
 test_plan="UIValidation"
 SMOKE_ONLY_TESTING=(
-  "TronMobileUITests/TronSmokeUITests/testManageHomeOpensAtMediumFromRingAndHomeGearOpensSettings"
-  "TronMobileUITests/TronSmokeUITests/testComposerContextRingOpensManageHomeInHomeAndManageSessionElsewhere"
-  "TronMobileUITests/TronSmokeUITests/testIntegrationDestinationsHaveOneDoneButtonThroughSettings"
+  "TronMobileUITests/TronIntegrationSheetsUITests/testRetryConnectionRecoversUnreachableDetails"
 )
 
 command="${1:-checkpoint}"

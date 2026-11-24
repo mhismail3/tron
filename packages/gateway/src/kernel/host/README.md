@@ -158,7 +158,7 @@ None of its own; a module logs through `GatewayHost.log`. Shutdown records the
 ## Verify
 
 ```bash
-scripts/tron verify --module gateway/host
+scripts/tron gate --check
 ```
 
 Kernel contract: `module-host.integration.test.ts`.

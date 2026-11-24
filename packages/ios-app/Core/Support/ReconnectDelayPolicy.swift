@@ -63,6 +63,7 @@ package final class GatewayReconnectSchedule {
     private var nominalDelay: Double
     private var pending: Task<Void, Never>?
     private var continuation: CheckedContinuation<Bool, Never>?
+    private var accelerationPending = false
 
     package init(clock: MonotonicClock, delayPolicy: ReconnectDelayPolicy = .standard) {
         self.clock = clock
@@ -74,6 +75,10 @@ package final class GatewayReconnectSchedule {
         cancelPending(resume: false)
         let delay = delay ?? delayPolicy.delay(nominalSeconds: nominalDelay)
         nominalDelay = delayPolicy.nextNominalSeconds(after: nominalDelay)
+        if accelerationPending {
+            accelerationPending = false
+            return true
+        }
         let clock = self.clock
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
@@ -90,7 +95,10 @@ package final class GatewayReconnectSchedule {
     }
 
     package func accelerate() {
-        guard continuation != nil else { return }
+        guard continuation != nil else {
+            accelerationPending = true
+            return
+        }
         pending?.cancel()
         resume(true)
     }
@@ -101,11 +109,13 @@ package final class GatewayReconnectSchedule {
     }
 
     package func reset() {
+        accelerationPending = false
         cancelPending(resume: false)
         nominalDelay = delayPolicy.initialSeconds
     }
 
     package func cancel() {
+        accelerationPending = false
         cancelPending(resume: false)
     }
 

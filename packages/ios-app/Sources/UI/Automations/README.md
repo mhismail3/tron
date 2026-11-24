@@ -13,7 +13,7 @@ The Tron menu and the Automations sheet (list, detail, run detail, create/edit) 
 ## Contract
 
 - **Tron menu.** Sessions is the only dashboard. The Tron logo opens one native menu: Settings;
-  Automations and Apps, each a sheet over the dashboard; New Session. On the Home dashboard
+  Automations and Artifacts, each a sheet over the dashboard; New Session. On the Home dashboard
   the one floating Tron button is Home's: a tap opens the Home chat; a 0.2 s hold
   (`menuHoldDuration`) opens the same menu through a menu-primary sibling button, its only
   presenter: a menu on the touch button adds UIKit's own context-menu hold and opens late without
@@ -25,7 +25,7 @@ The Tron menu and the Automations sheet (list, detail, run detail, create/edit) 
   at rest or collapsed. Without window controls that inset is zero and the layout is unchanged.
   The scroll inset is a constant `contentMargins`, never a translated scroll view, whose safe-area
   insets would change mid-gesture.
-- **Automations sheet.** Medium and large detents; every identity-qualified, connected Gateway
+- **Automations sheet.** Content-fit height (large when it overflows); every identity-qualified, connected Gateway
   advertising `automations.v2` contributes rows (others are absent, never a warning). Active
   Automations list first, then paused, drafts and finished ones (attention, running, next
   occurrence, name, ID within each group). `AutomationInventory` projects every row's strings once
@@ -86,21 +86,10 @@ None of its own; catalog reads report through the State owners.
 ## Verify
 
 ```bash
-scripts/tron-ios-test run \
-  --only-testing TronMobileUITests/TronAccessibilityUITests \
-  --only-testing TronMobileViewTests/AccessibilityMaintenanceViewTests \
-  --only-testing TronMobileUITests/TronSmokeUITests/testAutomationsSheetFromTronMenu \
-  --only-testing TronMobileUITests/TronSmokeUITests/testAutomationsListActiveBeforePaused \
-  --only-testing TronMobileUITests/TronSmokeUITests/testAutomationEditDateControlsVisualParity \
-  --only-testing TronMobileUITests/TronSmokeUITests/testDashboardMenuStaysOpenDuringParentUpdates \
-  --only-testing TronMobileUITests/TronDashboardWindowControlsUITests
+scripts/tron-ios-test run
 ```
 
-`AccessibilityMaintenanceViewTests` drives the dashboard destinations in-process and checks that Knowledge is absent from the menu and Connected Services in Light/Dark/large type; `TronAccessibilityUITests` keeps the header frames and native menu geometry. The parent-update menu journey retains its Automations selection and thirty-update witness. The Automations fixture accepts no mutations.
-`TronDashboardWindowControlsUITests` checks that the title sits below the status bar in a
-full-screen window (the canonical iPhone lane, full-screen iPad). On an iPad
-simulator in Windowed Apps mode it also resizes the window and checks the title clears the
-controls at rest and collapsed; no lane runs iPad, so run that destination by hand.
+The Automations fixture accepts no mutations.
 
 ## Not here
 

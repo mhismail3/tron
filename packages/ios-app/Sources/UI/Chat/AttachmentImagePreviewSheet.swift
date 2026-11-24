@@ -81,10 +81,7 @@ struct AttachmentImagePreviewSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium])
-        .presentationDragIndicator(.hidden)
         .presentationCornerRadius(nil)
-        .presentationContentInteraction(.scrolls)
         .task(id: PresentationActivityTaskID(
             source: "\(String(describing: remoteIdentity))-\(model.knowledgePresentationIdentity)-ready:\(model.connectionState == .connected)",
             presentationActive: presentationActivity.allowsPresentationPublication

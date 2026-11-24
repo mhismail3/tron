@@ -1,0 +1,13 @@
+{
+  "layer": "L3",
+  "owns": [
+    "**"
+  ],
+  "dependsOn": [
+    "gateway/foundation",
+    "gateway/host",
+    "gateway/platform",
+    "gateway/util",
+    "gateway/workspace"
+  ]
+}

@@ -16,14 +16,13 @@ struct HostedIntegrationsFixtureView: View {
     @State private var mcpReplacementCounters = "add:0 token:0 retargets:0 released:0"
     @State private var hasReplacedMCPAuthority = false
     @State private var showingOllamaDetails = false
+    @State private var showingArtifacts = false
     private let scenario: String
-    private let dark: Bool
 
     init() {
         let arguments = HostedLaunch.arguments
         let scenario = arguments.drop(while: { $0 != "-integrations-scenario" }).dropFirst().first ?? "mcp-held-add"
         self.scenario = scenario
-        dark = arguments.contains("-ui-dark-mode")
         let gateway = HostedIntegrationsGateway(scenario: scenario)
         _gateway = State(initialValue: gateway)
         let replacementGateway = HostedIntegrationsGateway(scenario: "mcp-replacement")
@@ -49,7 +48,14 @@ struct HostedIntegrationsFixtureView: View {
             } else if scenario.hasPrefix("connection-") {
                 HostedConnectionRetryFixture(scenario: scenario)
             } else if ready {
-                if scenario == "ollama-detail" {
+                if scenario.hasPrefix("artifacts") {
+                    NavigationStack {
+                        Button("Artifacts") { showingArtifacts = true }
+                            .tronManagedSheet(isPresented: $showingArtifacts, identity: "dashboard.artifacts") { ArtifactsSheet() }
+                    }
+                    .environment(model)
+                    .tronPresentation()
+                } else if scenario == "ollama-detail" {
                     NavigationStack {
                         Button("Details for Ollama") { showingOllamaDetails = true }
                             .tronManagedSheet(isPresented: $showingOllamaDetails, identity: "fixture.ollama-detail") {
@@ -85,7 +91,7 @@ struct HostedIntegrationsFixtureView: View {
             } else if let error { Text(error) }
             else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
         }
-        .preferredColorScheme(dark ? .dark : .light)
+        .preferredColorScheme(HostedLaunch.arguments.contains("-artifacts-dark") ? .dark : .light)
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .background:
@@ -175,6 +181,33 @@ actor HostedIntegrationsGateway {
         if method == "session.close" { return (.object(["closed": .bool(true)]), nil) }
         if method == "session.commands" { return (.object(["commands": .array([])]), nil) }
         if method == "session.attention.read" { return (.object(["completionRevision": .number(0), "attentionRevision": .number(0), "isUnread": .bool(false)]), nil) }
+        if method == "artifacts.list" {
+            if HostedLaunch.arguments.contains("-artifacts-delay") { try? await Task.sleep(for: .seconds(1)) }
+            if scenario == "artifacts-error" {
+                return (nil, .object(["code": .string("invalid_response"), "message": .string("artifacts.list is missing required data at tools"), "retryable": .bool(false)]))
+            }
+            if scenario == "artifacts-empty" { return (.object(["tools": .array([]), "reports": .array([])]), nil) }
+            let base = HostedLaunch.arguments.drop(while: { $0 != "-artifacts-base-url" }).dropFirst().first ?? "https://mac.example.ts.net:8443"
+            let now = Date.now, calendar = Calendar.current
+            func at(days: Int, hours: Double) -> Date { calendar.date(byAdding: .day, value: -days, to: now)!.addingTimeInterval(-hours * 3_600) }
+            func entry(_ folder: String, _ name: String, _ title: String, _ date: Date, day: Bool) -> JSONValue {
+                var fields: [String: JSONValue] = ["name": .string(name), "title": .string(title),
+                    "updatedAt": .string(GatewayTimestamp.string(from: date)), "url": .string("\(base)/\(folder)/\(name)/")]
+                if day { fields["day"] = .string(String(name.prefix(10))) }
+                return .object(fields)
+            }
+            func dated(_ days: Int, _ slug: String) -> String {
+                let date = calendar.date(byAdding: .day, value: -days, to: now)!
+                return String(format: "%04d-%02d-%02d_%@", calendar.component(.year, from: date), calendar.component(.month, from: date), calendar.component(.day, from: date), slug)
+            }
+            let tools = [entry("artifacts", "ios-dev-builds", "Tron iOS development builds", at(days: 0, hours: 2), day: false),
+                         entry("artifacts", "usage-dashboard", "Provider usage dashboard", at(days: 3, hours: 0), day: false)]
+            let reports = [entry("reports", dated(0, "weekly-status"), "Weekly status", at(days: 0, hours: 1), day: true),
+                           entry("reports", dated(0, "sheet-audit"), "Artifacts sheet audit with a deliberately long title that must stay on one line", at(days: 0, hours: 3), day: true),
+                           entry("reports", dated(1, "release-guide"), "Release guide", at(days: 1, hours: 0), day: true),
+                           entry("reports", dated(6, "gapyear-schedule"), "Gap year schedule", at(days: 6, hours: 0), day: true)]
+            return (.object(["tools": .array(tools), "reports": .array(reports)]), nil)
+        }
         if method == "mcp.list" {
             let servers: [JSONValue] = scenario.hasPrefix("mcp-auth-") ? [.object([
                 "name": .string("fixture-auth-server"), "scope": .string("global"), "enabled": .bool(true),

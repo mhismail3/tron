@@ -22,18 +22,10 @@ Commands:
                                     every mutating Gateway lifecycle transition
   chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]
                                     Attach terminal chat to the Gateway-owned runtime
-  test gateway [--mini] [vitest args...]
-                                    Run Gateway tests with pinned Node here, or on the Mac mini
-                                    under its lease with --mini (tools/verify/README.md)
-  test ios [--ios-host mini|local] [runner args...]
-                                    Run the owned iOS runner under the mini lease by default;
-                                    return logs and native result bundles; local is host-local.
+  test gateway [vitest args...]     Run Gateway tests with pinned Node under an isolated HOME
+  test ios [runner args...]         Run the owned iOS runner (scripts/tron-ios-test); on demand
   test mac [test classes...]        Build and run the Mac integration tests under a temporary HOME
-  test tooling [test files...]      Run Python script integration suites with per-test evidence
-  flakes [--tree HASH] [--json]     Read same-tree pass/fail history from the external test ledger
-  flakes --budgets [FRACTION] [--json]
-                                    Gateway tests whose slowest pass uses over FRACTION (0.25)
-                                    of their timeout or wait bound (tools/verify/README.md)
+  test tooling [test files...]      Run Python script integration suites
   provider-smoke [--probe-only] [--live --agent-dir <dir>] [--require-fable-5-2] [--json]
                                     Claude subscription smoke of the pinned Pi: Fable 5.2,
                                     the Claude Code version it sends, Tron's wiring tests
@@ -85,22 +77,9 @@ Commands:
                                     Read-only repository metrics of a commit's Git
                                     objects to test-results/metrics/<sha>.json;
                                     --compare prints the delta table; never a gate
-  verify [--changed] [--base <ref>] | --module <id> | --all | --update-locks <id> [--skip ios,mac,relay] [--plan]
-         [--gateway-host local|mini] [--ios-host local|mini]
-                                    Mechanical none/partial/full tier; affected checks
-                                    now, full coverage in land's --full validation.
-                                    --plan includes dirty paths and exact commands.
-                                    Live logs and partial test-results/verify/<sha>.json;
-                                    no empty test passes; land, not verify, gates main.
-  verify --full [--base <ref>] [--skip ...]
-                                    Every test file in every group: land's suite
-  land [-m <message>]               Merge this branch --no-ff onto fetched main, run Tiers 0-2
-                                    on that exact merge on the mini, push it only if it passed;
-                                    one land at a time per host (tools/verify/land.md)
-  mutate <gateway-src-file> [--count N] [--seed S] [--timeout SECONDS]
-                                    Seeded sampled mutation of one file against the tests
-                                    verify selects for it (lock sensitivity, plan 6.6);
-                                    test-results/mutate/; measures, never gates
+  gate [--check]                    The one admission to main: merge onto fetched main, run
+                                    every gate check in parallel and push, all within 58s;
+                                    --check pushes nothing (tools/verify/README.md)
   determinism [--update] [--base <ref>]
                                     Gateway test real-time, fixed-port, skip/only and retry
                                     sites against packages/gateway/determinism-baseline.json;
@@ -218,16 +197,15 @@ case "$cmd" in
     case "$suite" in
       gateway)
         case "${1:-}" in
-          --mini) shift; exec python3 "$ROOT/tools/verify/mini.py" "$@" ;;
           *) exec python3 "$ROOT/tools/verify/gateway.py" "$@" ;;
         esac
         ;;
-      ios) exec python3 "$ROOT/tools/verify/mini.py" ios "$@" ;;
+      ios) exec "$ROOT/scripts/tron-ios-test" "$@" ;;
       mac) exec python3 "$ROOT/tools/verify/mac.py" "$@" ;;
       tooling)
         if (($# == 0)); then set -- "$ROOT"/tools/work/tests/test-*.py; fi
         status=0
-        for suite in "$@"; do python3 "$ROOT/tools/verify/ledger.py" python "$suite" || { code=$?; [[ "$status" -ne 0 ]] || status=$code; }; done
+        for suite in "$@"; do python3 "$suite" || { code=$?; [[ "$status" -ne 0 ]] || status=$code; }; done
         exit "$status"
         ;;
       *) usage >&2; exit 64 ;;
@@ -352,22 +330,8 @@ case "$cmd" in
       *) usage >&2; exit 64 ;;
     esac
     ;;
-  flakes)
-    exec python3 "$ROOT/tools/verify/ledger.py" "$@"
-    ;;
-  verify)
-    exec python3 "$ROOT/tools/verify/verify.py" "$@"
-    ;;
-  land)
-    git -C "$ROOT" fetch --quiet --no-tags --refmap= origin refs/heads/main
-    tool="$(git -C "$ROOT" rev-parse --absolute-git-dir)/tron-land-tool"
-    mkdir -p "$tool"
-    for file in land.py host_lock.py; do git -C "$ROOT" show "FETCH_HEAD:tools/verify/$file" >"$tool/$file"; done
-    cd "$ROOT"
-    exec python3 "$tool/land.py" "$@"
-    ;;
-  mutate)
-    exec python3 "$ROOT/tools/verify/mutate.py" "$@"
+  gate)
+    exec python3 "$ROOT/tools/verify/gate.py" "$@"
     ;;
   bundle)
     [[ "${1:-}" == gateway ]] || { usage >&2; exit 64; }

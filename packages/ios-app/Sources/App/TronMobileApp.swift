@@ -108,10 +108,6 @@ struct HostedFixtureRoot: View {
                 HostedAskUserFixtureView()
             } else if HostedLaunch.arguments.contains("-tron-session-pagination-fixture") {
                 HostedSessionPaginationFixture()
-            } else if HostedLaunch.arguments.contains("-tron-apps-install-design-fixture") {
-                HostedAppsInstallDesignFixture().environment(hostedModel)
-            } else if HostedLaunch.arguments.contains("-tron-apps-design-fixture") {
-                HostedAppsDesignFixture().environment(hostedModel)
             } else if HostedLaunch.arguments.contains("-tron-automation-fixture") {
                 HostedAutomationFixtureView()
             } else if HostedLaunch.arguments.contains("-tron-session-archive-fixture") {
@@ -176,7 +172,6 @@ struct SceneRootView: View {
 
 private struct RootView: View {
     @Environment(AppModel.self) private var model
-    @State private var onboardingDetent: PresentationDetent = .medium
     @State private var showOnboarding = false
 
     var body: some View {
@@ -186,12 +181,9 @@ private struct RootView: View {
             identity: "app.onboarding",
             presentationHaptic: nil
         ) {
-            OnboardingView(selectedDetent: $onboardingDetent) {
+            OnboardingView {
                 showOnboarding = false
             }
-                .presentationDetents([.medium, .large], selection: $onboardingDetent)
-                .presentationDragIndicator(.hidden)
-                .presentationContentInteraction(.resizes)
                 .interactiveDismissDisabled()
         }
         .background(TronBackdrop().ignoresSafeArea())
