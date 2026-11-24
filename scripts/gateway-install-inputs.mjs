@@ -73,6 +73,14 @@ function compatible(record) {
   return supports(record.os, process.platform) && supports(record.cpu, process.arch);
 }
 
+function lockedLocation(packages, from, name) {
+  for (let base = from; ; base = base.slice(0, Math.max(0, base.lastIndexOf("/node_modules/")))) {
+    const candidate = `${base ? `${base}/` : ""}node_modules/${name}`;
+    if (candidate in packages) return candidate;
+    if (!base) return undefined;
+  }
+}
+
 function packageNameFromPath(packagePath) {
   const parts = packagePath.split("/");
   const leaf = parts.at(-1);
@@ -134,13 +142,26 @@ export async function verifyGatewayInstallInputs(gatewayRoot, { mode = "full" } 
     lockError("Gateway workspace or link installs are not a supported canonical build input", mode);
   }
 
-  const omitDev = mode === "production";
   const expected = new Map();
-  for (const [path, record] of Object.entries(lock.packages)) {
-    if (!path) continue;
-    if (omitDev && record.dev === true) continue;
-    if ((record.optional === true || record.devOptional === true) && !compatible(record)) continue;
-    expected.set(path, record);
+  const pending = [""];
+  while (pending.length > 0) {
+    const from = pending.pop();
+    const record = lock.packages[from];
+    const optionalPeers = record.peerDependenciesMeta ?? {};
+    const names = [
+      ...Object.keys(record.dependencies ?? {}),
+      ...Object.keys(record.optionalDependencies ?? {}),
+      ...Object.keys(record.peerDependencies ?? {}).filter((name) => optionalPeers[name]?.optional !== true),
+      ...(from === "" && mode === "full" ? Object.keys(record.devDependencies ?? {}) : []),
+    ];
+    for (const name of names) {
+      const path = lockedLocation(lock.packages, from, name);
+      if (path === undefined || expected.has(path)) continue;
+      const target = lock.packages[path];
+      if ((target.optional === true || target.devOptional === true) && !compatible(target)) continue;
+      expected.set(path, target);
+      pending.push(path);
+    }
   }
   const actualLockRecords = Object.keys(hidden.packages).filter(Boolean);
   if (actualLockRecords.length !== expected.size) {
