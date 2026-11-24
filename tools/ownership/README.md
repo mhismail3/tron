@@ -153,16 +153,18 @@ untracked files and unnamed ignored residue.
 `--prune` deletes only expired scratch and evidence (never through a symlinked
 `.scratch` or `test-results`, and never in a linked worktree with a live process,
 local changes or unknown ignored data, or in any linked worktree without `lsof`:
-that is another worker's), bytecode, branches merged into `origin/main` (not
-merely into a local main) that no worktree has checked out (printing `git branch <name> <sha>`
-to restore each), and merged worktrees on a branch (a detached worktree belongs to the tool that
+that is another worker's), bytecode, and merged worktrees on a branch (a detached worktree belongs to the tool that
 made it, such as a base checkout) with no untracked, modified or
 non-regenerable ignored file (an ignored `.env.local` keeps it), no process whose
 working directory is inside, no HEAD activity for 3 days, and no `test-results/` file the primary checkout lacks
 byte for byte while that folder is unexpired (such a worktree is kept, counted as a decision, and the
 `rsync --ignore-existing` that keeps its evidence is named; first-failure logs are evidence). It makes the read-only Gateway payload writable first. Without `lsof` it
-prunes no worktree. Unmerged branches, residue and orphan directories are only
-reported. Other stores keep their owners: `scripts/tron-ios-test prune` owns
+prunes no worktree. It fetches `origin` first and then deletes, locally and on `origin`
+(with an expected-SHA lease), every branch no worktree has checked out that is merged into `origin/main` or
+whose every commit is patch-equivalent to one there, and every unmerged branch idle over 30 days after
+writing it to a bundle in `<git-common-dir>/tidy-archive/`; each deletion prints its restore command.
+Unmerged branches younger than that, residue and orphan directories are only reported, so the weekly run
+leaves every branch merged, deleted, or under 30 days old. Other stores keep their owners: `scripts/tron-ios-test prune` owns
 `~/Library/Developer/Tron/ios`.
 
 ## Verify

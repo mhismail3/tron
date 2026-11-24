@@ -11,7 +11,9 @@ and `tools/ownership/*.py`, and runs the command as a worker would:
    tooling no code names, and a pre-commit hook that differs from install-hooks.sh.
 2. A report run deletes nothing.
 3. `--prune` removes only expired scratch/evidence, bytecode, branches merged into
-   origin/main (not merely into a local, unpushed main) that no worktree has checked out (printing the restore command) and merged
+   origin/main (not merely into a local, unpushed main) or patch-equivalent to it, locally and on origin,
+   that no worktree has checked out (printing the restore command), unmerged branches idle over 30 days
+   once they are bundled (the bundle restores them), and merged
    worktrees with no local files, no process inside, no HEAD activity for 3 days and no unexpired
    test-results/ evidence the primary checkout lacks (that one is kept and the copy command named).
    Unmerged work, ignored local files such as `.env.local`, a live process, recent
@@ -258,6 +260,12 @@ class PruneTests(TidyCase):
         self.done = f.branch("done", merged=True)
         self.wip = f.branch("wip", merged=False)
         f.branch("local-only", merged=False, days_old=20)
+        self.picked = f.branch("picked", merged=False)
+        f.git(f.repo, "cherry-pick", self.picked)
+        f.git(f.repo, "push", "-q", "origin", "main")
+        self.stale = f.branch("stale", merged=False, days_old=40)
+        f.git(f.repo, "push", "-q", "origin", "done", "picked", "stale", "wip")
+        f.git(f.repo, "fetch", "-q", "origin")
         f.git(f.repo, "merge", "-q", "--no-ff", "--no-edit", "local-only")
         age(f.write(".scratch/old.js"), 10)
         f.write(".scratch/new.js")
@@ -282,7 +290,17 @@ class PruneTests(TidyCase):
         self.assertIn(f"tidy: pruned branch done (restore: git branch done {self.done})", out)
         for kept in ("wip", "local-only", "unmerged", "merged-local", "merged-live", "merged-recent"):
             self.assertIn(kept, branches)
-        self.assertIn("tidy: branches: ", out)
+        for gone in ("picked", "stale"):
+            self.assertNotIn(gone, branches)
+        self.assertEqual(f.git(f.origin, "branch", "--format=%(refname:short)").splitlines(), ["main", "wip"])
+        self.assertIn(f"tidy: pruned branch origin/done (restore: git push origin {self.done}:refs/heads/done)", out)
+        self.assertIn(f"tidy: pruned branch picked (restore: git branch picked {self.picked})", out)
+        self.assertIn("tidy: branch local-only ", out)
+        bundles = list((f.repo / ".git/tidy-archive").glob("*.bundle"))
+        self.assertEqual(len(bundles), 1, out)
+        self.assertIn(f"tidy: pruned branch stale (restore: git fetch {bundles[0]} refs/heads/stale:refs/heads/stale)", out)
+        f.git(f.repo, "fetch", "-q", str(bundles[0]), "refs/remotes/origin/stale:refs/heads/stale")
+        self.assertEqual(f.git(f.repo, "rev-parse", "stale"), self.stale)
         self.assertTrue((self.evidence / "test-results/2398/fail-before.log").exists(), out)
         copy = f"rsync -a --ignore-existing {self.evidence}/test-results/ {f.repo}/test-results/"
         self.assertIn(f"kept worktree {self.evidence}: 1 evidence file(s) the primary checkout lacks; keep them with: {copy}", out)
