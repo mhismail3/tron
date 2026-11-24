@@ -79,7 +79,6 @@ struct ArtifactsSheet: View {
     @Environment(\.tronPresentationSurfaceToken) private var token
     @PresentationState private var store = FeedStore<ArtifactsListing, Int, ReadIdentity>()
     @PresentationState private var opened: ArtifactEntry?
-    @State private var detent: PresentationDetent = .large // view-local: a reopened sheet starts large so both sections show
 
     private struct ReadIdentity: PresentationReadIdentity, Hashable {
         let knowledge: KnowledgePresentationIdentity
@@ -120,10 +119,10 @@ struct ArtifactsSheet: View {
                                 TronSettingsNotice(message: "Artifacts could not be loaded. \(error)", retry: reload)
                                     .accessibilityIdentifier("artifacts-error")
                             } else {
-                                TronSheetLoadingState(label: "Loading artifacts…", accent: .tronPrimary)
+                                placeholder
                             }
                         }
-                        .padding(.horizontal, 16).padding(.top, 4)
+                        .tronFeedInsets()
                     }
                     .tronScrollEdgeChrome()
                     .accessibilityIdentifier("artifacts-viewport")
@@ -153,8 +152,23 @@ struct ArtifactsSheet: View {
             .onPresentationRetire { store.suspend() }
             .tronManagedSheet(item: $opened, identity: { "artifacts.open.\($0.id)" }) { ArtifactViewer(entry: $0) }
         }
-        .tronTopBlur(.sheet).presentationDetents([.medium, .large], selection: $detent).presentationDragIndicator(.hidden)
+        .tronTopBlur(.sheet)
         .tronSettingsVisualTheme(accent: .tronPrimary).tint(.tronPrimary)
+    }
+
+    private var placeholder: some View {
+        TronLoadingPlaceholder(label: "Loading artifacts") {
+            VStack(alignment: .leading, spacing: TronListMetrics.feedGap) {
+                TronListSectionHeader(title: "Tools", count: 0)
+                ForEach(0..<2, id: \.self) { _ in
+                    TronFeedCard { TronListRow(TronListRowContent(leading: .icon("square.grid.2x2", .tronPrimary), title: "Artifact title", timestamp: "Today")) }
+                }
+                TronListSectionHeader(title: "Today", count: 0)
+                    .padding(.top, TronListMetrics.sectionGap - TronListMetrics.feedGap)
+                TronFeedCard { TronListRow(TronListRowContent(leading: .icon("doc.text", .tronPrimary), title: "Report title", timestamp: "Today")) }
+            }
+        }
+        .accessibilityIdentifier("artifacts-placeholder")
     }
 
     private var caption: some View {

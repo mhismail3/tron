@@ -48,7 +48,16 @@ struct ManageModelConfigurationCard: View {
                             .frame(maxWidth: .infinity, alignment: .leading).padding(12)
                     }
                 } else {
-                    TronSheetLoadingState(label: "Loading model…")
+                    TronLoadingPlaceholder(label: "Loading model") {
+                        VStack(spacing: 0) {
+                            TronSettingsRow(icon: "cpu", title: "Model name", titleFont: SessionSummaryTypography.headline)
+                            TronSettingsDivider()
+                            TronSettingsRow(icon: "brain", title: "Thinking")
+                            TronSettingsDivider()
+                            TronSettingsRow(icon: "gauge.with.dots.needle.50percent", title: "Context Window")
+                        }
+                    }
+                    .accessibilityIdentifier("home-manage-placeholder")
                 }
             }
         }
@@ -78,7 +87,7 @@ struct ManageModelConfigurationCard: View {
         }
         return VStack(spacing: 0) {
             TronSettingsRow(icon: "cpu", title: selected?.displayName ?? setting.display, titleFont: SessionSummaryTypography.headline) {
-                TronProgressiveSheetLink(accessibilityLabel: "Switch Model", identity: "manage.model.switch", detents: .contentFit) {
+                TronProgressiveSheetLink(accessibilityLabel: "Switch Model", identity: "manage.model.switch") {
                     SettingsModelPicker(setting: setting, target: target, title: "Models", selectionAvailability: availability,
                                         onReset: setting.overridden == true ? { change(setting, nil) } : nil) { change(setting, $0) }
                 } label: { TronInlineActionLabel("Switch Model") }

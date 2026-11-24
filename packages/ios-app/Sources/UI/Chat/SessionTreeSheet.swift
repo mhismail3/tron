@@ -228,7 +228,7 @@ struct SessionTreeSheet: View {
                                 TronSheetLoadingState(label: "Loading history…", accent: .tronPrimary)
                             }
                         }
-                        .padding(.horizontal, 16).padding(.top, 4)
+                        .tronFeedInsets()
                     }
                     .tronScrollEdgeChrome()
                     .accessibilityIdentifier("session-history-viewport")
@@ -286,7 +286,7 @@ struct SessionTreeSheet: View {
                 if labelNode?.label != nil { Button("Remove", role: .destructive) { saveLabelFromMenu(nil) } }
             }
         }
-        .tronTopBlur(.sheet).presentationDetents([.medium, .large]).presentationDragIndicator(.hidden)
+        .tronTopBlur(.sheet)
         .tronSettingsVisualTheme(accent: .tronPrimary).tint(.tronPrimary)
     }
 
@@ -491,7 +491,7 @@ struct HistoryEntryDetailsSheet: View {
                 if node.label != nil { Button("Remove", role: .destructive) { onSaveLabel(nil) } }
             }
         }
-        .tronTopBlur(.sheet).presentationDetents([.medium, .large]).presentationDragIndicator(.hidden).tint(.tronPrimary)
+        .tronTopBlur(.sheet).tint(.tronPrimary)
         .accessibilityIdentifier("history-entry-detail")
     }
 
@@ -632,7 +632,7 @@ struct HistoryNavigationSheet: View {
                 }.padding(18)
             }.tronScrollEdgeChrome().tronNavigationTitle(SessionHistoryPolicy.navigationTitle(for: node), accent: .tronPrimary)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button { dismiss() } label: { Image(systemName: "checkmark").tronToolbarAction(accent: .tronPrimary) }.accessibilityLabel("Done") } }
-        }.tronTopBlur(.sheet).presentationDetents([.medium, .large]).presentationDragIndicator(.hidden)
+        }.tronTopBlur(.sheet)
     }
     private func navigate() {
         guard !working, current else { return }
@@ -676,7 +676,7 @@ struct HistoryForkSheet: View {
                 }.padding(18)
             }.tronScrollEdgeChrome().tronNavigationTitle("Fork Session", accent: .tronPrimary)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button { dismiss() } label: { Image(systemName: "checkmark").tronToolbarAction(accent: .tronPrimary) }.disabled(working).accessibilityLabel("Done") } }
-        }.tronTopBlur(.sheet).presentationDetents([.medium, .large]).presentationDragIndicator(.hidden).interactiveDismissDisabled(working)
+        }.tronTopBlur(.sheet).interactiveDismissDisabled(working)
     }
     private func choice(_ title: String, detail: String, value: SessionForkPosition) -> some View {
         Button { position = value } label: {

@@ -69,7 +69,6 @@ struct HomeSectionRowsSheet: View, Equatable {
         TronDashboardFilterSheet(
             title: section.title,
             accent: .tronPrimary,
-            detents: [.medium, .large],
             onDone: onDone
         ) {
             if rows.isEmpty {

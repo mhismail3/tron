@@ -78,8 +78,6 @@ struct AutomationSessionPickerSheet: View {
                 }
             }
         }
-        .presentationDetents([.large])
-        .presentationDragIndicator(.hidden)
         .tronSettingsLayout()
         .tronSettingsVisualTheme(accent: .tronPrimary, surfaceAccent: .tronPrimarySurface)
     }
@@ -252,8 +250,6 @@ struct AutomationFormView: View {
         .tronSettingsLayout()
         .tronSettingsVisualTheme(accent: .tronPrimary)
         .tronTopBlur(.sheet)
-        .presentationDetents([.large])
-        .presentationDragIndicator(.hidden)
         .task(id: PresentationActivityTaskID(
             source: "\(selection?.id ?? "new"):\(model.profileRevision):\(model.foregroundReconciliationGeneration):\(scenePhase == .active)",
             presentationActive: presentationActivity.allowsPresentationPublication

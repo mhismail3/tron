@@ -25,7 +25,7 @@ The Tron menu and the Automations sheet (list, detail, run detail, create/edit) 
   at rest or collapsed. Without window controls that inset is zero and the layout is unchanged.
   The scroll inset is a constant `contentMargins`, never a translated scroll view, whose safe-area
   insets would change mid-gesture.
-- **Automations sheet.** Medium and large detents; every identity-qualified, connected Gateway
+- **Automations sheet.** Content-fit height (large when it overflows); every identity-qualified, connected Gateway
   advertising `automations.v2` contributes rows (others are absent, never a warning). Active
   Automations list first, then paused, drafts and finished ones (attention, running, next
   occurrence, name, ID within each group). `AutomationInventory` projects every row's strings once

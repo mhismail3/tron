@@ -75,8 +75,6 @@ struct WorkspaceBrowser: View {
             .onDisappear { loadOwner.cancel() }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
         .tint(accent)
     }
 

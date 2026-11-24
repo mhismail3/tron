@@ -3,7 +3,6 @@ import TronMobileCore
 
 struct ToolDetailSheet: View {
     let tool: ChatToolPresentation
-    let density: ToolDetailDisplayDensity
     @PresentationState private var showingTechnicalDetails = false
     @PresentationState private var fullText: ToolFullText?
     @PresentationState private var showingChanges = false
@@ -51,7 +50,7 @@ struct ToolDetailSheet: View {
             .environment(\.tronSettingsSecondaryTextSizeAdjustment, TronSettingsLayoutPolicy.metadataSizeAdjustment)
             .padding(.horizontal, 16)
             .padding(.top, 2)
-            .padding(.bottom, 18)
+            .padding(.bottom, 16)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .defaultScrollAnchor(.top, for: .initialOffset)
@@ -180,13 +179,8 @@ struct ToolDetailSheet: View {
             if diff.showsInline {
                 VStack(alignment: .leading, spacing: 7) {
                     sectionLabel("Change")
-                    ToolDiffView(lines: diff.visibleLines(for: density))
+                    ToolDiffView(lines: diff.lines)
                     fullDiffButton(diff)
-                    if density == .glance, diff.compactLines != diff.lines {
-                        Text("Pull up for more context, or open the full diff.")
-                            .font(TronTypography.settingsRowSubtext)
-                            .foregroundStyle(Color.tronTextMuted)
-                    }
                 }
             } else {
                 changesButton(diff)
@@ -506,8 +500,6 @@ struct ChatDetailSheet<Content: View>: View {
             }
         }
         .tronTopBlur(.toolDetail)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
         .tronPresentation()
     }
 }
@@ -523,7 +515,6 @@ struct ToolTextSheet: View {
     let text: String
     let accent: Color
     @Environment(\.dismiss) private var dismiss
-    @PresentationState private var detent: PresentationDetent = .large
 
     var body: some View {
         NavigationStack {
@@ -546,8 +537,6 @@ struct ToolTextSheet: View {
                 }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large], selection: $detent)
-        .presentationDragIndicator(.hidden)
         .tint(accent)
     }
 }

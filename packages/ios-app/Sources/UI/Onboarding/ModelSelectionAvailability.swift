@@ -22,8 +22,7 @@ struct ModelSelectionLockInfoLink: View {
     var body: some View {
         TronProgressiveSheetLink(
             accessibilityLabel: "Why configuration is unavailable",
-            accent: .tronPurple,
-            detents: .fixed([.medium, .large])
+            accent: .tronPurple
         ) {
             ScrollView {
                 TronInfoCard(icon: "lock", text: reason, accent: .tronPurple)

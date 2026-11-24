@@ -248,11 +248,9 @@ struct TronTechnicalJSONRow: View {
     var accent: Color = .tronSlate
     var onEdit: (() -> Void)?
     @State private var isPresented = false // view-local: a repeated row in many sheets; its raw JSON inspector is transient
-    @State private var detent: PresentationDetent = .medium // view-local: the inspector's detent
 
     var body: some View {
         Button {
-            detent = .medium
             isPresented = true
         } label: {
             TronSettingsRow(
@@ -276,7 +274,6 @@ struct TronTechnicalJSONRow: View {
                 value: value,
                 title: sheetTitle,
                 accent: accent,
-                detent: $detent,
                 onEdit: onEdit
             )
         }
@@ -287,7 +284,6 @@ struct TechnicalJSONSheet: View {
     let value: JSONValue
     let title: String
     let accent: Color
-    @Binding var detent: PresentationDetent
     let onEdit: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     @PresentationState private var document: (source: JSONValue, text: String)?
@@ -358,8 +354,6 @@ struct TechnicalJSONSheet: View {
         }
         .accessibilityIdentifier("technical-json-sheet")
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large], selection: $detent)
-        .presentationDragIndicator(.hidden)
         .tint(resolvedAccent)
     }
 }
@@ -404,8 +398,6 @@ struct JSONFieldSheet: View {
             }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
         .tint(accent)
     }
 }

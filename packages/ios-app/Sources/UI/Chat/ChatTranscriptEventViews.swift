@@ -183,8 +183,6 @@ struct ChatNotificationDetailSheet: View {
             }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
     }
 }
 

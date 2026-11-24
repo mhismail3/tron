@@ -206,12 +206,11 @@ struct WorkspaceInspectorSheet: View {
     @PresentationState private var diffRoute: WorkspaceDiffRoute?
     @PresentationState private var commitRoute: WorkspaceCommitRoute?
     @PresentationState private var detailRequests = WorkspaceDetailRequestOwner()
-    @PresentationState private var detent: PresentationDetent = .medium
 
     var body: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView(.vertical, showsIndicators: true) {
+            ScrollView(.vertical, showsIndicators: true) {
+                ScrollViewReader { proxy in
                     LazyVStack(alignment: .leading, spacing: 0) {
                         Color.clear.frame(height: 0).id("workspace-top")
                         header
@@ -220,12 +219,12 @@ struct WorkspaceInspectorSheet: View {
                             .padding(.bottom, 10)
                         content
                     }
-                }
-                .tronScrollEdgeChrome()
-                .onChange(of: selectedTab) { _, _ in
-                    proxy.scrollTo("workspace-top", anchor: .top)
+                    .onChange(of: selectedTab) { _, _ in
+                        proxy.scrollTo("workspace-top", anchor: .top)
+                    }
                 }
             }
+            .tronScrollEdgeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
@@ -298,8 +297,6 @@ struct WorkspaceInspectorSheet: View {
             }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large], selection: $detent)
-        .presentationDragIndicator(.hidden)
         .tronSettingsVisualTheme(accent: .tronPrimary)
         .tint(Color.tronPrimary)
     }
@@ -799,8 +796,6 @@ private struct WorkspaceGitDiffSheet: View {
             }
         }
         .tronTopBlur(.toolDetail)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
         .tronPresentation()
     }
 }
@@ -889,8 +884,6 @@ private struct WorkspaceCommitDetailSheet: View {
             .onDisappear { detailRequests.cancel() }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
     }
 
     private var messageBody: String? {

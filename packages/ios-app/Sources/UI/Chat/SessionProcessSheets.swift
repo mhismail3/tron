@@ -11,7 +11,6 @@ struct ProcessHistorySheet: View {
     @PresentationState private var store: SessionProcessHistoryStore?
     @PresentationState private var generation = 0
     @PresentationState private var selectedProcess: PresentedProcessActivity?
-    @PresentationState private var detent: PresentationDetent = .medium
 
     var body: some View {
         NavigationStack {
@@ -44,8 +43,6 @@ struct ProcessHistorySheet: View {
             if !active { store?.suspendPendingWork() }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large], selection: $detent)
-        .presentationDragIndicator(.hidden)
         .tronSettingsVisualTheme(accent: .tronPrimary)
         .tronPresentation()
         .accessibilityIdentifier("process-history-sheet")
@@ -387,7 +384,6 @@ struct ReadOnlySubagentSessionSheet: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @PresentationState private var store: ReadOnlySubagentSessionStore?
     @PresentationState private var scrollPosition = ScrollPosition(idType: String.self)
-    @PresentationState private var detent: PresentationDetent = .medium
     @PresentationState private var stopRequested = false
     @PresentationState private var confirmingStop = false
     @PresentationState private var invalidationSinkID: UUID?
@@ -469,9 +465,6 @@ struct ReadOnlySubagentSessionSheet: View {
             }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large], selection: $detent)
-        .presentationContentInteraction(.scrolls)
-        .presentationDragIndicator(.hidden)
         .tronPresentation()
         .accessibilityIdentifier("read-only-subagent-session-sheet")
     }

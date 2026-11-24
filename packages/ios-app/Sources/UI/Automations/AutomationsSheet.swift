@@ -68,7 +68,6 @@ struct AutomationsSheet: View {
         TronDashboardFilterSheet(
             title: "Automations",
             accent: .tronPrimary,
-            detents: [.medium, .large],
             onDone: onDone
         ) {
             Button { createPresented = true } label: {
@@ -165,7 +164,6 @@ struct AutomationsSheet: View {
         TronDashboardFilterSheet(
             title: "Filter",
             accent: .tronPrimary,
-            detents: [.medium, .large],
             onDone: { showingFilters = false }
         ) {
             TronDashboardFilterSectionTitle(

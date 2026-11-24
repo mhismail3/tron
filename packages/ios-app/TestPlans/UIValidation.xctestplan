@@ -30,6 +30,13 @@
         "identifier": "6C84D08D5E56B9C22DF122FB",
         "name": "TronMobileUITests"
       }
+    },
+    {
+      "target": {
+        "containerPath": "container:TronMobile.xcodeproj",
+        "identifier": "4622A6A46539DAFC45E7814C",
+        "name": "TronMobileViewTests"
+      }
     }
   ],
   "version": 1

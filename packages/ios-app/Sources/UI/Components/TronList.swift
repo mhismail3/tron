@@ -462,6 +462,12 @@ struct TronFeedPositionChip: View {
     }
 }
 
+extension View {
+    func tronFeedInsets() -> some View {
+        padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 24)
+    }
+}
+
 struct TronFeedEmptyState<Header: View, Placeholder: View>: View {
     let identifier: String
     @ViewBuilder let header: () -> Header
@@ -475,10 +481,11 @@ struct TronFeedEmptyState<Header: View, Placeholder: View>: View {
                     VStack(spacing: TronListMetrics.feedGap) { placeholder() }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 24)
+                .tronFeedInsets()
                 .frame(minHeight: proxy.size.height)
             }
             .tronScrollEdgeChrome()
+            .environment(\.tronSheetMeasuresContent, false)
             .accessibilityIdentifier(identifier)
         }
     }
@@ -514,7 +521,7 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
                     TronFeedChipSpace(position: position)
                 }
                 .scrollTargetLayout()
-                .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 24)
+                .tronFeedInsets()
             }
             .accessibilityIdentifier(identifier)
             .overlay(alignment: .bottom) {
