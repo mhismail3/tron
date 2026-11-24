@@ -28,7 +28,7 @@ final class ManageSheetsThemeViewTests: ShuffledTestCase {
                 let mode = dark ? "dark" : "light"
                 try await app.activate("Stop session")
                 try await app.until("Manage Session opens") { app.element("session-usage-summary") != nil }
-                try await app.expandTopSheet()
+                try await app.waitForTopSheetToSettle()
                 let theme = try await titleInk(app, "Manage Session")
                 for label in ["Workspace", "Instructions", "Session History", "Subagent History"] {
                         _ = try await revealed(app, label)
@@ -66,7 +66,7 @@ final class ManageSheetsThemeViewTests: ShuffledTestCase {
         let instructions = ["-tron-agent-instructions-fixture"]
         try await mounted(instructions) { app in
             try await app.until("the instructions sections") { app.element("agent-instructions-section-preamble") != nil }
-            try await app.expandTopSheet()
+            try await app.waitForTopSheetToSettle()
             let theme = try await titleInk(app, "Instructions")
             for (id, summary) in Self.summaries {
                 let row = try await revealed(app, "agent-instructions-section-\(id)")

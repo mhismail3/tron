@@ -180,5 +180,5 @@ func openManageHome(_ app: MountedFixture) async throws {
     try await app.activate("home-pinned-row")
     try await app.activate("session-context-button")
     try await app.until("Manage Home opens") { app.element("home-manage-state") != nil }
-    try await app.expandTopSheet()
+    try await app.waitForTopSheetToSettle()
 }

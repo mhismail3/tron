@@ -30,11 +30,11 @@ final class HomeTaskReadingViewTests: ShuffledTestCase {
             _ = try await revealed(app, "home-manage-tasks")
             try await app.activate("home-manage-tasks")
             try await app.until("Tasks opens") { app.element("home-task-terminal") != nil }
-            try await app.expandTopSheet()
+            try await app.waitForTopSheetToSettle()
             _ = try await revealed(app, "home-task-terminal")
             try await app.activate("home-task-terminal")
             try await app.until("the task opens") { app.element("home-task-detail") != nil }
-            try await app.expandTopSheet()
+            try await app.waitForTopSheetToSettle()
             let ids = ["home-task-model-title", "home-task-result-subtext", "home-task-model-subtext", "home-task-subagents-subtext",
                        "home-task-spend-subtext", "home-task-checkin-summary-title", "home-task-checkin-done-subtext",
                        "home-task-checkin-next-subtext", "home-task-checkin-next"]

@@ -4,14 +4,14 @@ import XCTest
 
 @MainActor
 final class SessionHistoryEntryViewTests: ShuffledTestCase {
-    func testHistoryEntryUsesOneScrollAndClearsToolbarAtMedium() async throws {
+    func testHistoryEntryUsesOneScrollAndClearsToolbar() async throws {
         try await mounted(["-tron-session-configuration-fixture", "-settings-scope-review", "-fixture-appearance", "light",
                            "-manage-session-review", "-history-large"]) { app in
             try await app.activate("Stop session")
             _ = try await revealed(app, "Session History")
             try await app.activate("Session History")
             try await app.until("the history row") { app.element("history-row-h-6732") != nil }
-            try await app.expandTopSheet()
+            try await app.waitForTopSheetToSettle()
             let historyTop = app.top.convert(app.top.bounds, to: nil).minY
             try await app.activate("history-row-h-6731")
             try await app.until("History Entry opens") {

@@ -13,7 +13,7 @@ final class HomeControlsViewTests: ShuffledTestCase {
                 _ = try await revealed(app, "home-manage-controls")
                 try await app.activate("home-manage-controls")
                 try await app.until("Controls opens") { app.element("home-settings-controls") != nil }
-                try await app.expandTopSheet()
+                try await app.waitForTopSheetToSettle()
                 for _ in 0..<8 {
                     let node = try await revealed(app, "home-manage-disable")
                     if app.window.bounds.insetBy(dx: 0, dy: 50).contains(node.accessibilityFrame) { break }

@@ -209,8 +209,8 @@ struct WorkspaceInspectorSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView(.vertical, showsIndicators: true) {
+            ScrollView(.vertical, showsIndicators: true) {
+                ScrollViewReader { proxy in
                     LazyVStack(alignment: .leading, spacing: 0) {
                         Color.clear.frame(height: 0).id("workspace-top")
                         header
@@ -219,12 +219,12 @@ struct WorkspaceInspectorSheet: View {
                             .padding(.bottom, 10)
                         content
                     }
-                }
-                .tronScrollEdgeChrome()
-                .onChange(of: selectedTab) { _, _ in
-                    proxy.scrollTo("workspace-top", anchor: .top)
+                    .onChange(of: selectedTab) { _, _ in
+                        proxy.scrollTo("workspace-top", anchor: .top)
+                    }
                 }
             }
+            .tronScrollEdgeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {

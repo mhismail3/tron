@@ -33,9 +33,10 @@ private struct TronContentFitSheetModifier: ViewModifier {
         return height < window.maximumDetent ? height : nil
     }
 
-    private var detent: PresentationDetent {
-        if let fitHeight { return .height(fitHeight) }
-        return loading && settled == nil && floor == 0 && padScene?.mode == nil && !keyboard && !dynamicTypeSize.isAccessibilitySize ? .medium : .large
+    private var target: TronSheetDetentDriver.Target {
+        if let fitHeight { return .fit(fitHeight) }
+        let opensMedium = loading && settled == nil && floor == 0 && padScene?.mode == nil && !keyboard && !dynamicTypeSize.isAccessibilitySize
+        return opensMedium ? .medium : .large
     }
 
     private func update(_ change: () -> Void) {
@@ -69,20 +70,39 @@ private struct TronContentFitSheetModifier: ViewModifier {
                 update { keyboard = false }
             }
             .onAppear { appeared = true }
-            .background { TronSheetDetentDriver(height: fitHeight, medium: detent == .medium, animated: appeared && !reduceMotion) }
+            .background { TronSheetDetentDriver(target: target, animated: appeared && !reduceMotion) }
             .presentationDragIndicator(.hidden)
     }
-
-
 }
 
 private struct TronSheetDetentDriver: UIViewControllerRepresentable {
-    let height: CGFloat?
-    let medium: Bool
+    enum Target: Equatable { case fit(CGFloat), medium, large }
+    let target: Target
     let animated: Bool
 
     final class Controller: UIViewController {
-        var applied: String?
+        var target = Target.large
+        var animated = false
+        private var applied: Target?
+
+        func apply() {
+            var root: UIViewController = self
+            while let parent = root.parent { root = parent }
+            guard !root.isBeingDismissed, let sheet = root.sheetPresentationController else { return }
+            let detent: UISheetPresentationController.Detent = switch target {
+            case .fit(let height): .custom(identifier: .init("tron.content-fit")) { _ in height }
+            case .medium: .medium()
+            case .large: .large()
+            }
+            guard applied != target || sheet.detents.map(\.identifier) != [detent.identifier] else { return }
+            let first = applied == nil
+            applied = target
+            let change = {
+                sheet.detents = [detent]
+                sheet.selectedDetentIdentifier = detent.identifier
+            }
+            if animated, !first, !root.isBeingPresented { sheet.animateChanges(change) } else { change() }
+        }
     }
 
     func makeUIViewController(context: Context) -> Controller {
@@ -93,27 +113,10 @@ private struct TronSheetDetentDriver: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: Controller, context: Context) {
-        apply(to: controller)
-        DispatchQueue.main.async { apply(to: controller) }
-    }
-
-    private func apply(to controller: Controller) {
-        var root: UIViewController = controller
-        while let parent = root.parent { root = parent }
-        guard !root.isBeingDismissed, let sheet = root.sheetPresentationController else { return }
-        let key = height.map { "fit:\($0)" } ?? (medium ? "medium" : "large")
-        let identifier: UISheetPresentationController.Detent.Identifier = height == nil ? (medium ? .medium : .large) : .init("tron.content-fit")
-        guard controller.applied != key || sheet.detents.map(\.identifier) != [identifier] else { return }
-        let first = controller.applied == nil
-        controller.applied = key
-        let detent: UISheetPresentationController.Detent = height.map { value in
-            .custom(identifier: identifier) { _ in value }
-        } ?? (medium ? .medium() : .large())
-        let change = {
-            sheet.detents = [detent]
-            sheet.selectedDetentIdentifier = detent.identifier
-        }
-        if animated, !first { sheet.animateChanges(change) } else { change() }
+        controller.target = target
+        controller.animated = animated
+        controller.apply()
+        DispatchQueue.main.async { controller.apply() }
     }
 }
 

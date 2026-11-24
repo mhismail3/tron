@@ -16,7 +16,7 @@ final class MemoryPositionViewTests: ShuffledTestCase {
                 _ = try await revealed(app, row)
                 try await app.activate(row)
                 try await app.until("\(title) opens") { app.element(done) != nil }
-                try await app.expandTopSheet()
+                try await app.waitForTopSheetToSettle()
                 try await scrolled(app, viewport)
                 let label = try await positionChip(app).accessibilityLabel ?? ""
                 XCTAssertTrue(label.hasPrefix("Items "), label)
@@ -34,20 +34,20 @@ final class MemoryPositionViewTests: ShuffledTestCase {
             try await app.activate("home-pinned-row")
             try await app.activate("session-context-button")
             try await app.until("Manage Home opens") { app.element("home-manage-state") != nil }
-            _ = try? await app.expandTopSheet()
+            _ = try? await app.waitForTopSheetToSettle()
             _ = try await revealed(app, "home-manage-chapters")
             try await app.activate("home-manage-chapters")
             try await app.until("Chapters opens") { app.element("home-chapter-1") != nil }
-            _ = try? await app.expandTopSheet()
+            _ = try? await app.waitForTopSheetToSettle()
             try await app.activate("home-chapter-1")
             try await app.until("the chapter opens") { app.element("home-chapter-detail") != nil }
-            _ = try? await app.expandTopSheet()
+            _ = try? await app.waitForTopSheetToSettle()
             _ = try await revealed(app, "home-chapter-browse-memory")
             XCTAssertNil(app.element("From Home's summaries of this chapter."),
                          "Topics already names the chapter summaries; no redundant caption can scroll behind Chapters")
             try await app.activate("home-chapter-browse-memory")
             try await app.until("the scoped memory opens") { app.element("home-memory-summary-7672-8") != nil }
-            _ = try? await app.expandTopSheet()
+            _ = try? await app.waitForTopSheetToSettle()
             try await checkChip(app, count: 32)
             try await app.activate("home-sheet-done-memory")
             try await app.activate("home-sheet-done-chapter")
@@ -55,7 +55,7 @@ final class MemoryPositionViewTests: ShuffledTestCase {
             _ = try await revealed(app, "home-manage-memory-browser")
             try await app.activate("home-manage-memory-browser")
             try await app.until("the unscoped memory opens") { app.element("home-memory-summary-7736-8") != nil }
-            _ = try? await app.expandTopSheet()
+            _ = try? await app.waitForTopSheetToSettle()
             try await checkChip(app, count: 40)
         }
     }
