@@ -236,8 +236,7 @@ Notifications is the first hook consumer, in E5, after its push lock (E0b).
 
 ## 7. Extraction order and guarding locks
 
-Every kernel slice is risk-class (review). Until `scripts/tron verify` (Phase 0 slice 0.11)
-lands, a slice runs the named locks and the full Gateway suite directly. Locks stay unchanged.
+Every kernel slice is risk-class (review) and is admitted through `scripts/tron gate`.
 
 | Step | Change | Guarding locks |
 |---|---|---|

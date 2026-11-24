@@ -329,7 +329,7 @@ scripts/tron test gateway src/kernel/run/compaction-policy.integration.test.ts
 scripts/tron test gateway src/e2e/sessions/runtime-control-publication.integration.test.ts
 scripts/tron test gateway src/e2e/sessions/annotation-only-steer.integration.test.ts
 scripts/tron test gateway src/e2e/kernel/run/task-lifecycle.conformance.integration.test.ts
-scripts/tron verify --module gateway/run
+scripts/tron gate --check
 ```
 
 ## Not here

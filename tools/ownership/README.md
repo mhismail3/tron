@@ -4,8 +4,7 @@ Every tracked path has exactly one owning module. A module is declared by a
 co-located `<name>.module.json` manifest (format B′), or as a whole directory by
 an ancestor's [`directories`](#directory-modules) entry.
 `scripts/tron ownership` checks the whole repository and the [layout](#layout)
-`root.module.json` declares. It is read-only; `scripts/tron verify` runs it as its
-first static step.
+`root.module.json` declares. It is read-only; `scripts/tron gate` runs it.
 
 ```bash
 scripts/tron ownership             # index paths, working-tree manifest contents
@@ -57,7 +56,6 @@ are the tracked paths ending in `.module.json`. There is no central registry.
   | `dependsOn` | no | other module ids |
   | `dynamicEdges` | no | `{to, kind, via?, why}`: `to` is another module id; `kind` is `registration`, `spawn`, `fs-read`, `generated` or `wire`; `via` is a tracked repo-relative path; `why` is non-empty |
   | `verify` | no | `scripts/tron …` commands |
-  | `iosLanes` | no | class-owned Python validator declarations: `classes` holds exact `Target/Class` identities; `command` is an argument list starting with a tracked `.py` script this module owns ([execution contract](../verify/README.md#owner-declared-ios-validation)) |
   | `riskClass` | no | `kernel`, `contracts`, `persistence`, `security`, `lifecycle`, `ios-ui`, `mac-installer` |
   | `directories` | no | whole-directory modules below this manifest: `{"<dir>": {"name", "layer", "verify"?}}`; see [Directory modules](#directory-modules) |
 
@@ -150,8 +148,7 @@ means something needs a decision; `--json` prints the same report.
 ignored paths with no named writer, any `.scratch/` or loose `.pi/` entry, and worktrees
 pi-subagents left under `<checkout>-worktrees/worktrees/<this worktree>/`. It exits 1 until
 they are gone; an agent runs it before it reports or parks. `--here --landing` checks only
-untracked files and unnamed ignored residue, and is a `scripts/tron verify` step, so residue
-cannot land.
+untracked files and unnamed ignored residue.
 
 `--prune` deletes only expired scratch and evidence (never through a symlinked
 `.scratch` or `test-results`, and never in a linked worktree with a live process,

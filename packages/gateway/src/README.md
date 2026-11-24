@@ -124,7 +124,7 @@ Also the rows of `src/` modules that have no README yet: process lifecycle
 ## Verify
 
 ```bash
-scripts/tron verify --module gateway/foundation
+scripts/tron gate --check
 ```
 
 ## Not here

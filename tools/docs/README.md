@@ -41,7 +41,7 @@ generator's arguments:
 
 `check` regenerates every block in tracked Markdown and fails, naming the file
 and generator, when one differs, has no end marker or names an unknown
-generator. With `--base <ref>` (as `verify` runs it), a `settings` block is
+generator. With `--base <ref>`, a `settings` block is
 regenerated only when one of its sources (any Gateway `src/` file, `package.json`,
 `package-lock.json`, `tools/docs/`) or the block's own text changed since `<ref>`:
 otherwise regenerating cannot differ, and the Gateway's `node_modules` is not

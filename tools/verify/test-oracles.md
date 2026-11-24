@@ -30,18 +30,13 @@ useful failure bound. Use risk-based known-bad proof, not ritual mutations for
 all edits. Preserve the first failure and distinguish a test defect from a product
 race using actual evidence.
 
-## Goldens, assertions and timeouts
+## Assertions and timeouts
 
-Workers may update intended-behavior assertions, fixtures, timeouts and goldens
-without maintainer test-text approval. Explain the cause and intended delta;
-re-record only the affected witness through its owner and run the comparison.
-A non-author reviewer names each surviving oracle, checks for weakening and explicitly
-ACCEPTs the final change after answering, from the `verify` delta: what did this change
-delete or retire; why does each new test file not extend its listed owner; and is any added
-compatibility wording real compat code (refuse it)? A case no rule clearly fits takes the more
-reversible option, recorded in the issue, never a quiet exception. Never auto-bless unexplained reds or normalize away the
-protected distinction. Subjective design goes to the maintainer with inline visuals;
-Home owns objective gates. A still image does not prove interaction.
+There are no golden, snapshot or recorded-trace oracles. Workers may update intended-behavior
+assertions, fixtures and timeouts without maintainer test-text approval, explaining the cause and
+intended delta. A non-author reviewer names each surviving oracle, checks for weakening and
+explicitly ACCEPTs: what did this change delete or retire, and why does each new test file not
+extend its owner? Subjective design goes to the maintainer with inline visuals.
 
 ## Reds
 
@@ -52,6 +47,5 @@ Preserve the first failure, exact SHA, command and raw logs/counts. A passing re
 nondeterminism evidence, not resolution. Diagnose an unattributed red before choosing
 any revert target; never guess.
 
-Run affected checks before the merge; broad coverage belongs to
-full suites on main and the device checkpoints ([P2](../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-landing-and-checkpoint-signal)), not duplicated per-worker suites. Report counts, skips,
+The gate is the only admission check ([README](README.md#gate)). Report counts, skips,
 failures and untested boundaries honestly. See [test-confidence procedures](../../.agents/skills/tron-test-confidence/SKILL.md).

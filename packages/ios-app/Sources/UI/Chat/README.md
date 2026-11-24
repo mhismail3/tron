@@ -64,7 +64,7 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   one-second deadline) and prepend (eight-second deadline); every `ChatLayoutTransaction` ends
   settled or abandoned. Catch up from far back first jumps to a staged frame at the reveal (80–140
   points) above the newest end, measured from the pinned end so the composer and keyboard
-  obstruction never shrink it, then scrolls smoothly (`TronChatCatchUpUITests`, #330). A detached reader keeps one frozen installed commit until it returns.
+  obstruction never shrink it, then scrolls smoothly (#330). A detached reader keeps one frozen installed commit until it returns.
   UIKit owns keyboard motion and the composer's single first responder; the composer is the
   ScrollView's sole bottom safe-area inset. Exactly one scroll owns the status-bar gesture.
 - **Spatial roles.** User prompts right-anchored (≤ 364 points, emerald glass), agent prose and
@@ -150,11 +150,6 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   first and always visible, a details group (model, type, time, request ID, HTTP status rows) and
   a Message group whose `TronSettingsCodeRow` holds the full selectable JSON (or verbatim text).
   Long payload groups use the shared static-surface policy instead of a tall backdrop filter.
-- **Error presentation.** `TronMobileViewTests/ChatProviderErrorStyleViewTests` checks that hosted
-  ChatView error pills stay centred in both appearances, that a live run groups, settles and survives
-  reopen, that error sheets show the breakdown, pretty JSON and raw text, and that every occurrence
-  uses the standard detail rows; `TronChatProviderErrorStyleUITests` keeps the
-  standard error sheet's payload selectable (light).
 - **Haptics.** Live events only, through `TronHaptics`; `ChatLiveHapticLedger` tells live from restored.
 - **Extension interactions.** The mounted route is the sole sheet owner and presents pending
   interactions only after the first ready frame. Forms (one to four questions) keep a device-local
@@ -223,8 +218,7 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
 - Disposable state (opening, imports, entrance ledger, floating displays) lives in
   `ChatSessionPresentation`; nothing here is persisted except drafts via State.
 - Dashboard row context and relative timestamps use the shared code caption typography,
-  independent of the reading family, including View All. `TronMobileViewTests/SessionRowClockViewTests` checks
-  their rendered glyph advances and caption metrics against shared code text references.
+  independent of the reading family, including View All.
 - Reduce Motion removes spatial motion and never hides authoritative text.
 - Pause/Resume memory and Disable Home are icon buttons leading Manage Home's toolbar
   (`home-manage-pause`/`home-manage-resume`, `home-manage-disable`), read from the sheet's own
@@ -259,54 +253,7 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
 
 ## Verify
 
-`TronMobileViewTests/ToolSummaryTintViewTests` renders canonical transcript DTOs through mounted ChatView
-in-process and samples title ink: recovered (count retained), latest failure, no failures, cross-group
-continuation, and active failure/amber. Calls deliberately disagree with collection, result-arrival and
-timestamp ordering.
-
-`TronChatChipCategoryColorUITests` renders one hosted transcript holding every chip category and
-compares each chip's rendered title ink with its category's contrast-safe palette in light and dark;
-its capture-only method provides Burgundy/Emerald light/dark visual review.
-
-`WorkerToolRegressionViewTests` exercises custom worker report outcomes/Markdown/evidence,
-check-in attention/Next and friendly transcript chips; `TronWorkerToolRegressionTests` keeps aggregate
-navigation and extension/MCP humanization.
-
-`TronInteractionSheetUITests` exercises the native change card's exact scoped answer and the
-ask_user form over the hosted socket; the Gateway's `native-change.e2e.test.ts` owns
-authorization, receipt recovery and Stop proof.
-
-`TronMobileViewTests/SixSmallUIRegressionViewTests` checks the model row's subtext and monospaced ID metrics
-against the shared row in-process.
-`TronSixSmallUIRegressionTests` keeps primary toast ink, model search selection, workspace path/status
-separation at standard/narrow/accessibility sizes, and check-in receipt content.
-
-`TronMobileViewTests/HomeSummaryTypographyViewTests` renders the production Home summary beside an independent
-`SessionSummaryTypography.usageValue` reference, comparing glyph/line metrics and Dynamic Type growth
-with distinct reading/code families through `HostedHomeSummaryTypographyFixture`.
-
-`TronQueuedSteerThemeUITests/testQueuedCardAndEditorFollowPrimaryTheme` samples native queued-card
-fill/arrow and editor glass across all primary themes in light/dark, comparing dark Burgundy's
-surface with Manage Home rather than its lifted ink. It also opens/saves the real queued editor.
-`TronAnnotationOnlySteerUITests` checks annotation content beneath the queue header, independent chip
-navigation and enabled editing/removal, photo/file-only editor validity in Home and normal chat, and
-a long steer cut like a user prompt whose editor keeps the whole text.
-
-`TronProfileHierarchyUITests/testNativeHierarchyReviewMatrix` captures the real Profile sheet
-with isolated `-home-profile-hierarchy` synthetic data in light/dark at Large, XXL and XXXL.
-The fixture sets those exact SwiftUI sizes; the journey measures native row growth and checks
-writable-placement versus read-only-prior actions. Captures require human visual review.
-
-Classes under `TronMobileUITests/`: `TronHomeDashboardUITests`, `TronHomeSheetsUITests`,
-`TronConsolidatedUIRegressionTests` (Memory/canonical navigation, metadata, usage loading,
-Workspace cover/uncover, Manage model writes and scoped Settings routes),
-`TronSubsheetReliabilityUITests` (fresh Profile item and Chapter first taps, reopen/foreground,
-Canonical transcript medium→large and fresh medium reset, shared presenter lifecycle/haptics),
-`TronDashboardHomeButtonUITests`, `TronNewSessionUITests`, `TronSubagentParityUITests`,
-`TronToolSheetsPolishUITests`, `TronChatDisplayStripUITests`, `TronChatAnnotationUITests`,
-`TronComposerUploadUITests`, `TronChatHapticsUITests`, `TronReadonlyAttachmentUITests`, `TronCameraCaptureUITests`,
-and the Home, Manage Session and Ask User journeys in
-`TronSmokeUITests` ([runbook](../../../docs/development.md#efficient-focused-tests)). Real
+`TronMobileUITests/TronIntegrationSheetsUITests` is the hosted UI journey kept on demand. Real
 boundaries: `scripts/ios-gateway-e2e-test run-ui` and `scripts/tron test gateway
 src/e2e/modules/home/home-session-catalog.e2e.test.ts src/e2e/sessions/home-activation.e2e.test.ts`. Motion,
 gestures, the private top blur and the keyboard need a `Tron Device` check.

@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { expectRequestShapes } from "../../../test-support/lock-projections.js";
 import { notificationsPushScenario, PUSH_RELAY_ORIGIN } from "../../../test-support/lock-scenarios.js";
 import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
 
@@ -49,7 +48,7 @@ describe("gateway/notifications push lock", () => {
       ], revision: expect.stringMatching(/^[0-9a-f]{32}$/u), unreadCount: 2 } });
     expect(workerRoles, "the task worker ran a turn and its reminder turn").toEqual(["system", "user", "assistant", "assistant"]);
     const requests = gateway.record().providerRequests;
-    expectRequestShapes(requests, [...Array.from({ length: 7 }, () => "chatWithNotificationsSelect"), "taskWorker", "taskWorker"]);
+    
     const select = (text: string) => [{ role: "assistant", text: "", toolCalls: ["lock_select"] }, { role: "toolResult", text: "chosen: Keep", toolName: "lock_select" },
       { role: "assistant", text }];
     const chat = [

@@ -87,7 +87,7 @@ preamble, `tron` section and child handoff registration).
 ## Verify
 
 ```bash
-scripts/tron verify --module gateway/workspace
+scripts/tron gate --check
 scripts/tron test gateway src/e2e/workspace/tron-workspace.integration.test.ts
 ```
 

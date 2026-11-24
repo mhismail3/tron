@@ -28,11 +28,5 @@
     "validate-ios-artifact.py",
     "validate-push-service-config.sh",
     "xcresult-failures.py"
-  ],
-  "iosLanes": [
-    {
-      "classes": ["TronMobileUITests/TronIdleControlUITests"],
-      "command": ["scripts/test-ios-process-evidence.py", "--hosted-idle"]
-    }
   ]
 }

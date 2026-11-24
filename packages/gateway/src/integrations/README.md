@@ -46,7 +46,7 @@ or background credential probe occurs.
 ## Verify
 
 ```bash
-scripts/tron verify --module gateway/integrations
+scripts/tron gate --check
 scripts/tron test gateway src/e2e/integrations/tests/connections.projection.integration.test.ts
 ```
 

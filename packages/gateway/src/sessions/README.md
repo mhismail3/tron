@@ -137,7 +137,7 @@ metadata, never JSONL, and never implies parallel execution.
 ## Verify
 
 ```bash
-scripts/tron verify --module gateway/run
+scripts/tron gate --check
 scripts/tron test gateway src/e2e/sessions/runtime-registry- \
   src/e2e/sessions/runtime-tool-loadout.integration.test.ts
 ```

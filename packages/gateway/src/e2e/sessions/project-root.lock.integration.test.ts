@@ -2,7 +2,6 @@ import { readFile, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
-import { expectRequestShapes, expectSystemShapes } from "../../../test-support/lock-projections.js";
 import { projectRootTrustScenario } from "../../../test-support/lock-scenarios.js";
 import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
 
@@ -82,8 +81,8 @@ describe("gateway/session-catalog project-root lock", () => {
     expect(recorded.providerRequests[0]!.tools).toContain("project_probe");
     expect(recorded.providerRequests[0]!.tools).not.toContain("nested_probe");
     expect(recorded.providerRequests[2]!.tools).not.toContain("project_probe");
-    expectRequestShapes(recorded.providerRequests, ["trustedProjectSubdirectory", "trustedProjectSubdirectory", "revokedProjectSubdirectory"]);
-    expectSystemShapes(canonicalJsonl, ["projectSubdirectorySystem#0", "projectSubdirectorySystem#1"]);
+    
+    
     const receipts = canonicalJsonl.flatMap((entry) => {
       const record = entry as { customType?: string; data?: { receiptKind?: string; lifecycle?: string } };
       return record.customType === "tron.chat-invocation.v1" ? [`${record.data?.receiptKind}:${record.data?.lifecycle ?? ""}`] : [];

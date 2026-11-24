@@ -150,7 +150,6 @@ admissions. They use records actually produced by the Gateway fixture, not a cop
 algorithm or live private data. Existing task-history tests retain the complete-history
 oracle; metrics deliberately does not replace it.
 
-Run `scripts/tron verify --changed` on the committed diff, retain counts/logs and obtain
-independent acceptance of test edits. Home owns broad post-land runtime/full-tier
-checkpoints. No full Gateway suite, Debug/Stable restart, install, live state mutation,
+Admit the committed change with `scripts/tron gate`, retain counts/logs and obtain
+independent acceptance of test edits. No full Gateway suite, Debug/Stable restart, install, live state mutation,
 self-check Automation or brief-template behavior change belongs to this implementation.

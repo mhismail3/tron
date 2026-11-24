@@ -36,8 +36,7 @@ ceiling), exposes their alt text, and loads through the existing bounded
 `ChatMediaLoader.inlineArtifact(for:)` owner. This avoids the full-preview slot's
 single replacement flight cancelling adjacent images. Cancellation, managed
 presentation activity and exact profile/session/media identity fence publication.
-The hosted `TronDisplayDocumentThemeUITests` image journey checks decoded PNG
-pixels and unavailable states in both appearances; the Gateway image-lifetime
+The Gateway image-lifetime
 integration journey checks sibling admission and retention across source removal,
 cold reopen and session deletion.
 
@@ -71,9 +70,7 @@ Full photo previews preflight source dimensions and component depth before Image
 up to a 4,096-pixel edge within 64 MiB decoded RGBA bytes, including row-alignment allowance.
 High-depth PNGs downsample to fit rather than being rejected solely for exceeding the budget
 at that edge. The actual decoded-byte check and 25 MiB encoded cap still apply. Load or decode
-failure says “The photo could not be loaded for preview”; it does not claim deletion. The
-light/dark high-depth open/zoom/reopen and invalid-image fallback journeys are in
-`TronReadonlyAttachmentUITests`.
+failure says “The photo could not be loaded for preview”; it does not claim deletion.
 
 ## Ownership and lifecycle
 

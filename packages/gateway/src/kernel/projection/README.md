@@ -30,7 +30,7 @@ through a real Pi session and persisted history.
 
 The attention lock runs through the real Gateway/Pi boundary. Reconnect,
 run-event and delegation locks also protect this owner's wire projections.
-Run selected validation with `scripts/tron verify --module gateway/projection`
+Run selected validation with `scripts/tron gate --check`
 (or `--changed` for a committed slice).
 
 Canonical invocation/delivery and activity/notification codecs belong to

@@ -86,21 +86,10 @@ None of its own; catalog reads report through the State owners.
 ## Verify
 
 ```bash
-scripts/tron-ios-test run \
-  --only-testing TronMobileUITests/TronAccessibilityUITests \
-  --only-testing TronMobileViewTests/AccessibilityMaintenanceViewTests \
-  --only-testing TronMobileUITests/TronSmokeUITests/testAutomationsSheetFromTronMenu \
-  --only-testing TronMobileUITests/TronSmokeUITests/testAutomationsListActiveBeforePaused \
-  --only-testing TronMobileUITests/TronSmokeUITests/testAutomationEditDateControlsVisualParity \
-  --only-testing TronMobileUITests/TronSmokeUITests/testDashboardMenuStaysOpenDuringParentUpdates \
-  --only-testing TronMobileUITests/TronDashboardWindowControlsUITests
+scripts/tron-ios-test run
 ```
 
-`AccessibilityMaintenanceViewTests` drives the dashboard destinations in-process and checks that Knowledge is absent from the menu and Connected Services in Light/Dark/large type; `TronAccessibilityUITests` keeps the header frames and native menu geometry. The parent-update menu journey retains its Automations selection and thirty-update witness. The Automations fixture accepts no mutations.
-`TronDashboardWindowControlsUITests` checks that the title sits below the status bar in a
-full-screen window (the canonical iPhone lane, full-screen iPad). On an iPad
-simulator in Windowed Apps mode it also resizes the window and checks the title clears the
-controls at rest and collapsed; no lane runs iPad, so run that destination by hand.
+The Automations fixture accepts no mutations.
 
 ## Not here
 

@@ -269,8 +269,7 @@ artifact checks. Browser live views are admitted only from `builtin:agent-browse
   not repaired from result files or step counts. Control and admission readers remain strict.
   Fork test entrypoints allocate a fresh root rather than inheriting the runtime's
   `PI_SUBAGENTS_TEMP_ROOT`; only nested test processes reuse their loader-owned root.
-- **Proof:** `delegation.lock.integration.test.ts` (native skill paths and serialized managed-provider
-  identity; pin changes re-record only their intended identity hunks through the scenario-lock owner),
+- **Proof:** `delegation.lock.integration.test.ts` (a real child runs to completion and returns its answer),
   `managed-subagents.install.integration.test.ts`,
   `managed-subagents-warm-process.e2e.test.ts` (fresh home, real Gateway process),
   `managed-subagents.transform.integration.test.ts` (fresh build, no Gateway-thread transform),
@@ -310,12 +309,6 @@ switches over ends in a `never` default (`compatibility-manifest.ts`, `projectio
 persist and send: one faux-provider scenario through the real `RuntimeRegistry`/`RuntimeSlot`
 with codemode, tool search and MCP (text and thinking, direct and nested tools,
 `models.classify()` and `image()`, MCP tools, steer and follow-up, abort, manual compaction, a
-Chat model change), normalized and compared with
-`test-fixtures/pi-sdk/sdk-behavior-trace.golden.json`; a busy-loop replay must match too. The
-scenario-lock projection omits shared tool descriptions and parameter schemas already covered by
-the Home activation lock; this changes only the compared projection, not the captured runtime
-transcript or provider schemas. Run
-`npm run test:sdk-behavior-trace` (a mismatch keeps `test-results/sdk-behavior-trace.diff`);
-update deliberately with `npm run update:sdk-behavior-trace` ([scenario locks](scenario-locks.md)).
-The golden is darwin-specific and includes Tron prompt text, so tool snippet changes update it in
-the same change. For an SDK candidate review each hunk; one nobody can explain is the stop.
+Chat model change), asserting each tool succeeds, nested image and classifier results, and the
+persisted codemode image path; a busy-loop replay must pass the same assertions. Run
+`npm run test:sdk-behavior-trace`.
