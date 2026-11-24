@@ -25,8 +25,6 @@ GATEWAY_TESTS = [
     'src/e2e/admin/settings-subject-audit.e2e.test.ts',
     'src/e2e/automations/automations.owned-run.lock.integration.test.ts',
     'src/e2e/automations/schedule-run-now-stop-drain.integration.test.ts',
-    'src/e2e/modules/home/home-profile-v2-recovery.integration.test.ts',
-    'src/e2e/modules/home/home-task-tool.e2e.test.ts',
     'src/e2e/modules/home/home.lock.integration.test.ts',
     'src/e2e/protocol/protocol.wire.lock.integration.test.ts',
     'src/e2e/sessions/pi-persisted-state-corpus.integration.test.ts',
@@ -35,12 +33,16 @@ GATEWAY_TESTS = [
     'src/e2e/sessions/sdk-behavior-trace.integration.test.ts',
     'src/e2e/sessions/session-search.privacy.lock.integration.test.ts',
     'src/e2e/transport/server-revocation.integration.test.ts',
-    'src/episodic/episodic-layout-migration.integration.test.ts',
     'src/modules/home/home-ledger-crash.e2e.test.ts',
     'src/modules/home/home-receipt-crash.e2e.test.ts',
     'src/notifications/push-policy-migration.integration.test.ts',
-    'src/sessions/extension-artifact-discovery.integration.test.ts',
     'src/transport/command-receipts.lock.integration.test.ts',
+]
+LONG_TESTS = [
+    'src/e2e/modules/home/home-profile-v2-recovery.integration.test.ts',
+    'src/e2e/modules/home/home-task-tool.e2e.test.ts',
+    'src/episodic/episodic-layout-migration.integration.test.ts',
+    'src/sessions/extension-artifact-discovery.integration.test.ts',
 ]
 PROCESS_TESTS = [
     'src/e2e/kernel/delegation/managed-run-stop-drain.e2e.test.ts',
@@ -213,6 +215,8 @@ def checks(gate: Gate, tree: Path, base: str, merged: str) -> None:
         ('lint', [node, 'node_modules/oxlint/bin/oxlint', '-c', '.oxlintrc.json', '--deny-warnings',
                   '--report-unused-disable-directives', 'src', 'test-support', 'test-fixtures', 'scripts'], gateway),
         ('gateway', [*vitest, '--maxWorkers=6', '--passWithNoTests=false', *GATEWAY_TESTS], gateway),
+        *[(f'long-{Path(path).name.split(".")[0]}', [*vitest, '--passWithNoTests=false', path], gateway)
+          for path in LONG_TESTS],
         *[(f'process-{Path(path).name.split(".")[0]}', [*vitest, '--config', 'vitest.nested.config.ts', path], gateway)
           for path in PROCESS_TESTS],
     ]
