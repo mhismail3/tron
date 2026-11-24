@@ -106,6 +106,42 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         }
     }
 
+    func testParentSheetAndItsCardsStayStillWhileASubsheetComesAndGoes() async throws {
+        try await mounted(["-tron-settings-fixture", "-settings-expanded-review", "-six-ui-surface", "worker-report"]) { app in
+            try await app.until("the report sheet") { app.button("Technical details") != nil && sheetChain(app).count == 1 }
+            _ = try await app.still("the report sheet") { [Double(sheetFrame(app).minY)] }
+            let parent = try XCTUnwrap(sheetChain(app).first)
+            XCTAssertGreaterThan(sheetFrame(app).minY, 120, "the report sheet fits its content")
+            @MainActor func bottomCard() -> CGRect? {
+                MountedFixture.elements(in: parent.view).filter { MountedFixture.identifier($0) == "tron-sheet-surface" }
+                    .map(\.accessibilityFrame).max { $0.maxY < $1.maxY }
+            }
+            let startCard = try XCTUnwrap(bottomCard(), "the bottom card")
+            var ys: [CGFloat] = [], cards: [CGFloat] = []
+            UIView.setAnimationsEnabled(true)
+            defer { UIView.setAnimationsEnabled(false) }
+            try await app.activate("Technical details")
+            var closed = false
+            for index in 0..<200 {
+                let layer = parent.view.layer.presentation() ?? parent.view.layer
+                ys.append(layer.convert(layer.bounds, to: nil).minY)
+                if let card = bottomCard() { cards.append(card.height) }
+                if !closed, index > 40, sheetChain(app).count == 2 { try await app.activate("Done"); closed = true }
+                await MountedFixture.nextFrame()
+            }
+            let trace = "PARENT_TRACE " + ys.enumerated().filter { $0.offset == 0 || abs($0.element - ys[$0.offset - 1]) > 0.25 }
+                .map { "\($0.offset):\(Int($0.element))" }.joined(separator: " ")
+            print(trace)
+            let deltas = zip(ys, ys.dropFirst()).map { $1 - $0 }.filter { abs($0) > 0.5 }
+            let reversals = zip(deltas, deltas.dropFirst()).filter { ($0 > 0) != ($1 > 0) }.count
+            XCTAssertTrue(closed, "the subsheet closed")
+            XCTAssertEqual(reversals, 0, "The sheet under a subsheet moves monotonically, never up-down-up\n\(trace)")
+            XCTAssertEqual(ys.last!, ys.first!, accuracy: 0.5, "The sheet under a subsheet returns to its own height\n\(trace)")
+            XCTAssertTrue(cards.allSatisfy { abs($0 - startCard.height) <= 0.5 },
+                          "The bottom card keeps its laid-out height on every frame: \(Set(cards.map { Int($0) }).sorted())")
+        }
+    }
+
     private func sheetChain(_ app: MountedFixture) -> [UIViewController] {
         var chain: [UIViewController] = []
         var next = app.window.rootViewController?.presentedViewController
