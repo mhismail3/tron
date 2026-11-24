@@ -160,9 +160,10 @@ working directory is inside, no HEAD activity for 3 days, and no `test-results/`
 byte for byte while that folder is unexpired (such a worktree is kept, counted as a decision, and the
 `rsync --ignore-existing` that keeps its evidence is named; first-failure logs are evidence). It makes the read-only Gateway payload writable first. Without `lsof` it
 prunes no worktree. It fetches `origin` first and then deletes, locally and on `origin`
-(with an expected-SHA lease), every branch no worktree has checked out that is merged into `origin/main` or
-whose every commit is patch-equivalent to one there, and every unmerged branch idle over 30 days after
-writing it to a bundle in `<git-common-dir>/tidy-archive/`; each deletion prints its restore command.
+(with an expected-SHA lease), every branch no worktree has checked out whose every commit is on
+`origin/main` or patch-equivalent to one there, and every other branch idle over 30 days, after writing
+them all to one bundle in `<git-common-dir>/tidy-archive/`; each deletion prints its restore command.
+Deleting an origin branch closes a pull request whose head it is. Worktrees count as merged by the same rule.
 Unmerged branches younger than that, residue and orphan directories are only reported, so the weekly run
 leaves every branch merged, deleted, or under 30 days old. Other stores keep their owners: `scripts/tron-ios-test prune` owns
 `~/Library/Developer/Tron/ios`.

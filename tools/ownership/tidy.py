@@ -154,10 +154,7 @@ def live_cwds() -> set[str] | None:
 
 
 def merged(sha: str) -> bool:
-    """On origin/main by ancestry, or every commit patch-equivalent to one there (a squash or cherry-pick)."""
-    if subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", sha, "refs/remotes/origin/main"],
-                      capture_output=True).returncode == 0:
-        return True
+    """Every commit is on origin/main or patch-equivalent to one there (a squash or cherry-pick)."""
     cherry = subprocess.run(["git", "-C", str(ROOT), "cherry", "refs/remotes/origin/main", sha],
                             capture_output=True, text=True)
     return cherry.returncode == 0 and not any(line.startswith("+") for line in cherry.stdout.splitlines())
@@ -319,29 +316,26 @@ def report(prune: bool) -> dict:
 
 
 def prune_branches(out: dict) -> None:
-    """Delete local and origin branches main has; bundle, then delete, those idle over STALE_DAYS."""
-    stale = [b for b in out["branches"] if not b["merged"] and b["idleDays"] > STALE_DAYS]
-    bundle = None
-    if stale:
-        common = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir").strip())
-        bundle = common / ARCHIVE / f"{time.strftime('%Y%m%d-%H%M%S')}.bundle"
-        bundle.parent.mkdir(exist_ok=True)
-        made = subprocess.run(["git", "-C", str(ROOT), "bundle", "create", str(bundle), *[b["ref"] for b in stale]],
-                              capture_output=True, text=True)
-        if made.returncode:
-            out["notes"].append(f"kept {len(stale)} stale branch(es): could not bundle them: {made.stderr.strip()}")
-            stale = []
-    doomed = [b for b in out["branches"] if b["merged"] or b in stale]
-
-    def restore(b: dict) -> str:
-        if not b["merged"]:
-            return f"git fetch {bundle} {b['ref']}:refs/heads/{b['branch']}"
-        return f"git push origin {b['sha']}:refs/heads/{b['branch']}" if b["remote"] else f"git branch {b['branch']} {b['sha']}"
-
+    """Bundle, then delete, local and origin branches main has and those idle over STALE_DAYS."""
+    checked_out = {str(w.get("branch", "")).removeprefix("refs/heads/") for w in worktrees()}
+    doomed = [b for b in out["branches"] if (b["merged"] or b["idleDays"] > STALE_DAYS)
+              and (b["remote"] or b["branch"] not in checked_out)]
+    if not doomed:
+        return
+    common = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir").strip())
+    bundle = common / ARCHIVE / f"{time.strftime('%Y%m%d-%H%M%S')}.bundle"
+    bundle.parent.mkdir(exist_ok=True)
+    made = subprocess.run(["git", "-C", str(ROOT), "bundle", "create", str(bundle), *[b["ref"] for b in doomed]],
+                          capture_output=True, text=True)
+    if made.returncode:
+        out["notes"].append(f"kept {len(doomed)} branch(es): could not bundle them: {made.stderr.strip()}")
+        return
+    gone = set()
     for b in doomed:
         if not b["remote"] and subprocess.run(["git", "-C", str(ROOT), "update-ref", "-d", b["ref"], b["sha"]],
                                               capture_output=True).returncode == 0:
-            out["pruned"].append(f"branch {b['branch']} (restore: {restore(b)})")
+            gone.add(b["ref"])
+            out["pruned"].append(f"branch {b['branch']} (restore: git fetch {bundle} {b['ref']}:{b['ref']})")
     remote = [b for b in doomed if b["remote"]]
     if remote:
         pushed = subprocess.run(["git", "-C", str(ROOT), "push", "--porcelain", "origin",
@@ -351,12 +345,12 @@ def prune_branches(out: dict) -> None:
                    if line.startswith("-\t")}
         for b in remote:
             if b["branch"] in deleted:
-                out["pruned"].append(f"branch origin/{b['branch']} (restore: {restore(b)})")
+                gone.add(b["ref"])
+                out["pruned"].append(f"branch origin/{b['branch']} (restore: git fetch {bundle} {b['ref']} && "
+                                     f"git push origin {b['sha']}:refs/heads/{b['branch']})")
             else:
                 out["notes"].append(f"could not delete origin/{b['branch']}: {pushed.stderr.strip() or 'push refused'}")
-    gone = {item.split(" ")[1] for item in out["pruned"] if item.startswith("branch ")}
-    out["branches"] = [b for b in out["branches"] if ("origin/" if b["remote"] else "") + b["branch"] not in gone]
-
+    out["branches"] = [b for b in out["branches"] if b["ref"] not in gone]
 
 FIXES = {
     "untracked": "commit it with an owner, move it to .scratch/, or delete it",
