@@ -811,8 +811,6 @@ private actor HostedHomeShellGateway {
                 ? fixtureSettingsChangeResult(key: "model.queue[role=background]")
                 : JSONValue.object(["configured": .bool(configured), "open": .bool(true), "paused": .bool(paused)])
             return (result, nil)
-        case "command.status":
-            return (.object(["status": .string("completed"), "result": .null]), nil)
         case "session.abort":
             if params["sessionId"]?.stringValue == "home-session", params["operationId"]?.stringValue == "home-operation",
                params["kind"]?.stringValue == "agent", params["commandId"]?.stringValue != nil {

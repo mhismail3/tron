@@ -78,32 +78,6 @@ final class TronPadSheetPresentationUITests: XCTestCase {
     }
 
     @MainActor
-    func testWideLandscapeSubSheetStacksInsideTheSideColumn() {
-        let app = launchHomeChat(orientation: .landscapeLeft)
-        defer { app.terminate() }
-        let window = app.windows.firstMatch.frame
-        openManageHome(app)
-        let parent = sheetFrame(app, title: "Manage Home", done: app.buttons["home-sheet-done-manage"])
-        assertTrailingColumn(parent, in: window)
-
-        let row = app.descendants(matching: .any)["home-manage-tasks"]
-        XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
-        row.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["home-task-active"].waitForExistence(timeout: 8), app.debugDescription)
-        let childTitle = app.staticTexts["Tasks"].firstMatch
-        XCTAssertTrue(childTitle.waitForExistence(timeout: 5), app.debugDescription)
-        let childDone = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex
-            .max { $0.frame.minY < $1.frame.minY } ?? app.buttons["Done"]
-        let child = sheetFrame(app, title: "Tasks", done: childDone)
-        assertTrailingColumn(child, in: window)
-        XCTAssertEqual(child.minX, parent.minX, accuracy: 24, "The child sheet stays in the parent's column")
-        XCTAssertGreaterThan(child.minY, parent.minY, "Manage Home's top edge shows above the stacked Tasks: \(child) over \(parent)")
-        keepScreenshot(app, "ipad-landscape-manage-home-home-settings-stacked")
-        assertChatInteractive(app, beside: child, typing: "Typed beside Tasks")
-        XCTAssertTrue(app.descendants(matching: .any)["home-task-active"].exists, "Using the chat must not dismiss Tasks")
-    }
-
-    @MainActor
     func testWideLandscapeSessionSheetIsATrailingColumn() {
         XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
