@@ -348,7 +348,9 @@ describe("Pi SDK boundary behavior trace", { timeout: SCENARIO_HANG_BOUND_MS }, 
   });
 
   it("produces the same trace under in-process load and an injected response delay", async () => {
-    const trace = await runBoundaryScenario({ load: true });
-    expectScenarioValid(trace);
+    const unloaded = await runBoundaryScenario({ load: false });
+    const loaded = await runBoundaryScenario({ load: true });
+    expectScenarioValid(loaded);
+    expect(loaded).toEqual(unloaded);
   });
 });

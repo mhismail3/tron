@@ -118,26 +118,8 @@ describe("gateway/protocol wire contract locks", () => {
       for (const value of values) expect(decode(value), where).toEqual(value);
     }
 
-    const trace = {
-      lock: "protocol-wire",
-      declared: {
-        gatewayProtocol: declared,
-        connectionContract: JSON.parse(await readFile(resolve(REPOSITORY, "packages", "protocol-fixtures", "gateway-connection-contract.json"), "utf8")),
-      },
-      handshake: {
-        accepted: { frames: accepted.frames.map((frame) => eventShapePaths("hello", frame)), protocolVersion: (accepted.frames[0] as { protocolVersion?: unknown })?.protocolVersion ?? null },
-        refused: { frames: refused.frames.map((frame) => eventShapePaths("refusal", frame)), close: refused.close },
-      },
-      methods: calls.map((entry) => ({
-        method: entry.method,
-        request: eventShapePaths("request", entry.params),
-        ok: entry.response.ok,
-        response: eventShapePaths("response", entry.response.ok ? entry.response.result : entry.response.error),
-      })),
-    };
-    expect(trace.handshake.accepted.protocolVersion).toBe(declared.protocolVersion);
-        expect(refused.close?.code, "a client outside the range is refused with the mismatch close").toBeGreaterThanOrEqual(4000);
-        const failures = trace.methods.filter((entry) => !entry.ok).map((entry) => entry.method);
-        expect(failures).toEqual(["session.prompt", "no.such.method"]);
+    expect((accepted.frames[0] as { protocolVersion?: unknown })?.protocolVersion).toBe(declared.protocolVersion);
+    expect(refused.close?.code, "a client outside the range is refused with the mismatch close").toBeGreaterThanOrEqual(4000);
+    expect(calls.filter((entry) => !entry.response.ok).map((entry) => entry.method)).toEqual(["session.prompt", "no.such.method"]);
   });
 });

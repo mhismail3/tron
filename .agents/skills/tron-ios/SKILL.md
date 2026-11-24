@@ -160,8 +160,7 @@ reclaim simulators yourself.
   reap` runs that same sweep on demand, and `prune` reclaims disk alone.
 - Home plans simulator work across workers; your brief's "Heavy work" paragraph says when and in what
   shape to run. `scripts/ios-test-lock.py --host-slot` holds the ceiling of 3 simulator jobs on this
-  Mac: `tron-ios-test` (`build`, `run`, `checkpoint`, `prepare`, `diagnose`, so `scripts/tron verify`'s
-  iOS lanes), `tron-profile ios`, `ios-gateway-e2e-test` (all but `stop`/`clean`) and
+  Mac: `tron-ios-test` (`build`, `run`, `checkpoint`, `prepare`, `diagnose`), `tron-profile ios`, `ios-gateway-e2e-test` (all but `stop`/`clean`) and
   `tron-ios-simulator install` take a slot after their lane's lease, and a job that finds all slots
   held waits and names the holders. `scripts/tron-ios-test slots` shows them. The slot is a kernel
   `flock`, so a killed or crashed job frees it once its command tree has ended. `verify` uses one lane

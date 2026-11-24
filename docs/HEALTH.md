@@ -128,7 +128,7 @@ re-encodes the UI; **taste** = visual iteration.
 | 9 | `ios-app/Sources/UI/Chat/ChatView.swift` (3.7k) | taste + hub: layout, wiring and sheets in one view |
 | 10 | `ios-app/Fixtures/HostedChatDisplayFixture.swift` (1.6k) | mirror of chat display |
 | 11 | `gateway/src/kernel/settings/settings-change.ts` (0.7k) | state: change and Undo stripe; 22 of 40 commits are fixes, 3 reverts |
-| 12 | `tools/verify/verify.py` (1.0k) | tooling: selection and quarantine rules keep changing |
+| 12 | `tools/verify/verify.py` (1.0k, deleted with the one gate) | tooling: selection and quarantine rules kept changing |
 | 13 | `ios-app/Sources/UI/Chat/SessionShellView.swift` (1.5k) | taste: chat shell sheets and toolbar |
 | 14 | `gateway/src/transport/server.ts` (3.0k) | hub: WebSocket dispatch |
 | 15 | `scripts/ios-gateway-e2e-test` (1.6k) | mirror: parallel UI-journey harness |

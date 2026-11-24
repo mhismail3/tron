@@ -147,7 +147,7 @@ def directory_modules(manifest: str, data: dict, problems: list[str]) -> dict[st
         elif not isinstance(entry, dict) or not {"name", "layer"} <= set(entry) or set(entry) - {"name", "layer", "verify"} or not isinstance(entry["name"], str) \
                 or not STEM.fullmatch(entry["name"]) or not one_of(entry["layer"], LAYERS) \
                 or ("verify" in entry and (not isinstance(entry["verify"], list) or any(not isinstance(command, str) or not command.startswith("scripts/tron ") for command in entry["verify"]))):
-            problems.append(f"{label} must declare name/layer and may declare scripts/tron verify commands")
+            problems.append(f"{label} must declare name/layer and may declare scripts/tron commands")
         else:
             path = directory if folder == "." else f"{folder}/{directory}"
             found[f"{manifest}#{directory}"] = (module_id(f"{path}/{entry['name']}{SUFFIX}"), path, entry["layer"], entry.get("verify", []))

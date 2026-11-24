@@ -19,6 +19,9 @@
     "src/e2e/admin/settings-change.integration.test.ts": {
       "timeout-literal": 2
     },
+    "src/e2e/admin/settings-gate.e2e.test.ts": {
+      "timeout-literal": 2
+    },
     "src/e2e/admin/settings-subject-audit.e2e.test.ts": {
       "timeout-literal": 1
     },
@@ -208,8 +211,14 @@
       "sleep": 1,
       "timeout-literal": 1
     },
+    "src/modules/home/home-ledger-crash.e2e.test.ts": {
+      "timeout-literal": 1
+    },
     "src/modules/home/home-profile-you-centred.integration.test.ts": {
       "timeout-literal": 5
+    },
+    "src/modules/home/home-receipt-crash.e2e.test.ts": {
+      "timeout-literal": 1
     },
     "src/modules/home/home-task-store.integration.test.ts": {
       "sleep": 1,

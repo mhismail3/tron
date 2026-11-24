@@ -28,8 +28,9 @@ cat > "$PRE_PUSH" << 'HOOK'
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
+unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX
 
-exec python3 "$ROOT/tools/verify/gate.py" --pre-push
+exec python3 "$ROOT/tools/verify/gate.py" --pre-push "$1"
 HOOK
 
 chmod +x "$PRE_PUSH"

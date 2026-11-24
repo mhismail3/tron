@@ -116,8 +116,7 @@ so Home sees the Mac on every wake:
 - `simulatorsBooted`: `launchd_sim` processes in the sweep's process table, one per booted
   simulator, whoever booted it.
 - `heavy`: each task Home has running now, mapped to the heavy kinds its command scope holds
-  (`xcodebuild`, `xctest`, `simulator` for `simctl`/Simulator.app, `vitest`, `verify` for
-  `tools/verify/verify.py`), named from each owned process's `ps` arguments, skipping
+  (`xcodebuild`, `xctest`, `simulator` for `simctl`/Simulator.app, `vitest`), named from each owned process's `ps` arguments, skipping
   launchers (`node`, `python`, shells, `env`, `xcrun`) and their flags. `[]` means none. A
   simulator's own processes run under launchd, outside every scope: they count in
   `simulatorsBooted`, never in a task's `heavy`.

@@ -5,18 +5,18 @@
 `scripts/tron gate` is the one admission to main. From a committed worktree it fetches
 `origin/main`, merges the change `--no-ff` in a temporary worktree, runs every check below in
 parallel, and pushes that exact merge to main only when all pass. The whole run, from invocation
-to the push or refusal, has a 58 s deadline; each check has a 45 s budget. A check over budget,
+to the push or refusal, has a 58 s deadline; each check has a 45 s budget. Vitest runs with `--allowOnly=false`; installed dependencies must match the merged lockfile. A check over budget,
 a failure, a dirty tree or an expired deadline refuses and leaves main unchanged. There are no
 retries, skips, quarantine, selection by risk tier or later full suite: what the gate does not run
 is not a gate. `--check` runs the same gate and pushes nothing. Each run writes
 `test-results/gate/<time>/` (one log per check and `result.json` with outcome, SHAs and per-step
 seconds).
 
-Checks: the privacy guard, `scripts/tron ownership`, the protocol contract, documentation and agent
+Checks: the privacy guard, the shrink-only determinism baseline (no new `.skip`/`.only`/sleeps), `scripts/tron ownership`, the protocol contract, documentation and agent
 policy, no added code comments, the gate's own tests,
 Gateway production and test-support typecheck, oxlint, and the fixed Gateway suite named in
 `gate.py` (`GATEWAY_TESTS`, `PROCESS_TESTS`): caught regressions (extension artifact discovery,
-Home task tool), authorization and privacy, migrations, concurrency/receipts, and real
+Home task tool), authorization and privacy, migrations, crash recovery, concurrency/receipts, and real
 Gateway-process boundaries. A test joins the gate only if it caught a real regression or guards
 one of those classes, and only if the gate still fits its deadline.
 

@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import io
+import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import gate  # noqa: E402
@@ -72,7 +74,9 @@ class GateTests(unittest.TestCase):
 
     def test_the_end_to_end_deadline_refuses(self) -> None:
         before = self.main()
+        began = time.monotonic()
         self.assertEqual(self.admit(self.run_steps(['sleep', '30']), deadline=2, step=30), 1)
+        self.assertLess(time.monotonic() - began, 10)
         self.assertEqual(self.main(), before)
 
     def test_uncommitted_work_is_refused_before_any_check(self) -> None:
@@ -91,6 +95,36 @@ class GateTests(unittest.TestCase):
         self.commit('other')
         git(self.work, 'push', '--quiet', 'origin', 'HEAD:main')
         self.assertEqual(self.admit(self.run_steps(['true']), tip=self.tip, push='pre-push'), 1)
+
+    def hook(self, lines: str, environment: dict | None = None) -> tuple[int, list]:
+        ran = []
+        with mock.patch.dict(os.environ, environment or {}), mock.patch('sys.stdin', io.StringIO(lines)), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            code = gate.main(['--pre-push', 'origin'], gate=lambda *a: ran.append(a[3]), root=self.work)
+        return code, ran
+
+    def test_pre_push_ignores_other_refs_and_refuses_main_deletion_or_several_updates(self) -> None:
+        zero = '0' * 40
+        self.assertEqual(self.hook(f'refs/heads/change {self.tip} refs/heads/change {zero}\n'), (0, []))
+        self.assertEqual(self.hook(f'(delete) {zero} refs/heads/main {self.main()}\n'), (1, []))
+        twice = f'refs/heads/a {self.tip} refs/heads/main {zero}\n' * 2
+        self.assertEqual(self.hook(twice), (1, []))
+
+    def test_pre_push_skips_only_the_exact_commit_the_gate_checked(self) -> None:
+        line = f'refs/heads/change {self.tip} refs/heads/main {self.main()}\n'
+        self.assertEqual(self.hook(line, {gate.TOKEN: self.tip}), (0, []))
+        self.assertEqual(self.hook(line, {gate.TOKEN: 'f' * 40})[1], [self.tip], 'another token runs the checks')
+
+    def test_pre_push_from_a_linked_worktree_checks_the_pushed_commit_not_the_hook_gitdir(self) -> None:
+        git(self.work, 'merge', '--quiet', 'main')
+        tip = git(self.work, 'rev-parse', 'HEAD')
+        other = self.scratch / 'other'
+        git(self.scratch, 'init', '--quiet', str(other))
+        before = git(self.work, 'symbolic-ref', 'HEAD')
+        code, ran = self.hook(f'refs/heads/change {tip} refs/heads/main {self.main()}\n',
+                              {'GIT_DIR': str(other / '.git'), 'GIT_WORK_TREE': str(other)})
+        self.assertEqual((code, ran), (0, [tip]))
+        self.assertEqual(git(self.work, 'symbolic-ref', 'HEAD'), before)
 
 
 if __name__ == '__main__':

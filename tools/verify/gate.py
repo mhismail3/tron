@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import uuid
 import signal
 import subprocess
 import sys
@@ -35,6 +36,8 @@ GATEWAY_TESTS = [
     'src/e2e/sessions/session-search.privacy.lock.integration.test.ts',
     'src/e2e/transport/server-revocation.integration.test.ts',
     'src/episodic/episodic-layout-migration.integration.test.ts',
+    'src/modules/home/home-ledger-crash.e2e.test.ts',
+    'src/modules/home/home-receipt-crash.e2e.test.ts',
     'src/notifications/push-policy-migration.integration.test.ts',
     'src/sessions/extension-artifact-discovery.integration.test.ts',
     'src/transport/command-receipts.lock.integration.test.ts',
@@ -51,13 +54,17 @@ class Refused(Exception):
     pass
 
 
+def clean_environment(**extra: str) -> dict:
+    return {**{key: value for key, value in os.environ.items() if not key.startswith('GIT_')}, **extra}
+
+
 class Gate:
-    def __init__(self, root: Path, deadline: float = DEADLINE, step: float = STEP):
+    def __init__(self, root: Path, deadline: float = DEADLINE, step: float = STEP, started: float | None = None):
         self.root = root
-        self.started = time.monotonic()
+        self.started = time.monotonic() if started is None else started
         self.deadline = self.started + deadline
         self.step = step
-        self.output = root / 'test-results' / 'gate' / time.strftime('%Y%m%dT%H%M%S')
+        self.output = root / 'test-results' / 'gate' / f"{time.strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:6]}"
         self.output.mkdir(parents=True, exist_ok=True)
         self.steps: list[dict] = []
         self.running: list[subprocess.Popen] = []
@@ -70,9 +77,12 @@ class Gate:
             raise Refused(f'the {DEADLINE:.0f}s end-to-end deadline expired')
         return left
 
+    def run(self, command: list[str], cwd: Path | None = None, env: dict | None = None) -> subprocess.CompletedProcess:
+        return subprocess.run(command, cwd=cwd or self.root, env=env or clean_environment(), text=True,
+                              capture_output=True, timeout=min(15, self.left()))
+
     def git(self, *arguments: str, cwd: Path | None = None, env: dict | None = None) -> str:
-        result = subprocess.run(['git', *arguments], cwd=cwd or self.root, env=env, text=True,
-                                capture_output=True, timeout=min(15, self.left()))
+        result = self.run(['git', *arguments], cwd=cwd, env=env)
         if result.returncode:
             raise Refused(f'git {" ".join(arguments)} failed: {result.stderr.strip()}')
         return result.stdout.strip()
@@ -117,38 +127,44 @@ class Gate:
             stream.close()
         self.streams.clear()
 
-    def admit(self, checks, tip: str | None = None, push: str = 'push') -> int:
+    def admit(self, checks, tip: str | None = None, push: str = 'push', remote: str = 'origin') -> int:
         outcome, reason, base, merged = 'refused', '', None, None
+        pushing = False
         tree = Path(tempfile.mkdtemp(prefix='tron-gate-'))
         try:
             if tip is None:
                 if self.git('status', '--porcelain'):
                     raise Refused('commit or remove every change first; the gate admits only committed work')
                 tip = self.git('rev-parse', 'HEAD')
-            self.git('fetch', '--quiet', '--no-tags', 'origin', 'refs/heads/main')
+            self.git('fetch', '--quiet', '--no-tags', remote, 'refs/heads/main')
             base = self.git('rev-parse', 'FETCH_HEAD')
             self.git('worktree', 'add', '--quiet', '--detach', str(tree), base)
             if push == 'pre-push':
-                if subprocess.run(['git', 'merge-base', '--is-ancestor', base, tip], cwd=self.root).returncode:
-                    raise Refused('the pushed commit does not contain origin/main; run scripts/tron gate')
+                if self.run(['git', 'merge-base', '--is-ancestor', base, tip]).returncode:
+                    raise Refused(f'the pushed commit does not contain {remote}/main; run scripts/tron gate')
                 self.git('checkout', '--quiet', '--detach', tip, cwd=tree)
             elif base != tip:
                 self.git('merge', '--quiet', '--no-ff', '--no-edit', tip, cwd=tree)
             merged = self.git('rev-parse', 'HEAD', cwd=tree)
             checks(self, tree, base, merged)
             if push == 'push':
-                self.git('push', '--quiet', 'origin', f'{merged}:refs/heads/main', env=dict(os.environ, **{TOKEN: merged}))
+                pushing = True
+                self.git('push', '--quiet', remote, f'{merged}:refs/heads/main', env=clean_environment(**{TOKEN: merged}))
                 outcome = 'updated'
             elif push == 'check':
-                self.git('push', '--dry-run', '--quiet', 'origin', f'{merged}:refs/heads/main', env=dict(os.environ, **{TOKEN: merged}))
+                self.git('push', '--dry-run', '--quiet', remote, f'{merged}:refs/heads/main', env=clean_environment(**{TOKEN: merged}))
                 outcome = 'checked'
             else:
                 outcome = 'admitted'
         except (Refused, OSError, subprocess.TimeoutExpired) as error:
             reason = str(error)
+            if pushing:
+                outcome = 'outcome-unknown'
+                reason += f'; main may have moved: compare {remote}/main with {merged}'
         finally:
             self.stop()
-            subprocess.run(['git', 'worktree', 'remove', '--force', str(tree)], cwd=self.root, capture_output=True)
+            subprocess.run(['git', 'worktree', 'remove', '--force', str(tree)], cwd=self.root, env=clean_environment(),
+                           capture_output=True, timeout=10)
             for path in [tree, *self.cleanup]:
                 shutil.rmtree(path, ignore_errors=True)
             receipt = {'outcome': outcome, 'reason': reason, 'base': base, 'tip': tip, 'merged': merged,
@@ -164,15 +180,21 @@ def checks(gate: Gate, tree: Path, base: str, merged: str) -> None:
     if not modules.is_dir():
         raise Refused(f'missing {modules}; install Gateway dependencies in this checkout first')
     (tree / 'packages/gateway/node_modules').symlink_to(modules)
-    node = subprocess.run([str(tree / 'scripts/tron-node')], capture_output=True, text=True).stdout.strip()
+    installed = json.loads((modules / '.package-lock.json').read_text())['packages']
+    locked = json.loads((tree / 'packages/gateway/package-lock.json').read_text())['packages']
+    stale = [name for name, entry in locked.items() if name and not entry.get('optional')
+             and installed.get(name, {}).get('version') != entry.get('version')]
+    if stale:
+        raise Refused(f'installed Gateway dependencies differ from the merged lockfile ({stale[0]}); reinstall first')
+    node = gate.run([str(tree / 'scripts/tron-node')]).stdout.strip()
     if not node:
         raise Refused('no pinned Node; see scripts/tron-node')
     home = Path(tempfile.mkdtemp(prefix='tron-gate-home-'))
     gate.cleanup.append(home)
-    env = dict(os.environ, HOME=str(home), TMPDIR=str(home), PYTHONDONTWRITEBYTECODE='1',
+    env = clean_environment(HOME=str(home), TMPDIR=str(home), PYTHONDONTWRITEBYTECODE='1', CI='1',
                PATH=str(Path(node).parent) + os.pathsep + os.environ['PATH'])
     gateway = tree / 'packages/gateway'
-    vitest = [node, 'node_modules/vitest/vitest.mjs', 'run', '--reporter=dot']
+    vitest = [node, 'node_modules/vitest/vitest.mjs', 'run', '--reporter=dot', '--allowOnly=false']
     commands = [
         ('privacy', [str(tree / 'scripts/personal-info-guard.sh')], tree),
         ('ownership', [sys.executable, 'tools/ownership/ownership.py'], tree),
@@ -180,6 +202,7 @@ def checks(gate: Gate, tree: Path, base: str, merged: str) -> None:
         ('docs', [sys.executable, 'scripts/check-documentation-policy.py'], tree),
         ('agent-policy', [str(tree / 'scripts/check-agent-policy.sh')], tree),
         ('comments', [sys.executable, 'tools/verify/comments.py', '--base', base], tree),
+        ('determinism', [sys.executable, 'tools/verify/determinism.py', '--base', base], tree),
         ('gate-tests', [sys.executable, 'tools/verify/tests/test-gate.py'], tree),
         ('typecheck', [node, 'node_modules/typescript/bin/tsc', '-p', 'tsconfig.json', '--noEmit'], gateway),
         ('typecheck-tests', [node, 'node_modules/typescript/bin/tsc', '-p', 'tsconfig.test-support.json',
@@ -197,8 +220,10 @@ def checks(gate: Gate, tree: Path, base: str, merged: str) -> None:
     gate.parallel(commands, env)
 
 
-def main(arguments: list[str]) -> int:
-    if arguments == ['--pre-push']:
+def main(arguments: list[str], gate=checks, root: Path = ROOT) -> int:
+    started = time.monotonic()
+    if arguments[:1] == ['--pre-push'] and len(arguments) <= 2:
+        remote = arguments[1] if len(arguments) == 2 else 'origin'
         updates = [line.split() for line in sys.stdin.read().splitlines() if line.strip()]
         main_updates = [update for update in updates if len(update) == 4 and update[2] == 'refs/heads/main']
         if not main_updates:
@@ -209,9 +234,9 @@ def main(arguments: list[str]) -> int:
             return 1
         if os.environ.get(TOKEN) == tip:
             return 0
-        return Gate(ROOT).admit(checks, tip=tip, push='pre-push')
+        return Gate(root, started=started).admit(gate, tip=tip, push='pre-push', remote=remote)
     if arguments in ([], ['--check']):
-        return Gate(ROOT).admit(checks, push='check' if arguments else 'push')
+        return Gate(root, started=started).admit(gate, push='check' if arguments else 'push')
     print('usage: scripts/tron gate [--check]', file=sys.stderr)
     return 2
 

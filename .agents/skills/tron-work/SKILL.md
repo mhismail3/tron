@@ -27,24 +27,24 @@ git merge --no-edit FETCH_HEAD
 
 On conflict, stop; keep the branch/index/worktree and resolve deliberately. Never
 stash, reset away work, or retry a failed merge blindly. Review reused rerere
-resolutions. Run `scripts/tron verify --plan` and the affected checks.
+resolutions.
 Obtain independent ACCEPT for test changes; follow the [oracle policy](../../../tools/verify/test-oracles.md).
-Prepare pinned Gateway dependencies only when selected checks need them. Review with
+Prepare pinned Gateway dependencies before running the gate. Review with
 `git diff --binary --full-index <base> HEAD --`; privacy-check exported patches.
 
 ## Publish
 
-After the focused checks pass (`scripts/tron verify --changed` or the fast PR check), fetch main,
-`git merge --no-ff` your branch onto it and push main. No full-suite gate runs before main; if the
-push is refused because main moved, fetch, merge again and push.
+Land with `scripts/tron gate` ([gate](../../../tools/verify/README.md#gate)): it merges your committed
+branch onto fetched main, runs every check and pushes main within 58 s, or refuses and leaves main
+unchanged. On refusal fix the cause and rerun; if main moved, rerun. Never push main by hand or with
+`--no-verify`.
 
 If you pushed the task branch, delete it on origin once main contains it
 (`git push origin --delete <branch>`); `refs/archive/*` keeps anything abandoned.
-On a conflict, resolve it in the merge, rerun the focused checks, then push. An uncertain network
+On a conflict, merge fetched main into your branch, resolve it, commit, then rerun the gate. An uncertain network
 result is not a failed write: inspect `git ls-remote origin refs/heads/main` and
 ancestry before acting. Never force-push main or automatically replay uncertain writes.
-Full suites run after the merge, on main, and a red there is fixed forward; device checkpoints own device coverage
-([principles P2](../../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-landing-and-checkpoint-signal)). Sync tracked-clean primary main only when
+Device checkpoints own device coverage. Sync tracked-clean primary main only when
 strictly behind with `git merge --ff-only origin/main`; preserve untracked files.
 
 ## Issues and preservation

@@ -7,9 +7,8 @@ what enforces it; a rule with no enforcement is cut. Safety boundaries live in
 ## P1 A module owns its code and its tests
 
 **Rule.** The repository is a monorepo: code, tests and fixtures sit in the module that owns them
-(its `*.module.json`). Tests reach other modules only through their public interfaces. A commit is
-gated by the local tests of the modules it touches, plus the E2E journeys that prove any behaviour
-it deletes.
+(its `*.module.json`). Tests reach other modules only through their public interfaces. Every commit is
+admitted by the one gate (P2).
 **Evidence.** At def6e931c, 209 of 240 JS/TS test files imported another module (counting
 `test-support`); 150 of 228 Gateway test files imported another module's internals; and 92 test
 files (55,866 lines) booted the whole Gateway registry (#2316 baseline). Under that coupling the full
