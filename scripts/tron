@@ -85,6 +85,9 @@ Commands:
                                     Read-only repository metrics of a commit's Git
                                     objects to test-results/metrics/<sha>.json;
                                     --compare prints the delta table; never a gate
+  gate [--check]                    The one admission to main: merge onto fetched main, run
+                                    every gate check in parallel and push, all within 58s;
+                                    --check pushes nothing (tools/verify/README.md)
   verify [--changed] [--base <ref>] | --module <id> | --all | --update-locks <id> [--skip ios,mac,relay] [--plan]
          [--gateway-host local|mini] [--ios-host local|mini]
                                     Mechanical none/partial/full tier; affected checks
@@ -351,6 +354,10 @@ case "$cmd" in
     ;;
   flakes)
     exec python3 "$ROOT/tools/verify/ledger.py" "$@"
+    ;;
+  gate)
+    shift
+    exec python3 "$ROOT/tools/verify/gate.py" "$@"
     ;;
   verify)
     exec python3 "$ROOT/tools/verify/verify.py" "$@"
