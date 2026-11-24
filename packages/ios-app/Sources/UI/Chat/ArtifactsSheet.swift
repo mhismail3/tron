@@ -119,7 +119,7 @@ struct ArtifactsSheet: View {
                                 TronSettingsNotice(message: "Artifacts could not be loaded. \(error)", retry: reload)
                                     .accessibilityIdentifier("artifacts-error")
                             } else {
-                                TronSheetLoadingState(label: "Loading artifacts…", accent: .tronPrimary)
+                                placeholder
                             }
                         }
                         .padding(.horizontal, 16).padding(.top, 4)
@@ -154,6 +154,21 @@ struct ArtifactsSheet: View {
         }
         .tronTopBlur(.sheet)
         .tronSettingsVisualTheme(accent: .tronPrimary).tint(.tronPrimary)
+    }
+
+    private var placeholder: some View {
+        TronLoadingPlaceholder(label: "Loading artifacts") {
+            VStack(alignment: .leading, spacing: TronListMetrics.feedGap) {
+                TronListSectionHeader(title: "Tools", count: 0)
+                ForEach(0..<2, id: \.self) { _ in
+                    TronFeedCard { TronListRow(TronListRowContent(leading: .icon("square.grid.2x2", .tronPrimary), title: "Artifact title", timestamp: "Today")) }
+                }
+                TronListSectionHeader(title: "Today", count: 0)
+                    .padding(.top, TronListMetrics.sectionGap - TronListMetrics.feedGap)
+                TronFeedCard { TronListRow(TronListRowContent(leading: .icon("doc.text", .tronPrimary), title: "Report title", timestamp: "Today")) }
+            }
+        }
+        .accessibilityIdentifier("artifacts-placeholder")
     }
 
     private var caption: some View {

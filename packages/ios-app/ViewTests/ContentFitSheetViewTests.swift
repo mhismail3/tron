@@ -52,6 +52,93 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
             trace.assertStill("Arriving data fills the placeholders without resizing the sheet", against: app)
         }
     }
+
+    func testFittedSheetsNeitherScrollNorClipTheirContent() async throws {
+        for surface in ["worker-tools-short", "worker-thinking"] {
+            try await mounted(["-tron-settings-fixture", "-settings-expanded-review", "-six-ui-surface", surface]) { app in
+                try await assertFitted(app, surface)
+            }
+        }
+        try await mounted(["-tron-home-dashboard-fixture", "-home-shell-ready"]) { app in
+            try await openManageHome(app)
+            try await assertFitted(app, "manage-home")
+        }
+    }
+
+    func testBottomCardIsConcentricWithTheSheet() async throws {
+        for surface in ["worker-tools-short", "worker-report"] {
+            try await mounted(["-tron-settings-fixture", "-settings-expanded-review", "-six-ui-surface", surface]) { app in
+                try await assertConcentricBottom(app, surface)
+            }
+        }
+        try await mounted(["-tron-home-dashboard-fixture", "-home-shell-ready"]) { app in
+            try await openManageHome(app)
+            try await assertConcentricBottom(app, "manage-home")
+        }
+    }
+
+    func testArtifactsOpensAtItsFinalHeightWithEveryRowInside() async throws {
+        for delayed in [false, true] {
+            try await mounted(["-tron-integrations-fixture", "-integrations-scenario", "artifacts"] + (delayed ? ["-artifacts-delay"] : [])) { app in
+                try await app.activate("Artifacts")
+                var placeholder = false
+                let trace = try await SheetTrace.record(app, frames: 150, ready: { app.element("Done") != nil }) { index in
+                    if index == 0 { placeholder = app.element("artifacts-placeholder") != nil }
+                }
+                if delayed { XCTAssertTrue(placeholder, "Artifacts lays out placeholder rows while it loads") }
+                trace.assertStill("Artifacts opens at its final height", against: app)
+                try await app.until("the artifact rows") { app.element("artifact-card-usage-dashboard-container") != nil }
+                try await assertFitted(app, "artifacts\(delayed ? "-delayed" : "")")
+            }
+        }
+    }
+
+    private func sheetFrame(_ app: MountedFixture) -> CGRect { app.top.convert(app.top.bounds, to: nil) }
+
+    private func mainScroll(_ app: MountedFixture) -> UIScrollView? {
+        let width = sheetFrame(app).width
+        return MountedFixture.views(UIScrollView.self, in: app.top)
+            .filter { $0.bounds.height > 100 && $0.bounds.width > width * 0.8 }.max { $0.bounds.height < $1.bounds.height }
+    }
+
+    private func settle(_ app: MountedFixture, _ name: String) async throws {
+        _ = try await app.still("\(name) layout") {
+            guard let scroll = mainScroll(app) else { return nil }
+            return [scroll.contentSize.height, scroll.adjustedContentInset.bottom, scroll.bounds.height, sheetFrame(app).minY].map { Double($0) }
+        }
+    }
+
+    private func assertFitted(_ app: MountedFixture, _ name: String) async throws {
+        try await settle(app, name)
+        capture(app, name)
+        let sheet = sheetFrame(app)
+        XCTAssertGreaterThan(sheet.minY, 120, "\(name) fits its content")
+        let scroll = try XCTUnwrap(mainScroll(app))
+        let needed = scroll.contentSize.height + scroll.adjustedContentInset.top + scroll.adjustedContentInset.bottom
+        XCTAssertLessThanOrEqual(needed, scroll.bounds.height + 0.5,
+            "\(name): a fitted sheet must not scroll (content \(scroll.contentSize.height), insets \(scroll.adjustedContentInset), bounds \(scroll.bounds.height))")
+    }
+
+    private func assertConcentricBottom(_ app: MountedFixture, _ name: String) async throws {
+        try await app.until("\(name) presents") { app.button("Done") != nil || app.element("home-sheet-done-manage") != nil }
+        try await settle(app, name)
+        capture(app, "\(name)-corners")
+        let surfaces = MountedFixture.elements(in: app.top).filter {
+            let id = MountedFixture.identifier($0) ?? ""
+            return id == "tron-sheet-surface" || id.hasPrefix("tool-run-summary-")
+        }
+            .map(\.accessibilityFrame)
+        let card = try XCTUnwrap(surfaces.max { $0.maxY < $1.maxY }, "\(name) has a card")
+        let sheet = sheetFrame(app)
+        XCTAssertGreaterThan(sheet.minY, 120, "\(name) fits its content")
+        XCTAssertEqual(sheet.maxY - card.maxY, card.minX - sheet.minX, accuracy: 1,
+                       "\(name): the bottom card's concentric corners share the sheet's corner centres only when its bottom gap equals its side gap; card \(card) sheet \(sheet)")
+    }
+
+    private func capture(_ app: MountedFixture, _ name: String) {
+        let shot = XCTAttachment(image: app.render())
+        shot.name = "sheet-\(name)"; shot.lifetime = .keepAlways; add(shot)
+    }
 }
 
 struct SheetTrace: CustomStringConvertible {

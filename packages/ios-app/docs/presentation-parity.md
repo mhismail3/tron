@@ -129,6 +129,12 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   sizes or with the keyboard up. While a `TronSheetLoadingState` is shown the sheet holds its last
   settled height (medium before the first), so it opens at its final size; genuine changes after
   appearance animate with `.smooth` (none under Reduce Motion). The drag indicator is hidden.
+  The measured scroll extends under the bottom safe area; a fitted sheet adds no bottom content
+  margin, so content never exceeds its frame and the sheet cannot scroll or bounce (when the
+  scroll stops at the safe area, the safe-area height stays in the detent). While a sheet fits,
+  every `tronGlassSurface`/`tronScrollSurface` uses `ConcentricRectangle` bottom corners
+  (fixed card radius as the minimum), so only the card nearest the sheet's bottom edge grows to
+  share the sheet corners' centres; no surface marks itself as last.
   Scrolls that fill their viewport (`TronFeedEmptyState`) or are nested opt out through
   `tronSheetMeasuresContent`. `ContentFitSheetViewTests` samples the presented frame per display
   frame and fails on any overshoot or post-open move.

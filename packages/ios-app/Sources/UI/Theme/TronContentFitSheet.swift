@@ -1,9 +1,14 @@
 import SwiftUI
 import UIKit
 
+private struct TronSheetFit: Equatable {
+    let needed: CGFloat
+    let bottom: CGFloat
+}
+
 private struct TronSheetFitKey: PreferenceKey {
-    static let defaultValue: CGFloat? = nil
-    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
+    static let defaultValue: TronSheetFit? = nil
+    static func reduce(value: inout TronSheetFit?, nextValue: () -> TronSheetFit?) {
         if let next = nextValue() { value = next }
     }
 }
@@ -11,7 +16,6 @@ private struct TronSheetFitKey: PreferenceKey {
 extension EnvironmentValues {
     @Entry var tronSheetFitsContent = false
     @Entry var tronSheetMeasuresContent = false
-    @Entry var tronSurfaceConcentricBottom = false
 }
 
 private struct TronContentFitSheetModifier: ViewModifier {
@@ -20,6 +24,8 @@ private struct TronContentFitSheetModifier: ViewModifier {
     @State private var loading = false
     @State private var keyboard = false
     @State private var appeared = false
+    @State private var sheetBottom: CGFloat?
+    @State private var scrollBottom: CGFloat?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.tronPadSheetScene) private var padScene
@@ -27,7 +33,8 @@ private struct TronContentFitSheetModifier: ViewModifier {
     private var fitHeight: CGFloat? {
         guard padScene?.mode == nil, !keyboard, !dynamicTypeSize.isAccessibilitySize, let content = loading ? settled : measured else { return nil }
         let window = TronSheetWindowMetrics.current
-        let height = (content - window.bottomInset).rounded(.up)
+        let stopsAtSafeArea = sheetBottom.flatMap { sheet in scrollBottom.map { sheet - $0 > window.bottomInset / 2 } } ?? false
+        let height = (stopsAtSafeArea ? content : content - window.bottomInset).rounded(.up)
         return height < window.maximumDetent ? height : nil
     }
 
@@ -41,10 +48,12 @@ private struct TronContentFitSheetModifier: ViewModifier {
             .environment(\.tronSheetFitsContent, !loading && fitHeight != nil)
             .environment(\.tronSheetMeasuresContent, true)
             .onPreferenceChange(TronSheetFitKey.self) { next in
-                guard next.map({ abs($0 - (measured ?? -1)) >= 0.5 }) ?? (measured != nil) else { return }
+                guard let next else { return }
+                if abs(next.bottom - (scrollBottom ?? -1)) >= 0.5 { scrollBottom = next.bottom }
+                guard abs(next.needed - (measured ?? -1)) >= 0.5 else { return }
                 resize {
-                    measured = next
-                    if !loading { settled = next }
+                    measured = next.needed
+                    if !loading { settled = next.needed }
                 }
             }
             .onPreferenceChange(TronSheetLoadingPreferenceKey.self) { request in
@@ -62,6 +71,9 @@ private struct TronContentFitSheetModifier: ViewModifier {
                 resize { keyboard = false }
             }
             .onAppear { appeared = true }
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY + $0.safeAreaInsets.bottom } action: { next in
+                if abs(next - (sheetBottom ?? -1)) >= 0.5 { sheetBottom = next }
+            }
             .presentationDetents([detent])
             .presentationDragIndicator(.hidden)
     }
@@ -93,52 +105,44 @@ private struct TronSheetWindowMetrics {
 }
 
 struct TronSheetFitScrollModifier: ViewModifier {
-    @State private var height: CGFloat?
+    @State private var needed: CGFloat?
+    @State private var bottom: CGFloat?
     @Environment(\.tronSheetMeasuresContent) private var measures
+    @Environment(\.tronSheetFitsContent) private var fits
 
     func body(content: Content) -> some View {
         if measures {
             content
                 .environment(\.tronSheetMeasuresContent, false)
+                .ignoresSafeArea(.container, edges: .bottom)
+                .contentMargins(.bottom, fits ? 0 : TronSheetWindowMetrics.current.bottomInset)
                 .scrollBounceBehavior(.basedOnSize, axes: .vertical)
                 .onScrollGeometryChange(for: CGFloat?.self) { geometry in
                     let insets = geometry.contentInsets
                     return insets.top > 0 || insets.bottom > 0 ? insets.top + geometry.contentSize.height : nil
                 } action: { _, next in
-                    if let next { height = next }
+                    if let next { needed = next }
                 }
-                .preference(key: TronSheetFitKey.self, value: height)
+                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { bottom = $0 }
+                .preference(key: TronSheetFitKey.self, value: needed.flatMap { needed in
+                    bottom.map { TronSheetFit(needed: needed, bottom: $0) }
+                })
         } else {
             content
         }
     }
 }
 
-private struct TronSheetBottomContainerModifier: ViewModifier {
-    let active: Bool
-    @Environment(\.tronSheetFitsContent) private var fits
-
-    func body(content: Content) -> some View {
-        content.environment(\.tronSurfaceConcentricBottom, fits && active)
-    }
-}
-
 enum TronSurfaceShape {
-    static func resolve(cornerRadius: CGFloat, concentricBottom: Bool) -> AnyShape {
-        guard concentricBottom else { return AnyShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)) }
-        return AnyShape(ConcentricRectangle(
-            uniformTopCorners: .fixed(cornerRadius),
-            uniformBottomCorners: .concentric(minimum: .fixed(cornerRadius))
-        ))
+    static func resolve(cornerRadius: CGFloat, inFittedSheet: Bool) -> AnyShape {
+        guard inFittedSheet else { return AnyShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)) }
+        return AnyShape(ConcentricRectangle(uniformTopCorners: .fixed(cornerRadius),
+                                            uniformBottomCorners: .concentric(minimum: .fixed(cornerRadius))))
     }
 }
 
 extension View {
     func tronContentFitSheet() -> some View {
         modifier(TronContentFitSheetModifier())
-    }
-
-    func tronSheetBottomContainer(_ active: Bool = true) -> some View {
-        modifier(TronSheetBottomContainerModifier(active: active))
     }
 }

@@ -15,7 +15,7 @@ extension HomeSheet {
         return TronSettingsSections(alignment: .leading, spacing: 18) {
             HomeContextSummaryCard(snapshot: sessionID.flatMap { model.sessionContextPresentation(for: $0) }, read: read)
             if let sessionID { ManageModelConfigurationCard(sessionID: sessionID, home: true) }
-            manageRows(read, unresolved: unresolved).tronSheetBottomContainer()
+            manageRows(read, unresolved: unresolved)
         }
         .animation(.smooth(duration: 0.3), value: read)
     }

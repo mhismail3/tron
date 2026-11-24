@@ -195,13 +195,15 @@ private struct TronGlassSurfaceModifier: ViewModifier {
     let interactive: Bool
     let respectsSettingsTheme: Bool
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
-    @Environment(\.tronSurfaceConcentricBottom) private var concentricBottom
+    @Environment(\.tronSheetFitsContent) private var fits
 
     func body(content: Content) -> some View {
-        let shape = TronSurfaceShape.resolve(cornerRadius: cornerRadius, concentricBottom: concentricBottom)
+        let shape = TronSurfaceShape.resolve(cornerRadius: cornerRadius, inFittedSheet: fits)
         let resolvedAccent = respectsSettingsTheme ? settingsTheme?.surfaceAccent ?? accent : accent
         content
-            .environment(\.tronSurfaceConcentricBottom, false)
+            #if HOSTED_TEST
+            .background { Color.clear.accessibilityElement().accessibilityIdentifier("tron-sheet-surface") }
+            #endif
             .contentShape(shape)
             .glassEffect(
                 .regular.tint(resolvedAccent.opacity(tintOpacity)).interactive(interactive),
@@ -215,13 +217,15 @@ private struct TronScrollSurfaceModifier: ViewModifier {
     let cornerRadius: CGFloat
     let tintOpacity: Double
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
-    @Environment(\.tronSurfaceConcentricBottom) private var concentricBottom
+    @Environment(\.tronSheetFitsContent) private var fits
 
     func body(content: Content) -> some View {
-        let shape = TronSurfaceShape.resolve(cornerRadius: cornerRadius, concentricBottom: concentricBottom)
+        let shape = TronSurfaceShape.resolve(cornerRadius: cornerRadius, inFittedSheet: fits)
         let resolvedAccent = settingsTheme?.surfaceAccent ?? accent
         content
-            .environment(\.tronSurfaceConcentricBottom, false)
+            #if HOSTED_TEST
+            .background { Color.clear.accessibilityElement().accessibilityIdentifier("tron-sheet-surface") }
+            #endif
             .contentShape(shape)
             .background {
                 shape

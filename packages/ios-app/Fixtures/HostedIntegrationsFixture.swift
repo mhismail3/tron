@@ -182,6 +182,7 @@ actor HostedIntegrationsGateway {
         if method == "session.commands" { return (.object(["commands": .array([])]), nil) }
         if method == "session.attention.read" { return (.object(["completionRevision": .number(0), "attentionRevision": .number(0), "isUnread": .bool(false)]), nil) }
         if method == "artifacts.list" {
+            if HostedLaunch.arguments.contains("-artifacts-delay") { try? await Task.sleep(for: .seconds(1)) }
             if scenario == "artifacts-empty" { return (.object(["tools": .array([]), "reports": .array([])]), nil) }
             let base = HostedLaunch.arguments.drop(while: { $0 != "-artifacts-base-url" }).dropFirst().first ?? "https://mac.example.ts.net:8443"
             let now = Date.now, calendar = Calendar.current

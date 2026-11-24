@@ -544,7 +544,7 @@ struct ToolRunDetailSheet: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(orderedTools) { tool in
-                        ToolRunSummaryRow(tool: tool, isLast: tool.id == orderedTools.last?.id) {
+                        ToolRunSummaryRow(tool: tool) {
                             if let onDisplay, let command = ToolDisplayActivation.command(for: tool, sessionID: sessionID) {
                                 onDisplay(tool.id, command)
                             } else {
@@ -737,7 +737,6 @@ struct ToolRowPreviewViewport<Content: View>: View {
 
 private struct ToolRunSummaryRow: View {
     let tool: ChatToolPresentation
-    let isLast: Bool
     let action: () -> Void
 
     var body: some View {
@@ -821,7 +820,6 @@ private struct ToolRunSummaryRow: View {
             .padding(.vertical, 11)
             .frame(maxWidth: .infinity, alignment: .leading)
             .tronScrollSurface(accent: accent, cornerRadius: 12, tintOpacity: 0.10)
-            .tronSheetBottomContainer(isLast)
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
