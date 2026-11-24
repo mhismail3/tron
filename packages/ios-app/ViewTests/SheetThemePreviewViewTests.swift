@@ -64,7 +64,7 @@ final class SheetThemePreviewViewTests: ShuffledTestCase {
                           + (mode == "dark" ? ["-settings-dark"] : [])) { app in
             try await app.activate("Open Settings")
             try await app.until("Settings opens") { app.navigationTitle("Settings") != nil }
-            try await app.expandTopSheet()
+            try await app.waitForTopSheetToSettle()
             try await open(app, "settings-link-Connections", title: "Connections")
             try await body(app)
         }
@@ -74,7 +74,7 @@ final class SheetThemePreviewViewTests: ShuffledTestCase {
         _ = try await revealed(app, key)
         try await app.activate(key)
         try await app.until("\(title) opens") { app.navigationTitle(title) != nil }
-        try await app.expandTopSheet()
+        try await app.waitForTopSheetToSettle()
     }
 
     private func containerPatch(_ frame: CGRect) -> CGRect {

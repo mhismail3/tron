@@ -71,7 +71,6 @@ struct SessionShellView: View {
     @Environment(\.tronPresentationActivityCoordinator) private var presentationActivityCoordinator
     @State private var dashboardHeader = DashboardHeaderState()
     @State private var showNewSession = false
-    @State private var newSessionDetent: PresentationDetent = .medium
     @State private var showSettings = false
     @State private var showingAutomations = false
     @State private var showingArtifacts = false
@@ -152,8 +151,6 @@ struct SessionShellView: View {
                     present(route)
                 }
                     .tronTopBlur(.sheet)
-                    .presentationDetents([.medium, .large], selection: $newSessionDetent)
-                    .presentationDragIndicator(.hidden)
             }
             .automationsSheet(
                 isPresented: $showingAutomations,
@@ -171,7 +168,6 @@ struct SessionShellView: View {
                     showSettings = false
                     present(route)
                 })
-                .presentationDragIndicator(.hidden)
             }
             .tronManagedSheet(item: $projectSettings, identity: { "dashboard.project-settings.\($0.id)" }) { route in
                 ProjectSettingsSheet(route: route)

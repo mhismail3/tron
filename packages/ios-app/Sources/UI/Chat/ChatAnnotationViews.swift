@@ -214,8 +214,6 @@ struct ChatAnnotationSheet: View {
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { presenter?.sheetTop = $0 }
         .onDisappear { presenter?.sheetTop = nil }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
         .tint(accent)
         .tronSettingsVisualTheme(accent: accent)
     }

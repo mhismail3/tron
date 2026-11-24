@@ -31,7 +31,7 @@ final class ListStandardViewTests: ShuffledTestCase {
             _ = try await revealed(app, "home-manage-profile")
             try await app.activate("home-manage-profile")
             try await app.until("Profile opens") { app.element("home-profile-items") != nil }
-            try await app.expandTopSheet()
+            try await app.waitForTopSheetToSettle()
             let list = "home-profile-items", titles = ["Communication", "Machines, devices & services"]
             let rowID = "home-profile-item-6a26bfb7-f0d1-44ce-b0ae-9da01da3e55c"
             try await app.until("the sections") {

@@ -12,29 +12,14 @@ final class HomeTaskReadingViewTests: ShuffledTestCase {
         try await mounted(["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-task-padding-review"],
                           contentSize: contentSize) { app in
             try await openManageHome(app)
-            _ = try await revealed(app, "home-manage-controls")
-            try await app.until("the Controls row markers") {
-                app.element("home-manage-controls-title") != nil && app.element("home-manage-controls-subtext") != nil
-            }
-            let controlsLabel = app.element("home-manage-controls")?.accessibilityLabel ?? ""
-            XCTAssertTrue(controlsLabel.contains("Controls") && controlsLabel.contains("Pause or resume memory, or disable Home"), controlsLabel)
-            let metadata = app.element("home-manage-controls-subtext")!, settingsTitle = app.element("home-manage-controls-title")!
-            let metadataLines: CGFloat = accessibilityLarge ? 2 : 1
-            let metadataHeight = metadata.accessibilityFrame.height / metadataLines
-            XCTAssertGreaterThan(metadataHeight, 0)
-            if accessibilityLarge {
-                XCTAssertGreaterThan(metadata.accessibilityFrame.height, settingsTitle.accessibilityFrame.height,
-                                     "The subtitle wraps at accessibility text")
-            }
-            XCTAssertLessThan(metadataHeight, settingsTitle.accessibilityFrame.height, "Default shared-row callers keep their smaller metadata style")
             _ = try await revealed(app, "home-manage-tasks")
             try await app.activate("home-manage-tasks")
             try await app.until("Tasks opens") { app.element("home-task-terminal") != nil }
-            try await app.expandTopSheet()
+            try await app.waitForTopSheetToSettle()
             _ = try await revealed(app, "home-task-terminal")
             try await app.activate("home-task-terminal")
             try await app.until("the task opens") { app.element("home-task-detail") != nil }
-            try await app.expandTopSheet()
+            try await app.waitForTopSheetToSettle()
             let ids = ["home-task-model-title", "home-task-result-subtext", "home-task-model-subtext", "home-task-subagents-subtext",
                        "home-task-spend-subtext", "home-task-checkin-summary-title", "home-task-checkin-done-subtext",
                        "home-task-checkin-next-subtext", "home-task-checkin-next"]

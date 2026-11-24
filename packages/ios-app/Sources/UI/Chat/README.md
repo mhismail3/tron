@@ -144,7 +144,7 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   `ChatCompactPillSurface` enforces interactive Liquid Glass, with semantic red tint and stronger
   error ink; only non-tappable informational pills may retain a flat surface.
   The existing transcript notification route keeps its sheet live above lazy rows.
-  `ChatDetailSheet`, shared with nested tool details, owns navigation/Done, medium/large detents,
+  `ChatDetailSheet`, shared with nested tool details, owns navigation/Done, content-fit sizing,
   top chrome and insets. Single errors and runs share one layout of themed standard groups: a
   summary row (runs: totals and first/last times, then the Breakdown list), then per occurrence, newest
   first and always visible, a details group (model, type, time, request ID, HTTP status rows) and
@@ -226,10 +226,10 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   independent of the reading family, including View All. `TronMobileViewTests/SessionRowClockViewTests` checks
   their rendered glyph advances and caption metrics against shared code text references.
 - Reduce Motion removes spatial motion and never hides authoritative text.
-- Pause/Resume memory and Disable Home are `HomeControlsSection`, the last section of Home
-  Settings (never Manage Home); it owns its own fenced `home.status` read. Disable Home's icon,
-  title and subtitle use `tronError` and Pause memory's use `tronSlate` (the Paused pill's
-  neutral); each row overrides the inherited settings theme locally so its icon cannot revert to primary.
+- Pause/Resume memory and Disable Home are icon buttons leading Manage Home's toolbar
+  (`home-manage-pause`/`home-manage-resume`, `home-manage-disable`), read from the sheet's own
+  `home.manage` status; each tap presents a `TronConfirmationSheet` before the mutation. An
+  unresolved Home command replaces them with Check completion (`home-manage-check-completion`).
 - Tasks default to in-progress/attention lineages; the shared toolbar filter exposes finished
   and all work. The Gateway owns grouping by explicit resume links, never by title.
 - Task check-ins use shared list insets and line/block spacing once per record: summary headline,
@@ -297,7 +297,7 @@ with isolated `-home-profile-hierarchy` synthetic data in light/dark at Large, X
 The fixture sets those exact SwiftUI sizes; the journey measures native row growth and checks
 writable-placement versus read-only-prior actions. Captures require human visual review.
 
-Classes under `TronMobileUITests/`: `TronHomeControlsUITests`, `TronHomeDashboardUITests`, `TronHomeSheetsUITests`,
+Classes under `TronMobileUITests/`: `TronHomeDashboardUITests`, `TronHomeSheetsUITests`,
 `TronConsolidatedUIRegressionTests` (Memory/canonical navigation, metadata, usage loading,
 Workspace cover/uncover, Manage model writes and scoped Settings routes),
 `TronSubsheetReliabilityUITests` (fresh Profile item and Chapter first taps, reopen/foreground,

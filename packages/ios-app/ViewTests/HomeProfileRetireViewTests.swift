@@ -10,11 +10,11 @@ final class HomeProfileRetireViewTests: ShuffledTestCase {
             _ = try await revealed(app, "home-manage-profile")
             try await app.activate("home-manage-profile")
             try await app.until("Profile opens") { app.element("home-profile-items") != nil }
-            try await app.expandTopSheet()
+            try await app.waitForTopSheetToSettle()
             _ = try await revealed(app, "home-profile-item-9a364c45-34fe-4f0a-93e6-fc507e2b0bdc")
             try await app.activate("home-profile-item-9a364c45-34fe-4f0a-93e6-fc507e2b0bdc")
             try await app.until("the profile item opens") { app.element("home-profile-item-detail") != nil }
-            try await app.expandTopSheet()
+            try await app.waitForTopSheetToSettle()
             _ = try await revealed(app, "home-profile-item-retire")
             try await app.until("the Retire row and its subtext") {
                 app.element("home-profile-item-retire") != nil && app.element("home-profile-item-retire-subtext") != nil

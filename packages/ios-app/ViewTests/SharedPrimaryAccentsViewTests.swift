@@ -16,14 +16,14 @@ final class SharedPrimaryAccentsViewTests: ShuffledTestCase {
                            "-fixture-appearance", mode], theme: theme) { app in
             try await app.activate("Stop session")
             try await app.until("Manage Session opens") { app.navigationTitle("Manage Session") != nil }
-            try await app.expandTopSheet()
+            try await app.waitForTopSheetToSettle()
             let progress = try await revealed(app, "Context used")
             XCTAssertEqual(progress.accessibilityValue, "31 percent")
             try await verify(app, ["Context used"], title: "Manage Session", name: "\(theme)-\(mode)-usage")
             _ = try await revealed(app, "Session History")
             try await app.activate("Session History")
             try await app.until("Session History opens") { app.element("history-row-h-6732-status") != nil }
-            try await app.expandTopSheet()
+            try await app.waitForTopSheetToSettle()
             try await verify(app, ["history-row-h-6732-status", "history-row-h-6731-leading"],
                              title: "Session History", name: "\(theme)-\(mode)-history")
             _ = try await revealed(app, "history-row-h-6727-leading")
@@ -31,13 +31,13 @@ final class SharedPrimaryAccentsViewTests: ShuffledTestCase {
         }
         try await mounted(["-tron-agent-instructions-fixture"] + (mode == "dark" ? ["-home-dark"] : []), theme: theme) { app in
             try await app.until("the instructions sections") { app.element("agent-instructions-section-tools") != nil }
-            try await app.expandTopSheet()
+            try await app.waitForTopSheetToSettle()
             for (section, indices) in [("tools", [0, 1]), ("rules", [0, 2]), ("skills", [0])] {
                 _ = try await revealed(app, "agent-instructions-section-\(section)")
                 try await app.activate("agent-instructions-section-\(section)")
                 let title = section.capitalized
                 try await app.until("\(title) opens") { app.navigationTitle(title) != nil }
-                try await app.expandTopSheet()
+                try await app.waitForTopSheetToSettle()
                 try await verify(app, indices.map { "agent-instructions-entry-\(section).\($0)" }, title: title,
                                  name: "\(theme)-\(mode)-\(section)") { frame in
                     CGRect(x: frame.maxX - 70, y: frame.minY, width: 70, height: frame.height)

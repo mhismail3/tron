@@ -98,7 +98,7 @@ struct AutomationDetailView: View {
         .foregroundStyle(Color.tronTextPrimary)
         .tronSettingsLayout()
         .tronSettingsVisualTheme(accent: .tronPrimary, surfaceAccent: .tronPrimarySurface)
-        .tronTopBlur(.sheet).presentationDetents([.large]).presentationDragIndicator(.hidden)
+        .tronTopBlur(.sheet)
         .task(id: PresentationActivityTaskID(
             source: "\(selection.id):\(currentRevisionTag):\(loadRevision):\(presentationReadGeneration):\(model.profileRevision):\(model.foregroundReconciliationGeneration):\(scenePhase == .active)",
             presentationActive: presentationActivity.allowsPresentationPublication

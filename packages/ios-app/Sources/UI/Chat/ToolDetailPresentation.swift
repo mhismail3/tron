@@ -62,11 +62,6 @@ private struct BoundedCircularBuffer<Element> {
     }
 }
 
-enum ToolDetailDisplayDensity: Hashable, Sendable {
-    case glance
-    case expanded
-}
-
 struct ToolDetailMetadata: Hashable, Sendable, Identifiable {
     let label: String
     let value: String
@@ -217,15 +212,9 @@ enum ToolDiffLineKind: Hashable, Sendable {
     case omitted(Int)
 }
 
-enum ToolDiffOmissionScope: Hashable, Sendable {
-    case expanded
-    case glance
-}
-
 enum ToolDiffLineID: Hashable, Sendable {
     case source(index: Int, kind: ToolDiffLineKind, text: String)
     case omission(
-        scope: ToolDiffOmissionScope,
         precedingSourceIndex: Int?,
         followingSourceIndex: Int?,
         omittedLineCount: Int
@@ -248,11 +237,8 @@ struct ToolDiffPresentation: Hashable, Sendable {
     static let retainedHeadLines = 240
     static let retainedTailLines = 119
     static let maximumRenderedLineCharacters = 360
-    static let compactHeadLines = 8
-    static let compactTailLines = 5
 
     let lines: [ToolDiffLine]
-    let compactLines: [ToolDiffLine]
     let sourceLabel: String
     let totalLineCount: Int
     let lineCounts: ToolDiffLineCounts?
@@ -273,10 +259,6 @@ struct ToolDiffPresentation: Hashable, Sendable {
     var changesSubtitle: String {
         guard let diffUnitCount else { return sourceLabel }
         return "\(diffUnitCount) diff \(diffUnitCount == 1 ? "section" : "sections") · \(sourceLabel)"
-    }
-
-    func visibleLines(for density: ToolDetailDisplayDensity) -> [ToolDiffLine] {
-        density == .glance ? compactLines : lines
     }
 
     static func make(
@@ -306,7 +288,6 @@ struct ToolDiffPresentation: Hashable, Sendable {
            var presentation = make(unifiedPatch: patch, sourceLabel: "Applied diff", sourceIsTruncated: responseIsTruncated) {
             presentation = ToolDiffPresentation(
                 lines: presentation.lines,
-                compactLines: presentation.compactLines,
                 sourceLabel: presentation.sourceLabel,
                 totalLineCount: presentation.totalLineCount,
                 lineCounts: presentation.lineCounts,
@@ -478,11 +459,6 @@ struct ToolDiffPresentation: Hashable, Sendable {
         private var tail = BoundedCircularBuffer<SourceLine>(
             capacity: ToolDiffPresentation.retainedTailLines
         )
-        private var compactHead: [SourceLine] = []
-        private var compactTail = BoundedCircularBuffer<SourceLine>(
-            capacity: ToolDiffPresentation.compactTailLines
-        )
-        private var compactSemanticCount = 0
         private(set) var totalCount = 0
         private(set) var hasChangeContent = false
         private var additions = 0
@@ -494,15 +470,6 @@ struct ToolDiffPresentation: Hashable, Sendable {
             if line.0 == .addition { additions += 1 }
             if line.0 == .removal { removals += 1 }
             if line.0 == .addition || line.0 == .removal { hasChangeContent = true }
-            if case .metadata = line.0 {
-            } else {
-                compactSemanticCount += 1
-                if compactHead.count < ToolDiffPresentation.compactHeadLines {
-                    compactHead.append(sourceLine)
-                } else {
-                    compactTail.append(sourceLine)
-                }
-            }
             if head.count < ToolDiffPresentation.retainedHeadLines {
                 head.append(sourceLine)
                 return
@@ -528,7 +495,6 @@ struct ToolDiffPresentation: Hashable, Sendable {
                 let omitted = totalCount - head.count - tail.count
                 visible = head.map(\.presentation)
                     + [omission(
-                        scope: .expanded,
                         preceding: head.last,
                         following: orderedTail.first,
                         count: omitted,
@@ -538,7 +504,6 @@ struct ToolDiffPresentation: Hashable, Sendable {
             }
             return ToolDiffPresentation(
                 lines: visible,
-                compactLines: compactPresentation(),
                 sourceLabel: sourceLabel,
                 totalLineCount: totalCount,
                 lineCounts: countsAvailable ? ToolDiffLineCounts(additions: additions, removals: removals) : nil,
@@ -549,27 +514,7 @@ struct ToolDiffPresentation: Hashable, Sendable {
             )
         }
 
-        private func compactPresentation() -> [ToolDiffLine] {
-            let orderedTail = compactTail.orderedElements
-            let maximumUnomitted = ToolDiffPresentation.compactHeadLines
-                + ToolDiffPresentation.compactTailLines
-            guard compactSemanticCount > maximumUnomitted else {
-                return (compactHead + orderedTail).map(\.presentation)
-            }
-            let omitted = compactSemanticCount - compactHead.count - compactTail.count
-            return compactHead.map(\.presentation)
-                + [omission(
-                    scope: .glance,
-                    preceding: compactHead.last,
-                    following: orderedTail.first,
-                    count: omitted,
-                    text: "\(omitted) diff lines omitted from glance"
-                )]
-                + orderedTail.map(\.presentation)
-        }
-
         private func omission(
-            scope: ToolDiffOmissionScope,
             preceding: SourceLine?,
             following: SourceLine?,
             count: Int,
@@ -577,7 +522,6 @@ struct ToolDiffPresentation: Hashable, Sendable {
         ) -> ToolDiffLine {
             ToolDiffLine(
                 id: .omission(
-                    scope: scope,
                     precedingSourceIndex: preceding?.sourceIndex,
                     followingSourceIndex: following?.sourceIndex,
                     omittedLineCount: count

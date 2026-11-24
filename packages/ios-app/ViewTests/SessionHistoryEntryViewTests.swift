@@ -4,20 +4,19 @@ import XCTest
 
 @MainActor
 final class SessionHistoryEntryViewTests: ShuffledTestCase {
-    func testHistoryEntryUsesOneScrollAndClearsToolbarAtMedium() async throws {
+    func testHistoryEntryUsesOneScrollAndClearsToolbar() async throws {
         try await mounted(["-tron-session-configuration-fixture", "-settings-scope-review", "-fixture-appearance", "light",
                            "-manage-session-review", "-history-large"]) { app in
             try await app.activate("Stop session")
             _ = try await revealed(app, "Session History")
             try await app.activate("Session History")
             try await app.until("the history row") { app.element("history-row-h-6732") != nil }
-            try await app.expandTopSheet()
+            try await app.waitForTopSheetToSettle()
             try await app.activate("history-row-h-6731")
             try await app.until("History Entry opens") {
                 app.navigationTitle("History Entry") != nil && entryText(app) { $0.hasSuffix(" characters") } != nil
             }
             let title = try XCTUnwrap(app.navigationTitle("History Entry"))
-            XCTAssertGreaterThan(title.accessibilityFrame.minY, app.window.bounds.height * 0.35, "Exercise the medium detent")
             let done = try XCTUnwrap(app.toolbarActions(around: title).first { $0.accessibilityLabel == "Done" })
             let response = try XCTUnwrap(entryText(app) { $0.hasPrefix("Response") })
             XCTAssertGreaterThanOrEqual(response.accessibilityFrame.minY, done.accessibilityFrame.maxY,

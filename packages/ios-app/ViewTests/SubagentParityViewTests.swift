@@ -47,7 +47,7 @@ final class SubagentParityViewTests: ShuffledTestCase {
             try await mounted(["-tron-subagent-parity-fixture", "-history-grouping", "-history-lifecycle", "-history-\(outcome)", "-dark"]) { app in
                 try await app.activate("Subagent History")
                 try await app.until("the worker row") { app.button("subagent-row-worker") != nil }
-                try await app.expandTopSheet()
+                try await app.waitForTopSheetToSettle()
                 let stages = [("worker", "Queued", true), ("worker", "Running", true),
                               ("worker", "Pausing…", true), ("worker", "Paused", false),
                               ("resumed", "Queued", true), ("resumed", "Running", true),

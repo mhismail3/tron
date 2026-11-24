@@ -82,7 +82,7 @@ struct HostedToolSheetsPolishFixture: View {
     @ViewBuilder private var destination: some View {
         let tool = Self.tool(scenario)
         NavigationStack {
-            ToolDetailSheet(tool: tool, density: .expanded)
+            ToolDetailSheet(tool: tool)
                 .tronToolDetailNavigationChrome()
                 .toolbar {
                     ToolbarItem(placement: .principal) { ToolDetailNavigationTitle(tool: tool) }
@@ -94,8 +94,6 @@ struct HostedToolSheetsPolishFixture: View {
                 }
         }
         .tronTopBlur(.toolDetail)
-        .presentationDetents([.large])
-        .presentationDragIndicator(.hidden)
         .tronPresentation()
     }
 

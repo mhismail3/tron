@@ -221,8 +221,6 @@ private struct AgentInstructionsListSheet<Content: View>: View {
                 .tint(accent)
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
         .tronSettingsVisualTheme(accent: accent)
     }
 }
@@ -237,7 +235,7 @@ private struct AgentInstructionsReader: View {
     let reading: AgentInstructionsReading
 
     var body: some View {
-        TronDocumentSheet(title: reading.title, detents: [.medium, .large]) {
+        TronDocumentSheet(title: reading.title) {
             PreparedAgentInstructions(instructions: reading.text)
                 .tronScrollEdgeChrome()
         }

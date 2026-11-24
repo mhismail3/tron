@@ -31,7 +31,7 @@ final class DashboardHeadersViewTests: ShuffledTestCase {
                                "-fixture-appearance", dark ? "dark" : "light"]) { app in
                 try await app.activate("Open Settings")
                 try await app.until("Settings opens") { app.navigationTitle("Settings") != nil }
-                try await app.expandTopSheet()
+                try await app.waitForTopSheetToSettle()
                 for header in ["This iPhone", "Accounts", "Agent & Tools", "System"] {
                     XCTAssertNil(app.staticText(header), "Settings has no section header \(header)\n\(app.tree())")
                 }

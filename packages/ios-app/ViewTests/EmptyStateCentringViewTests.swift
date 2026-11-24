@@ -49,7 +49,7 @@ final class EmptyStateCentringViewTests: ShuffledTestCase {
             prefixed(text) != nil && feed() != nil && prefixed(captionText) != nil
         }
         for detent in ["medium", "large"] {
-            if detent == "large" { try await app.expandTopSheet() }
+            if detent == "large" { try await app.waitForTopSheetToSettle() }
             _ = try await app.still("\(title) at \(detent) layout") {
                 guard let p = prefixed(text), let f = feed(), let c = prefixed(captionText) else { return nil }
                 let feedFrame = f.convert(f.bounds, to: nil)

@@ -37,8 +37,6 @@ struct MCPAuthSheet: View {
                 }
             }
             .tronPresentation()
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.hidden)
         }
         .onChange(of: model.isAuthOperationActive(operationID), initial: true) { _, isActive in
             if !isActive { finish() }

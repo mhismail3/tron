@@ -1354,7 +1354,6 @@ struct DisplaySheet: View {
     @PresentationState private var showingTechnicalDetails = false
     @PresentationState private var imageLeaseID = UUID()
     @PresentationState private var documentLeaseID = UUID()
-    @PresentationState private var liveDetent: PresentationDetent = .medium
 
     @ViewBuilder
     var body: some View {
@@ -1381,8 +1380,6 @@ struct DisplaySheet: View {
                     }
             }
             .tronTopBlur(.sheet)
-            .presentationDetents([.medium, .large], selection: $liveDetent)
-            .presentationDragIndicator(.hidden)
             .tronPresentation()
         } else if (route.display.kind == .webpage || route.display.kind == .hls),
            let value = route.display.remoteURL,
@@ -1390,8 +1387,6 @@ struct DisplaySheet: View {
             TronSafariView(url: url)
                 .ignoresSafeArea(.container, edges: .all)
                 .accessibilityLabel(route.display.altText)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.hidden)
         } else if let artifact = route.display.artifact,
                   route.display.kind == .image,
            let identity = model.chatMediaDestinationIdentity(blobID: artifact.id, sessionID: route.sessionID) {
@@ -1424,11 +1419,7 @@ struct DisplaySheet: View {
             .accessibilityLabel(route.display.altText)
         } else {
             let isVideo = route.display.kind == .video
-            TronDocumentSheet(
-                title: route.display.title,
-                detents: isVideo ? [.medium, .large] : [.large],
-                initialDetent: isVideo ? .medium : nil
-            ) {
+            TronDocumentSheet(title: route.display.title) {
                 let content = DisplayArtifactContent(sessionID: route.sessionID, display: route.display, context: .sheet)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 if isVideo {

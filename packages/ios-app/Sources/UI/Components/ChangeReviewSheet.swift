@@ -9,7 +9,6 @@ struct ChangeReviewSheet: View {
     let close: (() -> Void)?
     let approve: () -> Void
     let cancel: () -> Void
-    @PresentationState private var detent: PresentationDetent = .medium
 
     init(review: ChangeReview, submitting: Bool = false, secret: Binding<String>? = nil, failure: String? = nil,
          close: (() -> Void)? = nil, approve: @escaping () -> Void, cancel: @escaping () -> Void) {
@@ -37,11 +36,18 @@ struct ChangeReviewSheet: View {
                     }
                     if let secret {
                         TronSettingsGroup("API key") {
-                            SecureField("Paste API key", text: secret)
-                                .textContentType(.password).textInputAutocapitalization(.never).autocorrectionDisabled()
-                                .tronTextEntryDone()
+                            Text(verbatim: "Paste API key")
+                                .hidden()
                                 .modifier(ReviewRowInsets())
-                                .accessibilityIdentifier("change-review-secret")
+                                .overlay {
+                                    SecureField("Paste API key", text: secret)
+                                        .textContentType(.password).textInputAutocapitalization(.never).autocorrectionDisabled()
+                                        .tronTextEntryDone()
+                                        .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
+                                        .frame(maxHeight: .infinity)
+                                        .contentShape(Rectangle())
+                                        .accessibilityIdentifier("change-review-secret")
+                                }
                         }
                         .tronSettingsCaption("Sent once to your Mac and stored in its Keychain. It is never shown again.")
                     }
@@ -97,8 +103,6 @@ struct ChangeReviewSheet: View {
             }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large], selection: $detent)
-        .presentationDragIndicator(.hidden)
         .interactiveDismissDisabled(close != nil || submitting)
     }
 

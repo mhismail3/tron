@@ -49,8 +49,6 @@ struct ProjectSettingsSheet: View {
         .tronTopBlur(.sheet)
         .tronPresentation()
         .tronSettingsLayout()
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
     }
 }
 

@@ -9,7 +9,7 @@ final class ManageSessionReviewViewTests: ShuffledTestCase {
                            "-fixture-appearance", "light"]) { app in
             try await app.activate("Stop session")
             try await app.until("Manage Session opens") { app.element("session-usage-summary") != nil }
-            try await app.expandTopSheet()
+            try await app.waitForTopSheetToSettle()
             @MainActor func button(_ key: String) -> NSObject? {
                 MountedFixture.elements(in: app.top).last {
                     (MountedFixture.identifier($0) == key || $0.accessibilityLabel == key) && $0.accessibilityTraits.contains(.button)

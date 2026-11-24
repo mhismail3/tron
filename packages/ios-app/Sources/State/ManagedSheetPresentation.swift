@@ -165,7 +165,7 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
             content: AnyView(Color.clear.accessibilityHidden(true).sheet(isPresented: $isPresented, onDismiss: didDismiss) {
                 let token = lease.contentToken(identity: identity)
                 TronPresentationSurface(token: token, parent: parent, keepsParentViewport: keepsPresenterViewport) {
-                    sheetContent().environment(\.chatOwnsStatusBar, false)
+                    sheetContent().environment(\.chatOwnsStatusBar, false).tronContentFitSheet()
                 }
                 .tronPadSheetPresentation()
                 .environment(\.tronPresentationStateScope, stateStore.scope(path: statePath))
@@ -297,7 +297,7 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
             content: AnyView(Color.clear.accessibilityHidden(true).sheet(item: $item, onDismiss: didDismiss) { value in
                 let token = lease.contentToken(identity: identity(value))
                 TronPresentationSurface(token: token, parent: parent) {
-                    sheetContent(value).environment(\.chatOwnsStatusBar, false)
+                    sheetContent(value).environment(\.chatOwnsStatusBar, false).tronContentFitSheet()
                 }
                 .tronPadSheetPresentation()
                 .environment(\.tronPresentationStateScope, stateStore.scope(path: statePath(value)))

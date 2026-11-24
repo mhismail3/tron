@@ -24,19 +24,19 @@ final class TronSheetBackgroundUITests: XCTestCase {
         ring.tap()
         let manageDone = app.buttons["home-sheet-done-manage"]
         XCTAssertTrue(manageDone.waitForExistence(timeout: 5))
-        assertStationaryBlur(app, done: manageDone, dark: dark, name: "manage")
+        assertStationaryBlur(app, done: manageDone, dark: dark, name: "manage", loading: "home-manage-placeholder")
         releaseHeldTaskList()
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].waitForExistence(timeout: 5))
         app.descendants(matching: .any)["home-manage-tasks"].tap()
         let tasksDone = app.buttons["home-sheet-done-tasks"]
         XCTAssertTrue(tasksDone.waitForExistence(timeout: 5))
-        assertStationaryBlur(app, done: tasksDone, dark: dark, name: "tasks")
+        assertStationaryBlur(app, done: tasksDone, dark: dark, name: "tasks", loading: "sheet-loading")
         releaseHeldTaskList()
         XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 5))
     }
 
-    @MainActor private func assertStationaryBlur(_ app: XCUIApplication, done: XCUIElement, dark: Bool, name: String) {
-        XCTAssertTrue(app.descendants(matching: .any)["sheet-loading"].waitForExistence(timeout: 3),
+    @MainActor private func assertStationaryBlur(_ app: XCUIApplication, done: XCUIElement, dark: Bool, name: String, loading: String) {
+        XCTAssertTrue(app.descendants(matching: .any)[loading].firstMatch.waitForExistence(timeout: 3),
                       "The delayed real sheet read must exercise the loading reveal")
         let window = app.windows.firstMatch.frame
         let toolbarY = done.frame.midY

@@ -10,7 +10,7 @@ final class HomeProfileViewTests: ShuffledTestCase {
             _ = try await revealed(app, "home-manage-profile")
             try await app.activate("home-manage-profile")
             try await app.until("Profile opens") { app.element("home-profile-items") != nil }
-            try await app.expandTopSheet()
+            try await app.waitForTopSheetToSettle()
             let titles = ["Communication", "Machines, devices & services", "Unsorted"]
             try await app.until("the profile areas") { titles.allSatisfy { text(app, $0) != nil } }
             let areas = titles.map { text(app, $0)!.accessibilityFrame }

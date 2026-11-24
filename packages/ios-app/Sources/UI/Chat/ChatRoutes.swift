@@ -86,7 +86,6 @@ struct ChatRoutes: ViewModifier {
                         onForkCreated(route)
                     }
                 )
-                .presentationDragIndicator(.hidden)
             }
             .tronManagedSheet(
                 item: $queuedMessageEditor,
@@ -225,7 +224,6 @@ private struct QueueEditingUnavailableSheet: View {
             }
         }
         .tronTopBlur(.sheet)
-        .presentationDragIndicator(.hidden)
         .tronPresentation()
     }
 }

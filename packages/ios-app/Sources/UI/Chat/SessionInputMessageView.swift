@@ -347,7 +347,6 @@ struct InboundContextDetailsSheet: View {
     let item: TranscriptItem
     var technical = false
     @Environment(\.dismiss) private var dismiss
-    @PresentationState private var detent: PresentationDetent = .medium
     @PresentationState private var showingTechnicalDetails = false
 
     private let report: InboundHomeReport?
@@ -489,8 +488,6 @@ struct InboundContextDetailsSheet: View {
             InboundContextDetailsSheet(item: item, technical: true)
         }
         .tronTopBlur(.toolDetail)
-        .presentationDetents([.medium, .large], selection: $detent)
-        .presentationDragIndicator(.hidden)
         .tronPresentation()
     }
 

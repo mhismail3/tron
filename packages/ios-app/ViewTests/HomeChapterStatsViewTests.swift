@@ -10,14 +10,14 @@ final class HomeChapterStatsViewTests: ShuffledTestCase {
             _ = try await revealed(app, "home-manage-chapters")
             try await app.activate("home-manage-chapters")
             try await app.until("Chapters opens") { app.element("home-chapter-list") != nil }
-            try await app.expandTopSheet()
+            try await app.waitForTopSheetToSettle()
             for ordinal in [2, 1] {
                 try await app.activate("home-chapter-\(ordinal)")
                 try await app.until("chapter \(ordinal) opens") {
                     app.element("home-chapter-detail") != nil && app.element("home-chapter-stats") != nil
                         && app.element("home-chapter-size") != nil && app.element("home-chapter-header") != nil
                 }
-                try await app.expandTopSheet()
+                try await app.waitForTopSheetToSettle()
                 let header = app.element("home-chapter-header")!.accessibilityFrame
                 let size = app.element("home-chapter-size")!.accessibilityFrame
                 let stats = app.element("home-chapter-stats")!.accessibilityFrame

@@ -10,7 +10,6 @@ struct SessionActivitySheet: View {
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.scenePhase) private var scenePhase
     @PresentationState private var selectedProcess: PresentedProcessActivity?
-    @PresentationState private var detent: PresentationDetent = .medium
     @PresentationState private var appSettings = AppLocalBehaviorSettings.shared
 
     var body: some View {
@@ -64,8 +63,6 @@ struct SessionActivitySheet: View {
             ReadOnlySubagentSessionSheet(parentSessionID: sessionID, process: process)
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large], selection: $detent)
-        .presentationDragIndicator(.hidden)
         .tronSettingsVisualTheme(accent: .tronPrimary)
         .tronPresentation()
         .accessibilityIdentifier("session-activity-sheet")

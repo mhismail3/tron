@@ -74,8 +74,8 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   [Presentation-scoped state](#presentation-scoped-state).
 - **Sheet direction.** All progressive disclosure (pickers, skill/command containers, custom chat
   UI, default sheets) moves to one generic content-sized custom sheet, built ground-up as the
-  managed-sheet owner. Until it lands, managed sheets keep the medium/large detents below
-  (`TronPadSheetMode` on iPadOS 27); a surface never gets its own sheet patch.
+  managed-sheet owner. Until it lands, every managed sheet is sized by `tronContentFitSheet`
+  (see Detents; `TronPadSheetMode` on iPadOS 27); a surface never gets its own sheet patch.
 - **Presentation haptics.** Managed sheets (including nested sheets)
   and system pickers play one medium, full-intensity impact through `TronHaptics`, respecting System Haptics.
   Semantic interaction patterns and exclusions are in the [UI haptic map](../Sources/UI/README.md#haptic-map).
@@ -94,8 +94,7 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 - **Info.** Every sheet with technical or metadata details opens them from the top-leading
   `TronSheetInfoButton`.
 - **Documents.** Document-style sheets use `TronDocumentSheet` (`TronSheetTitle`/Done, shared top chrome,
-  hidden drag indicator, `tronPresentation`); an explicit initial detent keeps the other detents
-  draggable. Content that owns its own stacks passes `hostsNavigation: false` and applies
+  `tronPresentation`). Content that owns its own stacks passes `hostsNavigation: false` and applies
   `tronDocumentSheetChrome` at each stack root, never nesting a second NavigationStack.
 - **Top blur.** One shared backdrop with a continuous proportional fade, never a solid band;
   `TronTopBlurStyle` owns the depths, radius and adaptive tint. `tronTopBlurSurface` attaches it
@@ -114,15 +113,38 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   `tronSheetContentLoading`, hiding every `tronScrollEdgeChrome` scroll view (title and Done stay
   usable). The pulse leaves without a fade and content fades and rises 8 points with
   `ChatMotion.transcriptViewReveal` (Reduce Motion: fade only). Owners request it only while they
-  have no content, so cached or refreshed content is never hidden or replayed. Non-scroll sheets
+  have no content, so cached or refreshed content is never hidden or replayed. A sheet whose
+  structure is known (Manage Home) lays out every card at once and renders values still loading
+  with the shared `TronLoadingPlaceholder` (the dashboard Usage skeleton) instead. Non-scroll sheets
   (media, terminal, camera) keep their own preparation surfaces.
 - **Chat details.** Provider-error and nested tool-call details reuse `ChatDetailSheet` for
   navigation, Done, top chrome, insets and detents. Single errors and runs share one layout of
   standard groups: a summary row, then per occurrence (newest first) a details group (model, type,
   time, request ID, HTTP status rows) and a Message group with the full selectable text; runs add
   the Breakdown list. No disclosures or a lone container.
-- **Detents.** Progressive and Home sub-sheets open at medium and drag to large; a presentation's
-  managed scope owns its chosen detent, so refreshes and child round trips do not reset it.
+- **Detents.** The managed-sheet presenter applies `tronContentFitSheet` once; no surface sets
+  detents. Each `tronScrollEdgeChrome` scroll that carries a sheet inset reports its top inset plus
+  content height (never its bottom inset, which animates while a sheet presents), and the sheet
+  takes one `.height` detent at that size, or `.large` when it overflows, at accessibility text
+  sizes or with the keyboard up. While a `TronSheetLoadingState` is shown the sheet holds its last
+  settled height (medium before the first), so a reopened sheet opens at its final size; a first open shows medium until content settles. The sizer owns the
+  native detent: every change after presentation goes through
+  `UISheetPresentationController.animateChanges` (the system sheet spring), including growth to and
+  from full height; Reduce Motion applies it instantly. A nested sheet opens at its own content
+  height like any other, and a sheet's height preference never reaches the sheet that presented it.
+  Opening a child never changes its parent's detent; UIKit tucks a taller parent down behind a
+  shorter child, and closing the child restores the parent's height. A covered sheet never
+  drives its detent; it reapplies its own height once uncovered. The drag indicator is hidden.
+  The measured scroll extends under the bottom safe area; a fitted sheet adds no bottom content
+  margin, so content never exceeds its frame and the sheet cannot scroll or bounce. While a sheet fits,
+  every `tronGlassSurface`/`tronScrollSurface` uses `ConcentricRectangle` bottom corners
+  (fixed card radius as the minimum), so only the card nearest the sheet's bottom edge grows to
+  share the sheet corners' centres; no surface marks itself as last.
+  Feeds and their loading, empty and error states share one inset owner, `tronFeedInsets`, so a
+  failure card keeps the same bottom inset as the rows it replaces.
+  Scrolls that fill their viewport (`TronFeedEmptyState`) or are nested opt out through
+  `tronSheetMeasuresContent`. `ContentFitSheetViewTests` samples the presented frame per display
+  frame and fails on any overshoot or post-open move.
 - **iPad sheets.** On iPadOS 27 `TronPadSheetMode` replaces every managed sheet's detents (iPhone
   and earlier iPadOS keep them). A scene at least 1100 pt wide (every full-screen landscape iPad)
   shows a full-height 420 pt trailing column without dimming; the scene or route surface that
@@ -202,7 +224,7 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 ## Exact review presentation
 
 `ChangeReviewSheet` (`UI/Components/ChangeReviewSheet.swift`) is the one plaintext before/after
-review. It opens at medium and composes standard sections: a summary row (title, reason), one
+review. It opens at its content height (see Detents) and composes standard sections: a summary row (title, reason), one
 Before/After group per item with its detail caption, an always-visible monospaced Exact values
 section, and, for intent `provider-api-key`, one `SecureField` for the provider's API key; Approve
 stays disabled until it holds text, and the approving answer alone carries it (`secret`), never
@@ -285,8 +307,7 @@ separate:
   can be reused within one canvas update and would inherit the old sheet node's state. `TronNativeSheetCanvas`, mounted at each scene/surface root, contains scope-owned
   `RetainedNativeSheetHost` nodes in one retained SwiftUI hosting controller per surface. Native
   sheet nodes mount while their presenters are idle, before the first binding request; the first
-  tap changes an existing node rather than installing an already-presenting graph. Home destinations
-  share medium/large detents, including Canonical transcript's document chrome. Keeping child
+  tap changes an existing node rather than installing an already-presenting graph. Keeping child
   controllers under a disposable container does not retain their presentations. Hosts forward
   inherited environment and transactions; explicit scene-phase and dependency-read observation keep
   activation/freshness live. Invisible mounting stays outside control labels. Native chrome, detents,

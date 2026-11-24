@@ -10,7 +10,7 @@ final class HomeSheetsViewTests: ShuffledTestCase {
             try await openTasks(app)
             try await app.activate("home-task-active")
             try await app.until("the worker detail") { app.element("home-task-detail") != nil }
-            try await app.expandTopSheet()
+            try await app.waitForTopSheetToSettle()
             let ids = ["home-task-model-title", "home-task-model-subtext", "home-task-subagents-subtext", "home-task-spend-subtext",
                        "home-task-run-run-live-subtext", "home-task-checkin-done-subtext", "home-task-checkin-next-subtext"]
             try await app.until("the worker rows") { ids.allSatisfy { app.element($0) != nil } }
@@ -44,7 +44,7 @@ final class HomeSheetsViewTests: ShuffledTestCase {
             _ = try await revealed(app, "home-manage-memory-browser")
             try await app.activate("home-manage-memory-browser")
             try await app.until("Memory opens") { app.element("home-memory-row-39") != nil }
-            try await app.expandTopSheet()
+            try await app.waitForTopSheetToSettle()
             let ids = ["home-memory-card-39-container", "home-memory-row-39-title", "home-memory-row-39-metadata"]
             try await app.until("the memory row") { ids.allSatisfy { app.element($0) != nil } }
             let card = app.element(ids[0])!.accessibilityFrame, title = app.element(ids[1])!.accessibilityFrame
@@ -75,7 +75,7 @@ final class HomeSheetsViewTests: ShuffledTestCase {
                 try await openTasks(app)
                 try await app.activate("home-task-active")
                 try await app.until("the worker detail") { app.element("home-task-detail") != nil }
-                try await app.expandTopSheet()
+                try await app.waitForTopSheetToSettle()
                 _ = try await revealed(app, "home-task-checkin")
                 _ = try await revealed(app, "home-task-checkin-next")
                 let ids = ["home-task-checkin-summary-title", "home-task-checkin-summary-subtext", "home-task-checkin-done-title",
@@ -103,7 +103,7 @@ final class HomeSheetsViewTests: ShuffledTestCase {
                 _ = try await revealed(app, "home-manage-memory-browser")
                 try await app.activate("home-manage-memory-browser")
                 try await app.until("Memory opens") { app.element("home-sheet-done-memory") != nil }
-                try await app.expandTopSheet()
+                try await app.waitForTopSheetToSettle()
                 _ = try await revealed(app, "home-memory-resolution-boundary")
                 let ids = ["home-memory-boundary-title", "home-memory-boundary-subtext", "home-memory-card-34-container", "home-memory-card-32-container"]
                 try await app.until("the boundary and its cards") { ids.allSatisfy { app.element($0) != nil } }
@@ -121,6 +121,6 @@ final class HomeSheetsViewTests: ShuffledTestCase {
         _ = try await revealed(app, "home-manage-tasks")
         try await app.activate("home-manage-tasks")
         try await app.until("Tasks opens") { app.element("home-task-active") != nil }
-        try await app.expandTopSheet()
+        try await app.waitForTopSheetToSettle()
     }
 }

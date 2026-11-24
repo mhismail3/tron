@@ -151,12 +151,6 @@ final class TronHomeSheetsUITests: XCTestCase {
         XCTAssertFalse(element(app, "home-manage-context").exists, "Home Context is part of Manage Home")
         assertCompactHomeSummary(app)
 
-        app.swipeUp()
-        let controls = element(app, "home-manage-controls"), tasks = element(app, "home-manage-tasks")
-        XCTAssertTrue(controls.waitForExistence(timeout: 3))
-        XCTAssertGreaterThan(controls.frame.minY, tasks.frame.maxY, "Controls follows Tasks in Manage Home's navigation card")
-        keep("01b-manage-bottom")
-        app.swipeDown()
 
         let memoryRow = element(app, "home-manage-memory-browser"), window = app.windows.firstMatch
         for _ in 0..<3 where memoryRow.frame.maxY > window.frame.height - 60 {
@@ -366,30 +360,19 @@ final class TronHomeSheetsUITests: XCTestCase {
             XCTAssertTrue(outcome.label.hasSuffix(selection == "Memory date" ? "Found" : "2 matches"),
                           "The selected chip must render its own payload, not the previous tool: \(app.debugDescription)")
             let done = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)!
-            XCTAssertGreaterThan(done.frame.minY, app.windows.firstMatch.frame.height * 0.35,
-                                 "Every fresh tool presentation starts medium even after a previous tool expanded")
-            keep("1309-\(index)-initial-medium")
-            if index == 1 {
+            let fitted = done.frame.minY
+            XCTAssertGreaterThan(fitted, 120, "Every fresh tool presentation opens at its content height")
+            keep("1309-\(index)-initial-fitted")
+            if index < 2 {
                 inspectHistoricalToolRequest(app)
-                XCTAssertGreaterThan(done.frame.minY, app.windows.firstMatch.frame.height * 0.35,
-                                     "A nested info/JSON round trip retains the parent's medium detent")
+                XCTAssertEqual(done.frame.minY, fitted, accuracy: 2, "A nested info/JSON round trip retains the parent's height")
             }
-            let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
-            origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: done.frame.minY - 12))
-                .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: 20)))
-            keep("1309-\(index)-after-expansion-gesture")
-            let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in done.frame.minY < 120 }, object: nil)
-            XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 5), .completed,
-                           "The native sheet must actually expand before testing leakage; Done frame: \(done.frame)")
-
             if index == 0 {
-                inspectHistoricalToolRequest(app)
-                XCTAssertLessThan(done.frame.minY, 120, "A nested info/back round trip retains the parent's chosen large detent")
                 XCUIDevice.shared.press(.home)
                 app.activate()
                 XCTAssertTrue(element(app, "home-tool-detail").waitForExistence(timeout: 10))
                 XCTAssertTrue(element(app, "home-tool-outcome").label.hasSuffix("2 matches"))
-                XCTAssertLessThan(done.frame.minY, 120, "Background/foreground retains the chosen large detent")
+                XCTAssertEqual(done.frame.minY, fitted, accuracy: 2, "Background/foreground retains the sheet's height")
             }
             closeTop(app)
             XCTAssertTrue(waitFor(element(app, "home-tool-detail"), "exists == false", timeout: 5))
@@ -428,8 +411,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         request.tap()
         XCTAssertTrue(app.staticTexts["Request JSON"].waitForExistence(timeout: 5))
         let jsonDone = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)!
-        XCTAssertGreaterThan(jsonDone.frame.minY, app.windows.firstMatch.frame.height * 0.35,
-                             "The JSON reader keeps its own existing medium-first policy, even over a large parent")
+        XCTAssertTrue(jsonDone.isHittable, "The JSON reader opens at its content height, or large when its JSON overflows")
         closeTop(app)
         XCTAssertTrue(request.waitForExistence(timeout: 5))
         closeTop(app)
@@ -628,16 +610,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         let pill = element(app, "home-tool-outcome")
         XCTAssertTrue(pill.label.hasSuffix(outcome), "\(name): outcome \(pill.label)")
         keep("tool-\(name)")
-        let done = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)
-        if let done, done.frame.minY > 120 {
-            let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
-            origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: done.frame.minY - 12))
-                .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: 20)))
-            let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in done.frame.minY < 120 }, object: nil)
-            XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 5), .completed)
-        }
         checks()
-        keep("tool-\(name)-large")
         closeTop(app)
         XCTAssertTrue(waitFor(element(app, "home-tool-detail"), "exists == false", timeout: 5), name)
     }

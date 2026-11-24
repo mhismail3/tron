@@ -60,8 +60,6 @@ struct TronDatePickerSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
         .tronSettingsVisualTheme(accent: accent)
     }
 }
