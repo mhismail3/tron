@@ -121,10 +121,12 @@ extension HomeSheet {
         pendingControl = HomeManagePendingControl(kind: kind, admission: admission)
     }
 
+    #if HOSTED_TEST
     func performControl(_ command: HomeMutationCoordinator.Command) {
         guard let admission = controlAdmission() else { return }
         runControl(command, admission)
     }
+    #endif
 
     private func runControl(_ command: HomeMutationCoordinator.Command, _ admission: HomeControlAdmission) {
         settleControl(admission) { try await model.performHomeControl(command, authority: admission.authority) }

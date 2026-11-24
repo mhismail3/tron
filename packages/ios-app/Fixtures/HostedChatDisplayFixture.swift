@@ -441,7 +441,6 @@ private actor HostedHomeShellGateway {
     private var paused = false
     private var configured = true
     private let delayed: Bool
-    private var acceptedControl: JSONValue?
     private let browserState: String?
     private let emptyContext: Bool
     private let sheetState: String?
@@ -811,13 +810,9 @@ private actor HostedHomeShellGateway {
             let result = method == "settings.change"
                 ? fixtureSettingsChangeResult(key: "model.queue[role=background]")
                 : JSONValue.object(["configured": .bool(configured), "open": .bool(true), "paused": .bool(paused)])
-            if delayed {
-                acceptedControl = result
-                try? await Task.sleep(for: .seconds(6))
-            }
             return (result, nil)
         case "command.status":
-            return (.object(["status": .string("completed"), "result": acceptedControl ?? .null]), nil)
+            return (.object(["status": .string("completed"), "result": .null]), nil)
         case "session.abort":
             if params["sessionId"]?.stringValue == "home-session", params["operationId"]?.stringValue == "home-operation",
                params["kind"]?.stringValue == "agent", params["commandId"]?.stringValue != nil {

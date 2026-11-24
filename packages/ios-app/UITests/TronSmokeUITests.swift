@@ -639,6 +639,7 @@ final class TronSmokeUITests: XCTestCase {
 
     @MainActor
     func testManageHomeToolbarControlsConfirmPauseResumeDisable() {
+        continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
         app.launch()
