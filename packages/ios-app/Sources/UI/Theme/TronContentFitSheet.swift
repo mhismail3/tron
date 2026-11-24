@@ -48,21 +48,17 @@ private struct TronContentFitSheetModifier: ViewModifier {
             .environment(\.tronSheetFitsContent, !loading && fitHeight != nil)
             .environment(\.tronSheetMeasuresContent, true)
             .onPreferenceChange(TronSheetFitKey.self) { next in
-                guard let next else { return }
-                if abs(next.bottom - (scrollBottom ?? -1)) >= 0.5 { scrollBottom = next.bottom }
-                guard abs(next.needed - (measured ?? -1)) >= 0.5 else { return }
+                if let bottom = next?.bottom, abs(bottom - (scrollBottom ?? -1)) >= 0.5 { scrollBottom = bottom }
+                guard next.map({ abs($0.needed - (measured ?? -1)) >= 0.5 }) ?? (measured != nil) else { return }
                 resize {
-                    measured = next.needed
-                    if !loading { settled = next.needed }
+                    measured = next?.needed
+                    if !loading { settled = next?.needed }
                 }
             }
             .onPreferenceChange(TronSheetLoadingPreferenceKey.self) { request in
                 let next = request != nil
                 guard next != loading else { return }
-                resize {
-                    loading = next
-                    if !next { settled = measured }
-                }
+                resize { loading = next }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
                 resize { keyboard = true }
