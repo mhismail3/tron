@@ -136,7 +136,16 @@ describe("Managed subagents: intentional stop drain", () => {
     const expanded = { ...snapshot, blockerCount: 1, blockers: [{ ...task, progressAt: new Date(8.64e15).toISOString() }] };
     expect(new RestartDrainProgress().evaluate(expanded, Date.parse(heldAt) + limit, limit)).toEqual({ outcome: "waiting" });
     const unparsed = { ...snapshot, blockers: snapshot.blockers.map(entry => ({ ...entry, progressAt: heldAt.replace(/\.\d{3}Z$/u, "Z") })) };
-    expect(() => new RestartDrainProgress().evaluate(unparsed, 0, limit)).toThrow(/not an ISO instant/u);
+    const unset = { ...snapshot, blockers: snapshot.blockers.map(({ progressAt: _, ...entry }) => entry) };
+    const decided = (input: typeof snapshot, now: number) => {
+      const decision = new RestartDrainProgress().evaluate(input, now, limit);
+      return decision.outcome === "stalled" ? { ...decision, blocker: decision.blocker.id } : decision;
+    };
+    const early = { ...snapshot, blockers: snapshot.blockers.map(entry => ({ ...entry, progressAt: "1969-12-31T23:59:59.000Z" })) };
+    for (const now of [0, Date.parse(heldAt) + limit, Date.parse(runProgress) + limit]) {
+      expect(decided(unparsed, now)).toEqual(decided(unset, now));
+      expect(decided(early, now)).toEqual(decided(unset, now));
+    }
     child.releaseHeld();
     await run.completion.catch(() => {});
   }, 60_000);
