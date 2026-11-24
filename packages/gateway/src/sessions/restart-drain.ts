@@ -70,7 +70,7 @@ export class RestartDrainProgress {
 
 function instant(value: string | undefined): Time {
   const ms = value === undefined ? Number.NaN : Date.parse(value);
-  return Number.isFinite(ms) && new Date(ms).toISOString() === value ? { $: "At", ms } : { $: "Unset" };
+  return ms >= 0 && new Date(ms).toISOString() === value ? { $: "At", ms } : { $: "Unset" };
 }
 
 export function logUnresolvedDrainOwners(

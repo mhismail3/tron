@@ -141,7 +141,11 @@ describe("Managed subagents: intentional stop drain", () => {
       const decision = new RestartDrainProgress().evaluate(input, now, limit);
       return decision.outcome === "stalled" ? { ...decision, blocker: decision.blocker.id } : decision;
     };
-    for (const now of [0, Date.parse(heldAt) + limit, Date.parse(runProgress) + limit]) expect(decided(unparsed, now)).toEqual(decided(unset, now));
+    const early = { ...snapshot, blockers: snapshot.blockers.map(entry => ({ ...entry, progressAt: "1969-12-31T23:59:59.000Z" })) };
+    for (const now of [0, Date.parse(heldAt) + limit, Date.parse(runProgress) + limit]) {
+      expect(decided(unparsed, now)).toEqual(decided(unset, now));
+      expect(decided(early, now)).toEqual(decided(unset, now));
+    }
     child.releaseHeld();
     await run.completion.catch(() => {});
   }, 60_000);
