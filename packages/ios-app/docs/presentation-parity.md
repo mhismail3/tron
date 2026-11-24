@@ -87,7 +87,7 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   accent the sheet gives `TronSheetTitle`; both resolve through `TronSheetTint` (inherited Settings
   tint, else the sheet's accent, else emerald). Only `.destructive` (red) and `.neutral`
   Close/Cancel (grey) differ, and a disabled action greys itself; never paint toolbar icons
-  directly. `TronSheetTintUITests` compares each icon's ink with its title (`assertToolbarTint`).
+  directly.
 - **Dismissal.** Modal detail flows dismiss with the native top-right check; top-left dismissal is
   reserved for navigation. Sheets never use pull-to-refresh: History, packages and providers expose
   Reload in the toolbar, and dashboards converge through live Gateway invalidations.
@@ -128,7 +128,7 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   shows a full-height 420 pt trailing column without dimming; the scene or route surface that
   presented it reflows beside it, so the chat keeps taking taps and text, and a sheet opened from
   the column stacks on it in the same column. A narrower scene (portrait, split, windowed) shows
-  one large centered page sheet. `TronPadSheetPresentationUITests` runs on an iPad lane.
+  one large centered page sheet.
 
 ## Confirmations, entry and notices
 
@@ -303,12 +303,9 @@ separate:
 
 `packages/ios-app/scripts/presentation-source-policy.py` makes this the default: managed-sheet
 content may not declare `@State` unless the line says `// view-local: <reason>`. Native focus
-behavior is not overridden. `TronForegroundCaptureUITests` observes native controller lifetime,
-retained paging/viewport, keyboard input routing, socket read demand and anchor deallocation in
-the hosted UI lane. `RealGatewayPairAndChatUITests/testForegroundAndReconnectKeepSheetsAndTheirContent`
+behavior is not overridden. `RealGatewayPairAndChatUITests/testForegroundAndReconnectKeepSheetsAndTheirContent`
 checks Mac Terminal setup-panel and nested MCP-form retention on the paired-Gateway
-path. Real SSH/tmux shell and output continuity is separately exercised by
-`TronMacTerminalUITests/testShellAndOutputSurviveDismissAndBackground` through
+path. Real SSH/tmux shell and output continuity is exercised through
 `scripts/ios-mac-terminal-journey`; reconnect repaints a fresh emulator attachment.
 
 ## Presentation activity

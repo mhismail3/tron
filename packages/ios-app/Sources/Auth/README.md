@@ -42,8 +42,7 @@ None.
 ## Verify
 
 ```bash
-scripts/tron-ios-test run --only-testing TronMobileUITests/TronIntegrationSheetsUITests \
-  --only-testing TronMobileUITests/TronMCPServerSheetsUITests
+scripts/tron-ios-test run --only-testing TronMobileUITests/TronIntegrationSheetsUITests
 ```
 
 These cover OAuth receipts, late completion and expiry without redispatch, and the shared auth

@@ -72,7 +72,7 @@ Commands:
 
 Selectors:
   --only-testing OWNER  Repeat without shell-generated command fragments, for example:
-                        --only-testing TronMobileUITests/TronSmokeUITests/testIntegrationDestinationsHaveOneDoneButtonThroughSettings
+                        --only-testing TronMobileUITests/TronIntegrationSheetsUITests/testRetryConnectionRecoversUnreachableDetails
                         Without a selector, run, checkpoint and prepare run the smoke set (SMOKE_ONLY_TESTING).
 
 Options:
@@ -256,9 +256,7 @@ simulator_args=(
 test_scheme="Tron UI Validation"
 test_plan="UIValidation"
 SMOKE_ONLY_TESTING=(
-  "TronMobileUITests/TronSmokeUITests/testManageHomeOpensAtMediumFromRingAndHomeGearOpensSettings"
-  "TronMobileUITests/TronSmokeUITests/testComposerContextRingOpensManageHomeInHomeAndManageSessionElsewhere"
-  "TronMobileUITests/TronSmokeUITests/testIntegrationDestinationsHaveOneDoneButtonThroughSettings"
+  "TronMobileUITests/TronIntegrationSheetsUITests/testRetryConnectionRecoversUnreachableDetails"
 )
 
 command="${1:-checkpoint}"

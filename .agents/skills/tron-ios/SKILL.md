@@ -17,7 +17,7 @@ distributed Beta product.
 | Performance measurement | Tron Device Performance | DevicePerformance | `TronMobileProfiling`, production-sandbox, never a validation gate |
 | Scenario profiling (agents) | `scripts/tron-profile ios` (Tron Device Performance) | DevicePerformance | optimized hosted test on the owned test simulator, shared lease |
 | Manual release archive | Tron Release | Release | production; archive/analyze/profile only |
-| UI validation (the only `tron-ios-test` product) | Tron UI Validation | Test (run and test actions) | `HOSTED_TEST` app, `TronMobileUITests`, in-process `TronMobileViewTests` |
+| UI validation (the only `tron-ios-test` product) | Tron UI Validation | Test (run and test actions) | `HOSTED_TEST` app, `TronMobileUITests` |
 
 `LocalDevice` is the optimized normal-use configuration: Swift `-O` whole-module
 compilation, normal Clang optimization, testability disabled, and
@@ -54,7 +54,6 @@ scripts/tron-ios-simulator status
 scripts/tron-ios-simulator stop
 scripts/tron test ios build
 scripts/tron test ios run --only-testing TronMobileUITests/<Class>/<method>
-scripts/tron test ios checkpoint --lane ipad --device-type "iPad Pro 13-inch (M5)" --only-testing TronMobileUITests/TronPadSheetPresentationUITests
 scripts/tron test ios run                 # the smoke set, with current built products
 scripts/tron test ios checkpoint         # build, then the smoke set
 scripts/tron test ios status --all

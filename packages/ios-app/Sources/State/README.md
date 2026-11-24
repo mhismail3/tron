@@ -106,7 +106,7 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
 - **Static UI locks.** Only `HOSTED_TEST` with `TRON_UI_LOCK_RENDERING=1` disables
   animation at each `TronPresentationSurface` content root. Native sheets create
   independent transaction roots; their layout updates cannot rely on the presenter's
-  transaction ([UI locks](../../UITests/Locks/README.md)). Normal journeys are unchanged.
+  transaction. Normal journeys are unchanged.
 
 - **Hosted idle evidence.** `PresentationActivityCoordinator` exposes only aggregate current
   mounted/activity counts to `HostedPresentationProbe` through bounded weak references, never
@@ -165,8 +165,7 @@ lane ([runbook](../../docs/development.md#efficient-focused-tests)):
 scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronIntegrationSheetsUITests/testEstablishedSocketLossThenOpenTimeoutsBecomeUnreachable \
   --only-testing TronMobileUITests/TronIntegrationSheetsUITests/testSecondaryRecoverySurvivesBackgroundAndResetsOnlyOnRetryOrSuccess \
-  --only-testing TronMobileUITests/TronIntegrationSheetsUITests/testRetryConnectionRecoversUnreachableDetails \
-  --only-testing TronMobileViewTests/IntegrationSheetsViewTests
+  --only-testing TronMobileUITests/TronIntegrationSheetsUITests/testRetryConnectionRecoversUnreachableDetails
 scripts/ios-gateway-e2e-test all
 scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground
 ```

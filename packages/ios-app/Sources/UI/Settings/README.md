@@ -125,12 +125,7 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
 
 ```bash
 scripts/tron-ios-test run \
-  --only-testing TronMobileUITests/TronIntegrationSheetsUITests \
-  --only-testing TronMobileUITests/TronMCPServerSheetsUITests \
-  --only-testing TronMobileUITests/TronProjectTrustUITests \
-  --only-testing TronMobileViewTests/ProjectTrustViewTests \
-  --only-testing TronMobileViewTests/IntegrationSheetsViewTests \
-  --only-testing TronMobileUITests/TronSmokeUITests/testIphoneDashboardPreferencesPersistAcrossRoutesAndRelaunch
+  --only-testing TronMobileUITests/TronIntegrationSheetsUITests
 scripts/ios-gateway-e2e-test run-ui \
   --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testOutsideMcpAdditionReachesTheOpenMcpScreen \
   --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSourcesTextDoneAndRoutes
@@ -138,9 +133,6 @@ scripts/ios-gateway-e2e-test run-ui \
 
 Gateway `native-change.e2e.test.ts` owns agent numeric-map changes, next-Pi-session admission, spend-card
 acceptance and Undo.
-The surviving memory/provider/queued-editor journeys in
-`TronForegroundCaptureUITests` own native-stack refresh, draft/focus preservation and invalid-child
-retirement; retired Worker thinking and Transport editor cases do not define that lifecycle.
 
 Hosted values are scripted,
 not persistence evidence. Real-UI journeys read their key inventory
