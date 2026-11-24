@@ -6,8 +6,6 @@
     "kernel/run/compaction-policy.integration.test.ts",
     "kernel/run/compaction-policy.ts",
     "kernel/run/context-delivery.ts",
-    "sessions/context-edit.integration.test.ts",
-    "kernel/run/agent-command-priority.integration.test.ts",
     "kernel/run/direct-bash-process-owner.integration.test.ts",
     "kernel/run/direct-bash-process-owner.ts",
     "kernel/run/task-command-scope.ts",

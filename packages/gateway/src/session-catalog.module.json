@@ -6,7 +6,6 @@
     "sessions/blob-store.lock.integration.test.ts",
     "sessions/catalog.md",
     "sessions/catalog-discovery.ts",
-    "sessions/catalog-jsonl.integration.test.ts",
     "sessions/catalog-jsonl.ts",
     "sessions/catalog-metadata-index.ts",
     "sessions/catalog-metadata-index.lock.integration.test.ts",
@@ -19,7 +18,6 @@
     "sessions/session-catalog.ts",
     "sessions/session-export.ts",
     "kernel/session/canonical-reader.ts",
-    "kernel/session/canonical-reader.integration.test.ts",
     "kernel/session/README.md"
   ],
   "dependsOn": [

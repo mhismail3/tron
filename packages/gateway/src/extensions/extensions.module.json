@@ -9,8 +9,5 @@
     "gateway/pi",
     "gateway/settings",
     "gateway/delegation"
-  ],
-  "verify": [
-    "scripts/tron test gateway src/e2e/sessions/tron-modules.integration.test.ts"
   ]
 }

@@ -7,8 +7,6 @@
     "delegation.module.json",
     "managed-producer.ts",
     "managed-subagents.install.integration.test.ts",
-    "managed-subagents.invalid-entry.integration.test.ts",
-    "managed-subagents.payload.integration.test.ts",
     "managed-subagents.ts",
     "delegation-operations.ts",
     "subagent-catalog.ts",

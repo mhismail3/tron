@@ -7,9 +7,6 @@
     "src/admin/settings-outside-read.integration.test.ts": {
       "timeout-literal": 1
     },
-    "src/client/gateway-client.integration.test.ts": {
-      "sleep": 1
-    },
     "src/e2e/admin/mcp-auth-session.integration.test.ts": {
       "sleep": 1,
       "timeout-literal": 1
@@ -20,9 +17,6 @@
       "wall-clock-expect": 1
     },
     "src/e2e/admin/settings-change.integration.test.ts": {
-      "timeout-literal": 2
-    },
-    "src/e2e/admin/settings-gate.e2e.test.ts": {
       "timeout-literal": 2
     },
     "src/e2e/admin/settings-subject-audit.e2e.test.ts": {
@@ -49,9 +43,6 @@
     "src/e2e/kernel/delegation/delegation.lock.integration.test.ts": {
       "timeout-literal": 1
     },
-    "src/e2e/kernel/delegation/home-managed-provider.integration.test.ts": {
-      "timeout-literal": 1
-    },
     "src/e2e/kernel/delegation/managed-run-stop-drain.e2e.test.ts": {
       "sleep": 1,
       "timeout-literal": 3
@@ -62,40 +53,13 @@
     "src/e2e/kernel/delegation/managed-subagents.rollback.integration.test.ts": {
       "timeout-literal": 2
     },
-    "src/e2e/kernel/delegation/managed-subagents.transform.integration.test.ts": {
-      "timeout-literal": 3
-    },
-    "src/e2e/kernel/delegation/managed-workflow-children.integration.test.ts": {
-      "timeout-literal": 2
-    },
-    "src/e2e/kernel/projection/codemode-nested-presentation.integration.test.ts": {
-      "sleep": 1
-    },
-    "src/e2e/kernel/resources/project-root.integration.test.ts": {
-      "timeout-literal": 1
-    },
-    "src/e2e/kernel/run/observation-counts.integration.test.ts": {
-      "timeout-literal": 1
-    },
-    "src/e2e/kernel/run/resource-freshness.e2e.test.ts": {
-      "timeout-literal": 1
-    },
-    "src/e2e/kernel/run/shared-prefix.integration.test.ts": {
-      "timeout-literal": 1
-    },
     "src/e2e/kernel/run/task-lifecycle.conformance.integration.test.ts": {
       "timeout-literal": 3
-    },
-    "src/e2e/kernel/run/turn-frame.integration.test.ts": {
-      "timeout-literal": 1
     },
     "src/e2e/modules/home/home-context-data.e2e.test.ts": {
       "timeout-literal": 9
     },
     "src/e2e/modules/home/home-lesson-move.e2e.test.ts": {
-      "timeout-literal": 2
-    },
-    "src/e2e/modules/home/home-obligations.e2e.test.ts": {
       "timeout-literal": 2
     },
     "src/e2e/modules/home/home-profile-triage.integration.test.ts": {
@@ -107,12 +71,6 @@
     "src/e2e/modules/home/home-restart.lock.integration.test.ts": {
       "timeout-literal": 1
     },
-    "src/e2e/modules/home/home-session-catalog.e2e.test.ts": {
-      "timeout-literal": 2
-    },
-    "src/e2e/modules/home/home-system-prompt.e2e.test.ts": {
-      "timeout-literal": 2
-    },
     "src/e2e/modules/home/home-task-command-scope.e2e.test.ts": {
       "timeout-literal": 2
     },
@@ -122,35 +80,15 @@
     "src/e2e/modules/home/home-task-dispatch.e2e.test.ts": {
       "timeout-literal": 55
     },
-    "src/e2e/modules/home/home-task-managed-provider.e2e.test.ts": {
-      "timeout-literal": 1
-    },
-    "src/e2e/modules/home/home-task-prompt-cache.e2e.test.ts": {
-      "timeout-literal": 1
-    },
     "src/e2e/modules/home/home-task-subagents-controls.e2e.test.ts": {
       "sleep": 1,
       "timeout-literal": 14
-    },
-    "src/e2e/modules/home/home-task-subagents-model-queue.e2e.test.ts": {
-      "timeout-literal": 2
-    },
-    "src/e2e/modules/home/home-task-subagents-reports.e2e.test.ts": {
-      "sleep": 1,
-      "timeout-literal": 12
-    },
-    "src/e2e/modules/home/home-task-subagents-settlement.e2e.test.ts": {
-      "sleep": 2,
-      "timeout-literal": 9
     },
     "src/e2e/modules/home/home-task-tool.e2e.test.ts": {
       "timeout-literal": 3,
       "wall-clock-expect": 1
     },
     "src/e2e/modules/home/home-task-worker-model.e2e.test.ts": {
-      "timeout-literal": 1
-    },
-    "src/e2e/modules/home/home-wake-rollover.e2e.test.ts": {
       "timeout-literal": 1
     },
     "src/e2e/modules/home/home-wake.e2e.test.ts": {
@@ -170,9 +108,6 @@
       "sleep": 2,
       "timeout-literal": 6
     },
-    "src/e2e/sessions/agent-instructions.integration.test.ts": {
-      "timeout-literal": 8
-    },
     "src/e2e/sessions/browser-fork-receipts.integration.test.ts": {
       "timeout-literal": 2
     },
@@ -183,21 +118,11 @@
     "src/e2e/sessions/home-activation.e2e.test.ts": {
       "timeout-literal": 31
     },
-    "src/e2e/sessions/home-cache-layout.e2e.test.ts": {
-      "timeout-literal": 5
-    },
-    "src/e2e/sessions/home-designation.integration.test.ts": {
-      "sleep": 2,
-      "timeout-literal": 1
-    },
     "src/e2e/sessions/home-memory-browser-scale.e2e.test.ts": {
       "timeout-literal": 2
     },
     "src/e2e/sessions/home-memory-tools.e2e.test.ts": {
       "timeout-literal": 13
-    },
-    "src/e2e/sessions/home-profile.integration.test.ts": {
-      "timeout-literal": 11
     },
     "src/e2e/sessions/home-request-seam.integration.test.ts": {
       "sleep": 1,
@@ -205,12 +130,6 @@
     },
     "src/e2e/sessions/home-research-tools.integration.test.ts": {
       "timeout-literal": 19
-    },
-    "src/e2e/sessions/multi-resource-message.e2e.test.ts": {
-      "timeout-literal": 1
-    },
-    "src/e2e/sessions/native-tool-settlement.integration.test.ts": {
-      "timeout-literal": 1
     },
     "src/e2e/sessions/pi-persisted-state-corpus.integration.test.ts": {
       "timeout-literal": 2
@@ -265,12 +184,6 @@
       "sleep": 2,
       "timeout-literal": 8
     },
-    "src/e2e/workspace/tron-workspace.integration.test.ts": {
-      "timeout-literal": 4
-    },
-    "src/episodic/episodic-checkpoint-amortization.e2e.test.ts": {
-      "timeout-literal": 1
-    },
     "src/episodic/episodic-layout-migration.integration.test.ts": {
       "timeout-literal": 2
     },
@@ -284,17 +197,8 @@
       "sleep": 1,
       "timeout-literal": 1
     },
-    "src/episodic/home-state.e2e.test.ts": {
-      "timeout-literal": 2
-    },
     "src/kernel/delegation/managed-subagents.install.integration.test.ts": {
       "timeout-literal": 1
-    },
-    "src/kernel/delegation/managed-subagents.invalid-entry.integration.test.ts": {
-      "timeout-literal": 2
-    },
-    "src/kernel/delegation/managed-subagents.payload.integration.test.ts": {
-      "timeout-literal": 11
     },
     "src/kernel/run/direct-bash-process-owner.integration.test.ts": {
       "timeout-literal": 12,
@@ -304,17 +208,8 @@
       "sleep": 1,
       "timeout-literal": 1
     },
-    "src/machine/workspace-inspection-service.integration.test.ts": {
-      "timeout-literal": 1
-    },
-    "src/modules/home/home-ledger-crash.e2e.test.ts": {
-      "timeout-literal": 1
-    },
     "src/modules/home/home-profile-you-centred.integration.test.ts": {
       "timeout-literal": 5
-    },
-    "src/modules/home/home-receipt-crash.e2e.test.ts": {
-      "timeout-literal": 1
     },
     "src/modules/home/home-task-store.integration.test.ts": {
       "sleep": 1,
