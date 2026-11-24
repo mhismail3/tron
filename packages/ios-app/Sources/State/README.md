@@ -111,7 +111,7 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
 - **Hosted idle evidence.** `PresentationActivityCoordinator` exposes only aggregate current
   mounted/activity counts to `HostedPresentationProbe` through bounded weak references, never
   copied surface state or surface identity strings. The simulator process supervisor owns
-  trigger, capture and retention ([idle diagnostics](../../docs/development.md#proving-idle-diagnostics)).
+  trigger, capture and retention ([idle diagnostics](../../docs/development.md#process-evidence-diagnostics)).
 
 ## Invariants
 

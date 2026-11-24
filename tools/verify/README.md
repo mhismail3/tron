@@ -12,7 +12,8 @@ is not a gate. `--check` runs the same gate and pushes nothing. Each run writes
 `test-results/gate/<time>/` (one log per check and `result.json` with outcome, SHAs and per-step
 seconds).
 
-Checks: the privacy guard, `scripts/tron ownership`, the protocol contract, the gate's own tests,
+Checks: the privacy guard, `scripts/tron ownership`, the protocol contract, documentation and agent
+policy, no added code comments, the gate's own tests,
 Gateway production and test-support typecheck, oxlint, and the fixed Gateway suite named in
 `gate.py` (`GATEWAY_TESTS`, `PROCESS_TESTS`): caught regressions (extension artifact discovery,
 Home task tool), authorization and privacy, migrations, concurrency/receipts, and real

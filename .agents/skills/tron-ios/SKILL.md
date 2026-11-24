@@ -40,11 +40,9 @@ before `devicectl` when their signed protocol metadata differs.
 
 ## Commands
 
-Tron simulator tests run serially on the Mac mini, not this Mac. Commit the source first, then use
-`scripts/tron test ios` (mini by default), or `scripts/tron verify ... --gateway-host mini --ios-host mini`.
-The latter moves the whole verification under one mini lease when iOS work is selected, so its build,
-index validation and test artifacts stay together without nested acquisition. Home plans the mini queue.
-A busy mini waits; unreachable or incomplete execution never falls back here. Native helpers below
+Simulator tests are on-demand proof, never part of the gate. Commit the source first, then use
+`scripts/tron test ios` (this host's `scripts/tron-ios-test`); run one heavy job per host under the global
+Shared machines rules. Native helpers below
 remain host-local execution owners for in-lease work. Their 3 host slots are a ceiling, not a target.
 
 ```bash
@@ -63,10 +61,8 @@ scripts/tron test ios lanes
 A failed `build` prints `error: path:line: message` for each build error and a
 failed `run` prints `failure: test: message` for each test failure (first 20),
 read from the run's result bundle (`Build.xcresult`, `TestResults.xcresult`) by
-`scripts/xcresult-failures.py`. Read that block first. The mini returns those bundles and raw logs under
-`test-results/mini/<sha-prefix>-<nonce>/ios/` with an exact-SHA/host/exit receipt; the console prints the
-artifact directory. Native reports retain mini paths. A fresh source needs `checkpoint` or `build`
-before `run`; missing or stale products are still refused. See [mini execution](../../../tools/verify/README.md#ios-checks-on-the-mini).
+`scripts/xcresult-failures.py`. Read that block first; the console prints the run directory. A fresh
+source needs `checkpoint` or `build` before `run`; missing or stale products are still refused.
 Native `lane-remove`, `reap`, `prune` and `clean` remain owning maintenance commands, not routine
 remote test steps; remove only resources you own and have authorization to delete.
 
