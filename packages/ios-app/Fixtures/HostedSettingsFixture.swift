@@ -75,6 +75,11 @@ struct HostedSettingsFixture: View {
                         }
                     } else if HostedLaunch.arguments.contains("-settings-ui-providers") {
                         providerReview
+                    } else if HostedLaunch.arguments.contains("-workspace-browser") {
+                        Button("Open Workspace") { nestedSettings = true }
+                            .tronManagedSheet(isPresented: $nestedSettings, identity: "fixture.workspace-browser") {
+                                WorkspaceBrowser(initialPath: "/fixture/projects") { _ in }
+                            }
                     } else if HostedLaunch.arguments.contains("-settings-nested") {
                         Button("Open Settings") { nestedSettings = true }
                             .tronManagedSheet(isPresented: $nestedSettings, identity: "fixture.nested-settings") {
@@ -182,6 +187,16 @@ private actor HostedSettingsSocket: GatewaySocketConnection {
         case "gateway.update.status":
             result = .object(["state": .string("idle"), "channel": .string("stable"), "candidateAvailable": .bool(false), "rollbackAvailable": .bool(false)])
         case "filesystem.list":
+            if HostedLaunch.arguments.contains("-workspace-browser") {
+                let top = params["path"]?.stringValue == "/fixture"
+                let path = top ? "/fixture" : "/fixture/projects"
+                result = .object(["path": .string(path), "parent": top ? .string("/") : .string("/fixture"),
+                    "entries": .array((1...(top ? 12 : 4)).map { index in
+                        .object(["name": .string("Repo \(index)"), "path": .string("\(path)/repo-\(index)"),
+                                 "kind": .string("directory"), "hidden": .bool(false)])
+                    })])
+                break
+            }
             result = .object(["path": params["path"] ?? .string("/fixture/projects"), "parent": .string("/fixture"), "entries": .array([
                 .object(["name": .string("Example"), "path": .string("/fixture/projects/Example"), "kind": .string("directory"), "hidden": .bool(false)])
             ])])

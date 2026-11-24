@@ -93,6 +93,67 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         }
     }
 
+    func testNestedSheetLeavesItsParentStillAndOpensAtItsFinalHeight() async throws {
+        try await mounted(["-tron-settings-fixture", "-settings-nested", "-settings-expanded-review"]) { app in
+            try await app.activate("Open Settings")
+            _ = try await revealed(app, "settings-link-Connections")
+            try await assertNested(app, "settings-connections") { try await app.activate("settings-link-Connections") }
+        }
+        try await mounted(["-tron-home-dashboard-fixture", "-home-shell-ready"]) { app in
+            try await openManageHome(app)
+            _ = try await revealed(app, "home-manage-controls")
+            try await assertNested(app, "manage-home-controls") { try await app.activate("home-manage-controls") }
+        }
+    }
+
+    private func sheetChain(_ app: MountedFixture) -> [UIViewController] {
+        var chain: [UIViewController] = []
+        var next = app.window.rootViewController?.presentedViewController
+        while let controller = next, !controller.isBeingDismissed { chain.append(controller); next = controller.presentedViewController }
+        return chain
+    }
+
+    private func assertNested(_ app: MountedFixture, _ name: String, open: () async throws -> Void) async throws {
+        try await app.until("\(name) parent settles") { true }
+        let parent = try XCTUnwrap(sheetChain(app).last)
+        let parentHeight = parent.view.bounds.height
+        let depth = sheetChain(app).count
+        UIView.setAnimationsEnabled(true)
+        try await open()
+        var parentHeights: [CGFloat] = []
+        let trace = try await SheetTrace.record(app, frames: 120, ready: { sheetChain(app).count == depth + 1 }) { _ in
+            parentHeights.append(parent.view.bounds.height)
+        }
+        let moved = parentHeights.filter { abs($0 - parentHeight) > 0.5 }
+        let rest = trace.samples.firstIndex { sample in abs(sample.minY - trace.final.minY) <= 0.5 } ?? trace.samples.count
+        let jumps = trace.samples[rest...].filter { abs($0.minY - trace.final.minY) > 0.5 }
+        XCTAssertTrue(jumps.isEmpty, "\(name): the nested sheet reached its height, then moved again\n\(trace)")
+        XCTAssertTrue(moved.isEmpty, "\(name): opening a nested sheet resized its parent from \(parentHeight) to \(Set(moved))")
+        trace.assertStill("\(name): the nested sheet opens at its final height", against: app)
+    }
+
+    func testHeightChangesAfterOpeningAnimateWithTheContent() async throws {
+        try await mounted(["-tron-settings-fixture", "-workspace-browser"]) { app in
+            try await app.activate("Open Workspace")
+            try await app.until("the four-folder listing") { app.element("Repo 4") != nil && app.element("Repo 5") == nil }
+            _ = try await app.still("the fitted picker") { [Double(sheetFrame(app).minY)] }
+            let start = sheetFrame(app).minY
+            let goUp = try XCTUnwrap(MountedFixture.elements(in: app.top).last {
+                $0.accessibilityTraits.contains(.button) && $0.accessibilityLabel?.contains("Go Up") == true
+            })
+            let trace = try await SheetTrace.record(app, frames: 90, each: { index in
+                if index == 0 { _ = goUp.accessibilityActivate() }
+            })
+            let end = trace.final.minY
+            XCTAssertLessThan(end, start - 100, "Go Up to twelve folders grows the sheet\n\(trace)")
+            let steps = zip(trace.samples, trace.samples.dropFirst()).map { abs($1.minY - $0.minY) }
+            XCTAssertLessThan(steps.max() ?? .infinity, (start - end) * 0.5,
+                              "The sheet grows continuously, never in one frame\n\(trace)")
+            let between = Set(trace.samples.map(\.minY).filter { $0 < start - 1 && $0 > end + 1 }.map { Int($0) })
+            XCTAssertGreaterThanOrEqual(between.count, 4, "The resize passes through intermediate heights\n\(trace)")
+        }
+    }
+
     private func sheetFrame(_ app: MountedFixture) -> CGRect { app.top.convert(app.top.bounds, to: nil) }
 
     private func mainScroll(_ app: MountedFixture) -> UIScrollView? {
