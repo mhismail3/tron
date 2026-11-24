@@ -209,7 +209,7 @@ it.each([["thrown", true], ["returned", false]])("retries a %s prompt-safety fla
   const fx = await fixture();
   await appendFile(fx.chapters[0]!.path, assistantEntry("assistant", "b", `Tron answered ${"detail ".repeat(500)}`));
   let flagged = 0;
-  const memory = await fx.open(fx.source, async request => {
+  const memory = await fx.open(fx.source, async () => {
     if (flagged === 0) {
       flagged += 1;
       if (thrown) throw new Error(FLAGGED);

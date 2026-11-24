@@ -1,7 +1,6 @@
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockClient, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
-import { normalizeTraceValue } from "../../../test-support/scenario-lock.js";
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 
 const gateways: LockGateway[] = [];

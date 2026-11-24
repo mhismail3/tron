@@ -4,6 +4,7 @@ import type { AssistantMessage, Usage } from "../kernel/pi/ai.js";
 import type { ModelQueueRole } from "./model-queue-extension.js";
 import { durableAtomicWriteText } from "../foundation/durable-json.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
+import { CONTROL_CHARACTER } from "../foundation/control-characters.js";
 
 const MAX_BYTES = 8 * 1024 * 1024;
 const MAX_RECORDS = 10_000;
@@ -42,7 +43,7 @@ function keys(value: { [key: string]: unknown }, expected: readonly string[]): b
 }
 
 function identifier(value: unknown, maximum: number): value is string {
-  return typeof value === "string" && value.length > 0 && Buffer.byteLength(value) <= maximum && !/[\u0000-\u001f\u007f]/u.test(value);
+  return typeof value === "string" && value.length > 0 && Buffer.byteLength(value) <= maximum && !CONTROL_CHARACTER.test(value);
 }
 
 function counter(value: unknown): value is number {

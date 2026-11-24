@@ -167,6 +167,7 @@ export class McpAdminService {
       const strings = (value: unknown, limit: number): string[] => Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string").slice(0, limit).map(entry => entry.slice(0, 256)) : [];
       const exposure = (MCP_EXPOSURES as readonly string[]).includes(row.exposure as string) ? row.exposure as string : "codemode";
       const error = typeof row.error === "string" && row.error.length > 0
+        // oxlint-disable-next-line no-control-regex -- strips controls except tab and newline from MCP error text
         ? row.error.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "").slice(0, 2_048) : undefined;
       return [{ name: row.name, state: typeof row.state === "string" ? row.state.slice(0, 64) : "unknown", scope: row.scope === "project" ? "project" : "global", enabled: row.enabled !== false, exposure, transport: typeof row.transport === "string" ? row.transport.slice(0, 256) : "unknown", tools: strings(row.tools, 128), ...(error ? { error } : {}) }];
     }) : [];

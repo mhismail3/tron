@@ -1,6 +1,7 @@
 import type { JsonValue } from "../../protocol/types.js";
 import { isGatewayTimestamp } from "../../util/timestamp.js";
 import { validateProfileMetadata } from "./profile-placement.js";
+import { CONTROL_CHARACTER } from "../../foundation/control-characters.js";
 
 export const PROFILE_NOTE_SCHEMA_VERSION = 1 as const;
 
@@ -128,7 +129,7 @@ export function assertProfileNoteId(value: unknown, label = "profile-note id"): 
 }
 
 function assertProfileNoteProjectId(value: unknown, label = "project id"): asserts value is string {
-  if (typeof value !== "string" || value.length < 1 || value.length > 4_096 || /[\u0000-\u001f\u007f]/.test(value)) throw new Error(`Invalid ${label}`);
+  if (typeof value !== "string" || value.length < 1 || value.length > 4_096 || CONTROL_CHARACTER.test(value)) throw new Error(`Invalid ${label}`);
   if (value.startsWith("/")) {
     if (value.includes("\\") || value.split("/").some(component => component === "..")) throw new Error(`Invalid ${label}`);
     return;

@@ -14,6 +14,7 @@ import { abortableRead } from "../util/abortable-read.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import type { PromptAttachmentState } from "../protocol/types.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
+import { CONTROL_CHARACTER, CONTROL_CHARACTERS } from "../foundation/control-characters.js";
 
 const MAXIMUM_ATTACHMENT_READERS = 32;
 const UPLOAD_METADATA_MAX_BYTES = 64 * 1_024;
@@ -93,7 +94,7 @@ interface UploadCapacityStatus {
 }
 
 function safeName(input: string): string {
-  const name = basename(input).replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 160);
+  const name = basename(input).replace(CONTROL_CHARACTERS, "").slice(0, 160);
   return name || "attachment";
 }
 
@@ -120,7 +121,7 @@ function isUploadMetadata(value: unknown, expectedID: string, maximumBytes: numb
     && metadata.id === expectedID
     && typeof metadata.name === "string" && metadata.name === safeName(metadata.name)
     && typeof metadata.mimeType === "string" && metadata.mimeType.length > 0 && metadata.mimeType.length <= 200
-    && !/[\u0000-\u001f\u007f]/.test(metadata.mimeType)
+    && !CONTROL_CHARACTER.test(metadata.mimeType)
     && typeof metadata.path === "string" && metadata.path.length > 0 && metadata.path.length <= 8_192
     && typeof metadata.createdAt === "string" && isGatewayTimestamp(metadata.createdAt)
     && new Date(metadata.createdAt).toISOString() === metadata.createdAt
@@ -346,7 +347,7 @@ export class UploadStore {
       }
 
       const name = safeName(nameInput);
-      const mimeType = mimeTypeInput.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 200)
+      const mimeType = mimeTypeInput.replace(CONTROL_CHARACTERS, "").slice(0, 200)
         || "application/octet-stream";
       const uploadDirectory = await this.ensureUploadDirectory();
       const folder = join(uploadDirectory, staged.id);

@@ -746,6 +746,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       for (const pid of [serverPid, childPid]) {
         if (pid !== undefined && !terminal(processState(pid))) {
           try { process.kill(pid, "SIGKILL"); } catch (error) {
+            // oxlint-disable-next-line no-unsafe-finally -- a cleanup failure must surface even when the guarded block already failed
             if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
           }
         }
@@ -1797,7 +1798,6 @@ export default function (pi) {
       const created = await fixture.registry.create(fixture.cwd);
       const manager = (created as unknown as { sessionManager: SessionManager }).sessionManager;
       manager.appendMessage(fauxAssistantMessage("persisted before extension close"));
-      const persisted = (created as unknown as { session: () => void });
       created.publishSnapshot();
       await waitFor(() => created.persistedSessionFile !== undefined, "the persisted session file");
       await waitFor(() => (fixture.registry as unknown as { latestSummaries: Map<string, unknown> }).latestSummaries.has(created.id), "the latest summary for the created session");

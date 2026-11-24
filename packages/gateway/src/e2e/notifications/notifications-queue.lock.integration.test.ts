@@ -271,7 +271,7 @@ describe("gateway/notifications delivery locks", () => {
 
   it("a rejected waiting admission leaves the same live episode eligible for the next turn", async () => {
     const lock = await pushLock("notifications-waiting-rejected", [{ name: "lock-background.ts", source: DETACHED_RUN }]);
-    const { gateway, relay, sessionId } = lock;
+    const { gateway, relay } = lock;
     const service = lock.service();
     const enqueue = service.enqueue.bind(service);
     let rejected!: () => void;

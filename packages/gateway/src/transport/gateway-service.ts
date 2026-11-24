@@ -18,7 +18,7 @@ import type { SettingsStoreAdapter } from "../admin/settings-model.js";
 import type { ChangeContext, SessionAppliers, SettingsChangePath } from "../kernel/settings/settings-change.js";
 import type { SessionSettingsSource, SettingsModel } from "../kernel/settings/settings-model.js";
 import { type ChangeOutcome, type ChangeRequest, type SettingsTarget, QUALIFIER_NAMES, type Qualifiers } from "../kernel/settings/tool-contract.js";
-import type { Actor, ChangeEntry } from "../kernel/settings/settings-record.js";
+import type { ChangeEntry } from "../kernel/settings/settings-record.js";
 import { recordSubject } from "../kernel/settings/settings-schema.js";
 import { HOME_PROFILE_KINDS, HOME_PROFILE_MAINTAINER_ACTIONS, HomeProfileItems, type HomeProfileRequest } from "../modules/home/home-profile.js";
 import { profilePath } from "../modules/home/profile-placement.js";
@@ -348,7 +348,7 @@ export class GatewayService {
       },
     });
     dependencies.settingsChanges?.observe({
-      applied: (target, changes, context) => this.settingsChanged(target, changes, context),
+      applied: (target, changes) => this.settingsChanged(target, changes),
     });
     dependencies.settingsModel?.owner.outsideChanges?.observe({
       providerFilesChanged: () => dependencies.globalProviderResources.requestReload(),
@@ -360,7 +360,7 @@ export class GatewayService {
           await this.settingsChanged(group[0]!.target, group.map(entry => ({
             changeId: entry.changeId, key: entry.key, ...(entry.qualifiers ? { qualifiers: entry.qualifiers } : {}),
             layer: entry.layer, status: entry.status,
-          })), { actor: group[0]!.actor });
+          })));
         }
       },
     });
@@ -1629,7 +1629,8 @@ export class GatewayService {
               interaction.signal?.addEventListener("abort", aborted, { once: true });
               const finish = (error?: unknown) => {
                 interaction.signal?.removeEventListener("abort", aborted);
-                error ? reject(error) : resolve();
+                if (error) reject(error);
+                else resolve();
               };
               withMcpAuthInteraction(operationId, interaction, () => {
                 void slot.prompt(`/mcp login ${server}`).catch(finish);
@@ -1909,7 +1910,7 @@ export class GatewayService {
     return slot.homeSettingsChapter(workToken);
   }
 
-  private async settingsChanged(target: SettingsTarget, changes: readonly ChangeOutcome[], context: { actor: Actor; reason?: string }): Promise<void> {
+  private async settingsChanged(target: SettingsTarget, changes: readonly ChangeOutcome[]): Promise<void> {
     if (changes.length === 0) return;
     const projectDir = target.kind === "project" ? (await this.dependencies.trust.inspect(target.cwd)).projectDir
       : target.kind === "session" && changes.some(change => change.layer === "project")

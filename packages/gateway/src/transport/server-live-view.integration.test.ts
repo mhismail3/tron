@@ -151,6 +151,7 @@ describe("authenticated disposable live-view HTTP", () => {
     const writing = new Promise<void>((resolve) => { reached = resolve; });
     const end = ServerResponse.prototype.end;
     vi.spyOn(ServerResponse.prototype, "end").mockImplementation(function (this: ServerResponse, ...args) {
+      // oxlint-disable-next-line typescript/no-this-alias -- the spy captures the held response object it intercepts
       if (this.req.url?.endsWith("/frame") && !held) { held = this; reached(); return this; }
       return end.apply(this, args);
     });

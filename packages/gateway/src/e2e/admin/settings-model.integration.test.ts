@@ -8,7 +8,6 @@ import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager
 import { fauxProvider, fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { ModelQueueOwner } from "../../providers/model-queue.js";
 import { ProviderUsageOwner } from "../../providers/provider-usage.js";
-import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../../kernel/resources/trust-service.js";
 import { McpAdminService } from "../../admin/mcp-admin-service.js";

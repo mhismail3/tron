@@ -1,3 +1,4 @@
+import { CONTROL_CHARACTER } from "../foundation/control-characters.js";
 interface GatewayRuntimeIdentity {
   sourceRevision?: string;
   buildFingerprint?: string;
@@ -8,7 +9,7 @@ const MAX_IDENTITY_BYTES = 256;
 
 function optionalIdentity(value: string | undefined): string | undefined {
   if (!value) return undefined;
-  if (Buffer.byteLength(value) > MAX_IDENTITY_BYTES || /[\u0000-\u001f\u007f]/u.test(value)) return undefined;
+  if (Buffer.byteLength(value) > MAX_IDENTITY_BYTES || CONTROL_CHARACTER.test(value)) return undefined;
   return value;
 }
 

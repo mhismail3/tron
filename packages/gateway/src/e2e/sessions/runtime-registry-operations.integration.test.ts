@@ -404,7 +404,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       pi.on("session_start", (_event, ctx) => {
         setImmediate(() => {
           ctx.ui.setWidget("async-status", ["PI_SUBAGENT_ASYNC_JSON:" + "x".repeat(1_024)]);
-          ctx.ui.setWidget("async-status", ["PI_SUBAGENT_ASYNC_JSON:" + '\"x\",'.repeat(115)]);
+          ctx.ui.setWidget("async-status", ["PI_SUBAGENT_ASYNC_JSON:" + '"x",'.repeat(115)]);
           ctx.ui.setStatus("oversized-widget-callback", "completed");
         });
       });

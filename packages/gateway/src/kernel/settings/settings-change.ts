@@ -419,6 +419,7 @@ export class SettingsChangePath {
         return result;
       } finally {
         try { await outside?.end(writes, landed); }
+        // oxlint-disable-next-line no-unsafe-finally -- a cleanup failure must surface even when the guarded block already failed
         catch (error) { throw asUncertainOutcome(error, "Settings effects settled but outside-observation publication failed"); }
       }
     };

@@ -4,11 +4,9 @@ import {
   automationOwnedRunScenario, compactionScenario, notificationsPushScenario, openLockSession, projectRootTrustScenario,
   promptStreamScenario, queueControlScenario,
 } from "../../../test-support/lock-scenarios.js";
-import { type TraceValue } from "../../../test-support/scenario-lock.js";
 import { sessionSettingChange } from "../../../test-support/session-settings-change.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 
-const MODULE = "gateway/e2e";
 const owned: Array<() => Promise<void>> = [];
 const own = (gateway: LockGateway) => { owned.push(() => gateway.dispose()); };
 afterEach(async () => { for (const release of owned.splice(0).reverse()) await release(); });

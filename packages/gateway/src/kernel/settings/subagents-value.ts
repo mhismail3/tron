@@ -2,6 +2,7 @@ import { GatewayError } from "../../errors.js";
 import { carriesSecret, SECRET_NAME, refuseSetting as refuse } from "./secret-free.js";
 import type { Direction } from "./tool-contract.js";
 import type { ValueType } from "./settings-types.js";
+import { CONTROL_CHARACTER } from "../../foundation/control-characters.js";
 
 const HINT = "subagent secrets stay out of settings";
 const MAX_BYTES = 64 * 1024;
@@ -36,7 +37,7 @@ const map = (spec: Spec): Spec => (value, path) => {
 };
 
 const machine: Spec = (value, path) => must(typeof value === "string" && value.trim() !== "" && value.trim().length <= 128
-  && !/[\u0000-\u001f\u007f]/u.test(value), path, "a machine name of at most 128 characters");
+  && !CONTROL_CHARACTER.test(value), path, "a machine name of at most 128 characters");
 const override = object({
   description: text, advertise: bool, output: orFalse(text), outputMode: oneOf("inline", "file-only"), model: orFalse(anyText), fast: bool,
   thinking: orFalse(anyText), systemPromptMode: oneOf("append", "replace"), inheritProjectContext: bool, inheritGlobalContext: bool,
@@ -73,7 +74,7 @@ const settings = object({
   defaultExtensions: strings(true), defaultSubagentOnlyExtensions: strings(true), agentScanDirs: strings(true), agentExcludeDirs: strings(true),
   agentOverrides: map(override), agentOverridesByProvider: map(map(override)), modelScope, watchdog,
   machines: map(object({
-    cwd: (value, path) => must(typeof value === "string" && /^(?:\/|~)/u.test(value.trim()) && !/[\u0000-\u001f\u007f]/u.test(value),
+    cwd: (value, path) => must(typeof value === "string" && /^(?:\/|~)/u.test(value.trim()) && !CONTROL_CHARACTER.test(value),
       path, "an absolute POSIX path or one starting with ~"),
     env: (value, path) => must(isObject(value) && Object.keys(value).length === 0, path,
       "empty: saved-machine runs use the remote machine's environment"),

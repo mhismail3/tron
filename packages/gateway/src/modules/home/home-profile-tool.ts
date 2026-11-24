@@ -7,6 +7,7 @@ import type { ProfileStore } from "./profile-store.js";
 import { profilePath } from "./profile-placement.js";
 import { profileIndex } from "./home-profile-hierarchy.js";
 import { HOME_PROFILE_ACTIONS, HOME_PROFILE_KINDS, PROFILE_TEXT_MAX, PROFILE_REASON_MAX, readHomeProfileIndex, type HomeProfileAction, type HomeProfileKind, type HomeProfileSaved, type HomeProfileRequest, type HomeProfileChangeAccess } from "./home-profile.js";
+// oxlint-disable-next-line no-control-regex -- refuses controls and line separators in one-line profile text
 const SINGLE_LINE = /[\u0000-\u001f\u007f\u2028\u2029]/;
 
 const PROFILE_PARAMETERS = Type.Object({

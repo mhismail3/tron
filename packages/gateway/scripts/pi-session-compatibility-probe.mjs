@@ -25,7 +25,7 @@ function semantic(manager) {
   const entries = manager.getEntries();
   const indexes = new Map(entries.map((entry, index) => [entry.id, index]));
   return {
-    entries: entries.map((entry, index) => {
+    entries: entries.map((entry) => {
       const copy = { ...entry };
       delete copy.id; delete copy.timestamp;
       copy.parent = entry.parentId === null ? null : indexes.get(entry.parentId);

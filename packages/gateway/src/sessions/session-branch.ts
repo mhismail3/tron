@@ -1,4 +1,5 @@
 import type { FileEntry, SessionEntry } from "../kernel/pi/coding-agent.js";
+import { CONTROL_CHARACTER } from "../foundation/control-characters.js";
 
 interface ParsedSessionBranch {
   sessionId: string;
@@ -50,7 +51,7 @@ interface ValidatedSearchBranch {
 }
 
 function isValidID(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0 && Buffer.byteLength(value, "utf8") <= 512 && !/[\u0000-\u001f\u007f]/u.test(value);
+  return typeof value === "string" && value.length > 0 && Buffer.byteLength(value, "utf8") <= 512 && !CONTROL_CHARACTER.test(value);
 }
 
 function validateGraph(file: readonly FileEntry[]): Map<string, SessionEntry> {

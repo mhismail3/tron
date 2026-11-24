@@ -5,6 +5,7 @@ import { observeBrowserCDP, type CapturedBrowserFrame } from "./browser-live-cdp
 import { nativeLiveClientFactory, nativeLiveFailure, observeNativeWindow, type NativeLiveFailure, type NativeLiveClient, type NativeLiveClientFactory } from "./native-live-view.js";
 import { BROWSER_LIVE_VIEW_SCHEMA, NATIVE_LIVE_VIEW_SCHEMA, type BrowserLiveViewDescriptor, type LiveViewDescriptor, type NativeLiveViewDescriptor } from "../modules/display/contract.js";
 import { captureRegion, type NativeCaptureRegion, type NativeCaptureSource } from "../machine/native-capture-client.js";
+import { CONTROL_CHARACTER, CONTROL_CHARACTERS } from "../foundation/control-characters.js";
 
 export function browserCDPEndpoint(value: string): URL {
   let endpoint: URL;
@@ -66,7 +67,7 @@ function generationKey(sessionId: string, generation: string, cdpUrl: string): s
 }
 function bounded(value: unknown, maximum: number): value is string {
   return typeof value === "string" && value.length > 0 && Buffer.byteLength(value) <= maximum
-    && !/[\u0000-\u001f\u007f]/.test(value);
+    && !CONTROL_CHARACTER.test(value);
 }
 
 export class BrowserLiveViewRegistry {
@@ -140,7 +141,7 @@ export class BrowserLiveViewRegistry {
     if (!current()) throw new GatewayError("conflict", "Native capture load ended");
     if (this.views.size >= BROWSER_LIVE_VIEW_MAXIMUM_REGISTRATIONS) throw new GatewayError("busy", "Live view capacity reached", true);
     const registration: NativeLiveViewRegistration = { sessionId, loadToken: entry.loadToken,
-      viewId: randomUUID(), generation: randomUUID(), title: `${(source.title || source.applicationName).replace(/[\u0000-\u001f\u007f]/g, " ").trim() || "Mac view"}${region ? " (area)" : ""}`.slice(0, 256),
+      viewId: randomUUID(), generation: randomUUID(), title: `${(source.title || source.applicationName).replace(CONTROL_CHARACTERS, " ").trim() || "Mac view"}${region ? " (area)" : ""}`.slice(0, 256),
       handle, region, native: entry };
     this.nativeCatalogs.delete(sessionId);
     this.views.set(key(sessionId, registration.viewId), { registration, viewers: new Map(), latest: undefined,

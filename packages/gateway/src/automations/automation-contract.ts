@@ -13,6 +13,7 @@ import type {
   AutomationTrigger,
   AutomationUpdateInput,
 } from "./types.js";
+import { CONTROL_CHARACTER } from "../foundation/control-characters.js";
 
 export const MAXIMUM_AUTOMATIONS = 1_024;
 export const MAXIMUM_AUTOMATION_RECORD_BYTES = 512 * 1_024;
@@ -27,7 +28,6 @@ export const AUTOMATION_FAILURE_CIRCUIT_LIMIT = 3;
 
 const occurrenceId = /^[A-Za-z0-9_-]{43}$/u;
 const sessionTargetId = /^[A-Za-z0-9_:-]{1,200}$/u;
-const controlCharacter = /[\u0000-\u001f\u007f]/u;
 
 function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
   const keys = Object.keys(value);
@@ -41,7 +41,7 @@ function record(value: unknown): Record<string, unknown> | undefined {
 
 function bounded(value: unknown, maximumBytes: number, allowEmpty = false): value is string {
   return typeof value === "string" && (allowEmpty || value.length > 0)
-    && Buffer.byteLength(value) <= maximumBytes && !/[\u0000]/u.test(value);
+    && Buffer.byteLength(value) <= maximumBytes && !value.includes("\u0000");
 }
 
 function timestamp(value: unknown): value is string {
@@ -93,7 +93,7 @@ function admitsAutomationTarget(value: unknown): value is AutomationTarget {
     && isAutomationId(input.homeId) && Number.isSafeInteger(input.routeGeneration) && (input.routeGeneration as number) >= 1;
   return input.kind === "workspace"
     && exactKeys(input, ["kind", "cwd", "sessionPolicy"])
-    && bounded(input.cwd, 4_096) && isAbsolute(input.cwd) && !controlCharacter.test(input.cwd)
+    && bounded(input.cwd, 4_096) && isAbsolute(input.cwd) && !CONTROL_CHARACTER.test(input.cwd)
     && input.sessionPolicy === "newPerRun";
 }
 

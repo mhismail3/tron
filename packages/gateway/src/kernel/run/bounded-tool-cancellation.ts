@@ -83,7 +83,7 @@ export function boundToolCancellation(session: AgentSession, graceMs = TOOL_CANC
     return next;
   };
   Object.defineProperty(state, "tools", { configurable: true, enumerable: descriptor.enumerable ?? true,
-    get, set: (tools: AgentToolLike[]) => set(tools.map(bound)) });
+    get, set: (tools: AgentToolLike[]) => { set(tools.map(bound)); } });
   state[BOUNDED] = inFlight;
   set(get().map(bound));
 }

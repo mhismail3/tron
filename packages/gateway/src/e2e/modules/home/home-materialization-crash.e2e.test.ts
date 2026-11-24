@@ -34,7 +34,7 @@ import { TrustService } from "../../../kernel/resources/trust-service.js";
 import { TronWorkspace } from "../../../workspace/tron-workspace.js";
 import { HomeOwner, type HomeSessionPort } from "../../../modules/home/home-owner.js";
 import { homeTaskPolicy } from "../../../modules/home/home-task-worker-choice.js";
-import { RuntimeRegistry, type RuntimeLifecycleRecord } from "../../../kernel/session/runtime-registry.js";
+import { type RuntimeLifecycleRecord } from "../../../kernel/session/runtime-registry.js";
 import { durableAtomicWriteJson } from "../../../foundation/durable-json.js";
 
 const roots: string[] = [];

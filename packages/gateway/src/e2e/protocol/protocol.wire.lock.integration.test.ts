@@ -4,12 +4,10 @@ import WebSocket from "ws";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { startLockGateway, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
-import { eventShapePaths } from "../../../test-support/scenario-lock.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import * as Protocol from "../../protocol/types.js";
 import { protocolTs } from "../../../../../tools/proof/dafny2wire/dafny2wire.mjs";
 
-const MODULE = "gateway/e2e";
 const REPOSITORY = resolve(import.meta.dirname, "..", "..", "..", "..", "..");
 const gateways: LockGateway[] = [];
 afterEach(async () => {

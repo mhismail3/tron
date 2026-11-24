@@ -206,6 +206,7 @@ export abstract class RunOperations<FixedAt> extends RunRuntime<FixedAt> {
           this.revision += 1;
           this.publishSnapshot();
           if (cleanupFailure !== undefined) {
+            // oxlint-disable-next-line no-unsafe-finally -- a cleanup failure must surface even when the guarded block already failed
             throw asUncertainOutcome(cleanupFailure, "Bash completed but its ownership marker could not be cleared; refresh session state instead of replaying");
           }
         }

@@ -221,6 +221,7 @@ function profileListItem(item: HomeProfileItem) {
     status: item.status, createdAt: item.record.createdAt, updatedAt: item.record.updatedAt };
 }
 
+// oxlint-disable-next-line no-control-regex -- refuses controls and line separators in one-line profile text
 const SINGLE_LINE = /[\u0000-\u001f\u007f\u2028\u2029]/;
 export const PROFILE_TEXT_MAX = 512;
 export const PROFILE_REASON_MAX = 2_000;

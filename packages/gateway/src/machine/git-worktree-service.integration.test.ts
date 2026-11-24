@@ -3,7 +3,7 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "
 import { promisify } from "node:util";
 import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { GitWorktreeService } from "./git-worktree-service.js";
 import { waitFor } from "../../test-support/wait-for.js";
 

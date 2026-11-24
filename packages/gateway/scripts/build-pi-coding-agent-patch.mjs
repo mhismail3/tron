@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 // Reproduce Tron's patched package tarballs from their declared source, patch and toolchain.
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";

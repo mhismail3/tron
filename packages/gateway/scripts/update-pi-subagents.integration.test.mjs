@@ -202,9 +202,11 @@ for (const failure of ["ancestor", "version", "missing-source", "dirty", "late-c
         assert.equal(existsSync(join(target, "pi-subagents-pin.json.tmp")), false);
       } finally {
         if (writerPid) {
+          // oxlint-disable-next-line no-unsafe-finally -- a cleanup failure must surface even when the guarded block already failed
           try { process.kill(-writerPid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; }
           const deadline = Date.now() + 5_000;
           while (true) {
+            // oxlint-disable-next-line no-unsafe-finally -- a cleanup failure must surface even when the guarded block already failed
             try { process.kill(writerPid, 0); } catch (error) { if (error.code === "ESRCH") break; throw error; }
             assert.ok(Date.now() < deadline, "writer must exit before removing preserved staging");
             Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);

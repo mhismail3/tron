@@ -12,6 +12,7 @@ import { readJson } from "../foundation/json.js";
 import type { BlobByteRange, BlobLease } from "../sessions/blob-store.js";
 import { DISPLAY_ARTIFACT_KINDS, type DisplayArtifactDescriptor, type DisplayArtifactKind } from "../modules/display/contract.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
+import { CONTROL_CHARACTER, CONTROL_CHARACTERS } from "../foundation/control-characters.js";
 
 const METADATA_MAX_BYTES = 64 * 1_024;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
@@ -64,13 +65,13 @@ function refuseUnavailableSource(error: unknown): never {
 }
 
 function safeName(input: string): string {
-  const value = basename(input).replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 160);
+  const value = basename(input).replace(CONTROL_CHARACTERS, "").slice(0, 160);
   return value || "artifact";
 }
 
 function validIdentity(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= 200
-    && !/[\u0000-\u001f\u007f]/.test(value);
+    && !CONTROL_CHARACTER.test(value);
 }
 
 function isConfirmedArtifactCorruption(error: unknown): boolean {
@@ -90,7 +91,7 @@ function isMetadata(value: unknown, expectedID: string, maximumItemBytes: number
     && item.id === expectedID && typeof item.id === "string" && DISPLAY_ARTIFACT_ID_PATTERN.test(item.id)
     && typeof item.name === "string" && item.name === safeName(item.name)
     && typeof item.mimeType === "string" && item.mimeType.length > 0 && item.mimeType.length <= 200
-    && !/[\u0000-\u001f\u007f]/.test(item.mimeType)
+    && !CONTROL_CHARACTER.test(item.mimeType)
     && Number.isSafeInteger(item.size) && (item.size as number) > 0 && (item.size as number) <= maximumItemBytes
     && isDisplayArtifactKind(item.kind)
     && typeof item.digest === "string" && DIGEST_PATTERN.test(item.digest)

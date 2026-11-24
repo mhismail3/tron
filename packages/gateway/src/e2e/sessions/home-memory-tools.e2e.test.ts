@@ -8,13 +8,13 @@ import { ModelRuntime, type AgentSession } from "@earendil-works/pi-coding-agent
 import { TronWorkspace } from "../../workspace/tron-workspace.js";
 import {
   fauxAssistantMessage, fauxProvider, fauxText, fauxThinking, fauxToolCall,
-  type AssistantMessage, type FauxProviderHandle, type Message, type ToolCall,
+  type FauxProviderHandle, type Message, type ToolCall,
 } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../../kernel/resources/trust-service.js";
 import { EPISODIC_DEFAULTS, type EpisodicMessageRecord, type EpisodicSummarizer } from "../../episodic/episodic-contract.js";
 import { EpisodicStore } from "../../episodic/episodic-store.js";
-import { HOME_MEMORY_VIEW_MARKER, type HomeMemoryUnavailableReason } from "../../modules/home/home-memory.js";
+import { HOME_MEMORY_VIEW_MARKER } from "../../modules/home/home-memory.js";
 import type { HomeRequestRecord } from "../../modules/home/home-request-policy.js";
 import type { HomeMemoryToolDetails } from "../../modules/home/home-memory-tools.js";
 import type { HomeMemoryStatus } from "../../protocol/types.js";
@@ -267,12 +267,6 @@ async function prompt(f: Fixture, input: string, reply: string): Promise<void> {
 
 const ok = (answer: ToolObservation): string => {
   expect(answer.details?.status, `${answer.toolName} must answer, not refuse: ${answer.text}`).toBe("ok");
-  return answer.text;
-};
-
-const unavailable = (answer: ToolObservation, reason: HomeMemoryUnavailableReason): string => {
-  expect(answer.isError).toBe(false);
-  expect(answer.details).toEqual({ status: "unavailable", reason });
   return answer.text;
 };
 

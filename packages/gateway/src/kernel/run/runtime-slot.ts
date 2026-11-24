@@ -2012,6 +2012,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   }
 
   public activitySource(): activityProjection.ActivitySource {
+    // oxlint-disable-next-line typescript/no-this-alias -- getters and methods of this object literal read the owner, not the literal
     const slot = this;
     return {
       get processActivities() { return slot.processActivities; },
@@ -3285,6 +3286,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   private readonly snapshotProjection = new SnapshotProjection();
 
   private buildSnapshot(sequence: number): SessionSnapshot {
+    // oxlint-disable-next-line typescript/no-this-alias -- getters and methods of this object literal read the owner, not the literal
     const slot = this;
     return this.snapshotProjection.build({
       displayProjection: this.displayProjection,
@@ -3349,6 +3351,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   }
 
   private pageSource(): sessionPages.PageSource {
+    // oxlint-disable-next-line typescript/no-this-alias -- getters and methods of this object literal read the owner, not the literal
     const slot = this;
     return {
       displayProjection: this.displayProjection,

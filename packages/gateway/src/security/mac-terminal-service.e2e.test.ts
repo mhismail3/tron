@@ -246,6 +246,7 @@ for (const enabled of [true, false]) it(`restores previously ${enabled ? "enable
     for (const service of [old, next]) {
       let job: string;
       try { job = await run("/bin/launchctl", ["print", `gui/${process.getuid!()}/${service.label}`]); }
+      // oxlint-disable-next-line no-unsafe-finally -- a cleanup failure must surface even when the guarded block already failed
       catch (error) { if (String(error).includes("Could not find service")) continue; throw error; }
       expect(job.includes(service.plistPath) && job.includes(service.configPath)).toBe(true);
       await run("/bin/launchctl", ["bootout", `gui/${process.getuid!()}/${service.label}`]);

@@ -428,6 +428,7 @@ describe("Mac Terminal", () => {
       await new Promise<void>(resolve => proxy.close(() => resolve()));
       await first?.catch(() => {});
       try { execFileSync("/opt/homebrew/bin/tmux", ["-L", "tron-mobile", "kill-session", "-t", sessionName], { stdio: "ignore" }); }
+      // oxlint-disable-next-line no-unsafe-finally -- a cleanup failure must surface even when the guarded block already failed
       catch (error) { if ((error as { status?: number }).status !== 1) throw error; }
       finally { await sshd.stop(); }
     }

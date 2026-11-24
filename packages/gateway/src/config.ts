@@ -11,6 +11,7 @@ import { readSecureJson, SecureJsonFileError } from "./foundation/secure-json.js
 import { GatewayError } from "./errors.js";
 import { resolveTronHome } from "./tron-home.js";
 import { assertHomeLayout, initializeHomeLayout, tronHomePath } from "./foundation/tron-home-layout.js";
+import { CONTROL_CHARACTER } from "./foundation/control-characters.js";
 
 export interface GatewayConfig {
   readonly host: string;
@@ -211,9 +212,9 @@ function isStoredGatewayConfig(value: unknown): value is StoredGatewayConfig {
   return keys.length === expectedKeys.length && keys.every((key) => expectedKeys.includes(key))
     && document.version === 1
     && typeof document.machineId === "string" && Buffer.byteLength(document.machineId) > 0
-    && Buffer.byteLength(document.machineId) <= 256 && !/[\u0000-\u001f\u007f]/.test(document.machineId)
+    && Buffer.byteLength(document.machineId) <= 256 && !CONTROL_CHARACTER.test(document.machineId)
     && typeof document.machineName === "string" && Buffer.byteLength(document.machineName) > 0
-    && Buffer.byteLength(document.machineName) <= 1_024 && !/[\u0000-\u001f\u007f]/.test(document.machineName);
+    && Buffer.byteLength(document.machineName) <= 1_024 && !CONTROL_CHARACTER.test(document.machineName);
 }
 
 async function storedGatewayConfig(path: string): Promise<StoredGatewayConfig | null> {
@@ -237,7 +238,7 @@ async function storedGatewayConfig(path: string): Promise<StoredGatewayConfig | 
 function validateMachineGroupID(value: unknown): string {
   if (typeof value !== "string" || value.trim().length === 0
     || Buffer.byteLength(value) > MACHINE_GROUP_MAX_BYTES
-    || /[\u0000-\u001f\u007f]/.test(value)) {
+    || CONTROL_CHARACTER.test(value)) {
     throw new GatewayError("conflict", "Machine group identity is malformed or oversized");
   }
   return value;
@@ -293,7 +294,7 @@ function machineGroupIdentityPath(
 async function loadMachineGroupID(environment: NodeJS.ProcessEnv): Promise<string> {
   const injected = environment.TRON_MACHINE_GROUP_ID?.trim();
   if (injected) {
-    if (Buffer.byteLength(injected) > MACHINE_GROUP_MAX_BYTES || /[\u0000-\u001f\u007f]/.test(injected)) {
+    if (Buffer.byteLength(injected) > MACHINE_GROUP_MAX_BYTES || CONTROL_CHARACTER.test(injected)) {
       throw new GatewayError("invalid_request", "TRON_MACHINE_GROUP_ID is invalid");
     }
     return injected;

@@ -145,6 +145,7 @@ describe("prompt journeys across the real Gateway process", () => {
       release();
       if (lookupPid !== undefined) {
         try { process.kill(lookupPid, "SIGKILL"); } catch (error) {
+          // oxlint-disable-next-line no-unsafe-finally -- a cleanup failure must surface even when the guarded block already failed
           if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
         }
       }

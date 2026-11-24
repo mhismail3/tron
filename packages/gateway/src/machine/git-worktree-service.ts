@@ -153,38 +153,34 @@ export class GitWorktreeService {
     const baseCommit = createdBranch
       ? (await runGit(repositoryRoot, ["rev-parse", `${baseRef}^{commit}`])).stdout.trim()
       : undefined;
-    try {
-      if (createdBranch) {
-        await runGit(repositoryRoot, ["worktree", "add", "-b", branch, target, baseRef]);
-      } else {
-        await runGit(repositoryRoot, ["worktree", "add", target, branch]);
-      }
-      const canonical = await realpath(target);
-      return {
-        cwd: canonical,
-        cleanup: async () => {
-          let worktreeRemoved = false;
-          if (createdBranch && baseCommit) {
-            await this.assertOwnedWorktree(repositoryRoot, canonical, branch);
-            try {
-              await this.removeCreatedBranch(repositoryRoot, branch, baseCommit);
-            } catch (error) {
-              if (isUncertainOutcome(error)) throw error;
-              const current = await runGit(repositoryRoot, ["rev-parse", "--verify", `refs/heads/${branch}`])
-                .catch(failure => { throw asUncertainOutcome(failure, "Git branch cleanup could not be reconciled"); });
-              if (current.stdout.trim() === baseCommit) {
-                throw asUncertainOutcome(error, "Git branch cleanup failed without a confirmed branch move");
-              }
-              await this.removeWorktree(repositoryRoot, canonical);
-              worktreeRemoved = true;
-            }
-          }
-          if (!worktreeRemoved) await this.removeWorktree(repositoryRoot, canonical);
-        },
-      };
-    } catch (error) {
-      throw error;
+    if (createdBranch) {
+      await runGit(repositoryRoot, ["worktree", "add", "-b", branch, target, baseRef]);
+    } else {
+      await runGit(repositoryRoot, ["worktree", "add", target, branch]);
     }
+    const canonical = await realpath(target);
+    return {
+      cwd: canonical,
+      cleanup: async () => {
+        let worktreeRemoved = false;
+        if (createdBranch && baseCommit) {
+          await this.assertOwnedWorktree(repositoryRoot, canonical, branch);
+          try {
+            await this.removeCreatedBranch(repositoryRoot, branch, baseCommit);
+          } catch (error) {
+            if (isUncertainOutcome(error)) throw error;
+            const current = await runGit(repositoryRoot, ["rev-parse", "--verify", `refs/heads/${branch}`])
+              .catch(failure => { throw asUncertainOutcome(failure, "Git branch cleanup could not be reconciled"); });
+            if (current.stdout.trim() === baseCommit) {
+              throw asUncertainOutcome(error, "Git branch cleanup failed without a confirmed branch move");
+            }
+            await this.removeWorktree(repositoryRoot, canonical);
+            worktreeRemoved = true;
+          }
+        }
+        if (!worktreeRemoved) await this.removeWorktree(repositoryRoot, canonical);
+      },
+    };
   }
 
   private async repositoryRoot(cwd: string): Promise<string> {

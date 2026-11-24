@@ -240,6 +240,7 @@ function findStringTerminator(line: string, start: number, allowBell: boolean): 
 
 function safeLink(uri: string): string | undefined {
   if (uri.length === 0) return "";
+  // oxlint-disable-next-line no-control-regex -- refuses C0 and C1 controls in link URIs
   if (uri.length > MAX_LINK_LENGTH || /[\u0000-\u001f\u007f-\u009f]/.test(uri)) return undefined;
   try {
     const parsed = new URL(uri);

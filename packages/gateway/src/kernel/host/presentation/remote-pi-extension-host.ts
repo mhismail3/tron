@@ -48,6 +48,7 @@ export class RemotePiExtensionHost {
   rerender(): void { if (!this.retired) this.requestRender(true); }
 
   context(): ExtensionUIContext {
+    // oxlint-disable-next-line typescript/no-this-alias -- getters and methods of this object literal read the owner, not the literal
     const host = this;
     return {
       ...this.baseContext,
@@ -102,6 +103,7 @@ export class RemotePiExtensionHost {
       onDiagnostic: (diagnostic) => this.recordDiagnostic(diagnostic),
     });
     const screen = this.screen;
+    // oxlint-disable-next-line typescript/no-this-alias -- getters and methods of this object literal read the owner, not the literal
     const host = this;
     this.tuiProxy = new Proxy(screen as TUI, {
       get(target, property, receiver) {

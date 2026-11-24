@@ -17,6 +17,7 @@ import {
   type PushGrant,
 } from "./grant-store.js";
 import { PushRelayClient, type RelayNotificationOutcome, type RelayNotificationResult } from "./relay-client.js";
+import { CONTROL_CHARACTER, CONTROL_CHARACTER_EXCEPT_LINE_BREAKS } from "../foundation/control-characters.js";
 
 const INTENT_TTL_MS = 15 * 60_000;
 const RECEIPT_TTL_MS = 24 * 60 * 60_000;
@@ -94,7 +95,7 @@ function iso(ms: number): string { return new Date(ms).toISOString(); }
 function isID(value: string): boolean { return /^[A-Za-z0-9_-]{8,160}$/u.test(value); }
 function boundedText(value: string, maximumBytes: number, field: "message" | "title"): string {
   const normalized = value.trim();
-  if (!normalized || Buffer.byteLength(normalized) > maximumBytes || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(normalized)) {
+  if (!normalized || Buffer.byteLength(normalized) > maximumBytes || CONTROL_CHARACTER_EXCEPT_LINE_BREAKS.test(normalized)) {
     throw new GatewayError("invalid_request", `Notification ${field} must contain 1 through ${maximumBytes} UTF-8 bytes of text`);
   }
   return normalized;
@@ -102,7 +103,7 @@ function boundedText(value: string, maximumBytes: number, field: "message" | "ti
 function boundedRoute(route: { sessionId: string; machineId: string } | undefined, sessionId: string) {
   if (route === undefined) return undefined;
   if (route.sessionId !== sessionId || !SESSION_ROUTE_ID.test(route.sessionId) || !route.machineId
-    || Buffer.byteLength(route.machineId) > 256 || /[\u0000-\u001f\u007f]/u.test(route.machineId)) {
+    || Buffer.byteLength(route.machineId) > 256 || CONTROL_CHARACTER.test(route.machineId)) {
     throw new GatewayError("invalid_request", "Notification route is malformed");
   }
   return route;

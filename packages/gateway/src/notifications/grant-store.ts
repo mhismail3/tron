@@ -7,6 +7,7 @@ import { readSecureJson, SecureJsonFileError } from "../foundation/secure-json.j
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import { GatewayError } from "../errors.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
+import { CONTROL_CHARACTER } from "../foundation/control-characters.js";
 
 export type NotificationKind = "explicit" | "ask" | "agent_finished" | "waiting";
 type DeliveryOutcome = "pending" | "accepted_by_apns" | "retryable" | "invalid_token" | "permanent_failure" | "ambiguous" | "expired";
@@ -145,7 +146,7 @@ function isTarget(value: unknown): value is PendingTarget {
     && (route === undefined || (typeof route === "object" && route !== null && !Array.isArray(route)
       && exact(route, ["sessionId", "machineId"]) && id(route.sessionId)
       && typeof route.machineId === "string" && Buffer.byteLength(route.machineId) > 0
-      && Buffer.byteLength(route.machineId) <= 256 && !/[\u0000-\u001f\u007f]/u.test(route.machineId)))
+      && Buffer.byteLength(route.machineId) <= 256 && !CONTROL_CHARACTER.test(route.machineId)))
     && Number.isSafeInteger(v.attempts) && (v.attempts as number) >= 0 && (v.attempts as number) <= 8
     && timestamp(v.nextAttemptAt) && ["pending", "accepted_by_apns", "retryable", "invalid_token", "permanent_failure", "ambiguous", "expired"].includes(v.outcome as string);
 }
@@ -185,7 +186,7 @@ function isInboxEntry(value: unknown): value is NotificationInboxEntry {
     && typeof v.message === "string" && Buffer.byteLength(v.message) > 0 && Buffer.byteLength(v.message) <= 512
     && typeof v.sessionId === "string" && SESSION_ID.test(v.sessionId)
     && (v.machineId === undefined || (typeof v.machineId === "string" && Buffer.byteLength(v.machineId) > 0
-      && Buffer.byteLength(v.machineId) <= 256 && !/[\u0000-\u001f\u007f]/u.test(v.machineId)))
+      && Buffer.byteLength(v.machineId) <= 256 && !CONTROL_CHARACTER.test(v.machineId)))
     && ["queued", "accepted_by_apns", "failed", "ambiguous", "expired"].includes(v.outcome as string);
 }
 export function validateNotificationDocument(value: unknown): NotificationDocument {
