@@ -331,7 +331,6 @@ case "$cmd" in
     esac
     ;;
   gate)
-    shift
     exec python3 "$ROOT/tools/verify/gate.py" "$@"
     ;;
   bundle)
