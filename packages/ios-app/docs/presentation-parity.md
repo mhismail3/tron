@@ -130,9 +130,9 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   settled height (medium before the first), so it opens at its final size. The sizer owns the
   native detent: every change after presentation goes through
   `UISheetPresentationController.animateChanges` (the system sheet spring), including growth to and
-  from full height; Reduce Motion applies it instantly. A nested sheet never opens shorter than the
-  sheet it covers, and a sheet's height preference never reaches the sheet that presented it, so
-  opening, using and closing a child leaves the parent still. The drag indicator is hidden.
+  from full height; Reduce Motion applies it instantly. A nested sheet opens at its own content
+  height like any other, and a sheet's height preference never reaches the sheet that presented it,
+  so closing a child restores its parent's height. The drag indicator is hidden.
   The measured scroll extends under the bottom safe area; a fitted sheet adds no bottom content
   margin, so content never exceeds its frame and the sheet cannot scroll or bounce. While a sheet fits,
   every `tronGlassSurface`/`tronScrollSurface` uses `ConcentricRectangle` bottom corners
