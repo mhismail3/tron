@@ -86,7 +86,7 @@ final class TronSubsheetReliabilityUITests: XCTestCase {
             XCTAssertTrue(waitFor(feedback, "label == 'sheet-feedback:\(played)'"), "\(index): \(feedback.label)")
             switch dismissal {
             case "swipe":
-                window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.62))
+                window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: (detail.frame.minY - 40) / window.frame.height))
                     .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1.0)),
                            withVelocity: .fast, thenHoldForDuration: 0)
             case "background":

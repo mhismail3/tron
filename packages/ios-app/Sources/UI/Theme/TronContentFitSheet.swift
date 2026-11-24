@@ -100,7 +100,7 @@ private struct TronSheetDetentDriver: UIViewControllerRepresentable {
     private func apply(to controller: Controller) {
         var root: UIViewController = controller
         while let parent = root.parent { root = parent }
-        guard let sheet = root.sheetPresentationController else { return }
+        guard !root.isBeingDismissed, let sheet = root.sheetPresentationController else { return }
         let key = height.map { "fit:\($0)" } ?? (medium ? "medium" : "large")
         let identifier: UISheetPresentationController.Detent.Identifier = height == nil ? (medium ? .medium : .large) : .init("tron.content-fit")
         guard controller.applied != key || sheet.detents.map(\.identifier) != [identifier] else { return }
