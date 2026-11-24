@@ -69,10 +69,8 @@ export class RestartDrainProgress {
 }
 
 function instant(value: string | undefined): Time {
-  if (value === undefined) return { $: "Unset" };
-  const ms = Date.parse(value);
-  if (new Date(ms).toISOString() !== value) throw new RangeError(`Drain blocker time is not an ISO instant: ${JSON.stringify(value)}`);
-  return { $: "At", ms };
+  const ms = value === undefined ? Number.NaN : Date.parse(value);
+  return Number.isFinite(ms) && new Date(ms).toISOString() === value ? { $: "At", ms } : { $: "Unset" };
 }
 
 export function logUnresolvedDrainOwners(
