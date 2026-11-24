@@ -188,8 +188,8 @@ struct HomeManagePendingControl: Identifiable {
 
         var icon: String {
             switch self {
-            case .pause: "pause.fill"
-            case .resume: "play.fill"
+            case .pause: "pause"
+            case .resume: "play"
             case .disable: "house.slash"
             }
         }
