@@ -249,7 +249,6 @@ struct HostedHomeDashboardFixture: View {
         let initialState = arguments.first(where: { $0.hasPrefix("-home-shell-") })?.replacingOccurrences(of: "-home-shell-", with: "") ?? "undesignated"
         let gateway = HostedHomeShellGateway(capabilityEnabled: capabilityEnabled, initialState: initialState,
             phase: arguments.first(where: { $0.hasPrefix("-home-phase-") })?.replacingOccurrences(of: "-home-phase-", with: ""),
-            unresolved: arguments.contains("-home-control-unresolved"),
             delayed: arguments.contains("-home-control-delayed"),
             browserState: arguments.first(where: { $0.hasPrefix("-home-browser-") })?.replacingOccurrences(of: "-home-browser-", with: ""),
             emptyContext: arguments.contains("-home-context-empty"),
@@ -291,8 +290,6 @@ struct HostedHomeDashboardFixture: View {
                             if staleActionFinished {
                                 Text("Stale action finished").accessibilityIdentifier("fixture.stale-action-finished")
                             }
-                            Text(model.homeMutations.isRunning(profileID: profile.id) ? "running" : model.homeMutations.ownsUnresolvedCommand(profileID: profile.id) ? "unresolved" : "idle")
-                                .accessibilityIdentifier("fixture.home-command-state")
                             Text("control-count:\(controlCount)").accessibilityIdentifier("fixture.home-control-count")
                             Text("prompt-route:\(promptRoute)").accessibilityIdentifier("fixture.home-prompt-route")
                             Text("opened-session:\(openedSession)").accessibilityIdentifier("fixture.home-opened-session")
@@ -443,10 +440,8 @@ private actor HostedHomeShellGateway {
     private var phase: String
     private var paused = false
     private var configured = true
-    private let unresolved: Bool
     private let delayed: Bool
     private var acceptedControl: JSONValue?
-    private var receiptChecks = 0
     private let browserState: String?
     private let emptyContext: Bool
     private let sheetState: String?
@@ -502,7 +497,7 @@ private actor HostedHomeShellGateway {
     private var profileItems: [HostedProfileItem] = HostedHomeToolFixture.profileItems
     private var profileUndo: [String: (before: [HostedProfileItem], after: [HostedProfileItem])] = [:]
     private var profileChangeCount = 0
-    init(capabilityEnabled: Bool, initialState: String, phase: String? = nil, unresolved: Bool = false, delayed: Bool = false, browserState: String? = nil, emptyContext: Bool = false, sheetState: String? = nil) {
+    init(capabilityEnabled: Bool, initialState: String, phase: String? = nil, delayed: Bool = false, browserState: String? = nil, emptyContext: Bool = false, sheetState: String? = nil) {
         self.sheetState = sheetState
         self.browserState = browserState
         self.emptyContext = emptyContext
@@ -512,7 +507,6 @@ private actor HostedHomeShellGateway {
         self.phase = phase ?? "ready"
         paused = phase == "paused"
         configured = phase != "unconfigured"
-        self.unresolved = unresolved
         self.delayed = delayed
     }
     func statusCount() -> Int { homeStatusCount }
@@ -821,14 +815,8 @@ private actor HostedHomeShellGateway {
                 acceptedControl = result
                 try? await Task.sleep(for: .seconds(6))
             }
-            if unresolved {
-                acceptedControl = result
-                return (nil, .object(["code": .string("response_too_large"), "message": .string("Completion unavailable"), "retryable": .bool(false)]))
-            }
             return (result, nil)
         case "command.status":
-            receiptChecks += 1
-            if unresolved && receiptChecks == 1 { return (.object(["status": .string("pending")]), nil) }
             return (.object(["status": .string("completed"), "result": acceptedControl ?? .null]), nil)
         case "session.abort":
             if params["sessionId"]?.stringValue == "home-session", params["operationId"]?.stringValue == "home-operation",
