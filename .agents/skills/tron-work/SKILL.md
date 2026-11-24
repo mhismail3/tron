@@ -34,17 +34,16 @@ Prepare pinned Gateway dependencies only when selected checks need them. Review 
 
 ## Publish
 
-After affected evidence passes, run `scripts/tron land` from the task branch
-([land](../../../tools/verify/land.md)). It waits its turn on this host, merges `--no-ff` onto
-fetched main, validates that exact merge (its affected checks, iOS ones on the mini; the main suite runs on the mini) and pushes it only if
-green; when main moved meanwhile it merges and validates again. Never push main by hand.
+After the focused checks pass (`scripts/tron verify --changed` or the fast PR check), fetch main,
+`git merge --no-ff` your branch onto it and push main. No full-suite gate runs before main; if the
+push is refused because main moved, fetch, merge again and push.
 
 If you pushed the task branch, delete it on origin once main contains it
 (`git push origin --delete <branch>`); `refs/archive/*` keeps anything abandoned.
-A red or conflict refusal leaves main and your branch unchanged: fix, commit, land again. An uncertain network
+On a conflict, resolve it in the merge, rerun the focused checks, then push. An uncertain network
 result is not a failed write: inspect `git ls-remote origin refs/heads/main` and
 ancestry before acting. Never force-push main or automatically replay uncertain writes.
-Do not run full suites after landing: the main suite and the device checkpoints own that coverage
+Full suites run after the merge, on main, and a red there is fixed forward; device checkpoints own device coverage
 ([principles P2](../../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-landing-and-checkpoint-signal)). Sync tracked-clean primary main only when
 strictly behind with `git merge --ff-only origin/main`; preserve untracked files.
 

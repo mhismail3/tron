@@ -44,8 +44,7 @@ lanes shards may use beside each other (`iosLanes`), plus the concurrency limit 
 (default 1); phone and iPad shards run one at a time unless the caller explicitly widens it.
 Home plans heavy work within the three-slot ceiling; follow the brief's "Heavy work" paragraph.
 The option changes neither selection nor the runner's three host-wide slots; packing only
-spreads methods across the lanes it allows, and iPad shards share the same job limit. `scripts/tron land` passes `--ios-jobs 3`: its
-verification runs alone under the mini's job lock.
+spreads methods across the lanes it allows, and iPad shards share the same job limit.
 Shards run longest estimate first on up to that many phone lanes: the worktree's own lane, then
 this worktree's `verify-iphone2-<hash>` and `verify-iphone3-<hash>` lanes (the canonical iPhone;
 one per further slot of `scripts/ios-test-lock.py`'s `HOST_SLOTS`), with iPad-only shards on the

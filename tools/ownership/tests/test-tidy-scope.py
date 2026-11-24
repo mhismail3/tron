@@ -4,7 +4,7 @@
 Reuses the disposable checkout from test-tidy.py (real `scripts/tron`, real worktrees, a bare
 origin) and runs the command as a worker would:
 
-1. A detached-HEAD worktree belongs to the tool that made it (land's merge worktree, base
+1. A detached-HEAD worktree belongs to the tool that made it (base
    checks): it is reported but never pruned, even when merged, clean and idle.
 2. Scratch and evidence in a linked worktree with a live process, local changes or
    unknown ignored data are another worker's (as is every linked worktree when `lsof` is

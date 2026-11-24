@@ -217,21 +217,6 @@ class ExternalVerificationTests(VerifyCase):
         self.assertNotEqual(refused.returncode, 0)
         self.assertIn("unsupported verify declaration", refused.stdout + refused.stderr)
 
-    def test_the_bisect_probe_runs_a_declared_verification_file_by_name(self) -> None:
-        """The main suite probes a red group's files with --files; a declared scripts/verify-*.py file is not named like a
-        test, and --files refused it, so a red Python group gave no result instead of a bisect."""
-        r = self.repo
-        self.declare("alpha", [self.external("probe", body=PASSING, path="scripts/verify-probe.py")])
-        r.commit("a declared verification file")
-        planned = r.verify("--files", "scripts/verify-probe.py", "--plan")
-        self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
-        self.assertEqual(json.loads(planned.stdout[planned.stdout.index("{"):])["groups"], {"python": ["scripts/verify-probe.py"]})
-        r.write("scripts/helper.py", "VALUE = 1\n")
-        r.commit("a tracked script that is no test")
-        refused = r.verify("--files", "scripts/helper.py", "--plan")
-        self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
-        self.assertIn("no tracked test file", refused.stderr)
-
     def test_gateway_declarations_keep_existing_runner_classification(self) -> None:
         r = self.repo
         files = ["src/main.integration.test.ts", "src/nested.integration.test.ts", "src/mac.integration.test.ts",
@@ -1430,7 +1415,7 @@ class IosLaneTests(VerifyCase):
                  "lane": "swift", "host": "h", "cpuIdlePercent": None, "memoryFreePercent": None, "measuredAt": "m", "seenAt": "s",
                  "contended": 0} for test, outcome, seconds in (
                      ("TronMobileUITests/A/testA", "passed", 4.0), ("TronMobileUITests/A/testA", "failed", 9.0),
-                     ("TronSwiftAppUITests/B/testB", "passed", 7.0), ("TronMobileViewTests/C/testC", "skipped", 50.0),
+                     ("TronMobileViewTests/B/testB", "passed", 7.0), ("TronMobileViewTests/C/testC", "skipped", 50.0),
                      ("TronMacIntegrationTests/MacQuitGatewayTests/restartControl()", "passed", 30.0))]
         subprocess.run([sys.executable, "-c", f"import json, sys; sys.path.insert(0, {str(ROOT / 'tools/verify')!r}); import ledger; "
                         f"ledger.append(json.loads({json.dumps(rows)!r}))"], env=r.env, check=True)
@@ -1438,7 +1423,7 @@ class IosLaneTests(VerifyCase):
         self.assertEqual(result.returncode, 75, result.stdout + result.stderr)
         self.assertEqual(json.loads(result.stdout), [["verify", "--changed", "--base", r.git("rev-parse", "base"),
                                                      "--ios-host", "local", "--gateway-host", "local"],
-                                                    {"TronMobileUITests/A/testA": 9.0, "TronSwiftAppUITests/B/testB": 7.0}],
+                                                    {"TronMobileUITests/A/testA": 9.0, "TronMobileViewTests/B/testB": 7.0}],
                          "the handoff carries every iOS target's longest passed or failed timing and nothing else")
         self.assertFalse(calls.exists(), "no iOS build or test runs on the submitting host")
         self.assertFalse((r.path / "test-results/verify").exists(), "the mini owns the report, not an outer local verifier")

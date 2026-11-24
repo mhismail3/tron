@@ -52,6 +52,6 @@ Preserve the first failure, exact SHA, command and raw logs/counts. A passing re
 nondeterminism evidence, not resolution. Diagnose an unattributed red before choosing
 any revert target; never guess.
 
-Run affected checks before landing; broad coverage belongs to
-[`land`](land.md) and the device checkpoints ([P2](../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-landing-and-checkpoint-signal)), not duplicated per-worker suites. Report counts, skips,
+Run affected checks before the merge; broad coverage belongs to
+full suites on main and the device checkpoints ([P2](../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-landing-and-checkpoint-signal)), not duplicated per-worker suites. Report counts, skips,
 failures and untested boundaries honestly. See [test-confidence procedures](../../.agents/skills/tron-test-confidence/SKILL.md).

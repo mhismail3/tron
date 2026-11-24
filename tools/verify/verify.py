@@ -837,14 +837,6 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
         selected |= set(tests)
         reasons.append(f"--full: every test file ({len(tests)} files)")
         touched, chosen, declared = ["(all)"], set(modules), set(modules)
-    elif mode == "files":
-        runnable = {path for path in tracked if is_test(path) or (path.startswith("scripts/verify-") and path.endswith(".py"))}
-        missing = sorted(set(paths or []) - runnable)
-        if missing:
-            raise VerifyError(f"--files names no tracked test file: {', '.join(missing)}")
-        selected |= set(paths or [])
-        reasons.append(f"--files: the {len(selected)} named test file(s)")
-        touched, chosen = ["(files)"], set()
     elif mode == "all":
         selected |= set(locks)
         reasons.append(f"--all: every lock ({len(locks)} files)")
@@ -981,7 +973,7 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
         selected -= deferred
         if deferred:
             full_reasons.append(f"{len(deferred)} unchanged serial or slow test file(s)")
-            reasons.append(f"deferred to the main suite: {len(deferred)} unchanged serial or slow test file(s) ({POST_MERGE}); changed tests still run now")
+            reasons.append(f"deferred to the full suite on main: {len(deferred)} unchanged serial or slow test file(s) ({POST_MERGE}); changed tests still run now")
     docs_only = mode == "changed" and len(docs) == len(touched)
     doc_inputs = mode in ("all", "full") or any(is_doc(path) or path.endswith(".module.json") for path in touched)
     tier = "none" if docs_only else "full" if mode in ("all", "full") or full_reasons else "partial"
@@ -1326,9 +1318,8 @@ def main(argv: list[str]) -> int:
     mode.add_argument("--changed", action="store_true")
     mode.add_argument("--module", metavar="ID")
     mode.add_argument("--all", action="store_true")
-    mode.add_argument("--full", action="store_true", help="every test file in every group: the main suite")
+    mode.add_argument("--full", action="store_true", help="every test file in every group: the full suite on main")
     mode.add_argument("--update-locks", metavar="ID")
-    mode.add_argument("--files", nargs="*", metavar="TEST", help="exactly these test files and the static checks: the main suite's bisect probe")
     parser.add_argument("--base", default="origin/main")
     parser.add_argument("--ios-host", choices=("local", "mini"), default="local",
                         help="run a verification that selects iOS checks on this host or entirely under the mini lease")
@@ -1349,7 +1340,7 @@ def main(argv: list[str]) -> int:
     if skip - set(SKIPPABLE):
         parser.error(f"--skip accepts only {', '.join(SKIPPABLE)}")
     name = ("all" if args.all else "full" if args.full else "module" if args.module else "update-locks" if args.update_locks
-            else "files" if args.files is not None else "changed")
+            else "changed")
     try:
         if not args.plan and git("status", "--porcelain", "--untracked-files=normal").strip():
             raise VerifyError("the worktree has uncommitted or untracked changes; verify reads the committed state, commit first")
@@ -1357,7 +1348,7 @@ def main(argv: list[str]) -> int:
         base = git("merge-base", args.base, "HEAD").strip() if name == "changed" else git("rev-parse", "--verify", args.base).strip()
         result, _ = ownership.check()
         modules = result["modules"]
-        paths = args.files if name == "files" else changed_paths(base, working=True) if args.plan and name == "changed" else None
+        paths = changed_paths(base, working=True) if args.plan and name == "changed" else None
         selection = select(name, args.module or args.update_locks, base, modules, result["tracked"], paths=paths)
         change = delta(base) if name == "changed" else None
     except (VerifyError, ownership.GitError) as error:
@@ -1415,7 +1406,7 @@ def main(argv: list[str]) -> int:
     print(f"verify --{name}{' ' + (args.module or args.update_locks) if args.module or args.update_locks else ''} at {sha[:12]}"
           f" (base {base[:12]}): {len(selection['tests'])} test file(s) selected", flush=True)
     print(f"  tier: {selection['tier']} — affected checks now" + (
-        "; the main suite runs every file after the merge" if selection["tier"] == "full" and name not in ("all", "full") else ""), flush=True)
+        "; the full suite on main runs every file after the merge" if selection["tier"] == "full" and name not in ("all", "full") else ""), flush=True)
     for reason in selection["reasons"]:
         print(f"  why: {reason}", flush=True)
     if change:
@@ -1688,12 +1679,12 @@ def main(argv: list[str]) -> int:
         if passing == 0 and selection["docsOnly"]:
             return finish("passed", "Empty or documentation-only change: static/documentation checks are its evidence")
         if passing == 0 and selection["deferredTests"]:
-            return finish("passed", f"affected static checks passed; {len(selection['deferredTests'])} serial or slow test file(s) deferred to the main suite")
+            return finish("passed", f"affected static checks passed; {len(selection['deferredTests'])} serial or slow test file(s) deferred to the full suite on main")
         if passing == 0:
             return finish("failed", "zero tests ran: an empty selection is not evidence")
         groups_run = len({step["name"].split()[1] for step in run.steps if step["name"].startswith("tests:") and step["status"] == "ok"})
         return finish("passed", f"{passing} passing test(s) across {groups_run} runner group(s)"
-                      + (f"; {len(selection['deferredTests'])} serial or slow file(s) deferred to the main suite" if selection["deferredTests"] else "")
+                      + (f"; {len(selection['deferredTests'])} serial or slow file(s) deferred to the full suite on main" if selection["deferredTests"] else "")
                       + (f"; skipped by request: {', '.join(sorted(skip))}" if skip else ""))
 
     except KeyboardInterrupt:

@@ -277,7 +277,7 @@ Existing upward and two-way pairs live in the shrink-only
 always allowed.
 [Layer rules](../tools/layers/README.md).
 
-Run affected checks, then land with `scripts/tron land` ([land](../tools/verify/land.md), [Git/gh skill](../.agents/skills/tron-work/SKILL.md)); it validates the affected checks of the exact merge (selected iOS tests on the mini), the main suite then runs every file, and device checkpoints own device coverage ([principles P2](PRINCIPLES.md#p2-whole-system-health-is-a-landing-and-checkpoint-signal)).
+Run the focused checks (`scripts/tron verify --changed`), then `git merge --no-ff` onto fetched main and push ([Git/gh skill](../.agents/skills/tron-work/SKILL.md)); full suites run on main after the merge and a red is fixed forward; device checkpoints own device coverage ([principles P2](PRINCIPLES.md#p2-whole-system-health-is-a-landing-and-checkpoint-signal)).
 Markdown-only changes need static/docs evidence. [Verify](../tools/verify/README.md)
 owns selection and `test-results/verify/<sha>.json`; the [oracle policy](../tools/verify/test-oracles.md)
 owns fail-before/pass-after in the owning test, consolidation, and test changes with independent ACCEPT. Reds need
