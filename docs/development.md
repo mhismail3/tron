@@ -283,6 +283,5 @@ root fixes or causal reverts; no retry-to-green.
 Home plans the queue (`packages/gateway/docs/host-load.md`). The host-local iOS runner, profiler,
 Gateway E2E harness and Development simulator helper still take their native simulator lease and one
 of three host slots through `scripts/ios-test-lock.py --host-slot`; that ceiling is not a target.
-`scripts/tron test ios slots` reads the mini's slots; `scripts/tron-ios-test slots` reads this host's.
-`verify` uses one simulator lane unless its brief permits `--ios-jobs 2|3`.
+`scripts/tron-ios-test slots` reads this host's slots.
 [iOS parallel workers](../packages/ios-app/docs/development.md#parallel-worker-resource-ownership).

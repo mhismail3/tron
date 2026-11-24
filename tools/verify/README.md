@@ -9,7 +9,7 @@ to the push or refusal, has a 58 s deadline; each check has a 45 s budget. Vites
 a failure, a dirty tree or an expired deadline refuses and leaves main unchanged. There are no
 retries, skips, quarantine, selection by risk tier or later full suite: what the gate does not run
 is not a gate. `--check` runs the same gate and pushes nothing. Each run writes
-`test-results/gate/<time>/` (one log per check and `result.json` with outcome, SHAs and per-step
+`test-results/gate/<time>-<id>/` (one log per check and `result.json` with outcome, SHAs and per-step
 seconds).
 
 Checks: the privacy guard, the shrink-only determinism baseline (no new `.skip`/`.only`/sleeps), `scripts/tron ownership`, the protocol contract, documentation and agent

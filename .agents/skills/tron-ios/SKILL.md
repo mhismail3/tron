@@ -163,8 +163,7 @@ reclaim simulators yourself.
   Mac: `tron-ios-test` (`build`, `run`, `checkpoint`, `prepare`, `diagnose`), `tron-profile ios`, `ios-gateway-e2e-test` (all but `stop`/`clean`) and
   `tron-ios-simulator install` take a slot after their lane's lease, and a job that finds all slots
   held waits and names the holders. `scripts/tron-ios-test slots` shows them. The slot is a kernel
-  `flock`, so a killed or crashed job frees it once its command tree has ended. `verify` uses one lane
-  unless told `--ios-jobs 2|3`. Each lane keeps its own simulator and DerivedData. There is no CPU,
+  `flock`, so a killed or crashed job frees it once its command tree has ended. Each lane keeps its own simulator and DerivedData. There is no CPU,
   memory or load admission, and none should be scripted around a run. Run only one simulator job per
   worktree.
 - `scripts/tron-ios-test status --all` is the read-only view of everything

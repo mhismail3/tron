@@ -156,15 +156,18 @@ class Gate:
                 outcome = 'checked'
             else:
                 outcome = 'admitted'
-        except (Refused, OSError, subprocess.TimeoutExpired) as error:
+        except (Refused, OSError, KeyError, ValueError, subprocess.TimeoutExpired) as error:
             reason = str(error)
             if pushing:
                 outcome = 'outcome-unknown'
                 reason += f'; main may have moved: compare {remote}/main with {merged}'
         finally:
             self.stop()
-            subprocess.run(['git', 'worktree', 'remove', '--force', str(tree)], cwd=self.root, env=clean_environment(),
-                           capture_output=True, timeout=10)
+            try:
+                subprocess.run(['git', 'worktree', 'remove', '--force', str(tree)], cwd=self.root, env=clean_environment(),
+                               capture_output=True, timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
             for path in [tree, *self.cleanup]:
                 shutil.rmtree(path, ignore_errors=True)
             receipt = {'outcome': outcome, 'reason': reason, 'base': base, 'tip': tip, 'merged': merged,

@@ -13,10 +13,6 @@ cleanup:
 - Each simulator lane and physical device has an exclusive lease.
 - Host slots (`scripts/ios-test-lock.py --host-slot`) are a ceiling of three simulator jobs on this Mac.
   The ceiling is not a number to fill. A job that needs a slot waits for it and names the holder.
-- `verify` runs one simulator lane unless its caller passes `--ios-jobs 2` or `3`. Home says so in the
-  brief when the Mac is otherwise free.
-- Local full-Gateway runs take `/tmp/tron-full-gateway.lock` in arrival order. The mini runs one job at
-  a time under its own lock.
 - Each command cleans up its own processes and simulator. Settling a task reaps what its commands left
   (below). Do not kill another worker or Stable.
 

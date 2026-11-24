@@ -53,9 +53,9 @@ lines. Governance tooling alone was about 14,000 lines (#2316 §0). Tests reache
 fail-before/pass-after named no owner for the proof and only deleting a test needed evidence, so each
 fix added a file. In the 60 days to 2026-11-08, 69 of 657 new test files sat beside a test sharing
 their name prefix (17 the same stem), and 792 added product-source lines named legacy, compat or shim code (#2327).
-**Enforced by** the Gateway compiler's `noUnusedLocals` setting for dead locals, and the `verify`
-delta that reviewers ACCEPT against: each new test file beside an existing owner and each added
-line naming compatibility code (its line counts are a signal only). **Not yet enforced:** the
+**Enforced by** the Gateway compiler's `noUnusedLocals` setting for dead locals, and reviewer ACCEPT
+against the diff: each new test file beside an existing owner and each added line naming
+compatibility code. **Not yet enforced:** the
 unused-export and unused-file check (knip) is #2316 Phase 7; one owner per capability, reuse of existing primitives, kept-behaviour E2E proof before a deletion, and
 whole-capability preservation rely on review.
 

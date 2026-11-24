@@ -157,8 +157,7 @@ Home plans heavy work across workers ([host load](../../gateway/docs/host-load.m
 "Heavy work" paragraph. Host slots are a ceiling of 3 simulator jobs on the Mac:
 `scripts/ios-test-lock.py --host-slot` takes one for every `tron-ios-test` build or run, profiler run,
 Gateway E2E command and `tron-ios-simulator install`, waits (naming the holders) when all are taken,
-and `scripts/tron-ios-test slots` shows them. `verify` uses one simulator lane unless its caller passes
-`--ios-jobs 2|3`; build and run wait for a slot without an acquisition deadline.
+and `scripts/tron-ios-test slots` shows them. build and run wait for a slot without an acquisition deadline.
 `tron-ios-test --host-slot-wait-seconds N` explicitly opts into bounded acquisition (exit 73 when
 unavailable), without timing out admitted work. The Development simulator and each device hold host-wide
 leases (exit 73 names the holder). Neither
