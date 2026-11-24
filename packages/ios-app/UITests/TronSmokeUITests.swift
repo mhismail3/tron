@@ -878,6 +878,11 @@ final class TronSmokeUITests: XCTestCase {
                       "A profile switch left the Home sheet presented for the previous profile")
     }
 
+    private func waitForLabel(_ element: XCUIElement, containing text: String, timeout: TimeInterval) -> Bool {
+        let predicate = NSPredicate(format: "label CONTAINS %@", text)
+        return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: timeout) == .completed
+    }
+
     @MainActor
     private func openManageHome(_ app: XCUIApplication) {
         let ring = app.buttons["session-context-button"]
