@@ -110,7 +110,7 @@ struct HomePagedListSheet: View {
                             if let error = store.error { TronSettingsNotice(message: error, retry: retry) }
                             else { TronSheetLoadingState(label: "Loading Home…", accent: accent) }
                         }
-                        .padding(.horizontal, 16).padding(.top, 4)
+                        .tronFeedInsets()
                     }
                     .tronScrollEdgeChrome()
                     .accessibilityIdentifier("\(identifier)-viewport")

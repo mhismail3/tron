@@ -724,8 +724,8 @@ struct ThinkingTraceDetailSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView(.vertical, showsIndicators: true) {
+            ScrollView(.vertical, showsIndicators: true) {
+                ScrollViewReader { proxy in
                     VStack(alignment: .leading, spacing: 12) {
                         ChatStreamingInlineText(
                             inline: inline,
@@ -741,22 +741,22 @@ struct ThinkingTraceDetailSheet: View {
                     }
                     .padding(18)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
-                }
-                .defaultScrollAnchor(.top)
-                .tronScrollEdgeChrome()
-                .onAppear {
-                    guard streaming else { return }
-                    proxy.scrollTo(Self.traceID, anchor: .bottom)
-                }
-                .onChange(of: inline.source) { _, _ in
-                    guard streaming else { return }
-                    var transaction = Transaction()
-                    transaction.animation = nil
-                    withTransaction(transaction) {
+                    .onAppear {
+                        guard streaming else { return }
                         proxy.scrollTo(Self.traceID, anchor: .bottom)
+                    }
+                    .onChange(of: inline.source) { _, _ in
+                        guard streaming else { return }
+                        var transaction = Transaction()
+                        transaction.animation = nil
+                        withTransaction(transaction) {
+                            proxy.scrollTo(Self.traceID, anchor: .bottom)
+                        }
                     }
                 }
             }
+            .defaultScrollAnchor(.top)
+            .tronScrollEdgeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
@@ -773,8 +773,6 @@ struct ThinkingTraceDetailSheet: View {
             }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
     }
 }
 

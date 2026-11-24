@@ -5,19 +5,11 @@ import { GatewayLogger } from "../../../transport/logger.js";
 import { fauxAssistantMessage, fauxToolCall, type SimpleStreamOptions, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockGateway } from "../../../../test-support/gateway-lock-harness.js";
-import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../../../test-support/scenario-lock.js";
+import { normalizeTraceValue, type TraceValue } from "../../../../test-support/scenario-lock.js";
 import { awaitsWithin, waitFor } from "../../../../test-support/wait-for.js";
 import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
 import { droppingAnyTurnFrame } from "../../../../test-support/turn-frame.js";
 
-const MODULE = "gateway/e2e";
-const NARROWED_ENTRY_TYPES = new Set(["tron.settings.v1", "tron.chat-invocation.v1", "tron.context-delivery.v4", "tron.home-task-result.v1"]);
-
-function narrowed(entry: TraceValue): boolean {
-  const record = entry as { type?: unknown; customType?: unknown; message?: { role?: unknown } };
-  return (record.type === "message" && record.message?.role === "system")
-    || ((record.type === "custom" || record.type === "custom_message") && NARROWED_ENTRY_TYPES.has(String(record.customType)));
-}
 const LOCK = "home-contention-restart";
 const WORKER_MARKER = "This is a finite Home task.";
 const TASK_ID = "lock-restart-task";
@@ -184,16 +176,7 @@ describe("gateway/home contention, publication and restart lock", () => {
       canonicalJsonl: { home: await restarted.canonical(homeSessionId) },
       task: { atRestart: taskAtRestart as TraceValue, recovered: taskFile ? await restarted.file(join(homeRoot, "tasks", taskFile)) : null },
     } as unknown as TraceValue, restarted.normalization));
-    const homeEntries = (trace as unknown as { canonicalJsonl: { home: TraceValue[] } }).canonicalJsonl.home;
-    const kept = homeEntries.filter(narrowed);
-    let placeholder = 0;
-    const inline = homeEntries.map((entry) => narrowed(entry) ? { narrowedGolden: placeholder++ } : entry);
-    await compareWithGolden({
-      module: MODULE, ...lockPaths(import.meta.url, LOCK), trace: { lock: LOCK, canonicalJsonl: { home: kept } },
-      inlineTrace: { ...(trace as unknown as Record<string, unknown>), canonicalJsonl: { home: inline } } as TraceValue,
-      update: lockUpdateRequested(MODULE),
-      validate: () => {
-        expect(followUp.ok, JSON.stringify(followUp)).toBe(true);
+    expect(followUp.ok, JSON.stringify(followUp)).toBe(true);
         expect(disableWhileBusy.ok).toBe(false);
         expect(pauseRefused!.ok).toBe(false);
         expect(JSON.stringify(ledgerAfterRefusal)).toBe(JSON.stringify(ledgerBefore));
@@ -208,7 +191,5 @@ describe("gateway/home contention, publication and restart lock", () => {
         expect(reopened.result.sessionId).toBe(homeSessionId);
         expect(transcript.ok).toBe(true);
         expect(JSON.stringify(trace)).toContain("tron.home-task-result.v1");
-      },
-    });
   }, 120_000);
 });

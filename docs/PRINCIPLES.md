@@ -7,31 +7,25 @@ what enforces it; a rule with no enforcement is cut. Safety boundaries live in
 ## P1 A module owns its code and its tests
 
 **Rule.** The repository is a monorepo: code, tests and fixtures sit in the module that owns them
-(its `*.module.json`). Tests reach other modules only through their public interfaces. A commit is
-gated by the local tests of the modules it touches, plus the E2E journeys that prove any behaviour
-it deletes.
+(its `*.module.json`). Tests reach other modules only through their public interfaces. Every commit is
+admitted by the one gate (P2).
 **Evidence.** At def6e931c, 209 of 240 JS/TS test files imported another module (counting
 `test-support`); 150 of 228 Gateway test files imported another module's internals; and 92 test
 files (55,866 lines) booted the whole Gateway registry (#2316 baseline). Under that coupling the full
 suite (about 16 minutes) became the gate, and load-sensitive reds blocked unrelated work: 21 flake
 issues were open.
-**Enforced by** `scripts/tron verify --changed`, which runs the changed modules' owned tests, those of
-modules whose untyped code imports a changed file, and each TypeScript test that imports a changed file.
+**Enforced by** review; the gate runs no per-module selection.
 **Not yet enforced:** the public-interface rule and the deleted-behaviour E2E proof. The
 boundary check in #2316 T2.9 adds them.
 
 ## P2 Whole-system health is a landing and checkpoint signal
 
-**Rule.** A change merges `--no-ff` onto main after its focused checks (`scripts/tron verify --changed`); no full-suite
-gate runs before main. Full suites (`scripts/tron verify --full`), including every Gateway E2E journey, run on main
-after the merge, and a red is fixed forward. The iOS suite and the real-UI core journeys (prompt/reply, delegate/result, approval tap,
-settings change, Home wake, reconnect/restart; [map](../tools/verify/core-journeys.md)) run at
-device checkpoints. A red is filed against the module that owns it,
-which fixes it at the root or reverts its change. A retry that passes is evidence of
-nondeterminism, not a fix.
-**Evidence.** Each journey's remaining gaps are tracked as #2230–#2235.
-**Enforced by** `scripts/tron verify --changed` before the merge, full suites on main, and the checkpoint
-device smoke.
+**Rule.** Every change reaches main through `scripts/tron gate`: one bounded run, under 60 s from
+invocation to the main update or refusal. No second landing run or full suite follows; what the gate
+does not run is not a gate. Simulator and real-UI journeys are on-demand proof and device checkpoints.
+A red is filed against the module that owns it, which fixes it at the root or reverts its change. A
+retry that passes is evidence of nondeterminism, not a fix.
+**Enforced by** the gate and its pre-push hook, by convention only (`--no-verify` bypasses it).
 
 ## P3 Clear owners, clean modules
 
@@ -46,8 +40,7 @@ Tests default to fewer: agents read the code itself, so a test earns its place o
 real behaviour fault at a boundary. A fix's proof strengthens the owning E2E/integration test, or adds
 nothing when one already proves it; tests that restate code (structure locks, duplicate unit tests,
 implementation snapshots) are retired. Loosening an assertion that guards real behaviour is never
-allowed. Rendering needs a built-UI witness; accepted exception (#2332): `TronUILockTests` keeps only
-whole-tree accessibility witnesses, with no rendered (pixel) witness. Other additions are a fix, a consolidation into one owner, or a type
+allowed. There are no golden, snapshot or recorded-trace tests. Other additions are a fix, a consolidation into one owner, or a type
 change that deletes the runtime checks it replaces. No backward-compatibility code: no shims,
 aliases, old-format or fallback readers, flags or "just in case" wrappers; live old data moves once
 through a backed-up migration. Simplify by reusing and hardening existing primitives (approval
@@ -60,9 +53,9 @@ lines. Governance tooling alone was about 14,000 lines (#2316 §0). Tests reache
 fail-before/pass-after named no owner for the proof and only deleting a test needed evidence, so each
 fix added a file. In the 60 days to 2026-11-08, 69 of 657 new test files sat beside a test sharing
 their name prefix (17 the same stem), and 792 added product-source lines named legacy, compat or shim code (#2327).
-**Enforced by** the Gateway compiler's `noUnusedLocals` setting for dead locals, and the `verify`
-delta that reviewers ACCEPT against: each new test file beside an existing owner and each added
-line naming compatibility code (its line counts are a signal only). **Not yet enforced:** the
+**Enforced by** the Gateway compiler's `noUnusedLocals` setting for dead locals, and reviewer ACCEPT
+against the diff: each new test file beside an existing owner and each added line naming
+compatibility code. **Not yet enforced:** the
 unused-export and unused-file check (knip) is #2316 Phase 7; one owner per capability, reuse of existing primitives, kept-behaviour E2E proof before a deletion, and
 whole-capability preservation rely on review.
 
@@ -74,9 +67,8 @@ changes behaviour on purpose; its fail-before/pass-after proof goes in the ownin
 same change. Commits are prefixed `test:`, `delete:`, `refactor:`, `fix(#n):`, `docs:` or `chore:`.
 **Evidence.** #2279 converted four whole-trace locks into behaviour checks. Each conversion was
 proven by injecting 8 mutants that failed both the old check and the new one.
-**Enforced by** the wire goldens (`protocol-wire`, `client-event-schemas`), the persisted-format
-goldens (`store-*`, `tron-corpus`, the pi-sdk corpus), and reviewer ACCEPT for any test or
-assertion edit. **Not yet enforced:** commit prefixes and expected-fail regression tests
+**Enforced by** the generated-wire equality and handshake checks in `protocol.wire.lock`, the
+pi-sdk persisted-state corpus reopen test, and reviewer ACCEPT for any test or assertion edit. **Not yet enforced:** commit prefixes and expected-fail regression tests
 (#2316 Phase 7).
 
 ## P5 One owner per state; contracts change only by decision
@@ -95,13 +87,8 @@ Gateway refusing a mismatched client.
 ## P6 Tests are deterministic and own their resources
 
 **Rule.** A test owns its HOME, TMPDIR, ports and children, and uses events or injected clocks
-instead of sleeps. Each test run records its identity, commit/tree, outcome, duration and execution-host
-CPU idle/free-memory reading in the external [test ledger](../tools/verify/README.md#test-ledger).
-A test is flaky only when it both passes and fails on the same committed tree; an always-failing
-test is broken. Mark known contention with `TRON_TEST_CONTENDED=1`: flake ranking excludes those
-records, while verify retains raw verdicts. Host readings inform that annotation;
-concurrency or a load threshold does not classify it automatically. Use `scripts/tron flakes` to
-triage same-tree evidence, preserve first failures and measure repeat counts before and after a fix.
+instead of sleeps. A test is flaky only when it both passes and fails on the same committed tree; an always-failing
+test is broken. Preserve first failures and measure repeat counts before and after a fix.
 A flake is its module's bug: it gets one timeboxed root-cause attempt, then shipped logging
 that catches the next occurrence, and then the case is deleted with a non-author ACCEPT that names
 the surviving check. It never blocks another module.

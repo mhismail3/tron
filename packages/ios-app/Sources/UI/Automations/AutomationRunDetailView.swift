@@ -68,7 +68,7 @@ struct AutomationRunDetailView: View {
         .foregroundStyle(Color.tronTextPrimary)
         .tronSettingsLayout()
         .tronSettingsVisualTheme(accent: .tronPrimary, surfaceAccent: .tronPrimarySurface)
-        .tronTopBlur(.sheet).presentationDetents([.large]).presentationDragIndicator(.hidden)
+        .tronTopBlur(.sheet)
         .tronConfirmation("Resolve uncertain run?", isPresented: $confirmingResolution) {
             ForEach(["succeeded", "failed", "cancelled"], id: \.self) { outcome in
                 Button(outcome.capitalized) { Task { await resolve(outcome) } }

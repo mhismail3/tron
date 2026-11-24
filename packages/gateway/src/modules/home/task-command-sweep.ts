@@ -13,7 +13,7 @@ const LOAD_TOP_PROCESSES = 5;
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 16);
 
-const HEAVY_PROCESS_KINDS = ["xcodebuild", "xctest", "simulator", "vitest", "verify"] as const;
+const HEAVY_PROCESS_KINDS = ["xcodebuild", "xctest", "simulator", "vitest"] as const;
 export type HeavyProcessKind = typeof HEAVY_PROCESS_KINDS[number];
 const LAUNCHER = /^(?:node|python[\d.]*|bash|sh|zsh|env|xcrun)$/iu;
 
@@ -30,7 +30,6 @@ function heavyProcessKind(args: string): HeavyProcessKind | undefined {
   if (name === "xcodebuild" || name === "xctest") return name;
   if (name === "simctl" || name === "Simulator") return "simulator";
   if (/^vitest(?:\.m?js)?$/u.test(name) || target.includes("/node_modules/vitest/")) return "vitest";
-  if (name === "verify.py") return "verify";
   return undefined;
 }
 

@@ -17,7 +17,6 @@ struct ToolCard: View {
     var timing: ChatToolDescriptor? = nil
     var onOpenDetails: ((String) -> Void)? = nil
     @State private var detailPresentation: ToolDetailRoute?
-    @State private var detailDetent: PresentationDetent = .medium
 
     init(
         title: String,
@@ -110,7 +109,6 @@ struct ToolCard: View {
         .toolDetailSheet(
             route: $detailPresentation,
             instance: detailTool.id,
-            detent: $detailDetent,
             tool: detailPresentation?.resolve(in: [detailTool])
         )
     }
@@ -129,7 +127,6 @@ struct ToolCard: View {
         } else if let onOpenDetails {
             onOpenDetails(detailTool.id)
         } else {
-            detailDetent = .medium
             detailPresentation = ToolDetailRoute(toolID: detailTool.id)
         }
     }
@@ -350,7 +347,6 @@ struct ToolRunView: View {
 
 struct LiveToolRunDetails: View {
     let initial: ToolRunResolvedState
-    @PresentationState private var detent: PresentationDetent = .medium
     let onDisplay: (String, DisplayPresentationCommand) -> Void
     let onDismiss: () -> Void
     @Environment(AppModel.self) private var model
@@ -369,7 +365,7 @@ struct LiveToolRunDetails: View {
         Group {
             if run.displayCount == 1, let tool = tools.first {
                 NavigationStack {
-                    ToolDetailSheet(tool: tool, density: detent == .large ? .expanded : .glance)
+                    ToolDetailSheet(tool: tool)
                         .tronToolDetailNavigationChrome()
                         .toolbar {
                             ToolbarItem(placement: .principal) { ToolDetailNavigationTitle(tool: tool) }
@@ -384,8 +380,6 @@ struct LiveToolRunDetails: View {
                         }
                 }
                 .tronTopBlur(.toolDetail)
-                .presentationDetents([.medium, .large], selection: $detent)
-                .presentationDragIndicator(.hidden)
                 .tronPresentation()
             } else {
                 ToolRunDetailSheet(run: run, tools: tools, onDisplay: onDisplay)
@@ -412,7 +406,6 @@ struct ReadOnlyToolRunView: View {
     let run: ChatToolRunPresentation
     let tools: [ChatToolPresentation]
     @State private var showsDetails = false
-    @State private var detailDetent: PresentationDetent = .medium
 
     var body: some View {
         ToolActivityChip(run: run, action: openDetails)
@@ -422,10 +415,7 @@ struct ReadOnlyToolRunView: View {
         ) {
             if run.displayCount == 1, let tool = resolvedTools.first {
                 NavigationStack {
-                    ToolDetailSheet(
-                        tool: tool,
-                        density: detailDetent == .large ? .expanded : .glance
-                    )
+                    ToolDetailSheet(tool: tool)
                     .tronToolDetailNavigationChrome()
                     .toolbar {
                         ToolbarItem(placement: .principal) {
@@ -442,8 +432,6 @@ struct ReadOnlyToolRunView: View {
                     }
                 }
                 .tronTopBlur(.toolDetail)
-                .presentationDetents([.medium, .large], selection: $detailDetent)
-                .presentationDragIndicator(.hidden)
                 .tronPresentation()
             } else {
                 ToolRunDetailSheet(run: run, tools: resolvedTools)
@@ -539,7 +527,6 @@ struct ToolRunDetailSheet: View {
     @Environment(\.canonicalResourceSessionID) private var sessionID
     @PresentationState private var selectedToolRoute: ToolDetailRoute?
     @PresentationState private var selectedToolPresentation: ChatToolPresentation?
-    @PresentationState private var detailDetent: PresentationDetent = .medium
 
     private var tone: ChatNotificationTone {
         if run.failureCount > 0 { return .error }
@@ -561,7 +548,6 @@ struct ToolRunDetailSheet: View {
                             if let onDisplay, let command = ToolDisplayActivation.command(for: tool, sessionID: sessionID) {
                                 onDisplay(tool.id, command)
                             } else {
-                                detailDetent = .medium
                                 selectedToolPresentation = tool
                                 selectedToolRoute = ToolDetailRoute(toolID: tool.id)
                             }
@@ -570,7 +556,7 @@ struct ToolRunDetailSheet: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 4)
-                .padding(.bottom, 18)
+                .padding(.bottom, 16)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
             .defaultScrollAnchor(.top, for: .initialOffset)
@@ -599,7 +585,6 @@ struct ToolRunDetailSheet: View {
         ) { _ in
             ToolRunSelectedDetailSheet(
                 tool: $selectedToolPresentation,
-                detailDetent: $detailDetent,
                 close: { selectedToolRoute = nil }
             )
         }
@@ -612,24 +597,18 @@ struct ToolRunDetailSheet: View {
             selectedToolPresentation = newestTool
         }
         .tronTopBlur(.toolDetail)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
         .tronPresentation()
     }
 }
 
 private struct ToolRunSelectedDetailSheet: View {
     @Binding var tool: ChatToolPresentation?
-    @Binding var detailDetent: PresentationDetent
     let close: () -> Void
 
     var body: some View {
         if let tool {
             NavigationStack {
-                ToolDetailSheet(
-                    tool: tool,
-                    density: detailDetent == .large ? .expanded : .glance
-                )
+                ToolDetailSheet(tool: tool)
                 .tronToolDetailNavigationChrome()
                 .toolbar {
                     ToolbarItem(placement: .principal) {
@@ -646,8 +625,6 @@ private struct ToolRunSelectedDetailSheet: View {
                 }
             }
             .tronTopBlur(.toolDetail)
-            .presentationDetents([.medium, .large], selection: $detailDetent)
-            .presentationDragIndicator(.hidden)
             .tronPresentation()
         }
     }
@@ -843,7 +820,6 @@ private struct ToolRunSummaryRow: View {
             .padding(.vertical, 11)
             .frame(maxWidth: .infinity, alignment: .leading)
             .tronScrollSurface(accent: accent, cornerRadius: 12, tintOpacity: 0.10)
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
@@ -1233,7 +1209,6 @@ struct ToolDetailRoute: Identifiable, Hashable {
 private struct ToolDetailSheetHost: ViewModifier {
     @Binding var route: ToolDetailRoute?
     let instance: String
-    @Binding var detent: PresentationDetent
     let tool: ChatToolPresentation?
 
     func body(content: Content) -> some View {
@@ -1244,10 +1219,7 @@ private struct ToolDetailSheetHost: ViewModifier {
         ) { _ in
             if let tool {
                 NavigationStack {
-                    ToolDetailSheet(
-                        tool: tool,
-                        density: detent == .large ? .expanded : .glance
-                    )
+                    ToolDetailSheet(tool: tool)
                     .tronToolDetailNavigationChrome()
                     .toolbar {
                         ToolbarItem(placement: .principal) {
@@ -1264,8 +1236,6 @@ private struct ToolDetailSheetHost: ViewModifier {
                     }
                 }
                 .tronTopBlur(.toolDetail)
-                .presentationDetents([.medium, .large], selection: $detent)
-                .presentationDragIndicator(.hidden)
                 .tronPresentation()
             }
         }
@@ -1276,9 +1246,8 @@ private extension View {
     func toolDetailSheet(
         route: Binding<ToolDetailRoute?>,
         instance: String,
-        detent: Binding<PresentationDetent>,
         tool: ChatToolPresentation?
     ) -> some View {
-        modifier(ToolDetailSheetHost(route: route, instance: instance, detent: detent, tool: tool))
+        modifier(ToolDetailSheetHost(route: route, instance: instance, tool: tool))
     }
 }

@@ -123,7 +123,7 @@ document holds no policy.
 ## Verify
 
 ```bash
-scripts/tron verify --module gateway/notifications
+scripts/tron gate --check
 scripts/tron test gateway src/notifications/notification-inbox.integration.test.ts \
   src/e2e/sessions/runtime-terminal-notifications.integration.test.ts \
   src/e2e/sessions/runtime-registry-notification-read.integration.test.ts
@@ -136,7 +136,7 @@ real mobile open/sync/visible journey, writing
 `notifications.store.lock.integration.test.ts` (this module) and the
 `src/e2e/notifications/notifications.push.lock.integration.test.ts` journey (terminal and
 input-required pushes at the relay boundary, presence suppression, the task-worker skip), which
-runs in the batch: `verify --module` selects only this module's own tests. After initial open/sync, the lock asks the real runtime to publish
+runs on demand. After initial open/sync, the lock asks the real runtime to publish
 its idle snapshot and requires that ordinary `session.snapshot` at the phone before
 admitting work. The failed-run step holds the phone's real socket writes through
 terminal ownership retirement, then requires an idle `session.rebaseline`. Both

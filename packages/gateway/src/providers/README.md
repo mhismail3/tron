@@ -168,7 +168,7 @@ failures. OpenCode Go's usage endpoint retains its distinct entitlement/auth/oth
 ## Verify
 
 ```bash
-scripts/tron verify --module gateway/providers
+scripts/tron gate --check
 scripts/tron test gateway src/providers/provider-usage.integration.test.ts \
   src/providers/context-window-policy.integration.test.ts
 ```

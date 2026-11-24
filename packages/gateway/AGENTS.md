@@ -41,12 +41,8 @@ Wire-traffic profiling and multi-session qualification:
 
 ## Hazards
 
-- **Host lock and isolation.** `scripts/tron test gateway` takes the host's full-Gateway lock (unless
-  its caller already holds it) and gives each run its own HOME and temporary roots
-  ([verify](../../tools/verify/README.md#gateway-test-isolation)); a bare `npx vitest run` has neither.
-- **Test host.** `scripts/tron verify` and `scripts/tron test gateway` run the Gateway Vitest lanes here;
-  `--gateway-host mini` (`test gateway --mini`) runs them on the Mac mini at the exact commit under its lease
-  ([mini](../../tools/verify/README.md#gateway-and-python-lanes-on-the-mini)), verify's Python group with them.
+- **Isolation.** `scripts/tron test gateway` gives each run its own HOME and temporary roots and reaps
+  leftover processes ([verify](../../tools/verify/README.md#on-demand-proof)); a bare `npx vitest run` has neither.
 - **Nested pass.** Files that run nested Vitest or real pi children, or activate the managed
   pi-subagents install, run one at a time in the nested pass; `vitest.nested.config.ts` lists them
   ([test-support](test-support/README.md#contract)).

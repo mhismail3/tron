@@ -52,7 +52,6 @@ private struct HostedSubsheetParent: View {
             .padding()
             .navigationTitle("Parent")
         }
-        .presentationDetents([.large])
         .tronManagedSheet(item: $item, identity: { "fixture.item.\($0.id)" }) { value in
             HostedSubsheetChild(title: "Item \(value.id)", closeParent: closeParent) { delay in
                 rerequest(after: delay, close: { item = nil }, open: { item = HostedSubsheetItem(id: value.id == "a" ? "b" : "a") })
@@ -92,7 +91,6 @@ private struct HostedSubsheetChild: View {
                 Button("Re-request after \(delay) ms") { rerequest(delay) }.accessibilityIdentifier("fixture.rerequest-\(delay)")
             }
         }
-        .presentationDetents([.medium])
     }
 }
 #endif

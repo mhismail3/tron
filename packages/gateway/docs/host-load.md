@@ -13,10 +13,6 @@ cleanup:
 - Each simulator lane and physical device has an exclusive lease.
 - Host slots (`scripts/ios-test-lock.py --host-slot`) are a ceiling of three simulator jobs on this Mac.
   The ceiling is not a number to fill. A job that needs a slot waits for it and names the holder.
-- `verify` runs one simulator lane unless its caller passes `--ios-jobs 2` or `3`. Home says so in the
-  brief when the Mac is otherwise free.
-- Local full-Gateway runs take `/tmp/tron-full-gateway.lock` in arrival order. The mini runs one job at
-  a time under its own lock.
 - Each command cleans up its own processes and simulator. Settling a task reaps what its commands left
   (below). Do not kill another worker or Stable.
 
@@ -116,8 +112,7 @@ so Home sees the Mac on every wake:
 - `simulatorsBooted`: `launchd_sim` processes in the sweep's process table, one per booted
   simulator, whoever booted it.
 - `heavy`: each task Home has running now, mapped to the heavy kinds its command scope holds
-  (`xcodebuild`, `xctest`, `simulator` for `simctl`/Simulator.app, `vitest`, `verify` for
-  `tools/verify/verify.py`), named from each owned process's `ps` arguments, skipping
+  (`xcodebuild`, `xctest`, `simulator` for `simctl`/Simulator.app, `vitest`), named from each owned process's `ps` arguments, skipping
   launchers (`node`, `python`, shells, `env`, `xcrun`) and their flags. `[]` means none. A
   simulator's own processes run under launchd, outside every scope: they count in
   `simulatorsBooted`, never in a task's `heavy`.

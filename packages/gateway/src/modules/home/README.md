@@ -35,7 +35,7 @@ Native change cards wait in the requesting turn and consume the paired tap throu
 - **Tasks and wake inbox:** `home-task-*.ts`, `home-wake-inbox.ts`; contract in
   [tasks.md](tasks.md). Generic subagent receipt/artifact proof belongs to
   [kernel delegation](../../kernel/delegation/delegated-activity.md), not Home policy.
-  Also `home-diagnostic.ts`, `host-pressure.ts`, `task-command-sweep.ts` ([task command scopes](../../../docs/host-load.md#task-command-scopes)), `locks/` (goldens).
+  Also `home-diagnostic.ts`, `host-pressure.ts`, `task-command-sweep.ts` ([task command scopes](../../../docs/host-load.md#task-command-scopes)).
 
 ## Contract
 
@@ -347,7 +347,7 @@ and the [built-in improvement-loop design](improvement-loop.md).
 | `host.pressure` | info; warning at `critical` | A Home-status read saw the host-pressure level change: `state`, `transition`, CPU busy, loop utilization and load per CPU; it informs and never holds a worker back |
 
 ## Verify
-`scripts/tron verify --module gateway/home` or `scripts/tron test gateway <file>` covers
+`scripts/tron gate --check` or `scripts/tron test gateway <file>` covers
 `src/modules/home/*.test.ts` and `src/sessions/home-*.test.ts` (nested suites add `--config vitest.nested.config.ts`).
 `src/e2e/automations/home-tool-admission.e2e.test.ts` captures provider declarations for fresh/stale chapters, maintainer/automation turns and saved selections.
 Boundary fixtures read session presence/files through Native; chapter metrics remain Home-owned.

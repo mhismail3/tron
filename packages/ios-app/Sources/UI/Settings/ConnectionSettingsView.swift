@@ -64,13 +64,11 @@ struct ConnectionsSettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @PresentationState private var selectedProfile: GatewayProfile?
-    @PresentationState private var serverDetailDetent: PresentationDetent = .medium
     @PresentationState private var selectedAuthorizedDevice: GatewayAuthorizedDevice?
     @PresentationState private var authorizedDevices: [GatewayAuthorizedDevice] = []
     @PresentationState private var dataLoadGeneration = 0
     @PresentationState private var showAddServer = false
     @PresentationState private var showingMacReplacement = false
-    @PresentationState private var addServerDetent: PresentationDetent = .medium
 
     private var pairedProfiles: [GatewayProfile] {
         _ = model.profileRevision
@@ -94,7 +92,6 @@ struct ConnectionsSettingsView: View {
                         ForEach(Array(pairedProfiles.enumerated()), id: \.element.id) { index, profile in
                             if index > 0 { TronSettingsDivider() }
                             Button {
-                                serverDetailDetent = .medium
                                 selectedProfile = profile
                             } label: {
                                 TronValueRow(
@@ -211,9 +208,6 @@ struct ConnectionsSettingsView: View {
                 GatewayConnectionDetailView(profile: profile)
             }
             .tronTopBlur(.sheet)
-            .presentationDetents([.medium, .large], selection: $serverDetailDetent)
-            .presentationDragIndicator(.hidden)
-            .presentationContentInteraction(.resizes)
         }
         .tronManagedSheet(
             isPresented: authorizedDeviceDetailPresented,
@@ -225,9 +219,6 @@ struct ConnectionsSettingsView: View {
                     PairedDeviceDetailView(authorized: authorized)
                 }
                 .tronTopBlur(.sheet)
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.hidden)
-                .presentationContentInteraction(.resizes)
             }
         }
         .tronManagedSheet(
@@ -243,12 +234,9 @@ struct ConnectionsSettingsView: View {
             identity: "settings.connection.add-server",
             onDismiss: { model.isAddingServer = false }
         ) {
-            OnboardingView(mode: .addServer, selectedDetent: $addServerDetent) {
+            OnboardingView(mode: .addServer) {
                 showAddServer = false
             }
-            .presentationDetents([.medium, .large], selection: $addServerDetent)
-            .presentationDragIndicator(.hidden)
-            .presentationContentInteraction(.resizes)
         }
         .task(id: "\(model.profileRevision):\(model.deviceCatalogRevision):\(model.foregroundReconciliationGeneration):\(presentationActivity.allowsPresentationPublication)") {
             await reload()
@@ -1060,7 +1048,6 @@ struct GatewayServerInfoSheet: View {
     let metadata: [TronTechnicalMetadataItem]
     let identities: [TronTechnicalMetadataItem]
     let loading: Bool
-    @PresentationState private var detent: PresentationDetent = .medium
 
     var body: some View {
         NavigationStack {
@@ -1101,8 +1088,6 @@ struct GatewayServerInfoSheet: View {
             }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large], selection: $detent)
-        .presentationDragIndicator(.hidden)
         .tronPresentation()
     }
 }

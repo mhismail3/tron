@@ -154,7 +154,7 @@ uses those same identity codecs as the scheduler, executor and cold catalog.
 ## Verify
 
 ```bash
-scripts/tron verify --module gateway/automations
+scripts/tron gate --check
 scripts/tron test gateway src/e2e/automations/automation-scheduler.integration.test.ts src/e2e/automations/automation-home.e2e.test.ts
 ```
 

@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Build and run the Mac integration tests (TronMacIntegrationTests) under an owned temporary HOME and TMPDIR.
 
-`scripts/tron test mac [Class or Class/method ...]` runs those tests, or the whole target. `verify`'s
-`mac` group runs this one command."""
+`scripts/tron test mac [Class or Class/method ...]` runs those tests, or the whole target."""
 from __future__ import annotations
 
 import os
@@ -13,8 +12,6 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-
-import ledger
 
 ROOT = Path(__file__).resolve().parents[2]
 TARGET = "TronMacIntegrationTests"
@@ -36,9 +33,9 @@ def main(classes: list[str]) -> int:
         (scratch / "home").mkdir(mode=0o700)
         (scratch / "tmp").mkdir(mode=0o700)
         only = [f"-only-testing:{TARGET}/{name}" for name in classes]
-        return ledger.execute('swift', ['xcodebuild', 'test-without-building', *PROJECT, *only,
-                                       '-resultBundlePath', str(scratch / 'TestResults.xcresult')],
-                              env={"HOME": str(scratch / "home"), "TMPDIR": str(scratch / "tmp")}, cwd=ROOT)
+        return subprocess.run(['xcodebuild', 'test-without-building', *PROJECT, *only,
+                               '-resultBundlePath', str(scratch / 'TestResults.xcresult')],
+                              env={**os.environ, "HOME": str(scratch / "home"), "TMPDIR": str(scratch / "tmp")}, cwd=ROOT).returncode
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 

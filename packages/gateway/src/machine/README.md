@@ -140,7 +140,7 @@ The iPhone pins the private host identity at enrollment
 ## Verify
 
 ```bash
-scripts/tron verify --module gateway/machine
+scripts/tron gate --check
 scripts/tron test gateway src/e2e/kernel/resources/project-root.integration.test.ts
 cd packages/gateway && npm run test:mac-terminal   # needs the tailnet and Swift 6.2
 ```

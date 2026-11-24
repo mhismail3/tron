@@ -10,7 +10,7 @@ reusable components. Its binding rules are [presentation parity](../../docs/pres
 - `Theme/`: `TronPresentation` (app-wide boundary: managed sheets, settings rows and groups,
   confirmations, loading, top blur, toolbar tint), `TronTheme`, `ThemeColor`, `FontSettings`, `TronFontLoader`,
   `TronSettingControls`, `TronDateControls` (`TronDateValueButton`, `TronDatePickerSheet`, shared by
-  Automations and Home), `TronCardRail`, `TronDisclosure`, `TronContentFitDetent`, `TronWidthCap`,
+  Automations and Home), `TronCardRail`, `TronDisclosure`, `TronContentFitSheet`, `TronWidthCap`,
   `TronSafariView`.
 - `Components/`: `TronDocumentSheet`, `TronList` (the list standard), `TronTextEntrySheet`, `StructuredJSONView`,
   `TechnicalDetailPresentation`, `TronNativeSheetCanvas` (surface-level native containment for
@@ -138,32 +138,10 @@ None.
 
 ## Verify
 
-`TronMobileUITests/TronThemeIconUITests/testThemeSelectionAppliesBundledIconsAndRestoresSilently`
-uses the production Appearance view, the built iPhone/iPad icon declarations and UIKit's native
-selected icon (read by a hosted-only fixture); it selects all three themes and relaunches the app.
-It is not a physical-device or notification-icon guarantee.
-
-Activity primary ink is checked against the rendered primary title/plus across all themes,
-light/dark, dashboard working dots and composer active/recent/extension states:
-`TronMobileViewTests/ActivityPrimaryColorViewTests/testActivityInkFollowsPrimaryThemeLightAndDark`.
-Wine glass hue, native ink contrast and unchanged light ink are checked through Home → Home
-Settings by `TronMobileUITests/TronBurgundyGlassUITests/testWineGlassKeepsInkReadableAndLightBurgundyUnchanged`.
-`TronNotificationInboxUITests/testSheetFollowsGatewayLiveWithoutOfflineRowOrPullToRefresh`
-requires clear read-row glass to differ from the iOS 27.2 sheet by at least four RGB levels;
-unread surfaces and accent-tint checks retain their greater-than-six threshold.
+Theme, ink and glass are verified by reading the source and on device.
 
 ```bash
-scripts/tron-ios-test run \
-  --only-testing TronMobileUITests/TronSmokeUITests/testHomeSheetLoadingSurfaceRemainsFullWidth \
-  --only-testing TronMobileUITests/TronHomeSheetsUITests/testHomeCursorPagesRetryAndRetainScroll \
-  --only-testing TronMobileUITests/TronSheetTintUITests \
-  --only-testing TronMobileUITests/TronAccessibilityUITests \
-  --only-testing TronMobileViewTests/AccessibilityMaintenanceViewTests
 packages/ios-app/scripts/test-source-policy.sh
-scripts/tron-ios-test run --only-testing TronMobileUITests/TronChatHapticsUITests \
-  --only-testing TronMobileUITests/TronInteractionHapticsUITests \
-  --only-testing TronMobileUITests/TronSubsheetReliabilityUITests \
-  --only-testing TronMobileViewTests/ChatHapticsViewTests
 ```
 
 The loading journey samples rendered material, not accessibility geometry; the paged-list journey

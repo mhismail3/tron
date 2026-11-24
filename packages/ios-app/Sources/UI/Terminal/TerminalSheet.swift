@@ -76,8 +76,6 @@ struct TerminalSheetChrome<Content: View, MenuContent: View>: View {
                 }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.large])
-        .presentationDragIndicator(.hidden)
         .tint(accent)
         .animation(.easeOut(duration: 0.16), value: keyboard.isKeyboardPresented)
     }

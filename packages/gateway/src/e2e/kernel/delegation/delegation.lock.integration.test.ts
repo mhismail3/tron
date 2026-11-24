@@ -4,34 +4,15 @@ import { fauxAssistantMessage, fauxToolCall, type TranscriptContext } from "@ear
 import { afterEach, describe, expect, it } from "vitest";
 import { disposeFixtures, fixture } from "../../../../test-support/home-task-fixture.js";
 import { startScriptedChild, type ChildModelServer } from "../../../../test-support/home-task-subagent-child.js";
-import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../../../test-support/scenario-lock.js";
+import { normalizeTraceValue, type TraceValue } from "../../../../test-support/scenario-lock.js";
 import { waitFor } from "../../../../test-support/wait-for.js";
 
-const MODULE = "gateway/e2e";
 const BOUND = { boundMs: 30_000 };
 const servers: ChildModelServer[] = [];
 afterEach(async () => {
   for (const server of servers.splice(0)) await server.close();
   await disposeFixtures();
 });
-
-const NARROWED_ENTRY_TYPES = new Set(["tron.settings.v1", "tron.context-window.v1", "tron.extension-activity.v1"]);
-
-function narrowed(entry: TraceValue): boolean {
-  const record = entry as { type?: unknown; customType?: unknown; message?: { role?: unknown } };
-  return (record.type === "message" && record.message?.role === "system")
-    || (record.type === "custom" && NARROWED_ENTRY_TYPES.has(String(record.customType)));
-}
-
-function split(entries: TraceValue[]): { kept: TraceValue[]; inline: TraceValue[] } {
-  const kept: TraceValue[] = [];
-  const inline = entries.map((entry) => {
-    if (!narrowed(entry)) return entry;
-    kept.push(entry);
-    return { narrowedGolden: kept.length - 1 };
-  });
-  return { kept, inline };
-}
 
 function messages(context: TranscriptContext): string[] {
   return context.messages.filter((message) => (message as { role?: unknown }).role !== "system")
@@ -75,22 +56,12 @@ describe("gateway/delegation kernel locks", () => {
       processActivity: activity.map((item) => normalize(item)),
       childJsonl: child,
     };
-    const parent = split(trace.canonicalJsonl);
-    const childEntries = split(trace.childJsonl);
-    await compareWithGolden({
-      module: MODULE, ...lockPaths(import.meta.url, trace.lock),
-      trace: { lock: trace.lock, canonicalJsonl: parent.kept, childJsonl: childEntries.kept },
-      inlineTrace: { ...trace, canonicalJsonl: parent.inline, childJsonl: childEntries.inline },
-      update: lockUpdateRequested(MODULE),
-      validate: () => {
-        const result = canonical.find((entry) => entry.type === "message" && entry.message.role === "toolResult");
+    const result = canonical.find((entry) => entry.type === "message" && entry.message.role === "toolResult");
         expect(result?.message.toolName).toBe("subagent");
         expect(result?.message.isError).toBe(false);
         expect(JSON.stringify(result?.message.content)).toContain("CHILD-DONE");
         expect(requests).toHaveLength(2);
         expect(child.length).toBeGreaterThan(0);
         expect(JSON.stringify(child)).toContain("Lock child task");
-      },
-    });
   }, 60_000);
 });

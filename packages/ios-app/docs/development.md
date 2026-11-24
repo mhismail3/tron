@@ -89,10 +89,7 @@ whose workload or render check diverged. Scenarios: `ProfilingTests/`
 dashboard filter through `AppLocalBehaviorSettings`, the mounted dashboard's settings owner;
 writing its persisted preferences alone does not update a live dashboard.
 
-Verify runs the scenarios of each `ProfilingTests` class that `scripts/profile.module.json` declares in
-`iosScenarios` once (`--iterations 1`) on each change, and passes them only on their functional receipts
-([verify](../../../tools/verify/README.md#owner-declared-profiling-scenarios)). Measured numbers stay diagnostic:
-`--self-test` and `compare` are never validation gates.
+`ProfilingTests` scenarios run on demand; measured numbers stay diagnostic and are never gates.
 
 #### Attribution: finding the owner
 
@@ -108,15 +105,12 @@ What iOS records: [observability](../../gateway/docs/observability.md); copy it 
 
 ## Efficient focused tests
 
-Native UI validation is integration/end-to-end. Claims a rendered view can show (accessibility tree,
-layout frames, colours) go to the in-process [view tests](../ViewTests/README.md), which share the
-UIValidation build and run without relaunching the app. Build once, run
+Native UI validation is on-demand integration proof, never part of the gate. Build once, run
 only the owning tests, and rebuild after an edit (stale products are refused):
 
 ```bash
 scripts/tron-ios-test build
 scripts/tron-ios-test run --only-testing TronMobileUITests/<Class>/<method>
-scripts/tron-ios-test run --only-testing TronMobileViewTests
 scripts/tron-ios-test run          # the smoke set (SMOKE_ONLY_TESTING in scripts/tron-ios-test)
 scripts/tron-ios-test checkpoint   # build, then the smoke set
 python3 scripts/test-ios-test-infrastructure.py
@@ -126,7 +120,7 @@ python3 scripts/test-ios-process-evidence.py  # owned-group timeout diagnostics;
 Repeat `--only-testing` for adjacent journeys; a class selector runs the class. Count the methods
 executed: an unmatched selector is not evidence. Screenshots stay in the reported
 `TestResults.xcresult` (`xcrun xcresulttool export attachments --path <xcresult> --output-path
-<private-dir>`), never in the source tree. Accessibility witnesses: [UI locks](../UITests/Locks/README.md).
+<private-dir>`), never in the source tree.
 
 A synthesized tap or drag returns only after the app is idle, so a sheet detent it settles is read
 directly afterwards. An `XCTNSPredicateExpectation` or `waitForExistence` polls first after about 1 s,
@@ -163,8 +157,7 @@ Home plans heavy work across workers ([host load](../../gateway/docs/host-load.m
 "Heavy work" paragraph. Host slots are a ceiling of 3 simulator jobs on the Mac:
 `scripts/ios-test-lock.py --host-slot` takes one for every `tron-ios-test` build or run, profiler run,
 Gateway E2E command and `tron-ios-simulator install`, waits (naming the holders) when all are taken,
-and `scripts/tron-ios-test slots` shows them. `verify` uses one simulator lane unless its caller passes
-`--ios-jobs 2|3`; build and run wait for a slot without an acquisition deadline.
+and `scripts/tron-ios-test slots` shows them. build and run wait for a slot without an acquisition deadline.
 `tron-ios-test --host-slot-wait-seconds N` explicitly opts into bounded acquisition (exit 73 when
 unavailable), without timing out admitted work. The Development simulator and each device hold host-wide
 leases (exit 73 names the holder). Neither
@@ -250,43 +243,12 @@ service, real-Gateway journey, physical haptic, APNs or device behavior.
 - A pass needs one executed, passing test and writes `coverage.json`; partial evidence is kept.
 - A hosted launch without a fixture argument renders the production `ProductionSceneRoot`.
 
-### Proving idle diagnostics
+### Process-evidence diagnostics
 
-The existing process-evidence owner runs two exact UI selectors in separate supervised helper
-invocations and then applies its artifact oracles. The default Python mode remains simulator-free:
+The simulator-free owner of timeout process evidence:
 
 ```bash
 python3 scripts/test-ios-process-evidence.py
-python3 scripts/test-ios-process-evidence.py --hosted-idle
-```
-
-`--hosted-idle` owns the diagnostic pair: a `checkpoint` of
-`TronMobileUITests/TronIdleControlUITests/testActualXCTestIdleControls` builds and runs first;
-a serial `run` of `testBlockedMainThreadIdleCapture` reuses those exact products. It intentionally
-pays an incremental build even when a calling verifier already built: standalone or source-only
-selection must not depend on an undeclared fresh-product prerequisite. The owner streams helper
-output, propagates build/run/oracle failures and cancellation, and resolves only each invocation's
-single exact completion receipt, never a global newest run. Both run metadata source identities
-must match the owner's unchanged worktree fingerprint. The pair requires one simulator slot at
-a time. `scripts/ios.module.json` declares this class's owner command: normal verification selects
-it after the ordinary phone/Pad matrix joins, not in the default Python lane or a combined UI shard.
-The selected replacement owns both fresh runs and their artifact assertions; ordinary-shard exclusion
-requires that replacement to be selected. Failed current builds prevent its invocation.
-
-The artifact oracle checks real XCTest completion, exact run/simulator/app PID and kernel-birth
-provenance, external main-thread stacks, live repeating CA animation and canonical surface counts.
-Baseline, shipped active/covered orb and SwiftUI-repeat controls must finish without consuming the
-capture; only the UIView repeat control holds idle long enough. The blocked-main control must
-retain an unanswered signal and a sleeping main-thread stack while completing normally. Both
-artificial holds last20s, solely to exercise capture, not change product/test timeouts.
-The simulator-free process suite also launches two real native owned-process incarnations and
-plants previous-birth readiness at the current PID. It requires no signal/request, live successor
-and a retained external sample: this tests stale readiness without claiming actual PID reuse.
-
-Retained runs can be inspected without a simulator:
-
-```bash
-python3 scripts/test-ios-process-evidence.py --idle-controls-run <first-run-dir> --blocked-main-run <second-run-dir>
 ```
 
 ## Gateway fixture work

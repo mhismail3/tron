@@ -205,8 +205,6 @@ struct CameraCaptureSheet: View {
         .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
         .task { await cameraModel.requestPermissionAndSetup() }
         .onDisappear { cameraModel.stopSession() }
-        .presentationDetents([.medium])
-        .presentationDragIndicator(.hidden)
         .presentationBackground(.clear)
         .presentationBackground(alignment: .center) {
             cameraSurface

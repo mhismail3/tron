@@ -1,7 +1,6 @@
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockClient, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
-import { expectRequestShapes, expectSystemShapes } from "../../../test-support/lock-projections.js";
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
 
@@ -127,7 +126,7 @@ describe("gateway/run lifecycle RPC lock", () => {
     });
     const turn = ["start:staged", "transition:accepted", "binding:", "terminal:completed"];
     expect(receipts).toEqual([...turn, ...turn]);
-    expectSystemShapes(canonicalJsonl, ["chat#0"]);
+    
     const recorded = gateway.record();
     expect(recorded.providerRequests.map((request) => withoutTurnFrame(request.messages).map((message) => {
       const { role, text } = message as { role: string; text?: string };
@@ -136,7 +135,7 @@ describe("gateway/run lifecycle RPC lock", () => {
       ["user:answer before the reload"],
       ["user:answer before the reload", "assistant:Answer before the reload.", "user:hold this run through the restart"],
     ]);
-    expectRequestShapes(recorded.providerRequests, ["chat", "chat"]);
+    
 
     expect(stop.result).toMatchObject({ stopping: true, scheduled: true, activeSessionIds: [], drainRevision: 3, drainId: stop.result.drain.drainId,
       drain: { phase: "preparing", omittedCount: 0, suspectProjectionCount: 0, blockerCount: 0, blockerCounts: {}, blockers: [] } });

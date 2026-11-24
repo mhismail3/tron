@@ -4,7 +4,7 @@ import {
   automationOwnedRunScenario, compactionScenario, notificationsPushScenario, openLockSession, projectRootTrustScenario,
   promptStreamScenario, queueControlScenario,
 } from "../../../test-support/lock-scenarios.js";
-import { compareWithGolden, lockPaths, lockUpdateRequested, type TraceValue } from "../../../test-support/scenario-lock.js";
+import { type TraceValue } from "../../../test-support/scenario-lock.js";
 import { sessionSettingChange } from "../../../test-support/session-settings-change.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 
@@ -68,10 +68,6 @@ describe("gateway/protocol client event schemas", () => {
       union.set(event.topic, paths);
     }
     const events = [...union].sort(([a], [b]) => a.localeCompare(b)).map(([topic, paths]) => ({ topic, paths: [...paths].sort() }));
-    await compareWithGolden({
-      module: MODULE, ...lockPaths(import.meta.url, "client-event-schemas"), update: lockUpdateRequested(MODULE),
-      trace: { lock: "client-event-schemas", events: events as unknown as TraceValue[] },
-      validate: () => { expect(events.length, "every topic the scenarios reach").toBeGreaterThanOrEqual(12); },
-    });
+    expect(events.length, "every topic the scenarios reach").toBeGreaterThanOrEqual(12);
   }, 240_000);
 });

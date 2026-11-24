@@ -101,9 +101,6 @@ notification inbox.
 ## Verify
 
 ```bash
-scripts/tron-ios-test run --only-testing TronMobileUITests/TronNotificationInboxUITests \
-  --only-testing TronMobileUITests/TronHomePushNavigationUITests \
-  --only-testing TronMobileUITests/TronDeliveredNotificationUITests
 scripts/validate-push-service-config.sh config/PushService.xcconfig
 ```
 
