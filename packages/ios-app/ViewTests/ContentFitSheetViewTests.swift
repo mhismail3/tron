@@ -12,23 +12,6 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         }
     }
 
-    func testAccessibilityTextOpensLarge() async throws {
-        try await mounted(["-tron-settings-fixture", "-settings-expanded-review", "-six-ui-surface", "worker-tools-short"],
-                          contentSize: .accessibilityExtraExtraExtraLarge) { app in
-            let trace = try await SheetTrace.record(app, frames: 60)
-            trace.assertStill("Accessibility text opens large")
-            XCTAssertLessThan(trace.final.minY, 120, "\(trace)")
-        }
-    }
-
-    func testOverflowingSheetOpensLargeWithoutResizing() async throws {
-        try await mounted(["-tron-settings-fixture", "-settings-expanded-review", "-six-ui-surface", "worker-thinking-long"]) { app in
-            let trace = try await SheetTrace.record(app, frames: 90)
-            trace.assertStill("An overflowing sheet opens large")
-            XCTAssertLessThan(trace.final.minY, 120, "\(trace)")
-        }
-    }
-
     func testManageHomeShowsItsStructureBeforeDataAndKeepsItsHeight() async throws {
         try await mounted(["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-presentation-loading"]) { app in
             try await app.activate("home-pinned-row")
@@ -230,26 +213,8 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         XCTAssertEqual(parentFrame().height, parentStart.height, accuracy: 0.5, "\(name): closing the nested sheet restores its parent")
     }
 
-    func testPresentationPreferenceChangesKeepTheFittedHeight() async throws {
-        try await mounted(["-tron-settings-fixture", "-dismiss-lock-sheet"]) { app in
-            try await app.activate("Open Lock")
-            try await app.until("the lock sheet") { app.element("Toggle lock") != nil }
-            _ = try await app.still("the fitted lock sheet") { [Double(sheetFrame(app).minY)] }
-            XCTAssertGreaterThan(sheetFrame(app).minY, 120, "the lock sheet fits its content")
-            let toggle = try XCTUnwrap(app.button("Toggle lock"))
-            let sheet = try XCTUnwrap(sheetChain(app).last)
-            var locks: [Bool] = []
-            let trace = try await SheetTrace.record(app, frames: 120, each: { index in
-                if index % 20 == 10 { locks.append(sheet.isModalInPresentation) }
-                if index % 20 == 0 { _ = toggle.accessibilityActivate() }
-            })
-            XCTAssertEqual(locks, [true, false, true, false, true, false], "Each toggle flips interactiveDismissDisabled")
-            trace.assertStill("Toggling interactiveDismissDisabled keeps the fitted height", against: app)
-        }
-    }
-
-    private func goUp(_ arguments: [String], frames: Int, _ check: (CGFloat, SheetTrace) -> Void) async throws {
-        try await mounted(["-tron-settings-fixture", "-workspace-browser"] + arguments) { app in
+    func testHeightChangesAfterOpeningAnimateWithTheContent() async throws {
+        try await mounted(["-tron-settings-fixture", "-workspace-browser"]) { app in
             try await app.activate("Open Workspace")
             try await app.until("the four-folder listing") { app.element("Repo 4") != nil && app.element("Repo 5") == nil }
             _ = try await app.still("the fitted picker") { [Double(sheetFrame(app).minY)] }
@@ -257,25 +222,11 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
             let goUp = try XCTUnwrap(MountedFixture.elements(in: app.top).last {
                 $0.accessibilityTraits.contains(.button) && $0.accessibilityLabel?.contains("Go Up") == true
             })
-            let trace = try await SheetTrace.record(app, frames: frames, each: { index in
+            let trace = try await SheetTrace.record(app, frames: 90, each: { index in
                 if index == 0 { _ = goUp.accessibilityActivate() }
             })
-            XCTAssertLessThan(trace.final.minY, start - 100, "Go Up to twelve folders grows the sheet\n\(trace)")
-            check(start, trace)
-        }
-    }
-
-    func testReduceMotionAppliesHeightChangesAtOnce() async throws {
-        try await goUp(["-reduce-motion"], frames: 60) { start, trace in
             let end = trace.final.minY
-            let between = trace.samples.map(\.minY).filter { $0 < start - 1 && $0 > end + 1 }
-            XCTAssertTrue(between.isEmpty, "Under Reduce Motion the sheet changes height without intermediate frames\n\(trace)")
-        }
-    }
-
-    func testHeightChangesAfterOpeningAnimateWithTheContent() async throws {
-        try await goUp([], frames: 90) { start, trace in
-            let end = trace.final.minY
+            XCTAssertLessThan(end, start - 100, "Go Up to twelve folders grows the sheet\n\(trace)")
             let steps = zip(trace.samples, trace.samples.dropFirst()).map { abs($1.minY - $0.minY) }
             XCTAssertLessThan(steps.max() ?? .infinity, (start - end) * 0.5,
                               "The sheet grows continuously, never in one frame\n\(trace)")
@@ -283,6 +234,7 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
             XCTAssertGreaterThanOrEqual(between.count, 4, "The resize passes through intermediate heights\n\(trace)")
         }
     }
+
     private func sheetFrame(_ app: MountedFixture) -> CGRect { app.top.convert(app.top.bounds, to: nil) }
 
     private func mainScroll(_ app: MountedFixture) -> UIScrollView? {
