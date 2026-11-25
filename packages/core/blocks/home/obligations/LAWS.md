@@ -6,7 +6,7 @@ Block hash: `d82c68c6b04abd5c` (over `blocks/home/obligations/Block.dfy`, `laws/
 | Gate | Status |
 |---|---|
 | Proof (pinned Dafny, --verify-included-files) | PASS: blocks/home/obligations/Block.dfy: Dafny program verifier finished with 10 verified, 0 errors;  |
-| Independent review | MISSING |
+| Independent review | ACCEPT by reviewer (run 76e8e47f) (anthropic/claude-haiku-5-5, transcript-verified); writer parent (Home task, #2637) (anthropic/claude-opus-5-5); 2026-11-25 |
 | Mutation check | PASS: 38 valid mutants, 38 killed by laws, 0 survived, 0 accepted (blocks/home/obligations/MUTATION.json; statuses a2e708bc9e4f4d2e) |
 | Cut over | the only implementation: `packages/gateway/src/core/home/obligations` runs this block's compiled core (scripts/tron proof facade) |
 
@@ -21,7 +21,7 @@ lemma O1Owed(s: State)
 
 **Mutation results.** kills 1 of 38 valid mutants; 0 killed by this law alone.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: Owed(s) <==> s.request? || s.reopened? matches the English and the old owed. Witness: s=request. Near-definitional; kills one mutant.
 
 ## T1 transitions
 
@@ -35,7 +35,7 @@ lemma T1Transitions(p: Prior, a: State, size: Count)
 
 **Mutation results.** kills 33 of 38 valid mutants; 6 killed by this law alone.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: Next <==> Legal && !(request && size>=Cap) and Next ==> state==a match the English; the old transitions match Legal exactly. Witnesses: Present(request) to reportedDone gives Next; Absent to request at size 1000 gives Full.
 
 ## C1 contradiction
 
@@ -48,7 +48,7 @@ lemma C1Contradiction(p: Prior, a: State, size: Count)
 
 **Mutation results.** kills 23 of 38 valid mutants; 0 killed by this law alone.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: Contradictory <==> !Legal matches the English and the old refusal conditions. Witness: Present(request) to request is contradictory at any size.
 
 ## K1 cap
 
@@ -62,7 +62,7 @@ lemma K1Cap(p: Prior, a: State, size: Count)
 
 **Mutation results.** kills 19 of 38 valid mutants; 0 killed by this law alone.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: Full <==> Legal && request && size>=Cap and Next && Absent ==> size<Cap are satisfiable (Absent/request/1000 gives Full; 999 gives Next). 'Only a request adds an item' follows from Legal(Absent,a) => a=request in T1/C1 rather than K1's own ensures.
 
 ## Law kinds
 
@@ -108,3 +108,7 @@ ghost predicate Legal(p: Prior, a: State) {
   case reopened => p.Present? && (p.state == reportedDone || p.state == verified)
 }
 ```
+
+## Reviewer: general notes
+
+A1 matches the shell (replay checks in home-obligations.ts, write checks in home-owner.ts including the reopen-same-message refusal). Law-kind table: T1 is also exact-results; the receipt-identity replay of a write is shell-owned.

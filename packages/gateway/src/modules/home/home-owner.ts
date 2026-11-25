@@ -222,12 +222,12 @@ export class HomeOwner {
       if (action === "reopened" && (step !== "next" || before!.latest.source.entryId === source.id)) throw new GatewayError("conflict", "Reopening requires a new maintainer message for a closed obligation");
       if (step !== "next") throw new GatewayError("conflict", "The human action is already closed; missing proof cannot reopen it");
       let evidence: ObligationEvent["evidence"];
-      if (request.action === "verified") {
+      if (action === "verified") {
         const entry = branch.slice(start).find(candidate => candidate.id === request.evidenceEntryId);
         if (entry?.type !== "message" || entry.message.role !== "toolResult" || entry.message.isError || !textOf(entry).includes(request.evidenceQuote!)) throw new GatewayError("invalid_request", "Verification requires a successful tool result and verbatim evidence from this activation");
         evidence = { sessionId, entryId: entry.id, quote: request.evidenceQuote! };
       }
-      const event: ObligationEvent = { receiptId, id: request.id!, action: request.action, source: { sessionId, entryId: source.id, quote: request.quote! },
+      const event: ObligationEvent = { receiptId, id: request.id!, action, source: { sessionId, entryId: source.id, quote: request.quote! },
         ...(request.text ? { text: request.text } : {}), ...(request.issue ? { issue: request.issue } : {}), ...(evidence ? { evidence } : {}) };
       await slot.persistCanonicalCustomEntry(HOME_OBLIGATION, JSON.parse(JSON.stringify(event)), receiptId);
       return { item: { id: event.id, text: before?.text ?? event.text!, ...(before?.issue || event.issue ? { issue: before?.issue ?? event.issue } : {}),

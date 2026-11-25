@@ -24,5 +24,7 @@ Which transitions are legal (request opens an absent id; reported-done closes an
 verified closes an owed or reported-done item; reopened reopens a closed one), the 1000-item cap
 and which states are owed are decided by the proven block `home/obligations`
 (`packages/core`, compiled core in `src/core/home/obligations`); replay and writes both ask it.
-`home-obligations.integration.test.ts` replays canonical histories through the block: owed states,
-every contradiction refused, and the cap.
+`home-obligations.integration.test.ts` replays canonical histories through the block (owed states,
+the contradictions of each action, the cap) and drives real Home tool calls: legal writes append,
+refused ones (reopen of an owed item or from the closing message, closing a closed item, re-creating
+an id, a write outside the maintainer turn) append nothing.
