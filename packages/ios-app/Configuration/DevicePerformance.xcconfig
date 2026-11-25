@@ -1,10 +1,3 @@
-// DevicePerformance.xcconfig - Optimized hosted-test measurement build on the production identity.
-// scripts/tron-profile ios (simulator) and the pinned-device baseline run
-// hosted XCTest scenarios against this build, so it compiles like the shipping
-// app: Swift -O with whole-module optimization (the LocalDevice/Release codegen,
-// including cross-file inlining and generic specialization) and optimized Clang.
-// Testability and HOSTED_TEST stay on only because the hosted test bundle
-// imports the app with @testable and uses hosted fixtures.
 #include "Base.xcconfig"
 
 DEBUG_INFORMATION_FORMAT = dwarf

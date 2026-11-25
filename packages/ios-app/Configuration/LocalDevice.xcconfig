@@ -1,6 +1,3 @@
-// LocalDevice.xcconfig - Optimized production-sandbox build for a development device.
-// Keep development signing so Instruments can attach, while matching the
-// optimizer and symbol settings used by the release-like execution path.
 #include "Base.xcconfig"
 
 DEBUG_INFORMATION_FORMAT = dwarf-with-dsym

@@ -66,8 +66,6 @@ static const char *skip_space(const char *cursor) {
     return cursor;
 }
 
-/* Payload manifests intentionally contain only bounded, unescaped identity
- * strings. Rejecting escapes keeps this tiny launcher parser unambiguous. */
 static int json_string(const char *json, const char *key, char *output, size_t capacity) {
     char needle[96];
     int length = snprintf(needle, sizeof(needle), "\"%s\"", key);
@@ -223,9 +221,6 @@ static int path_is_fingerprint_covered(const char *root, const char *candidate) 
     return path_is_under(app, candidate) || path_is_under(runtime, candidate);
 }
 
-/* The launcher recomputes the same deterministic dependency-tree fingerprint
- * as deployment and the Swift validator. Internal links are permitted only
- * when they resolve to a regular file inside app/ or runtime/. */
 static int immutable_tree(const char *path, const char *root) {
     struct stat info;
     if (lstat(path, &info) != 0) return -1;
@@ -253,9 +248,6 @@ static int immutable_tree(const char *path, const char *root) {
     return result;
 }
 
-/* The Swift validator and the deployment helper bound the two package
- * documents; an oversized one is a tampering signal even when its bytes match
- * the fingerprint, so this launcher applies the same upper limits. */
 static int required_document(const char *root, const char *relative, off_t maximumBytes) {
     char path[PATH_MAX];
     struct stat info;
@@ -280,9 +272,6 @@ static int required_path(const char *root, const char *relative, char *resolved,
     return 0;
 }
 
-/* Required runtime aliases are the one intentional executable-symlink contract.
- * Their exact relative text is fingerprinted, and both the textual target and
- * resolved file must match the already-required architecture runtime. */
 static int required_runtime_alias(const char *root, const char *architecture) {
     char directory[PATH_MAX], alias[PATH_MAX], runtime[PATH_MAX];
     char aliasResolved[PATH_MAX], runtimeResolved[PATH_MAX], target[PATH_MAX], expectedTarget[PATH_MAX];
@@ -303,10 +292,6 @@ static int required_runtime_alias(const char *root, const char *architecture) {
     return 0;
 }
 
-/* Staging, deployment, and Swift payload admission parse package.json and
- * require .bin/pi to match declared bin.pi. This minimal launcher does not
- * duplicate a general JSON parser; it owns the final immutable alias text,
- * package/node_modules containment, fingerprint, and executable checks. */
 static int required_npm_alias(const char *root, const char *architecture) {
     char directory[PATH_MAX], alias[PATH_MAX], npm[PATH_MAX];
     char aliasResolved[PATH_MAX], npmResolved[PATH_MAX], target[PATH_MAX], expectedTarget[PATH_MAX];
@@ -389,8 +374,6 @@ static int collect_finger_entries(const char *directory, const char *root,
     struct dirent *entry;
     int result = 0;
     while ((entry = readdir(handle)) != NULL) {
-        /* readdir always returns these directory entries; skip them before
-         * applying the payload-name safety policy. */
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
         if (!safe_name(entry->d_name)) { result = -1; break; }
         char child[PATH_MAX], childRelative[PATH_MAX];
@@ -407,8 +390,6 @@ static int collect_finger_entries(const char *directory, const char *root,
             ssize_t length = readlink(child, target, sizeof(target) - 1);
             struct stat targetInfo;
                     if (length <= 0 || length >= (ssize_t)sizeof(target) - 1) { result = -1; break; }
-            // readlink(2) does not append a terminator; validate only after
-            // explicitly terminating the bounded result.
             target[length] = '\0';
             if (!safe_name(target)) { result = -1; break; }
             if (realpath(child, resolved) == NULL || !path_is_under(root, resolved)
@@ -625,8 +606,6 @@ static int validate_payload(const char *payload, const char *expectedChannel, co
     char actualFingerprint[65];
     if (payload_fingerprint(root, actualFingerprint) != 0 || strcmp(actualFingerprint, identity.fingerprint) != 0) return -1;
     if (selectedIdentity != NULL) *selectedIdentity = identity;
-    /* Re-resolve the two paths after every validation step. They are absolute
-     * realpaths, never paths assembled from an untrusted manifest. */
     if (required_path(root, "app/dist/index.js", entrypoint, PATH_MAX, 0, 1024, 0) != 0 ||
         required_path(root, runtimeRelative, node, PATH_MAX, 1, 1024 * 1024, 0) != 0) return -1;
     return 0;
@@ -672,16 +651,12 @@ static int read_selection(const char *path, const char *channel, char *version, 
     return 0;
 }
 
-/** A refused selection: what the store claimed, and why the launcher refused
- * it. The launcher records it because the refused payload is not what ran. */
 typedef struct {
     char version[MAX_COMPONENT_BYTES];
     char fingerprint[65];
     const char *reason;
 } RefusedSelection;
 
-/* A refused record is not trusted, but the identity it claims still names the
- * payload the launcher record is about. */
 static void claimed_identity(const char *json, RefusedSelection *refused) {
     char version[128], fingerprint[65];
     refused->version[0] = '\0';
@@ -694,8 +669,6 @@ static void claimed_identity(const char *json, RefusedSelection *refused) {
     }
 }
 
-/* The attempt marker carries no runtime epoch, so the candidate's own manifest
- * is read to correlate the record with the Gateway's startup records. */
 static void candidate_epoch(const char *channelRoot, const char *version, char *output, size_t capacity) {
     char path[PATH_MAX], manifest[MAX_MANIFEST_BYTES + 1], epoch[MAX_COMPONENT_BYTES];
     output[0] = '\0';
@@ -737,9 +710,6 @@ static void launcher_timestamp(char *output, size_t capacity) {
              broken.tm_hour, broken.tm_min, broken.tm_sec, (int)(now.tv_nsec / 1000000));
 }
 
-/* Launcher records join the deploy timeline the helper owns: one JSON line per
- * decision, appended in a single O_APPEND write so its reader never sees a
- * partial record. Recording never changes or delays a launch. */
 #define LAUNCHER_RECORD_MAX_BYTES 4096
 
 static void launcher_record(const char *logPath, const char *level, const char *event, const char *message,
@@ -775,8 +745,6 @@ static void launcher_record(const char *logPath, const char *level, const char *
     (void)close(fd);
 }
 
-/* A refused pending selection ends the launch with exit 75, so its record is
- * the only durable evidence of why nothing ran. */
 static int rejected_pending_selection(const char *logPath, const char *channelRoot, const RefusedSelection *refused) {
     char epoch[MAX_COMPONENT_BYTES];
     candidate_epoch(channelRoot, refused->version, epoch, sizeof(epoch));
@@ -786,8 +754,6 @@ static int rejected_pending_selection(const char *logPath, const char *channelRo
     return -1;
 }
 
-/* The bundled fallback names the refused selection, why it was refused, and the
- * payload that runs instead, because the store's selection is not what ran. */
 static void bundled_fallback_message(const RefusedSelection *refused, const char *bundledVersion, char *output, size_t capacity) {
     char selection[256];
     if (refused->version[0] != '\0' && refused->fingerprint[0] != '\0') {
@@ -839,16 +805,11 @@ static int recover_pending_attempt_unlocked(const char *channelRoot, const char 
         return rejected_pending_selection(logPath, channelRoot, &refused);
     }
 
-    // A committed candidate was authenticated and selected by the helper.
-    // Removing the marker under the shared lock makes relaunch idempotent.
     if (strcmp(attempt, "committed") == 0) {
         if (unlink(markerPath) != 0 && errno != ENOENT) return -1;
         return 0;
     }
 
-    // The candidate gets exactly one launch. Atomically consume that attempt;
-    // only a subsequent launcher invocation while the helper has not committed
-    // the marker is evidence that startup failed and requires rollback.
     if (strcmp(attempt, "pending") == 0) {
         char temporary[PATH_MAX], launched[1024];
         if (snprintf(temporary, sizeof(temporary), "%s.tmp-attempt-%ld", markerPath, (long)getpid()) >= (int)sizeof(temporary)) return -1;
@@ -860,7 +821,6 @@ static int recover_pending_attempt_unlocked(const char *channelRoot, const char 
         int written = fd >= 0 && write(fd, launched, (size_t)length) == length && fsync(fd) == 0;
         if (fd >= 0 && close(fd) != 0) written = 0;
         if (!written || rename(temporary, markerPath) != 0) { unlink(temporary); return -1; }
-        // The candidate now owns the store's single launch attempt.
         char candidateEpoch[MAX_COMPONENT_BYTES], launchedMessage[256];
         candidate_epoch(channelRoot, candidateVersion, candidateEpoch, sizeof(candidateEpoch));
         snprintf(launchedMessage, sizeof(launchedMessage), "Candidate %s received its single launch attempt", candidateVersion);
@@ -883,7 +843,6 @@ static int recover_pending_attempt_unlocked(const char *channelRoot, const char 
     if (close(fd) != 0) result = 0;
     if (!result || rename(temporary, currentPath) != 0) { unlink(temporary); return -1; }
     if (unlink(markerPath) != 0 && errno != ENOENT) return -1;
-    // The candidate consumed its attempt without committing, so the previous selection was restored.
     char candidateEpoch[MAX_COMPONENT_BYTES], rolledBackMessage[256];
     candidate_epoch(channelRoot, candidateVersion, candidateEpoch, sizeof(candidateEpoch));
     snprintf(rolledBackMessage, sizeof(rolledBackMessage), "Candidate %s exited during startup; restored %s", candidateVersion, previousVersion);
@@ -911,22 +870,15 @@ static int recover_pending_attempt(const char *channelRoot, const char *channel,
                 (void)rmdir(lockPath);
                 continue;
             }
-            // A lock observed fresh on entry never becomes removable by this
-            // waiter merely because a loaded host stretches the bounded loop.
             observedFreshLock = 1;
         }
         struct timespec delay = { .tv_sec = 0, .tv_nsec = 25000000 };
         (void)nanosleep(&delay, NULL);
     }
-    // A pending candidate is not admissible without exclusive ownership of
-    // its attempt marker. Exit and let the supervisor retry; a later launch
-    // can remove a stale lock and run the existing rollback/commit recovery.
     RefusedSelection refused = { { 0 }, { 0 }, "Pending attempt lock is held; not launching an uncommitted payload" };
     return rejected_pending_selection(logPath, channelRoot, &refused);
 }
 
-/* Return 1 only when the external store/channel is genuinely absent. Any
- * existing but symlinked or malformed root is unsafe and must not fall back. */
 static int admit_channel_root(const char *home, const char *channel, char *admittedRoot) {
     char statePath[PATH_MAX], payloadsPath[PATH_MAX], payloadsRoot[PATH_MAX], channelPath[PATH_MAX];
     if (!valid_component(channel, 64) ||
@@ -1015,9 +967,6 @@ static int home_layout_admitted(const char *home) {
 }
 
 int main(int argc, char **argv) {
-    // Build verification compiles this source afresh and uses this mode rather
-    // than trusting the staged helper. It validates the bounded manifest,
-    // immutable payload tree, required entries, and canonical fingerprint.
     if (argc == 7 && strcmp(argv[1], "--verify-payload") == 0 &&
         (strcmp(argv[3], "stable") == 0 || strcmp(argv[3], "dev") == 0)) {
         PayloadIdentity identity;
@@ -1031,9 +980,6 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    // Build and verification tooling may ask the already-built trusted helper
-    // to hash an arbitrary payload. This avoids the process-per-file shell
-    // implementation on large production dependency trees.
     if (argc == 3 && strcmp(argv[1], "--fingerprint") == 0) {
         struct stat rootInfo;
         char root[PATH_MAX], fingerprint[65];
@@ -1079,8 +1025,6 @@ int main(int argc, char **argv) {
     char selectedPayloadRoot[PATH_MAX];
     const char *channel = getenv("TRON_GATEWAY_CHANNEL");
     if (channel == NULL || channel[0] == '\0') channel = "stable";
-    /* Only the two shipped channels are admitted. Validate before any
-     * channel-derived marker, lock, or selection path is touched. */
     if (strcmp(channel, "stable") != 0 && strcmp(channel, "dev") != 0) {
         fprintf(stderr, "Invalid TRON_GATEWAY_CHANNEL.\n");
         return 78;
@@ -1089,7 +1033,6 @@ int main(int argc, char **argv) {
     char deployLogPath[PATH_MAX] = {0};
     int externalState = 1;
     if (homeResolved) {
-        // A home whose log path does not fit loses its launcher records only.
         if (snprintf(deployLogPath, sizeof(deployLogPath), "%s/logs/deploy.jsonl", home) >= (int)sizeof(deployLogPath)) deployLogPath[0] = '\0';
         externalState = admit_channel_root(home, channel, admittedChannelRoot);
     }
@@ -1106,9 +1049,6 @@ int main(int argc, char **argv) {
         }
         external = external_payload(admittedChannelRoot, channel, node, entrypoint, helper, selectedPayloadRoot, &selectedIdentity, &refused) == 0;
         if (!external) {
-            // The external root was safely admitted, but its current selection
-            // or payload no longer validates. Never execute it; retain the
-            // trusted bundled payload as the bounded resilience fallback.
             fprintf(stderr, "Tron Gateway external payload selection is invalid; using bundled payload.\n");
         }
     }
@@ -1119,7 +1059,6 @@ int main(int argc, char **argv) {
             return 78;
         }
         if (externalState == 0) {
-            // An admitted store's selection was refused above, so the bundled payload is the fallback.
             char fallbackMessage[512];
             bundled_fallback_message(&refused, selectedIdentity.version, fallbackMessage, sizeof(fallbackMessage));
             launcher_record(deployLogPath, "warning", "launcher.bundled-fallback", fallbackMessage,
@@ -1163,9 +1102,6 @@ int main(int argc, char **argv) {
         return 70;
     }
 
-    /* The explicit V8 old-space limit. The Gateway's live-runtime byte budget
-     * (LIVE_RUNTIME_BYTE_BUDGET) is sized below this, so loaded sessions cannot
-     * reach the heap limit; Node's default would let them approach it. */
     const char *heap_flag = "--max-old-space-size=4096";
     char **child_argv = calloc((size_t)argc + 3, sizeof(char *));
     if (child_argv == NULL) return 71;

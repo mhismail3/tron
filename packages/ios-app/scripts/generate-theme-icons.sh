@@ -7,8 +7,6 @@ trap 'rm -rf "$tmp"' EXIT
 cat >"$tmp/GenerateThemeIcons.swift" <<'SWIFT'
 import Foundation
 
-/// Compile together with ThemeColor.swift: the app palette is the only mapping.
-/// AppIcon.icon owns the silhouette, placement, background and glass materials.
 @main
 struct GenerateThemeIcons {
     static func main() throws {
