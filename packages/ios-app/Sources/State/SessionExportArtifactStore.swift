@@ -2,7 +2,6 @@ import Foundation
 
 enum SessionExportArtifactPolicy {
     static let maximumEncodedBytes = 2 * 1_024 * 1_024 * 1_024
-    static let legacyMaximumEncodedBytes = 25 * 1_048_576
     static let maximumTotalBytes: Int64 = 4 * 1_024 * 1_024 * 1_024
     static let maximumArtifacts = 8
     static let minimumFreeBytes: Int64 = 64 * 1_024 * 1_024
@@ -12,7 +11,6 @@ enum SessionExportArtifactPolicy {
 
 enum SessionExportDownloadAdmissionError: Error {
     case invalidVersionedSize
-    case legacySizeExceeded
 }
 
 struct SessionExportDownloadAdmission: Equatable {
@@ -20,32 +18,16 @@ struct SessionExportDownloadAdmission: Equatable {
     let reservedBytes: Int64
     let expectedBytes: Int64?
 
-    static func resolve(
-        supportsLargeExports: Bool,
-        declaredBytes: Int64?
-    ) throws -> SessionExportDownloadAdmission {
-        if supportsLargeExports {
-            guard let declaredBytes,
-                  declaredBytes > 0,
-                  declaredBytes <= Int64(SessionExportArtifactPolicy.maximumEncodedBytes),
-                  let maximumBytes = Int(exactly: declaredBytes) else {
-                throw SessionExportDownloadAdmissionError.invalidVersionedSize
-            }
-            return SessionExportDownloadAdmission(
-                maximumBytes: maximumBytes,
-                reservedBytes: declaredBytes,
-                expectedBytes: declaredBytes
-            )
-        }
-        if let declaredBytes,
-           (declaredBytes <= 0
-            || declaredBytes > Int64(SessionExportArtifactPolicy.legacyMaximumEncodedBytes)) {
-            throw SessionExportDownloadAdmissionError.legacySizeExceeded
+    static func resolve(declaredBytes: Int64?) throws -> SessionExportDownloadAdmission {
+        guard let declaredBytes,
+              declaredBytes > 0,
+              declaredBytes <= Int64(SessionExportArtifactPolicy.maximumEncodedBytes),
+              let maximumBytes = Int(exactly: declaredBytes) else {
+            throw SessionExportDownloadAdmissionError.invalidVersionedSize
         }
         return SessionExportDownloadAdmission(
-            maximumBytes: SessionExportArtifactPolicy.legacyMaximumEncodedBytes,
-            reservedBytes: declaredBytes
-                ?? Int64(SessionExportArtifactPolicy.legacyMaximumEncodedBytes),
+            maximumBytes: maximumBytes,
+            reservedBytes: declaredBytes,
             expectedBytes: declaredBytes
         )
     }
@@ -94,37 +76,6 @@ actor SessionExportArtifactStore {
         let reservation = SessionExportArtifactReservation(id: UUID(), maximumBytes: expectedBytes)
         reservations[reservation.id] = expectedBytes
         return reservation
-    }
-
-    func writeText(_ text: String, suggestedName: String) throws -> URL {
-        let data = Data(text.utf8)
-        try prepareForIncoming(byteCount: Int64(data.count), additionalDiskBytes: 0)
-        let folder = root.appending(path: UUID().uuidString, directoryHint: .isDirectory)
-        do {
-            try FileManager.default.createDirectory(
-                at: folder,
-                withIntermediateDirectories: false,
-                attributes: [.protectionKey: FileProtectionType.complete]
-            )
-            let destination = folder.appending(
-                path: Self.safeFilename(suggestedName),
-                directoryHint: .notDirectory
-            )
-            try data.write(to: destination, options: [.atomic, .completeFileProtection])
-            let values = try destination.resourceValues(forKeys: [
-                .fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey,
-            ])
-            guard values.isRegularFile == true,
-                  values.isSymbolicLink != true,
-                  values.fileSize == data.count else {
-                throw URLError(.cannotDecodeContentData)
-            }
-            activeArtifacts.insert(destination)
-            return destination
-        } catch {
-            try? FileManager.default.removeItem(at: folder)
-            throw error
-        }
     }
 
     func cancelDownload(_ reservation: SessionExportArtifactReservation) {

@@ -22,7 +22,6 @@ package final class ChatInteractionTrace: @unchecked Sendable {
 
     package enum ProjectionChange: String, Sendable {
         case first
-        case sameSpine = "same-spine"
         case changedSpine = "changed-spine"
         case deferred
         case resumed
@@ -41,7 +40,6 @@ package final class ChatInteractionTrace: @unchecked Sendable {
 
     package enum EntranceStage: String, Sendable {
         case admitted
-        case admittedFallback = "admitted-fallback"
         case completed
     }
 
@@ -59,16 +57,13 @@ package final class ChatInteractionTrace: @unchecked Sendable {
         case releaseReady = "release-ready"
         case released
         case canonicalHandoff = "canonical-handoff"
-        case semanticHandoff = "semantic-handoff"
     }
 
     package enum LeaseReason: String, Sendable {
-        case targetOwned = "target-owned"
         case settledEvidence = "settled-evidence"
         case frameBoundary = "frame-boundary"
         case consumed
         case canonicalAcknowledgement = "canonical-acknowledgement"
-        case semanticIdentityChanged = "semantic-identity-changed"
     }
 
     package enum LayoutStage: String, Sendable {

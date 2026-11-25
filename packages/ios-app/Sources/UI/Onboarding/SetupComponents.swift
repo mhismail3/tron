@@ -83,7 +83,6 @@ struct ProviderConfigurationSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
     let provider: ProviderSummary
     let target: ProviderCatalogTarget
     @PresentationState private var activeOperationID: String?
