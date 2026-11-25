@@ -6337,6 +6337,7 @@ class DeviceLeaseFixture(ContainedFixture, unittest.TestCase):
         """A worktree holding the real helpers and synthetic repository tools."""
         worktree = self.root / name
         (worktree / "packages/ios-app").mkdir(parents=True)
+        (self.root / "main-source-admission").write_text("fixture-admission")
         for relative in (
             "config/ci-toolchain.env", "scripts/tron-ios-simulator", "scripts/tron-ios-device",
             "scripts/tron-xcodebuild", "scripts/ios-test-lock.py", "scripts/tron_rebuild_lock.py", "scripts/ios-test-build-identity.py",
@@ -6359,7 +6360,7 @@ class DeviceLeaseFixture(ContainedFixture, unittest.TestCase):
     def run_tool(self, worktree: Path, tool: str, *arguments: str, caller: str) -> subprocess.CompletedProcess[str]:
         result = subprocess.run(
             [str(worktree / "scripts" / tool), *arguments],
-            env={**self.caller_environment(caller, None), "TRON_MAIN_SOURCE_ROOT": str(worktree)},
+            env={**self.caller_environment(caller, None), "TRON_MAIN_SOURCE_NONCE": "fixture-admission"},
             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60,
         )
         self.outputs.append(result.stdout)
@@ -6371,7 +6372,7 @@ class DeviceLeaseFixture(ContainedFixture, unittest.TestCase):
         with output.open("w") as handle:
             process = subprocess.Popen(
                 [str(worktree / "scripts" / tool), *arguments],
-                env={**self.caller_environment(caller, gate), "TRON_MAIN_SOURCE_ROOT": str(worktree)},
+                env={**self.caller_environment(caller, gate), "TRON_MAIN_SOURCE_NONCE": "fixture-admission"},
                 text=True, stdout=handle, stderr=subprocess.STDOUT,
             )
         self.started.append((process, output))
