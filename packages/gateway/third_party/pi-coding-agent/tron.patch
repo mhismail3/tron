@@ -2578,6 +2578,18 @@ index 988e9e817e5a92b74ca0ac733b907bd48238bb24..eba9cc8df508e1661d680482ea97ad9a
  		agent,
  		sessionManager,
  		settingsManager,
+diff --git a/packages/coding-agent/test/suite/regressions/11692-dispose-waits-for-oauth-refresh.test.ts b/packages/coding-agent/test/suite/regressions/11692-dispose-waits-for-oauth-refresh.test.ts
+index 25f7a7fa98a67212c2ff0f3decaf89e9d83912a9..8614786da8fcc0d05d4759cabc8878d265984d82 100644
+--- a/packages/coding-agent/test/suite/regressions/11692-dispose-waits-for-oauth-refresh.test.ts
++++ b/packages/coding-agent/test/suite/regressions/11692-dispose-waits-for-oauth-refresh.test.ts
+@@ -87,6 +87,7 @@ describe("regression #11692: OAuth refresh in flight at shutdown", () => {
+ 		harnesses.push(harness);
+ 		const services: AgentSessionServices = {
+ 			cwd: harness.tempDir,
++			projectDir: harness.tempDir,
+ 			agentDir: harness.tempDir,
+ 			modelRuntime,
+ 			settingsManager: harness.settingsManager,
 diff --git a/packages/coding-agent/test/suite/regressions/6162-extension-active-tools-next-turn.test.ts b/packages/coding-agent/test/suite/regressions/6162-extension-active-tools-next-turn.test.ts
 index 27ba2e27e60553200d39e320064c8f8cf019ea64..4b8ebac088aaf11267ca430345758e9697176dba 100644
 --- a/packages/coding-agent/test/suite/regressions/6162-extension-active-tools-next-turn.test.ts
@@ -2606,6 +2618,18 @@ index 9991520690bee8593e48b3f49c2eaff4c3748aa4..238f32d0c2d08c802b76282343993fa8
 +++ b/packages/coding-agent/test/suite/regressions/8724-in-memory-fork-active-tool.test.ts
 @@ -42,6 +42,7 @@ describe("regression #8724: in-memory fork during an active tool turn", () => {
  		const harness = await createHarness({ tools: [blockingTool] });
+ 		const services: AgentSessionServices = {
+ 			cwd: harness.tempDir,
++			projectDir: harness.tempDir,
+ 			agentDir: harness.tempDir,
+ 			modelRuntime: harness.session.modelRuntime,
+ 			settingsManager: harness.settingsManager,
+diff --git a/packages/coding-agent/test/suite/regressions/9124-runtime-dispose-tool-settlement.test.ts b/packages/coding-agent/test/suite/regressions/9124-runtime-dispose-tool-settlement.test.ts
+index 31f8713c2eaed0a234e4458fdc7bedb3fa48cf6f..0efb1d945fb1e7bcae2a662ebcde85c17f3068eb 100644
+--- a/packages/coding-agent/test/suite/regressions/9124-runtime-dispose-tool-settlement.test.ts
++++ b/packages/coding-agent/test/suite/regressions/9124-runtime-dispose-tool-settlement.test.ts
+@@ -23,6 +23,7 @@ describe("regression #9124: runtime disposal during tool execution", () => {
+ 		harnesses.push(harness);
  		const services: AgentSessionServices = {
  			cwd: harness.tempDir,
 +			projectDir: harness.tempDir,
