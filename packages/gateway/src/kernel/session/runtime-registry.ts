@@ -3532,12 +3532,26 @@ export class RuntimeRegistry implements SessionOperations {
         facts.push({ ...fact, sessionId: slot.id, key: `slot:${slot.id}:${fact.key}` });
       }
     }
-    facts.sort((left, right) => (left.admittedAt ?? "").localeCompare(right.admittedAt ?? "")
+    const admitted = (fact: { admittedAt?: string }): number => {
+      const milliseconds = fact.admittedAt === undefined ? Number.NaN : Date.parse(fact.admittedAt);
+      return Number.isFinite(milliseconds) ? milliseconds : Number.POSITIVE_INFINITY;
+    };
+    facts.sort((left, right) => admitted(left) - admitted(right)
       || left.category.localeCompare(right.category) || left.key.localeCompare(right.key));
     const answered = answeringWorkToken === undefined ? facts : facts.filter((fact) => fact.key !== `work:${answeringWorkToken}`);
     const counts: Partial<Record<AdministrativeDrainBlockerCategory, number>> = {};
     for (const fact of answered) counts[fact.category] = (counts[fact.category] ?? 0) + 1;
+    const omittedProgress = new Map<string, number>();
+    for (const fact of answered.slice(64)) {
+      const progress = fact.progressAt === undefined ? Number.NaN : Date.parse(fact.progressAt);
+      if (fact.sessionId && Number.isFinite(progress) && progress > (omittedProgress.get(fact.sessionId) ?? -1)) {
+        omittedProgress.set(fact.sessionId, progress);
+      }
+    }
     const summaries = answered.slice(0, 64).map((fact) => {
+      const own = fact.progressAt === undefined ? Number.NaN : Date.parse(fact.progressAt);
+      const omitted = fact.sessionId ? omittedProgress.get(fact.sessionId) : undefined;
+      const progressAt = omitted !== undefined && !(own >= omitted) ? new Date(omitted).toISOString() : fact.progressAt;
       const admittedMilliseconds = fact.admittedAt ? Date.parse(fact.admittedAt) : Number.NaN;
       return {
         id: `blocker-${createHash("sha256").update(`${this.drainId}\0${fact.key}`).digest("hex").slice(0, 20)}`,
@@ -3549,7 +3563,7 @@ export class RuntimeRegistry implements SessionOperations {
           admittedAt: fact.admittedAt,
           ageMs: Math.max(0, now - admittedMilliseconds),
         } : {}),
-        ...(fact.progressAt ? { progressAt: fact.progressAt } : {}),
+        ...(progressAt ? { progressAt } : {}),
       } satisfies AdministrativeDrainBlockerSummary;
     });
     const fingerprint = JSON.stringify({

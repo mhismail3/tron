@@ -39,15 +39,20 @@ abstract module SessionsRestartDrainLaws {
   // the tracked blocker's id is tokenised in the same call as the snapshot, so it equals a listed blocker's token
   // exactly when the ids are equal. Blocker ids are unique within a snapshot (each is a hash of the drain id and
   // the blocker's distinct key), so the shell finds a stalled blocker by its id.
-  // Assumption A2: count is the snapshot's blockerCount and the blockers are its listed blockers in order (at most
-  // 64; the rest are omitted). A session id is absent or non-empty (the runtime registry omits an empty one), and
-  // every admission and progress time is absent or a Date#toISOString instant at or after 1970: the Gateway's
-  // clocks write those, and an extension-reported time is bounded to 0 to 8.64e15 ms and written by toISOString
-  // before it reaches a blocker. The shell reads any other string as Unset and passes each set time as its milliseconds. For
-  // the years 1970 to 9999 the strings order as their milliseconds, so the block orders them as the replaced
-  // TypeScript's string comparison did; an expanded year after 9999 (+0YYYYY, only from an extension-reported
-  // time) is ordered by its time, where the string comparison put it before every four-digit year. now is the
-  // Gateway clock read once per poll and limit the stall limit.
+  // Assumption A2: count is the snapshot's blockerCount and the blockers are its listed blockers: at most 64, the
+  // earliest admitted first and those with no admission time last (ties by category, then key), so the oldest
+  // admitted blocker is always listed and only later or unadmitted ones are omitted. A listed blocker of a session
+  // carries the latest progress time of that session's omitted blockers when it is later than its own, so the
+  // latest progress of a session's listed blockers is that of all its blockers. A session id is absent or
+  // non-empty (the runtime registry omits an empty one), and every admission and progress time is absent or a
+  // Date#toISOString instant at or after 1970: the Gateway's clocks write those, and an extension-reported time is
+  // bounded to 0 to 8.64e15 ms and written by toISOString before it reaches a blocker. An extension-reported
+  // progress time is never later than the Gateway clock when it was observed: a later one reads as the previous
+  // progress time, or the observation time when there is none (the producer shares the Gateway host's clock). An
+  // extension-reported admission time is not bounded by that clock. The shell reads any other string as Unset and passes
+  // each set time as its milliseconds, so an expanded year after 9999 (a signed six-digit year, only from an
+  // extension-reported admission time) is ordered by its time. now is the Gateway clock read once per poll and
+  // limit the stall limit.
   // Assumption A3: the shell keeps the returned tracked value for the next poll of the same drain and starts each
   // drain with nothing tracked; on Completed or UnresolvedOwners it restarts, on Stalled it restarts naming the
   // blocker, and on Waiting it polls again.
@@ -134,9 +139,9 @@ abstract module SessionsRestartDrainLaws {
       t.Tracking? && t.id == o.id && t.state == o.state && t.admitted == o.admitted
       && t.progress == Progress(Elems(blockers), o)
 
-  // R1 timer-reset: the stall timer restarts from the oldest blocker's last signal (its progress time, else its
-  // admission time, else now) exactly when the tracked blocker, its state, its progress time or its admission time
-  // changed since the last poll; otherwise it keeps running from the tracked time.
+  // R1 timer-reset: the stall timer restarts from the oldest blocker's last signal (its progress time as O1 judges
+  // it, else its admission time, else now) exactly when the tracked blocker, its state, that progress time or its
+  // admission time changed since the last poll; otherwise it keeps running from the tracked time.
   lemma R1TimerReset(count: Count, blockers: List<Blocker>, tracked: Tracked, now: Ms, limit: Ms, i: int)
     requires count != 0 && !OnlyOwners(count, Elems(blockers)) && Oldest(Elems(blockers), i)
     ensures var o, t := Elems(blockers)[i], Evaluate(count, blockers, tracked, now, limit).tracked;

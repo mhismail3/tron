@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../../kernel/resources/trust-service.js";
 import type { ExtensionRunActivity, ExtensionToolOrigin, SessionSummaryUpdate } from "../../protocol/types.js";
 import { GatewayWorkRegistry } from "../../kernel/run/gateway-work-registry.js";
+import { RestartDrainProgress } from "../../sessions/restart-drain.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "../../kernel/receipts/invocation-receipts.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE } from "../../kernel/receipts/extension-activity-history.js";
 import {
@@ -1204,6 +1205,60 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect([run, join(run, "status.json")].map(allowed)).toEqual([true, true]);
     expect([runs, join(run, "other.json"), join(run, "nested"), join(run, "nested", "status.json"), prefixed, longer,
       projectRun].map(allowed)).toEqual([false, false, false, false, false, false, false]);
+  });
+
+  it("judges a future-dated extension progress time as progress now, so the restart drain still stalls on it (#2682)", async () => {
+    const fixture = await coldFixture("future-progress-drain");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const startedAt = new Date(Date.now() - 1_000).toISOString();
+    const future = { details: { mode: "single", runId: "future-run", lastActivityAt: 8.64e15, progress: [{ agent: "worker", status: "running" }] } };
+    const first = updateExtensionActivity(slot.ownedTurns, "future-tool", "subagent", { source: "project" }, "running", startedAt, startedAt, future)!;
+    const blocker = () => fixture.registry.administrativeDrainSnapshot().blockers.find((entry) => entry.category === "detached-extension-run")!;
+    const progressAt = blocker().progressAt!;
+    expect(progressAt).toBe(first.lifecycle!.observedAt);
+    updateExtensionActivity(slot.ownedTurns, "future-tool", "subagent", { source: "project" }, "running", startedAt, new Date().toISOString(), future);
+    expect(blocker().progressAt).toBe(progressAt);
+    const limit = 180_000;
+    expect(new RestartDrainProgress().evaluate(fixture.registry.administrativeDrainSnapshot(), Date.parse(progressAt) + limit, limit))
+      .toMatchObject({ outcome: "stalled", blocker: { category: "detached-extension-run" }, ageMs: limit });
+  });
+
+  it("lists the oldest admitted blocker within the 64-blocker cap ahead of blockers with no admission time (#2682)", async () => {
+    const workRegistry = new GatewayWorkRegistry();
+    const fixture = await coldFixture("drain-cap-oldest", { workRegistry });
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const admitted = workRegistry.begin({ kind: "rpc-mutation", method: "session.prompt", hostEpoch: workRegistry.runtimeEpoch });
+    try {
+      vi.spyOn(slot, "administrativeDrainBlockers").mockReturnValue(Array.from({ length: 70 }, (_, index) => ({
+        category: "extension-command-prompt-ui" as const, key: `unadmitted-${index}`, state: "active" as const,
+      })));
+      const snapshot = fixture.registry.administrativeDrainSnapshot();
+      expect(snapshot).toMatchObject({ blockerCount: 71, omittedCount: 7 });
+      const oldest = snapshot.blockers.find((entry) => entry.category === "rpc-mutation");
+      expect(oldest).toMatchObject({ method: "session.prompt", admittedAt: expect.any(String) });
+      const limit = 180_000;
+      expect(new RestartDrainProgress().evaluate(snapshot, Date.parse(oldest!.progressAt!) + limit, limit))
+        .toMatchObject({ outcome: "stalled", blocker: { id: oldest!.id }, ageMs: limit });
+    } finally {
+      admitted.settle();
+    }
+  });
+
+  it("judges a listed blocker by its session's progress even when the progressing blocker is past the 64 cap (#2682)", async () => {
+    const fixture = await coldFixture("drain-cap-session-progress");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const base = Date.now() - 3_600_000;
+    const at = (offset: number) => new Date(base + offset).toISOString();
+    vi.spyOn(slot, "administrativeDrainBlockers").mockReturnValue(Array.from({ length: 70 }, (_, index) => ({
+      category: "detached-extension-run" as const, key: `run-${index}`, state: "active" as const,
+      admittedAt: at(index), progressAt: at(index === 69 ? 600_000 : index),
+    })));
+    const snapshot = fixture.registry.administrativeDrainSnapshot();
+    expect(snapshot).toMatchObject({ blockerCount: 70, omittedCount: 6 });
+    const limit = 180_000;
+    expect(new RestartDrainProgress().evaluate(snapshot, base + 200_000, limit)).toEqual({ outcome: "waiting" });
+    expect(new RestartDrainProgress().evaluate(snapshot, base + 600_000 + limit, limit))
+      .toMatchObject({ outcome: "stalled", ageMs: limit });
   });
 
   it("retains nonterminal artifact authority until receipt capacity is available", async () => {

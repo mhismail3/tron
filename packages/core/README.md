@@ -36,7 +36,10 @@ invocation receipts fold into each invocation's lifecycle, and which histories a
 `packages/gateway/src/core/receipts/invocation-lifecycle`), `home/task-authorization` (whether a Home task runs under
 the standing scope or a one-use grant, or must wait for reconfirmation or a grant, over string tokens; shell
 `packages/gateway/src/modules/home/home-task-authorization.ts`, core in
-`packages/gateway/src/core/home/task-authorization`), `security/public-host` (which IPv4 and IPv6 addresses a public display URL
+`packages/gateway/src/core/home/task-authorization`), `home/obligations` (whether one maintainer-obligation event is a legal
+transition, a contradiction or over the ledger's 1000-item cap, and which states are owed; shell
+`packages/gateway/src/modules/home/home-obligations.ts` (replay) and `home-owner.ts` (writes), core in
+`packages/gateway/src/core/home/obligations`), `security/public-host` (which IPv4 and IPv6 addresses a public display URL
 may name, IPv4-mapped forms included, and whether a rate limiter admits a key's attempt and which attempt times it keeps;
 shells `packages/gateway/src/display/display-contract.ts` and `packages/gateway/src/security/rate-limiter.ts`, core in
 `packages/gateway/src/core/security/public-host`), `security/path-shape` (whether a resolved path is within a root,
