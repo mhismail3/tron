@@ -28,7 +28,7 @@ def main():
         script.write_text('''#!/bin/sh
 set -eu
 git rev-parse HEAD > "$SOURCE_REPORT"
-printf "%s\\n" "$TRON_MAIN_SOURCE_ROOT" "$TRON_MAIN_SOURCE_REF" "$@" >> "$SOURCE_REPORT"
+printf "%s\\n" "$PWD" "$TRON_MAIN_SOURCE_REF" "$@" >> "$SOURCE_REPORT"
 nested=packages/ios-app/build/DerivedData-fast-debug/SourcePackages/checkouts/generated
 mkdir -p "$nested"
 git -C "$nested" init -q
@@ -44,6 +44,8 @@ exit "${BUILD_STATUS:-0}"
         git(repo, "add", "."); git(repo, "commit", "-m", "main source"); git(repo, "push", "origin", "main")
         main_sha = git(repo, "rev-parse", "HEAD")
         git(repo, "checkout", "-b", "worker")
+        git(repo, "commit", "--allow-empty", "-m", "ambiguous local origin/main")
+        git(repo, "branch", "origin/main")
         shutil.copy2(ROOT / "scripts/tron-ios-device", script)
         (repo / "untracked").write_text("keep")
         user = repo / "packages/ios-app/build/DerivedData-fast-debug/SourcePackages/checkouts/user"
@@ -68,6 +70,12 @@ exit "${BUILD_STATUS:-0}"
                 assert (user / "dirty").read_text() == "keep caller draft"
                 registrations = git(repo, "worktree", "list", "--porcelain")
                 assert len(registrations.split("worktree ")) == 2, registrations
+        (root / "main-source-admission").write_text("other-run")
+        result = subprocess.run([script, "install", "--fast-debug"], env={**env, "TRON_MAIN_SOURCE_ROOT": str(repo), "TRON_MAIN_SOURCE_NONCE": "inherited"},
+                                text=True, capture_output=True, timeout=15)
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        report = (root / "report").read_text().splitlines()
+        assert report[0] == main_sha and report[1] != str(repo), report
         git(repo, "checkout", "-q", "-b", "candidate", main_sha)
         (repo / "candidate").write_text("candidate")
         git(repo, "add", "candidate"); git(repo, "commit", "-m", "candidate"); git(repo, "push", "origin", "candidate")
@@ -111,7 +119,7 @@ exit "${BUILD_STATUS:-0}"
         assert resolved == main_sha
         artifact = ROOT / "test-results/main-source.json"
         artifact.parent.mkdir(exist_ok=True)
-        artifact.write_text(json.dumps({"revision": main_sha, "cases": ["real install/share entry points", "success/failure nested-clone cleanup", "dirty caller and unpublished nested work preserved", "no receipts", "read-only source resolution", "signal while the build awaits reaping", "share --ref builds the fetched branch; install --ref, bare and absent refs refused"]}, indent=2) + "\n")
+        artifact.write_text(json.dumps({"revision": main_sha, "cases": ["real install/share entry points", "success/failure nested-clone cleanup", "dirty caller and unpublished nested work preserved", "no receipts", "read-only source resolution", "signal while the build awaits reaping", "share --ref builds the fetched branch; install --ref, bare and absent refs refused", "an inherited admission nonce and a local origin/main branch cannot select the caller's source"]}, indent=2) + "\n")
         print(f"Passed fetched-main source journey; evidence: {artifact}")
 
 

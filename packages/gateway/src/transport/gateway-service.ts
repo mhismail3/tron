@@ -10,7 +10,8 @@ import { asUncertainOutcome, GatewayError } from "../errors.js";
 import { runtimeIdentity } from "./runtime-identity.js";
 import { DeviceLogStore } from "./device-logs.js";
 import { HOME_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY, HOME_MEMORY_VIEW_CAPABILITY, HOME_PROFILE_LIST_CAPABILITY, HOME_PROFILE_EDIT_CAPABILITY } from "../protocol/capabilities.js";
-import type { CommandDetail, GatewayRestartResponse, HomeTaskStatusResult, JsonValue, ModelPage, ModelRef, SessionCommands, SessionListPage } from "../protocol/types.js";
+import type { CommandDetail, GatewayRestartResponse, JsonValue, ModelPage, ModelRef, SessionCommands, SessionListPage } from "../protocol/types.js";
+import { encodeHomeTaskStatusResult } from "../protocol/types.js";
 import { admitHomeMemoryView, admitHomeMemoryEvidence } from "../episodic/home-memory-browser.js";
 import { GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import { PI_VERSION } from "../kernel/pi/version.js";
@@ -516,8 +517,7 @@ export class GatewayService {
       }
       case "home.taskStatus": {
         rejectUnknownFields(params, ["taskId"], method);
-        const status: HomeTaskStatusResult = await this.requireHome().taskStatus(string(params.taskId, "taskId", { max: 160 }));
-        return safeJson(status);
+        return JSON.parse(encodeHomeTaskStatusResult(await this.requireHome().taskStatus(string(params.taskId, "taskId", { max: 160 })))) as JsonValue;
       }
       case "home.redeliverTaskResult":
         return this.mutation(client, method, params, async () => {

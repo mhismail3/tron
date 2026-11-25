@@ -5,17 +5,16 @@ struct TronGatewayProfile: Equatable, Sendable {
     let launchAgentLabel: String
     let channel: String
     let homeName: String
-    let agentDirectoryName: String
     let port: Int
     let agentBundleName: String
 
     static let stable = TronGatewayProfile(
         name: "stable", launchAgentLabel: "com.tron.server", channel: "stable",
-        homeName: ".tron", agentDirectoryName: "agent", port: 9847, agentBundleName: "Tron Agent"
+        homeName: ".tron", port: 9847, agentBundleName: "Tron Agent"
     )
     static let debug = TronGatewayProfile(
         name: "debug", launchAgentLabel: "com.tron.server.dev", channel: "dev",
-        homeName: ".tron-dev", agentDirectoryName: "agent", port: 9848, agentBundleName: "Tron Agent Dev"
+        homeName: ".tron-dev", port: 9848, agentBundleName: "Tron Agent Dev"
     )
 }
 

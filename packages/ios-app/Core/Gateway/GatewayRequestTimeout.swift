@@ -11,6 +11,4 @@ package enum GatewayRequestTimeout {
     package static let sessionDelete: Duration = .seconds(60)
     package static let sessionArchive: Duration = .seconds(60)
     package static let modelCatalogRefresh: Duration = .seconds(75)
-    package static let packageCheckUpdates: Duration = .seconds(180)
-    package static let packageMutation: Duration = .seconds(300)
 }

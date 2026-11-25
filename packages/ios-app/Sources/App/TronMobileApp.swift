@@ -9,9 +9,6 @@ struct TronMobileApp: App {
 
     init() {
         HostedPresentationProbe.installIdleCapture()
-        if ProcessInfo.processInfo.environment["TRON_UI_LOCK_RENDERING"] == "1" {
-            UIView.setAnimationsEnabled(false)
-        }
         _hostedModel = State(initialValue: AppModel())
         HostedFixtureRoot.prepareLaunch()
     }
@@ -67,75 +64,16 @@ struct HostedFixtureRoot: View {
 
     var body: some View {
         Group {
-            if HostedLaunch.arguments.contains("-tron-idle-control") {
-                HostedIdleControlFixture()
-            } else if HostedLaunch.arguments.contains("-tron-tool-sheets-polish-fixture") {
-                HostedToolSheetsPolishFixture().environment(hostedModel)
-            } else if HostedLaunch.arguments.contains("-tron-home-dashboard-fixture") {
+            if HostedLaunch.arguments.contains("-tron-home-dashboard-fixture") {
                 HostedHomeDashboardFixture()
             } else if HostedLaunch.arguments.contains("-tron-snapshot-cache-fixture") {
                 HostedSnapshotCacheFixture()
             } else if HostedLaunch.arguments.contains("-tron-session-configuration-fixture") {
                 HostedSessionConfigurationFixture()
-            } else if HostedLaunch.arguments.contains("-tron-project-trust-fixture") {
-                HostedProjectTrustFixture()
-            } else if HostedLaunch.arguments.contains("-tron-subagent-parity-fixture") {
-                HostedSubagentParityFixture()
-            } else if HostedLaunch.arguments.contains("-tron-new-session-fixture") {
-                HostedNewSessionFixture()
-            } else if HostedLaunch.arguments.contains("-tron-composer-upload-fixture") {
-                HostedComposerUploadFixture()
-            } else if HostedLaunch.arguments.contains("-tron-subsheet-reliability-fixture") {
-                HostedSubsheetReliabilityFixture()
-            } else if HostedLaunch.arguments.contains("-tron-interaction-haptics-fixture") {
-                HostedInteractionHapticsFixture()
-            } else if HostedLaunch.arguments.contains("-tron-chat-haptics-fixture") {
-                HostedChatHapticsFixture()
-            } else if HostedLaunch.arguments.contains("-tron-notification-inbox-fixture") {
-                HostedNotificationInboxFixture()
-            } else if HostedLaunch.arguments.contains("-tron-recovery-notice-fixture") {
-                HostedRecoveryNoticeFixture()
-            } else if HostedLaunch.arguments.contains("-tron-keychain-locked-fixture") {
-                HostedProductionScene(model: HostedKeychainLockedFixture.model)
-                    .overlay(alignment: .bottom) { HostedKeychainLockedFixture.ConnectionState() }
-            } else if HostedLaunch.arguments.contains("-tron-readonly-attachment-fixture") {
-                HostedReadonlyAttachmentFixture()
-            } else if HostedLaunch.arguments.contains("-tron-chat-display-fixture") {
-                HostedChatDisplayFixture()
-            } else if HostedLaunch.arguments.contains("-tron-chat-annotation-fixture") {
-                HostedChatAnnotationFixture()
             } else if HostedLaunch.arguments.contains("-tron-ask-user-fixture") {
                 HostedAskUserFixtureView()
-            } else if HostedLaunch.arguments.contains("-tron-session-pagination-fixture") {
-                HostedSessionPaginationFixture()
-            } else if HostedLaunch.arguments.contains("-tron-automation-fixture") {
-                HostedAutomationFixtureView()
-            } else if HostedLaunch.arguments.contains("-tron-session-archive-fixture") {
-                HostedSessionArchiveFixture()
-            } else if HostedLaunch.arguments.contains("-tron-home-summary-typography-fixture") {
-                HostedHomeSummaryTypographyFixture()
-            } else if HostedLaunch.arguments.contains("-tron-session-row-clock-fixture") {
-                HostedSessionRowClockFixture()
             } else if HostedLaunch.arguments.contains("-tron-integrations-fixture") {
                 HostedIntegrationsFixtureView()
-            } else if HostedLaunch.arguments.contains("-tron-dashboard-menu-fixture") {
-                HostedDashboardMenuFixtureView()
-            } else if HostedLaunch.arguments.contains("-tron-accessibility-fixture") {
-                HostedAccessibilityFixtureView()
-            } else if HostedLaunch.arguments.contains("-tron-settings-navigation-fixture") {
-                SettingsView()
-                    .environment(hostedModel)
-                    .tronPresentation()
-                    .tronSettingsLayout()
-                    .preferredColorScheme(.light)
-            } else if HostedLaunch.arguments.contains("-tron-mac-settings-fixture") {
-                HostedSettingsFixture()
-            } else if HostedLaunch.arguments.contains("-tron-extension-widgets-fixture") {
-                HostedExtensionWidgetsFixtureView()
-            } else if HostedLaunch.arguments.contains("-tron-agent-instructions-fixture") {
-                HostedAgentInstructionsFixtureView()
-            } else if HostedLaunch.arguments.contains("-tron-mac-terminal-fixture") {
-                HostedMacTerminalFixture()
             } else if HostedLaunch.arguments.contains("-tron-settings-fixture") {
                 HostedSettingsFixture()
             } else {

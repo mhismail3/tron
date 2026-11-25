@@ -10,6 +10,7 @@ import { GATEWAY_CONNECTION_POLICY } from "./connection-policy.js";
 import { GatewayServer } from "./server.js";
 import type { PeerPathLookup, PeerPathReader } from "./tailscale-peer.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { PROTOCOL_VERSION } from "../version.js";
 
 const NO_TAILSCALE_PATH: PeerPathReader = { lookup: async (): Promise<PeerPathLookup> => ({ peerPath: "unknown", peerPathSource: "not-tailscale", peerRelay: "" }) };
 
@@ -119,7 +120,7 @@ async function observeHeartbeats(script: ClientScript, ticks: number, options: H
     sessions: { unsubscribeClient: vi.fn() } as never,
     auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as never,
     service: {
-      info: () => ({ protocolVersion: 9 }),
+      info: () => ({ protocolVersion: PROTOCOL_VERSION }),
 
       releaseClient: vi.fn(),
       invoke: vi.fn(),
@@ -151,7 +152,7 @@ async function observeHeartbeats(script: ClientScript, ticks: number, options: H
     if (frame.topic === "test.barrier") barrier = frame.payload.sequence;
   });
   await new Promise<void>((resolve, reject) => { socket.once("open", () => resolve()); socket.once("error", reject); });
-  socket.send(JSON.stringify({ type: "hello", protocolVersion: 9, diagnostics: PEER_DIAGNOSTICS }));
+  socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION, diagnostics: PEER_DIAGNOSTICS }));
   await waitFor(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.opened"), "hello");
   const connection = () => [...(gateway as unknown as { clients: Map<string, { unansweredHeartbeats: number; lastClientInitiatedInboundAt: number | null }> }).clients.values()][0];
 

@@ -16,6 +16,7 @@ import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { GatewayService } from "../../transport/gateway-service.js";
 import { GatewayServer } from "../../transport/server.js";
 import { waitFor } from "../../../test-support/wait-for.js";
+import { PROTOCOL_VERSION } from "../../version.js";
 
 const REPORT_PATH = join(process.cwd(), "test-results", "session-archive.integration.json");
 const report: {
@@ -199,7 +200,7 @@ async function fixture(options: {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await waitFor(() => socket.readyState === WebSocket.OPEN, "socket open");
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 9 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
     await waitFor(() => frames.some((frame) => frame.type === "hello"), "hello");
     const send = (id: string, method: string, params: object) => socket.send(JSON.stringify({ type: "request", id, method, params }));
     return {

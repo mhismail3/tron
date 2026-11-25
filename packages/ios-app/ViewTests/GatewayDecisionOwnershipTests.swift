@@ -24,6 +24,34 @@ final class GatewayDecisionOwnershipTests: XCTestCase {
         XCTAssertFalse(SessionProcessAdmissionPolicy.admitsSnapshotFacts(snapshot), "Bounds admission of untrusted input stays")
     }
 
+    private func extensionActivity(_ id: String, updatedAt: String, lifecycle: ExtensionActivityLifecycle,
+                                   status: ExtensionRunActivity.Status = .completed, title: String? = nil,
+                                   children: [ExtensionRunChild] = []) -> ExtensionRunActivity {
+        ExtensionRunActivity(id: id, toolCallId: id, source: ExtensionToolOrigin(source: "project"), title: title ?? id,
+                             status: status, startedAt: observed, updatedAt: updatedAt, children: children, lifecycle: lifecycle)
+    }
+
+    func testTheAppInstallsTheGatewaysDecidedExtensionLifecycleRecencyAndOrder() {
+        let decided = ExtensionActivityLifecycle(state: .completed, sequence: 2, observedAt: observed, terminalAt: observed,
+                                                 recentUntil: "2026-11-23T23:59:00.000Z", visibility: .unknown)
+        let unknownChild = ExtensionRunChild(id: "child", label: "child", status: .running, lifecycle: .unknown)
+        let sent = extensionActivity("decided", updatedAt: observed, lifecycle: decided, status: .running, children: [unknownChild])
+        XCTAssertEqual(ExtensionActivityAdmissionPolicy.admitted([sent]), [sent], "The app installs the Gateway's lifecycle, recency and child state as sent")
+        XCTAssertFalse(ExtensionActivityAdmissionPolicy.admits(extensionActivity("oversized", updatedAt: observed, lifecycle: decided,
+                                                                                 title: String(repeating: "x", count: 513))),
+                       "Bounds admission of untrusted input stays")
+
+        let gatewayOrder = (0..<33).map { index in
+            extensionActivity("activity-\(index)", updatedAt: String(format: "2026-11-24T00:00:%02d.000Z", 59 - index),
+                              lifecycle: ExtensionActivityLifecycle(state: .completed, sequence: 1, observedAt: observed,
+                                                                    terminalAt: observed, recentUntil: index.isMultiple(of: 2) ? "2026-11-24T00:15:00.000Z" : nil,
+                                                                    visibility: index.isMultiple(of: 2) ? .recent : .historical,
+                                                                    remainingMs: index.isMultiple(of: 2) ? 60_000 : nil))
+        }
+        XCTAssertEqual(ExtensionActivityAdmissionPolicy.admitted(gatewayOrder).map(\.id), gatewayOrder.prefix(32).map(\.id),
+                       "Past the cap the app keeps the Gateway's order")
+    }
+
     func testLiveOutputRendersAsTheGatewaySentIt() {
         let tool = { (output: String, truncated: Bool?) in
             ToolExecutionState(toolCallId: "call", toolName: "bash", status: .running, arguments: .object([:]), partialResult: nil,
@@ -77,6 +105,23 @@ final class GatewayDecisionOwnershipTests: XCTestCase {
         XCTAssertEqual(SessionRebaselineAdmission.evaluate(current: current, incoming: next(15, 6, current.runtimeGeneration)), .install)
         XCTAssertEqual(SessionRebaselineAdmission.evaluate(current: current, incoming: next(15, 3, current.runtimeGeneration)), .resynchronize)
         XCTAssertEqual(SessionRebaselineAdmission.evaluate(current: current, incoming: next(1, 1, "restarted")), .install)
+    }
+
+    func testDisplayURLsAdmitTheGatewaysCanonicalHostsAndRefuseRawFormsItWouldBlock() {
+        for url in ["https://mooses-macbook-server.tail3b6e78.ts.net:8443/", "https://one.two.example.com/", "https://a.b.c.d/",
+                    "https://8.8.8.8/", "https://1.2.0.3/", "https://[2606:4700::1111]/", "https://example.com./"] {
+            XCTAssertTrue(DisplayRemoteURLPolicy.admits(url), url)
+        }
+        for url in ["https://127.1/", "https://012.0.0.1/", "https://0x7f.0.0.1/", "https://08.8.8.8/", "https://1.2.3/",
+                    "https://4294967295/", "https://example.123/", "https://a.b.c.1/", "https://1.2.3.4.5/",
+                    "https://10.0.0.1/", "https://127.0.0.1/", "https://192.168.1.1/", "https://100.64.0.1/", "https://203.0.113.1/",
+                    "https://[2001:0db8::1]/", "https://[2001:db8::1]/", "https://[::1]/", "https://[::ffff:8.8.8.8]/", "https://[fe80::1]/", "https://[+2001::1]/",
+                    "https://[2400:cb00::1%25x]/", "https://[2001:::1]/", "https://[2001::1::2]/",
+                    "https://[2001:1:2:3:4:5:6:7::]/", "https://[2001:2:3:4:5:6:7::8]/", "https://[2001:1:2:3:4:5:6::7]/",
+                    "https://[2001:1:2:3:4::5:6:7:8]/", "https://[2001:1:2:3:4:5:6:7:8::]/",
+                    "https://@example.com/", "https://user@example.com/", "https://example.com/?q", "https://localhost/"] {
+            XCTAssertFalse(DisplayRemoteURLPolicy.admits(url), url)
+        }
     }
 
     func testExtensionLifecycleIntegerProjectionFailsAsAnInvalidResponse() throws {

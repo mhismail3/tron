@@ -6,6 +6,7 @@ import { disposeFixtures, fixture } from "../../../../test-support/home-task-fix
 import { startScriptedChild, type ChildModelServer } from "../../../../test-support/home-task-subagent-child.js";
 import { waitFor } from "../../../../test-support/wait-for.js";
 import { ProcessTranscriptLeaseStore } from "../../../transport/process-transcript-leases.js";
+import { decodeProcessTranscriptPageResult } from "../../../protocol/types.js";
 
 const servers: ChildModelServer[] = [];
 afterEach(async () => {
@@ -42,6 +43,8 @@ it("stops only the exact connection-owned child transcript through the K5 run ow
       process.childSessionRef!, process.runId!, binding.path, () => {}, authority,
       { viewerId: "child-viewer", parentSubscriptionToken: "parent-presentation" });
     expect(lease.canAbort).toBe(true);
+    const page = await leases.page("viewer-client", lease.leaseId);
+    expect(decodeProcessTranscriptPageResult(page), "session.processTranscript.page sends exactly ProcessTranscriptPageResult").toEqual(page);
     await expect(leases.abortOwned("foreign-client", lease.leaseId)).rejects.toMatchObject({ code: "not_found" });
     expect(server.abortedRequests()).toBe(0);
     await leases.abortOwned("viewer-client", lease.leaseId);

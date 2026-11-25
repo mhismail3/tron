@@ -20,5 +20,11 @@ receipt identity. Reads fold designated chapters in order and validate source en
 there is no mutable projection cache, migration, live seeding or fallback to summaries.
 Malformed history refuses rather than reporting nothing owed. Bounds are 1000 items,
 10000 events and a 128 KiB owed response; exceeding them refuses a partial result.
-`home-obligations.e2e.test.ts` crosses real Home tool execution, lossy summary compaction,
-chapter rollover and cold Gateway restart, preserving native compaction refusal.
+Which transitions are legal (request opens an absent id; reported-done closes an owed item;
+verified closes an owed or reported-done item; reopened reopens a closed one), the 1000-item cap
+and which states are owed are decided by the proven block `home/obligations`
+(`packages/core`, compiled core in `src/core/home/obligations`); replay and writes both ask it.
+`home-obligations.integration.test.ts` replays canonical histories through the block (owed states,
+the contradictions of each action, the cap) and drives real Home tool calls: legal writes append,
+refused ones (reopen of an owed item or from the closing message, closing a closed item, re-creating
+an id, a write outside the maintainer turn) append nothing.

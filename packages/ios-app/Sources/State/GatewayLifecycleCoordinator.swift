@@ -339,7 +339,6 @@ final class GatewayLifecycleCoordinator {
 
     func enteredBackground() {
         recorder.endEpisode(.background)
-        let backgroundConnectionID = connectionID
         foregroundReconciliationGeneration &+= 1
         let task = foregroundReconciliationTask
         foregroundReconciliationTask = nil
@@ -370,7 +369,6 @@ final class GatewayLifecycleCoordinator {
         let retirement = Task { @MainActor [weak self] in
             await previousRetirement?.value
             guard !Task.isCancelled, let self else { return }
-            _ = backgroundConnectionID
             await self.client.retireForBackground()
         }
         backgroundRetirementTask = retirement

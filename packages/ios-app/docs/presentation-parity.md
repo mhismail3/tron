@@ -237,10 +237,12 @@ section, and, for intent `provider-api-key`, one `SecureField` for the provider'
 stays disabled until it holds text, and the approving answer alone carries it (`secret`), never
 shown again. Approve (check, `tronPrimary`) and Cancel (red) are toolbar actions; the native
 interaction adds a grey leading close that leaves the review undecided. An agent, Home or worker
-change arrives as the native `change` interaction (`ExtensionInteractionSheet`); Settings,
-chat model card and Controls rows whose dry run requires a tap present the same sheet. Approve
-retires the sheet at the tap and answers the typed owner once with the review's digest through the
-receipt executor; Cancel and native dismissal send nothing. Generic forms never authorize effects.
+change arrives as the native `change` interaction (`ExtensionInteractionSheet`): Approve and Cancel
+each answer once with the review's digest and `approved` true or false, show a submitting state, and
+close only after the answer resolves. MCP Servers settings and the chat model card
+(`ManageModelConfigurationCard`) present the same sheet when a dry run requires a tap: Approve
+retires it at the tap and applies the change once with the digest; Cancel and native dismissal
+send nothing. Generic forms never authorize effects.
 The sheet shows Gateway text only. Audit history and Undo belong to the agent's `settings` tool;
 owner actions have no generic Undo. Settings and its inherited admin-sheet chrome follow the
 selected primary theme; semantic statuses keep their colors.

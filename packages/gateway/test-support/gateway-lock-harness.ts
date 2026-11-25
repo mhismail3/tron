@@ -42,6 +42,7 @@ import {
   type TraceNormalization, type TraceValue,
 } from "./scenario-lock.js";
 import { waitFor } from "./wait-for.js";
+import { PROTOCOL_VERSION } from "../src/version.js";
 
 type Step = (context: TranscriptContext, options: SimpleStreamOptions | undefined) => AssistantMessage | Promise<AssistantMessage>;
 
@@ -312,7 +313,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
         }
       });
       await waitFor(() => socket.readyState === WebSocket.OPEN, `the ${label} socket to open`);
-      socket.send(JSON.stringify({ type: "hello", protocolVersion: 9, ...connectOptions }));
+      socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION, ...connectOptions }));
       await waitFor(() => frames.some((frame) => frame.type === "hello"), `the ${label} hello`);
       const send = (method: string, params: Record<string, unknown>) => {
         const id = `${label}-${String(++frameCounter).padStart(3, "0")}`;

@@ -158,43 +158,6 @@ final class MountedFixture {
         }
     }
 
-    func pixels(_ area: CGRect, image: UIImage? = nil) -> [[Double]]? {
-        let bounds = area.integral
-        let image = image ?? render(bounds)
-        let local = image.size == window.bounds.size ? area : area.offsetBy(dx: -bounds.minX, dy: -bounds.minY)
-        guard let source = image.cgImage else { return nil }
-        let scale = CGFloat(source.width) / image.size.width
-        guard let crop = source.cropping(to: local.applying(CGAffineTransform(scaleX: scale, y: scale))) else { return nil }
-        let width = crop.width, height = crop.height
-        var bytes = [UInt8](repeating: 0, count: width * height * 4)
-        guard let context = CGContext(data: &bytes, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
-                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        context.draw(crop, in: CGRect(x: 0, y: 0, width: width, height: height))
-        return stride(from: 0, to: bytes.count, by: 4).map { [Double(bytes[$0]), Double(bytes[$0 + 1]), Double(bytes[$0 + 2])] }
-    }
-
-    func ink(_ area: CGRect, image: UIImage? = nil) -> [Double]? {
-        guard let pixels = pixels(area, image: image) else { return nil }
-        var sum = [0.0, 0.0, 0.0], count = 0.0
-        for rgb in pixels where rgb.max()! - rgb.min()! > 60 {
-            for channel in 0..<3 { sum[channel] += rgb[channel] / 255 }
-            count += 1
-        }
-        return count > 10 ? sum.map { $0 / count } : nil
-    }
-
-    func chroma(_ area: CGRect, range minimum: Double, image: UIImage? = nil) -> (ink: [Double], count: Int)? {
-        guard let pixels = pixels(area, image: image) else { return nil }
-        var sum = [0.0, 0.0, 0.0], count = 0
-        for rgb in pixels {
-            let low = rgb.min()!, range = rgb.max()! - low
-            guard range >= minimum else { continue }
-            for channel in 0..<3 { sum[channel] += (rgb[channel] - low) / range }
-            count += 1
-        }
-        return count > 0 ? (sum.map { $0 / Double(count) }, count) : nil
-    }
-
     func labelled(_ prefix: String) -> NSObject? {
         Self.elements(in: top).last {
             $0.isAccessibilityElement && $0.accessibilityTraits.contains(.button) && $0.accessibilityLabel?.hasPrefix(prefix) == true
@@ -225,10 +188,6 @@ final class MountedFixture {
         }
         visit(window.layer)
         return found
-    }
-
-    func inked(_ what: String, _ area: () -> CGRect?) async throws -> [Double] {
-        try await still(what) { area().flatMap { ink($0) } }
     }
 
     func still(_ what: String, _ sample: () -> [Double]?) async throws -> [Double] {

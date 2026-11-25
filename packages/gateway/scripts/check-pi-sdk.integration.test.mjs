@@ -29,10 +29,8 @@ const sample = await open(path, "r");
 const prototype = Object.getPrototypeOf(sample);
 await sample.close();
 const stat = prototype.stat;
-const createReadStream = prototype.createReadStream;
 const decode = TextDecoder.prototype.decode;
 let handle;
-let streams = 0;
 let chunks = 0;
 let closed;
 const cleanup = new Promise(resolve => { closed = resolve; });
@@ -48,10 +46,6 @@ prototype.stat = async function(...args) {
   if (phase === "stat") controller.abort();
   return result;
 };
-prototype.createReadStream = function(...args) {
-  streams++;
-  return createReadStream.apply(this, args);
-};
 TextDecoder.prototype.decode = function(...args) {
   const result = decode.apply(this, args);
   if (phase === "stream" && ++chunks === 1) controller.abort();
@@ -61,9 +55,8 @@ await assert.rejects(createReadToolDefinition(process.cwd()).execute("read", { p
 await cleanup;
 await setImmediate();
 assert.equal(handle.fd, -1);
-assert.equal(streams, phase === "stat" ? 0 : 1);
 assert.equal(chunks, phase === "stat" ? 0 : 1);
-console.log("READ_ABORT_PROBE " + JSON.stringify({ phase, fd: handle.fd, streams, chunks }));
+console.log("READ_ABORT_PROBE " + JSON.stringify({ phase, fd: handle.fd, chunks }));
 `);
   for (const phase of ["stat", "stream"]) {
     const child = spawnSync(process.execPath, [probe, path, phase], {
@@ -71,7 +64,7 @@ console.log("READ_ABORT_PROBE " + JSON.stringify({ phase, fd: handle.fd, streams
       env: { PATH: process.env.PATH, HOME: root, TMPDIR: root, PI_CODING_AGENT_DIR: join(root, "agent") },
     });
     assert.equal(child.status, 0, `${phase}: ${child.error ?? ""}\n${child.stdout}${child.stderr}`);
-    assert.match(child.stdout, new RegExp(`READ_ABORT_PROBE \\{"phase":"${phase}","fd":-1,"streams":${phase === "stat" ? 0 : 1},"chunks":${phase === "stat" ? 0 : 1}\\}`, "u"));
+    assert.match(child.stdout, new RegExp(`READ_ABORT_PROBE \\{"phase":"${phase}","fd":-1,"chunks":${phase === "stat" ? 0 : 1}\\}`, "u"));
   }
 });
 

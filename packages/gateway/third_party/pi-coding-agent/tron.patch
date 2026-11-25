@@ -1,32 +1,3 @@
-diff --git a/package-lock.json b/package-lock.json
-index fbf84cc836f6a6ba7d4082e5e767be57e8a1091e..7ecc721909bb1013d455835170f9e9dad0e3bea7 100644
---- a/package-lock.json
-+++ b/package-lock.json
-@@ -6451,7 +6451,7 @@
- 				"quickjs-wasi": "3.6.2",
- 				"semver": "7.8.5",
- 				"typebox": "1.3.27",
--				"undici": "8.12.3",
-+				"undici": "8.12.4",
- 				"yaml": "2.9.0"
- 			},
- 			"bin": {
-@@ -6542,6 +6542,15 @@
- 			"extraneous": true,
- 			"license": "MIT"
- 		},
-+		"packages/coding-agent/node_modules/undici": {
-+			"version": "8.12.4",
-+			"resolved": "https://registry.npmjs.org/undici/-/undici-8.12.4.tgz",
-+			"integrity": "sha512-8Mx+uNKKER2bA4AdtedkqRbwUCIJFr2nJckXRe5yrDqzePqwLP7VNcctN8/XdmDSbF7mS+jJKIszlL+vbam1VA==",
-+			"license": "MIT",
-+			"engines": {
-+				"node": ">=22.19.0"
-+			}
-+		},
- 		"packages/durable": {
- 			"name": "@earendil-works/pi-durable",
- 			"version": "1.5.1",
 diff --git a/packages/coding-agent/docs/mcp.md b/packages/coding-agent/docs/mcp.md
 index 5c6aa7d86d71cd9634fd0efff10f8784de84fb00..6b453902ac4a32ea7dafae6fc023d34ea2c1eccb 100644
 --- a/packages/coding-agent/docs/mcp.md
@@ -77,7 +48,7 @@ index 5c6aa7d86d71cd9634fd0efff10f8784de84fb00..6b453902ac4a32ea7dafae6fc023d34e
  
  `/mcp` lists configured servers with their state, tool count, exposure, and configuration source. Servers that need attention appear first. Select a server to inspect its tools and connection details, reconnect, sign in or out, change exposure, or enable and disable it.
 diff --git a/packages/coding-agent/docs/models-configuration.md b/packages/coding-agent/docs/models-configuration.md
-index f028a8e0bf22ae52e9b36018bc4b9b1e252cba72..31bc3f471e65b884098f4fff93f7de4e74eab037 100644
+index 01315c9688527f5356050a2750d1ad27bf8e85ad..5be279c53d7d56bfc6a96344fff60a6e23ae0cc5 100644
 --- a/packages/coding-agent/docs/models-configuration.md
 +++ b/packages/coding-agent/docs/models-configuration.md
 @@ -14,7 +14,7 @@ Each key under `providers` is a provider ID. A built-in provider ID changes that
@@ -103,7 +74,7 @@ index 803458a8b54a6e2350e3b24bed1f3612c3637279..3daccb7945f50df42d088da364bba7e4
  Opening `/model` reloads the file. A `models` entry adds or replaces a model with the same ID on that provider. Use `modelOverrides` to change metadata for an existing built-in or extension-provided model without replacing the provider's model list. Unknown override IDs are ignored.
  
 diff --git a/packages/coding-agent/docs/sdk.md b/packages/coding-agent/docs/sdk.md
-index 7d0883b3ff7926c077414ccce9b4f7aa31f7065b..e5dd2e899b9979586a4e1567d77f940ce1bb74e7 100644
+index 7d0883b3ff7926c077414ccce9b4f7aa31f7065b..4a60b534e35f3d411cfdda4b6191704755c3676b 100644
 --- a/packages/coding-agent/docs/sdk.md
 +++ b/packages/coding-agent/docs/sdk.md
 @@ -29,7 +29,9 @@ The [complete minimal example](../examples/sdk/01-minimal.ts) also streams text
@@ -126,93 +97,20 @@ index 7d0883b3ff7926c077414ccce9b4f7aa31f7065b..e5dd2e899b9979586a4e1567d77f940c
  `session.dispose()` aborts active work, invalidates extension contexts, disconnects from the agent, and removes event listeners. Call it when the session is no longer needed.
  
  `AgentSessionRuntime` adds `newSession()`, `switchSession()`, `fork()`, and `importFromJsonl()`. Each operation replaces the active `AgentSession` and recreates services for the target working directory.
-@@ -107,10 +111,28 @@ Each boundary can be supplied explicitly:
+@@ -107,9 +111,11 @@ Each boundary can be supplied explicitly:
  
  Use `DefaultResourceLoader` when you want standard discovery with selected overrides. Supply a custom `ResourceLoader` when the host owns resource storage and discovery completely.
  
-+### Remove global settings with a backup
-+
-+`await settingsManager.unsetGlobalSettings(["theme", "hideThinkingBlock"])` removes declared top-level keys from file-backed global settings. It does not remove project overrides or change the host's approval policy. In-memory/custom storage and unknown keys are refused. An absent key is a no-op, without a backup.
-+
-+The operation shares the settings write queue and file lock with setters. It reads the current file under that lock, preserves unknown and unrelated parsed fields, and writes an exclusive, exact-byte `0600` backup beside `settings.json`. The backup and its directory are flushed before an atomic `0600` replacement, which is also flushed. The source must be a single-link regular file owned by the current POSIX user, with owner read/write permissions and no bits outside `0644`. Symlinked files or containing directories, unsafe source modes, invalid UTF-8/JSON, and detected file/directory identity, content, ownership or mode changes are refused. Directory identity is fenced from before lock acquisition through reading and replacement. This relies on the settings lock for cooperating writers; it is not an operating-system sandbox against an adversarial writer racing the final check and rename. Directory flushing requires a supporting filesystem. Retained backup files are not pruned automatically.
-+
-+The promise rejects on refusal or error; queued storage errors are also recorded by `drainErrors()`. A successful receipt contains only `status: "unchanged"` and `changedKeys: []`, or `status: "applied"`, changed key names, `backupPath`, and before/after SHA-256 digests. It never contains setting values. Await this promise for its own result; `flush()` joins the queue but retains its existing error-collection behavior. Failed setter edits remain owned until persistence succeeds or a successful unset explicitly deletes them. Later setters remain ordered after deletion, rebased at their field or map-entry granularity without reviving deleted siblings. Effective getters still include project settings.
-+
-+Filesystem failures reject with `SettingsUnsetError`: fixed message, `phase`, `replacement` (`"not-attempted"` or `"uncertain"`), optional `recovery`, and secondary `cleanupFailures`. The primary phase is preserved if descriptor close or lock release also fails. Before a rename attempt this operation has not replaced the source, but another writer may have changed it. Any failure from the rename attempt onward is conservatively uncertain, never an applied/unchanged receipt. The manager then refuses further global persistence and unset operations until explicit `reload()` reconciles its view with storage; a successful reload discards only pending global edits accepted before its call boundary, so the host must settle that intent first. Reload runs on the same queue, rebases later accepted global edits onto the loaded settings, and leaves those edits owned by their subsequent writes. Global persistence checks load/recovery errors at its queue turn, allowing writes ordered after a successful reload while still refusing writes before recovery. Do not interpret rejection or the running getters as proof of canonical state.
-+
-+`recovery.kind: "verified-backup"` carries `backupPath` and `beforeSha256` only after the exact-byte backup file and directory flushes succeed. `"unverified-backup"` carries only an owned retained path: it may be incomplete or not durably recorded and is not an authorized restore source. These describe acknowledged filesystem calls, not a guarantee against hardware/filesystem failure. Restore is an explicit host action: stop writers, inspect canonical state, verify the successful receipt's or verified recovery metadata's backup SHA-256, and atomically replace global `settings.json` from that backup with private permissions and filesystem flushing, then reload. If no verified backup metadata exists, establish recovery independently; do not restore from a filename alone. There is no automatic restore, rollback reader or fallback.
-+
- <a id="inlineextension"></a>
- 
- Inline extension factories can be supplied through `DefaultResourceLoader`. Give one an `InlineExtension` name only when it needs a stable name in diagnostics and startup output. A named inline extension with `replaceable: true` is left out when another extension registers a tool, command, or flag with a name it registers during loading, instead of both loading with a conflict. The CLI's built-in codemode, tool search, and MCP extensions are replaceable. A named entry with `builtin: true` is not an inline extension: it supplies the code of the `builtin:<name>` extension, which loads like a configured extension file. It loads by default, is listed in `pi config`, and is disabled by `-builtin:<name>` in the `extensions` setting or by `noExtensions`; `additionalExtensionPaths: ["builtin:<name>"]` loads it explicitly. It loads after project trust is resolved, so it cannot handle `project_trust`. The CLI's built-in extensions use it.
- 
+-<a id="inlineextension"></a>
 +### Inspect MCP configuration without connecting
 +
 +`loadMcpConfig({ agentDir, cwd: projectDir, projectTrusted, maxConfigBytes: 256 * 1024 })`, exported from the package root, reads the same canonical configuration as the MCP extension. It includes disabled servers, global/project precedence, project overrides, source metadata and validation errors. Pass the project configuration directory as `cwd`, and its actual trust decision as `projectTrusted`; untrusted project files are not read. `maxConfigBytes` is an optional per-file UTF-8 byte budget. An oversized file contributes an error and no entries; other valid sources remain. Omitting the budget keeps the normal SDK loading behavior.
-+
+ 
+-Inline extension factories can be supplied through `DefaultResourceLoader`. Give one an `InlineExtension` name only when it needs a stable name in diagnostics and startup output. A named inline extension with `replaceable: true` is left out when another extension registers a tool, command, or flag with a name it registers during loading, instead of both loading with a conflict. The CLI's built-in codemode, tool search, and MCP extensions are replaceable. A named entry with `builtin: true` is not an inline extension: it supplies the code of the `builtin:<name>` extension, which loads like a configured extension file. It loads by default, is listed in `pi config`, and is disabled by `-builtin:<name>` in the `extensions` setting or by `noExtensions`; `additionalExtensionPaths: ["builtin:<name>"]` loads it explicitly. It loads after project trust is resolved, so it cannot handle `project_trust`. The CLI's built-in extensions use it.
 +This call does not create a session, write files, start servers, connect, refresh providers, or resolve environment/command/credential values. It reads only the applicable `mcp.json` files. Returned configuration can still contain literal credentials, and parse diagnostics can contain source text. Hosts must project only bounded non-secret metadata and error counts into public or model-visible inventory; do not dump the result or raw diagnostics.
-+
+ 
  <a id="codemode-mcp"></a>
  
- The CLI loads `codemode`, `tool_search`, and MCP as built-in extensions. SDK sessions do not; add `createCodemodeExtension()`, `createToolSearchExtension()`, and `createMcpExtension()` to the `extensionFactories` of `DefaultResourceLoader`. `codemode` and `tool_search` are registered inactive: enable them through the `defaultTools` setting (`["+codemode", "+tool_search"]` keeps the other default tools), or let the MCP extension activate them: `codemode` for servers with `codemode` exposure, `tool_search` for servers with `deferred` exposure. The MCP extension connects its servers on `session_start`, so call `session.bindExtensions()`. See [Codemode and MCP](../examples/sdk/14-codemode-mcp.ts).
-diff --git a/packages/coding-agent/install-lock/package-lock.json b/packages/coding-agent/install-lock/package-lock.json
-index eab89567b15c2db297d445219b0658ba02767adc..33dfa5f97949abccbce56dd640cb4fb3df96afa4 100644
---- a/packages/coding-agent/install-lock/package-lock.json
-+++ b/packages/coding-agent/install-lock/package-lock.json
-@@ -516,7 +516,7 @@
- 				"quickjs-wasi": "3.6.2",
- 				"semver": "7.8.5",
- 				"typebox": "1.3.27",
--				"undici": "8.12.3",
-+				"undici": "8.12.4",
- 				"yaml": "2.9.0"
- 			},
- 			"bin": {
-@@ -526,6 +526,15 @@
- 				"node": ">=22.19.0"
- 			}
- 		},
-+		"node_modules/@earendil-works/pi-coding-agent/node_modules/undici": {
-+			"version": "8.12.4",
-+			"resolved": "https://registry.npmjs.org/undici/-/undici-8.12.4.tgz",
-+			"integrity": "sha512-8Mx+uNKKER2bA4AdtedkqRbwUCIJFr2nJckXRe5yrDqzePqwLP7VNcctN8/XdmDSbF7mS+jJKIszlL+vbam1VA==",
-+			"license": "MIT",
-+			"engines": {
-+				"node": ">=22.19.0"
-+			}
-+		},
- 		"node_modules/@earendil-works/pi-mcp": {
- 			"version": "1.5.1",
- 			"resolved": "https://registry.npmjs.org/@earendil-works/pi-mcp/-/pi-mcp-1.5.1.tgz",
-@@ -1443,15 +1452,6 @@
- 			"integrity": "sha512-zu+jc1pcy4UiNThxikUr36f0Rybk9PEeCg/NE6adeWr/SKsdNO4EzZHYRDlv2YCVAfj3Odq3dESSo/jNyoBXzA==",
- 			"license": "MIT"
- 		},
--		"node_modules/undici": {
--			"version": "8.12.3",
--			"resolved": "https://registry.npmjs.org/undici/-/undici-8.12.3.tgz",
--			"integrity": "sha512-+fdndUTwBP86cVjihTp21hZHo7d6oj1c/47XPA3lL8mM0XHs+C4EkcjmgRsFnFk2f/UONGDy9ItBItmXsLOQHw==",
--			"license": "MIT",
--			"engines": {
--				"node": ">=22.19.0"
--			}
--		},
- 		"node_modules/undici-types": {
- 			"version": "6.21.0",
- 			"resolved": "https://registry.npmjs.org/undici-types/-/undici-types-6.21.0.tgz",
-diff --git a/packages/coding-agent/package.json b/packages/coding-agent/package.json
-index 20150665edcd78ce937030462d22fa1f6f8fd41a..422b781360eb8691c3a832176225ea516f44a6b4 100644
---- a/packages/coding-agent/package.json
-+++ b/packages/coding-agent/package.json
-@@ -61,7 +61,7 @@
- 		"quickjs-wasi": "3.6.2",
- 		"semver": "7.8.5",
- 		"typebox": "1.3.27",
--		"undici": "8.12.3",
-+		"undici": "8.12.4",
- 		"yaml": "2.9.0"
- 	},
- 	"overrides": {
 diff --git a/packages/coding-agent/src/core/agent-session-services.ts b/packages/coding-agent/src/core/agent-session-services.ts
 index 9673ba6a84a593d3a87d07a29649a747bf18c981..14923bf16c047983528f92207341e31545e58444 100644
 --- a/packages/coding-agent/src/core/agent-session-services.ts
@@ -301,7 +199,7 @@ index 9673ba6a84a593d3a87d07a29649a747bf18c981..14923bf16c047983528f92207341e315
  		modelRuntime: options.services.modelRuntime,
  		settingsManager: options.services.settingsManager,
 diff --git a/packages/coding-agent/src/core/agent-session.ts b/packages/coding-agent/src/core/agent-session.ts
-index f76247d5647a6ab17923425ebb0cee5b4ca6495b..272ed0f59748b60a38e4b467a03cad3fd92d3fd3 100644
+index 6a89c5b4133628bf1b39483b7af35d7fb6c26833..02c2477d75eec05b875fba0c730c9e82f1b6fa9d 100644
 --- a/packages/coding-agent/src/core/agent-session.ts
 +++ b/packages/coding-agent/src/core/agent-session.ts
 @@ -141,11 +141,14 @@ import {
@@ -343,7 +241,7 @@ index f76247d5647a6ab17923425ebb0cee5b4ca6495b..272ed0f59748b60a38e4b467a03cad3f
  	private _extensionRunnerRef?: { current?: ExtensionRunner };
  	private _initialActiveToolNames?: string[];
  	/**
-@@ -511,11 +520,17 @@ export class AgentSession {
+@@ -515,11 +524,17 @@ export class AgentSession {
  	private _toolPromptSnippets: Map<string, string> = new Map();
  	private _toolPromptGuidelines: Map<string, string[]> = new Map();
  
@@ -361,7 +259,7 @@ index f76247d5647a6ab17923425ebb0cee5b4ca6495b..272ed0f59748b60a38e4b467a03cad3f
  		this.agent = config.agent;
  		this.sessionManager = config.sessionManager;
  		this.settingsManager = config.settingsManager;
-@@ -523,6 +538,7 @@ export class AgentSession {
+@@ -527,6 +542,7 @@ export class AgentSession {
  		this._resourceLoader = config.resourceLoader;
  		this._customTools = config.customTools ?? [];
  		this._cwd = config.cwd;
@@ -369,7 +267,7 @@ index f76247d5647a6ab17923425ebb0cee5b4ca6495b..272ed0f59748b60a38e4b467a03cad3f
  		this._modelRuntime = config.modelRuntime;
  		this._cacheWarmer = config.cacheWarmer;
  		if (this._cacheWarmer) {
-@@ -966,26 +982,13 @@ export class AgentSession {
+@@ -970,26 +986,13 @@ export class AgentSession {
  			const context = await this._compactBeforeNextAssistantResponse(turn.context);
  			const previousSnapshot = await previousPrepareNextTurnWithContext?.({ ...turn, context }, signal);
  			const nextContext = previousSnapshot?.context ?? context;
@@ -397,7 +295,7 @@ index f76247d5647a6ab17923425ebb0cee5b4ca6495b..272ed0f59748b60a38e4b467a03cad3f
  				model: this.agent.state.model,
  				thinkingLevel: this.agent.state.thinkingLevel,
  			};
-@@ -1550,9 +1553,17 @@ export class AgentSession {
+@@ -1554,9 +1557,17 @@ export class AgentSession {
  		return !this._isAgentRunActive && !this.isCompacting;
  	}
  
@@ -417,27 +315,28 @@ index f76247d5647a6ab17923425ebb0cee5b4ca6495b..272ed0f59748b60a38e4b467a03cad3f
  	}
  
  	/** Current retry attempt (0 if not retrying) */
-@@ -1603,10 +1614,16 @@ export class AgentSession {
+@@ -1607,13 +1618,15 @@ export class AgentSession {
  	setActiveToolsByName(toolNames: string[]): void {
  		const previous = this.getActiveToolNames();
  		this._setActiveTools(toolNames);
--		// A loadout that deactivates a tool replaces the restored one, whose pending tools are dropped.
--		// One that only adds tools, like activating tool_search, keeps them.
-+		// A loadout that deactivates a tool replaces the restored one. Keep its explicitly
+-		// A loadout that deactivates a tool of the restored one replaces it, and its pending tools are
+-		// dropped. One that only adds tools, like activating tool_search, keeps them, and so does one
+-		// that only deactivates tools outside the restored loadout, such as an extension's own tool that
+-		// the restore or reload activated as newly registered.
++		// A loadout that deactivates a tool of the restored one replaces it. Keep its explicitly
 +		// requested pending names: MCP servers may still be connecting when a host reapplies it.
-+		// One that only adds tools, like activating tool_search, keeps all pending names.
++		// One that only adds tools, or only deactivates tools outside the restored loadout, keeps all.
  		const active = new Set(this.getActiveToolNames());
--		if (previous.some((name) => !active.has(name))) this._pendingToolNames.clear();
-+		if (previous.some((name) => !active.has(name))) {
+ 		if (previous.some((name) => !active.has(name) && this._restoredToolNames.has(name))) {
+-			this._pendingToolNames.clear();
 +			const requested = new Set(toolNames);
 +			for (const name of this._pendingToolNames) {
 +				if (!requested.has(name)) this._pendingToolNames.delete(name);
 +			}
-+		}
+ 		}
  	}
  
- 	private _setActiveTools(toolNames: string[]): void {
-@@ -1803,6 +1820,9 @@ export class AgentSession {
+@@ -1811,6 +1824,9 @@ export class AgentSession {
  		const loadedContextFiles = this._resourceLoader.getAgentsFiles().agentsFiles;
  
  		this._baseSystemPromptOptions = normalizeBuildSystemPromptOptions({
@@ -447,7 +346,7 @@ index f76247d5647a6ab17923425ebb0cee5b4ca6495b..272ed0f59748b60a38e4b467a03cad3f
  			cwd: this._cwd,
  			skills: loadedSkills,
  			contextFiles: loadedContextFiles,
-@@ -1825,15 +1845,12 @@ export class AgentSession {
+@@ -1833,15 +1849,12 @@ export class AgentSession {
  	 * and persisted, and the forced text is projected onto the request by
  	 * {@link _installAgentForcedPromptProjection}.
  	 */
@@ -465,7 +364,7 @@ index f76247d5647a6ab17923425ebb0cee5b4ca6495b..272ed0f59748b60a38e4b467a03cad3f
  			buildSystemPromptSections(options),
  		);
  		return sections ? { role: "system", content: "", sections, timestamp: Date.now() } : undefined;
-@@ -1883,7 +1900,7 @@ export class AgentSession {
+@@ -1891,7 +1904,7 @@ export class AgentSession {
  			const current = getCurrentSystemMessage(transformed);
  			const head: SystemMessage = {
  				role: "system",
@@ -474,7 +373,7 @@ index f76247d5647a6ab17923425ebb0cee5b4ca6495b..272ed0f59748b60a38e4b467a03cad3f
  				...(current?.toolsAdded ? { toolsAdded: current.toolsAdded } : {}),
  				timestamp: current?.timestamp ?? Date.now(),
  			};
-@@ -1946,8 +1963,13 @@ export class AgentSession {
+@@ -1961,8 +1974,13 @@ export class AgentSession {
  		let messages: AgentMessage[];
  		try {
  			messages = await this._prepareRun(trigger);
@@ -488,7 +387,7 @@ index f76247d5647a6ab17923425ebb0cee5b4ca6495b..272ed0f59748b60a38e4b467a03cad3f
  			this._flushPendingBashMessages();
  			this._flushPendingCustomMessages();
  			this._resolveIdleWaitIfIdle();
-@@ -1957,7 +1979,6 @@ export class AgentSession {
+@@ -1972,7 +1990,6 @@ export class AgentSession {
  		// have while idle. No run exists yet, so they cannot split a tool call from its result.
  		this._flushPendingBashMessages();
  		this._flushPendingCustomMessages();
@@ -496,7 +395,7 @@ index f76247d5647a6ab17923425ebb0cee5b4ca6495b..272ed0f59748b60a38e4b467a03cad3f
  
  		// Compaction before the prompt may have scheduled a retry; the new prompt replaces it.
  		this._failedResponse = undefined;
-@@ -2591,6 +2612,11 @@ export class AgentSession {
+@@ -2606,6 +2623,11 @@ export class AgentSession {
  		return this._followUpMessages;
  	}
  
@@ -508,7 +407,7 @@ index f76247d5647a6ab17923425ebb0cee5b4ca6495b..272ed0f59748b60a38e4b467a03cad3f
  	get resourceLoader(): ResourceLoader {
  		return this._resourceLoader;
  	}
-@@ -3795,6 +3821,7 @@ export class AgentSession {
+@@ -3811,6 +3833,7 @@ export class AgentSession {
  			this._cwd,
  			this.sessionManager,
  			new ModelRegistry(this._modelRuntime),
@@ -517,7 +416,7 @@ index f76247d5647a6ab17923425ebb0cee5b4ca6495b..272ed0f59748b60a38e4b467a03cad3f
  		if (this._extensionRunnerRef) {
  			this._extensionRunnerRef.current = this._extensionRunner;
 diff --git a/packages/coding-agent/src/core/extensions/runner.ts b/packages/coding-agent/src/core/extensions/runner.ts
-index bf2c6380835fccb77a1896d6ef89469ca359f1e4..2849a90ed39c5b3cf549c9b25ce367d1f125605d 100644
+index 937c9331385f7919d4cfab47063307d0af58bc7f..dbfed62ef12c0c472bf097184ea97185eb40cae8 100644
 --- a/packages/coding-agent/src/core/extensions/runner.ts
 +++ b/packages/coding-agent/src/core/extensions/runner.ts
 @@ -367,6 +367,7 @@ export class ExtensionRunner {
@@ -528,7 +427,7 @@ index bf2c6380835fccb77a1896d6ef89469ca359f1e4..2849a90ed39c5b3cf549c9b25ce367d1
  	private sessionManager: SessionManager;
  	private modelRegistry: ModelRegistry;
  	private errorListeners: Set<ExtensionErrorListener> = new Set();
-@@ -405,11 +406,13 @@ export class ExtensionRunner {
+@@ -405,6 +406,7 @@ export class ExtensionRunner {
  		cwd: string,
  		sessionManager: SessionManager,
  		modelRegistry: ModelRegistry,
@@ -536,13 +435,15 @@ index bf2c6380835fccb77a1896d6ef89469ca359f1e4..2849a90ed39c5b3cf549c9b25ce367d1
  	) {
  		this.extensions = extensions;
  		this.runtime = runtime;
+@@ -414,6 +416,7 @@ export class ExtensionRunner {
+ 		};
  		this.uiContext = noOpUIContext;
  		this.cwd = cwd;
 +		this.projectDir = projectDir;
  		this.sessionManager = sessionManager;
  		this.modelRegistry = modelRegistry;
  	}
-@@ -909,6 +912,10 @@ export class ExtensionRunner {
+@@ -913,6 +916,10 @@ export class ExtensionRunner {
  				runner.assertActive();
  				return runner.cwd;
  			},
@@ -553,7 +454,7 @@ index bf2c6380835fccb77a1896d6ef89469ca359f1e4..2849a90ed39c5b3cf549c9b25ce367d1
  			get sessionManager() {
  				runner.assertActive();
  				return runner.sessionManager;
-@@ -1436,7 +1443,7 @@ export class ExtensionRunner {
+@@ -1440,7 +1447,7 @@ export class ExtensionRunner {
  		systemPromptOptions: BuildSystemPromptOptions,
  	): Promise<BeforeAgentStartCombinedResult> {
  		const currentOptions = normalizeBuildSystemPromptOptions(systemPromptOptions);
@@ -563,7 +464,7 @@ index bf2c6380835fccb77a1896d6ef89469ca359f1e4..2849a90ed39c5b3cf549c9b25ce367d1
  			{},
  			Object.getOwnPropertyDescriptors(this.createContext()),
 diff --git a/packages/coding-agent/src/core/extensions/types.ts b/packages/coding-agent/src/core/extensions/types.ts
-index 7fcc870a99f799ebd19f3a4d51b300d63088ca78..780f8ad503a7d31231a29465c32073ff512266fd 100644
+index 9bcf4d25e6132bfb3ccc86288eb42beb4689210e..551bdabe2a4235db786639a61a87153e16955c3e 100644
 --- a/packages/coding-agent/src/core/extensions/types.ts
 +++ b/packages/coding-agent/src/core/extensions/types.ts
 @@ -352,6 +352,11 @@ export interface ExtensionContext {
@@ -792,11 +693,11 @@ index ff5f42b3984a289c665855fe3ec676265bc8c4b9..c1dc062d30b29d74b366c3051045c395
  
  	/**
 diff --git a/packages/coding-agent/src/core/package-manager.ts b/packages/coding-agent/src/core/package-manager.ts
-index 5fd93754ec14ac0a3a93872629cb830853cd75da..9c772632cc35c5c190467e82314b92e2cfef6532 100644
+index 8543d012d7ee99b72dbad0a9d04cede2bdc89d1a..5555ff3fe7dd6bce641562bda0ec34764408db6c 100644
 --- a/packages/coding-agent/src/core/package-manager.ts
 +++ b/packages/coding-agent/src/core/package-manager.ts
-@@ -156,7 +156,10 @@ export interface PackageManager {
- }
+@@ -185,7 +185,10 @@ export interface PackageManager {
+ export type PackageCommandOutput = "inherit" | "capture";
  
  interface PackageManagerOptions {
 +	/** Working directory. Project `.agents/skills` are discovered from it and its parents. */
@@ -805,8 +706,8 @@ index 5fd93754ec14ac0a3a93872629cb830853cd75da..9c772632cc35c5c190467e82314b92e2
 +	projectDir?: string;
  	agentDir: string;
  	settingsManager: SettingsManager;
- 	/** Names of built-in extensions, resolved as `builtin:<name>` extension resources. */
-@@ -881,6 +884,7 @@ function applyAutoloadDisabledPatterns(allPaths: string[], patterns: string[], b
+ 	/** Default `inherit`. */
+@@ -912,6 +915,7 @@ function applyAutoloadDisabledPatterns(allPaths: string[], patterns: string[], b
  
  export class DefaultPackageManager implements PackageManager {
  	private cwd: string;
@@ -814,7 +715,7 @@ index 5fd93754ec14ac0a3a93872629cb830853cd75da..9c772632cc35c5c190467e82314b92e2
  	private agentDir: string;
  	private settingsManager: SettingsManager;
  	private builtinExtensions: string[];
-@@ -890,6 +894,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -922,6 +926,7 @@ export class DefaultPackageManager implements PackageManager {
  
  	constructor(options: PackageManagerOptions) {
  		this.cwd = resolvePath(options.cwd);
@@ -822,7 +723,7 @@ index 5fd93754ec14ac0a3a93872629cb830853cd75da..9c772632cc35c5c190467e82314b92e2
  		this.agentDir = resolvePath(options.agentDir);
  		this.settingsManager = options.settingsManager;
  		this.builtinExtensions = options.builtinExtensions ?? [];
-@@ -1006,7 +1011,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -1039,7 +1044,7 @@ export class DefaultPackageManager implements PackageManager {
  		const installFailures = await this.resolvePackageSources(packageSources, accumulator, onMissing);
  
  		const globalBaseDir = this.agentDir;
@@ -831,7 +732,7 @@ index 5fd93754ec14ac0a3a93872629cb830853cd75da..9c772632cc35c5c190467e82314b92e2
  
  		for (const resourceType of RESOURCE_TYPES) {
  			const target = this.getTargetMap(accumulator, resourceType);
-@@ -1720,7 +1725,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -1755,7 +1760,7 @@ export class DefaultPackageManager implements PackageManager {
  		const stdout = await this.runCommandCapture(
  			npmCommand.command,
  			[...npmCommand.args, "view", packageSpec, "version", "--json"],
@@ -840,7 +741,7 @@ index 5fd93754ec14ac0a3a93872629cb830853cd75da..9c772632cc35c5c190467e82314b92e2
  		);
  		const raw = stdout.trim();
  		if (!raw) throw new Error("Empty response from npm view");
-@@ -2288,7 +2293,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -2323,7 +2328,7 @@ export class DefaultPackageManager implements PackageManager {
  		}
  		if (scope === "project") {
  			this.assertProjectTrustedForScope(scope);
@@ -849,7 +750,7 @@ index 5fd93754ec14ac0a3a93872629cb830853cd75da..9c772632cc35c5c190467e82314b92e2
  		}
  		return join(this.agentDir, "npm");
  	}
-@@ -2329,7 +2334,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -2364,7 +2369,7 @@ export class DefaultPackageManager implements PackageManager {
  		}
  		if (scope === "project") {
  			this.assertProjectTrustedForScope(scope);
@@ -858,7 +759,7 @@ index 5fd93754ec14ac0a3a93872629cb830853cd75da..9c772632cc35c5c190467e82314b92e2
  		}
  		return join(this.agentDir, "npm", "node_modules", source.name);
  	}
-@@ -2369,7 +2374,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -2404,7 +2409,7 @@ export class DefaultPackageManager implements PackageManager {
  		}
  		if (scope === "project") {
  			this.assertProjectTrustedForScope(scope);
@@ -867,7 +768,7 @@ index 5fd93754ec14ac0a3a93872629cb830853cd75da..9c772632cc35c5c190467e82314b92e2
  		}
  		return join(this.agentDir, "git");
  	}
-@@ -2395,7 +2400,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -2430,7 +2435,7 @@ export class DefaultPackageManager implements PackageManager {
  	private getBaseDirForScope(scope: SourceScope): string {
  		if (scope === "project") {
  			this.assertProjectTrustedForScope(scope);
@@ -1077,10 +978,10 @@ index 6d75b001e7c9e796484c1d09d59a5c81816397b3..8f6e2dbe9ca115eaba1fa1f985ff0813
  
  type ConfigValueReference = { type: "command"; config: string } | { type: "template"; parts: TemplatePart[] };
 diff --git a/packages/coding-agent/src/core/resource-loader.ts b/packages/coding-agent/src/core/resource-loader.ts
-index bb0740e49675be6a28a537fc1d8ae92d06fbb924..a1bd3d3390812a4c56b1c05c453db35bb4e306e4 100644
+index 632ceeee11404b66c4b276ffefeac6de8b889daf..ff55f5ab9a8f40cc3c1cb89a3a7cc3f407a0bdd2 100644
 --- a/packages/coding-agent/src/core/resource-loader.ts
 +++ b/packages/coding-agent/src/core/resource-loader.ts
-@@ -183,7 +183,7 @@ export interface ResourceLoader {
+@@ -185,7 +185,7 @@ export interface ResourceLoader {
  	getSkills(): { skills: Skill[]; diagnostics: ResourceDiagnostic[] };
  	getPrompts(): { prompts: PromptTemplate[]; diagnostics: ResourceDiagnostic[] };
  	getThemes(): { themes: Theme[]; diagnostics: ResourceDiagnostic[] };
@@ -1089,7 +990,7 @@ index bb0740e49675be6a28a537fc1d8ae92d06fbb924..a1bd3d3390812a4c56b1c05c453db35b
  	getSystemPrompt(): string | undefined;
  	getSystemPromptSource(): { path: string } | undefined;
  	getAppendSystemPrompt(): string[];
-@@ -260,16 +260,16 @@ function findShadowedContextFile(cwd: string): string | undefined {
+@@ -262,16 +262,16 @@ function findShadowedContextFile(cwd: string): string | undefined {
  export function loadProjectContextFiles(options: {
  	cwd: string;
  	agentDir: string;
@@ -1109,7 +1010,7 @@ index bb0740e49675be6a28a537fc1d8ae92d06fbb924..a1bd3d3390812a4c56b1c05c453db35b
  		seenPaths.add(globalContext.path);
  	}
  
-@@ -302,7 +302,13 @@ export function loadProjectContextFiles(options: {
+@@ -304,7 +304,13 @@ export function loadProjectContextFiles(options: {
  }
  
  export interface DefaultResourceLoaderOptions {
@@ -1123,7 +1024,7 @@ index bb0740e49675be6a28a537fc1d8ae92d06fbb924..a1bd3d3390812a4c56b1c05c453db35b
  	agentDir: string;
  	settingsManager?: SettingsManager;
  	eventBus?: EventBus;
-@@ -333,8 +339,8 @@ export interface DefaultResourceLoaderOptions {
+@@ -339,8 +345,8 @@ export interface DefaultResourceLoaderOptions {
  		themes: Theme[];
  		diagnostics: ResourceDiagnostic[];
  	};
@@ -1134,7 +1035,7 @@ index bb0740e49675be6a28a537fc1d8ae92d06fbb924..a1bd3d3390812a4c56b1c05c453db35b
  	};
  	systemPromptOverride?: (base: string | undefined) => string | undefined;
  	appendSystemPromptOverride?: (base: string[]) => string[];
-@@ -342,6 +348,7 @@ export interface DefaultResourceLoaderOptions {
+@@ -348,6 +354,7 @@ export interface DefaultResourceLoaderOptions {
  
  export class DefaultResourceLoader implements ResourceLoader {
  	private cwd: string;
@@ -1142,7 +1043,7 @@ index bb0740e49675be6a28a537fc1d8ae92d06fbb924..a1bd3d3390812a4c56b1c05c453db35b
  	private agentDir: string;
  	private settingsManager: SettingsManager;
  	private eventBus: EventBus;
-@@ -373,8 +380,8 @@ export class DefaultResourceLoader implements ResourceLoader {
+@@ -379,8 +386,8 @@ export class DefaultResourceLoader implements ResourceLoader {
  		themes: Theme[];
  		diagnostics: ResourceDiagnostic[];
  	};
@@ -1153,7 +1054,7 @@ index bb0740e49675be6a28a537fc1d8ae92d06fbb924..a1bd3d3390812a4c56b1c05c453db35b
  	};
  	private systemPromptOverride?: (base: string | undefined) => string | undefined;
  	private appendSystemPromptOverride?: (base: string[]) => string[];
-@@ -386,7 +393,7 @@ export class DefaultResourceLoader implements ResourceLoader {
+@@ -392,7 +399,7 @@ export class DefaultResourceLoader implements ResourceLoader {
  	private promptDiagnostics: ResourceDiagnostic[];
  	private themes: Theme[];
  	private themeDiagnostics: ResourceDiagnostic[];
@@ -1162,7 +1063,7 @@ index bb0740e49675be6a28a537fc1d8ae92d06fbb924..a1bd3d3390812a4c56b1c05c453db35b
  	private systemPrompt?: string;
  	private systemPromptSourcePath?: string;
  	private appendSystemPrompt: string[];
-@@ -402,14 +409,16 @@ export class DefaultResourceLoader implements ResourceLoader {
+@@ -408,14 +415,16 @@ export class DefaultResourceLoader implements ResourceLoader {
  
  	constructor(options: DefaultResourceLoaderOptions) {
  		this.cwd = resolvePath(options.cwd);
@@ -1180,7 +1081,7 @@ index bb0740e49675be6a28a537fc1d8ae92d06fbb924..a1bd3d3390812a4c56b1c05c453db35b
  			agentDir: this.agentDir,
  			settingsManager: this.settingsManager,
  			builtinExtensions: [...this.builtinExtensions.keys()],
-@@ -470,7 +479,7 @@ export class DefaultResourceLoader implements ResourceLoader {
+@@ -478,7 +487,7 @@ export class DefaultResourceLoader implements ResourceLoader {
  		return { themes: this.themes, diagnostics: this.themeDiagnostics };
  	}
  
@@ -1189,7 +1090,7 @@ index bb0740e49675be6a28a537fc1d8ae92d06fbb924..a1bd3d3390812a4c56b1c05c453db35b
  		return { agentsFiles: this.agentsFiles };
  	}
  
-@@ -883,7 +892,7 @@ export class DefaultResourceLoader implements ResourceLoader {
+@@ -891,7 +900,7 @@ export class DefaultResourceLoader implements ResourceLoader {
  			skillsResult = { skills: [], diagnostics: [] };
  		} else {
  			skillsResult = loadSkills({
@@ -1198,7 +1099,7 @@ index bb0740e49675be6a28a537fc1d8ae92d06fbb924..a1bd3d3390812a4c56b1c05c453db35b
  				agentDir: this.agentDir,
  				skillPaths,
  				includeDefaults: false,
-@@ -906,7 +915,7 @@ export class DefaultResourceLoader implements ResourceLoader {
+@@ -914,7 +923,7 @@ export class DefaultResourceLoader implements ResourceLoader {
  			promptsResult = { prompts: [], diagnostics: [] };
  		} else {
  			const loaded = loadPromptTemplates({
@@ -1207,7 +1108,7 @@ index bb0740e49675be6a28a537fc1d8ae92d06fbb924..a1bd3d3390812a4c56b1c05c453db35b
  				agentDir: this.agentDir,
  				promptPaths,
  				includeDefaults: false,
-@@ -1026,10 +1035,10 @@ export class DefaultResourceLoader implements ResourceLoader {
+@@ -1034,10 +1043,10 @@ export class DefaultResourceLoader implements ResourceLoader {
  			join(this.agentDir, "extensions"),
  		];
  		const projectRoots = [
@@ -1222,7 +1123,7 @@ index bb0740e49675be6a28a537fc1d8ae92d06fbb924..a1bd3d3390812a4c56b1c05c453db35b
  		];
  
  		for (const root of agentRoots) {
-@@ -1083,7 +1092,7 @@ export class DefaultResourceLoader implements ResourceLoader {
+@@ -1091,7 +1100,7 @@ export class DefaultResourceLoader implements ResourceLoader {
  		const themes: Theme[] = [];
  		const diagnostics: ResourceDiagnostic[] = [];
  		if (includeDefaults) {
@@ -1231,7 +1132,7 @@ index bb0740e49675be6a28a537fc1d8ae92d06fbb924..a1bd3d3390812a4c56b1c05c453db35b
  
  			for (const dir of defaultDirs) {
  				this.loadThemesFromDir(dir, themes, diagnostics, colorMode);
-@@ -1243,7 +1252,7 @@ export class DefaultResourceLoader implements ResourceLoader {
+@@ -1251,7 +1260,7 @@ export class DefaultResourceLoader implements ResourceLoader {
  	}
  
  	private discoverSystemPromptFile(): string | undefined {
@@ -1240,7 +1141,7 @@ index bb0740e49675be6a28a537fc1d8ae92d06fbb924..a1bd3d3390812a4c56b1c05c453db35b
  		if (this.settingsManager.isProjectTrusted() && existsSync(projectPath)) {
  			return projectPath;
  		}
-@@ -1257,7 +1266,7 @@ export class DefaultResourceLoader implements ResourceLoader {
+@@ -1265,7 +1274,7 @@ export class DefaultResourceLoader implements ResourceLoader {
  	}
  
  	private discoverAppendSystemPromptFile(): string | undefined {
@@ -1325,594 +1226,6 @@ index dbab1d1d99f309ed9b3ebec3f2c3272520ef8d0b..9d06d42729859e290ec18828be46278f
  		scopedModels: options.scopedModels,
  		resourceLoader,
  		customTools: options.customTools,
-diff --git a/packages/coding-agent/src/core/settings-manager.ts b/packages/coding-agent/src/core/settings-manager.ts
-index 99bbeade0d212549375da990199797a8afdce3d6..6ce98846b0af2831fd36ebe9b0abdcb312a3f242 100644
---- a/packages/coding-agent/src/core/settings-manager.ts
-+++ b/packages/coding-agent/src/core/settings-manager.ts
-@@ -1,8 +1,24 @@
- import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
- import type { Model } from "@earendil-works/pi-ai";
- import type { ScrollViewScrollbar, TerminalCapabilities, WheelScrollLines } from "@earendil-works/pi-tui";
--import { randomUUID } from "crypto";
--import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-+import { createHash, randomUUID } from "crypto";
-+import {
-+	closeSync,
-+	constants,
-+	existsSync,
-+	fchmodSync,
-+	fstatSync,
-+	fsyncSync,
-+	lstatSync,
-+	mkdirSync,
-+	openSync,
-+	readFileSync,
-+	realpathSync,
-+	renameSync,
-+	type Stats,
-+	unlinkSync,
-+	writeFileSync,
-+} from "fs";
- import { dirname, join } from "path";
- import lockfile from "proper-lockfile";
- import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
-@@ -25,6 +41,7 @@ import type {
- 	TuiMode,
- 	WarningSettings,
- } from "./settings-schema.ts";
-+import { SettingsSchema } from "./settings-schema.ts";
- 
- export type {
- 	BranchSummarySettings,
-@@ -173,6 +190,52 @@ export interface SettingsError {
- 	error: Error;
- }
- 
-+export type UnsetGlobalSettingsReceipt =
-+	| { status: "unchanged"; changedKeys: [] }
-+	| {
-+			status: "applied";
-+			changedKeys: (keyof Settings)[];
-+			backupPath: string;
-+			beforeSha256: string;
-+			afterSha256: string;
-+	  };
-+
-+export type SettingsUnsetRecovery =
-+	| { kind: "verified-backup"; backupPath: string; beforeSha256: string }
-+	| { kind: "unverified-backup"; backupPath: string };
-+
-+export class SettingsUnsetError extends Error {
-+	readonly phase: string;
-+	readonly replacement: "not-attempted" | "uncertain";
-+	readonly recovery: SettingsUnsetRecovery | undefined;
-+	readonly cleanupFailures: readonly string[];
-+
-+	constructor(
-+		phase: string,
-+		replacement: "not-attempted" | "uncertain",
-+		recovery: SettingsUnsetRecovery | undefined,
-+		cleanupFailures: readonly string[],
-+		reason?: "unsafe" | "invalid",
-+	) {
-+		super(
-+			replacement === "uncertain"
-+				? "Settings unset durability uncertain"
-+				: reason === "unsafe"
-+					? "Unsafe settings file"
-+					: reason === "invalid"
-+						? "Invalid settings file"
-+						: "Settings unset refused before commit",
-+		);
-+		this.name = "SettingsUnsetError";
-+		this.phase = phase;
-+		this.replacement = replacement;
-+		this.recovery = recovery;
-+		this.cleanupFailures = cleanupFailures;
-+	}
-+}
-+
-+type SettingsMutation = { field: keyof Settings; nestedKey?: string; value: unknown };
-+
- type SettingsPaths = Partial<Record<SettingsScope, string>>;
- 
- function toSettingsError(scope: SettingsScope, error: unknown, path?: string): SettingsError {
-@@ -221,6 +284,201 @@ export class FileSettingsStorage implements SettingsStorage {
- 		throw (lastError as Error) ?? new Error("Failed to acquire settings lock");
- 	}
- 
-+	unsetGlobalSettings(keys: readonly (keyof Settings)[]): UnsetGlobalSettingsReceipt {
-+		const path = this.globalSettingsPath;
-+		const directory = dirname(path);
-+		const descriptors: number[] = [];
-+		let phase = "read";
-+		let reason: "unsafe" | "invalid" | undefined;
-+		let failure: { phase: string; reason?: "unsafe" | "invalid" } | undefined;
-+		let release: (() => void) | undefined;
-+		let directoryIdentity: Stats | undefined;
-+		let realDirectory: string | undefined;
-+		let temporary: string | undefined;
-+		let temporaryIdentity: Stats | undefined;
-+		let renamed = false;
-+		let renameAttempted = false;
-+		let recovery: SettingsUnsetRecovery | undefined;
-+		let receipt: UnsetGlobalSettingsReceipt | undefined;
-+		const cleanupFailures: string[] = [];
-+		const open = (file: string, flags: string | number, mode?: number): number => {
-+			const fd = openSync(file, flags, mode);
-+			descriptors.push(fd);
-+			return fd;
-+		};
-+		const sameDirectory = (): boolean => {
-+			const current = lstatSync(directory, { throwIfNoEntry: false });
-+			return (
-+				!!current?.isDirectory() &&
-+				current.dev === directoryIdentity?.dev &&
-+				current.ino === directoryIdentity.ino &&
-+				realpathSync(directory) === realDirectory
-+			);
-+		};
-+		const assertDirectory = () => {
-+			if (!sameDirectory()) throw new Error();
-+		};
-+		const assertSource = (identity: Stats) => {
-+			if (
-+				!identity.isFile() ||
-+				identity.nlink !== 1 ||
-+				identity.uid !== process.getuid?.() ||
-+				(identity.mode & 0o600) !== 0o600 ||
-+				(identity.mode & 0o7777 & ~0o644) !== 0
-+			) {
-+				reason = "unsafe";
-+				throw new Error();
-+			}
-+		};
-+		const settle = (stage: string, cleanup: () => void) => {
-+			try {
-+				cleanup();
-+			} catch {
-+				if (!failure) failure = { phase: stage };
-+				else cleanupFailures.push(stage);
-+			}
-+		};
-+		const apply = (): UnsetGlobalSettingsReceipt => {
-+			const initialDirectory = lstatSync(directory, { throwIfNoEntry: false });
-+			if (!initialDirectory) return { status: "unchanged", changedKeys: [] };
-+			if (!initialDirectory.isDirectory()) {
-+				reason = "unsafe";
-+				throw new Error();
-+			}
-+			const directoryFd = open(directory, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-+			directoryIdentity = fstatSync(directoryFd);
-+			realDirectory = realpathSync(directory);
-+			if (initialDirectory.dev !== directoryIdentity.dev || initialDirectory.ino !== directoryIdentity.ino)
-+				throw new Error();
-+			assertDirectory();
-+			const initial = lstatSync(path, { throwIfNoEntry: false });
-+			if (!initial) return { status: "unchanged", changedKeys: [] };
-+			assertSource(initial);
-+			phase = "lock";
-+			release = this.acquireLockSyncWithRetry(path);
-+			phase = "read";
-+			assertDirectory();
-+			if (!lstatSync(path, { throwIfNoEntry: false })) return { status: "unchanged", changedKeys: [] };
-+			const fd = open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-+			const identity = fstatSync(fd);
-+			assertSource(identity);
-+			const original = readFileSync(fd);
-+			assertDirectory();
-+			let parsed: unknown;
-+			try {
-+				parsed = JSON.parse(stripBom(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(original)));
-+			} catch {
-+				reason = "invalid";
-+				throw new Error();
-+			}
-+			if (!isMergeableObject(parsed)) {
-+				reason = "invalid";
-+				throw new Error();
-+			}
-+			const changedKeys = keys.filter((key) => Object.hasOwn(parsed, key));
-+			if (changedKeys.length === 0) return { status: "unchanged", changedKeys: [] };
-+			for (const key of changedKeys) delete parsed[key];
-+			const next = Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`);
-+			const beforeSha256 = createHash("sha256").update(original).digest("hex");
-+			const backupPath = `${path}.backup-${randomUUID()}`;
-+			phase = "backup-create";
-+			assertDirectory();
-+			const backupFd = open(backupPath, "wx", 0o600);
-+			recovery = { kind: "unverified-backup", backupPath };
-+			phase = "backup-write";
-+			fchmodSync(backupFd, 0o600);
-+			writeFileSync(backupFd, original);
-+			phase = "backup-sync";
-+			fsyncSync(backupFd);
-+			phase = "backup-directory-sync";
-+			assertDirectory();
-+			fsyncSync(directoryFd);
-+			recovery = { kind: "verified-backup", backupPath, beforeSha256 };
-+			temporary = `${path}.unset-${randomUUID()}`;
-+			phase = "temporary-create";
-+			assertDirectory();
-+			const temporaryFd = open(temporary, "wx", 0o600);
-+			temporaryIdentity = fstatSync(temporaryFd);
-+			phase = "temporary-write";
-+			fchmodSync(temporaryFd, 0o600);
-+			writeFileSync(temporaryFd, next);
-+			phase = "temporary-sync";
-+			fsyncSync(temporaryFd);
-+			phase = "validate";
-+			assertDirectory();
-+			const currentFd = open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-+			const current = fstatSync(currentFd);
-+			assertSource(current);
-+			if (
-+				current.dev !== identity.dev ||
-+				current.ino !== identity.ino ||
-+				current.size !== identity.size ||
-+				current.mtimeMs !== identity.mtimeMs ||
-+				current.ctimeMs !== identity.ctimeMs ||
-+				current.mode !== identity.mode ||
-+				current.uid !== identity.uid ||
-+				current.gid !== identity.gid ||
-+				!readFileSync(currentFd).equals(original)
-+			)
-+				throw new Error();
-+			const currentTemporary = lstatSync(temporary);
-+			if (
-+				!currentTemporary.isFile() ||
-+				currentTemporary.nlink !== 1 ||
-+				currentTemporary.dev !== temporaryIdentity.dev ||
-+				currentTemporary.ino !== temporaryIdentity.ino ||
-+				(currentTemporary.mode & 0o7777) !== 0o600 ||
-+				currentTemporary.size !== next.length
-+			)
-+				throw new Error();
-+			assertDirectory();
-+			phase = "rename";
-+			renameAttempted = true;
-+			renameSync(temporary, path);
-+			renamed = true;
-+			phase = "commit-directory-sync";
-+			fsyncSync(directoryFd);
-+			return {
-+				status: "applied",
-+				changedKeys,
-+				backupPath,
-+				beforeSha256,
-+				afterSha256: createHash("sha256").update(next).digest("hex"),
-+			};
-+		};
-+		try {
-+			receipt = apply();
-+		} catch {
-+			failure = { phase, reason };
-+		} finally {
-+			if (temporary && temporaryIdentity && !renamed) {
-+				settle("temporary-cleanup", () => {
-+					if (!sameDirectory()) throw new Error();
-+					const current = lstatSync(temporary!, { throwIfNoEntry: false });
-+					if (!current) return;
-+					if (
-+						!current.isFile() ||
-+						current.dev !== temporaryIdentity!.dev ||
-+						current.ino !== temporaryIdentity!.ino
-+					)
-+						throw new Error();
-+					unlinkSync(temporary!);
-+				});
-+			}
-+			for (const fd of descriptors.reverse()) settle("close", () => closeSync(fd));
-+			if (release) settle("release", release);
-+		}
-+		if (failure)
-+			throw new SettingsUnsetError(
-+				failure.phase,
-+				renameAttempted ? "uncertain" : "not-attempted",
-+				recovery,
-+				cleanupFailures,
-+				failure.reason,
-+			);
-+		return receipt!;
-+	}
-+
- 	withLock(scope: SettingsScope, fn: (current: string | undefined) => string | undefined): void {
- 		const path = scope === "global" ? this.globalSettingsPath : this.projectSettingsPath;
- 		const dir = dirname(path);
-@@ -275,8 +533,7 @@ export class SettingsManager {
- 	private projectSettings: Settings;
- 	private settings: Settings;
- 	private projectTrusted: boolean;
--	private modifiedFields = new Set<keyof Settings>(); // Track global fields modified during session
--	private modifiedNestedFields = new Map<keyof Settings, Set<string>>(); // Track global nested field modifications
-+	private globalMutations: SettingsMutation[] = [];
- 	private modifiedProjectFields = new Set<keyof Settings>(); // Track project fields modified during session
- 	private modifiedProjectNestedFields = new Map<keyof Settings, Set<string>>(); // Track project nested field modifications
- 	private globalSettingsLoadError: Error | null = null; // Track if global settings file had parse errors
-@@ -498,31 +755,40 @@ export class SettingsManager {
- 	}
- 
- 	async reload(): Promise<void> {
--		await this.writeQueue;
--		const globalLoad = SettingsManager.tryLoadFromStorage(this.storage, "global");
--		if (!globalLoad.error) {
--			this.globalSettings = globalLoad.settings;
--			this.globalSettingsLoadError = null;
--		} else {
--			this.globalSettingsLoadError = globalLoad.error;
--			this.recordError("global", globalLoad.error);
--		}
-+		const before = new Set(this.globalMutations);
-+		const operation = this.writeQueue.then(() => {
-+			const globalLoad = SettingsManager.tryLoadFromStorage(this.storage, "global");
-+			if (!globalLoad.error) {
-+				this.globalSettings = globalLoad.settings;
-+				this.globalSettingsLoadError = null;
-+				this.globalMutations = this.globalMutations.filter((mutation) => !before.has(mutation));
-+				for (const mutation of this.globalMutations) SettingsManager.applyMutation(this.globalSettings, mutation);
-+			} else {
-+				this.globalSettingsLoadError = globalLoad.error;
-+				this.recordError("global", globalLoad.error);
-+			}
- 
--		this.modifiedFields.clear();
--		this.modifiedNestedFields.clear();
--		this.modifiedProjectFields.clear();
--		this.modifiedProjectNestedFields.clear();
-+			this.modifiedProjectFields.clear();
-+			this.modifiedProjectNestedFields.clear();
- 
--		const projectLoad = SettingsManager.tryLoadFromStorage(this.storage, "project", this.projectTrusted);
--		if (!projectLoad.error) {
--			this.projectSettings = projectLoad.settings;
--			this.projectSettingsLoadError = null;
--		} else {
--			this.projectSettingsLoadError = projectLoad.error;
--			this.recordError("project", projectLoad.error);
--		}
-+			const projectLoad = SettingsManager.tryLoadFromStorage(this.storage, "project", this.projectTrusted);
-+			if (!projectLoad.error) {
-+				this.projectSettings = projectLoad.settings;
-+				this.projectSettingsLoadError = null;
-+			} else {
-+				this.projectSettingsLoadError = projectLoad.error;
-+				this.recordError("project", projectLoad.error);
-+			}
- 
--		this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
-+			this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
-+		});
-+		this.writeQueue = operation.then(
-+			() => undefined,
-+			(error) => {
-+				this.recordError("global", error);
-+			},
-+		);
-+		return operation;
- 	}
- 
- 	/** Apply additional overrides on top of current settings */
-@@ -530,15 +796,30 @@ export class SettingsManager {
- 		this.settings = deepMergeSettings(this.settings, overrides);
- 	}
- 
--	/** Mark a global field as modified during this session */
--	private markModified(field: keyof Settings, nestedKey?: string): void {
--		this.modifiedFields.add(field);
--		if (nestedKey) {
--			if (!this.modifiedNestedFields.has(field)) {
--				this.modifiedNestedFields.set(field, new Set());
--			}
--			this.modifiedNestedFields.get(field)!.add(nestedKey);
-+	private static captureMutation(settings: Settings, field: keyof Settings, nestedKey?: string): SettingsMutation {
-+		const value =
-+			nestedKey === undefined
-+				? settings[field]
-+				: (settings[field] as Record<string, unknown> | undefined)?.[nestedKey];
-+		return { field, nestedKey, value: structuredClone(value) };
-+	}
-+
-+	private static applyMutation(settings: Settings, { field, nestedKey, value }: SettingsMutation): void {
-+		const target = settings as Record<string, unknown>;
-+		if (nestedKey === undefined) {
-+			if (value === undefined) delete target[field];
-+			else target[field] = structuredClone(value);
-+			return;
- 		}
-+		const base = target[field];
-+		const nested = { ...(isMergeableObject(base) ? base : {}), [nestedKey]: structuredClone(value) };
-+		if (value === undefined) delete nested[nestedKey];
-+		if (Object.keys(nested).length === 0) delete target[field];
-+		else target[field] = nested;
-+	}
-+
-+	private markModified(field: keyof Settings, nestedKey?: string): void {
-+		this.globalMutations.push(SettingsManager.captureMutation(this.globalSettings, field, nestedKey));
- 	}
- 
- 	/** Mark a project field as modified during this session */
-@@ -562,15 +843,9 @@ export class SettingsManager {
- 		this.errors.push(toSettingsError(scope, error, this.settingsPaths[scope]));
- 	}
- 
--	private clearModifiedScope(scope: SettingsScope): void {
--		if (scope === "global") {
--			this.modifiedFields.clear();
--			this.modifiedNestedFields.clear();
--			return;
--		}
--
--		this.modifiedProjectFields.clear();
--		this.modifiedProjectNestedFields.clear();
-+	private assertGlobalSettingsLoaded(): void {
-+		const error = this.globalSettingsLoadError;
-+		if (error) throw error instanceof SettingsUnsetError ? error : new Error("Global settings could not be loaded");
- 	}
- 
- 	private enqueueWrite(scope: SettingsScope, task: () => void): void {
-@@ -580,48 +855,23 @@ export class SettingsManager {
- 					this.assertProjectTrustedForWrite();
- 				}
- 				task();
--				this.clearModifiedScope(scope);
-+				if (scope === "project") {
-+					this.modifiedProjectFields.clear();
-+					this.modifiedProjectNestedFields.clear();
-+				}
- 			})
- 			.catch((error) => {
- 				this.recordError(scope, error);
- 			});
- 	}
- 
--	private cloneModifiedNestedFields(source: Map<keyof Settings, Set<string>>): Map<keyof Settings, Set<string>> {
--		const snapshot = new Map<keyof Settings, Set<string>>();
--		for (const [key, value] of source.entries()) {
--			snapshot.set(key, new Set(value));
--		}
--		return snapshot;
--	}
--
--	private persistScopedSettings(
--		scope: SettingsScope,
--		snapshotSettings: Settings,
--		modifiedFields: Set<keyof Settings>,
--		modifiedNestedFields: Map<keyof Settings, Set<string>>,
--	): void {
-+	private persistScopedSettings(scope: SettingsScope, mutations: readonly SettingsMutation[]): void {
-+		if (mutations.length === 0) return;
- 		this.storage.withLock(scope, (current) => {
--			const currentFileSettings = current
-+			const mergedSettings = current
- 				? SettingsManager.migrateSettings(JSON.parse(stripBom(current)) as Record<string, unknown>)
- 				: {};
--			const mergedSettings: Settings = { ...currentFileSettings };
--			for (const field of modifiedFields) {
--				const value = snapshotSettings[field];
--				if (modifiedNestedFields.has(field) && typeof value === "object" && value !== null) {
--					const nestedModified = modifiedNestedFields.get(field)!;
--					const baseNested = (currentFileSettings[field] as Record<string, unknown>) ?? {};
--					const inMemoryNested = value as Record<string, unknown>;
--					const mergedNested = { ...baseNested };
--					for (const nestedKey of nestedModified) {
--						mergedNested[nestedKey] = inMemoryNested[nestedKey];
--					}
--					(mergedSettings as Record<string, unknown>)[field] = mergedNested;
--				} else {
--					(mergedSettings as Record<string, unknown>)[field] = value;
--				}
--			}
--
-+			for (const mutation of mutations) SettingsManager.applyMutation(mergedSettings, mutation);
- 			return JSON.stringify(mergedSettings, null, 2);
- 		});
- 	}
-@@ -629,16 +879,14 @@ export class SettingsManager {
- 	private save(): void {
- 		this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
- 
--		if (this.globalSettingsLoadError) {
--			return;
--		}
--
--		const snapshotGlobalSettings = structuredClone(this.globalSettings);
--		const modifiedFields = new Set(this.modifiedFields);
--		const modifiedNestedFields = this.cloneModifiedNestedFields(this.modifiedNestedFields);
--
-+		const through = this.globalMutations.at(-1);
-+		if (!through) return;
- 		this.enqueueWrite("global", () => {
--			this.persistScopedSettings("global", snapshotGlobalSettings, modifiedFields, modifiedNestedFields);
-+			this.assertGlobalSettingsLoaded();
-+			const mutations = this.globalMutations.slice(0, this.globalMutations.indexOf(through) + 1);
-+			this.persistScopedSettings("global", mutations);
-+			const persisted = new Set(mutations);
-+			this.globalMutations = this.globalMutations.filter((mutation) => !persisted.has(mutation));
- 		});
- 	}
- 
-@@ -651,11 +899,14 @@ export class SettingsManager {
- 			return;
- 		}
- 
--		const snapshotProjectSettings = structuredClone(this.projectSettings);
--		const modifiedFields = new Set(this.modifiedProjectFields);
--		const modifiedNestedFields = this.cloneModifiedNestedFields(this.modifiedProjectNestedFields);
-+		const mutations = [...this.modifiedProjectFields].flatMap((field) => {
-+			const nested = this.modifiedProjectNestedFields.get(field);
-+			return nested
-+				? [...nested].map((key) => SettingsManager.captureMutation(this.projectSettings, field, key))
-+				: [SettingsManager.captureMutation(this.projectSettings, field)];
-+		});
- 		this.enqueueWrite("project", () => {
--			this.persistScopedSettings("project", snapshotProjectSettings, modifiedFields, modifiedNestedFields);
-+			this.persistScopedSettings("project", mutations);
- 		});
- 	}
- 
-@@ -667,6 +918,44 @@ export class SettingsManager {
- 		this.saveProjectSettings(projectSettings);
- 	}
- 
-+	unsetGlobalSettings(keys: readonly (keyof Settings)[]): Promise<UnsetGlobalSettingsReceipt> {
-+		const requested = [...new Set(keys)];
-+		if (requested.some((key) => !Object.hasOwn(SettingsSchema.properties, key))) {
-+			return Promise.reject(new Error("Unknown settings key"));
-+		}
-+		const storage = this.storage;
-+		if (!(storage instanceof FileSettingsStorage))
-+			return Promise.reject(new Error("Unset requires file settings storage"));
-+		const before = new Set(this.globalMutations);
-+		const operation = this.writeQueue.then(() => {
-+			this.assertGlobalSettingsLoaded();
-+			let receipt: UnsetGlobalSettingsReceipt;
-+			try {
-+				receipt = storage.unsetGlobalSettings(requested);
-+			} catch (error) {
-+				if (error instanceof SettingsUnsetError && error.replacement === "uncertain")
-+					this.globalSettingsLoadError = error;
-+				throw error;
-+			}
-+			this.globalMutations = this.globalMutations.filter(
-+				(mutation) => !before.has(mutation) || !requested.includes(mutation.field),
-+			);
-+			for (const field of requested) delete this.globalSettings[field];
-+			for (const mutation of this.globalMutations) {
-+				if (requested.includes(mutation.field)) SettingsManager.applyMutation(this.globalSettings, mutation);
-+			}
-+			this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
-+			return receipt;
-+		});
-+		this.writeQueue = operation.then(
-+			() => undefined,
-+			(error) => {
-+				this.recordError("global", error);
-+			},
-+		);
-+		return operation;
-+	}
-+
- 	async flush(): Promise<void> {
- 		await this.writeQueue;
- 	}
-@@ -793,7 +1082,7 @@ export class SettingsManager {
- 			this.globalSettings.modelThinkingLevels = {};
- 		}
- 		this.globalSettings.modelThinkingLevels[`${provider}/${modelId}`] = level;
--		this.markModified("modelThinkingLevels");
-+		this.markModified("modelThinkingLevels", `${provider}/${modelId}`);
- 		this.save();
- 	}
- 
-@@ -803,7 +1092,7 @@ export class SettingsManager {
- 		if (Object.keys(this.globalSettings.modelThinkingLevels).length === 0) {
- 			delete this.globalSettings.modelThinkingLevels;
- 		}
--		this.markModified("modelThinkingLevels");
-+		this.markModified("modelThinkingLevels", `${provider}/${modelId}`);
- 		this.save();
- 	}
- 
 diff --git a/packages/coding-agent/src/core/skills.ts b/packages/coding-agent/src/core/skills.ts
 index 48df4536b9a62642855fdeed2ab44a6202968a96..62157b3ea1798b463bde54fa061ea7184aa7fc68 100644
 --- a/packages/coding-agent/src/core/skills.ts
@@ -2143,18 +1456,6 @@ index e51e14fe4065d73c3a85947000eff04402fa7a52..d34eb075f6fdc8c3aec6acaa8b174c47
  /**
   * Diff the sections the model currently has (replayed from the transcript, so never null)
   * against the desired ones. Returns a `SystemMessage.sections` patch, or undefined when
-diff --git a/packages/coding-agent/src/core/tools/read.ts b/packages/coding-agent/src/core/tools/read.ts
-index dd123cb4eb0373e4b97647a5a8b560d0f48b17cc..4e8a6d1b26e97d0dfcfe4d634e0d2ebe5b8dda1d 100644
---- a/packages/coding-agent/src/core/tools/read.ts
-+++ b/packages/coding-agent/src/core/tools/read.ts
-@@ -77,6 +77,7 @@ async function* readLocalFileChunks(path: string, { signal }: { signal?: AbortSi
- 	try {
- 		const stats = await handle.stat();
- 		const end = stats.isFile() && stats.size > 0 ? stats.size - 1 : undefined;
-+		signal?.throwIfAborted();
- 		yield* handle.createReadStream({ end, signal, autoClose: false });
- 	} finally {
- 		await handle.close();
 diff --git a/packages/coding-agent/src/core/trust-manager.ts b/packages/coding-agent/src/core/trust-manager.ts
 index f0721efefd954e13c2b502168a2682e544298a2d..572cabf6e5b71b2721129f407d7c67e3a4bdc890 100644
 --- a/packages/coding-agent/src/core/trust-manager.ts
@@ -2258,7 +1559,7 @@ index 8e8553c2354fe43b9ca9ef24a0ff45af5b4d8eaa..a85e9ca6fc8da27f6c382bfe9df19018
  		servers: [...state.servers.values()],
  		...(state.autoEnableCodemode === undefined ? {} : { autoEnableCodemode: state.autoEnableCodemode }),
 diff --git a/packages/coding-agent/src/extensions/mcp/index.ts b/packages/coding-agent/src/extensions/mcp/index.ts
-index 1a2db568a126e31f1d69417e3b3ecadd2d767570..0d7a4b3dc80351afd18d4a6cddff8d91b8699226 100644
+index d3ef248b48e280073fd3e88737a4af8c4d98b168..33fab469fdf73fe2cfabdcfb05433a7a2dff9e41 100644
 --- a/packages/coding-agent/src/extensions/mcp/index.ts
 +++ b/packages/coding-agent/src/extensions/mcp/index.ts
 @@ -68,7 +68,7 @@ import { type McpMenu, type McpUi, showMcpManager } from "./ui.ts";
@@ -2288,7 +1589,7 @@ index 1a2db568a126e31f1d69417e3b3ecadd2d767570..0d7a4b3dc80351afd18d4a6cddff8d91
  	let intro = "MCP servers whose tools are not declared to you.";
  	if (reaches.has("codemode")) intro += " Call the tools of `codemode` servers from codemode scripts.";
  	if (reaches.has("tool_search")) intro += " Load the tools of `tool_search` servers with `tool_search`.";
-@@ -193,16 +195,31 @@ function serverSummary(server: McpServerListing): string {
+@@ -187,16 +189,31 @@ export interface McpServerListing {
   * tools are reached and a one-line summary. The model learns of the servers from it, since neither
   * codemode nor tool_search lists them. Undefined when there are no such servers.
   */
@@ -2310,7 +1611,7 @@ index 1a2db568a126e31f1d69417e3b3ecadd2d767570..0d7a4b3dc80351afd18d4a6cddff8d91
 +		.map((server) => ({
 +			namespace: mcpNamespace(server.entry.name),
 +			reach: configuredExposures(server.entry).has("codemode") ? "codemode" : "tool_search",
-+			summary: serverSummary(server),
++			summary: mcpServerSummary(server.entry.config.description, server.connection?.instructions),
 +		}));
 +}
 +
@@ -2327,16 +1628,19 @@ index 1a2db568a126e31f1d69417e3b3ecadd2d767570..0d7a4b3dc80351afd18d4a6cddff8d91
  	const omitted = (count: number) =>
  		count > 0 ? [`- … ${count} more server${count === 1 ? "" : "s"}; find their tools with searchTools()`] : [];
  	// Characters of the intro, the first `kept` server lines without descriptions, and the omission line.
-@@ -215,7 +232,7 @@ export function renderServersSection(servers: readonly McpServerListing[]): stri
+@@ -209,10 +226,7 @@ export function renderServersSection(servers: readonly McpServerListing[]): stri
  			? 0
  			: Math.min(MAX_SERVER_DESCRIPTION_CHARS, Math.floor((MAX_SERVERS_SECTION_CHARS - size(kept)) / kept) - 2);
  	const lines = listed.slice(0, kept).map((server, index) => {
--		const summary = perServer > 0 ? truncate(serverSummary(server), perServer) : "";
+-		const summary =
+-			perServer > 0
+-				? truncate(mcpServerSummary(server.entry.config.description, server.connection?.instructions), perServer)
+-				: "";
 +		const summary = perServer > 0 ? truncate(server.summary, perServer) : "";
  		return summary ? `${heads[index]}: ${summary}` : heads[index];
  	});
  	return [intro, ...lines, ...omitted(listed.length - kept)].join("\n");
-@@ -294,8 +311,8 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+@@ -291,8 +305,8 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
  		/** Whether a prompt already waited for the startup connections since the session started. */
  		let waitedForStartup = false;
  		const startupWaitMs = options.startupWaitMs ?? DEFAULT_STARTUP_WAIT_MS;
@@ -2347,7 +1651,7 @@ index 1a2db568a126e31f1d69417e3b3ecadd2d767570..0d7a4b3dc80351afd18d4a6cddff8d91
  		let credentials = options.credentials;
  		/** The session's model registry, which resolves `auth.provider` tokens. */
  		let modelRegistry: ModelRegistry | undefined;
-@@ -568,7 +585,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+@@ -565,7 +579,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
  			if (!isCurrent()) return undefined;
  			const connection = new runtime.McpServerConnection({
  				entry: server.entry,
@@ -2356,7 +1660,7 @@ index 1a2db568a126e31f1d69417e3b3ecadd2d767570..0d7a4b3dc80351afd18d4a6cddff8d91
  				createTransport: options.createTransport ?? runtime.createDefaultTransport,
  				credentials: getCredentials(runtime),
  				providerToken: async (provider) => modelRegistry?.getApiKeyForProvider(provider),
-@@ -1119,7 +1136,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+@@ -1116,7 +1130,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
  			autoEnableCodemode = loaded.autoEnableCodemode ?? true;
  			warnedUnreachable = false;
  			waitedForStartup = false;
@@ -2365,7 +1669,7 @@ index 1a2db568a126e31f1d69417e3b3ecadd2d767570..0d7a4b3dc80351afd18d4a6cddff8d91
  			modelRegistry = ctx.modelRegistry;
  			session = new AbortController();
  			const { signal } = session;
-@@ -1179,7 +1196,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+@@ -1176,7 +1190,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
  		pi.on("before_agent_start", async (event, ctx) => {
  			await waitForDirectServers(ctx);
  			const { sections } = event.systemPromptOptions;
@@ -2374,7 +1678,7 @@ index 1a2db568a126e31f1d69417e3b3ecadd2d767570..0d7a4b3dc80351afd18d4a6cddff8d91
  			if (section) sections[MCP_SERVERS_SECTION] = section;
  			else delete sections[MCP_SERVERS_SECTION];
  		});
-@@ -1342,7 +1359,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+@@ -1339,7 +1353,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
  }
  
  function defaultLoadConfig(ctx: ExtensionContext): LoadedMcpConfig {
@@ -2472,7 +1776,7 @@ index 2e998f86ea52f90b38aa93fc1e93e9c6222b3ff5..f96592ba836f4ea9c34429392849124b
  			client.onNotification("notifications/tools/list_changed", () => {
  				void this.refreshTools(client);
 diff --git a/packages/coding-agent/src/index.ts b/packages/coding-agent/src/index.ts
-index bfa256ab8808c5cdba852aedbfacabf2950a15e9..b6798e59be2571e5f3d3b8b4c948333c0c6587d0 100644
+index bfa256ab8808c5cdba852aedbfacabf2950a15e9..1697bae730f9b89c5eb7c4d901a54d12867ec289 100644
 --- a/packages/coding-agent/src/index.ts
 +++ b/packages/coding-agent/src/index.ts
 @@ -249,6 +249,13 @@ export type {
@@ -2489,18 +1793,7 @@ index bfa256ab8808c5cdba852aedbfacabf2950a15e9..b6798e59be2571e5f3d3b8b4c948333c
  export type { ResourceCollision, ResourceDiagnostic, ResourceLoader } from "./core/resource-loader.ts";
  export { DefaultResourceLoader, loadProjectContextFiles } from "./core/resource-loader.ts";
  // SDK for programmatic usage
-@@ -323,7 +330,10 @@ export {
- 	type RetrySettings,
- 	SettingsManager,
- 	type SettingsManagerCreateOptions,
-+	SettingsUnsetError,
-+	type SettingsUnsetRecovery,
- 	type TuiMode,
-+	type UnsetGlobalSettingsReceipt,
- } from "./core/settings-manager.ts";
- // Skills
- export {
-@@ -414,8 +424,14 @@ export {
+@@ -414,8 +421,14 @@ export {
  // Built-in extensions. The CLI loads them; SDK sessions add them to their extension factories.
  export { type CodemodeExtensionOptions, createCodemodeExtension } from "./extensions/codemode/index.ts";
  export type { CodemodeStoreEntryData, CodemodeToolDetails } from "./extensions/codemode/tool.ts";
@@ -2518,10 +1811,10 @@ index bfa256ab8808c5cdba852aedbfacabf2950a15e9..b6798e59be2571e5f3d3b8b4c948333c
  // Main entry point
  export { type MainOptions, main } from "./main.ts";
 diff --git a/packages/coding-agent/src/modes/interactive/interactive-mode.ts b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
-index 2459c10df86459b63e749878db5ea140cac0ab07..19e4630259f1a4e1b534bb597a0e8edf797b1944 100644
+index e8b8552b1e3b6b11447e86c667b505c403aa2d51..ef4d1816a3a0c3bf8b50646167c73f21ac906692 100644
 --- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
 +++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
-@@ -2383,6 +2383,7 @@ export class InteractiveMode {
+@@ -2448,6 +2448,7 @@ export class InteractiveMode {
  			mode: "tui",
  			hasUI: true,
  			cwd: this.sessionManager.getCwd(),
@@ -3265,518 +2558,6 @@ index e68b4cfea52ac87c3e0e80e2cbbae1f882188580..e7f49eede0cf590d7d8ad6d2b19ac4e6
  				{ path: join(cwd, "AGENTS.md"), content: "project instructions" },
  				{ path: join(nestedCwd, "AGENTS.override.md"), content: "service override" },
  			]);
-diff --git a/packages/coding-agent/test/settings-manager.test.ts b/packages/coding-agent/test/settings-manager.test.ts
-index 5ff78de92037f98ad3a2a3d773839fbd3159d1ce..14452b45100ef8b1300aaa6b269b8e7606855a73 100644
---- a/packages/coding-agent/test/settings-manager.test.ts
-+++ b/packages/coding-agent/test/settings-manager.test.ts
-@@ -1,7 +1,21 @@
--import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
-+import { syncBuiltinESMExports } from "node:module";
-+import { createHash } from "crypto";
-+import fs, {
-+	chmodSync,
-+	existsSync,
-+	linkSync,
-+	mkdirSync,
-+	readdirSync,
-+	readFileSync,
-+	rmSync,
-+	statSync,
-+	symlinkSync,
-+	writeFileSync,
-+} from "fs";
- import { homedir } from "os";
- import { join } from "path";
--import { afterEach, beforeEach, describe, expect, it } from "vitest";
-+import lockfile from "proper-lockfile";
-+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
- import { DEFAULT_HTTP_IDLE_TIMEOUT_MS } from "../src/core/http-dispatcher.ts";
- import { type Settings, SettingsManager } from "../src/core/settings-manager.ts";
- 
-@@ -20,6 +34,8 @@ describe("SettingsManager", () => {
- 	});
- 
- 	afterEach(() => {
-+		vi.restoreAllMocks();
-+		syncBuiltinESMExports();
- 		if (existsSync(testDir)) {
- 			rmSync(testDir, { recursive: true });
- 		}
-@@ -111,6 +127,437 @@ describe("SettingsManager", () => {
- 		});
- 	});
- 
-+	describe("backup-first global unset", () => {
-+		it("backs up exact bytes and serializes deletion between setters without resurrecting keys", async () => {
-+			const settingsPath = join(agentDir, "settings.json");
-+			const original = Buffer.from('\uFEFF{ "theme": "dark", "hideThinkingBlock": true, "custom": {"keep": 1} }\n');
-+			writeFileSync(settingsPath, original);
-+			const manager = SettingsManager.create(projectDir, agentDir);
-+			const unset = manager.unsetGlobalSettings(["theme", "hideThinkingBlock", "theme"]);
-+			manager.setDefaultThinkingLevel("high");
-+			const receipt = await unset;
-+			await manager.flush();
-+			expect(receipt.status).toBe("applied");
-+			if (receipt.status !== "applied") throw new Error("Expected applied receipt");
-+			expect(readFileSync(receipt.backupPath)).toEqual(original);
-+			expect(statSync(receipt.backupPath).mode & 0o777).toBe(0o600);
-+			expect(receipt.beforeSha256).toBe(createHash("sha256").update(original).digest("hex"));
-+			expect(receipt.afterSha256).toBe(
-+				createHash("sha256")
-+					.update(`${JSON.stringify({ custom: { keep: 1 } }, null, 2)}\n`)
-+					.digest("hex"),
-+			);
-+			expect(statSync(settingsPath).mode & 0o777).toBe(0o600);
-+			expect(receipt.changedKeys).toEqual(["theme", "hideThinkingBlock"]);
-+			expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({
-+				custom: { keep: 1 },
-+				defaultThinkingLevel: "high",
-+			});
-+			expect(manager.getTheme()).toBeUndefined();
-+			expect(manager.getHideThinkingBlock()).toBe(false);
-+			expect(SettingsManager.create(projectDir, agentDir).getGlobalSettings()).toEqual(manager.getGlobalSettings());
-+			expect(await manager.unsetGlobalSettings(["theme"])).toEqual({ status: "unchanged", changedKeys: [] });
-+			expect(await manager.unsetGlobalSettings([])).toEqual({ status: "unchanged", changedKeys: [] });
-+			expect(manager.drainErrors()).toEqual([]);
-+			expect(readdirSync(agentDir).filter((name) => name.includes(".backup-"))).toHaveLength(1);
-+		});
-+
-+		it("preserves prior queued writes, external fields, later same-key setters and project overrides", async () => {
-+			const settingsPath = join(agentDir, "settings.json");
-+			writeFileSync(settingsPath, JSON.stringify({ theme: "dark", hideThinkingBlock: true }));
-+			writeFileSync(join(projectDir, ".pi", "settings.json"), JSON.stringify({ theme: "project" }));
-+			const manager = SettingsManager.create(projectDir, agentDir);
-+			writeFileSync(settingsPath, JSON.stringify({ theme: "dark", hideThinkingBlock: true, external: 7 }));
-+			manager.setDefaultThinkingLevel("low");
-+			const unset = manager.unsetGlobalSettings(["theme", "hideThinkingBlock"]);
-+			manager.setTheme("dark");
-+			const receipt = await unset;
-+			await manager.flush();
-+			expect(receipt.status).toBe("applied");
-+			expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({
-+				theme: "dark",
-+				defaultThinkingLevel: "low",
-+				external: 7,
-+			});
-+			expect(manager.getGlobalSettings().theme).toBe("dark");
-+			expect(manager.getTheme()).toBe("project");
-+		});
-+
-+		it("retains failed setter ownership after storage repair unless unset explicitly deletes it", async () => {
-+			const settingsPath = join(agentDir, "settings.json");
-+			for (const unset of [false, true]) {
-+				writeFileSync(settingsPath, '{"theme":"old"}');
-+				const manager = SettingsManager.create(projectDir, agentDir);
-+				writeFileSync(settingsPath, "{");
-+				manager.setTheme("new");
-+				await manager.flush();
-+				expect(manager.drainErrors()).toHaveLength(1);
-+				writeFileSync(settingsPath, '{"theme":"old"}');
-+				if (unset) await manager.unsetGlobalSettings(["theme"]);
-+				manager.setDefaultThinkingLevel("high");
-+				await manager.flush();
-+				const expected = unset ? { defaultThinkingLevel: "high" } : { theme: "new", defaultThinkingLevel: "high" };
-+				expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual(expected);
-+				expect(manager.getGlobalSettings()).toEqual(expected);
-+				expect(SettingsManager.create(projectDir, agentDir).getGlobalSettings()).toEqual(expected);
-+				expect(manager.drainErrors()).toEqual([]);
-+			}
-+		});
-+
-+		it("rebases later nested and map-entry edits onto deletion in memory and on disk", async () => {
-+			const settingsPath = join(agentDir, "settings.json");
-+			writeFileSync(
-+				settingsPath,
-+				JSON.stringify({
-+					compaction: { enabled: true, reserveTokens: 321 },
-+					terminal: { showImages: true, trueColor: false },
-+					images: { autoResize: true, blockImages: true },
-+					retry: { enabled: true, maxRetries: 9 },
-+					markdown: { mermaid: "off", codeBlockIndent: "old" },
-+					modelThinkingLevels: { "old/model": "low", "stale/model": "medium" },
-+					extensionChangelogVersions: { old: "1" },
-+				}),
-+			);
-+			const manager = SettingsManager.create(projectDir, agentDir);
-+			const unset = manager.unsetGlobalSettings([
-+				"compaction",
-+				"terminal",
-+				"images",
-+				"retry",
-+				"markdown",
-+				"modelThinkingLevels",
-+				"extensionChangelogVersions",
-+			]);
-+			manager.setCompactionEnabled(false);
-+			manager.setShowImages(false);
-+			manager.setImageAutoResize(false);
-+			manager.setRetryEnabled(false);
-+			manager.setMermaidRenderingMode("final");
-+			manager.setModelThinkingLevel("new", "model", "high");
-+			manager.removeModelThinkingLevel("old", "model");
-+			manager.setExtensionChangelogVersion("new", "2");
-+			await unset;
-+			await manager.flush();
-+			const expected = {
-+				compaction: { enabled: false },
-+				terminal: { showImages: false },
-+				images: { autoResize: false },
-+				retry: { enabled: false },
-+				markdown: { mermaid: "final" },
-+				modelThinkingLevels: { "new/model": "high" },
-+				extensionChangelogVersions: { new: "2" },
-+			};
-+			expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual(expected);
-+			expect(manager.getGlobalSettings()).toEqual(expected);
-+			const fresh = SettingsManager.create(projectDir, agentDir);
-+			expect(fresh.getGlobalSettings()).toEqual(expected);
-+			expect(manager.getCompactionSettings()).toEqual(fresh.getCompactionSettings());
-+			expect(manager.getRetrySettings()).toEqual(fresh.getRetrySettings());
-+			expect(manager.getTerminalCapabilityOverrides()).toEqual(fresh.getTerminalCapabilityOverrides());
-+			expect(manager.getBlockImages()).toBe(fresh.getBlockImages());
-+			expect(manager.getCodeBlockIndent()).toBe(fresh.getCodeBlockIndent());
-+			expect(manager.drainErrors()).toEqual([]);
-+		});
-+
-+		it("does not create a backup or canonical file for a missing source", async () => {
-+			const manager = SettingsManager.create(projectDir, agentDir);
-+			expect(await manager.unsetGlobalSettings(["theme", "theme"])).toEqual({
-+				status: "unchanged",
-+				changedKeys: [],
-+			});
-+			expect(readdirSync(agentDir)).toEqual([]);
-+		});
-+
-+		it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
-+			"reaches backup creation under the real lock before filesystem write denial",
-+			async () => {
-+				const settingsPath = join(agentDir, "settings.json");
-+				const original = '{"theme":"dark","private":"fixture-only"}';
-+				writeFileSync(settingsPath, original);
-+				const manager = SettingsManager.create(projectDir, agentDir);
-+				const realOpen = fs.openSync;
-+				let reachedBackup = false;
-+				vi.spyOn(fs, "openSync").mockImplementation((path, flags, mode) => {
-+					if (String(path).includes(".backup-")) {
-+						expect(existsSync(`${settingsPath}.lock`)).toBe(true);
-+						reachedBackup = true;
-+						chmodSync(agentDir, 0o500);
-+					}
-+					return realOpen(path, flags, mode);
-+				});
-+				syncBuiltinESMExports();
-+				try {
-+					await expect(manager.unsetGlobalSettings(["theme"])).rejects.toMatchObject({
-+						phase: "backup-create",
-+						replacement: "not-attempted",
-+						recovery: undefined,
-+					});
-+					expect(reachedBackup).toBe(true);
-+					expect(readFileSync(settingsPath, "utf8")).toBe(original);
-+					expect(manager.getTheme()).toBe("dark");
-+					expect(
-+						readdirSync(agentDir).filter((name) => name.includes(".backup-") || name.includes(".unset-")),
-+					).toEqual([]);
-+				} finally {
-+					chmodSync(agentDir, 0o700);
-+				}
-+			},
-+		);
-+
-+		it.skipIf(process.platform === "win32")(
-+			"reports syscall failure phases and recovery without confusing injected errors with physical durability proof",
-+			async () => {
-+				const settingsPath = join(agentDir, "settings.json");
-+				const original = Buffer.from('{"theme":"dark","private":"fixture-only"}\n');
-+				for (const fault of [
-+					"backup-sync",
-+					"backup-directory-sync",
-+					"temporary-sync",
-+					"rename",
-+					"commit-directory-sync",
-+				] as const) {
-+					writeFileSync(settingsPath, original);
-+					const manager = SettingsManager.create(projectDir, agentDir);
-+					const realOpen = fs.openSync;
-+					const realSync = fs.fsyncSync;
-+					const realRename = fs.renameSync;
-+					const paths = new Map<number, string>();
-+					let directorySyncs = 0;
-+					vi.spyOn(fs, "openSync").mockImplementation((path, flags, mode) => {
-+						const fd = realOpen(path, flags, mode);
-+						paths.set(fd, String(path));
-+						return fd;
-+					});
-+					vi.spyOn(fs, "fsyncSync").mockImplementation((fd) => {
-+						const path = paths.get(fd);
-+						if (path === agentDir) directorySyncs++;
-+						if (
-+							(fault === "backup-sync" && path?.includes(".backup-")) ||
-+							(fault === "backup-directory-sync" && path === agentDir && directorySyncs === 1) ||
-+							(fault === "temporary-sync" && path?.includes(".unset-")) ||
-+							(fault === "commit-directory-sync" && path === agentDir && directorySyncs === 2)
-+						)
-+							throw new Error("injected fsync failure");
-+						realSync(fd);
-+					});
-+					vi.spyOn(fs, "renameSync").mockImplementation((source, target) => {
-+						if (fault === "rename") throw new Error("injected rename failure");
-+						realRename(source, target);
-+					});
-+					syncBuiltinESMExports();
-+					try {
-+						const failure: unknown = await manager
-+							.unsetGlobalSettings(["theme"])
-+							.catch((error: unknown) => error);
-+						const backups = readdirSync(agentDir).filter((name) => name.includes(".backup-"));
-+						const backupPath = join(agentDir, backups[backups.length - 1]);
-+						const verified = fault !== "backup-sync" && fault !== "backup-directory-sync";
-+						expect(failure).toMatchObject({
-+							phase: fault,
-+							replacement:
-+								fault === "rename" || fault === "commit-directory-sync" ? "uncertain" : "not-attempted",
-+							recovery: verified
-+								? {
-+										kind: "verified-backup",
-+										backupPath,
-+										beforeSha256: createHash("sha256").update(original).digest("hex"),
-+									}
-+								: { kind: "unverified-backup", backupPath },
-+						});
-+						expect(readFileSync(backupPath)).toEqual(original);
-+						expect(statSync(backupPath).mode & 0o777).toBe(0o600);
-+						expect(readFileSync(settingsPath)).toEqual(
-+							fault === "commit-directory-sync"
-+								? Buffer.from(`${JSON.stringify({ private: "fixture-only" }, null, 2)}\n`)
-+								: original,
-+						);
-+						expect(readdirSync(agentDir).filter((name) => name.includes(".unset-"))).toEqual([]);
-+						if (fault === "commit-directory-sync") {
-+							manager.setDefaultThinkingLevel("high");
-+							await manager.flush();
-+							expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({ private: "fixture-only" });
-+							await manager.reload();
-+							expect(manager.getGlobalSettings()).toEqual({ private: "fixture-only" });
-+						}
-+					} finally {
-+						vi.restoreAllMocks();
-+						syncBuiltinESMExports();
-+						for (const name of readdirSync(agentDir).filter((name) => name.includes(".backup-")))
-+							rmSync(join(agentDir, name));
-+					}
-+				}
-+			},
-+		);
-+
-+		it.skipIf(process.platform === "win32")(
-+			"preserves primary phase and recovery when descriptor close and lock release also fail",
-+			async () => {
-+				const settingsPath = join(agentDir, "settings.json");
-+				writeFileSync(settingsPath, '{"theme":"dark"}');
-+				const manager = SettingsManager.create(projectDir, agentDir);
-+				const realOpen = fs.openSync;
-+				const realSync = fs.fsyncSync;
-+				const realClose = fs.closeSync;
-+				const realLock = lockfile.lockSync;
-+				let directoryFd: number | undefined;
-+				let backupFd: number | undefined;
-+				vi.spyOn(fs, "openSync").mockImplementation((path, flags, mode) => {
-+					const fd = realOpen(path, flags, mode);
-+					if (String(path) === agentDir) directoryFd = fd;
-+					if (String(path).includes(".backup-")) backupFd = fd;
-+					return fd;
-+				});
-+				vi.spyOn(fs, "fsyncSync").mockImplementation((fd) => {
-+					if (fd === backupFd) throw new Error("primary private-fixture");
-+					realSync(fd);
-+				});
-+				vi.spyOn(fs, "closeSync").mockImplementation((fd) => {
-+					realClose(fd);
-+					if (fd === directoryFd) throw new Error("secondary private-fixture");
-+				});
-+				vi.spyOn(lockfile, "lockSync").mockImplementation((path, options) => {
-+					const release = realLock(path, options);
-+					return () => {
-+						release();
-+						throw new Error("release private-fixture");
-+					};
-+				});
-+				syncBuiltinESMExports();
-+				await expect(manager.unsetGlobalSettings(["theme"])).rejects.toMatchObject({
-+					message: "Settings unset refused before commit",
-+					phase: "backup-sync",
-+					replacement: "not-attempted",
-+					recovery: { kind: "unverified-backup" },
-+					cleanupFailures: ["close", "release"],
-+				});
-+				expect(readFileSync(settingsPath, "utf8")).toBe('{"theme":"dark"}');
-+				expect(existsSync(`${settingsPath}.lock`)).toBe(false);
-+			},
-+		);
-+
-+		it.skipIf(process.platform === "win32")(
-+			"refuses real entry and metadata drift and never removes a foreign temporary pathname",
-+			async () => {
-+				const settingsPath = join(agentDir, "settings.json");
-+				const original = '{"theme":"dark"}';
-+				for (const fault of [
-+					"collision",
-+					"file",
-+					"mode",
-+					"directory-before-read",
-+					"directory-after-temporary",
-+				] as const) {
-+					writeFileSync(settingsPath, original);
-+					chmodSync(settingsPath, 0o644);
-+					const manager = SettingsManager.create(projectDir, agentDir);
-+					const realOpen = fs.openSync;
-+					const realSync = fs.fsyncSync;
-+					let temporary: string | undefined;
-+					let temporaryFd: number | undefined;
-+					let drifted = false;
-+					const moved = join(testDir, `moved-${fault}`);
-+					vi.spyOn(fs, "openSync").mockImplementation((path, flags, mode) => {
-+						const name = String(path);
-+						if (name.includes(".unset-") && flags === "wx") {
-+							temporary = name;
-+							if (fault === "collision") writeFileSync(name, "foreign-collision");
-+						}
-+						const fd = realOpen(path, flags, mode);
-+						if (name === temporary) temporaryFd = fd;
-+						if (
-+							fault === "directory-before-read" &&
-+							name === settingsPath &&
-+							typeof flags === "number" &&
-+							!drifted
-+						) {
-+							drifted = true;
-+							fs.renameSync(agentDir, moved);
-+							mkdirSync(agentDir);
-+							fs.renameSync(join(moved, "settings.json"), settingsPath);
-+						}
-+						return fd;
-+					});
-+					vi.spyOn(fs, "fsyncSync").mockImplementation((fd) => {
-+						realSync(fd);
-+						if (fd !== temporaryFd || drifted) return;
-+						drifted = true;
-+						if (fault === "file") {
-+							const other = join(agentDir, "writer");
-+							writeFileSync(other, '{"theme":"intervening"}');
-+							fs.renameSync(other, settingsPath);
-+						}
-+						if (fault === "mode") chmodSync(settingsPath, 0o640);
-+						if (fault === "directory-after-temporary" && temporary) {
-+							fs.renameSync(agentDir, moved);
-+							mkdirSync(agentDir);
-+							writeFileSync(settingsPath, "intervening-directory");
-+							writeFileSync(temporary, "foreign-directory");
-+						}
-+					});
-+					syncBuiltinESMExports();
-+					try {
-+						await expect(manager.unsetGlobalSettings(["theme"])).rejects.toThrow();
-+						expect(readFileSync(settingsPath, "utf8")).toBe(
-+							fault === "file"
-+								? '{"theme":"intervening"}'
-+								: fault === "directory-after-temporary"
-+									? "intervening-directory"
-+									: original,
-+						);
-+						if (fault === "mode") expect(statSync(settingsPath).mode & 0o777).toBe(0o640);
-+						if (fault === "collision" || fault === "directory-after-temporary")
-+							expect(readFileSync(temporary!, "utf8")).toBe(
-+								fault === "collision" ? "foreign-collision" : "foreign-directory",
-+							);
-+					} finally {
-+						vi.restoreAllMocks();
-+						syncBuiltinESMExports();
-+						for (const name of readdirSync(agentDir))
-+							rmSync(join(agentDir, name), { recursive: true, force: true });
-+					}
-+				}
-+			},
-+		);
-+
-+		it("refuses unsupported storage, unknown keys, unsafe files and filesystem write denial without mutation", async () => {
-+			await expect(SettingsManager.inMemory({ theme: "dark" }).unsetGlobalSettings(["theme"])).rejects.toThrow(
-+				"Unset requires file settings storage",
-+			);
-+			const settingsPath = join(agentDir, "settings.json");
-+			const original = '{"theme":"dark","private":"not-in-receipts"}';
-+			writeFileSync(settingsPath, original);
-+			const manager = SettingsManager.create(projectDir, agentDir);
-+			await expect(manager.unsetGlobalSettings(["unknown" as "theme"])).rejects.toThrow("Unknown settings key");
-+			linkSync(settingsPath, join(agentDir, "linked"));
-+			await expect(manager.unsetGlobalSettings(["theme"])).rejects.toThrow("Unsafe settings file");
-+			rmSync(join(agentDir, "linked"));
-+			rmSync(settingsPath);
-+			symlinkSync(join(agentDir, "target"), settingsPath);
-+			writeFileSync(join(agentDir, "target"), original);
-+			await expect(manager.unsetGlobalSettings(["theme"])).rejects.toThrow("Unsafe settings file");
-+			expect(readFileSync(settingsPath, "utf8")).toBe(original);
-+			rmSync(settingsPath);
-+			writeFileSync(settingsPath, original);
-+			chmodSync(settingsPath, 0o666);
-+			await expect(manager.unsetGlobalSettings(["theme"])).rejects.toThrow("Unsafe settings file");
-+			expect(readFileSync(settingsPath, "utf8")).toBe(original);
-+			chmodSync(settingsPath, 0o600);
-+			const invalidUtf8 = Buffer.concat([Buffer.from('{"theme":"'), Buffer.from([0xff]), Buffer.from('"}')]);
-+			writeFileSync(settingsPath, invalidUtf8);
-+			await expect(manager.unsetGlobalSettings(["theme"])).rejects.toThrow("Invalid settings file");
-+			expect(readFileSync(settingsPath)).toEqual(invalidUtf8);
-+			writeFileSync(settingsPath, original);
-+			chmodSync(agentDir, 0o500);
-+			try {
-+				await expect(manager.unsetGlobalSettings(["theme"])).rejects.toThrow();
-+				expect(readFileSync(settingsPath, "utf8")).toBe(original);
-+				expect(manager.getTheme()).toBe("dark");
-+			} finally {
-+				chmodSync(agentDir, 0o700);
-+			}
-+		});
-+	});
-+
- 	describe("deviceId", () => {
- 		it("creates one global device ID and reuses it in later processes", async () => {
- 			const settingsPath = join(agentDir, "settings.json");
-@@ -174,6 +621,36 @@ describe("SettingsManager", () => {
- 	});
- 
- 	describe("reload", () => {
-+		it.each([false, true])(
-+			"preserves global setters accepted after reload starts (load recovery: %s)",
-+			async (recovering) => {
-+				const settingsPath = join(agentDir, "settings.json");
-+				writeFileSync(settingsPath, JSON.stringify({ theme: "old" }));
-+				const manager = SettingsManager.create(projectDir, agentDir);
-+				if (recovering) {
-+					writeFileSync(settingsPath, "{ invalid json");
-+					await manager.reload();
-+					expect(manager.drainErrors()).toMatchObject([{ scope: "global", path: settingsPath }]);
-+					writeFileSync(settingsPath, JSON.stringify({ theme: "old" }));
-+				}
-+
-+				const loading = manager.reload();
-+				manager.setTheme("new");
-+				await loading;
-+				await manager.flush();
-+
-+				const expected = { theme: "new" };
-+				expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual(expected);
-+				expect(manager.getTheme()).toBe("new");
-+				expect(manager.getGlobalSettings()).toEqual(expected);
-+				const fresh = SettingsManager.create(projectDir, agentDir);
-+				expect(fresh.getGlobalSettings()).toEqual(expected);
-+				expect(fresh.getSettings()).toEqual(manager.getSettings());
-+				expect(manager.drainErrors()).toEqual([]);
-+				expect(fresh.drainErrors()).toEqual([]);
-+			},
-+		);
-+
- 		it("should reload global settings from disk", async () => {
- 			const settingsPath = join(agentDir, "settings.json");
- 			writeFileSync(
 diff --git a/packages/coding-agent/test/suite/harness.ts b/packages/coding-agent/test/suite/harness.ts
 index 988e9e817e5a92b74ca0ac733b907bd48238bb24..eba9cc8df508e1661d680482ea97ad9a9d2f66b3 100644
 --- a/packages/coding-agent/test/suite/harness.ts
@@ -3797,6 +2578,18 @@ index 988e9e817e5a92b74ca0ac733b907bd48238bb24..eba9cc8df508e1661d680482ea97ad9a
  		agent,
  		sessionManager,
  		settingsManager,
+diff --git a/packages/coding-agent/test/suite/regressions/11692-dispose-waits-for-oauth-refresh.test.ts b/packages/coding-agent/test/suite/regressions/11692-dispose-waits-for-oauth-refresh.test.ts
+index 25f7a7fa98a67212c2ff0f3decaf89e9d83912a9..8614786da8fcc0d05d4759cabc8878d265984d82 100644
+--- a/packages/coding-agent/test/suite/regressions/11692-dispose-waits-for-oauth-refresh.test.ts
++++ b/packages/coding-agent/test/suite/regressions/11692-dispose-waits-for-oauth-refresh.test.ts
+@@ -87,6 +87,7 @@ describe("regression #11692: OAuth refresh in flight at shutdown", () => {
+ 		harnesses.push(harness);
+ 		const services: AgentSessionServices = {
+ 			cwd: harness.tempDir,
++			projectDir: harness.tempDir,
+ 			agentDir: harness.tempDir,
+ 			modelRuntime,
+ 			settingsManager: harness.settingsManager,
 diff --git a/packages/coding-agent/test/suite/regressions/6162-extension-active-tools-next-turn.test.ts b/packages/coding-agent/test/suite/regressions/6162-extension-active-tools-next-turn.test.ts
 index 27ba2e27e60553200d39e320064c8f8cf019ea64..4b8ebac088aaf11267ca430345758e9697176dba 100644
 --- a/packages/coding-agent/test/suite/regressions/6162-extension-active-tools-next-turn.test.ts
@@ -3825,6 +2618,18 @@ index 9991520690bee8593e48b3f49c2eaff4c3748aa4..238f32d0c2d08c802b76282343993fa8
 +++ b/packages/coding-agent/test/suite/regressions/8724-in-memory-fork-active-tool.test.ts
 @@ -42,6 +42,7 @@ describe("regression #8724: in-memory fork during an active tool turn", () => {
  		const harness = await createHarness({ tools: [blockingTool] });
+ 		const services: AgentSessionServices = {
+ 			cwd: harness.tempDir,
++			projectDir: harness.tempDir,
+ 			agentDir: harness.tempDir,
+ 			modelRuntime: harness.session.modelRuntime,
+ 			settingsManager: harness.settingsManager,
+diff --git a/packages/coding-agent/test/suite/regressions/9124-runtime-dispose-tool-settlement.test.ts b/packages/coding-agent/test/suite/regressions/9124-runtime-dispose-tool-settlement.test.ts
+index 31f8713c2eaed0a234e4458fdc7bedb3fa48cf6f..0efb1d945fb1e7bcae2a662ebcde85c17f3068eb 100644
+--- a/packages/coding-agent/test/suite/regressions/9124-runtime-dispose-tool-settlement.test.ts
++++ b/packages/coding-agent/test/suite/regressions/9124-runtime-dispose-tool-settlement.test.ts
+@@ -23,6 +23,7 @@ describe("regression #9124: runtime disposal during tool execution", () => {
+ 		harnesses.push(harness);
  		const services: AgentSessionServices = {
  			cwd: harness.tempDir,
 +			projectDir: harness.tempDir,

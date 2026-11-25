@@ -1,0 +1,81 @@
+{
+  "block": "security/public-host",
+  "tier": "high-stakes",
+  "tierReason": "security: the SSRF guard decides which IP addresses a public display URL may name, and the rate limiter bounds unauthenticated pairing attempts",
+  "impl": "blocks/security/public-host/Block.dfy",
+  "symbols": [
+    "BlockedV4",
+    "BlockedV6",
+    "Live",
+    "RevOnto",
+    "LiveRev",
+    "Fewer",
+    "Recent",
+    "Admit"
+  ],
+  "verify": [
+    "blocks/security/public-host/Block.dfy"
+  ],
+  "laws": {
+    "B4 ipv4-ranges": [
+      "SecurityPublicHost.B4Ranges"
+    ],
+    "B6 ipv6-ranges": [
+      "SecurityPublicHost.B6Ranges"
+    ],
+    "M6 ipv4-mapped": [
+      "SecurityPublicHost.M6Mapped"
+    ],
+    "P1 prune": [
+      "SecurityPublicHost.P1Prune",
+      "SecurityPublicHost.RevOntoSpec",
+      "SecurityPublicHost.LiveRevSpec"
+    ],
+    "A1 admission": [
+      "SecurityPublicHost.A1Admission",
+      "SecurityPublicHost.FewerSpec"
+    ],
+    "S1 stale": [
+      "SecurityPublicHost.S1Stale"
+    ],
+    "W1 window": [
+      "SecurityPublicHost.W1Window",
+      "SecurityPublicHost.KeptCounts"
+    ]
+  },
+  "helpers": [
+    "BackLength",
+    "NoneFresh",
+    "ElemsFromSeq",
+    "FreshCat",
+    "FreshTwice"
+  ],
+  "translate": "blocks/security/public-host/Block.dfy",
+  "accepted": {},
+  "report": "blocks/security/public-host/MUTATION.json",
+  "kinds": {
+    "safety": [
+      "B4 ipv4-ranges",
+      "B6 ipv6-ranges",
+      "M6 ipv4-mapped",
+      "W1 window"
+    ],
+    "progress": [
+      "B4 ipv4-ranges",
+      "B6 ipv6-ranges",
+      "S1 stale"
+    ],
+    "recovery": "n/a: the limiter is process memory; a Gateway restart starts every key with no attempts (Assumption A2)",
+    "stale-inputs": [
+      "P1 prune",
+      "S1 stale"
+    ],
+    "exact-results": [
+      "B4 ipv4-ranges",
+      "B6 ipv6-ranges",
+      "P1 prune",
+      "A1 admission"
+    ],
+    "uncertain-outcomes": "n/a: no effects; the shell refuses the URL or the pairing attempt on the block's answer"
+  }
+}

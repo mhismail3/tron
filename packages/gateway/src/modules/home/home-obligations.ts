@@ -1,6 +1,7 @@
 import { Type, StringEnum } from "../../kernel/pi/ai.js";
 import type { SessionEntry, ToolDefinition } from "../../kernel/pi/coding-agent.js";
 import { GatewayError } from "../../errors.js";
+import { core as obligations, type State as CoreState } from "../../core/home/obligations/facade.js";
 
 export const HOME_OBLIGATION = "tron.home-obligation.v1";
 const ACTIONS = ["list", "request", "reported-done", "verified", "reopened"] as const;
@@ -52,15 +53,13 @@ export function replayObligations(entries: readonly SessionEntry[], sessionId: s
       if (evidence?.type !== "message" || evidence.message.role !== "toolResult" || evidence.message.isError || !messageText(evidence).includes(event.evidence.quote)) refuse("verification source is unavailable");
     }
     const before = items.get(event.id);
-    if (event.action === "request") {
-      if (before || !event.text) refuse("canonical request is contradictory");
-      items.set(event.id, { id: event.id, text: event.text!, ...(event.issue ? { issue: event.issue } : {}), state: event.action, request: event.source, latest: event });
-    } else {
-      if (!before || (event.action === "reopened" ? owed(before) : !owed(before) && !(event.action === "verified" && before.state === "reported-done"))) refuse("canonical transition is contradictory");
-      if (event.action === "verified" && !event.evidence) refuse("verification evidence is missing");
-      items.set(event.id, { ...before!, state: event.action, latest: event });
-    }
-    if (items.size > 1000) refuse("ledger exceeds 1000 items; no partial owed list is available");
+    if (event.action === "request" && !event.text) refuse("canonical request is contradictory");
+    const step = obligationStep(before, event.action, items.size);
+    if (step === "contradictory") refuse(event.action === "request" ? "canonical request is contradictory" : "canonical transition is contradictory");
+    if (event.action === "verified" && !event.evidence) refuse("verification evidence is missing");
+    if (step === "full") refuse("ledger exceeds 1000 items; no partial owed list is available");
+    items.set(event.id, before ? { ...before, state: event.action, latest: event }
+      : { id: event.id, text: event.text!, ...(event.issue ? { issue: event.issue } : {}), state: event.action, request: event.source, latest: event });
   }
   return items;
 }
@@ -69,7 +68,12 @@ function messageText(entry: SessionEntry): string {
   const content = entry.message.content;
   return typeof content === "string" ? content : content.filter(block => block.type === "text").map(block => block.text).join("\n");
 }
-export const owed = (item: ObligationItem): boolean => item.state === "request" || item.state === "reopened";
+const CORE_STATE: Record<State, CoreState> = { request: "request", "reported-done": "reportedDone", verified: "verified", reopened: "reopened" };
+export const owed = (item: ObligationItem): boolean => obligations.Owed(CORE_STATE[item.state]);
+export function obligationStep(before: ObligationItem | undefined, action: State, size: number): "next" | "contradictory" | "full" {
+  const step = obligations.Step(before ? { $: "Present", state: CORE_STATE[before.state] } : { $: "Absent" }, CORE_STATE[action], size);
+  return step.$ === "Next" ? "next" : step.$ === "Full" ? "full" : "contradictory";
+}
 
 export function admitObligation(input: ObligationRequest): void {
   if (!ACTIONS.includes(input.action)) refuse("unknown action");

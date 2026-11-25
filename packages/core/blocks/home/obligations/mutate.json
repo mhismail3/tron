@@ -1,0 +1,50 @@
+{
+  "block": "home/obligations",
+  "tier": "high-stakes",
+  "tierReason": "authority: decides which maintainer obligations Home reports as owed and which ledger transitions it admits or refuses (what Home tells the maintainer he owes, #2623)",
+  "impl": "blocks/home/obligations/Block.dfy",
+  "symbols": [
+    "Owed",
+    "Step"
+  ],
+  "verify": [
+    "blocks/home/obligations/Block.dfy"
+  ],
+  "laws": {
+    "O1 owed": [
+      "HomeObligations.O1Owed"
+    ],
+    "T1 transitions": [
+      "HomeObligations.T1Transitions"
+    ],
+    "C1 contradiction": [
+      "HomeObligations.C1Contradiction"
+    ],
+    "K1 cap": [
+      "HomeObligations.K1Cap"
+    ]
+  },
+  "translate": "blocks/home/obligations/Block.dfy",
+  "accepted": {},
+  "report": "blocks/home/obligations/MUTATION.json",
+  "kinds": {
+    "safety": [
+      "C1 contradiction",
+      "K1 cap"
+    ],
+    "progress": [
+      "T1 transitions"
+    ],
+    "recovery": "n/a: no process state; a cold restart replays canonical chapter history through the same block (the ledger is rebuilt per call, never cached)",
+    "stale-inputs": [
+      "C1 contradiction"
+    ],
+    "exact-results": [
+      "O1 owed",
+      "T1 transitions",
+      "C1 contradiction",
+      "K1 cap"
+    ],
+    "uncertain-outcomes": "n/a: no effects; the shell appends the event through its canonical receipt (per-tool-call receipt id) only on Next"
+  }
+}

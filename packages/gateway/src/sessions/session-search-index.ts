@@ -39,7 +39,7 @@ interface SearchIndexSessionFacts {
 }
 
 const SESSION_SEARCH_INDEX_TABLE_VERSION = "session-search-index-2";
-const SESSION_SEARCH_INDEX_DERIVATION_VERSION = "session-search-derivation-2";
+const SESSION_SEARCH_INDEX_DERIVATION_VERSION = "session-search-derivation-3";
 const SESSION_SEARCH_INDEX_SCHEMA = `${SESSION_SEARCH_INDEX_TABLE_VERSION}:${SESSION_SEARCH_INDEX_DERIVATION_VERSION}`;
 
 interface SearchIndexCandidate {

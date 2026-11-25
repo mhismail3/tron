@@ -59,14 +59,14 @@
       "reason": "SameState and SameTime are symmetric (each is equality, SameSpec), so swapping the tracked and the current value cannot change which branch Evaluate takes",
       "reviewer": "law reviewer (REVIEW.json acceptedMutants)"
     },
-    "Evaluate/swap-args/tracked.progress, p->p, tracked.progress#1": {
+    "Evaluate/swap-args/tracked.admitted, o.admitted->o.admitted, tracked.admitted#1": {
       "kind": "equivalent",
       "reason": "SameState and SameTime are symmetric (each is equality, SameSpec), so swapping the tracked and the current value cannot change which branch Evaluate takes",
       "reviewer": "law reviewer (REVIEW.json acceptedMutants)"
     },
-    "Evaluate/swap-args/tracked.admitted, o.admitted->o.admitted, tracked.admitted#1": {
+    "Evaluate/boundary/>->>=#1": {
       "kind": "equivalent",
-      "reason": "SameState and SameTime are symmetric (each is equality, SameSpec), so swapping the tracked and the current value cannot change which branch Evaluate takes",
+      "reason": "when the progress time equals the tracked time both keep that same millisecond as the timer's start",
       "reviewer": "law reviewer (REVIEW.json acceptedMutants)"
     },
     "Evaluate/boundary/<=-><#1": {

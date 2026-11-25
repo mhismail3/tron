@@ -1807,11 +1807,13 @@ export default function (pi) {
       await waitFor(() => created.isDisposed
         && !(fixture.registry as unknown as { slots: Map<string, unknown> }).slots.has(created.id), "the disposed session to leave the slot map");
       const queuedChanges = vi.spyOn((fixture.registry as unknown as { sessionCatalog: { awaitQueuedChanges(): Promise<void> } }).sessionCatalog, "awaitQueuedChanges");
+      const reading = fixture.registry.readTaskWorkerTranscript(created.id);
       const reopening = fixture.registry.acquire(created.id);
-      await waitFor(() => queuedChanges.mock.calls.length > 0, "the reopen waits for the queued index row");
+      await waitFor(() => queuedChanges.mock.calls.length > 1, "the transcript read and the reopen wait for the queued index row");
       await new Promise((resolve) => setImmediate(resolve));
       expect(queuedChanges.mock.settledResults.map((result) => result.type)).toEqual(queuedChanges.mock.calls.map(() => "incomplete"));
       release();
+      expect(JSON.stringify((await reading).entries)).toContain("persisted before extension close");
       const reopened = await reopening;
       expect(reopened.id).toBe(created.id);
       expect(JSON.stringify(reopened.snapshot().transcript)).toContain("persisted before extension close");

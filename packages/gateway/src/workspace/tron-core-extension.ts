@@ -10,7 +10,7 @@ const CONNECTIONS_TOOL_PARAMETERS = Type.Object({ action: Type.Literal("list") }
 
 export function tronContext(workspace: TronWorkspaceDescriptor, cwd: string, tools: readonly string[]): string {
   const lines = [
-    `Current execution working directory: ${JSON.stringify(cwd)}. Relative task paths and project instructions belong to this directory; do not change it to use the internal workspace.`,
+    `Current execution working directory: ${JSON.stringify(cwd)}. Project paths and instructions belong to this directory; do not change it to use the internal workspace.`,
     `Tron internal workspace: ${JSON.stringify(workspace.root)} (${workspace.available ? "available" : "unavailable"}). This separate, per-installation root is for deliberately retained cross-session information, not a copy of projects or sessions.`,
   ];
   if (tools.includes("display")) lines.push("Use display for useful visual/document results. source.kind=internal_file resolves relative to the internal workspace's files/ directory; source.kind=path remains relative to this session directory.");

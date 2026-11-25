@@ -834,6 +834,19 @@ module Protocol {
       forkBoundary: Option<TranscriptForkBoundary>
     )
 
+  /// session.processTranscript.page: one page and the transcript revision it was read at.
+  // @wire
+  datatype ProcessTranscriptPageResult = ProcessTranscriptPageResult(
+      items: seq<TranscriptItem>,
+      start: real,
+      end: real,
+      total: real,
+      nextEntryId: Option<string>,
+      leafEntryId: Option<string>,
+      forkBoundary: Option<TranscriptForkBoundary>,
+      revision: string
+    )
+
   // @wire
   datatype ProcessTranscriptLease = ProcessTranscriptLease(
       leaseId: string,

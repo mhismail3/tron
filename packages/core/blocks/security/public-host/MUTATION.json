@@ -1,0 +1,61 @@
+{
+ "summary": {
+  "block": "security/public-host",
+  "tier": "high-stakes",
+  "laws": "blocks/security/public-host/Block.dfy",
+  "toolHash": "ac4ab6d9eb34842e",
+  "mutants": 245,
+  "stillborn": 41,
+  "valid": 204,
+  "killed": 204,
+  "survived": 0,
+  "accepted": 0,
+  "seconds": 236,
+  "score": 1,
+  "unknown": 0,
+  "stillbornRatio": 0.167,
+  "filter": null,
+  "generated": 245,
+  "pass": true,
+  "inputsHash": "1c576e8c2b2552ab"
+ },
+ "perLaw": [
+  {
+   "law": "B4 ipv4-ranges",
+   "killed": 121,
+   "only": 95
+  },
+  {
+   "law": "B6 ipv6-ranges",
+   "killed": 31,
+   "only": 21
+  },
+  {
+   "law": "M6 ipv4-mapped",
+   "killed": 1,
+   "only": 0
+  },
+  {
+   "law": "P1 prune",
+   "killed": 29,
+   "only": 15
+  },
+  {
+   "law": "A1 admission",
+   "killed": 21,
+   "only": 11
+  },
+  {
+   "law": "S1 stale",
+   "killed": 0,
+   "only": 0
+  },
+  {
+   "law": "W1 window",
+   "killed": 0,
+   "only": 0
+  }
+ ],
+ "statuses": "fcef60322bb39311efdb242adab1d9cc4b5bae628445b6616cd47570e17feafe",
+ "notKilled": []
+}

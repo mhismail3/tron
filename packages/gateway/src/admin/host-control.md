@@ -125,16 +125,20 @@ not the worker session being resumed.
   queued work and drains every runtime before blob disposal; failed retirement stays
   retryable.
 - `gateway.drain.status` returns `AdministrativeDrainSnapshot` (counts, ≤ 64 blocker
-  summaries with category, state, age, progress and an `rpc-mutation`'s method;
+  summaries with category, state, age, progress and an `rpc-mutation`'s method, earliest
+  admitted first and unadmitted last, so the oldest admitted blocker is always listed, and a
+  listed blocker's progress is at least the latest of its session's omitted blockers;
   never IDs, prompts or paths). `gateway.restart` accepts `restartNow: true` to
   escalate; `gateway.stop` uses the same drain, exits only after a zero-blocker proof
   and records `failed` otherwise. The restart drain stalls after the oldest blocker makes
   no progress for 180 s, counting progress by any blocker on its session (a Home task held
-  between turns progresses through its live async runs), then exact cancellation and grace; only-suspect
+  between turns progresses through its live async runs; the timer never moves back when that run settles),
+  then exact cancellation and grace; only-suspect
   `terminal-receipt-persistence` blockers proceed at once. The proven block `sessions/restart-drain`
   (`packages/core`) makes that decision over millisecond times; `restart-drain.ts` carries its stall timer between
   polls. A blocker time that is not a `Date#toISOString` instant at or after 1970 reads as unset, like an
-  absent time: the stall timer runs from the progress time when there is one, else from the admission
+  absent time, and an extension-reported progress time later than the Gateway clock reads as the
+  previous progress time, else the observation time: the stall timer runs from the progress time when there is one, else from the admission
   time when there is one, else from the first poll that sees it. The stop drain has no stall
   bound: a stop exits 0 and nothing relaunches to recover cut work, so it waits for
   every accepted owner; a caller needing a deadline stops waiting itself (Mac Quit waits

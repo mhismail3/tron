@@ -1,5 +1,5 @@
 import { watch, type FSWatcher } from "node:fs";
-import type { JsonValue, ProcessTranscriptLease } from "../protocol/types.js";
+import type { JsonValue, ProcessTranscriptLease, ProcessTranscriptPageResult } from "../protocol/types.js";
 import { GatewayError } from "../errors.js";
 import type { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import { AsyncMutex } from "../util/async-mutex.js";
@@ -224,7 +224,7 @@ export class ProcessTranscriptLeaseStore {
     before?: number,
     expectedNextEntryId?: string,
     expectedRevision?: string,
-  ): Promise<ProcessTranscriptLease["page"] & { revision: string }> {
+  ): Promise<ProcessTranscriptPageResult> {
     const admittedLease = this.owned(clientId, leaseId);
     return admittedLease.pageMutex.run(async () => {
       const lease = this.owned(clientId, leaseId);

@@ -4,7 +4,7 @@ import type { ImageContent } from "../../kernel/pi/ai.js";
 import { utf8Page } from "../../kernel/host/utf8-page.js";
 import { isWakeEvidence, WakeInboxOwner, type HomeWakeEvidence, type HomeWakeEvidenceScope, type HomeWakeRoute, type HomeWakeTrigger } from "./home-wake-inbox.js";
 import { parseEntry, readCanonicalSession, visitCanonicalSessionEntries } from "../../kernel/session/canonical-reader.js";
-import { HOME_OBLIGATION, admitObligation, replayObligations, owed, type ObligationEvent, type ObligationRequest } from "./home-obligations.js";
+import { HOME_OBLIGATION, admitObligation, replayObligations, obligationStep, owed, type ObligationEvent, type ObligationRequest } from "./home-obligations.js";
 import { createHash } from "node:crypto";
 import type { NotificationService } from "../../notifications/notification-service.js";
 import { randomUUID } from "node:crypto";
@@ -176,6 +176,7 @@ export class HomeOwner {
 
   async obligationTool(sessionId: string, callId: string, request: ObligationRequest): Promise<unknown> {
     admitObligation(request);
+    const action = request.action;
     return this.recordMutex.run(async () => {
       const record = this.record;
       if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId) throw new GatewayError("conflict", "Home obligations are unavailable");
@@ -189,7 +190,7 @@ export class HomeOwner {
         if (count > 10000) throw new GatewayError("conflict", "Home obligation history exceeds 10000 events; no partial list is available");
         replayObligations(entries, chapter.sessionId, items);
       }
-      if (request.action === "list") {
+      if (action === "list") {
         const result = { items: [...items.values()].filter(owed), total: items.size };
         if (Buffer.byteLength(JSON.stringify(result)) > 128 * 1024) throw new GatewayError("conflict", "Home owed list exceeds 128 KiB; no partial list is available");
         return result;
@@ -209,26 +210,24 @@ export class HomeOwner {
       const before = items.get(request.id!);
       if (existing?.type === "custom") {
         const event = existing.data as ObligationEvent;
-        if (event.id !== request.id || event.action !== request.action || event.source.entryId !== source.id || event.source.quote !== request.quote
+        if (event.id !== request.id || event.action !== action || event.source.entryId !== source.id || event.source.quote !== request.quote
           || event.text !== request.text || event.issue !== request.issue || event.evidence?.entryId !== request.evidenceEntryId || event.evidence?.quote !== request.evidenceQuote) {
           throw new GatewayError("conflict", "Obligation receipt identity has different input");
         }
         return { item: before, receiptId };
       }
-      if (count >= 10000 || (request.action === "request" && items.size >= 1000)) throw new GatewayError("conflict", "Home obligation history is full; no event was appended");
-      if (request.action === "request" ? !!before : !before) throw new GatewayError("conflict", "Obligation id already exists or is unavailable; never re-create a closed item");
-      if (request.action === "reopened") {
-        if (owed(before!) || before!.latest.source.entryId === source.id) throw new GatewayError("conflict", "Reopening requires a new maintainer message for a closed obligation");
-      } else if (before && !owed(before) && !(request.action === "verified" && before.state === "reported-done")) {
-        throw new GatewayError("conflict", "The human action is already closed; missing proof cannot reopen it");
-      }
+      const step = obligationStep(before, action, items.size);
+      if (count >= 10000 || (action === "request" && obligationStep(undefined, action, items.size) === "full")) throw new GatewayError("conflict", "Home obligation history is full; no event was appended");
+      if (action === "request" ? !!before : !before) throw new GatewayError("conflict", "Obligation id already exists or is unavailable; never re-create a closed item");
+      if (action === "reopened" && (step !== "next" || before!.latest.source.entryId === source.id)) throw new GatewayError("conflict", "Reopening requires a new maintainer message for a closed obligation");
+      if (step !== "next") throw new GatewayError("conflict", "The human action is already closed; missing proof cannot reopen it");
       let evidence: ObligationEvent["evidence"];
-      if (request.action === "verified") {
+      if (action === "verified") {
         const entry = branch.slice(start).find(candidate => candidate.id === request.evidenceEntryId);
         if (entry?.type !== "message" || entry.message.role !== "toolResult" || entry.message.isError || !textOf(entry).includes(request.evidenceQuote!)) throw new GatewayError("invalid_request", "Verification requires a successful tool result and verbatim evidence from this activation");
         evidence = { sessionId, entryId: entry.id, quote: request.evidenceQuote! };
       }
-      const event: ObligationEvent = { receiptId, id: request.id!, action: request.action, source: { sessionId, entryId: source.id, quote: request.quote! },
+      const event: ObligationEvent = { receiptId, id: request.id!, action, source: { sessionId, entryId: source.id, quote: request.quote! },
         ...(request.text ? { text: request.text } : {}), ...(request.issue ? { issue: request.issue } : {}), ...(evidence ? { evidence } : {}) };
       await slot.persistCanonicalCustomEntry(HOME_OBLIGATION, JSON.parse(JSON.stringify(event)), receiptId);
       return { item: { id: event.id, text: before?.text ?? event.text!, ...(before?.issue || event.issue ? { issue: before?.issue ?? event.issue } : {}),

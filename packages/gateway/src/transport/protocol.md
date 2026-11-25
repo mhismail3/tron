@@ -38,7 +38,8 @@ requests, cancellation, receipts, ordered delivery and liveness. Methods:
   one-second flush deadline. Local-wrapper authority and resumable provider auth are
   independent of device revocation.
 - **Pairing storage.** The pairing limiter keeps an exact rolling per-address window
-  over at most 4,096 LRU addresses. At most 256 devices; metadata 1 MiB, wrapper
+  over at most 4,096 addresses; while all of them hold an attempt inside the window, a
+  new address is refused. At most 256 devices; metadata 1 MiB, wrapper
   credential 4 KiB, invitation 16 KiB before decode; owner-only regular files (no
   symlinks), exact versions and canonical timestamps. The invitation is consumed
   before the device record is written; a failed write issues a fresh one under the

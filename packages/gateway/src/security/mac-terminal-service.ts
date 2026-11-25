@@ -270,11 +270,14 @@ export class MacTerminalService {
   }
 
   private async retireJob(fence: () => void): Promise<void> {
-    if (await this.job()) {
-      fence();
-      await this.command("/bin/launchctl", ["bootout", `${this.domain}/${this.label}`]);
-      if (await this.job()) throw new GatewayError("conflict", "The owned SSH job did not stop");
+    if (!await this.job()) return;
+    fence();
+    await this.command("/bin/launchctl", ["bootout", `${this.domain}/${this.label}`]);
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      if (!await this.job()) return;
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
+    throw new GatewayError("conflict", "The owned SSH job did not stop");
   }
 
   private async stop(fence: () => void): Promise<void> {

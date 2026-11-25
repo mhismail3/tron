@@ -98,7 +98,7 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   drafts and an approved change retain the exact destination and receipt owner. Jev is a provider credential, not a connection. Retired Connected
   Services, X OAuth/credits and Raindrop setup have no native route or consumer.
 - **Connections and devices.** Paired Macs then authorized devices, each opening its own detail
-  sheet. Device rename (`device-label.v1`), source/install (`ios-device-install.v3`) and Gateway
+  sheet. Device rename, source/install (`ios-device-install.v3`) and Gateway
   update, promote, rollback and **Rebuild from Source** need the focused profile (**Use This
   Server** first). Rebuild is user-initiated only: agents never press it or submit its RPC. Status
   polling is command-bound and stops at terminal state, reconnect or disappearance. Maintenance

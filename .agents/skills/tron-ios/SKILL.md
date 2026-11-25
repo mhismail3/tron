@@ -61,7 +61,9 @@ scripts/tron test ios lanes
 A failed `build` prints `error: path:line: message` for each build error and a
 failed `run` prints `failure: test: message` for each test failure (first 20),
 read from the run's result bundle (`Build.xcresult`, `TestResults.xcresult`) by
-`scripts/xcresult-failures.py`. Read that block first; the console prints the run directory. A fresh
+`scripts/xcresult-failures.py`. A run whose `test.log` shows a runner restart or a test that started
+without finishing fails with status 65 and prints `crashed: test` for each, whatever the summary
+says. Read that block first; the console prints the run directory. A fresh
 source needs `checkpoint` or `build` before `run`; missing or stale products are still refused.
 Native `lane-remove`, `reap`, `prune` and `clean` remain owning maintenance commands, not routine
 remote test steps; remove only resources you own and have authorization to delete.
@@ -78,10 +80,12 @@ scripts/tron-ios-device stop
 ```
 
 When the user asks for a build on their phone and it is not reachable by
-`devicectl` (away from the Mac), commit, then run
+`devicectl` (away from the Mac), run
 `scripts/tron-ios-device share --title "<what this build is>" --notes "<what
 changed, what to test>"` and post its `Install page:` link in the chat (a
-`notify` with the link is fine). It publishes the same validated `Tron Device` +
+`notify` with the link is fine). Plain `share` builds fetched `origin/main`, never
+the caller's checkout; to share a preview, push its branch and add `--ref <branch>`.
+`install` always builds fetched `origin/main`. It publishes the same validated `Tron Device` +
 `LocalDevice` artifact to the tailnet-only share host on this Mac; see
 [Over-the-air development install](../../../packages/ios-app/docs/development.md#over-the-air-development-install).
 Share only when the user asks. If the share host is not reachable, ask the user

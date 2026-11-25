@@ -792,7 +792,8 @@ main() {
 case "${1:-}" in
     source) exec python3 "$ROOT_DIR/scripts/run-main-source.py" ;;
     install|share)
-        if [[ "${TRON_MAIN_SOURCE_ROOT:-}" != "$ROOT_DIR" ]]; then
+        admission="$(dirname "$ROOT_DIR")/main-source-admission"
+        if [[ -z "${TRON_MAIN_SOURCE_NONCE:-}" || ! -f "$admission" || "$(<"$admission")" != "$TRON_MAIN_SOURCE_NONCE" ]]; then
             exec python3 "$ROOT_DIR/scripts/run-main-source.py" -- scripts/tron-ios-device "$@"
         fi
         ;;
