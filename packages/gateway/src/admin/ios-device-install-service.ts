@@ -20,6 +20,7 @@ import {
   type FailureLine,
 } from "./document-admission.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
+import { CONTROL_CHARACTER } from "../foundation/control-characters.js";
 
 export const IOS_DEVICE_INSTALL_CAPABILITY = "ios-device-install.v3";
 const CONFIG_KIND = "tron-ios-device-install-config";
@@ -104,7 +105,7 @@ type IosDeviceInstallLauncher = (request: {
 
 function boundedText(value: unknown, name: string, maximum: number): string {
   if (typeof value !== "string" || Buffer.byteLength(value) === 0 || Buffer.byteLength(value) > maximum
-    || /[\u0000-\u001f\u007f]/u.test(value)) {
+    || CONTROL_CHARACTER.test(value)) {
     throw new GatewayError("conflict", `iOS device install ${name} is malformed`);
   }
   return value;
@@ -394,7 +395,7 @@ export class IosDeviceInstallService {
     discoverer?: IosDeviceTargetDiscovery;
     launcher?: IosDeviceInstallLauncher | false;
   }) {
-    if (!isAbsolute(options.tronHome) || /[\u0000-\u001f\u007f]/u.test(options.tronHome)) {
+    if (!isAbsolute(options.tronHome) || CONTROL_CHARACTER.test(options.tronHome)) {
       throw new GatewayError("conflict", "iOS device install data root is invalid");
     }
     if (options.gatewayChannel !== undefined

@@ -400,7 +400,7 @@ export class SessionSearchService {
           const vector = await this.semanticClient.embed(entry.text, this.semanticModel?.language, this.semanticAbort.signal);
           if (generation !== this.semanticGeneration) return;
           if (!this.admitSemanticVector(document.sessionId, document, entry, vector)) return;
-        } catch (error) { if (this.semanticAbort.signal.aborted) return; this.semanticCoverage = "partial"; }
+        } catch { if (this.semanticAbort.signal.aborted) return; this.semanticCoverage = "partial"; }
       }
       await this.yieldSlice();
     }

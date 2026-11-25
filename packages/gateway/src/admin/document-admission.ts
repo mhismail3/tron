@@ -1,12 +1,12 @@
 import { lstat, realpath } from "node:fs/promises";
 import { isAbsolute, join, parse } from "node:path";
 import { GatewayError } from "../errors.js";
+import { CONTROL_CHARACTER, CONTROL_CHARACTER_RUNS } from "../foundation/control-characters.js";
 
 export const COMMAND_ID = /^[A-Za-z0-9._:-]{8,160}$/u;
 
 const MAX_TIMESTAMP_BYTES = 64;
 const MAX_PATH_BYTES = 4_096;
-const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/u;
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/u;
 const ISO_TIMESTAMP_WITH_OFFSET = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u;
 
@@ -18,7 +18,7 @@ export interface FailureLine {
 
 export function boundedFailureText(error: unknown, line: FailureLine): string {
   const raw = error instanceof Error ? error.message : String(error);
-  const cleaned = raw.replace(/[\u0000-\u001f\u007f]+/gu, " ").replace(/\s+/gu, " ").trim();
+  const cleaned = raw.replace(CONTROL_CHARACTER_RUNS, " ").replace(/\s+/gu, " ").trim();
   if (Buffer.byteLength(cleaned) <= line.maximum) return cleaned || line.fallback;
   return Buffer.from(cleaned).subarray(0, line.maximum).toString("utf8").replace(/�+$/u, "");
 }
@@ -39,7 +39,7 @@ interface TimestampAdmission {
 export function admitIsoTimestamp(value: unknown, admission: TimestampAdmission): string {
   if (value === undefined || value === null) throw new GatewayError("conflict", admission.rejection);
   if (typeof value !== "string" || Buffer.byteLength(value) === 0 || Buffer.byteLength(value) > MAX_TIMESTAMP_BYTES
-    || CONTROL_CHARACTERS.test(value)) {
+    || CONTROL_CHARACTER.test(value)) {
     throw new GatewayError("conflict", admission.shapeRejection ?? admission.rejection);
   }
   if (!(admission.allowOffset ? ISO_TIMESTAMP_WITH_OFFSET : ISO_TIMESTAMP).test(value)) {
@@ -62,7 +62,7 @@ interface TrustedDirectoryAdmission {
 
 export async function admitTrustedDirectory(value: unknown, admission: TrustedDirectoryAdmission): Promise<string> {
   if (typeof value !== "string" || !isAbsolute(value) || Buffer.byteLength(value) > MAX_PATH_BYTES
-    || CONTROL_CHARACTERS.test(value)) {
+    || CONTROL_CHARACTER.test(value)) {
     throw new GatewayError("invalid_request", `${admission.subject} must be an absolute path`);
   }
   const subject = `${admission.subject} ${JSON.stringify(value)}`;

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { basename, dirname, isAbsolute, normalize } from "node:path";
 import { openNativeCaptureTransport } from "./native-capture-transport.js";
 import type { NativeCaptureTransport } from "./native-capture-transport.js";
+import { CONTROL_CHARACTER } from "../foundation/control-characters.js";
 
 const CONTROL_LIMIT = 65_536;
 const JPEG_LIMIT = 2 * 1024 * 1024;
@@ -222,7 +223,7 @@ class NativeCaptureClient {
       if (this.#closing) throw new Error("Native automation endpoint retired before publication");
       const generation = uuid(reply.generation), socket = reply.socket;
       if (typeof socket !== "string" || !isAbsolute(socket) || normalize(socket) !== socket || Buffer.byteLength(socket) >= 104
-          || /[\u0000-\u001f\u007f]/u.test(socket) || basename(socket) !== "s" || basename(dirname(socket)) !== `tron-cua-${generation}`) {
+          || CONTROL_CHARACTER.test(socket) || basename(socket) !== "s" || basename(dirname(socket)) !== `tron-cua-${generation}`) {
         throw new Error("Invalid native automation socket");
       }
       return Object.freeze({ socket, generation });

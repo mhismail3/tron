@@ -7,6 +7,7 @@ import { readSecureJson, SecureJsonFileError } from "../foundation/secure-json.j
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import { GatewayError } from "../errors.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
+import { CONTROL_CHARACTER, CONTROL_CHARACTERS } from "../foundation/control-characters.js";
 
 interface LocalAuthDocument {
   version: 2;
@@ -210,7 +211,7 @@ export class DeviceStore {
         ])
         || typeof device.id !== "string" || device.id.length === 0 || Buffer.byteLength(device.id) > 100
         || typeof device.name !== "string" || device.name.trim().length === 0 || Buffer.byteLength(device.name) > MAXIMUM_DEVICE_NAME_BYTES
-        || /[\u0000-\u001f\u007f]/.test(device.name)
+        || CONTROL_CHARACTER.test(device.name)
         || (device.customLabel !== undefined && !isCustomLabel(device.customLabel))
         || (device.observedName !== undefined && !isObservedName(device.observedName))
         || typeof device.tokenHash !== "string" || canonicalTokenHash(device.tokenHash) === null
@@ -297,7 +298,7 @@ export class DeviceStore {
       }
 
       const token = makeToken();
-      const safeDeviceName = deviceName.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 80);
+      const safeDeviceName = deviceName.replace(CONTROL_CHARACTERS, "").trim().slice(0, 80);
       const record: DeviceRecord = {
         id: randomUUID(),
         name: safeDeviceName || "Mobile device",

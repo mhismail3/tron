@@ -1,5 +1,5 @@
 import { workspaceModule } from "../../../workspace/workspace-module.js";
-import { basename, join } from "node:path";
+import { basename } from "node:path";
 import { setHomeMemoryModels } from "../../../../test-support/settings-dependencies.js";
 import { fauxAssistantMessage, fauxToolCall, type AssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -283,7 +283,6 @@ describe("Home session controls", () => {
   it("applies the Home session's model, thinking and context window through Home's saved settings", async () => {
     const f = await fixture();
     await configure(f);
-    const owner = homeOwnerOf(f.registry);
     const home = await f.registry.acquire(f.home.sessionId);
     expect(home.snapshot().model).toEqual({ provider: f.model.provider, id: f.model.id });
 

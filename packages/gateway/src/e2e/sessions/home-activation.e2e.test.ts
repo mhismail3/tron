@@ -1510,7 +1510,7 @@ describe("Tron Home activations end to end", () => {
     });
 
     it("invalidates continuation on append and context edit, and refuses partial source failure", async () => {
-      const { f, old, current, entryId } = await browserFixture("invalidation");
+      const { f, current, entryId } = await browserFixture("invalidation");
       const first = await page(f, { limit: 1 });
       current.sessionManager.appendContextEdit(entryId, { content: [{ type: "text", text: "edited projection" }] });
       await expect(page(f, { limit: 1, cursor: first.nextCursor })).rejects.toMatchObject({ code: "conflict", details: { reason: "home-memory-revision-changed" } });

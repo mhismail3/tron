@@ -8,11 +8,12 @@ import type { HookResources } from "./hook-resources.js";
 import type { PackageService } from "./package-service.js";
 import type { McpAdminService } from "./mcp-admin-service.js";
 import type { ModelConfigService } from "./model-config-service.js";
+import { CONTROL_CHARACTERS } from "../foundation/control-characters.js";
 
 const LIMIT = 64;
 const TEXT_LIMIT = 2_048;
 
-const text = (value: string): string => redactCredentials(redactCredentialUrls(value)).replace(/[\u0000-\u001f\u007f]/gu, " ").slice(0, TEXT_LIMIT);
+const text = (value: string): string => redactCredentials(redactCredentialUrls(value)).replace(CONTROL_CHARACTERS, " ").slice(0, TEXT_LIMIT);
 const sanitize = <T>(value: T): T => {
   if (typeof value === "string") return text(value) as T;
   if (Array.isArray(value)) return value.map(sanitize) as T;

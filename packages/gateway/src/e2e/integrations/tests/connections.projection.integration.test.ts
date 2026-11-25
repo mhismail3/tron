@@ -2,7 +2,6 @@ import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/pr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
-import { startLockGateway } from "../../../../test-support/gateway-lock-harness.js";
 import { ConnectionOwner } from "../../../integrations/connection-owner.js";
 import { acquireAgentRuntimeLock } from "../../../sessions/agent-runtime-lock.js";
 

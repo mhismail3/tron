@@ -56,6 +56,7 @@ export class MacTerminalService {
       ancestor = dirname(ancestor);
     }
     this.root = join(realpathSync(ancestor), ...remaining);
+    // oxlint-disable-next-line no-control-regex -- refuses C0 controls in the SSH home path
     if (/[\x00-\x1f]/u.test(this.root) || this.root.trim() !== this.root) throw new GatewayError("invalid_request", "Invalid SSH home path");
     this.port = options.port ?? MAC_TERMINAL_PORT;
     if (!Number.isInteger(this.port) || this.port < 1024 || this.port > 65535) throw new GatewayError("invalid_request", "Mac Terminal requires a high port");

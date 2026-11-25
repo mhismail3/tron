@@ -1,6 +1,7 @@
 import { PROMPT_TEXT_MAX_BYTES } from "./prompt-bounds.js";
 import type { ResourceInvocation } from "../../protocol/types.js";
 import { GatewayError } from "../../errors.js";
+import { CONTROL_CHARACTER_EXCEPT_LINE_BREAKS } from "../../foundation/control-characters.js";
 
 export const RESOURCE_NAME_MAX_BYTES = 512;
 export const RESOURCE_ARGUMENTS_MAX_BYTES = 5_000;
@@ -89,7 +90,7 @@ function admittedText(value: unknown, field: string, maximumBytes: number, allow
   if (Buffer.byteLength(value, "utf8") > maximumBytes) {
     throw new GatewayError("invalid_request", `${field} exceeds ${maximumBytes} UTF-8 bytes`);
   }
-  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value)) {
+  if (CONTROL_CHARACTER_EXCEPT_LINE_BREAKS.test(value)) {
     throw new GatewayError("invalid_request", `${field} contains unsupported control characters`);
   }
   return value;

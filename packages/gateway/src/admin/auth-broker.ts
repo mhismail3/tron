@@ -742,7 +742,8 @@ export class AuthBroker {
       const finish = (error?: Error) => {
         if (settled) return;
         settled = true;
-        error ? reject(error) : resolve();
+        if (error) reject(error);
+        else resolve();
       };
       const request = httpRequest({
         host,

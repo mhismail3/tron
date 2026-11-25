@@ -10,6 +10,7 @@ import type { Model } from "../kernel/pi/ai.js";
 import { estimateTokens, type AgentSession, type ExtensionFactory, type ModelRuntime, type SessionEntry, type SessionManager } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import type { ContextWindowLimits, ContextWindowPolicy, ModelRef } from "../protocol/types.js";
+import { CONTROL_CHARACTER } from "../foundation/control-characters.js";
 
 export const CONTEXT_WINDOW_ENTRY = "tron.context-window.v1";
 const MAX_CONTEXT_PREFERENCES = 500;
@@ -26,7 +27,7 @@ export function parseContextModelKey(key: string): ModelRef {
   const separator = key.indexOf("/");
   const provider = key.slice(0, separator);
   const id = key.slice(separator + 1);
-  if (separator < 1 || provider.length > 120 || !id || id.length > 300 || /[\u0000-\u001f\u007f]/u.test(key)) {
+  if (separator < 1 || provider.length > 120 || !id || id.length > 300 || CONTROL_CHARACTER.test(key)) {
     throw new GatewayError("invalid_request", "Context window preferences require provider/modelId keys");
   }
   return { provider, id };

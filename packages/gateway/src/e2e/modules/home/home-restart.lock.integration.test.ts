@@ -113,7 +113,7 @@ describe("gateway/home contention, publication and restart lock", () => {
     const admitted = await command("home.prompt", { text: "Delegate the restart work." });
     expect(admitted.ok, JSON.stringify(admitted)).toBe(true);
     await waitFor(() => callers.some((entry) => entry.caller === "home-input"), "the held Home activation");
-    const second = await command("home.prompt", { text: "A second message while busy." });
+    await command("home.prompt", { text: "A second message while busy." });
     const followUp = await command("home.prompt", { text: "Follow up after the activation.", behavior: "followUp" });
     const disableWhileBusy = await command("home.disable");
     releaseInput();

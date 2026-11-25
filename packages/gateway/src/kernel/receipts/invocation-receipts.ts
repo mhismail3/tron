@@ -5,6 +5,7 @@ import { GatewayError } from "../../errors.js";
 import { MAXIMUM_RESOURCE_INVOCATIONS, RESOURCE_ARGUMENTS_MAX_BYTES } from "../resources/resource-invocation.js";
 import { MAX_ID_BYTES, MAX_NAME_BYTES, validOrigin, validText, validTimestamp } from "./receipt-fields.js";
 import { core as lifecycle, type Fact, type Kind, type Life, type Mark, type Refusal } from "../../core/receipts/invocation-lifecycle/facade.js";
+import { CONTROL_CHARACTER_EXCEPT_LINE_BREAKS } from "../../foundation/control-characters.js";
 
 export interface InvocationProjection {
   version: 1;
@@ -152,7 +153,7 @@ export function parseInvocationReceipt(value: unknown): InvocationReceiptData | 
   if (r.arguments !== undefined && !validText(r.arguments, RESOURCE_ARGUMENTS_MAX_BYTES, true)) return undefined;
   if (r.submittedText !== undefined && (typeof r.submittedText !== "string"
       || Buffer.byteLength(r.submittedText, "utf8") > 192 * 1_024
-      || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(r.submittedText))) return undefined;
+      || CONTROL_CHARACTER_EXCEPT_LINE_BREAKS.test(r.submittedText))) return undefined;
   if (r.resources !== undefined && !validResources(r.resources, r.source, r.name, r.arguments)) return undefined;
   if (r.lifecycle !== undefined && (!validText(r.lifecycle, 64) || !LIFECYCLES.has(r.lifecycle as InvocationLifecycle))) return undefined;
   if (r.canonicalEntryId !== undefined && !validText(r.canonicalEntryId, MAX_ID_BYTES)) return undefined;

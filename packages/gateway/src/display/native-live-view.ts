@@ -49,9 +49,12 @@ export function observeNativeWindow(client: NativeLiveClient, handle: string,
       stop();
       try {
         const result = await closing!;
+        // oxlint-disable-next-line no-unsafe-finally -- a cleanup failure must surface even when the guarded block already failed
         if (result.diagnostic) throw new Error("Native capture joined with a retirement diagnostic");
       } catch (cleanup) {
+        // oxlint-disable-next-line no-unsafe-finally -- a cleanup failure must surface even when the guarded block already failed
         if (failed) throw new AggregateError([failure, cleanup], "Native capture and retirement failed");
+        // oxlint-disable-next-line no-unsafe-finally -- a cleanup failure must surface even when the guarded block already failed
         throw cleanup;
       }
     }

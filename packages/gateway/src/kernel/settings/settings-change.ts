@@ -64,7 +64,7 @@ type SubjectMutation<T> = { context: SubjectContext; writes: readonly SubjectWri
 );
 
 interface SettingsObserver {
-  applied(target: SettingsTarget, changes: readonly ChangeOutcome[], context: { actor: Actor; reason?: string }): void | Promise<void>;
+  applied(target: SettingsTarget, changes: readonly ChangeOutcome[]): void | Promise<void>;
 }
 
 interface SettingsChangeOwner extends SettingsReadOwner {
@@ -210,8 +210,8 @@ export class SettingsChangePath {
     const adopted = this.outcomes(applied.filter(done => done.plan.target));
     let signal: SettingsSignal | undefined;
     try {
-      await this.observer?.applied(target, changes, { actor: context.actor, ...(context.reason ? { reason: context.reason } : {}) });
-      if (adopted.length) await this.observer?.applied(applied.find(done => done.plan.target)!.plan.target!, adopted, { actor: context.actor, ...(context.reason ? { reason: context.reason } : {}) });
+      await this.observer?.applied(target, changes);
+      if (adopted.length) await this.observer?.applied(applied.find(done => done.plan.target)!.plan.target!, adopted);
       signal = await this.announce(changes, context);
     } catch (error) { throw asUncertainOutcome(error, "Settings applied but notification failed; inspect before retrying"); }
     return { status: "applied", changes, review, ...(signal ? { signal } : {}) };
@@ -237,9 +237,8 @@ export class SettingsChangePath {
         changeId: entry.changeId, key: entry.key, qualifiers: entry.qualifiers!, layer: "session", status: "applied",
         before: entry.before ?? null, after: entry.after ?? null,
       }));
-      const context = mutation.context;
       try {
-        await this.observer?.applied({ kind: "home" }, changes, { actor: context.actor, ...(context.reason ? { reason: context.reason } : {}) });
+        await this.observer?.applied({ kind: "home" }, changes);
         return await project(mutation.result, { status: "applied", changes });
       } catch (error) { throw asUncertainOutcome(error, "Profile applied but its result could not be published"); }
   }
@@ -306,7 +305,7 @@ export class SettingsChangePath {
       if (withCommitProof) await withCommitProof(publish); else await publish();
       const changes: ChangeOutcome[] = entries.map(entry => ({ changeId: entry.changeId, key: entry.key, qualifiers: entry.qualifiers!,
         layer: "session", status: "applied", before: entry.before ?? null, after: entry.after ?? null }));
-      if (entries.length) await Promise.resolve().then(() => this.observer?.applied({ kind: "home" }, changes, { actor: context.actor, ...(context.reason ? { reason: context.reason } : {}) }))
+      if (entries.length) await Promise.resolve().then(() => this.observer?.applied({ kind: "home" }, changes))
         .catch(error => { throw asUncertainOutcome(error, "Profile committed but its notification failed"); });
       return { status: "applied", changes };
   }
@@ -419,6 +418,7 @@ export class SettingsChangePath {
         return result;
       } finally {
         try { await outside?.end(writes, landed); }
+        // oxlint-disable-next-line no-unsafe-finally -- a cleanup failure must surface even when the guarded block already failed
         catch (error) { throw asUncertainOutcome(error, "Settings effects settled but outside-observation publication failed"); }
       }
     };

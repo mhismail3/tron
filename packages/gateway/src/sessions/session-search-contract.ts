@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { SessionSearchForkBoundary } from "./session-branch.js";
+import { CONTROL_CHARACTER } from "../foundation/control-characters.js";
 
 const SESSION_SEARCH_MAX_QUERY_BYTES = 2_048;
 const SESSION_SEARCH_MAX_RESULTS = 50;
@@ -79,7 +80,7 @@ export interface SessionSearchRequest {
 export function boundedQuery(raw: unknown): string {
   if (typeof raw !== "string") throw new Error("Search query must be a string");
   const query = raw.trim();
-  if (!query || Buffer.byteLength(query, "utf8") > SESSION_SEARCH_MAX_QUERY_BYTES || /[\u0000-\u001f\u007f]/u.test(query)) {
+  if (!query || Buffer.byteLength(query, "utf8") > SESSION_SEARCH_MAX_QUERY_BYTES || CONTROL_CHARACTER.test(query)) {
     throw new Error("Search query is empty or exceeds its bound");
   }
   return query;

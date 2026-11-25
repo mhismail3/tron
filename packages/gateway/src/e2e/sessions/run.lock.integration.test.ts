@@ -2,7 +2,6 @@ import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { readFile } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 import { type LockGateway, type LockGatewayOptions } from "../../../test-support/gateway-lock-harness.js";
-import { normalizeTraceValue } from "../../../test-support/scenario-lock.js";
 import { awaitsWithin } from "../../../test-support/wait-for.js";
 import { compactionScenario, EXTENSION_UI_OPTIONS, extensionUiScenario, gate, openLockSession, promptStreamScenario, type LockSession } from "../../../test-support/lock-scenarios.js";
 import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
@@ -27,7 +26,7 @@ async function openSession(name: string, options?: LockGatewayOptions): Promise<
   return session;
 }
 
-async function finish(session: Session, shape: string): Promise<RunLockTrace> {
+async function finish(session: Session): Promise<RunLockTrace> {
   await session.gateway.settled(session.sessionId);
   const transcript = await session.client.request("session.transcript", { sessionId: session.sessionId });
   expect(transcript.ok, JSON.stringify(transcript)).toBe(true);
@@ -127,7 +126,7 @@ describe("gateway/run kernel locks", () => {
   it("prompt/stream: one prompt streams thinking, text and a tool round trip", async () => {
     const session = await openSession("run-prompt-stream");
     await promptStreamScenario(session);
-    const trace = await finish(session, "chat");
+    const trace = await finish(session);
     const [opened] = results(trace, "session.open") as Array<{ completionRevision: number; session: Record<string, unknown> }>;
     expect(opened!.completionRevision).toBe(0);
     expect(opened!.session).toMatchObject({
@@ -177,7 +176,7 @@ describe("gateway/run kernel locks", () => {
     expect((await session.prompt("then follow up", { behavior: "followUp" })).ok).toBe(true);
     held.open();
     expect((await running).ok).toBe(true);
-    const trace = await finish(session, "chat");
+    const trace = await finish(session);
     const texts = trace.canonicalJsonl.flatMap((entry) => {
       const message = (entry as { message?: { role?: string; content?: unknown } }).message;
       return message?.role === "user" ? [JSON.stringify(message.content)] : [];
@@ -231,7 +230,7 @@ describe("gateway/run kernel locks", () => {
     });
     expect(aborted.ok, JSON.stringify(aborted)).toBe(true);
     expect(aborted.result).toEqual({ aborted: true });
-    const trace = await finish(session, "chat");
+    const trace = await finish(session);
     const assistant = trace.canonicalJsonl.find((entry) => (entry as { message?: { role?: string } }).message?.role === "assistant");
     expect((assistant as { message: { stopReason?: string } }).message.stopReason).toBe("aborted");
     expect(receipts(trace, ["start a turn to abort"])).toEqual(["start:staged", "transition:accepted", "binding:", "terminal:interrupted"]);
@@ -251,7 +250,7 @@ describe("gateway/run kernel locks", () => {
     const session = await openSession("run-compaction");
     const { compacted } = await compactionScenario(session);
     expect(compacted.result).toEqual({ compacted: true, queued: false });
-    const trace = await finish(session, "chat");
+    const trace = await finish(session);
     expect(canonicalTypes(trace)).toEqual([...SESSION_PREAMBLE, RECEIPT, RECEIPT, "message", "message", RECEIPT, "message", RECEIPT, RECEIPT, RECEIPT,
       "message", RECEIPT, "message", RECEIPT, "compaction"]);
     const compaction = trace.canonicalJsonl.find((entry) => (entry as { type?: unknown }).type === "compaction") as
@@ -284,7 +283,7 @@ describe("gateway/run kernel locks", () => {
     expect(pending).toMatchObject({ invocationId: expect.any(String), operationId: expect.any(String), owner: { id: expect.any(String) } });
     expect(pending).toMatchObject({ method: "select", title: "Choose a lock path", options: ["Keep", "Change"], presentationRevision: 1,
       owner: { kind: "extension", source: "auto", title: "Lock Select" } });
-    const trace = await finish(session, "chatWithExtensionSelect");
+    const trace = await finish(session);
     const result = trace.canonicalJsonl.find((entry) => (entry as { message?: { role?: string } }).message?.role === "toolResult");
     expect(JSON.stringify(result)).toContain("chosen: Keep");
     expect((result as { message: { details?: unknown } }).message.details).toEqual({ answer: "Keep" });

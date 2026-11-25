@@ -30,11 +30,10 @@ scripts/tron chat [--session <id>]   # terminal chat attached to the Gateway run
   unsupported ([charter](../../AGENTS.md#architecture-invariants)).
 
 **Lint.** `npm run lint` runs Oxlint (pinned in `devDependencies`) over `src`, `test-support`,
-`test-fixtures` and `scripts`. `.oxlintrc.json` enables Oxlint's `correctness` category plus the rules it lists; each
-correctness rule it turns `off` still has findings and joins once it has none (#2647). A rule
+`test-fixtures` and `scripts`. `.oxlintrc.json` enables Oxlint's whole `correctness` category plus the rules it lists and never
+turns a rule `off`; it ignores only the generated Dafny cores (`src/core/**/core.mjs`). A rule
 joins only with zero findings, and a disable needs a reason after `--`.
-`npm run test:lint` proves real bad fixtures fail. Type-aware async rules and
-`no-unused-vars` wait on #1227.
+`npm run test:lint` proves real bad fixtures fail. Type-aware async rules wait on #1227.
 
 Wire-traffic profiling and multi-session qualification:
 [Gateway profile](../../scripts/tron-profile-gateway.md).

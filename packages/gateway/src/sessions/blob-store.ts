@@ -6,6 +6,7 @@ import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { GatewayError } from "../errors.js";
 import { abortableRead } from "../util/abortable-read.js";
+import { CONTROL_CHARACTER } from "../foundation/control-characters.js";
 
 interface BlobValueBase {
   mimeType: string;
@@ -418,7 +419,7 @@ export class BlobStore {
 
   private validateMimeType(mimeType: string): void {
     if (Buffer.byteLength(mimeType) > BLOB_MAX_MIME_TYPE_BYTES
-      || /[\u0000-\u001f\u007f]/.test(mimeType)) {
+      || CONTROL_CHARACTER.test(mimeType)) {
       throw new GatewayError("conflict", "Blob MIME type exceeds the metadata limit or contains control characters");
     }
   }

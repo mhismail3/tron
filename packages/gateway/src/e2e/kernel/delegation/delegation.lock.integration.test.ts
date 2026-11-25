@@ -4,7 +4,7 @@ import { fauxAssistantMessage, fauxToolCall, type TranscriptContext } from "@ear
 import { afterEach, describe, expect, it } from "vitest";
 import { disposeFixtures, fixture } from "../../../../test-support/home-task-fixture.js";
 import { startScriptedChild, type ChildModelServer } from "../../../../test-support/home-task-subagent-child.js";
-import { normalizeTraceValue, type TraceValue } from "../../../../test-support/scenario-lock.js";
+import { normalizeTraceValue } from "../../../../test-support/scenario-lock.js";
 import { waitFor } from "../../../../test-support/wait-for.js";
 
 const BOUND = { boundMs: 30_000 };
@@ -40,7 +40,6 @@ describe("gateway/delegation kernel locks", () => {
     const sessionFolder = basename(f.registry.sessionDirectory(await realpath(f.cwd)));
     const normalize = (value: unknown) => normalizeTraceValue(JSON.parse(JSON.stringify(value).replaceAll(sessionFolder, "<session-cwd>")), normalization);
     const canonical = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n").map((line) => JSON.parse(line));
-    const activity = (slot.snapshot().processActivities ?? []).filter((item) => item.kind === "subagent");
     const childFile = canonical.flatMap((entry) => {
       const details = entry.type === "message" && entry.message.role === "toolResult" ? entry.message.details : undefined;
       const results = (details as { results?: Array<{ sessionFile?: string }> } | undefined)?.results ?? [];
@@ -49,13 +48,6 @@ describe("gateway/delegation kernel locks", () => {
     const child = childFile
       ? (await readFile(childFile, "utf8")).trimEnd().split("\n").map((line) => normalize(JSON.parse(line)))
       : [];
-    const trace = {
-      lock: "delegation-subagent",
-      providerRequests: requests as unknown as TraceValue[],
-      canonicalJsonl: canonical.map((entry) => normalize(entry)),
-      processActivity: activity.map((item) => normalize(item)),
-      childJsonl: child,
-    };
     const result = canonical.find((entry) => entry.type === "message" && entry.message.role === "toolResult");
         expect(result?.message.toolName).toBe("subagent");
         expect(result?.message.isError).toBe(false);

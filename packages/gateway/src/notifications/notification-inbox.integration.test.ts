@@ -89,7 +89,7 @@ const invoke = async (service: GatewayService, method: string, params: Record<st
 
 describe("notification inbox RPCs over a real credential document", () => {
   it("pages, filters, cuts and acknowledges the whole inbox across a full walk", async () => {
-    const { notifications, broadcasts, service } = await fixture();
+    const { broadcasts, service } = await fixture();
     const list = async (params: Record<string, unknown>) =>
       await invoke(service, "notification.inbox.list", params) as unknown as {
         notifications: NotificationInboxItem[]; revision: string; unreadCount: number; nextCursor?: string;

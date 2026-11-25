@@ -16,6 +16,7 @@ import {
   type FailureLine,
 } from "./document-admission.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
+import { CONTROL_CHARACTER } from "../foundation/control-characters.js";
 
 const MAX_DOCUMENT_BYTES = 64 * 1_024;
 const MAX_STRING_BYTES = 256;
@@ -104,7 +105,7 @@ function gatewayUpdateHelperPath(environment: NodeJS.ProcessEnv = process.env): 
   const payloadRoot = environment.TRON_GATEWAY_PAYLOAD_ROOT;
   if (environment.TRON_GATEWAY_SUPERVISED !== "1" || !value || !payloadRoot
     || !isAbsolute(value) || !isAbsolute(payloadRoot)
-    || /[\u0000-\u001f\u007f]/u.test(value) || /[\u0000-\u001f\u007f]/u.test(payloadRoot)) return undefined;
+    || CONTROL_CHARACTER.test(value) || CONTROL_CHARACTER.test(payloadRoot)) return undefined;
   try {
     const rootInfo = lstatSync(payloadRoot);
     const helperInfo = lstatSync(value);
@@ -228,7 +229,7 @@ function launchAgentUpdater(environment: NodeJS.ProcessEnv = process.env, tronHo
 function boundedString(value: unknown, name: string, maximum = MAX_STRING_BYTES): string | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "string" || Buffer.byteLength(value) === 0 || Buffer.byteLength(value) > maximum
-    || /[\u0000-\u001f\u007f]/u.test(value)) throw new GatewayError("conflict", `Gateway update ${name} is malformed`);
+    || CONTROL_CHARACTER.test(value)) throw new GatewayError("conflict", `Gateway update ${name} is malformed`);
   return value;
 }
 
@@ -315,8 +316,8 @@ function configDocument(value: unknown): GatewayUpdateConfig {
   if (Object.keys(raw).some((key) => !["schema", "kind", "sourceRoot", "artifactRoot", "updatedAt"].includes(key))
     || raw.schema !== UPDATE_CONFIG_SCHEMA || raw.kind !== UPDATE_CONFIG_KIND
     || typeof raw.sourceRoot !== "string" || !isAbsolute(raw.sourceRoot)
-    || Buffer.byteLength(raw.sourceRoot) > MAX_PATH_BYTES || /[\u0000-\u001f\u007f]/u.test(raw.sourceRoot)
-    || raw.artifactRoot !== undefined && (typeof raw.artifactRoot !== "string" || !isAbsolute(raw.artifactRoot) || Buffer.byteLength(raw.artifactRoot) > MAX_PATH_BYTES || /[\u0000-\u001f\u007f]/u.test(raw.artifactRoot))) {
+    || Buffer.byteLength(raw.sourceRoot) > MAX_PATH_BYTES || CONTROL_CHARACTER.test(raw.sourceRoot)
+    || raw.artifactRoot !== undefined && (typeof raw.artifactRoot !== "string" || !isAbsolute(raw.artifactRoot) || Buffer.byteLength(raw.artifactRoot) > MAX_PATH_BYTES || CONTROL_CHARACTER.test(raw.artifactRoot))) {
     throw new GatewayError("conflict", "Gateway update config is malformed");
   }
   return {

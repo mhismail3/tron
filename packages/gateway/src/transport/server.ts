@@ -1219,7 +1219,7 @@ export class GatewayServer {
         }
         throw error;
       }
-      const etag = `\"display-${artifactID}\"`;
+      const etag = `"display-${artifactID}"`;
       try {
         if (request.headers["if-none-match"] === etag) {
           response.writeHead(304, { etag, "cache-control": "private, immutable, max-age=31536000" });

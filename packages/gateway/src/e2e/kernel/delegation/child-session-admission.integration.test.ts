@@ -4,7 +4,7 @@ import { basename, dirname, join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ExtensionRunActivity, ExtensionToolOrigin } from "../../../protocol/types.js";
+import type { ExtensionRunActivity } from "../../../protocol/types.js";
 import { RuntimeRegistry } from "../../../kernel/session/runtime-registry.js";
 import { waitFor } from "../../../../test-support/wait-for.js";
 import { createColdRegistryFixture } from "../../../../test-support/runtime-registry-fixture.js";
@@ -431,7 +431,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", "fork-run");
     await Promise.all([mkdir(forksDirectory, { recursive: true }), mkdir(asyncDir, { recursive: true })]);
     const fork = SessionManager.forkFrom(parentFile, fixture.cwd, forksDirectory);
-    const firstChildEntry = fork.appendMessage(fauxAssistantMessage("fork transcript"));
+    fork.appendMessage(fauxAssistantMessage("fork transcript"));
     const forkFile = fork.getSessionFile()!;
     const artifactChildId = "artifact-fork-child";
     const startedAt = new Date(Date.now() - 1_000).toISOString();

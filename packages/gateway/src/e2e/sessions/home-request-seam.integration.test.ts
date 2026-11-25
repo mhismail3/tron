@@ -18,7 +18,7 @@ import type { SessionSnapshot } from "../../protocol/types.js";
 import type { EpisodicSummarizer } from "../../episodic/episodic-contract.js";
 import { HOME_MEMORY_VIEW_MARKER } from "../../modules/home/home-memory.js";
 import type { HomeRecord } from "../../modules/home/home-owner.js";
-import { HOME_NONCE_MARKER, HomeRequestPolicy, type HomeRefusalReason, type HomeRequestRecord } from "../../modules/home/home-request-policy.js";
+import { HOME_NONCE_MARKER, type HomeRefusalReason, type HomeRequestRecord } from "../../modules/home/home-request-policy.js";
 import { ModuleHost } from "../../kernel/host/module-host.js";
 import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 
@@ -978,7 +978,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
   it("C7b an unconfigured memory fails closed with zero provider requests", async () => {
     const item = await open("c7b", { home: true });
     item.faux.setResponses([async (context) => { item.requests.push(record(context)); return fauxAssistantMessage("must never be produced"); }]);
-    const outcome = await item.slot.prompt(longInput("C7b activation input")).then(
+    await item.slot.prompt(longInput("C7b activation input")).then(
       () => ({ rejected: false, message: "" }),
       (error: unknown) => ({ rejected: true, message: error instanceof Error ? `${error.name}: ${error.message}` : String(error) }),
     );

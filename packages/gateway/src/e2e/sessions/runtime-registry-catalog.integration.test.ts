@@ -352,7 +352,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const fixture = await coldFixture("reuse");
     await settleCatalog(fixture.registry);
     const walks = catalogWalks();
-    const before = walks.count();
 
     const catalog = await fixture.registry.catalog("user");
     expect(catalog.sessions.map((session) => session.id)).toContain(fixture.manager.getSessionId());
@@ -392,7 +391,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await initializeRegistry(restarted);
     await settleCatalog(restarted);
     const walks = catalogWalks();
-    const before = walks.count();
     const append = vi.spyOn(CatalogMetadataIndex.prototype, "append");
     try {
       const unchanged = await restarted.catalog("all");
@@ -1786,6 +1784,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const read = vi.spyOn(Object.getPrototypeOf(handle), "read").mockImplementation(async function (this: typeof handle, ...args: any[]) {
       const current = await this.stat();
       if (current.dev === identity.dev && current.ino === identity.ino) {
+        // oxlint-disable-next-line typescript/no-this-alias -- the spy captures the file handle whose read it fails
         failedHandle = this;
         throw failure;
       }

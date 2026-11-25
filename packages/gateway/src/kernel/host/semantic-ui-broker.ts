@@ -389,6 +389,7 @@ export class SemanticUIBroker {
   }
 
   context(): ExtensionUIContext {
+    // oxlint-disable-next-line typescript/no-this-alias -- getters and methods of this object literal read the owner, not the literal
     const broker = this;
     const context: ExtensionUIContext = {
       async select(title, options, opts) {

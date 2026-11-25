@@ -1,5 +1,5 @@
 import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -7,7 +7,7 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall, getCurrentTools, type
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { settingsDependencies, setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
-import { HOME_DEFAULT_TOOL_NAMES, HOME_TOOL_NAMES, homeToolCatalog } from "../../modules/home/home-runtime-policy.js";
+import { HOME_DEFAULT_TOOL_NAMES, homeToolCatalog } from "../../modules/home/home-runtime-policy.js";
 import { syntheticPng } from "../../../test-fixtures/synthetic-image.js";
 import { TrustService } from "../../kernel/resources/trust-service.js";
 import { maintainerChange } from "../../../test-support/native-change.js";
@@ -833,7 +833,7 @@ describe("typed settings at real runtime boundaries", () => {
     const f = await homeTaskFixture();
     const { settingsModel, settingsChanges } = f.settings;
     await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
-    const service = new GatewayService({ display: displayOwnerOf(f.registry),
+    new GatewayService({ display: displayOwnerOf(f.registry),
       config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: f.tronHome, agentDir: f.agentDir },
       modelRuntime: f.gateway, trust: f.trust, settingsModel, settingsChanges, sessions: f.registry, home: homeOwnerOf(f.registry),
       receipts: new CommandReceiptStore(f.tronHome), uploads: new UploadStore(f.tronHome, DEFAULT_MAX_UPLOAD_BYTES),

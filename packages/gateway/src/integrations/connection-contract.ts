@@ -3,6 +3,7 @@ import {
   type ConnectionPolicy, type ConnectionInstance,
   type RaindropCollectionMapping, type ConnectionOwnerState, type ConnectionOwnerReceipt,
 } from "../modules/integrations/contract.js";
+import { CONTROL_CHARACTER } from "../foundation/control-characters.js";
 
 const ID = /^[A-Za-z0-9._:-]{1,160}$/;
 const CREDENTIAL_REF = /^connector:[A-Za-z0-9._-]{1,64}:[A-Za-z0-9._:-]{1,256}$/;
@@ -20,13 +21,13 @@ function assertDefinitionId(value: unknown): asserts value is string {
 }
 
 function bounded(value: unknown, label: string, maximum: number): asserts value is string {
-  if (typeof value !== "string" || value.length < 1 || value.length > maximum || /[\u0000-\u001f\u007f]/.test(value)) throw new Error(`${label} is invalid`);
+  if (typeof value !== "string" || value.length < 1 || value.length > maximum || CONTROL_CHARACTER.test(value)) throw new Error(`${label} is invalid`);
 }
 
 function normalizeProviderDisplayName(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const label = value.trim();
-  return label.length > 0 && label.length <= 320 && !/[\u0000-\u001f\u007f]/.test(label) ? label : undefined;
+  return label.length > 0 && label.length <= 320 && !CONTROL_CHARACTER.test(label) ? label : undefined;
 }
 
 function validateConnectionPolicy(value: unknown): asserts value is ConnectionPolicy {

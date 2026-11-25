@@ -146,6 +146,7 @@ export function runUpdate({ gatewayDir = GATEWAY, forkRepo, commit, spawn = spaw
   } finally {
     if (existsSync(processOwnerFailure)) {
       const failure = readFileSync(processOwnerFailure, "utf8").slice(0, 4_096).trim();
+      // oxlint-disable-next-line no-unsafe-finally -- a cleanup failure must surface even when the guarded block already failed
       throw new Error(`probe process join failed; staging preserved at ${staging}: ${failure}`);
     }
     rmSync(staging, { recursive: true, force: true });

@@ -1,14 +1,12 @@
 import { createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync, readdirSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { execFile, execFileSync, spawn } from "node:child_process";
 import WebSocket from "ws";
 import { promisify } from "node:util";
 import { once } from "node:events";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -80,6 +78,7 @@ async function closeProducer(child: ReturnType<typeof spawn>, exited: Promise<un
   try {
     if(child.exitCode===null && endpoint){const socket=new WebSocket(endpoint);try {await awaitsWithin(once(socket,"open"),"producer cleanup connection",HOOK_HANG_BOUND_MS);socket.send(JSON.stringify({id:1,method:"Browser.close"}));await awaitsWithin(exited,"producer graceful exit",HOOK_HANG_BOUND_MS);} finally {socket.terminate();}}
   } finally {
+    // oxlint-disable-next-line no-unsafe-finally -- a cleanup failure must surface even when the guarded block already failed
     if(child.exitCode===null){if(!child.pid || child.pid<=1) throw new Error("Producer cleanup has no owned child PID; profile retained");child.kill("SIGTERM");await awaitsWithin(exited,"owned producer child exit",HOOK_HANG_BOUND_MS);}
   }
 }

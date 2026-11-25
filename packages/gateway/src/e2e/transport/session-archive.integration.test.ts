@@ -165,7 +165,7 @@ async function fixture(options: {
     current = { registry, service, server, receipts, port };
     return current;
   };
-  const stack = await start();
+  await start();
   cleanup.push(async () => {
     if (current) {
       sockets.forEach((socket) => socket.terminate());

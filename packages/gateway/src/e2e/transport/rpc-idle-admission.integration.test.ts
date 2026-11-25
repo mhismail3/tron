@@ -560,10 +560,6 @@ describe("receipt-backed mutations against their own session work entry", () => 
       return originalSessionPrompt(text, options);
     };
     const queuedBeforeStop = (slotBeforeStop as any).runQueue.queuedMessages.map((item: any) => ({ id: item.id, behavior: item.behavior, images: item.images?.length }));
-    const activeBashOwners = {
-      sdk: (slotBeforeStop as any).runtime.session.isBashRunning,
-      direct: (slotBeforeStop as any).directBashProcesses?.hasActiveProcesses,
-    };
     expect(queuedBeforeStop).toHaveLength(steerCount);
     const stopped = await client.request("steer-stop", "session.abort", {
       sessionId: session.id, commandId: "steer-stop",

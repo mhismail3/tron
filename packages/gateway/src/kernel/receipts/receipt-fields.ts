@@ -1,4 +1,5 @@
 import type { ChatOrigin } from "../../protocol/types.js";
+import { CONTROL_CHARACTER, CONTROL_CHARACTER_EXCEPT_LINE_BREAKS } from "../../foundation/control-characters.js";
 
 export const MAX_ID_BYTES = 256;
 export const MAX_NAME_BYTES = 512;
@@ -6,7 +7,7 @@ const ORIGIN_KINDS = new Set(["user", "subagent", "extension", "process", "gatew
 const ORIGIN_CONFIDENCE = new Set(["boundary", "receipt", "adapter", "unknown"] as const);
 
 export function validText(value: unknown, bytes: number, allowNewlines = false): value is string {
-  const controls = allowNewlines ? /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u : /[\u0000-\u001f\u007f]/u;
+  const controls = allowNewlines ? CONTROL_CHARACTER_EXCEPT_LINE_BREAKS : CONTROL_CHARACTER;
   return typeof value === "string" && value.length > 0 && Buffer.byteLength(value, "utf8") <= bytes
     && !controls.test(value);
 }

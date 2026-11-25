@@ -9,6 +9,7 @@ import {
   BROWSER_LIVE_VIEW_SCHEMA, DISPLAY_SCHEMA, NATIVE_LIVE_VIEW_SCHEMA,
   type DisplayArtifactDescriptor, type DisplayKind, type DisplayProjection, type DisplaySurface, type LiveViewDescriptor,
 } from "../modules/display/contract.js";
+import { CONTROL_CHARACTER } from "../foundation/control-characters.js";
 
 const DISPLAY_EMBEDDED_MEDIA_MAXIMUM_BYTES = 50 * 1_024 * 1_024;
 
@@ -20,7 +21,7 @@ function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[])
 export function boundedString(value: unknown, minimum: number, maximumBytes: number): value is string {
   return typeof value === "string" && Buffer.byteLength(value) >= minimum
     && Buffer.byteLength(value) <= maximumBytes
-    && !/[\u0000-\u001f\u007f]/.test(value);
+    && !CONTROL_CHARACTER.test(value);
 }
 
 function blockedIPv4(host: string): boolean {
