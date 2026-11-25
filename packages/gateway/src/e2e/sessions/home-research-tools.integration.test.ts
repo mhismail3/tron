@@ -616,7 +616,7 @@ describe("Tron Home research tools", () => {
     expect((await f.search.search({ query: "BROKEN-NEEDLE" })).coverage).toMatchObject({ omittedSessions: 1, reason: "One or more canonical sessions could not be admitted for search" });
     expect(refusals(f)).toEqual([]);
     recordCase("search-task-report", { reportHit: "worker-root/worker-report", omittedWithReason: partial.coverage.omittedSessions });
-  }, 60_000);
+  });
 
   it("redacts search snippets and explicit or fallback titles before persisted Home results", async () => {
     const secret = `sk-${"searchcredentialfixture".repeat(6)}`;
