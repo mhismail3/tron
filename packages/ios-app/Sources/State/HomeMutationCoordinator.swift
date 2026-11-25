@@ -169,6 +169,6 @@ final class HomeMutationCoordinator {
     private func requireAuthority(profileID: String, generation: Int? = nil) throws {
         guard lifecycle.selectedProfileID == profileID, lifecycle.generationAdmission != nil,
               generation == nil || lifecycle.currentLifecycleGeneration == generation,
-              lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true else { throw CancellationError() }
+              lifecycle.gatewayInfo != nil else { throw CancellationError() }
     }
 }

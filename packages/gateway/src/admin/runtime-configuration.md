@@ -93,8 +93,10 @@ Adding and removing packages is a `sources.packages` change (install card).
   materialization; four traversals per runtime, eight global; ≤ 25,000 items and
   16 MiB per traversal, 800,000 entry bytes per page. Provider catalogs: ≤ 1,000
   rows, unique IDs, 4 MiB of strings.
-- Items carry optional `cost` (`{input, output}` USD per million tokens; all-zero
-  means unknown and is omitted), `virtual` for Pi virtual models, and `releaseDate`.
+- Items carry `providerName` (the Pi provider's display name), `latest` (the id is an
+  undated alias: the same provider lists the id plus `-YYYYMMDD`), optional `cost`
+  (`{input, output}` USD per million tokens; all-zero means unknown and is omitted),
+  `virtual` for Pi virtual models, and `releaseDate`.
   Assistant rows name the physical `provider`/`modelId` and `thinkingLevel`.
 - `model.recent`: one Gateway-wide list of ≤ 12 `{provider,id,lastUsedAt}`, recorded
   only when user input starts a run in a user session; `models.recentChanged` on

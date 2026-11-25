@@ -112,7 +112,7 @@ struct HostedSessionConfigurationFixture: View {
 }
 
 private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
-    static let models = try! ModelPage.decode(wParse(#"{"models":[{"provider":"fixture","id":"model","name":"Fixture Model","reasoning":true,"input":["text"],"contextWindow":200000,"maxTokens":32000,"available":true,"releaseDate":"2026-01-01"},{"provider":"fixture","id":"alternative","name":"Alternative Model","reasoning":true,"input":["text"],"contextWindow":200000,"maxTokens":32000,"available":true,"releaseDate":"2026-01-02"}]}"#)).models
+    static let models = try! ModelPage.decode(wParse(#"{"models":[{"provider":"fixture","providerName":"Fixture","id":"model","name":"Fixture Model","latest":false,"reasoning":true,"input":["text"],"contextWindow":200000,"maxTokens":32000,"available":true,"releaseDate":"2026-01-01"},{"provider":"fixture","providerName":"Fixture","id":"alternative","name":"Alternative Model","latest":false,"reasoning":true,"input":["text"],"contextWindow":200000,"maxTokens":32000,"available":true,"releaseDate":"2026-01-02"}]}"#)).models
     private var bookmarkLabel: String?
     private var snapshot: SessionSnapshot
     private var hello = true

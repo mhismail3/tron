@@ -112,8 +112,7 @@ enum HomeManageRowPresentation {
         return "\(count) · \(confirmed.formatted()) confirmed · \((active.count - confirmed).formatted()) inferred"
     }
 
-    static func chapters(_ list: HomeChapterList?, fallback: HomeStatusChapter?) -> String? {
-        guard let list else { return fallback.map(HomeChapterPresentation.manageSubtitle) }
+    static func chapters(_ list: HomeChapterList) -> String {
         let count = list.chapters.count == 1 ? "1 chapter" : "\(list.chapters.count.formatted()) chapters"
         guard let active = list.chapters.last(where: { $0.state == .active }),
               let percent = HomeChapterPresentation.softPercent(active, limits: list.limits) else { return count }
@@ -177,7 +176,7 @@ final class HomeStatusPresentationOwner {
     @ObservationIgnored private weak var activityCoordinator: PresentationActivityCoordinator?
     @ObservationIgnored private var profileID: String?
     @ObservationIgnored private var connectionID: String?
-    private(set) var capabilityEnabled = false
+    private(set) var isAvailable = false
     @ObservationIgnored private var suspended = false
     @ObservationIgnored private var fetch: (@MainActor (HomeStatusReadFence) async throws -> HomeStatus)?
     @ObservationIgnored private var activeReadTask: Task<Void, Never>?
@@ -208,14 +207,14 @@ final class HomeStatusPresentationOwner {
         suspended = false
     }
 
-    func configure(profileID: String, connectionID: String?, capabilityEnabled: Bool) {
+    func configure(profileID: String, connectionID: String?, isAvailable: Bool) {
         let identityChanged = self.profileID != profileID || self.connectionID != connectionID
         if identityChanged { stopWork(clearStatus: true) }
         self.profileID = profileID
         self.connectionID = connectionID
-        self.capabilityEnabled = capabilityEnabled
+        self.isAvailable = isAvailable
         suspended = false
-        guard capabilityEnabled else {
+        guard isAvailable else {
             stopWork(clearStatus: true)
             return
         }
@@ -230,7 +229,7 @@ final class HomeStatusPresentationOwner {
     func profileRetired() {
         profileID = nil
         connectionID = nil
-        capabilityEnabled = false
+        isAvailable = false
         stopWork(clearStatus: true)
     }
 
@@ -265,16 +264,16 @@ final class HomeStatusPresentationOwner {
     func beginRead(
         profileID: String,
         connectionID: String,
-        capabilityEnabled: Bool,
+        isAvailable: Bool,
         token: PresentationSurfaceToken,
         coordinator: PresentationActivityCoordinator
     ) -> HomeStatusReadFence? {
-        guard capabilityEnabled,
+        guard isAvailable,
               !suspended,
               token == surfaceToken,
               coordinator === activityCoordinator,
               surfaceIsActive(token) else {
-            invalidateRead(clearStatus: !capabilityEnabled)
+            invalidateRead(clearStatus: !isAvailable)
             return nil
         }
         if self.profileID != profileID || self.connectionID != connectionID {
@@ -283,7 +282,7 @@ final class HomeStatusPresentationOwner {
         }
         self.profileID = profileID
         self.connectionID = connectionID
-        self.capabilityEnabled = true
+        self.isAvailable = true
         readGeneration &+= 1
         let fence = HomeStatusReadFence(
             profileID: profileID,
@@ -344,7 +343,7 @@ final class HomeStatusPresentationOwner {
 
     @discardableResult
     private func startRead() -> Task<Void, Never>? {
-        guard !suspended, capabilityEnabled,
+        guard !suspended, isAvailable,
               let profileID, let connectionID,
               let token = surfaceToken,
               let coordinator = activityCoordinator,
@@ -353,7 +352,7 @@ final class HomeStatusPresentationOwner {
               let fence = beginRead(
                 profileID: profileID,
                 connectionID: connectionID,
-                capabilityEnabled: capabilityEnabled,
+                isAvailable: isAvailable,
                 token: token,
                 coordinator: coordinator
               ) else { return nil }
@@ -374,7 +373,7 @@ final class HomeStatusPresentationOwner {
     }
 
     private func startWorkIfActive() {
-        guard cadence != .released, !suspended, capabilityEnabled, let token = surfaceToken,
+        guard cadence != .released, !suspended, isAvailable, let token = surfaceToken,
               let coordinator = activityCoordinator,
               coordinator.activity(for: token).allowsPresentationPublication,
               profileID != nil, connectionID != nil, fetch != nil else { return }

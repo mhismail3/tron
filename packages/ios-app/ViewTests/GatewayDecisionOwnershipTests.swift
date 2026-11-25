@@ -65,7 +65,7 @@ final class GatewayDecisionOwnershipTests: XCTestCase {
 
     func testTheModelCatalogShowsTheGatewaysContextWindowLimits() throws {
         let limits = ContextWindowLimits(minimum: 4_096, maximum: 200_000_000, default: 1_000_000, longContextThreshold: 200_000)
-        let model = ModelSummary(provider: "fixture", id: "large", name: "Large", virtual: false, reasoning: false, input: ["text"],
+        let model = ModelSummary(provider: "fixture", providerName: "Fixture", id: "large", name: "Large", latest: false, virtual: false, reasoning: false, input: ["text"],
                                  contextWindow: 1_000_000, contextWindowLimits: limits, maxTokens: 64_000, available: true)
         var snapshot = SnapshotCacheFixtureGateway.snapshot()
         snapshot.model = ModelRef(provider: "fixture", id: "large")

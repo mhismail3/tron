@@ -557,7 +557,7 @@ struct SessionShellView: View {
                             .listRowSeparator(.hidden)
                             .listRowInsets(SessionDashboardLayout.rowInsets)
                     }
-                } else if model.homeStatus.capabilityEnabled {
+                } else if model.homeStatus.isAvailable {
                     Section {
                         homePinnedButton
                     }
@@ -684,7 +684,7 @@ struct SessionShellView: View {
     }
 
     private var showsHomeFloatingButton: Bool {
-        serverFilter.sortMode == .home && model.homeStatus.capabilityEnabled
+        serverFilter.sortMode == .home && model.homeStatus.isAvailable
     }
 
     @ViewBuilder

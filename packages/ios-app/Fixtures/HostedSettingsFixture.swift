@@ -175,7 +175,7 @@ private actor HostedSettingsSocket: GatewaySocketConnection {
         case "model.list":
             let models: [JSONValue] = [("pro", "Fixture Pro"), ("lite", "Fixture Lite"), ("page", "Fixture Page Two")].map { id, name in
                 .object([
-                    "provider": .string("fixture"), "id": .string(id), "name": .string(name),
+                    "provider": .string("fixture"), "providerName": .string("Fixture Provider"), "id": .string(id), "name": .string(name), "latest": .bool(false),
                     "reasoning": .bool(true), "input": .array([.string("text")]),
                     "contextWindow": .number(8192), "maxTokens": .number(1024),
                     "available": .bool(true), "virtual": .bool(false)

@@ -2233,14 +2233,18 @@ export class GatewayService {
         try { return await modelRuntime.getAvailable(providerId, signal ? { signal } : undefined); }
         catch (error) { if (signal?.aborted) throw error; return []; }
       }))).flat().map((model) => `${model.provider}\0${model.id}`));
-      const projected = await Promise.all(modelRuntime.getModels().map(async (model) => {
+      const models = modelRuntime.getModels();
+      const aliased = new Set(models.flatMap(model => /-\d{8}$/.test(model.id) ? [`${model.provider}\0${model.id.slice(0, -9)}`] : []));
+      const projected = await Promise.all(models.map(async (model) => {
         const releaseDate = await this.modelReleaseDates.modelReleaseDate(model.provider, model.id);
         const limits = contextWindowLimits(model);
         const priced = model.cost.input > 0 || model.cost.output > 0;
         return {
           provider: model.provider,
+          providerName: modelRuntime.getProvider(model.provider)?.name ?? model.provider,
           id: model.id,
           name: openAIModelEligibility(modelRuntime)?.displayName(model.provider, model.id) ?? model.name,
+          latest: aliased.has(`${model.provider}\0${model.id}`),
           virtual: model.api === "pi-virtual",
           reasoning: model.reasoning,
           input: model.input,

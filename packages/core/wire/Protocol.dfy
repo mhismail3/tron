@@ -1379,8 +1379,10 @@ module Protocol {
   // @wire
   datatype ModelSummary = ModelSummary(
       provider: string,
+      providerName: string,
       id: string,
       name: string,
+      latest: bool,
       virtual: bool,
       reasoning: bool,
       input: seq<string>,

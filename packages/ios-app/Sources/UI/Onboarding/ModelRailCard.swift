@@ -13,7 +13,7 @@ struct ModelRailCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 4) {
-                Text(model.displayProviderName)
+                Text(model.providerName)
                     .font(TronTypography.settingsRowSubtext)
                     .foregroundStyle(Color.tronTextSecondary)
                     .lineLimit(1)
@@ -82,7 +82,7 @@ struct ModelRailCard: View {
     }
 
     static func accessibilityLabel(_ model: ModelSummary) -> String {
-        var parts = [model.displayName, model.displayProviderName]
+        var parts = [model.displayName, model.providerName]
         if let context = ModelCardFacts.contextLabel(model.contextWindow) {
             parts.append("\(context) token context")
         }
