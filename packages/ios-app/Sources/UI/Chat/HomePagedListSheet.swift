@@ -17,15 +17,14 @@ struct HomePagedListSheet: View {
 
     private struct ReadIdentity: PresentationReadIdentity, Hashable {
         let admission: HomeSheetReadIdentity
-        let sourceRevision: Int?
         let filter: HomeTaskFilter?
         func retainsContent(from previous: Self) -> Bool {
-            admission.retainsContent(from: previous.admission) && sourceRevision == previous.sourceRevision && filter == previous.filter
+            admission.retainsContent(from: previous.admission) && filter == previous.filter
         }
     }
     private var identity: ReadIdentity? {
         model.homeSheetReadIdentity(profileID: profileID, surfaceToken: token).map {
-            ReadIdentity(admission: $0, sourceRevision: isMemory ? model.selectedSnapshot?.revision : nil, filter: isTaskList ? filter : nil)
+            ReadIdentity(admission: $0, filter: isTaskList ? filter : nil)
         }
     }
     private var active: Bool { PresentationPublicationPolicy.allows(ambient: activity, coordinator: coordinator, token: token) }

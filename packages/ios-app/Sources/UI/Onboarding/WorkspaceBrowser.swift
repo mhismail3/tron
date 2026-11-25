@@ -47,15 +47,9 @@ struct WorkspaceBrowser: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                if loading && listing == nil {
-                    TronSheetLoadingState(label: "Loading folders…", accent: accent)
-                } else {
-                    browser
-                        .opacity(navigating ? 0.62 : 1)
-                        .animation(.easeInOut(duration: 0.16), value: navigating)
-                }
-            }
+            browser
+            .opacity(navigating ? 0.62 : 1)
+            .animation(.easeInOut(duration: 0.16), value: navigating)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
@@ -144,7 +138,10 @@ struct WorkspaceBrowser: View {
                 }
 
                 browserGroup("Folders") {
-                    if directories.isEmpty && !loading {
+                    if loading && listing == nil {
+                        TronLoadingState(label: "Loading folders…", accent: accent)
+                            .padding(.vertical, 28)
+                    } else if directories.isEmpty && !loading {
                         VStack(spacing: TronSpacing.md) {
                             Image(systemName: "folder")
                                 .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .medium))
