@@ -768,6 +768,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const fixture = await coldFixture("uncached");
     await settleCatalog(fixture.registry);
     const walks = catalogWalks();
+    const before = walks.count();
     const headers = catalogHeaderReads();
     try {
       expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id).toBe(fixture.manager.getSessionId());
@@ -786,6 +787,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await mkdir(join(fixture.agentDir, "sessions", "unrelated.jsonl"));
     await settleCatalog(fixture.registry);
     const walks = catalogWalks();
+    const before = walks.count();
     try {
       expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id)
         .toBe(fixture.manager.getSessionId());
@@ -811,6 +813,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(reconciled.at(-1)).toMatchObject({ outcome: "reconciled" });
 
     const walks = catalogWalks();
+    const before = walks.count();
     try {
       expect((await fixture.registry.catalog("all")).sessions.map((session) => session.id))
         .toEqual([fixture.manager.getSessionId()]);
@@ -1111,6 +1114,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const live = await fixture.registry.create(fixture.cwd);
     await settleCatalog(fixture.registry);
     const walks = catalogWalks();
+    const before = walks.count();
     try {
       const ids = await fixture.registry.sessionIDsForStorageMaintenance();
       expect([...ids].sort()).toEqual([fixture.manager.getSessionId(), child.getSessionId(), live.id].sort());
@@ -1133,6 +1137,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
 
     await settleCatalog(fixture.registry);
     const walks = catalogWalks();
+    const before = walks.count();
     try {
       const user = await fixture.registry.catalog("user");
       expect(user.sessions.map((session) => session.id)).toEqual([fixture.manager.getSessionId()]);
@@ -1186,6 +1191,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     children.forEach(child => child.appendMessage(fauxAssistantMessage("child starts")));
     const parentID = fixture.manager.getSessionId();
     const walks = catalogWalks();
+    const before = walks.count();
     try {
       expect((await fixture.registry.catalog("user")).sessions.map(row => row.id)).toEqual([parentID]);
       children.forEach(child => child.appendMessage(fauxAssistantMessage("parallel child progress")));
