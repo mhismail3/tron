@@ -286,11 +286,6 @@ struct TronPresentationSurface<Content: View>: View {
             .modifier(TronNativeSheetCanvas(role: registersLifecycle ? .route : .sheet))
             #if HOSTED_TEST
             .background { HostedPresentationProbe.nativeView?(token.id) }
-            .transaction { transaction in
-                if ProcessInfo.processInfo.environment["TRON_UI_LOCK_RENDERING"] == "1" {
-                    transaction.disablesAnimations = true
-                }
-            }
             #endif
             .environment(\.tronPresentationStateScope, stateScope)
             .environment(\.tronPresentationSurfaceToken, token)

@@ -600,6 +600,7 @@ build_products() {
       -parallel-testing-enabled NO \
       -enableCodeCoverage YES \
       -resultBundlePath "$build_result_bundle" \
+      ONLY_ACTIVE_ARCH=YES \
       -showBuildTimingSummary || build_status=$?
   if ((build_status != 0)); then
     python3 "$FAILURES" --build --root "$ROOT" "$build_result_bundle" >&2 || true
@@ -662,6 +663,25 @@ if sum(counts[field] for field in fields[:3]) + expected_failures != counts["tot
     raise SystemExit("invalid XCTest summary: test counts do not reconcile")
 if counts["passedTests"] <= 0 or counts["failedTests"] != 0:
     raise SystemExit("XCTest summary did not execute and pass at least one test")
+PY
+}
+
+validate_test_log() {
+  python3 - "$1" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text(errors="replace")
+restarts = text.count("Restarting after unexpected exit, crash, or test timeout")
+unfinished = dict.fromkeys(re.findall(r"^Test Case '(.+)' started\.$", text, re.M))
+for name in re.findall(r"^Test Case '(.+)' (?:passed|failed|skipped)", text, re.M):
+    unfinished.pop(name, None)
+if restarts or unfinished:
+    print(f"error: XCTest runner restarted {restarts} time(s); {len(unfinished)} test(s) started without finishing:", file=sys.stderr)
+    for name in unfinished:
+        print(f"  crashed: {name}", file=sys.stderr)
+    raise SystemExit(1)
 PY
 }
 
@@ -728,6 +748,9 @@ run_tests() {
       echo "error: XCTest summary did not prove a non-empty passing run: $summary_path" >&2
       test_status="$EXIT_TEST_FAILURE"
     fi
+  fi
+  if ! validate_test_log "$run_dir/test.log" && ((test_status == 0)); then
+    test_status="$EXIT_TEST_FAILURE"
   fi
   write_metadata complete "$test_status" || echo "warning: could not finalize run metadata: $metadata_path" >&2
   if ((test_status == 0)); then

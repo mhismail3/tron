@@ -51,7 +51,7 @@ struct PairedDeviceDetailView: View {
     }
 
     private var labelSupported: Bool {
-        serverConnected && model.gatewayInfo?.capabilities.contains("device-label.v1") == true
+        serverConnected
     }
 
     private func labelValid(_ value: String) -> Bool {

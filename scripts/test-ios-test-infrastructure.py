@@ -1108,6 +1108,7 @@ if [[ \" $* \" == *' test-without-building '* ]]; then
       \"TRON_SOURCE_DIRTY=${TEST_RUNNER_TRON_SOURCE_DIRTY:-}\" > \"$FAKE_XCODE_ENV_LOG\"
   fi
   if [[ \"${FAKE_RUNNER_MODE:-success}\" != missing-bundle && -n \"$bundle\" ]]; then mkdir -p \"$bundle\"; fi
+  if [[ -n \"${FAKE_TEST_OUTPUT:-}\" ]]; then printf '%s\\n' \"$FAKE_TEST_OUTPUT\"; fi
   if [[ \"${FAKE_RUNNER_MODE:-success}\" == timeout ]]; then sleep 30; fi
   exit \"${FAKE_XCODE_STATUS:-0}\"
 fi
@@ -1368,6 +1369,20 @@ shutil.copytree(source, clone)
                              override={"FAKE_TESTS": json.dumps(tests)})
         self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
         self.assertIn("test failures (1):\n  failure: testA(): A.swift:16: XCTAssertEqual failed\n", result.stderr)
+
+    def test_crashed_or_unfinished_tests_fail_a_green_summary(self) -> None:
+        passed = "Test Case '-[T.A testA]' started.\nTest Case '-[T.A testA]' passed (0.1 seconds).\n"
+        crashed = "Test Case '-[T.A testB]' started.\n"
+        restart = "Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.\n"
+        result = self.invoke(override={"FAKE_TEST_OUTPUT": passed})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        result = self.invoke(override={"FAKE_TEST_OUTPUT": passed + crashed + restart + passed})
+        self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
+        self.assertIn("restarted 1 time(s); 1 test(s) started without finishing", result.stderr)
+        self.assertIn("  crashed: -[T.A testB]\n", result.stderr)
+        self.assertEqual(self.latest_metadata()["exit_code"], 65)
+        result = self.invoke(override={"FAKE_TEST_OUTPUT": passed + restart})
+        self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
 
     def test_process_failure_and_timeout_take_precedence(self) -> None:
         result = self.invoke(summary='{"passedTests":1,"failedTests":0,"skippedTests":0,"totalTestCount":1}', xcode_status=7)

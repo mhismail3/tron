@@ -114,7 +114,11 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
           return;
         }
         if (next.mode === "unshape") {
-          if (linkStats.queuedPayloadBytes !== 0 || policy.mode !== "pass") throw new Error("shared-link schedule is not idle");
+          if (linkStats.queuedPayloadBytes !== 0 || policy.mode !== "pass") {
+            answer(response, 409, { error: "shared-link schedule is not idle", policyMode: policy.mode,
+              queuedPayloadBytes: linkStats.queuedPayloadBytes, scheduledBytes: linkStats.scheduledBytes });
+            return;
+          }
           shaper = undefined;
           answer(response, 200, { mode: "unshaped" });
           return;

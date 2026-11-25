@@ -270,9 +270,6 @@ private final class QuitGatewayFixture: @unchecked Sendable {
             if (process.env.QUIT_SCENARIO === 'receiptWriteFailure') {
               mkdirSync(receipt, {recursive:true, mode:0o700});
             }
-            // Model signal-insensitive teardown after the real completion
-            // receipt, retaining the Gateway's installed SIGTERM handler. This
-            // deterministic stall is not a reproduction of #1120's native cause.
             const exit = process.exit.bind(process);
             if (process.env.QUIT_HANG === '1') process.exit = code => {
               if (process.env.QUIT_SCENARIO === 'missingReceipt') rmSync(receipt, {force:true});
@@ -282,7 +279,6 @@ private final class QuitGatewayFixture: @unchecked Sendable {
                 const value = JSON.parse(readFileSync(receipt, 'utf8'));
                 writeFileSync(receipt, JSON.stringify({...value, pid:1}));
               }
-              // Log loss must not change the authoritative completion handoff.
               writeFileSync(root + '/shutdown-log.jsonl', readFileSync(root + '/tron/logs/gateway.jsonl'));
               rmSync(root + '/tron/logs/gateway.jsonl', {force:true});
               while (!existsSync(root + '/release-exit')) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,100);

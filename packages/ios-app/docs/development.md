@@ -51,7 +51,9 @@ cd packages/ios-app && xcodebuild build -project TronMobile.xcodeproj -scheme "T
 
 Configurations, schemes, identities and push routes: the skill's
 [routing table](../../../.agents/skills/tron-ios/SKILL.md#routing-table). Builds go through
-`scripts/tron-xcodebuild` (`-jobs min(4, CPUs)`, nice +10; an explicit `-jobs` fails).
+`scripts/tron-xcodebuild` (`-jobs min(4, CPUs)`, nice +10; an explicit `-jobs` fails). Test builds
+pass `ONLY_ACTIVE_ARCH=YES` so Swift packages build for the simulator's arm64 only; packages stay
+at their release optimisation level.
 
 ### Over-the-air development install
 

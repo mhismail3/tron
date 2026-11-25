@@ -470,7 +470,6 @@ struct GatewayConnectionDetailView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(\.tronPresentationActivity) private var presentationActivity
     let profile: GatewayProfile
     @PresentationState private var info: GatewayInfo?

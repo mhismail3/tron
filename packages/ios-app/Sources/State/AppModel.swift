@@ -2315,9 +2315,6 @@ extension AppModel {
 
     private func deviceLabelAdmission(for profileID: String) throws -> GatewayLifecycleCoordinator.Admission {
         try requireSelectedAdministrativeProfile(profileID)
-        guard gatewayInfo?.capabilities.contains("device-label.v1") == true else {
-            throw GatewayFailure(code: "unsupported", message: "This server does not support custom device labels.", retryable: false, details: nil)
-        }
         guard let admission = lifecycle.generationAdmission else { throw CancellationError() }
         try requireLifecycle(admission)
         return admission
@@ -3305,7 +3302,6 @@ extension AppModel {
             let blobId, name, mimeType: String
             let size: Int64?
         }
-        let supportsLargeExports = gatewayInfo?.capabilities.contains("session-export.v2") == true
         let response: Response = try await client.request(
             "session.export",
             Params(sessionId: sessionID, format: format),
@@ -3318,22 +3314,12 @@ extension AppModel {
         try Task.checkCancellation()
         let admission: SessionExportDownloadAdmission
         do {
-            admission = try SessionExportDownloadAdmission.resolve(
-                supportsLargeExports: supportsLargeExports,
-                declaredBytes: response.size
-            )
-        } catch SessionExportDownloadAdmissionError.invalidVersionedSize {
+            admission = try SessionExportDownloadAdmission.resolve(declaredBytes: response.size)
+        } catch {
             throw GatewayFailure(
                 code: "invalid_response",
                 message: "The Gateway did not describe a supported export size.",
                 retryable: true,
-                details: nil
-            )
-        } catch {
-            throw GatewayFailure(
-                code: "export_too_large",
-                message: "This Gateway does not support large session exports.",
-                retryable: false,
                 details: nil
             )
         }
