@@ -52,13 +52,7 @@ extension HomeToolDetailPresentation {
             return taskReport(page: page, offset: offset, total: total, next: details["nextOffset"]?.intValue,
                               identity: identity, icon: icon, taskID: taskID)
         case "steer", "interrupt", "stop", "resume", "rename":
-            guard let accepted = call.details?["accepted"]?.boolValue else { return nil }
-            if !accepted {
-                let reason = call.detail("reason") ?? call.text
-                return HomeToolDetailPresentation(
-                    header: Header(icon: icon, title: title, subtitle: targetTitle, pill: "Refused", tone: .failure),
-                    sections: [.failure(title: "Refused", message: reason, issues: [])])
-            }
+            guard call.details?["accepted"]?.boolValue == true else { return nil }
             if action == "rename", let renamed = call.detail("title") ?? call.string("title") {
                 identity.append(Row(icon: "pencil", title: "New title", value: renamed))
             }
