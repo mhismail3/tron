@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import { core as publicHost } from "../core/security/public-host/facade.js";
 import { admitBrowserToolReference } from "./browser-tool-reference.js";
 import {
   DISPLAY_ARTIFACT_ID_PATTERN,
@@ -25,34 +26,15 @@ export function boundedString(value: unknown, minimum: number, maximumBytes: num
 }
 
 function blockedIPv4(host: string): boolean {
-  const octets = host.split(".").map(Number);
-  if (octets.length !== 4 || octets.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) return true;
-  const [a, b, c] = octets as [number, number, number, number];
-  return a === 0 || a === 10 || a === 127 || a >= 224
-    || (a === 100 && b >= 64 && b <= 127)
-    || (a === 169 && b === 254)
-    || (a === 172 && b >= 16 && b <= 31)
-    || (a === 192 && (b === 0 || b === 168))
-    || (a === 198 && (b === 18 || b === 19))
-    || (a === 198 && b === 51 && c === 100)
-    || (a === 203 && b === 0 && c === 113);
+  const [a, b, c, d] = host.split(".").map(Number) as [number, number, number, number];
+  return publicHost.BlockedV4(a, b, c, d);
 }
 
 function blockedIPv6(host: string): boolean {
-  const normalized = host.toLowerCase().replace(/^\[|\]$/g, "");
-  if (normalized === "::" || normalized === "::1") return true;
-  const first = Number.parseInt(normalized.split(":", 1)[0] || "0", 16);
-  if (!Number.isFinite(first) || first < 0x2000 || first > 0x3fff
-    || normalized.startsWith("2001:db8:")) return true;
-  if (normalized.startsWith("::ffff:")) {
-    const tail = normalized.slice("::ffff:".length).split(":");
-    if (tail.length !== 2) return true;
-    const high = Number.parseInt(tail[0]!, 16);
-    const low = Number.parseInt(tail[1]!, 16);
-    if (!Number.isFinite(high) || !Number.isFinite(low)) return true;
-    return blockedIPv4(`${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`);
-  }
-  return false;
+  const [head = ""] = host.split("::");
+  const groups = head ? head.split(":") : [];
+  const hextet = (index: number) => index < groups.length ? Number.parseInt(groups[index]!, 16) : 0;
+  return publicHost.BlockedV6(hextet(0), hextet(1));
 }
 
 export function normalizePublicDisplayURL(input: string): string | undefined {

@@ -1,5 +1,7 @@
+import { core as publicHost } from "../core/security/public-host/facade.js";
+
 export class RateLimiter {
-  private readonly attempts = new Map<string, number[]>();
+  private readonly attempts = new Map<string, readonly number[]>();
   private admissions = 0;
 
   constructor(
@@ -21,13 +23,10 @@ export class RateLimiter {
     this.admissions += 1;
     if (this.admissions % this.sweepInterval === 0) this.prune(now);
 
-    const cutoff = now - this.windowMs;
-    const recent = (this.attempts.get(key) ?? []).filter((timestamp) => timestamp > cutoff);
-    const admitted = recent.length < this.maximum;
-    if (admitted) recent.push(now);
+    const { admitted, recent } = publicHost.Admit(this.attempts.get(key) ?? [], now, this.windowMs, this.maximum);
 
     this.attempts.delete(key);
-    if (!this.attempts.has(key) && this.attempts.size >= this.maximumKeys) {
+    if (this.attempts.size >= this.maximumKeys) {
       const oldest = this.attempts.keys().next().value;
       if (oldest !== undefined) this.attempts.delete(oldest);
     }
@@ -36,9 +35,8 @@ export class RateLimiter {
   }
 
   private prune(now: number): void {
-    const cutoff = now - this.windowMs;
     for (const [key, timestamps] of this.attempts) {
-      const recent = timestamps.filter((timestamp) => timestamp > cutoff);
+      const recent = publicHost.Recent(timestamps, now, this.windowMs);
       if (recent.length === 0) this.attempts.delete(key);
       else this.attempts.set(key, recent);
     }
