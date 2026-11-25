@@ -38,7 +38,7 @@ extension HomeToolDetailPresentation {
         }
         if let thinking = worker?["thinking"]?.stringValue ?? requestedThinking {
             let source = (worker?["thinkingSource"]?.stringValue ?? (requestedThinking == nil ? nil : "explicit"))?.components(separatedBy: ":").first
-            workerRows.append(Row(icon: "brain.head.profile", title: "Thinking", value: [thinking.capitalized, source].compactMap { $0 }.joined(separator: " · ")))
+            workerRows.append(Row(icon: "brain.head.profile", title: "Effort", value: [thinking.capitalized, source].compactMap { $0 }.joined(separator: " · ")))
         }
         if let note = worker?["note"]?.stringValue { workerRows.append(Row(icon: "info.circle", title: "Note", value: note)) }
         if let reason = call.string("reason") { workerRows.append(Row(icon: "text.quote", title: "Reason", value: reason)) }

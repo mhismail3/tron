@@ -37,7 +37,7 @@ struct ManageModelConfigurationCard: View {
             VStack(spacing: 0) {
                 if let ref {
                     modelRow(ref)
-                    if let thinking { TronSettingsDivider(); choiceRow(thinking, title: "Thinking", icon: "brain") }
+                    if let thinking { TronSettingsDivider(); choiceRow(thinking, title: "Effort", icon: "brain") }
                     if let contextWindow {
                         TronSettingsDivider()
                         choiceRow(contextWindow, title: "Context Window", icon: "gauge.with.dots.needle.50percent")
@@ -52,7 +52,7 @@ struct ManageModelConfigurationCard: View {
                         VStack(spacing: 0) {
                             TronSettingsRow(icon: "cpu", title: "Model name", titleFont: SessionSummaryTypography.headline)
                             TronSettingsDivider()
-                            TronSettingsRow(icon: "brain", title: "Thinking")
+                            TronSettingsRow(icon: "brain", title: "Effort")
                             TronSettingsDivider()
                             TronSettingsRow(icon: "gauge.with.dots.needle.50percent", title: "Context Window")
                         }
@@ -85,18 +85,15 @@ struct ManageModelConfigurationCard: View {
         let selected = model.providerCatalog(for: catalogTarget)?.models.first {
             $0.provider == value?["provider"]?.stringValue && $0.id == value?["id"]?.stringValue
         }
-        return VStack(spacing: 0) {
-            TronSettingsRow(icon: "cpu", title: selected?.displayName ?? setting.display, titleFont: SessionSummaryTypography.headline) {
-                TronProgressiveSheetLink(accessibilityLabel: "Switch Model", identity: "manage.model.switch") {
-                    SettingsModelPicker(setting: setting, target: target, title: "Models", selectionAvailability: availability,
-                                        onReset: setting.overridden == true ? { change(setting, nil) } : nil) { change(setting, $0) }
-                } label: { TronInlineActionLabel("Switch Model") }
-                .accessibilityIdentifier("manage-model-switch")
-                .accessibilityValue(availability.accessibilityValue)
-            }
-            .lineLimit(1)
-            .environment(\.tronSettingsRowAccessory, resetAccessory(setting))
+        return TronSettingsRow(icon: "cpu", title: selected?.displayName ?? setting.display, titleFont: SessionSummaryTypography.headline) {
+            TronProgressiveSheetLink(accessibilityLabel: "Switch Model", identity: "manage.model.switch") {
+                SettingsModelPicker(setting: setting, target: target, title: "Models", selectionAvailability: availability,
+                                    onReset: setting.overridden == true ? { change(setting, nil) } : nil) { change(setting, $0) }
+            } label: { TronInlineActionLabel("Switch Model") }
+            .accessibilityIdentifier("manage-model-switch")
+            .accessibilityValue(availability.accessibilityValue)
         }
+        .lineLimit(1)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(settingsRowIdentifier(setting))
     }
@@ -121,34 +118,17 @@ struct ManageModelConfigurationCard: View {
 
     private func choiceRow(_ setting: ResolvedSetting, title: String, icon: String) -> some View {
         let options = choiceOptions(for: setting)
-        return HStack(spacing: 0) {
+        return Group {
             if options.isEmpty {
                 TronSettingsRow(icon: icon, title: title) { TronInlineActionLabel(setting.display, accent: .tronPrimary) }
             } else {
                 SettingsChoiceSelectionRow(title: title, icon: icon, value: setting.value ?? .null, display: setting.display,
                                            options: options, information: lockReason, onChange: { change(setting, $0) })
             }
-            if setting.overridden == true { resetButton(setting).padding(.trailing, 12) }
         }
         .disabled(availability.isApplying || (!options.isEmpty && !availability.canSelect))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(settingsRowIdentifier(setting))
-    }
-
-    private func resetAccessory(_ setting: ResolvedSetting) -> (@MainActor @Sendable () -> AnyView)? {
-        guard setting.overridden == true else { return nil }
-        let button = AnyView(resetButton(setting))
-        return { button }
-    }
-
-    private func resetButton(_ setting: ResolvedSetting) -> some View {
-        Button { TronHaptics.shared.play(.selectionChanged); change(setting, nil) } label: {
-            TronInlineActionLabel("", icon: "arrow.uturn.backward", alignment: .leading, accent: .tronPrimary)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Revert")
-        .accessibilityIdentifier("\(settingsRowIdentifier(setting))-reset")
-        .disabled(!availability.canSelect)
     }
 
     private func change(_ setting: ResolvedSetting, _ value: JSONValue?) {

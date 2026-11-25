@@ -1381,19 +1381,11 @@ enum TronSettingsGroupSurfaceStyle: Equatable, Sendable {
     case scrollOptimized
 }
 
-private struct TronSettingsRowAccessoryKey: EnvironmentKey {
-    static let defaultValue: (@MainActor @Sendable () -> AnyView)? = nil
-}
-
 private struct TronSettingsRowStatusKey: EnvironmentKey {
     static let defaultValue: String? = nil
 }
 
 extension EnvironmentValues {
-    var tronSettingsRowAccessory: (@MainActor @Sendable () -> AnyView)? {
-        get { self[TronSettingsRowAccessoryKey.self] }
-        set { self[TronSettingsRowAccessoryKey.self] = newValue }
-    }
     var tronSettingsRowStatus: String? {
         get { self[TronSettingsRowStatusKey.self] }
         set { self[TronSettingsRowStatusKey.self] = newValue }
@@ -1495,7 +1487,6 @@ struct TronSettingsRow<Trailing: View>: View {
     @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
     @Environment(\.controlSize) private var controlSize
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Environment(\.tronSettingsRowAccessory) private var accessory
     @Environment(\.tronSettingsRowStatus) private var status
 
     init(
@@ -1546,18 +1537,14 @@ struct TronSettingsRow<Trailing: View>: View {
             stackedLeadingInset: icon == nil ? 0 : TronSettingsLayoutPolicy.iconSize + TronSpacing.xl
         ) {
             rowLabels
-            HStack(spacing: 0) {
-                if let accessory { accessory() }
-                trailing
-            }
-            .environment(\.tronSettingsRowAccessory, nil)
-            .environment(\.tronSettingsRowStatus, nil)
+            trailing
+                .environment(\.tronSettingsRowStatus, nil)
         }
         .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
         .padding(.vertical, labelsOwnInsets ? 0 : feedTrailing == nil ? TronSpacing.xl : TronSpacing.md)
         .frame(maxWidth: .infinity, minHeight: TronSettingsLayoutPolicy.rowMinimumHeight, alignment: .leading)
         .contentShape(Rectangle())
-        .accessibilityElement(children: accessory == nil ? .combine : .contain)
+        .accessibilityElement(children: .combine)
     }
 
     private var rowLabels: some View {
@@ -1660,7 +1647,6 @@ struct TronSettingsRow<Trailing: View>: View {
         .padding(.vertical, controlSize == .small && !dynamicTypeSize.isAccessibilitySize ? TronSpacing.xl : 0)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
-        .environment(\.tronSettingsRowAccessory, nil)
     }
 }
 
