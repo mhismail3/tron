@@ -394,15 +394,6 @@ final class TronFeedPosition {
     var newest: Int?
     var oldest: Int?
     var long = false
-    static let hysteresis: CGFloat = 60
-}
-
-private struct TronFeedChipSpace: View {
-    let position: TronFeedPosition
-    @ScaledMetric(relativeTo: .caption) private var height = TronFeedPositionChip.height
-    var body: some View {
-        Color.clear.frame(height: position.long ? height : 0).accessibilityHidden(true)
-    }
 }
 
 struct TronFeedPositionChip: View {
@@ -504,6 +495,8 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
     @ViewBuilder let row: (Item) -> Row
     @State private var position = TronFeedPosition()
     @State private var ordinals: [Item.ID: Int] = [:]
+    @ScaledMetric(relativeTo: .caption) private var chipSpace = TronFeedPositionChip.height
+    @Environment(\.tronSheetFitsContent) private var fits
 
     var body: some View {
         let trigger = items.count > 5 ? items[items.count - 5].id : items.last?.id
@@ -518,7 +511,7 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
                     }
                     TronFeedStateRow(tail: tail, retry: retry)
                         .onAppear { if tail == .idle { loadMore() } }
-                    TronFeedChipSpace(position: position)
+                    Color.clear.frame(height: position.long ? chipSpace : 0).accessibilityHidden(true)
                 }
                 .scrollTargetLayout()
                 .tronFeedInsets()
@@ -529,11 +522,12 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
                     guard let first = items.first?.id else { return }
                     withAnimation(.snappy) { reader.scrollTo(first, anchor: .top) }
                 }
+                .ignoresSafeArea(.container, edges: .bottom)
             }
             .tronScrollEdgeChrome()
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height - $0.containerSize.height } action: { _, excess in
-                if position.long { if excess < -TronFeedPosition.hysteresis { position.long = false } }
-                else if excess > 1 { position.long = true }
+                let long = !fits && excess - (position.long ? chipSpace : 0) > 0.5
+                if long != position.long { position.long = long }
             }
             .onScrollTargetVisibilityChange(idType: Item.ID.self, threshold: 0.3) { visible in
                 let values = visible.compactMap { ordinals[$0] }
