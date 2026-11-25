@@ -34,7 +34,8 @@ race using actual evidence.
 
 There are no golden, snapshot or recorded-trace oracles. Workers may update intended-behavior
 assertions, fixtures and timeouts without maintainer test-text approval, explaining the cause and
-intended delta. A non-author reviewer names each surviving oracle, checks for weakening and
+intended delta. A non-author reviewer with a shell (not the bash-less builtin `reviewer`) runs the changed
+tests, names each surviving oracle, checks for weakening and
 explicitly ACCEPTs: what did this change delete or retire, and why does each new test file not
 extend its owner? Subjective design goes to the maintainer with inline visuals.
 
