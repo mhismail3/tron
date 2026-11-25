@@ -193,6 +193,10 @@ describe("gateway/home scenario lock", () => {
     expect(task.ok, JSON.stringify(task)).toBe(true);
     const workerSessionId = task.result.sessionId as string;
     await gateway.settled(workerSessionId);
+    await waitFor(async () => {
+      const episodic = (await owner.memoryStatus()).episodic;
+      return episodic && episodic.pump.busy === 0 && episodic.view.unbuilt === 0 && episodic.coverage.summarized === episodic.coverage.admitted;
+    }, "Home memory to finish summarizing the activations");
     expect((await phone.request("home.taskList", {})).ok).toBe(true);
     expect((await phone.request("home.status", {})).ok).toBe(true);
     const context = await phone.request("home.context", {});

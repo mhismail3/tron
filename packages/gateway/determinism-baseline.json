@@ -48,7 +48,7 @@
     },
     "src/e2e/kernel/delegation/managed-run-stop-drain.e2e.test.ts": {
       "sleep": 1,
-      "timeout-literal": 3
+      "timeout-literal": 2
     },
     "src/e2e/kernel/delegation/managed-subagents-warm-process.e2e.test.ts": {
       "timeout-literal": 2
