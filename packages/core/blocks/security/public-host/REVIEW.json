@@ -1,46 +1,46 @@
 {
- "packetHash": "999970da6d5645be",
- "tier": "high-stakes",
- "date": "2026-11-25",
- "writer": {
-  "agent": "parent (Home task, #2640)",
-  "model": "anthropic/claude-opus-5-5"
- },
- "reviewer": {
-  "agent": "reviewer (run 6d8ec4c4)",
-  "model": "anthropic/claude-haiku-5-5",
-  "session": "2026-11-25T08-26-34-867Z_01a211d0-51f3-7244-9039-a6ac5b182c19/7dbe68a9-ce0d-4346-8c59-49803429e73f/run-0/session.jsonl"
- },
- "laws": {
-  "B4 ipv4-ranges": {
-   "verdict": "ACCEPT",
-   "notes": "BlockedV4 matches ListedV4 range for range, including 192.0.0.0/16 and 198.18/15; matches the old TS conditions. Witnesses: 8.8.8.8 admitted, 10.0.0.1 refused."
+  "packetHash": "1c576e8c2b2552ab",
+  "tier": "high-stakes",
+  "date": "2026-11-25",
+  "writer": {
+    "agent": "parent (Home task, #2686)",
+    "model": "anthropic/claude-opus-5-5"
   },
-  "B6 ipv6-ranges": {
-   "verdict": "ACCEPT",
-   "notes": "The exact negation of BlockedV6; matches the old TS on normalized forms. Scope note: 6to4, Teredo and 3fff::/20 are admitted, as the old guard admitted them."
+  "reviewer": {
+    "agent": "delegate (run 8bf6e315)",
+    "model": "anthropic/claude-haiku-5-5",
+    "session": "2026-11-25T10-15-37-951Z_01a21234-28df-7244-9039-a6bf2ceda56d/59402ac4-7997-43eb-a56b-586123e544cf/run-0/session.jsonl"
   },
-  "M6 ipv4-mapped": {
-   "verdict": "ACCEPT",
-   "notes": "The English matches the lemma for ::/96, ::ffff:0:0/96 and 64:ff9b::/96 whatever IPv4 they embed; entailed by B6, kept as a named security statement."
+  "laws": {
+    "B4 ipv4-ranges": {
+      "verdict": "ACCEPT",
+      "notes": "BlockedV4 matches ListedV4 range for range, including 192.0.0.0/16 and 198.18/15; matches the old TS conditions. Witnesses: 8.8.8.8 admitted, 10.0.0.1 refused."
+    },
+    "B6 ipv6-ranges": {
+      "verdict": "ACCEPT",
+      "notes": "!BlockedV6 is exactly 2000::/3 minus documentation (2001:db8::/32, 3fff::/20: h0 == 0x3fff && h1 < 0x1000), Teredo (2001::/32: h0 == 0x2001 && h1 == 0) and 6to4 (2002::/16), matching the English and BlockedV6."
+    },
+    "M6 ipv4-mapped": {
+      "verdict": "ACCEPT",
+      "notes": "The English matches the lemma for ::/96, ::ffff:0:0/96 and 64:ff9b::/96 whatever IPv4 they embed; entailed by B6, kept as a named security statement."
+    },
+    "P1 prune": {
+      "verdict": "ACCEPT",
+      "notes": "LiveRevSpec and RevOntoSpec give Elems(Recent) == FreshOf; same keep-set as the old timestamp > now - window filter. Witness: [0,500,1000] at 1000, window 1000 keeps [500,1000]."
+    },
+    "A1 admission": {
+      "verdict": "ACCEPT",
+      "notes": "Admitted iff fewer than maximum fresh attempts, keeping them followed by now; the old recent.length < maximum then push. Witness: empty with maximum 1 is admitted with [now]."
+    },
+    "S1 stale": {
+      "verdict": "ACCEPT",
+      "notes": "Corollary of A1 with NoneFresh; kills nothing alone, which is structural and acceptable."
+    },
+    "W1 window": {
+      "verdict": "ACCEPT",
+      "notes": "Per admitted attempt, via KeptCounts and A1; the window consequence holds for non-decreasing time (Assumption A2), eviction covered by A2; kills nothing alone."
+    }
   },
-  "P1 prune": {
-   "verdict": "ACCEPT",
-   "notes": "LiveRevSpec and RevOntoSpec give Elems(Recent) == FreshOf; same keep-set as the old timestamp > now - window filter. Witness: [0,500,1000] at 1000, window 1000 keeps [500,1000]."
-  },
-  "A1 admission": {
-   "verdict": "ACCEPT",
-   "notes": "Admitted iff fewer than maximum fresh attempts, keeping them followed by now; the old recent.length < maximum then push. Witness: empty with maximum 1 is admitted with [now]."
-  },
-  "S1 stale": {
-   "verdict": "ACCEPT",
-   "notes": "Corollary of A1 with NoneFresh; kills nothing alone, which is structural and acceptable."
-  },
-  "W1 window": {
-   "verdict": "ACCEPT",
-   "notes": "Per admitted attempt, via KeptCounts and A1; the window consequence holds for non-decreasing time (Assumption A2), eviction covered by A2; kills nothing alone."
-  }
- },
- "acceptedMutants": {},
- "general": "Shell matches the laws and the old TS on every normalized input enumerated. Residual scope notes for the maintainer: LRU eviction of a key that still has fresh attempts once 4,096 addresses are retained, which can reset its window (protocol.md promises an exact window over at most 4,096 LRU addresses); unchanged from the old code, whose !has(key) guard ran after delete(key) and was always true, and confirmed by the differential's identical retainedKeyCount; and 6to4/Teredo/3fff::/20 admission, as before."
+  "acceptedMutants": {},
+  "general": "Hash 1c576e8c2b2552ab at 6c8e533fa; MUTATION.json inputsHash matches (204 valid, 204 killed). #2686: B6 refuses Teredo, 6to4 and 3fff::/20; the shell limiter refuses a new key while every retained key still has a fresh attempt and drops only keys whose attempts no longer count, so a retained key is never reset; A2 states this. Residual: a flood of distinct addresses with fresh attempts refuses new pairing addresses until the window passes (fail closed, as #2686 recommends)."
 }
