@@ -8,7 +8,8 @@ parallel, and pushes that exact merge to main only when all pass. The whole run,
 to the push or refusal, has a 58 s deadline; each check has a 45 s budget. Vitest runs with `--allowOnly=false`; installed dependencies must match the merged lockfile. A check over budget,
 a failure, a dirty tree or an expired deadline refuses and leaves main unchanged. There are no
 retries, skips, quarantine, selection by risk tier or later full suite: what the gate does not run
-is not a gate. `--check` runs the same gate and pushes nothing. Each run writes
+is not a gate. One gate runs per clone at a time: it holds `tron-gate.lock` in the common Git directory, which every
+linked worktree shares, and a second gate refuses at once, naming the holder's PID and worktree. `--check` runs the same gate and pushes nothing. Each run writes
 `test-results/gate/<time>-<id>/` (one log per check and `result.json` with outcome, SHAs and per-step
 seconds).
 

@@ -118,8 +118,10 @@ struct SettingsChoiceSelectionRow: View {
         .onChange(of: isEnabled) { _, enabled in if !enabled { cancel() } }
         .onDisappear { cancel() }
         .accessibilityLabel(title)
-        .accessibilityHint(canEdit ? "Opens a slider of available choices. Dismiss to save." : "No alternative choices are available.")
+        .accessibilityHint(!isEnabled ? information ?? editHint : editHint)
     }
+
+    private var editHint: String { canEdit ? "Opens a slider of available choices. Dismiss to save." : "No alternative choices are available." }
 
     private func cancel() { sliderPresentation?.cancel(owner: ownerID) }
 }

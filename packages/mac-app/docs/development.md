@@ -217,7 +217,10 @@ scripts/tron mac replace --status --follow
   preflight → build → verify signature → stop workers → stop Gateway → swap → start → verify →
   finish. RPC goes to the listener the `com.tron.server` PID holds on 9847 with the
   `local-auth.json` bearer; failures name `client-output`, the Gateway code,
-  `connection-lost`, `timeout` or each unreachable endpoint.
+  `connection-lost`, `timeout` or each unreachable endpoint. Once its journal settles and the
+  result notification is requested, the runner boots out its own job through a detached
+  `launchctl`; every `start` also boots out exited runner jobs whose `runner.plist` lives in this
+  store (never a running one or another store's), so settled operations leave no launchd label.
 - **Preflight** checks source, HEAD, disk, signing, registrations, protocol with the requesting
   iPhone (`--allow-protocol-change`) and that no `mac reinstall` is active; it refuses wrappers
   without `TronReplacementQuitVersion`, which need one manual reinstall first. Quick also

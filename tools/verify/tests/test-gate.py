@@ -96,6 +96,23 @@ class GateTests(unittest.TestCase):
         git(self.work, 'push', '--quiet', 'origin', 'HEAD:main')
         self.assertEqual(self.admit(self.run_steps(['true']), tip=self.tip, push='pre-push'), 1)
 
+    def test_a_second_gate_on_the_same_clone_refuses_while_one_runs(self) -> None:
+        before = self.main()
+        common = Path(git(self.work, 'rev-parse', '--path-format=absolute', '--git-common-dir'))
+        other = self.scratch / 'linked'
+        git(self.work, 'worktree', 'add', '--quiet', '--detach', str(other), self.tip)
+        held = []
+
+        def nested(g, tree, base, merged):
+            with redirect_stdout(io.StringIO()):
+                held.append(gate.Gate(other, 20, 10).admit(self.run_steps(['true'])))
+            held.append((common / 'tron-gate.lock').read_text())
+        self.assertEqual(self.admit(nested), 0)
+        self.assertEqual(held[0], 1)
+        self.assertIn(f'pid {os.getpid()} in {self.work}', held[1])
+        self.assertEqual(git(self.remote, 'rev-parse', 'main^1'), before)
+        self.assertEqual(self.admit(self.run_steps(['true']), tip=self.tip, push='check'), 0, 'the lock is released after a gate ends')
+
     def hook(self, lines: str, environment: dict | None = None) -> tuple[int, list]:
         ran = []
         with mock.patch.dict(os.environ, environment or {}), mock.patch('sys.stdin', io.StringIO(lines)), \
