@@ -17,23 +17,23 @@ private struct TronContentFitSheetModifier: ViewModifier {
     @State private var measured: CGFloat?
     @State private var settled: CGFloat?
     @State private var loading = false
-    @State private var keyboard = false
     @State private var appeared = false
+    @State private var keyboard: CGFloat = 0
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.tronPadSheetScene) private var padScene
 
     private var fitHeight: CGFloat? {
-        guard padScene?.mode == nil, !keyboard, !dynamicTypeSize.isAccessibilitySize else { return nil }
+        guard padScene?.mode == nil, !dynamicTypeSize.isAccessibilitySize else { return nil }
         let window = TronSheetWindowMetrics.current
         guard let content = loading ? settled : measured else { return nil }
-        let height = (content - window.bottomInset).rounded(.up)
+        let height = (content - window.bottomInset + keyboard).rounded(.up)
         return height < window.maximumDetent ? height : nil
     }
 
     private var target: TronSheetDetentDriver.Target {
         if let fitHeight { return .fit(fitHeight) }
-        let opensMedium = loading && settled == nil && padScene?.mode == nil && !keyboard && !dynamicTypeSize.isAccessibilitySize
+        let opensMedium = loading && settled == nil && padScene?.mode == nil && !dynamicTypeSize.isAccessibilitySize
         return opensMedium ? .medium : .large
     }
 
@@ -60,11 +60,12 @@ private struct TronContentFitSheetModifier: ViewModifier {
                 guard next != loading else { return }
                 update { loading = next }
             }
-            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
-                update { keyboard = true }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { note in
+                let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue ?? .zero
+                update { keyboard = max(frame.height - TronSheetWindowMetrics.current.bottomInset, 0) }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-                update { keyboard = false }
+                update { keyboard = 0 }
             }
             .onAppear { appeared = true }
             .background { TronSheetDetentDriver(target: target, animated: appeared && !reduceMotion) }
@@ -81,6 +82,8 @@ private struct TronSheetDetentDriver: UIViewControllerRepresentable {
         var target = Target.large
         var animated = false
         private var applied: Target?
+        private static let appliedByRoot = NSMapTable<UIViewController, Box>.weakToStrongObjects()
+        private final class Box { let target: Target; init(_ target: Target) { self.target = target } }
 
         override func viewDidLayoutSubviews() {
             super.viewDidLayoutSubviews()
@@ -92,10 +95,20 @@ private struct TronSheetDetentDriver: UIViewControllerRepresentable {
             apply()
         }
 
+        private func floored(_ target: Target, under presenter: Target?) -> Target {
+            switch (target, presenter) {
+            case (.fit(let height), .fit(let floor)): .fit(max(height, floor))
+            case (.fit, .medium), (.fit, .large), (.medium, .large): .large
+            default: target
+            }
+        }
+
         func apply() {
             var root: UIViewController = self
             while let parent = root.parent { root = parent }
             guard !root.isBeingDismissed, root.presentedViewController == nil, let sheet = root.sheetPresentationController else { return }
+            let target = floored(target, under: root.presentingViewController.flatMap { Self.appliedByRoot.object(forKey: $0)?.target })
+            Self.appliedByRoot.setObject(Box(target), forKey: root)
             let detent: UISheetPresentationController.Detent = switch target {
             case .fit(let height): .custom(identifier: .init("tron.content-fit")) { _ in height }
             case .medium: .medium()

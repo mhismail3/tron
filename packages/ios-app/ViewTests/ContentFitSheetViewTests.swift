@@ -113,6 +113,59 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         }
     }
 
+    func testQuestionPagesAreMeasuredBeforeTheSwipeAndTheSheetFollowsTheTurn() async throws {
+        try await mounted(["-tron-ask-user-fixture", "-tron-ask-user-four-pages", "-tron-ask-user-styled"]) { app in
+            try await app.until("the form") { app.element("Submit all answers") != nil }
+            try await app.waitForTopSheetToSettle()
+            @MainActor func pages() -> [UIScrollView] {
+                MountedFixture.views(UIScrollView.self, in: app.top).filter { $0.bounds.width > 300 && $0.contentSize.height > 100 }
+            }
+            for turn in 1...3 {
+                _ = try await app.still("page \(turn) settled") { [Double(sheetFrame(app).minY)] }
+                XCTAssertEqual(pages().count, 4, "Turn \(turn): every page is laid out and measured before the finger moves")
+                let drag = try XCTUnwrap(HostedPresentationProbe.questionPageDrag)
+                let steps = 12
+                var dragYs: [CGFloat] = []
+                let trace = try await SheetTrace.record(app, frames: steps + 60, each: { index in
+                    if index == 0 { drag(.began, -1, 0) }
+                    if index > 0, index <= steps { drag(.changed, -CGFloat(index) * 22, 0) }
+                    if index == steps + 1 { drag(.ended, -CGFloat(steps) * 22, -600) }
+                    if index <= steps { dragYs.append(sheetFrame(app).minY) }
+                })
+                XCTAssertTrue(dragYs.allSatisfy { abs($0 - dragYs[0]) <= 0.5 }, "Turn \(turn): the sheet keeps its height under the finger: \(dragYs.map { Int($0) })")
+                let moves = zip(trace.samples, trace.samples.dropFirst()).map { $1.minY - $0.minY }.filter { abs($0) > 0.5 }
+                XCTAssertTrue(zip(moves, moves.dropFirst()).allSatisfy { ($0 > 0) == ($1 > 0) },
+                              "Turn \(turn): the sheet takes the new page's height in one move\n\(trace)")
+                XCTAssertEqual(trace.final.minY, sheetFrame(app).minY, accuracy: 0.5, "Turn \(turn): the sheet settles\n\(trace)")
+            }
+        }
+    }
+
+    func testKeyboardKeepsTheSheetFittedAboveIt() async throws {
+        try await mounted(["-tron-ask-user-fixture"]) { app in
+            try await app.until("the form") { app.element("Submit all answers") != nil }
+            try await app.waitForTopSheetToSettle()
+            _ = try await app.still("the fitted form") { [Double(sheetFrame(app).minY)] }
+            let start = sheetFrame(app).minY
+            XCTAssertGreaterThan(start, 120, "the form fits its content")
+            let window = app.window.bounds
+            let keyboard = CGRect(x: 0, y: window.maxY - 336, width: window.width, height: 336)
+            let shown = try await SheetTrace.record(app, frames: 90, each: { index in
+                guard index == 0 else { return }
+                NotificationCenter.default.post(name: UIResponder.keyboardWillShowNotification, object: nil,
+                                                userInfo: [UIResponder.keyboardFrameEndUserInfoKey: NSValue(cgRect: keyboard)])
+            })
+            let lift = keyboard.height - app.window.safeAreaInsets.bottom
+            XCTAssertTrue(shown.samples.allSatisfy { $0.minY > 120 }, "With the keyboard up the sheet stays fitted, never large\n\(shown)")
+            XCTAssertLessThan(shown.final.minY, start - lift * 0.9, "The fitted sheet grows by the keyboard's height\n\(shown)")
+            shown.assertStill("The sheet rises above the keyboard in one move", against: app)
+            let hidden = try await SheetTrace.record(app, frames: 90, each: { index in
+                if index == 0 { NotificationCenter.default.post(name: UIResponder.keyboardWillHideNotification, object: nil) }
+            })
+            XCTAssertEqual(hidden.final.minY, start, accuracy: 0.5, "Hiding the keyboard restores the fitted height\n\(hidden)")
+        }
+    }
+
     func testArtifactsErrorStaysInsideTheSheetInsets() async throws {
         try await mounted(["-tron-integrations-fixture", "-integrations-scenario", "artifacts-error"]) { app in
             try await app.activate("Artifacts")
@@ -199,9 +252,14 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         }
         let detentsStart = parentDetents()
         var detents: [[CGFloat?]] = []
+        var parentYs: [CGFloat] = []
         let trace = try await SheetTrace.record(app, frames: 120, ready: { sheetChain(app).count == depth + 1 }) { _ in
             detents.append(parentDetents())
+            let layer = parent.view.layer.presentation() ?? parent.view.layer
+            parentYs.append(layer.convert(layer.bounds, to: nil).minY)
         }
+        XCTAssertTrue(parentYs.allSatisfy { abs($0 - parentStart.minY) <= 0.5 },
+                      "\(name): the parent keeps its own height under the nested sheet, never tucked: \(Set(parentYs.map { Int($0) }).sorted())")
         XCTAssertFalse(detentsStart.isEmpty, "\(name): the parent has a detent")
         XCTAssertTrue(detents.allSatisfy { $0 == detentsStart }, "\(name): opening a nested sheet changed its parent's detent from \(detentsStart) to \(Set(detents.map { "\($0)" }))")
         trace.assertStill("\(name): the nested sheet opens at its final height", against: app)

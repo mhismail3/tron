@@ -5,6 +5,7 @@ import UIKit
 @MainActor enum HostedPresentationProbe {
     static var record: (@MainActor (String, String) -> Void)?
     static var nativeView: (@MainActor (String) -> AnyView)?
+    static var questionPageDrag: (@MainActor (UIGestureRecognizer.State, CGFloat, CGFloat) -> Void)?
 }
 #endif
 

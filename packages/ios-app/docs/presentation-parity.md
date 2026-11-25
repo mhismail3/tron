@@ -125,21 +125,25 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 - **Detents.** The managed-sheet presenter applies `tronContentFitSheet` once; no surface sets
   detents. Each `tronScrollEdgeChrome` scroll that carries a sheet inset reports its top inset plus
   content height (never its bottom inset, which animates while a sheet presents), and the sheet
-  takes one `.height` detent at that size, or `.large` when it overflows, at accessibility text
-  sizes or with the keyboard up. While a `TronSheetLoadingState` is shown the sheet holds its last
+  takes one `.height` detent at that size, or `.large` when it overflows or at accessibility text
+  sizes. With the keyboard up the sheet stays fitted and grows by the keyboard's height above the
+  bottom safe area, so a field that expands (the ask_user "Other" answer) grows the sheet smoothly. While a `TronSheetLoadingState` is shown the sheet holds its last
   settled height (medium before the first), so a reopened sheet opens at its final size; a first open shows medium until content settles. The sizer owns the
   native detent: every change after presentation goes through
   `UISheetPresentationController.animateChanges` (the system sheet spring), including growth to and
   from full height; Reduce Motion applies it instantly. A nested sheet opens at its own content
   height like any other, and a sheet's height preference never reaches the sheet that presented it.
-  Opening a child never changes its parent's detent; UIKit tucks a taller parent down behind a
-  shorter child, and closing the child restores the parent's height. A covered sheet never
+  Opening a child never changes its parent's detent, and a nested sheet never opens shorter than the
+  sheet it covers (the detent driver floors a child at its presenter's applied detent), so UIKit never tucks the parent down behind it and an interactive
+  swipe-dismiss of the child leaves the parent nothing to catch up on. A covered sheet never
   drives its detent; it reapplies its own height once uncovered. The drag indicator is hidden.
   The measured scroll extends under the bottom safe area; a fitted sheet adds no bottom content
   margin, so content never exceeds its frame and the sheet cannot scroll or bounce; it also does not clip, so
   while a fitted sheet rises or resizes its content and bottom card are clipped once, by the sheet's own
-  rounded shape. A paged sheet (the ask_user form) keeps every page measured and reports only the current
-  page's height through `tronSheetFitReports`, so a page entering mid-swipe never rebuilds or re-measures. While a sheet fits,
+  rounded shape. A paged sheet (the ask_user form) keeps every page mounted and measured, offsets them by
+  one page position that follows the finger, and reports only the current page's height through
+  `tronSheetFitReports`: no page is inserted or measured mid-swipe, the sheet keeps its height under the
+  finger and takes the new page's height as the turn settles. Under Reduce Motion the pages cross-fade. While a sheet fits,
   every `tronGlassSurface`/`tronScrollSurface` uses `ConcentricRectangle` bottom corners
   (fixed card radius as the minimum), so only the card nearest the sheet's bottom edge grows to
   share the sheet corners' centres; no surface marks itself as last.
