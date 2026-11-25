@@ -10,14 +10,14 @@
   "killed": 188,
   "survived": 0,
   "accepted": 0,
-  "seconds": 154,
+  "seconds": 168,
   "score": 1,
   "unknown": 0,
   "stillbornRatio": 0.161,
   "filter": null,
   "generated": 224,
   "pass": true,
-  "inputsHash": "9c2ea7cd9eac7595"
+  "inputsHash": "999970da6d5645be"
  },
  "perLaw": [
   {

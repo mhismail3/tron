@@ -75,8 +75,9 @@ abstract module SecurityPublicHostLaws {
   lemma B6Ranges(h0: Hextet, h1: Hextet)
     ensures !BlockedV6(h0, h1) <==> 0x2000 <= h0 <= 0x3fff && !(h0 == 0x2001 && h1 == 0x0db8)
 
-  // M6 ipv4-mapped: every IPv4-mapped IPv6 address (::ffff:0:0/96, first two hextets 0) is refused, whichever IPv4
-  // address it maps, public or not; so are the IPv4-compatible ::/96 and NAT64 64:ff9b::/96 forms.
+  // M6 ipv4-mapped: every address whose first hextet is 0 or 0x64 is refused, whatever follows: so every IPv4-mapped
+  // (::ffff:0:0/96), IPv4-compatible (::/96) and NAT64 (64:ff9b::/96) address is refused, whichever IPv4 address it
+  // embeds, public or not.
   lemma M6Mapped(h1: Hextet)
     ensures BlockedV6(0, h1) && BlockedV6(0x64, h1)
 

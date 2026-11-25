@@ -31,9 +31,9 @@ function blockedIPv4(host: string): boolean {
 }
 
 function blockedIPv6(host: string): boolean {
-  const [head = "", rest] = host.split("::");
+  const [head = ""] = host.split("::");
   const groups = head ? head.split(":") : [];
-  const hextet = (index: number) => index < groups.length ? Number.parseInt(groups[index]!, 16) : rest === undefined ? Number.NaN : 0;
+  const hextet = (index: number) => index < groups.length ? Number.parseInt(groups[index]!, 16) : 0;
   return publicHost.BlockedV6(hextet(0), hextet(1));
 }
 

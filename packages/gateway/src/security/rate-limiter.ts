@@ -26,7 +26,7 @@ export class RateLimiter {
     const { admitted, recent } = publicHost.Admit(this.attempts.get(key) ?? [], now, this.windowMs, this.maximum);
 
     this.attempts.delete(key);
-    if (!this.attempts.has(key) && this.attempts.size >= this.maximumKeys) {
+    if (this.attempts.size >= this.maximumKeys) {
       const oldest = this.attempts.keys().next().value;
       if (oldest !== undefined) this.attempts.delete(oldest);
     }
