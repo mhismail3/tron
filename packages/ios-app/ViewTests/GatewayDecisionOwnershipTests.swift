@@ -78,4 +78,25 @@ final class GatewayDecisionOwnershipTests: XCTestCase {
         XCTAssertEqual(SessionRebaselineAdmission.evaluate(current: current, incoming: next(15, 3, current.runtimeGeneration)), .resynchronize)
         XCTAssertEqual(SessionRebaselineAdmission.evaluate(current: current, incoming: next(1, 1, "restarted")), .install)
     }
+
+    func testExtensionLifecycleIntegerProjectionFailsAsAnInvalidResponse() throws {
+        let method = "fixture.extensionLifecycle"
+        let valid: [String: JSONValue] = ["version": .number(1), "state": .string("running"), "attention": .string("none"),
+                                          "sequence": .number(1), "observedAt": .string(observed), "remainingMs": .number(5)]
+        let decoded = try GatewayResponseDecoding.decode(.object(valid), as: ExtensionActivityLifecycle.self, method: method)
+        XCTAssertEqual(decoded.sequence, 1)
+        XCTAssertEqual(decoded.remainingMs, 5)
+        for field in ["sequence", "remainingMs"] {
+            for invalid in [0.5, 1e30] {
+                var malformed = valid
+                malformed[field] = .number(invalid)
+                XCTAssertThrowsError(try GatewayResponseDecoding.decode(.object(malformed), as: ExtensionActivityLifecycle.self, method: method)) { error in
+                    let failure = error as? GatewayFailure
+                    XCTAssertEqual(failure?.code, "invalid_response", "\(field)=\(invalid) escaped as \(error)")
+                    XCTAssertEqual(failure?.details?.objectValue?["method"]?.stringValue, method)
+                    XCTAssertEqual(failure?.details?.objectValue?["category"]?.stringValue, "invalid_data")
+                }
+            }
+        }
+    }
 }
