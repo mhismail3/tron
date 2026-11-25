@@ -61,7 +61,9 @@ scripts/tron test ios lanes
 A failed `build` prints `error: path:line: message` for each build error and a
 failed `run` prints `failure: test: message` for each test failure (first 20),
 read from the run's result bundle (`Build.xcresult`, `TestResults.xcresult`) by
-`scripts/xcresult-failures.py`. Read that block first; the console prints the run directory. A fresh
+`scripts/xcresult-failures.py`. A run whose `test.log` shows a runner restart or a test that started
+without finishing fails with status 65 and prints `crashed: test` for each, whatever the summary
+says. Read that block first; the console prints the run directory. A fresh
 source needs `checkpoint` or `build` before `run`; missing or stale products are still refused.
 Native `lane-remove`, `reap`, `prune` and `clean` remain owning maintenance commands, not routine
 remote test steps; remove only resources you own and have authorization to delete.
