@@ -1381,25 +1381,6 @@ enum TronSettingsGroupSurfaceStyle: Equatable, Sendable {
     case scrollOptimized
 }
 
-private struct TronSettingsRowAccessoryKey: EnvironmentKey {
-    static let defaultValue: (@MainActor @Sendable () -> AnyView)? = nil
-}
-
-private struct TronSettingsRowStatusKey: EnvironmentKey {
-    static let defaultValue: String? = nil
-}
-
-extension EnvironmentValues {
-    var tronSettingsRowAccessory: (@MainActor @Sendable () -> AnyView)? {
-        get { self[TronSettingsRowAccessoryKey.self] }
-        set { self[TronSettingsRowAccessoryKey.self] = newValue }
-    }
-    var tronSettingsRowStatus: String? {
-        get { self[TronSettingsRowStatusKey.self] }
-        set { self[TronSettingsRowStatusKey.self] = newValue }
-    }
-}
-
 struct TronSettingsGroup<Content: View>: View {
     let title: String?
     let detail: String?
@@ -1495,8 +1476,6 @@ struct TronSettingsRow<Trailing: View>: View {
     @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
     @Environment(\.controlSize) private var controlSize
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Environment(\.tronSettingsRowAccessory) private var accessory
-    @Environment(\.tronSettingsRowStatus) private var status
 
     init(
         icon: String?,
@@ -1546,18 +1525,13 @@ struct TronSettingsRow<Trailing: View>: View {
             stackedLeadingInset: icon == nil ? 0 : TronSettingsLayoutPolicy.iconSize + TronSpacing.xl
         ) {
             rowLabels
-            HStack(spacing: 0) {
-                if let accessory { accessory() }
-                trailing
-            }
-            .environment(\.tronSettingsRowAccessory, nil)
-            .environment(\.tronSettingsRowStatus, nil)
+            trailing
         }
         .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
         .padding(.vertical, labelsOwnInsets ? 0 : feedTrailing == nil ? TronSpacing.xl : TronSpacing.md)
         .frame(maxWidth: .infinity, minHeight: TronSettingsLayoutPolicy.rowMinimumHeight, alignment: .leading)
         .contentShape(Rectangle())
-        .accessibilityElement(children: accessory == nil ? .combine : .contain)
+        .accessibilityElement(children: .combine)
     }
 
     private var rowLabels: some View {
@@ -1601,24 +1575,6 @@ struct TronSettingsRow<Trailing: View>: View {
                             .lineLimit(1)
                             .fixedSize()
                     }
-                } else if let status {
-                    let titleText = Text(title).font(titleFont).foregroundStyle(titleColor)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if stacksAtLargeText {
-                        VStack(alignment: .leading, spacing: TronSpacing.xs) {
-                            titleText
-                            TronStatusPill(text: status, accent: settingsTheme?.accent ?? accent).fixedSize()
-                        }
-                    } else {
-                        HStack(alignment: .firstTextBaseline, spacing: TronSpacing.md) {
-                            titleText
-                            TronTitleLineCenteredLayout {
-                                Text(verbatim: "X").font(titleFont).hidden()
-                                TronStatusPill(text: status, accent: settingsTheme?.accent ?? accent)
-                                    .fixedSize()
-                            }
-                        }
-                    }
                 } else {
                     Text(title).font(titleFont).foregroundStyle(titleColor)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1660,7 +1616,6 @@ struct TronSettingsRow<Trailing: View>: View {
         .padding(.vertical, controlSize == .small && !dynamicTypeSize.isAccessibilitySize ? TronSpacing.xl : 0)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
-        .environment(\.tronSettingsRowAccessory, nil)
     }
 }
 

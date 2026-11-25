@@ -196,7 +196,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
         ...both({ store: "pi", path: ["defaultThinkingLevel"], qualified: ["modelThinkingLevels", "{model}"] }),
       },
       timing: "fixed", effect: "next-turn", writers: ANY_ACTOR,
-      label: "Thinking", help: "How much the model reasons before it answers.",
+      label: "Effort", help: "How much the model reasons before it answers.",
       order: 20, importance: "essential", control: "choice",
     },
     {
@@ -216,7 +216,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       id: "model.thinking[role=summarizer]", sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "context", fixed: { role: "summarizer" },
       type: types.choice([{ value: "inherit", label: "Same as chat", detail: "Uses the chat's own thinking level" }, ...THINKING], true),
       layers: both(pi("compaction", "thinkingLevel")), defaultValue: "inherit", timing: "live", effect: "next-compaction",
-      writers: ANY_ACTOR, label: "Summary thinking", help: "Thinking level for compaction summaries.", order: 80,
+      writers: ANY_ACTOR, label: "Summary effort", help: "Effort level for compaction summaries.", order: 80,
       importance: "advanced",
     },
     ...MODEL_QUEUE_ROLES.map((role, index): KeyDeclaration => ({
