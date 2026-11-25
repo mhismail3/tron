@@ -17,7 +17,7 @@ const roots: string[] = [];
 const children: Array<ReturnType<typeof spawn>> = [];
 const report: Array<Record<string, unknown>> = [];
 
-type LogRecord = { event?: string; message?: string; code?: string; pid?: number; durationMs?: number };
+type LogRecord = { event?: string; message?: string; code?: string; pid?: number; durationMs?: number; step?: string };
 
 async function freePort(): Promise<number> {
   return await new Promise((resolve, reject) => {
@@ -155,6 +155,7 @@ describe("Gateway exit after a supervised restart", () => {
     expect(result.signal).toBeNull();
     expect(result.code).toBe(75);
     expect(result.records.some((record) => record.event === "gateway.exit-stalled")).toBe(false);
+    expect(result.records.some((record) => record.step === "sidecars-suspend")).toBe(false);
   });
 
   it("leaves the process table when exit blocks after the shutdown was recorded", async () => {
@@ -189,6 +190,9 @@ describe("Gateway exit after a supervised restart", () => {
     report.push({ case: "intentional stop exits", code: result.code, signal: result.signal, exitMs: result.exitMs });
     expect(result.signal).toBeNull();
     expect(result.code).toBe(0);
+    const steps = result.records.filter(record => record.event === "gateway.shutdown-step").map(record => record.step);
+    expect(steps.indexOf("sidecars-suspend")).toBeGreaterThan(steps.indexOf("sessions-dispose"));
+    expect(steps.indexOf("sidecars-suspend")).toBeLessThan(steps.indexOf("runtime-lock-release"));
     expect(result.records.some(record => record.event === "gateway.stopped" && record.pid === result.pid && record.code === "0")).toBe(true);
   });
 

@@ -104,6 +104,11 @@ export class MacTerminalService {
     });
   }
 
+  async suspend(): Promise<void> {
+    if (!await this.enabled()) return;
+    await this.mutate(async fence => { if (await this.enabled()) await this.retireJob(fence); });
+  }
+
   async recover(): Promise<void> {
     await this.mutate(async fence => {
       const ip = await this.currentIPv4();

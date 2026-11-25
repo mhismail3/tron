@@ -100,6 +100,8 @@ Also the rows of `src/` modules that have no README yet: process lifecycle
 | `gateway.shutdown-cleanup-expired` | warning | The 2 s cleanup grace ended with owned work outstanding (count in the message) |
 | `gateway.shutdown-failed` | error | Shutdown itself threw: `error` |
 | `gateway.stop-completion.failed` | error | Publishing the intentional-stop receipt failed after every owner settled; the exit stays 0 so launchd does not relaunch |
+| `gateway.sidecar-suspend-failed` | error | An intentional stop could not stop a sidecar job it starts (`code` = `mac-terminal` or `share-host`, `lifecycle/share-host-job.ts`); that job keeps running and holds the home: `error` |
+| `share-host.startup-failed` | warning | Startup could not start the enabled `com.tron.ios-builds` share host for this home: `error` |
 | `gateway.stopped` | info; warning for a non-zero exit code | The last record before exit: `pid`, `code`, `durationMs` (shutdown time) |
 | `gateway.exit-stalled` | warning | A non-zero exit after a completed shutdown had not ended the process within `EXIT_STALL_GRACE_MS` (5,000 ms); the detached watcher (`lifecycle/exit-after-shutdown.ts`) then SIGKILLs that PID: `pid`, `code`, `durationMs` |
 | `gateway.restart-drain` | info | The restart was scheduled and the drain began |

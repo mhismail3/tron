@@ -92,7 +92,9 @@ starts the 5 s exit-stall grace; five seconds without it or a reachable drain is
 uncertainty and Quit fails, work untouched. A proven stall rechecks identity and boots out only
 that job, after its effective loaded `exit timeout` plus 5 s (missing, infinite or > 120 s
 refuses); it never signals the Gateway. Duplicate callers share one attempt; a retry keeps the
-accepted drain; each stop writes one `app.quit.gateway-exit`. Quit keeps both Login Items
+accepted drain; each stop writes one `app.quit.gateway-exit`. The Gateway's intentional stop also stops the jobs it starts beside it (the Mac Terminal sshd and the
+`com.tron.ios-builds` share host, keeping their LaunchAgents) and its MCP children exit with it, so
+Quit leaves the home unowned; launch starts them again. Quit keeps both Login Items
 approved; startup restarts the Gateway only while ServiceManagement reports `.enabled`. Replace
 Mac App uses the same owner through a private `~/.tron-maintenance/replace/quit/request.json` /
 `result.json` handoff bound to version, nonce and the exact wrapper PID/start; wrappers without

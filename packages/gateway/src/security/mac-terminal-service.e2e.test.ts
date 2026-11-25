@@ -141,6 +141,13 @@ it("owns authorization and launchd recovery while preserving host identity and t
   await phone.ssh(`${tmux} new-session -d -s ${name}`);
   const shell = (await phone.ssh(`${tmux} display-message -p -t ${name} '#{pane_pid}'`)).trim();
   expect(Number(shell)).toBeGreaterThan(0);
+  await service.suspend();
+  expect(await service.enabled()).toBe(true);
+  expect(await run("/bin/launchctl", ["print", `gui/${process.getuid!()}/${service.label}`]).then(() => true, () => false)).toBe(false);
+  expect(await tcp((await service.status()).hosts[0]!, service.port)).toBe(false);
+  await service.restore();
+  expect((await service.status()).serviceState).toBe("running");
+  expect((await phone.ssh(`${tmux} display-message -p -t ${name} '#{pane_pid}'`)).trim()).toBe(shell);
   await service.setEnabled(false);
   expect(await service.enabled()).toBe(false);
   expect((await service.status()).serviceState).toBe("stopped");

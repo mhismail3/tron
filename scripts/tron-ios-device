@@ -89,7 +89,8 @@ LaunchAgent com.tron.ios-builds (127.0.0.1:8444, serving ~/.tron/workspace/build
 at /, ~/.tron/workspace/artifacts at /artifacts/ and ~/.tron/workspace/reports at /reports/) and runs
 `tailscale serve --bg --https=8443 http://127.0.0.1:8444`, so all three are reachable
 only from the tailnet at https://<this Mac>.ts.net:8443/ with Tailscale's
-certificate. An existing agent picks up a new route when enable runs again. `disable` reverses both and keeps the builds;
+certificate. An existing agent picks up a new route when enable runs again. The Gateway serving
+that home stops the agent on an intentional stop (Quit) and starts it again on launch. `disable` reverses both and keeps the builds;
 both refuse, changing nothing, when :8443 serves anything else as well.
 USAGE
 }

@@ -40,6 +40,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from types import SimpleNamespace
 
 HERE = Path(__file__).resolve().parent
@@ -1083,6 +1084,60 @@ def snapshot_journey():
     return 0 if passed else 1
 
 
+def retire_journey():
+    """Settled runners leave no launchd label (#2679): a runner boots out its own job, and a start retires every exited
+    runner job whose plist is in its store while another store's runner job stays loaded."""
+    evidence, started, passed = [], time.time(), False
+    report = REPO / 'test-results/mac-replace-retire-e2e.json'
+    domain = f'gui/{os.getuid()}'
+    labels = []
+
+    def job(store, operation, program):
+        directory = store / operation
+        directory.mkdir(parents=True)
+        plist = directory / 'runner.plist'
+        label = replace.runner_label(operation)
+        labels.append(label)
+        plist.write_bytes(plistlib.dumps({'Label': label, 'ProgramArguments': program, 'RunAtLoad': True, 'KeepAlive': False,
+                                          'EnvironmentVariables': {'PYTHONPATH': str(HERE)}}))
+        code, _, err = capture(['/bin/launchctl', 'bootstrap', domain, plist], timeout=30)
+        check(code == 0, f'bootstrap {label}: {err.strip()}', evidence)
+        return label
+
+    def state(label, wanted):
+        for _ in range(100):
+            current = MacPlatform().launchd_state(label)
+            if current == wanted:
+                return current
+            time.sleep(0.1)
+        return current
+
+    try:
+        with tempfile.TemporaryDirectory(prefix='tron-mac-replace-retire-') as directory:
+            root = Path(directory).resolve()
+            store, other = root / 'store', root / 'other-store'
+            own = str(uuid.uuid4())
+            label = job(store, own, ['/usr/bin/python3', '-c', f'import tron_mac_replace as r; r.retire_own_runner({own!r})'])
+            check(state(label, 'absent') == 'absent', 'a settled runner boots out its own launchd job', evidence)
+            exited = job(store, str(uuid.uuid4()), ['/usr/bin/true'])
+            foreign = job(other, str(uuid.uuid4()), ['/usr/bin/true'])
+            check(state(exited, 'stopped') == 'stopped' and state(foreign, 'stopped') == 'stopped', 'both exited runner jobs stay loaded', evidence)
+            replace.retire_runners(SimpleNamespace(store=store))
+            check(state(exited, 'absent') == 'absent', 'start retires an exited runner job from its own store', evidence)
+            check(MacPlatform().launchd_state(foreign) == 'stopped', 'a runner job from another store stays loaded', evidence)
+        passed = True
+        return 0
+    except BaseException as error:  # noqa: BLE001 - report then fail
+        evidence.append({'error': repr(error)})
+        return 1
+    finally:
+        for label in labels:
+            capture(['/bin/launchctl', 'bootout', f'{domain}/{label}'], timeout=30)
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.write_text(json.dumps({'passed': passed, 'seconds': round(time.time() - started, 2), 'evidence': evidence}, indent=2) + '\n')
+        print(f'Mac replacement runner retirement E2E: {"passed" if passed else "FAILED"}; {report}', flush=True)
+
+
 def fixture_main():
     """`--fixture <config> ...`: the orchestrator CLI/runner against the fixture platform."""
     arguments = sys.argv[1:]
@@ -1101,6 +1156,9 @@ if __name__ == '__main__':
         sys.exit(launch_services_journey())
     if '--snapshot-only' in sys.argv:
         sys.exit(snapshot_journey())
+    retire_result = retire_journey()
+    if retire_result or '--retire-only' in sys.argv:
+        sys.exit(retire_result)
     retention_result = retention_journey()
     if retention_result or '--retention-only' in sys.argv:
         sys.exit(retention_result)
