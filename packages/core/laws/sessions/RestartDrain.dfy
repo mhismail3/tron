@@ -43,7 +43,7 @@ abstract module SessionsRestartDrainLaws {
   // 64; the rest are omitted). A session id is absent or non-empty (the runtime registry omits an empty one), and
   // every admission and progress time is absent or a Date#toISOString instant at or after 1970: the Gateway's
   // clocks write those, and an extension-reported time is bounded to 0 to 8.64e15 ms and written by toISOString
-  // before it reaches a blocker. The shell refuses any other string and passes each time as its milliseconds. For
+  // before it reaches a blocker. The shell reads any other string as Unset and passes each set time as its milliseconds. For
   // the years 1970 to 9999 the strings order as their milliseconds, so the block orders them as the replaced
   // TypeScript's string comparison did; an expanded year after 9999 (+0YYYYY, only from an extension-reported
   // time) is ordered by its time, where the string comparison put it before every four-digit year. now is the
