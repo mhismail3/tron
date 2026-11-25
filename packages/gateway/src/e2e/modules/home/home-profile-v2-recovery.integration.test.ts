@@ -1,4 +1,4 @@
-import { legacyProfileFixture } from "../../../../test-support/profile-v1-fixture.js";
+import { legacyProfileFixture, legacyProfileFixtures } from "../../../../test-support/profile-v1-fixture.js";
 import * as fs from "node:fs/promises";
 import { afterEach, expect, it } from "vitest";
 import { crashProfilePartition } from "../../../../test-support/profile-partition-crash.js";
@@ -25,12 +25,15 @@ async function setup() {
   knowledge = new ProfileStore(resource);
   return { f, profile: new HomeProfileItems(() => knowledge) };
 }
-async function seed(index: number, path?: string[], retired = false): Promise<Note> {
-  const record = {
+function draft(index: number, path?: string[], retired = false) {
+  return {
     kind: "note", scope: "personal", provenance: { actor: "agent", source: "home", evidence: [], reason: `Original capture ${index}` }, relations: [],
     content: { title: `Exact original note ${index}`, role: "fact", confirmed: false, ...(retired ? { retired: true } : {}),
       tags: path ? ["home-profile", "kind-fact"] : ["fixture-label", "home-profile", "kind-fact"], ...(path ? { profile: { version: 2, path } } : {}) },
   } as const;
+}
+async function seed(index: number, path?: string[]): Promise<Note> {
+  const record = draft(index, path);
   if (!path) return legacyProfileFixture(resource, `v2-seed-${index}`, structuredClone(record));
   return (await knowledge!.createNote({ commandId: `v2-seed-${index}`, record: structuredClone(record) })).record as Note;
 }
@@ -67,8 +70,7 @@ it("repairs a v2-to-historical Undo audit after a real postcommit process death 
 
 it("enforces personal, unsorted and sub-area limits atomically without losing over-bound originals", async () => {
   const { f, profile } = await setup();
-  const originals: Note[] = [];
-  for (let index = 0; index < 385; index++) originals.push(await seed(index, undefined, index === 384));
+  const originals = await legacyProfileFixtures(resource, Array.from({ length: 385 }, (_, index) => structuredClone(draft(index, undefined, index === 384)))) as Note[];
   const assignments = originals.map((note, index) => ({ id: note.id, expectedRevision: note.revisionId,
     path: index < 256 ? `engineering/leaf-${Math.floor(index / 32)}` : index === 384 ? "inferred/uncertain" : "inferred/review" }));
   const context = { actor: { kind: "ui" as const, id: "fixture" }, reason: "Exact bounded fixture migration" };
