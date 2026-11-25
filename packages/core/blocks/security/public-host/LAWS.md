@@ -352,4 +352,4 @@ ghost function AdmittedTimes(nows: seq<Ms>, window: Ms, maximum: Count): seq<Ms>
 
 ## Reviewer: general notes
 
-Shell matches the laws and the old TS on every normalized input enumerated. Residual scope notes for the maintainer: LRU eviction above 4096 active addresses (behaviour unchanged from the old code) and 6to4/Teredo/3fff::/20 admission.
+Shell matches the laws and the old TS on every normalized input enumerated. Residual scope notes for the maintainer: LRU eviction of a key that still has fresh attempts once 4,096 addresses are retained, which can reset its window (protocol.md promises an exact window over at most 4,096 LRU addresses); unchanged from the old code, whose !has(key) guard ran after delete(key) and was always true, and confirmed by the differential's identical retainedKeyCount; and 6to4/Teredo/3fff::/20 admission, as before.
