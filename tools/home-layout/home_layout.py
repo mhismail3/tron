@@ -925,32 +925,22 @@ def main(argv: list[str]) -> int:
     repair_parser = commands.add_parser("repair-memory", help="rebind Home memory after a receipted header-only relocation; never starts or stops Tron")
     repair_parser.add_argument("--home", required=True)
     repair_parser.add_argument("--journal", required=True)
-    freeze_parser = commands.add_parser("freeze-memory", help="back up Home memory and switch it to the frozen layout; never starts or stops Tron")
-    freeze_parser.add_argument("--home", required=True)
-    for memory_parser in (repair_parser, freeze_parser):
-        memory_mode = memory_parser.add_mutually_exclusive_group(required=True)
-        memory_mode.add_argument("--dry-run", action="store_true")
-        memory_mode.add_argument("--apply", action="store_true")
-        memory_parser.add_argument("--backup")
+    memory_mode = repair_parser.add_mutually_exclusive_group(required=True)
+    memory_mode.add_argument("--dry-run", action="store_true")
+    memory_mode.add_argument("--apply", action="store_true")
+    repair_parser.add_argument("--backup")
     args = parser.parse_args(argv)
-    if args.command in ("repair-memory", "freeze-memory"):
+    if args.command == "repair-memory":
         memory_home = os.path.abspath(args.home)
-        if args.command == "repair-memory":
-            module = ROOT / "packages/gateway/dist/episodic/home-source-relocation-migration.js"
-            journal = json.loads(runtime_layout.read_record(sys.modules[__name__], Path(args.journal))[0])
-            receipt_root = runtime_layout.backup_root({"home": memory_home, "user_home": os.path.expanduser("~")}, journal["layouts"][memory_home])
-            module_args = ["--home", memory_home, "--journal", os.path.abspath(args.journal), "--receipt-root", str(receipt_root)]
-            lock_root = Path(args.journal).resolve().parent
-            script = "const m=await import(process.argv[1]); await m.applyHomeSourceRelocation(await m.planHomeSourceRelocation(process.argv[2],process.argv[3],process.argv[4]),process.argv[5],Number(process.argv[6])); console.log(JSON.stringify({applied:true}));"
-            script_args = [memory_home, os.path.abspath(args.journal), str(receipt_root)]
-        else:
-            module = ROOT / "packages/gateway/dist/episodic/episodic-layout-migration.js"
-            module_args = ["--home", memory_home]
-            lock_root = Path(os.path.expanduser("~")) / ".tron-maintenance/layout-v2"
-            script = "const m=await import(process.argv[1]); console.log(JSON.stringify(await m.applyLayoutMigration(await m.planLayoutMigration(process.argv[2]),process.argv[3],Number(process.argv[4]))));"
-            script_args = [memory_home]
+        module = ROOT / "packages/gateway/dist/episodic/home-source-relocation-migration.js"
+        journal = json.loads(runtime_layout.read_record(sys.modules[__name__], Path(args.journal))[0])
+        receipt_root = runtime_layout.backup_root({"home": memory_home, "user_home": os.path.expanduser("~")}, journal["layouts"][memory_home])
+        module_args = ["--home", memory_home, "--journal", os.path.abspath(args.journal), "--receipt-root", str(receipt_root)]
+        lock_root = Path(args.journal).resolve().parent
+        script = "const m=await import(process.argv[1]); await m.applyHomeSourceRelocation(await m.planHomeSourceRelocation(process.argv[2],process.argv[3],process.argv[4]),process.argv[5],Number(process.argv[6])); console.log(JSON.stringify({applied:true}));"
+        script_args = [memory_home, os.path.abspath(args.journal), str(receipt_root)]
         if not module.is_file():
-            parser.error("Build the Gateway CLI before repairing memory" if args.command == "repair-memory" else "Build the Gateway CLI before migrating memory")
+            parser.error("Build the Gateway CLI before repairing memory")
         if args.apply and not args.backup:
             parser.error("--apply requires a new --backup directory")
         command = [str(ROOT / "scripts/tron-node"), "exec", "node", str(module), *module_args]
