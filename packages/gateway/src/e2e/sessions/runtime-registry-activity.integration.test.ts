@@ -1212,12 +1212,10 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const startedAt = new Date(Date.now() - 1_000).toISOString();
     const future = { details: { mode: "single", runId: "future-run", lastActivityAt: 8.64e15, progress: [{ agent: "worker", status: "running" }] } };
-    const observedBefore = Date.now();
-    updateExtensionActivity(slot.ownedTurns, "future-tool", "subagent", { source: "project" }, "running", startedAt, startedAt, future);
+    const first = updateExtensionActivity(slot.ownedTurns, "future-tool", "subagent", { source: "project" }, "running", startedAt, startedAt, future)!;
     const blocker = () => fixture.registry.administrativeDrainSnapshot().blockers.find((entry) => entry.category === "detached-extension-run")!;
     const progressAt = blocker().progressAt!;
-    expect(Date.parse(progressAt)).toBeGreaterThanOrEqual(observedBefore);
-    expect(Date.parse(progressAt)).toBeLessThanOrEqual(Date.now());
+    expect(progressAt).toBe(first.lifecycle!.observedAt);
     updateExtensionActivity(slot.ownedTurns, "future-tool", "subagent", { source: "project" }, "running", startedAt, new Date().toISOString(), future);
     expect(blocker().progressAt).toBe(progressAt);
     const limit = 180_000;
