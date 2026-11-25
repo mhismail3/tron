@@ -3,7 +3,7 @@ import { MacTerminalService } from "./security/mac-terminal-service.js";
 import { ManagedSubagents } from "./kernel/delegation/managed-subagents.js";
 import { homedir } from "node:os";
 import { existsSync, renameSync, writeFileSync, rmSync } from "node:fs";
-import { SettingsManager } from "./kernel/pi/coding-agent.js";
+import { SettingsManager, createEventBus } from "./kernel/pi/coding-agent.js";
 import { piCliBundle } from "./kernel/pi/packages.js";
 import { loadConfig, resolveAgentDir } from "./config.js";
 import { resolveTronHome } from "./tron-home.js";
@@ -161,7 +161,8 @@ await notifications.initialize();
 startupCheckpoint("notifications");
 
 const openAIModelEligibility = new OpenAIModelEligibility();
-const providerUsage = new ProviderUsageOwner();
+const globalExtensionEvents = createEventBus();
+const providerUsage = new ProviderUsageOwner({ events: globalExtensionEvents });
 const modelRuntime = await createProviderModelRuntime(config.agentDir);
 openAIModelEligibility.attachRuntime(modelRuntime);
 startupCheckpoint("model-runtime");
@@ -317,6 +318,7 @@ const globalProviderResources = await GlobalProviderResources.create({
   agentDir: config.agentDir,
   modelRuntime,
   auth,
+  eventBus: globalExtensionEvents,
   workRegistry,
   log: (level, message) => logger.log(level, message, { event: "runtime.diagnostic", source: "resource-loader" }),
   broadcast: () => transport?.broadcast("providers.changed", {}),

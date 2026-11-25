@@ -1,8 +1,8 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import type { Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
+import { ModelRuntime, createEventBus } from "@earendil-works/pi-coding-agent";
+import { fauxProvider, type Credential, type CredentialInfo, type CredentialStore } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { ModelQueueOwner } from "./model-queue.js";
@@ -296,5 +296,74 @@ describe("Anthropic usage under Pi's built-in OAuth", () => {
     expect(snapshot).toMatchObject({ providerId: "anthropic", status: "available" });
     expect(requests.map((request) => request.authorization)).toEqual(["Bearer sk-ant-oat01-second"]);
     expect(await piAnthropicLogin(agentDir)).toMatchObject({ type: "oauth", access: "sk-ant-oat01-second", refresh: "sk-ant-ort01-second" });
+  });
+});
+
+describe("Antigravity usage from its provider extension", () => {
+  it("reads the extension's quota reply, shows only groups covering served models and lets an exhausted window skip the queue", async () => {
+    const root = await mkdtemp(join(tmpdir(), "gateway-antigravity-usage-"));
+    const credential: Credential = { type: "api_key", key: "managed" };
+    const credentials: CredentialStore = {
+      read: async (providerId) => providerId === "antigravity-acp" ? credential : undefined,
+      list: async () => [{ providerId: "antigravity-acp", type: "api_key" }],
+      modify: async (providerId, fn) => providerId === "antigravity-acp" ? fn(credential) : undefined,
+      delete: async () => {},
+    };
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false, allowModelNetwork: false, credentials });
+    runtime.registerNativeProvider(fauxProvider({ provider: "antigravity-acp", api: "antigravity-acp", models: [{ id: "gemini-4-neon" }] }).provider);
+    await runtime.refresh({ allowNetwork: false });
+    const events = createEventBus();
+    let fivePercentRemaining = 98;
+    let requests = 0;
+    let answering = true;
+    events.on("antigravity-acp:quota:request", (data) => {
+      requests += 1;
+      if (!answering) return;
+      (data as { reply: (result: unknown) => void }).reply({ ok: true, quota: { at: 0, groups: [
+        { displayName: "Gemini Models", buckets: [
+          { window: "weekly", remainingFraction: 0.99, resetTime: "2026-12-02T00:27:00.000Z" },
+          { window: "5h", remainingFraction: fivePercentRemaining / 100, resetTime: "2026-11-25T05:27:00.000Z" },
+        ] },
+        { displayName: "Claude and GPT models", buckets: [{ window: "weekly", remainingFraction: 0 }] },
+      ] } });
+    });
+    let clock = Date.parse("2026-11-25T00:30:00Z");
+    const providerUsage = new ProviderUsageOwner({ now: () => clock, timeoutMs: 200, events });
+    const queue = new ModelQueueOwner({ tronHome: root, runtime, usage: providerUsage, queue: async () => ["antigravity-acp/gemini-4-neon"], now: () => clock });
+    const service = new GatewayService({ display: {} as never,
+      config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: root },
+      modelRuntime: runtime, broadcast: () => {}, providerUsage,
+      globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation() },
+      sessions: { recentModelUsage: () => [] },
+      receipts: { execute: async (_identity: string, _method: string, _commandId: string, operation: () => Promise<unknown>) => operation(), status: async () => undefined },
+    } as unknown as GatewayServiceDependencies);
+    try {
+      const list = await service.invoke(client, "provider.list", {}) as { providers: Array<{ id: string; usageSupported: boolean }> };
+      expect(list.providers.find((provider) => provider.id === "antigravity-acp")?.usageSupported).toBe(true);
+      expect(await service.invoke(client, "provider.usage", {})).toMatchObject({ providers: [{
+        providerId: "antigravity-acp", status: "available", source: "antigravity-acp.usage", scope: "account", stale: false,
+        windows: [
+          { id: "gemini-models-weekly", label: "Weekly", usedPercent: 1, resetsAt: "2026-12-02T00:27:00.000Z", windowSeconds: 604_800 },
+          { id: "gemini-models-5h", label: "5h", usedPercent: 2, resetsAt: "2026-11-25T05:27:00.000Z", windowSeconds: 18_000 },
+        ],
+      }] });
+      expect((await queue.availability("subagent")).models).toEqual([{ model: "antigravity-acp/gemini-4-neon", available: true }]);
+
+      fivePercentRemaining = 4;
+      clock += 61_000;
+      expect((await queue.availability("subagent")).models).toEqual([{ model: "antigravity-acp/gemini-4-neon", available: false, reason: "5h usage 96%" }]);
+
+      answering = false;
+      clock += 61_000;
+      const before = requests;
+      expect(await service.invoke(client, "provider.usage", { providerId: "antigravity-acp" })).toMatchObject({
+        providers: [{ status: "unavailable", stale: true, message: "Provider usage request timed out" }],
+      });
+      expect((await queue.availability("subagent")).models).toEqual([{ model: "antigravity-acp/gemini-4-neon", available: true }]);
+      expect(requests).toBe(before + 1);
+    } finally {
+      service.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
