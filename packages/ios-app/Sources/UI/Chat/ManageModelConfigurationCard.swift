@@ -114,6 +114,11 @@ struct ManageModelConfigurationCard: View {
         }
     }
 
+    private var lockReason: String? {
+        if case .blocked(let reason) = availability { return reason }
+        return nil
+    }
+
     private func choiceRow(_ setting: ResolvedSetting, title: String, icon: String) -> some View {
         let options = choiceOptions(for: setting)
         return HStack(spacing: 0) {
@@ -121,11 +126,11 @@ struct ManageModelConfigurationCard: View {
                 TronSettingsRow(icon: icon, title: title) { TronInlineActionLabel(setting.display, accent: .tronPrimary) }
             } else {
                 SettingsChoiceSelectionRow(title: title, icon: icon, value: setting.value ?? .null, display: setting.display,
-                                           options: options, onChange: { change(setting, $0) })
+                                           options: options, information: lockReason, onChange: { change(setting, $0) })
             }
             if setting.overridden == true { resetButton(setting).padding(.trailing, 12) }
         }
-        .disabled(availability.isApplying)
+        .disabled(availability.isApplying || (!options.isEmpty && !availability.canSelect))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(settingsRowIdentifier(setting))
     }
