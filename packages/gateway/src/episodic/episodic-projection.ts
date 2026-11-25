@@ -3,6 +3,7 @@ import { asRecord } from "../foundation/json.js";
 import { redactCredentials } from "../util/credential-redaction.js";
 import { EPISODIC_CAP_CHARS, EPISODIC_CAP_TAIL_CHARS, EPISODIC_OMITTED_TEXT, type EpisodicLimits, type EpisodicMessageKind, type EpisodicSourceCursor } from "./episodic-contract.js";
 import { capText } from "./episodic-tree.js";
+import { HOME_TASK_REPORT } from "../kernel/delegation/task-report.js";
 
 export interface EpisodicSourceDelta {
   sessionId: string;
@@ -91,6 +92,10 @@ function projectEntry(entry: EpisodicCanonicalEntry, edit: Record<string, unknow
       return { kind: "echo", text: `tool ${name}: ${capped.text}`, omissions };
     }
     return undefined;
+  }
+  if (entry.type === "custom" && entry.raw.customType === HOME_TASK_REPORT) {
+    const omissions: string[] = [];
+    return { kind: "talk", text: projectContent(asRecord(entry.raw.data)?.text, omissions), omissions };
   }
   if (entry.type === "custom_message") {
     if (entry.raw.display !== true) return undefined;

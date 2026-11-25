@@ -566,6 +566,47 @@ describe("Tron Home research tools", () => {
     recordCase("search-edits", { citation: "edited-root/edited-user", sourceUnchanged: true, staleHits: 0 });
   }, 60_000);
 
+  it("finds and opens a worker task report, and names a reason for every session a search leaves out", async () => {
+    const report = (cwd: string, timestamp: string) => [
+      { type: "session", version: 3, id: "worker-root", timestamp, cwd },
+      { type: "message", id: "worker-user", parentId: null, timestamp,
+        message: { role: "user", content: "Run the blur investigation.", timestamp: Date.now() } },
+      { type: "custom", id: "worker-report", parentId: "worker-user", timestamp, customType: "tron-home-task-report",
+        data: { version: 1, resultId: "blur", outcome: "final", text: "TASK-REPORT-NEEDLE bottom blur height is 28 points", evidence: [] } },
+    ];
+    const f = await fixture("search-task-report", async (agentDir, cwd) => {
+      const directory = join(agentDir, "sessions", "task-report");
+      await mkdir(directory, { recursive: true });
+      await writeFile(join(directory, "worker-root.jsonl"), report(cwd, new Date().toISOString()).map(entry => JSON.stringify(entry)).join("\n") + "\n");
+    });
+    await f.search.warm();
+    const [found] = await toolAnswers(f, "what blur height did the worker report", [
+      { name: "session_search", args: { query: "TASK-REPORT-NEEDLE", maxResults: 5 } },
+    ]);
+    expect(found!.details).toMatchObject({ hits: [expect.objectContaining({ sessionId: "worker-root", entryId: "worker-report",
+      snippet: expect.stringContaining("bottom blur height is 28 points") })] });
+    const [read] = await toolAnswers(f, "open that report", [
+      { name: "session_read", args: { sessionId: "worker-root", entryId: "worker-report", before: 1, after: 0 } },
+    ]);
+    expect(read!.text).toContain("entry=worker-report");
+    expect(read!.text).toContain("bottom blur height is 28 points");
+    expect((await f.search.search({ query: "TASK-REPORT-NEEDLE" })).coverage).toMatchObject({ omittedSessions: 0 });
+    expect((await f.search.search({ query: "TASK-REPORT-NEEDLE" })).coverage.reason).toBeUndefined();
+
+    const broken = join(f.agentDir, "sessions", "task-report", "broken-root.jsonl");
+    const timestamp = new Date().toISOString();
+    await writeFile(broken, [
+      { type: "session", version: 3, id: "broken-root", timestamp, cwd: f.project },
+      { type: "message", id: "orphan", parentId: "missing-parent", timestamp, message: { role: "user", content: "BROKEN-NEEDLE", timestamp: Date.now() } },
+    ].map(entry => JSON.stringify(entry)).join("\n") + "\n");
+    await waitFor(async () => (await f.registry.catalog("user")).sessions.some(session => session.id === "broken-root") || undefined, "the broken session in the catalog");
+    const partial = await f.search.search({ query: "BROKEN-NEEDLE" });
+    expect(partial.results).toEqual([]);
+    expect(partial.coverage).toMatchObject({ state: "partial", omittedSessions: 1, reason: expect.any(String) });
+    expect(refusals(f)).toEqual([]);
+    recordCase("search-task-report", { reportHit: "worker-root/worker-report", omittedWithReason: partial.coverage.omittedSessions });
+  }, 60_000);
+
   it("redacts search snippets and explicit or fallback titles before persisted Home results", async () => {
     const secret = `sk-${"searchcredentialfixture".repeat(6)}`;
     const namedSecret = `Bearer ${"namedcredentialfixture".repeat(6)}`;

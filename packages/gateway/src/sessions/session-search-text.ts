@@ -1,5 +1,6 @@
 import type { ContextEditEntry, SessionEntry } from "../kernel/pi/coding-agent.js";
 import { redactCredentials } from "../util/credential-redaction.js";
+import { HOME_TASK_REPORT } from "../kernel/delegation/task-report.js";
 import {
   SESSION_SEARCH_MAX_ENTRY_BYTES,
   SESSION_SEARCH_MAX_SNIPPET_BYTES,
@@ -31,16 +32,21 @@ export function extractSearchTexts(branch: readonly SessionEntry[]): SearchTextE
     if (entry.type === "context_edit") edits.set(entry.targetId, entry.replacement);
   }
   return branch.flatMap((entry, ordinal) => {
-    if (entry.type !== "message" || !entry.message || typeof entry.message !== "object" || Array.isArray(entry.message)) return [];
-    const message = entry.message as unknown as Record<string, unknown>;
-    if (message.role !== "user" && message.role !== "assistant") return [];
-    const content = edits.has(entry.id) ? edits.get(entry.id)?.content : message.content;
+    let role: SearchTextEntry["role"];
+    let content: unknown;
+    if (entry.type === "custom" && entry.customType === HOME_TASK_REPORT) {
+      role = "assistant";
+      content = (entry.data as { text?: unknown } | undefined)?.text;
+    } else {
+      if (entry.type !== "message" || !entry.message || typeof entry.message !== "object" || Array.isArray(entry.message)) return [];
+      const message = entry.message as unknown as Record<string, unknown>;
+      if (message.role !== "user" && message.role !== "assistant") return [];
+      role = message.role;
+      content = edits.has(entry.id) ? edits.get(entry.id)?.content : message.content;
+    }
     const text = redactCredentials(textFromContent(content)).normalize("NFC").trim();
     if (!text || Buffer.byteLength(text, "utf8") > SESSION_SEARCH_MAX_ENTRY_BYTES) return [];
-    return [{
-      id: entry.id, parentId: entry.parentId, timestamp: entry.timestamp,
-      role: message.role, text, ordinal,
-    }];
+    return [{ id: entry.id, parentId: entry.parentId, timestamp: entry.timestamp, role, text, ordinal }];
   });
 }
 

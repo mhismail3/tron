@@ -90,6 +90,7 @@ export class SessionSearchService {
   private coverageOmittedSessions = 0;
   private coverageReason: string | undefined;
   private readonly dirtySessions = new Map<string, number>();
+  private readonly unadmitted = new Map<string, string>();
   private dirtyGeneration = 0;
   private dirtyRefresh: Promise<void> | undefined;
   private semanticTask: Promise<void> | undefined;
@@ -290,6 +291,7 @@ export class SessionSearchService {
     this.coverageSessionsTotal = eligible.length;
     this.coverageOmittedSessions = 0;
     this.coverageReason = undefined;
+    this.unadmitted.clear();
     const identities = await this.catalogIdentities();
     const stored = new Map(this.index.sessionFacts().map(facts => [facts.sessionId, facts]));
     const published = new Set(eligible.map(session => session.id));
@@ -311,7 +313,7 @@ export class SessionSearchService {
       }
       const document = await this.loadDocument(session.id);
       if (this.warmupAbort.signal.aborted) return;
-      if (!document) { this.coverageOmittedSessions += 1; this.coverageReason = "One or more canonical sessions could not be admitted for search"; continue; }
+      if (!document) { this.unadmitted.set(session.id, candidate?.fileIdentity ?? ""); this.coverageOmittedSessions += 1; this.coverageReason = "One or more canonical sessions could not be admitted for search"; continue; }
       corpusFacts.push(`${document.sessionId}:${document.branchDigest}`);
       try {
         await this.index.replace(document, document.runtimeGeneration ? undefined : candidate);
@@ -419,8 +421,7 @@ export class SessionSearchService {
   }
 
   private async refreshDirty(signal?: AbortSignal): Promise<void> {
-    if (!this.dirtySessions.size) return;
-    if (!this.dirtyRefresh) {
+    if (this.dirtySessions.size && !this.dirtyRefresh) {
       const entries = [...this.dirtySessions.entries()];
       this.dirtyRefresh = (async () => {
         const refreshed: Array<{ id: string; generation: number; document?: SearchDocument }> = [];
@@ -443,13 +444,25 @@ export class SessionSearchService {
         }
       })().finally(() => { this.dirtyRefresh = undefined; });
     }
-    await awaitWithAbort(this.dirtyRefresh, signal);
+    if (this.dirtyRefresh) await awaitWithAbort(this.dirtyRefresh, signal);
     try {
       const catalog = await awaitWithAbort(this.sessions.catalog("user"), signal);
       const eligible = catalog.sessions.filter(session => !this.sessions.isLineageMember(session.id));
+      const indexed = new Set(this.index.sessionFacts().map(facts => facts.sessionId));
+      const identities = await awaitWithAbort(this.readCatalogIdentities(), signal);
+      for (const session of eligible) {
+        if (indexed.has(session.id) || this.dirtySessions.has(session.id)) continue;
+        const identity = identities?.get(session.id);
+        if (this.unadmitted.get(session.id) === (identity?.fileIdentity ?? "")) continue;
+        const document = await awaitWithAbort(this.loadDocument(session.id), signal);
+        if (!document) { this.unadmitted.set(session.id, identity?.fileIdentity ?? ""); continue; }
+        await this.index.replace(document, document.runtimeGeneration ? undefined : identity);
+        this.unadmitted.delete(session.id);
+      }
       this.coverageSessionsTotal = eligible.length;
       const stats = this.index.stats();
       this.coverageOmittedSessions = Math.max(0, eligible.length - stats.sessionsIndexed);
+      if (this.coverageOmittedSessions > 0) this.coverageReason ??= "One or more canonical sessions could not be admitted for search";
       this.semanticTotal = this.semanticVectors.size;
     } catch (error) { if (signal?.aborted) throw error; this.coverageReason = "Coverage could not be refreshed from the current catalog"; }
     if (this.dirtyOverflow) { this.semanticCoverage = "partial"; }
