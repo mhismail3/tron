@@ -151,9 +151,6 @@ struct ModelCatalogAccumulator {
             guard model.maxTokens >= minimum else {
                 throw invalidPagination(reason: "invalid_token_limit", path: "\(path).maxTokens")
             }
-            guard model.contextWindowLimits?.isValid != false else {
-                throw invalidPagination(reason: "invalid_context_limits", path: "\(path).contextWindowLimits")
-            }
             guard let bytes = Self.stringByteCount(model), bytes <= Int.max - pageStringBytes else {
                 throw invalidPagination(reason: "string_bytes", path: path)
             }
