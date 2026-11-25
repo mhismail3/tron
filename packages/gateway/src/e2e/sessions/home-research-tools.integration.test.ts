@@ -593,6 +593,16 @@ describe("Tron Home research tools", () => {
     expect((await f.search.search({ query: "TASK-REPORT-NEEDLE" })).coverage).toMatchObject({ omittedSessions: 0 });
     expect((await f.search.search({ query: "TASK-REPORT-NEEDLE" })).coverage.reason).toBeUndefined();
 
+    const late = join(f.agentDir, "sessions", "task-report", "late-root.jsonl");
+    await writeFile(late, [
+      { type: "session", version: 3, id: "late-root", timestamp: new Date().toISOString(), cwd: f.project },
+      { type: "message", id: "late-user", parentId: null, timestamp: new Date().toISOString(), message: { role: "user", content: "LATE-SESSION-NEEDLE", timestamp: Date.now() } },
+    ].map(entry => JSON.stringify(entry)).join("\n") + "\n");
+    await waitFor(async () => (await f.registry.catalog("user")).sessions.some(session => session.id === "late-root") || undefined, "the late session in the catalog");
+    const late1 = await f.search.search({ query: "LATE-SESSION-NEEDLE" });
+    expect(late1.results).toEqual([expect.objectContaining({ sessionId: "late-root", entryId: "late-user" })]);
+    expect(late1.coverage).toMatchObject({ sessionsIndexed: 2, sessionsTotal: 2, omittedSessions: 0 });
+
     const broken = join(f.agentDir, "sessions", "task-report", "broken-root.jsonl");
     const timestamp = new Date().toISOString();
     await writeFile(broken, [
@@ -602,7 +612,8 @@ describe("Tron Home research tools", () => {
     await waitFor(async () => (await f.registry.catalog("user")).sessions.some(session => session.id === "broken-root") || undefined, "the broken session in the catalog");
     const partial = await f.search.search({ query: "BROKEN-NEEDLE" });
     expect(partial.results).toEqual([]);
-    expect(partial.coverage).toMatchObject({ state: "partial", omittedSessions: 1, reason: expect.any(String) });
+    expect(partial.coverage).toMatchObject({ state: "partial", sessionsTotal: 3, omittedSessions: 1, reason: "One or more canonical sessions could not be admitted for search" });
+    expect((await f.search.search({ query: "BROKEN-NEEDLE" })).coverage).toMatchObject({ omittedSessions: 1, reason: "One or more canonical sessions could not be admitted for search" });
     expect(refusals(f)).toEqual([]);
     recordCase("search-task-report", { reportHit: "worker-root/worker-report", omittedWithReason: partial.coverage.omittedSessions });
   }, 60_000);
