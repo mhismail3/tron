@@ -16,6 +16,7 @@ import { GatewayService } from "../../transport/gateway-service.js";
 import { GatewayServer } from "../../transport/server.js";
 import type { AsyncMutex } from "../../util/async-mutex.js";
 import { waitFor } from "../../../test-support/wait-for.js";
+import { PROTOCOL_VERSION } from "../../version.js";
 
 function gate() {
   let resolve!: () => void;
@@ -122,7 +123,7 @@ async function fixture() {
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await waitFor(() => opened || error !== undefined, "the connection to open or fail");
     if (error) throw error;
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 9 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
     await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
     return {
       socket, frames, closed: () => closed,
