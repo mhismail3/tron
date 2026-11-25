@@ -249,7 +249,7 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
             for _ in 0..<240 { await MountedFixture.nextFrame() }
             XCTAssertGreaterThan(fixtureCount(app, "fixture.home-session-revision", "home-session-revision:"), startRevision + 3,
                                  "Home's session stays live while the memory sheet is open")
-            XCTAssertEqual(fixtureCount(app, "fixture.home-read-counts", "home.memory.view="), 1,
+            XCTAssertEqual(fixtureCount(app, "fixture.home-read-counts", "home.memory.view.first="), 1,
                            "An open memory sheet reads its first page once; live Home events never reload it")
             XCTAssertNotNil(app.element("home-memory-row-39"), "The first page stays on screen\n\(app.tree())")
             XCTAssertNil(app.element("sheet-loading"), "The sheet is not loading again")

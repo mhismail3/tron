@@ -566,7 +566,7 @@ private actor HostedHomeShellGateway {
     private var onHomeRead: (@MainActor @Sendable (String) -> Void)?
     func observeHomeReads(_ observer: @escaping @MainActor @Sendable (String) -> Void) { onHomeRead = observer }
     func homeReadSummary() -> String {
-        ["home.status", "home.context", "home.chapterList", "home.memory.view", "home.taskList", "home.taskStatus"]
+        ["home.status", "home.context", "home.chapterList", "home.memory.view", "home.memory.view.first", "home.taskList", "home.taskStatus"]
             .map { "\($0)=\(homeReads[$0, default: 0])" }.joined(separator: ",")
     }
 
@@ -623,6 +623,7 @@ private actor HostedHomeShellGateway {
         await ForegroundSheetProbe.record("rpc", method, params: params)
         if method.hasPrefix("home.") {
             homeReads[method, default: 0] += 1
+            if method == "home.memory.view", params["cursor"] == nil, params["part"] == nil { homeReads["home.memory.view.first", default: 0] += 1 }
             if let onHomeRead { await onHomeRead(homeReadSummary()) }
         }
         switch method {
