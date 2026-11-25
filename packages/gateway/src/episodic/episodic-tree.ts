@@ -99,19 +99,13 @@ function siblings(a: EpisodicViewPart, b: EpisodicViewPart | undefined): boolean
   return b !== undefined && a.level === b.level && a.index % 2 === 0 && b.index === a.index + 1;
 }
 
-function viewBytes(parts: readonly EpisodicViewPart[], bytesOf: EpisodicViewBytes): number {
-  let total = 0;
-  for (const part of parts) total += bytesOf(part).bytes;
-  return total;
-}
-
 function fitView(
   parts: EpisodicViewPart[],
   count: number,
   viewBudget: number,
   bytesOf: EpisodicViewBytes,
   isBuilt: (address: string) => boolean,
-  total = viewBytes(parts, bytesOf),
+  total: number,
   maxSpan = Number.POSITIVE_INFINITY,
 ): number {
   const counted = (part: EpisodicViewPart): number => part.span < maxSpan ? bytesOf(part).bytes : 0;
@@ -153,18 +147,6 @@ function foldTo(
   for (let index = 0; index < fitted.length; index += 1) parts[index] = fitted[index]!;
   parts.length = fitted.length;
   return bytes;
-}
-
-export function rebalanceView(
-  parts: EpisodicViewPart[],
-  count: number,
-  viewBudget: number,
-  bytesOf: EpisodicViewBytes,
-  isBuilt: (address: string) => boolean,
-  total = viewBytes(parts, bytesOf),
-): number {
-  if (total <= viewBudget) return total;
-  return foldTo(parts, count, viewLowWater(viewBudget), bytesOf, isBuilt, total) ?? total;
 }
 
 export function recentViewHigh(viewBudget: number): number {
