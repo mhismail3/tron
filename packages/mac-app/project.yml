@@ -29,11 +29,6 @@ packages:
   TronComputerControl:
     path: native-computer-control
 
-# Every directory source excludes "**/*.module.json" and "**/README.md": module
-# manifests and owner docs (tools/ownership/README.md) are repository
-# metadata that XcodeGen would otherwise copy into the product's Resources.
-# Folder references (type: folder) are copied whole by Xcode and cannot exclude,
-# so no manifest may live inside one.
 targets:
   TronSearchEmbeddingHelper:
     type: tool
@@ -62,9 +57,6 @@ targets:
           - "Search/**"
           - "**/*.module.json"
           - "**/README.md"
-      # Ordinary resources are copied through Xcode's resource phase. The
-      # tracked Library tree is excluded because the post-build script owns
-      # its `Contents/Library` placement and nested signing order.
       - path: Sources/Resources
         createIntermediateGroups: true
         buildPhase: resources
@@ -118,9 +110,6 @@ targets:
     postBuildScripts:
       - name: Copy Bundled Login Item
         basedOnDependencyAnalysis: false
-        # The protocol verifier reads the processed artifact plist. Declare the
-        # producer dependency so clean builds cannot schedule this script before
-        # ProcessInfoPlistFile.
         inputFiles:
           - "$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)"
         script: |
@@ -134,11 +123,7 @@ targets:
           test -d "$SRC" || { echo "Missing bundled Library resources at $SRC" >&2; exit 1; }
           test -d "$NATIVE_SRC" || { echo "Missing built Tron Native Host at $NATIVE_SRC" >&2; exit 1; }
           test -d "$GATEWAY_SRC" || { echo "Missing bundled Gateway resources at $GATEWAY_SRC; run scripts/bundle-gateway.sh" >&2; exit 1; }
-          # A previous build may contain the deliberately read-only payload.
-          # Make only that generated destination removable before replacing it.
           chmod -R u+w "$GATEWAY_DST" 2>/dev/null || true
-          # Retire the obsolete auto-embedded helper in incremental build output;
-          # only the explicit Library/Native copy below belongs in the app.
           rm -rf "$DST" "$GATEWAY_DST" "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Resources/TronNativeHost.app"
           mkdir -p "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Resources" "$DST/Native"
           EMBEDDING_HELPER="$BUILT_PRODUCTS_DIR/TronSearchEmbeddingHelper"
@@ -151,14 +136,9 @@ targets:
           install -m 0755 "$DERIVED_FILE_DIR/tron-cua/cua-driver" "$DST/Native/cua-driver"
           install -m 0644 "$DERIVED_FILE_DIR/tron-cua/manifest.json" "$DST/Native/cua-driver.manifest.json"
           install -m 0644 "$DERIVED_FILE_DIR/tron-cua/LICENSE.txt" "$DST/Native/cua-driver-LICENSE.txt"
-          # ditto/cp can fail while materializing symlinks inside a 0555 source
-          # tree because they apply directory modes before populating children.
-          # rsync defers final directory modes and preserves the internal links.
           /usr/bin/rsync -a "$GATEWAY_SRC/" "$GATEWAY_DST/"
           python3 "$SRCROOT/../../scripts/verify-gateway-protocol-contract.py" \
             --mac-app "$TARGET_BUILD_DIR/$WRAPPER_NAME" >/dev/null
-          # Signing rewrites Mach-O files, so the copied payload must be
-          # writable until signatures and its final fingerprint are complete.
           chmod -R u+w "$GATEWAY_DST"
           if [ -d "$DST/LoginItems" ] && [ "${CODE_SIGNING_ALLOWED:-YES}" != "NO" ]; then
             SIGN_IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY:--}}"
@@ -179,15 +159,9 @@ targets:
               [ -d "$HELPER" ] || continue
               codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$HELPER"
             done
-            # Cua remains byte-identical to its verified vendor-signed release.
-            # It executes as a child; it is not loaded into Tron's process.
-            # Sign the Aqua TCC host after copying it into its final nested
-            # location, then the outer app seals both native compositions.
             codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$NATIVE_DST"
             codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Resources/TronSearchEmbeddingHelper"
             codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$DST/Native/tron-native-capture.node"
-            # Native signing changes payload bytes. Recompute the selected
-            # bundle fingerprint before the outer app seals its resources.
             PAYLOAD_HASHER="$DST/LoginItems/Tron Agent.app/Contents/MacOS/tron"
             PAYLOAD_FINGERPRINT="$("$PAYLOAD_HASHER" --fingerprint "$GATEWAY_DST")"
             "$SRCROOT/scripts/update-payload-fingerprint.sh" "$GATEWAY_DST/manifest.json" "$PAYLOAD_FINGERPRINT"
@@ -195,9 +169,6 @@ targets:
             if [ -n "${CODESIGNING_FOLDER_PATH:-}" ] \
               && [ -d "$CODESIGNING_FOLDER_PATH" ] \
               && [ ! -d "$CODESIGNING_FOLDER_PATH/Contents/PlugIns" ]; then
-              # Debug builds link the app body and the preview stub as nested
-              # dylibs. Xcode 27 signs them only in its final signing step, after
-              # this phase, and the outer seal refuses unsigned nested code.
               for DEBUG_DYLIB in "${EXECUTABLE_DEBUG_DYLIB_PATH:-}" "${EXECUTABLE_BLANK_INJECTION_DYLIB_PATH:-}"; do
                 if [ -n "$DEBUG_DYLIB" ] && [ -f "$TARGET_BUILD_DIR/$DEBUG_DYLIB" ]; then
                   codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$TARGET_BUILD_DIR/$DEBUG_DYLIB"
@@ -298,9 +269,6 @@ targets:
       - package: TronComputerControl
         product: TronComputerControl
 
-  # Real-boundary tests only (spawned processes, loopback sockets, the built
-  # launcher, shared cross-language format files). Unit tests are not kept;
-  # see docs/development.md.
   TronMacIntegrationTests:
     type: bundle.unit-test
     platform: macOS
@@ -340,8 +308,6 @@ schemes:
       config: Debug
       environmentVariables:
         TRON_MAC_TEST_HOST: "1"
-        # Code under test resolves the Tron home globally (for example the Mac
-        # log writer); keep every test run out of the user's real home.
         TRON_DATA_DIR: "$(BUILT_PRODUCTS_DIR)/TronMacIntegrationTests-home"
         TRON_SINGLE_INSTANCE_LOCK_PROBE: "$(BUILT_PRODUCTS_DIR)/SingleInstanceLockProbe"
         TRON_NATIVE_HOST_RETIREMENT_PROBE: "$(BUILT_PRODUCTS_DIR)/NativeHostRetirementProbe"

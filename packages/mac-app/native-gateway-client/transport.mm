@@ -4,9 +4,6 @@
 #include <atomic>
 
 namespace capture {
-// Neither callers nor mutable runtime settings supply endpoints or expected
-// identities. The actual signed Node's publisher pins the canonical wrapper;
-// that validated installed composition pins the exact native host build.
 static NSString *hostRequirement() {
     SecCodeRef self = nullptr;
     CFDictionaryRef selfInfo = nullptr;
@@ -57,8 +54,6 @@ public:
         auto terminal = terminal_;
         connection_.interruptionHandler = ^{
             terminal->store(true);
-            // NSXPC interruption otherwise permits reconnect. Invalidate at
-            // the native boundary, not after the Node loop drains a TSFN.
             [weak invalidate];
             lost();
         };
@@ -67,8 +62,6 @@ public:
     }
     void send(size_t, NSData *request, Reply reply) override {
         if (terminal_->load()) throw std::runtime_error("native capture connection terminal");
-        // Check+send is not atomic with interruption. An already-admitted call
-        // can race invalidation and is uncertain; never allocate a successor.
         id<TronNativeCaptureService> peer = [connection_ remoteObjectProxyWithErrorHandler:^(NSError *) {
             reply(nil, nil);
         }];

@@ -1,5 +1,4 @@
 #!/bin/bash
-# Host tooling, not an iOS compilation input.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/tron-theme-icons.XXXXXX")"
@@ -7,8 +6,6 @@ trap 'rm -rf "$tmp"' EXIT
 cat >"$tmp/GenerateThemeIcons.swift" <<'SWIFT'
 import Foundation
 
-/// Compile together with ThemeColor.swift: the app palette is the only mapping.
-/// AppIcon.icon owns the silhouette, placement, background and glass materials.
 @main
 struct GenerateThemeIcons {
     static func main() throws {

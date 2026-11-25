@@ -1,6 +1,3 @@
-// Release.xcconfig - Release build for DMG distribution
-
-// Release settings
 DEBUG_INFORMATION_FORMAT = dwarf-with-dsym
 SWIFT_OPTIMIZATION_LEVEL = -O
 SWIFT_COMPILATION_MODE = wholemodule
@@ -8,10 +5,4 @@ COPY_PHASE_STRIP = NO
 ENABLE_NS_ASSERTIONS = NO
 MTL_ENABLE_DEBUG_INFO = NO
 
-// Override the default `PRODUCT_NAME = $(TARGET_NAME)` (= "TronMac") so the
-// archived bundle is `Tron.app` with executable `Tron` — matching the
-// Keep the archive product name stable for manual release packaging.
-// and the `/Applications/Tron.app` end-user surface. Debug keeps the default
-// so the `TronMacIntegrationTests` target's `BUNDLE_LOADER`/`TEST_HOST`
-// (which reference `TronMac.app/Contents/MacOS/TronMac`) keeps resolving.
 PRODUCT_NAME = Tron

@@ -19,7 +19,6 @@ static napi_ref retain(napi_env e, napi_value v) {
 static void drop(napi_env e, napi_ref &r) {
     if (!r) return;
     auto old = r; r = nullptr;
-    // Reference disposal does not execute JS and is valid during env cleanup.
     check(napi_delete_reference(e, old));
 }
 static void throwCurrent(napi_env e, const std::exception &error) {
@@ -53,7 +52,6 @@ struct State : std::enable_shared_from_this<State> {
     bool sealed = false, terminalQueued = false, cleaning = false, finalizerPending = false;
     explicit State(napi_env e) : env(e) {}
     napi_value failureValue() { napi_value v; check(napi_get_reference_value(env, failure, &v)); return v; }
-    // Node-loop only. Accepted work, unlike idle catalogs, owns loop liveness.
     void referenceLoop(bool on) {
         napi_threadsafe_function q;
         { std::lock_guard lock(mutex); q = queue; }
@@ -67,11 +65,8 @@ struct State : std::enable_shared_from_this<State> {
     void terminalLocked() {
         if (sealed || terminalQueued || !queue) return;
         terminalQueued = true;
-        // NULL is the pre-reserved terminal notification: no Payload/NSData
-        // allocation is needed when an ordinary native reply allocation fails.
         auto result = napi_call_threadsafe_function(queue, nullptr, napi_tsfn_nonblocking);
         if (result != napi_ok) {
-            // A full queue already owns a delivery which will observe terminal.
             if (result == napi_closing) { queue = nullptr; sealed = true; }
             else if (result != napi_queue_full) std::terminate();
         }
@@ -97,7 +92,6 @@ struct State : std::enable_shared_from_this<State> {
                 else terminalLocked();
             }
         } catch (...) {
-            // Never unwind a C++ allocation failure into an NSXPC/GCD callback.
             std::lock_guard lock(mutex);
             terminalLocked();
         } }
@@ -108,8 +102,6 @@ struct State : std::enable_shared_from_this<State> {
         { std::lock_guard lock(mutex); sealed = true; q = queue; queue = nullptr; peer = std::move(transport); }
         if (peer) peer->invalidate();
         if (q) {
-            // Ref BEFORE release: an unref'd async handle need not dispatch its
-            // close/finalizer before Node decides that its loop is finished.
             if (!cleaning) check(napi_ref_threadsafe_function(env, q));
             check(napi_release_threadsafe_function(q, cleaning ? napi_tsfn_abort : napi_tsfn_release));
         }
@@ -121,7 +113,6 @@ struct State : std::enable_shared_from_this<State> {
     napi_status invoke(napi_ref &ref, napi_value error, napi_value value) {
         napi_value cb;
         auto s = napi_get_reference_value(env, ref, &cb);
-        // The local handle, not an opaque deferred, keeps cb alive for this call.
         drop(env, ref);
         if (s != napi_ok) return s;
         napi_value args[] = {error, value}, ignored;
@@ -132,7 +123,7 @@ struct State : std::enable_shared_from_this<State> {
         drop(env, closed); drop(env, failure); drop(env, object);
     }
     napi_value failPending() {
-        if (!failure) return nullptr; // Already finalized: no callbacks remain.
+        if (!failure) return nullptr;
         auto reason = failureValue();
         napi_value firstException = nullptr;
         for (size_t i = 0; i < SlotCount; ++i) {
@@ -167,9 +158,6 @@ static void finalized(napi_env env, void *data, void *) {
     auto state = *context;
     state->retire();
     state->finalizerPending = false;
-    // Forced exit may finalize an already-closing handle BEFORE cleanup hooks.
-    // A callback may be refused by Node; there is no opaque Promise handle to
-    // leak/retry. Reference disposal remains valid without executing JavaScript.
     if (env && state->closed && !state->cleaning) {
         auto cb = state->closed; state->closed = nullptr;
         (void)state->invoke(cb, nilValue(env), undef(env));
@@ -180,12 +168,10 @@ static void finalized(napi_env env, void *data, void *) {
         check(napi_remove_async_cleanup_hook(hook));
         delete state->hookContext; state->hookContext = nullptr;
     }
-    // Node may drain aborted queued payloads after this finalizer with NULL env.
-    // Those payloads own State themselves and never access this freed context.
 }
 static void callJS(napi_env env, napi_value, void *context, void *data) {
     std::unique_ptr<Payload> p(static_cast<Payload *>(data));
-    if (!env) return; // Finalizer may already have freed context.
+    if (!env) return;
     auto state = p ? p->state : *static_cast<std::shared_ptr<State> *>(context);
     if (state->cleaning) return;
     try {
@@ -287,7 +273,7 @@ static napi_value closeLocal(napi_env e, napi_callback_info info) {
         auto rejectedException = state->failPending();
         if (rejectedException) {
             check(napi_throw(e, rejectedException));
-            return nullptr; // Native retirement/close callback remain owned.
+            return nullptr;
         }
         if (!state->finalizerPending && state->closed) {
             auto cb = state->closed; state->closed = nullptr;
@@ -338,7 +324,7 @@ static napi_value open(napi_env e, napi_callback_info info) {
         throwCurrent(e, error); return nullptr;
     }
 }
-} // namespace capture
+}
 NAPI_MODULE_INIT() {
     using namespace capture;
     try {

@@ -1,4 +1,3 @@
-// Test.xcconfig - Hosted-test app identity; beta relay route is not a real APNs lane
 #include "Debug.xcconfig"
 
 SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG HOSTED_TEST
