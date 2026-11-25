@@ -465,7 +465,7 @@ export class SessionSearchService {
           refreshed.push({ id, generation: processedGeneration, ...(document ? { document } : {}) });
         } catch {
           await this.index.remove(id);
-          this.coverageReason = "A changed session could not be indexed and will be retried on a later search";
+          this.coverageReason = "A changed session could not be indexed for search";
         }
         if (this.dirtySessions.get(id) === processedGeneration) this.dirtySessions.delete(id);
       }
