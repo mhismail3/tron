@@ -37,7 +37,9 @@ uses those same identity codecs as the scheduler, executor and cold catalog.
   the earlier instant; a civil date the timezone skips entirely (or whose remaining
   minutes it skips) has no occurrence and is skipped (#2382). Misfire `latest`|`skip`; overlap `skip`|one `queueLatest`.
   Recurrence advances from schedule time, not completion; clock movement never
-  recreates a recorded occurrence. Catch-up, history, batches, timers, prompts,
+  recreates a recorded occurrence. A schedule-tool interval whose resolved target is Home (created or updated) is
+  anchored at the next 10-minute boundary, so Home's repeating checks share wake slots
+  (one batched activation) while each keeps its cadence. Catch-up, history, batches, timers, prompts,
   storage and concurrency are bounded.
 - **Targets**: one existing persisted user session (prompts and notifications), or one
   Gateway-canonical workspace with `newPerRun` sessions (prompts only, intervals of at

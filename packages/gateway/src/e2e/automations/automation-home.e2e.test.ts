@@ -206,6 +206,41 @@ async function preparedGateway(extra: Partial<LockGatewayOptions> = {}) {
   return { gateway, phone, create, fire, sessionId: designated.result.sessionId as string };
 }
 
+it("real Gateway: Home repeating automations created minutes apart start on the same 10-minute grid slot and keep their cadence", async () => {
+  const slot = 10 * 60_000;
+  let clock = Math.ceil(Date.now() / slot) * slot + 60_000;
+  vi.spyOn(Date, "now").mockImplementation(() => clock);
+  const { gateway, phone, sessionId } = await preparedGateway();
+  const createdAt: number[] = [];
+  const arm = async (name: string, target: { target?: "home" }) => {
+    createdAt.push(clock);
+    gateway.script([
+      () => fauxAssistantMessage([fauxToolCall("schedule", { action: "create", activate: true, ...target, name, everyMinutes: 120, prompt: `${name} check.` })], { stopReason: "toolUse" }),
+      () => fauxAssistantMessage(`${name} armed.`),
+    ]);
+    expect((await phone.request("home.prompt", { commandId: gateway.commandId(), text: `Arm ${name}.` })).ok).toBe(true);
+    await gateway.settled(sessionId);
+    const result = (await gateway.registry.acquire(sessionId)).canonicalSessionEntries()
+      .filter(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "schedule").at(-1)!;
+    expect(result.message.isError).not.toBe(true);
+    return (await phone.request("automation.get", { automationId: (result.message.details as { id: string }).id })).result;
+  };
+  const first = await arm("First backstop", { target: "home" });
+  clock += 4 * 60_000;
+  const second = await arm("Second backstop", {});
+  const firings = [first, second].map(automation => Date.parse(automation.nextOccurrenceAt));
+  expect(firings[0], "both first firings share one grid slot").toBe(firings[1]);
+  expect(firings[0]! % slot).toBe(0);
+  for (const [index, at] of createdAt.entries()) {
+    expect(firings[index]!).toBeGreaterThanOrEqual(at);
+    expect(firings[index]! - at, "the first firing moves by at most 10 minutes").toBeLessThanOrEqual(slot);
+  }
+  for (const automation of [first, second]) {
+    expect(automation.target.kind, "an untargeted schedule in Home's own session is a Home automation").toBe("home");
+    expect(automation.trigger).toMatchObject({ kind: "interval", everySeconds: 7_200 });
+  }
+});
+
 it("real Gateway: busy firings cannot interleave; the 60-second cooldown is per automation and retains every firing", async () => {
   let clock = Date.now();
   const startedAt = clock;
