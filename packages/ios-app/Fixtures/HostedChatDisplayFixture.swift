@@ -555,7 +555,7 @@ private actor HostedHomeShellGateway {
     func configuredModelIdentity() -> String { configuredModels.isEmpty ? "none" : configuredModels.joined(separator: ",") }
     func lastPromptRoute() -> String { promptRoutes.last ?? "none" }
     func lastOpenedSession() -> String { openedSessions.last ?? "none" }
-    func capabilities() -> [String] { foreground.capabilities((sheetState == "dashboard-workers" ? [ProviderUsageCapability.name] : []) + ["sessions.v1", "home-profile-edit.v1", "context-window.v1", "skill-prompt.v1"]) }
+    func capabilities() -> [String] { foreground.capabilities((sheetState == "dashboard-workers" ? [ProviderUsageCapability.name] : []) + ["sessions.v1", "context-window.v1", "skill-prompt.v1"]) }
 
     private var homeReads: [String: Int] = [:]
     private var onHomeRead: (@MainActor @Sendable (String) -> Void)?

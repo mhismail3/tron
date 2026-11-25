@@ -86,10 +86,6 @@ package enum ModelReleaseDate {
         let digits = id[match].dropFirst()
         return "\(digits.prefix(4))-\(digits.dropFirst(4).prefix(2))-\(digits.suffix(2))"
     }
-
-    static func compact(_ value: String) -> String {
-        value.replacingOccurrences(of: "-", with: "")
-    }
 }
 
 extension ModelRef {

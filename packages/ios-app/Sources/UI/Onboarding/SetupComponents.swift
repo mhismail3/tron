@@ -555,19 +555,17 @@ enum ModelPickerSectioning {
 
     static func providerSections(models: [ModelSummary], selection: ModelRef?) -> [ProviderSection] {
         var grouped: [String: [ModelSummary]] = [:]
-        var catalogOrder: [String] = []
-        var names: [String: String] = [:]
+        var catalogOrder: [ModelSummary] = []
         for model in models {
-            if grouped[model.provider] == nil { catalogOrder.append(model.provider) }
+            if grouped[model.provider] == nil { catalogOrder.append(model) }
             grouped[model.provider, default: []].append(model)
-            names[model.provider] = model.providerName
         }
         return catalogOrder
             .map {
                 ProviderSection(
-                    provider: $0,
-                    displayName: names[$0] ?? $0,
-                    models: newestFirst(grouped[$0] ?? [])
+                    provider: $0.provider,
+                    displayName: $0.providerName,
+                    models: newestFirst(grouped[$0.provider] ?? [])
                 )
             }
             .sorted { lhs, rhs in
