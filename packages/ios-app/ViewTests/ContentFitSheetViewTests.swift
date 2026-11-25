@@ -98,7 +98,7 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
                 } else {
                     XCTAssertTrue(scrolls, "Forty reports scroll in the full-height sheet")
                     let rest = try XCTUnwrap(rests, "A feed that scrolls shows the position chip\n\(log)")
-                    let first = chips.firstIndex { $0 != nil } ?? chips.endIndex
+                    let first = try XCTUnwrap(chips.firstIndex { $0 != nil }, "The chip appears while the sheet opens\n\(log)")
                     XCTAssertTrue(chips[first...].allSatisfy { $0.map { abs($0 - rest) <= 0.5 } ?? false },
                                   "Once shown, the chip stays at its resting position on every frame\n\(log)")
                 }
