@@ -76,7 +76,7 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         }
     }
 
-    func testNestedSheetOpensAtItsOwnHeightAndClosingRestoresItsParent() async throws {
+    func testNestedSheetNeverTucksItsParentAndClosingRestoresIt() async throws {
         try await mounted(["-tron-settings-fixture", "-settings-nested", "-settings-expanded-review"]) { app in
             try await app.activate("Open Settings")
             _ = try await revealed(app, "settings-link-Connections")
@@ -120,18 +120,29 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
             @MainActor func pages() -> [UIScrollView] {
                 MountedFixture.views(UIScrollView.self, in: app.top).filter { $0.bounds.width > 300 && $0.contentSize.height > 100 }
             }
+            @MainActor func pageXs() -> [ObjectIdentifier: CGFloat] {
+                Dictionary(uniqueKeysWithValues: pages().map { scroll in
+                    let layer = scroll.layer.presentation() ?? scroll.layer
+                    return (ObjectIdentifier(scroll), layer.convert(layer.bounds, to: nil).minX)
+                })
+            }
             for turn in 1...3 {
                 _ = try await app.still("page \(turn) settled") { [Double(sheetFrame(app).minY)] }
                 XCTAssertEqual(pages().count, 4, "Turn \(turn): every page is laid out and measured before the finger moves")
                 let drag = try XCTUnwrap(HostedPresentationProbe.questionPageDrag)
                 let steps = 12
+                let pageWidth = sheetFrame(app).width
                 var dragYs: [CGFloat] = []
+                var xs: [ObjectIdentifier: [CGFloat]] = [:]
                 let trace = try await SheetTrace.record(app, frames: steps + 60, each: { index in
                     if index == 0 { drag(.began, -1, 0) }
                     if index > 0, index <= steps { drag(.changed, -CGFloat(index) * 22, 0) }
                     if index == steps + 1 { drag(.ended, -CGFloat(steps) * 22, -600) }
                     if index <= steps { dragYs.append(sheetFrame(app).minY) }
+                    for (page, x) in pageXs() { xs[page, default: []].append(x) }
                 })
+                let jumps = xs.values.flatMap { zip($0, $0.dropFirst()).map { abs($1 - $0) } }.filter { $0 > pageWidth / 4 }
+                XCTAssertTrue(jumps.isEmpty, "Turn \(turn): pages move continuously with the finger and the turn, never a page width in one frame: \(jumps.map { Int($0) })")
                 XCTAssertTrue(dragYs.allSatisfy { abs($0 - dragYs[0]) <= 0.5 }, "Turn \(turn): the sheet keeps its height under the finger: \(dragYs.map { Int($0) })")
                 let moves = zip(trace.samples, trace.samples.dropFirst()).map { $1.minY - $0.minY }.filter { abs($0) > 0.5 }
                 XCTAssertTrue(zip(moves, moves.dropFirst()).allSatisfy { ($0 > 0) == ($1 > 0) },
@@ -147,6 +158,7 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
             try await app.waitForTopSheetToSettle()
             _ = try await app.still("the fitted form") { [Double(sheetFrame(app).minY)] }
             let start = sheetFrame(app).minY
+            let idle = try XCTUnwrap(mainScroll(app)).bounds.height
             XCTAssertGreaterThan(start, 120, "the form fits its content")
             let window = app.window.bounds
             let keyboard = CGRect(x: 0, y: window.maxY - 336, width: window.width, height: 336)
@@ -157,7 +169,8 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
             })
             let lift = keyboard.height - app.window.safeAreaInsets.bottom
             XCTAssertTrue(shown.samples.allSatisfy { $0.minY > 120 }, "With the keyboard up the sheet stays fitted, never large\n\(shown)")
-            XCTAssertLessThan(shown.final.minY, start - lift * 0.9, "The fitted sheet grows by the keyboard's height\n\(shown)")
+            XCTAssertEqual(try XCTUnwrap(mainScroll(app)).bounds.height, idle + lift, accuracy: 0.5,
+                           "The fitted sheet grows by exactly the keyboard's height above the safe area\n\(shown)")
             shown.assertStill("The sheet rises above the keyboard in one move", against: app)
             let hidden = try await SheetTrace.record(app, frames: 90, each: { index in
                 if index == 0 { NotificationCenter.default.post(name: UIResponder.keyboardWillHideNotification, object: nil) }

@@ -131,8 +131,8 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   settled height (medium before the first), so a reopened sheet opens at its final size; a first open shows medium until content settles. The sizer owns the
   native detent: every change after presentation goes through
   `UISheetPresentationController.animateChanges` (the system sheet spring), including growth to and
-  from full height; Reduce Motion applies it instantly. A nested sheet opens at its own content
-  height like any other, and a sheet's height preference never reaches the sheet that presented it.
+  from full height; Reduce Motion applies it instantly. A sheet's height preference never reaches
+  the sheet that presented it.
   Opening a child never changes its parent's detent, and a nested sheet never opens shorter than the
   sheet it covers (the detent driver floors a child at its presenter's applied detent), so UIKit never tucks the parent down behind it and an interactive
   swipe-dismiss of the child leaves the parent nothing to catch up on. A covered sheet never

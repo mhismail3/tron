@@ -62,7 +62,7 @@ private struct TronContentFitSheetModifier: ViewModifier {
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { note in
                 let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue ?? .zero
-                update { keyboard = max(frame.height - TronSheetWindowMetrics.current.bottomInset, 0) }
+                update { keyboard = TronSheetWindowMetrics.current.keyboardLift(frame) }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
                 update { keyboard = 0 }
@@ -98,6 +98,7 @@ private struct TronSheetDetentDriver: UIViewControllerRepresentable {
         private func floored(_ target: Target, under presenter: Target?) -> Target {
             switch (target, presenter) {
             case (.fit(let height), .fit(let floor)): .fit(max(height, floor))
+            case (.medium, .fit(let floor)): .fit(floor)
             case (.fit, .medium), (.fit, .large), (.medium, .large): .large
             default: target
             }
@@ -143,6 +144,7 @@ private struct TronSheetDetentDriver: UIViewControllerRepresentable {
 private struct TronSheetWindowMetrics {
     let bottomInset: CGFloat
     let maximumDetent: CGFloat
+    var height: CGFloat = .infinity
 
     @MainActor static var current: TronSheetWindowMetrics {
         guard let window = UIApplication.shared.connectedScenes
@@ -151,7 +153,13 @@ private struct TronSheetWindowMetrics {
         }
         let insets = window.safeAreaInsets
         return TronSheetWindowMetrics(bottomInset: insets.bottom,
-                                      maximumDetent: window.bounds.height - insets.top - insets.bottom)
+                                      maximumDetent: window.bounds.height - insets.top - insets.bottom,
+                                      height: window.bounds.height)
+    }
+
+    func keyboardLift(_ frame: CGRect) -> CGFloat {
+        guard frame.maxY >= height - 0.5 else { return 0 }
+        return max(height - frame.minY - bottomInset, 0)
     }
 }
 

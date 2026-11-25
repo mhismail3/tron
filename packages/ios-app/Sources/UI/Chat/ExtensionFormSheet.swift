@@ -260,15 +260,11 @@ struct ExtensionFormSheet: View {
             guard !reduceMotion, pageWidth > 0 else { return }
             if sample.state == .began { focusedQuestionID = nil }
             pagePosition = CGFloat(currentQuestionIndex) - (hasTarget ? dx : dx / 3) / pageWidth
-        case .ended:
+        default:
             let projected = dx + sample.velocity * 0.2
-            let turns = hasTarget && abs(projected) > max(pageWidth / 3, 60) && (projected < 0) == (dx < 0)
+            let turns = sample.state == .ended && hasTarget && abs(projected) > max(pageWidth / 3, 60) && (projected < 0) == (dx < 0)
             withAnimation(ChatMotion.questionPageTurn(reduceMotion: reduceMotion)) {
                 if turns { currentQuestionIndex = target }
-                pagePosition = CGFloat(currentQuestionIndex)
-            }
-        default:
-            withAnimation(ChatMotion.questionPageTurn(reduceMotion: reduceMotion)) {
                 pagePosition = CGFloat(currentQuestionIndex)
             }
         }
