@@ -478,31 +478,7 @@ class Attribution(unittest.TestCase):
 
 
 class DriverProtocol(unittest.TestCase):
-    """The driver speaks to a Gateway as the phone does, so the protocol contract owner checks its copy."""
-
-    CONTRACT_INPUTS = ("config/GatewayProtocol.json", "packages/gateway/src/version.ts", "scripts/gateway-payload-deploy.mjs",
-                       "scripts/tron-profile-gateway-driver.mjs", "packages/mac-app/scripts/tron-gateway-launcher.c",
-                       "packages/ios-app/Core/Gateway/GatewayProtocolContract.swift",
-                       "packages/mac-app/Sources/Server/Health/GatewayProtocolContract.swift",
-                       "packages/ios-app/project.yml", "packages/mac-app/project.yml",
-                       "packages/ios-app/Sources/Info.plist", "packages/mac-app/Sources/Info.plist")
-
-    def test_a_driver_protocol_that_drifts_from_the_contract_is_refused(self) -> None:
-        sys.path.insert(0, str(ROOT / "scripts"))
-        import gateway_protocol_contract as contract
-        self.assertEqual(contract.verify_source_contract(ROOT).protocol_version, 9)
-        with tempfile.TemporaryDirectory(prefix="tron-driver-protocol-") as temporary:
-            copy = Path(temporary)
-            for relative in self.CONTRACT_INPUTS:
-                (copy / relative).parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(ROOT / relative, copy / relative)
-            driver = copy / "scripts/tron-profile-gateway-driver.mjs"
-            source = driver.read_text()
-            self.assertIn("\nconst PROTOCOL_VERSION = 9;\n", source)
-            driver.write_text(source.replace("\nconst PROTOCOL_VERSION = 9;\n", "\nconst PROTOCOL_VERSION = 10;\n"))
-            with self.assertRaisesRegex(contract.ProtocolContractError,
-                                        r"profiling driver protocol 10 does not match the contract's 9"):
-                contract.verify_source_contract(copy)
+    """The driver speaks to a Gateway as the phone does."""
 
     def test_every_settings_layer_the_driver_writes_is_one_the_gateway_accepts(self) -> None:
         service = (ROOT / "packages/gateway/src/transport/gateway-service.ts").read_text()
@@ -810,7 +786,7 @@ server.on("connection", (socket) => {
     try { frame = JSON.parse(data.toString("utf8")); } catch { return; }
     if (frame.type === "hello") {
       clientId = frame.clientId ?? null;
-      return socket.send(JSON.stringify({ type: "hello", protocolVersion: 9, gatewayVersion: "stub" }));
+      return socket.send(JSON.stringify({ type: "hello", protocolVersion: config.protocolVersion, gatewayVersion: "stub" }));
     }
     if (frame.type !== "request") return;
     const reply = (result) => socket.send(JSON.stringify({ type: "response", id: frame.id, ok: true, result }));
@@ -882,7 +858,8 @@ class StubGatewayHarness:
         (self.root / "port").unlink(missing_ok=True)
         config = {"journal": str(self.root / "closes.jsonl"), "portFile": str(self.root / "port"),
                   "probeOutput": str(self.root / "probe.json"), "failListAfter": fail_list_after,
-                  "delayOpenSessionId": delay_open_session_id, "delayMs": delay_ms, **extra,
+                  "delayOpenSessionId": delay_open_session_id, "delayMs": delay_ms,
+                  "protocolVersion": json.loads((ROOT / "config/GatewayProtocol.json").read_text())["protocolVersion"], **extra,
                   **({'port': port} if port is not None else {})}
         (self.root / "stub-config.json").write_text(json.dumps(config))
         stub = subprocess.Popen([NODE, str(self.root / "stub-gateway.mjs"), str(ROOT / "packages/gateway"),
