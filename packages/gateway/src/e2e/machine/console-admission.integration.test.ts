@@ -185,10 +185,15 @@ describe.skipIf(process.platform !== "darwin")("console admission for computer a
     const prompting = f.turn([desktop("desktop")]);
     await waitFor(() => f.dispatched(), "accepted driver observation");
     await waitFor(async () => await heldAssertions() === 1, "the scoped OS assertion while the computer turn runs");
-    const stopping = stop ? f.slot.abort("agent") : undefined;
-    await f.release();
-    await stopping;
+    if (stop) {
+      await f.slot.abort("agent");
+      expect((await execute("/bin/ps", ["-axo", "command="])).stdout).not.toContain(f.root);
+    } else await f.release();
     await prompting;
+    if (stop) {
+      expect(JSON.stringify(f.result("desktop").content)).toContain("interrupted; it may have completed");
+      expect(JSON.stringify(f.result("desktop").content)).not.toContain("gave no answer");
+    }
     await waitFor(async () => await heldAssertions() === 0, "assertion release at turn end");
     if (!stop) expect(f.result("desktop").isError).not.toBe(true);
   });

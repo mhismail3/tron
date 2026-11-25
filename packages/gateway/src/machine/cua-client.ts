@@ -118,7 +118,7 @@ export class CuaComputerClient {
         const name = arguments_.tool;
         if (name === undefined) return { status: "completed", output: { tools: [...OBSERVATIONS, ...ACTIONS] }, endpointGeneration: "metadata" };
         if (typeof name !== "string" || (!OBSERVATIONS.has(name) && !ACTIONS.has(name)) || name === "help") throw new Error("Unsupported computer help topic");
-        const help = await this.driver(["describe", name]);
+        const help = await this.driver(["describe", name], DEADLINE_MS, signal);
         signal?.throwIfAborted();
         if (help.failed) throw new Error("Computer help is unavailable");
         if (this.closed) throw new Error("Computer session ended before help publication");
@@ -138,7 +138,7 @@ export class CuaComputerClient {
       }
       const endpoint = this.endpoint!;
       if (observation) {
-        const started = await this.driver(["call", "start_session", JSON.stringify({ session: this.binding.runtimeLoadID }), "--socket", endpoint.socket]);
+        const started = await this.driver(["call", "start_session", JSON.stringify({ session: this.binding.runtimeLoadID }), "--socket", endpoint.socket], DEADLINE_MS, signal);
         const activation = parseCuaOutput(started.stdout, endpoint.generation);
         const state = activation.output as Record<string, unknown>;
         if (started.failed || activation.status !== "completed" || state.active !== true || typeof state.revived !== "boolean") throw new Error("Cua session activation was not confirmed");
@@ -163,7 +163,7 @@ export class CuaComputerClient {
       }
       signal?.throwIfAborted();
       if (this.closed) throw new Error("Computer session ended before dispatch");
-      const call = await this.driver(["call", tool, JSON.stringify(args), "--socket", endpoint.socket], tool === "type_text" ? TYPING_DEADLINE_MS : DEADLINE_MS);
+      const call = await this.driver(["call", tool, JSON.stringify(args), "--socket", endpoint.socket], tool === "type_text" ? TYPING_DEADLINE_MS : DEADLINE_MS, signal);
       const parsed = parseCuaOutput(call.stdout, endpoint.generation, observation ? "observation" : "action");
       const result: CuaComputerResult = call.failed && parsed.status === "completed" ? { ...parsed, status: "outcomeUnknown" } : parsed;
       if (signal?.aborted || this.closed) throw new Error("Computer operation interrupted; it may have completed. Do not replay it");
@@ -214,12 +214,13 @@ export class CuaComputerClient {
     } finally { if (directory) await rm(directory, { recursive: true, force: true }); }
   }
 
-  private async driver(args: string[], deadline = DEADLINE_MS): Promise<{ stdout: string; failed: boolean }> {
+  private async driver(args: string[], deadline = DEADLINE_MS, signal?: AbortSignal): Promise<{ stdout: string; failed: boolean }> {
     try {
-      const { stdout } = await execFileAsync(DRIVER, args, { env: this.environment(), maxBuffer: OUTPUT_LIMIT, encoding: "utf8", windowsHide: true, timeout: deadline });
+      const { stdout } = await execFileAsync(DRIVER, args, { env: this.environment(), maxBuffer: OUTPUT_LIMIT, encoding: "utf8", windowsHide: true, timeout: deadline, signal });
       return { stdout, failed: false };
     } catch (error) {
       const failure = error as { killed?: unknown; code?: unknown; stdout?: unknown };
+      if (signal?.aborted) throw new Error("Computer operation interrupted; it may have completed. Do not replay it");
       if (failure.killed === true) throw new Error(`Cua driver gave no answer within ${deadline / 1000} s; the effect is unknown`);
       if (typeof failure.code === "number" && typeof failure.stdout === "string" && failure.stdout.trimStart().startsWith("{")) return { stdout: failure.stdout, failed: true };
       throw error;

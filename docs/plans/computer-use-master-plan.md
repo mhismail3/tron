@@ -77,7 +77,6 @@ stated otherwise.
 | foreground-restore | R3 | foreground input, then the frontmost app is restored, 3/3 (idle Mac) |
 | permission-prompt | R3 | approve a real TCC prompt for a scratch app, 1/1, maintainer-scheduled |
 | locked-refusal / asleep-refusal | R4 | typed refusal < 1 s, no PNG (natural lock only) |
-| driver-hang | R4 | a stalled driver call ends as `outcomeUnknown` ≤ 10 s; Stop ends the turn in ≤ 1 s |
 | idle-lock-held | R5 | no lock during a working turn longer than display sleep; assertion gone after end, Stop or kill |
 | surface-home / worker / subagent | R6 | each surface runs the rows end to end through its own admission |
 
@@ -212,7 +211,8 @@ Owner: `packages/gateway/src/machine/cua-client.ts`.
 - **N6: contradictory guidance.** The prompt says "Prefer background AX actions", but for web content
   background delivery is unverifiable. RC1 removes the web case.
 - **Acceptance:**
-  - `driver-hang` row; Stop during a stalled call returns in ≤ 1 s.
+  - A stalled driver call ends as `outcomeUnknown` in ≤ 10 s and Stop during it returns in ≤ 1 s, proven by
+    `console-admission.integration.test.ts` (the fixture driver can stall; the bench drives the real driver and cannot).
   - The help output has no `session` field.
   - `post_action_wait` is admitted only where the driver schema advertises it.
   - A typed `stale_element` cause is returned.
@@ -368,8 +368,8 @@ means it needs an unlocked, idle-enough Mac for a short bench slot.
 
 | WP | Content | Depends on | Tests / proof | Size |
 |---|---|---|---|---|
-| **WP0** | **Measurement on the product path.** Bench drives `CuaComputerClient`; records driver version; adds rows `caption-exact`, `owned-persistent-profile`, `native-sheet`, `native-file-dialog`, `driver-hang`, `locked-*` (report `needs-locked` unless naturally locked). Take the first 0.33 baseline. | — | `bench.test.mjs`; one full 3-rep run (desktop) | M |
-| **WP1** | **Adapter hardening (RC3).** Deadlines and abort on every driver call; bounded `close()`; typed `stale_element`; help strips `session`; reap the orphaned console-admission fixtures and make the fake driver unblockable. | — | `driver-hang` row; extend `console-admission.integration.test.ts` (fail before: hangs) | M |
+| **WP0** | **Measurement on the product path.** Bench drives `CuaComputerClient`; records driver version; adds rows `caption-exact`, `owned-persistent-profile`, `native-sheet`, `native-file-dialog`, `locked-*` (report `needs-locked` unless naturally locked). Take the first 0.33 baseline. | — | `bench.test.mjs`; one full 3-rep run (desktop) | M |
+| **WP1** | **Adapter hardening (RC3).** Deadlines and abort on every driver call; bounded `close()`; typed `stale_element`; help strips `session`; reap the orphaned console-admission fixtures and make the fake driver unblockable. | — | extend `console-admission.integration.test.ts` (fail before: hangs) | M |
 | **WP2** | **Web goes over CDP (RC1 + RC8).** `computer` guidance and Home briefs route all web work to `agent_browser`; the refusal carries the owned-launch remedy; replace upstream `--remote-debugging-port` guidance in `tron.patch`; headed launches get the three background flags; unattended launches default headless. | — | `caption-exact`, `locked-browser` (natural lock), one fresh-worker transcript; goldens for prompt text need the maintainer (Taste/prompt) | M |
 | **WP3** | **Carry the patched engine (RC4, D2).** Package 775a666 as a Tron-owned engine artifact through the existing patch builder and pin gate; add its owning replace test. | D2 | `web-replace` 3/3, `caption-exact` 20/20 on the shipped artifact | M |
 | **WP4** | **Owned-browser lifecycle (RC7).** #2563.1–3 and #2629.1–2; F3 experiment first; #2574 load experiment. | — | `browser-fork-receipts.integration.test.ts` fail-before/pass-after; `owned-persistent-profile` 20/20 | M |
