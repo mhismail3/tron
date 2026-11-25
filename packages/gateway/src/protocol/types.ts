@@ -1223,6 +1223,25 @@ export function decodeProcessTranscriptLeasePage(v: unknown, p = "$"): ProcessTr
 export function encodeProcessTranscriptLeasePage(v: ProcessTranscriptLeasePage): string {
   return "{" + (',"items":' + "[" + v.items.map((x) => encodeTranscriptItem(x)).join(",") + "]" + ',"start":' + encNum(v.start) + ',"end":' + encNum(v.end) + ',"total":' + encNum(v.total) + (v.nextEntryId === undefined ? "" : ',"nextEntryId":' + JSON.stringify(v.nextEntryId)) + (v.leafEntryId === undefined ? "" : ',"leafEntryId":' + JSON.stringify(v.leafEntryId)) + (v.forkBoundary === undefined ? "" : ',"forkBoundary":' + encodeTranscriptForkBoundary(v.forkBoundary))).slice(1) + "}";
 }
+/** session.processTranscript.page: one page and the transcript revision it was read at. */
+export interface ProcessTranscriptPageResult {
+  items: TranscriptItem[];
+  start: number;
+  end: number;
+  total: number;
+  nextEntryId?: string;
+  leafEntryId?: string;
+  forkBoundary?: TranscriptForkBoundary;
+  revision: string;
+}
+export function decodeProcessTranscriptPageResult(v: unknown, p = "$"): ProcessTranscriptPageResult {
+  const o = obj(v, p);
+  only(o, p, ["items","start","end","total","nextEntryId","leafEntryId","forkBoundary","revision"]);
+  return { items: seq(own(o, "items"), p + ".items", (x, q) => decodeTranscriptItem(x, q)), start: num(own(o, "start"), p + ".start"), end: num(own(o, "end"), p + ".end"), total: num(own(o, "total"), p + ".total"), ...(own(o, "nextEntryId") === undefined ? {} : { nextEntryId: str(own(o, "nextEntryId"), p + ".nextEntryId") }), ...(own(o, "leafEntryId") === undefined ? {} : { leafEntryId: str(own(o, "leafEntryId"), p + ".leafEntryId") }), ...(own(o, "forkBoundary") === undefined ? {} : { forkBoundary: decodeTranscriptForkBoundary(own(o, "forkBoundary"), p + ".forkBoundary") }), revision: str(own(o, "revision"), p + ".revision") };
+}
+export function encodeProcessTranscriptPageResult(v: ProcessTranscriptPageResult): string {
+  return "{" + (',"items":' + "[" + v.items.map((x) => encodeTranscriptItem(x)).join(",") + "]" + ',"start":' + encNum(v.start) + ',"end":' + encNum(v.end) + ',"total":' + encNum(v.total) + (v.nextEntryId === undefined ? "" : ',"nextEntryId":' + JSON.stringify(v.nextEntryId)) + (v.leafEntryId === undefined ? "" : ',"leafEntryId":' + JSON.stringify(v.leafEntryId)) + (v.forkBoundary === undefined ? "" : ',"forkBoundary":' + encodeTranscriptForkBoundary(v.forkBoundary)) + ',"revision":' + JSON.stringify(v.revision)).slice(1) + "}";
+}
 export interface ProcessTranscriptLease {
   leaseId: string;
   processId: string;
