@@ -136,7 +136,10 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   shorter child, and closing the child restores the parent's height. A covered sheet never
   drives its detent; it reapplies its own height once uncovered. The drag indicator is hidden.
   The measured scroll extends under the bottom safe area; a fitted sheet adds no bottom content
-  margin, so content never exceeds its frame and the sheet cannot scroll or bounce. While a sheet fits,
+  margin, so content never exceeds its frame and the sheet cannot scroll or bounce; it also does not clip, so
+  while a fitted sheet rises or resizes its content and bottom card are clipped once, by the sheet's own
+  rounded shape. A paged sheet (the ask_user form) keeps every page measured and reports only the current
+  page's height through `tronSheetFitReports`, so a page entering mid-swipe never rebuilds or re-measures. While a sheet fits,
   every `tronGlassSurface`/`tronScrollSurface` uses `ConcentricRectangle` bottom corners
   (fixed card radius as the minimum), so only the card nearest the sheet's bottom edge grows to
   share the sheet corners' centres; no surface marks itself as last.

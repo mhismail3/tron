@@ -739,7 +739,7 @@ struct ThinkingTraceDetailSheet: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .id(Self.traceID)
                     }
-                    .padding(18)
+                    .padding(TronSpacing.xlarge)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .onAppear {
                         guard streaming else { return }

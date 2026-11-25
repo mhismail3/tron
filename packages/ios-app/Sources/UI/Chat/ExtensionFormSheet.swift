@@ -49,7 +49,7 @@ struct ExtensionFormSheet: View {
                             .offset(x: CGFloat(index - currentQuestionIndex) * pageWidth + pageDragOffset)
                             .allowsHitTesting(current)
                             .accessibilityHidden(!current)
-                            .transformEnvironment(\.tronSheetMeasuresContent) { $0 = $0 && current }
+                            .tronSheetFitReports(current)
                             .transition(reduceMotion ? .opacity : .identity)
                     }
                 } else {

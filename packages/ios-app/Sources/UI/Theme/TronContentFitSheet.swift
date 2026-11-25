@@ -154,6 +154,7 @@ struct TronSheetFitScrollModifier: ViewModifier {
                 .ignoresSafeArea(.container, edges: .bottom)
                 .contentMargins(.bottom, fits ? 0 : TronSheetWindowMetrics.current.bottomInset)
                 .scrollBounceBehavior(.basedOnSize, axes: .vertical)
+                .scrollClipDisabled(fits)
                 .onScrollGeometryChange(for: CGFloat?.self) { geometry in
                     let insets = geometry.contentInsets
                     return insets.top > 0 || insets.bottom > 0 ? insets.top + geometry.contentSize.height : nil
@@ -179,5 +180,8 @@ extension View {
     func tronContentFitSheet() -> some View {
         modifier(TronContentFitSheetModifier())
     }
-}
 
+    func tronSheetFitReports(_ reports: Bool) -> some View {
+        transformPreference(TronSheetFitKey.self) { if !reports { $0 = nil } }
+    }
+}
