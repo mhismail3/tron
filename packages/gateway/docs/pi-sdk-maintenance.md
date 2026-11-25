@@ -89,23 +89,12 @@ provider and virtual-model registration start are tracked, and `settleCredential
 joins them before pending credential writes; it does not close the runtime or refuse new
 work, so the creator of a runtime calls it after its registrations stop and before its storage
 is removed (`AgentSessionRuntime.dispose` calls it for each session). It also carries
-direct-argv 1Password/Keychain references for MCP headers and env and for a `models.json` provider `apiKey`, a backed-up
-`SettingsManager.unsetGlobalSettings` whose reload reconciles at the settings write queue, and
+direct-argv 1Password/Keychain references for MCP headers and env and for a `models.json` provider `apiKey`, and
 a root export of the config-only `loadMcpConfig` with a per-file byte budget. The `pi` bin and `./rpc-entry`
 bundle their dependencies, so only a release or a rebuild moves a dependency there, never a
-Gateway `overrides` entry. Both child entries are rebuilt with undici 8.12.4;
-`check-pi-sdk.integration.test.mjs` starts each real bundled entry on an isolated home and
-requires its installed fetch to reject a loopback body that mismatches tab-prefixed SRI metadata.
-This is independent of the Gateway's external dependency override and the separately pinned
-managed-provider closure. The SDK cohort and conversation contracts remain unchanged.
-
-The local-file reader checks cancellation after `FileHandle.stat()` and immediately before
-`createReadStream`, with its existing handle-closing `finally` unchanged. Native stream cancellation
-and ordinary errors still propagate. The existing SDK integration test runs stat-boundary and
-mid-stream cancellation in isolated processes and joins handle closure. This one-line bridge
-is removed when the pinned Pi includes
-[upstream PR #12025](https://github.com/earendil-works/pi/pull/12025); upstream owns the
-alternative signal-free stream with reader-owned cancellation.
+Gateway `overrides` entry; `check-pi-sdk.integration.test.mjs` starts each real bundled entry on an
+isolated home and requires its installed fetch to reject a loopback body that mismatches tab-prefixed
+SRI metadata. The SDK cohort and conversation contracts remain unchanged.
 
 `createAgentSession` and `createAgentSessionFromServices` accept a host `preamble` that replaces
 Pi's generic identity without suppressing tool snippets, tool guidelines or docs; a custom system
@@ -124,7 +113,7 @@ exported `serversSectionIntro`) renders `mcp_servers`; the Gateway passes its in
 renderers for both.
 Tools activated during a run are declared after the earlier tools, and their prompt sections are applied at the next run, so the system text is not rewritten inside a run. These bridges are listed in `removeWhen`. Earlier tarballs are not kept: git history restores
 them, and the SDK rollback check uses the registry release in `pi-sdk-baseline.json`. No installed
-runtime is changed by rebuilding or selecting `pi-coding-agent-1.5.1-tron.9.tgz` in a worktree. The reproducer's
+runtime is changed by rebuilding or selecting `pi-coding-agent-1.6.0-tron.1.tgz` in a worktree. The reproducer's
 `--write` mode alone may build an artifact that does not yet exist; every other check requires it.
 
 Pi activates newly registered declarable extension tools on a resumed branch, and the
