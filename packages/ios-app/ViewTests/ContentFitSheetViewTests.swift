@@ -178,6 +178,23 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         }
     }
 
+    private func openManageHome(_ app: MountedFixture) async throws {
+        try await app.activate("home-pinned-row")
+        try await app.activate("session-context-button")
+        try await app.until("Manage Home opens") { app.element("home-manage-state") != nil }
+        try await app.waitForTopSheetToSettle()
+    }
+
+    private func revealed(_ app: MountedFixture, _ key: String) async throws -> NSObject {
+        var node: NSObject?
+        try await app.until("\(key) exists") {
+            node = app.element(key)
+            return node != nil
+        }
+        try await app.reveal(node!)
+        return app.element(key) ?? node!
+    }
+
     private func sheetChain(_ app: MountedFixture) -> [UIViewController] {
         var chain: [UIViewController] = []
         var next = app.window.rootViewController?.presentedViewController
