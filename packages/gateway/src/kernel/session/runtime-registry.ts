@@ -3367,9 +3367,8 @@ export class RuntimeRegistry implements SessionOperations {
 
   async readTaskWorkerTranscript(sessionId: string, subagentSessionId?: string): Promise<{ sessionId: string; subagents: string[]; entries: SessionEntry[] }> {
     await this.sessionCatalog.whenReconciled();
-    const acquisition = await this.catalogAcquisition();
+    const { acquisition, entry: root } = await this.catalogMembership(sessionId);
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
-    const root = acquisition.entriesByID.get(sessionId);
     if (!root) throw new GatewayError("not_found", "Task worker session is unavailable");
     const catalogRoot = await realpath(this.catalogDirectory());
     const byPath = new Map([...acquisition.entriesByID.values()].map(entry => [entry.path, entry]));
