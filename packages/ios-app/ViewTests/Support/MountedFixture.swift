@@ -17,8 +17,7 @@ final class MountedFixture {
     private let savedTheme: ThemeColor
     private let savedFilter: DashboardServerFilterState
 
-    init(_ arguments: [String], theme: ThemeColor = .emerald,
-         contentSize: UIContentSizeCategory = .large) throws {
+    init(_ arguments: [String], theme: ThemeColor = .emerald) throws {
         guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else {
             throw FixtureNotReady(description: "the hosted app has no window scene")
         }
@@ -35,7 +34,6 @@ final class MountedFixture {
             .environment(\.scenePhase, .active)
             .transaction { $0.animation = nil; $0.disablesAnimations = true }))
         window = UIWindow(windowScene: scene)
-        window.traitOverrides.preferredContentSizeCategory = contentSize
         window.frame = scene.screen.bounds
         window.windowLevel = .normal + 1
         window.rootViewController = host
@@ -322,9 +320,9 @@ private final class FrameWaiter: NSObject {
 
 extension XCTestCase {
     @MainActor
-    func mounted(_ arguments: [String], theme: ThemeColor = .emerald, contentSize: UIContentSizeCategory = .large,
+    func mounted(_ arguments: [String], theme: ThemeColor = .emerald,
                  _ body: (MountedFixture) async throws -> Void) async throws {
-        let fixture = try MountedFixture(arguments, theme: theme, contentSize: contentSize)
+        let fixture = try MountedFixture(arguments, theme: theme)
         defer { fixture.close() }
         do { try await body(fixture) } catch let error as FixtureNotReady {
             XCTFail(error.description)

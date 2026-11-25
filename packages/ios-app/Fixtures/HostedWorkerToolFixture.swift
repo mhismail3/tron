@@ -12,8 +12,7 @@ struct HostedWorkerToolFixture: View {
                 let tools = surface == "worker-identities" ? Self.identityTools : Array(Self.identityTools.prefix(2))
                 ToolRunDetailSheet(run: ChatToolRunPresentation(tools: tools), tools: tools).tronSettingsLayout()
             } else if surface.hasPrefix("worker-thinking") {
-                ThinkingTraceDetailSheet(inline: MarkdownPresentation.Inline(source: surface == "worker-thinking-long"
-                    ? Array(repeating: Self.thought, count: 12).joined(separator: "\n\n") : Self.thought),
+                ThinkingTraceDetailSheet(inline: MarkdownPresentation.Inline(source: Self.thought),
                     identity: surface, streaming: false)
             } else {
                 NavigationStack {
