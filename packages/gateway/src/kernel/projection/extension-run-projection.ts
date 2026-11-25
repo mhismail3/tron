@@ -337,6 +337,12 @@ function isoTime(value: unknown): string | undefined {
   return new Date(milliseconds).toISOString();
 }
 
+function progressTime(value: unknown, observedAt: string, previous: string | undefined): string | undefined {
+  const reported = isoTime(value);
+  if (reported === undefined) return previous;
+  return Date.parse(reported) <= Date.parse(observedAt) ? reported : previous ?? observedAt;
+}
+
 function producerTime(value: unknown): string | undefined {
   if (typeof value === "string" && Buffer.byteLength(value) <= 128) {
     const milliseconds = Date.parse(value);
@@ -846,7 +852,7 @@ export function projectExtensionRunActivity(
     previous?: ExtensionRunActivity;
     activityId?: string;
     sequence?: number;
-    observedAt?: string;
+    observedAt: string;
     terminalAt?: string;
     recentUntil?: string;
     childIdentityStrategy?: ExtensionRunChildIdentityStrategy;
@@ -892,7 +898,8 @@ export function projectExtensionRunActivity(
   const firstProgress = candidates.length > 0 ? progressRecord(candidates[0]) : undefined;
   const aggregateProgress = progressRecord(details?.aggregate ?? details?.progressState);
   const runId = text(details?.runId ?? details?.asyncId, 256) ?? previous?.runId;
-  const lastActivityAt = isoTime(details?.lastActivityAt ?? aggregateProgress?.lastActivityAt ?? firstProgress?.lastActivityAt ?? details?.updatedAt) ?? previous?.lastActivityAt;
+  const lastActivityAt = progressTime(details?.lastActivityAt ?? aggregateProgress?.lastActivityAt ?? firstProgress?.lastActivityAt ?? details?.updatedAt,
+    base.observedAt, previous?.lastActivityAt);
   const currentTool = text(details?.currentTool ?? aggregateProgress?.currentTool ?? firstProgress?.currentTool, 256) ?? previous?.currentTool;
   const currentToolStartedAt = isoTime(details?.currentToolStartedAt ?? aggregateProgress?.currentToolStartedAt ?? firstProgress?.currentToolStartedAt) ?? previous?.currentToolStartedAt;
   const currentPath = displayPath(details?.currentPath ?? aggregateProgress?.currentPath ?? firstProgress?.currentPath) ?? previous?.currentPath;
@@ -946,7 +953,7 @@ export function projectExtensionRunActivity(
       ...(completedAt ? { completedAt } : {}),
       ...(previous ? { previous } : {}),
       ...(base.sequence === undefined ? {} : { sequence: base.sequence }),
-      ...(base.observedAt ? { observedAt: base.observedAt } : {}),
+      observedAt: base.observedAt,
       ...(base.terminalAt ? { terminalAt: base.terminalAt } : {}),
       ...(base.recentUntil ? { recentUntil: base.recentUntil } : {}),
     }),
