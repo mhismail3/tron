@@ -6,7 +6,7 @@ Block hash: `9b52b76ca038ba27` (over `blocks/sessions/restart-drain/Block.dfy`, 
 | Gate | Status |
 |---|---|
 | Proof (pinned Dafny, --verify-included-files) | PASS: blocks/sessions/restart-drain/Block.dfy: Dafny program verifier finished with 50 verified, 0 errors;  |
-| Independent review | NOT ACCEPTED: STALE (reviewed cf3d58e0fde201a4, current 9b52b76ca038ba27); reviewer transcript never mentions the current block hash (it did not review this version) |
+| Independent review | ACCEPT by reviewer (run caf7c496) (anthropic/claude-haiku-5-5, transcript-verified); writer parent (Home task, #2682) (anthropic/claude-opus-5-5); 2026-11-25 |
 | Mutation check | PASS: 105 valid mutants, 100 killed by laws, 0 survived, 5 accepted (blocks/sessions/restart-drain/MUTATION.json; statuses c1167956fbf94fb2) |
 | Cut over | the only implementation: `packages/gateway/src/core/sessions/restart-drain` runs this block's compiled core (scripts/tron proof facade) |
 
@@ -22,7 +22,7 @@ lemma C1Completed(count: Count, blockers: List<Blocker>, tracked: Tracked, now: 
 
 **Mutation results.** kills 12 of 105 valid mutants; 3 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: English 'complete exactly when no operation blocks it, and then the timer tracks nothing' matches Evaluate's first branch (count == 0 gives Completed, Untracked) and both C1Completed ensures clauses.
+**Reviewer notes.** ACCEPT: English 'complete exactly when no operation blocks it, and then the timer tracks nothing' matches C1Completed (count == 0 gives Completed, Untracked) and Evaluate's first branch.
 
 ## U1 unresolved-owners
 
@@ -48,7 +48,7 @@ lemma AllOwnersSpec(n: Count, bs: List<Blocker>)
 
 **Mutation results.** kills 31 of 105 valid mutants; 8 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: English 'every blocker listed, at least one, each a suspect terminal-receipt persistence write of a session' matches OnlyOwners and Owner; for count != 0, AllOwners is equivalent to OnlyOwners (AllOwnersSpec), and a truncated list (count above listed) fails AllOwners at Nil so it waits rather than proceeds.
+**Reviewer notes.** ACCEPT: Under count != 0, UnresolvedOwners exactly when OnlyOwners (every blocker listed, at least one, each a suspect terminal-receipt persistence write of a session), via AllOwnersSpec; a truncated list fails AllOwners at Nil and waits.
 
 ## W1 unlisted
 
@@ -62,7 +62,7 @@ lemma W1Unlisted(count: Count, blockers: List<Blocker>, tracked: Tracked, now: M
 
 **Mutation results.** kills 12 of 105 valid mutants; 0 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: Nonzero count with no listed blockers returns Step(Waiting, tracked), as the English says. The law text is correct; the packet's reviewer example (count=65 with 64 omitted) is arithmetically wrong, see general item 1.
+**Reviewer notes.** ACCEPT: count != 0 with no listed blockers gives Step(Waiting, tracked); the shell cannot produce this input (count > 0 always lists one), so the law is vacuous at the seam, not wrong.
 
 ## O1 oldest-tracked
 
@@ -123,7 +123,7 @@ lemma ProgressSpec(blockers: List<Blocker>, o: Blocker)
 
 **Mutation results.** kills 27 of 105 valid mutants; 11 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: Under the non-owner nonempty premise Evaluate tracks Elems[i] (OldestSpec, OldestWalk) with its id, state and admitted time, and progress equal to Progress (ProgressSpec). The Oldest predicate matches the English: set admission before unset, first blocker on ties, first blocker when none is set.
+**Reviewer notes.** ACCEPT: Oldest matches OldestOf; Progress equals LatestOf over the session's listed blockers (ProgressSpec, LatestSpec), which under A2 carry the latest progress of the session's omitted blockers (runtime-registry.ts omitted-progress carry).
 
 ## R1 timer-reset
 
@@ -149,7 +149,7 @@ lemma SameSpec(a: State, b: State, s: Time, t: Time)
 
 **Mutation results.** kills 24 of 105 valid mutants; 10 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: Evaluate keeps tracked.since only when id, state, progress and admitted all match (Unchanged, via SameSpec equality), otherwise uses Signal(p, admitted, now). The English 'its progress time' means the judging session-latest progress p that O1 defines; say so explicitly at the next revision.
+**Reviewer notes.** ACCEPT: since == (if Unchanged(tracked, o, p) then tracked.since else Signal(p, o.admitted, now)) with p O1's judged progress, matching the English and Evaluate via SameSpec. A backward move to an older judged progress also resets the timer; that pre-existing behaviour is tracked as #2685 and needs its own law revision.
 
 ## T1 stalled
 
@@ -165,7 +165,7 @@ lemma T1Stalled(count: Count, blockers: List<Blocker>, tracked: Tracked, now: Ms
 
 **Mutation results.** kills 32 of 105 valid mutants; 10 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: Stalled(o.id, Age(now, since)) when age >= limit, else Waiting, with since taken from the post-step tracked value; the zero clamp in Age matches the English.
+**Reviewer notes.** ACCEPT: Stalled(oldest id, Age(now, since)) when age >= limit, else Waiting, with since from the post-step tracked value and Age clamped at zero; matches the English and Evaluate.
 
 ## Proof helpers (statements only; not laws, but part of what is proven)
 
@@ -352,4 +352,4 @@ ghost function Age(now: Ms, since: Ms): Ms { if now <= since then 0 else now - s
 
 ## Reviewer: general notes
 
-Hash cf3d58e0fde201a4 confirmed as the packet hash. The only change since 828f2b535b690753 in laws/sessions/RestartDrain.dfy is the A2 comment line (watchdog_diff stat: one line removed, one added); Block.dfy, mutate.json and the proof inputs are unchanged. The new A2 sentence matches restart-drain.ts instant() (ms >= 0 and a toISOString round-trip, otherwise Unset, which is Time.Unset in the block) and host-control.md around line 136 ('reads as unset, like an absent time'). The laws quantify over all Time values including Unset, so they hold under the new wording. A1-A3 are realistic: runtime-registry.ts 3540-3552 gives id = blocker- plus sha256(drainId NUL key), sessionId only when non-empty, and admittedAt only when it parses; gateway-main.ts 678 creates a fresh RestartDrainProgress per drain, so nothing is tracked at start; runtime-registry.ts 3575-3610 polls the callback every 100 ms and restarts only on a true result; extension-run-projection.ts 334-338 bounds to 0-8.64e15 and applies toISOString. The five equivalent-mutant acceptances are machine-checked by tools/proof/mutate/mutate.mjs (Equiv.dfy, accepted only when r.code is 0); I independently agree with each: LatestFor >= picks an equal At(ms), so the same value results; the swap-args on SameState and SameTime are symmetric because both are equality (SameSpec); <= and < both give age 0 at now == since. Tier high-stakes is correct: a wrong answer can restart over live runs, or proceed over a suspect receipt write. Residual items, all report-only (P2), none changing a law verdict. (1) The W1 reviewer note's example (count=65 with 64 omitted blockers) is wrong: the shell lists min(count,64)=64 blockers, so 1 is omitted and 64 are listed; W1's premise (blockers.Nil?) cannot arise from the shell because count>0 always lists at least one. Correct it at the next law revision. (2) The A2 notation '+0YYYYY' is imprecise: toISOString writes expanded years as signed six digits, up to +275760 at the Date maximum. Changing the comment changes the hash and needs re-review. (3) Future-dated progress suppresses stall: extension-run-projection.ts:676 accepts lastActivityAt up to 8.64e15 with no clamp to now, and T1/R1 clamp age to 0 when since > now, so a far-future progress time keeps that blocker from stalling until that time passes; restartNow still escalates. The laws match their stated English and A2 does not forbid future times, so decide at the next law revision whether to clamp or treat such times as unset. (4) Truncation: runtime-registry.ts 3535-3540 sorts unset admission first (empty string) and then caps at 64, so with at least 64 unset-admission blockers the set-admission oldest is omitted from the stall decision; A2 does not state the listing rule. Reachability is remote. (5) The reviewer model must differ from anthropic/claude-opus-5-5, and I cannot confirm my own model id from my context; the supervisor must record it before this ACCEPT counts. (6) The tier rationale cites LAW-WRITING, which I could not find in the repository, so I judged the tier on substance. I did not re-run Dafny or the mutation tool (no shell); I rely on the packet's PASS (50 verified, 0 errors) and the MUTATION.json inputsHash, which matches cf3d58e0fde201a4.
+Hash 9b52b76ca038ba27; MUTATION.json inputsHash matches. Since cf3d58e0fde201a4 only comments in laws/sessions/RestartDrain.dfy changed: A2 states the listing rule (earliest admitted first, unadmitted last, at most 64, omitted progress carried onto listed blockers of the same session), the future-progress clamp, the shared host clock and that extension-reported admission times are not clamped; R1 names O1's judged progress. A1-A3 hold of the shell (runtime-registry.ts administrativeDrainSnapshot, restart-drain.ts instant(), extension-run-projection.ts progressTime, gateway-main.ts fresh RestartDrainProgress per drain). The five accepted equivalences AGREE. Residual: #2685 (timer moves back when a session's progressing blocker settles), pre-existing and tracked separately.
