@@ -148,7 +148,7 @@ const extensionUsage: Record<string, ExtensionUsage> = {
 const ANTIGRAVITY_WINDOWS: Record<string, [string, number]> = { weekly: ["Weekly", 604_800], "5h": ["5h", 18_000] };
 function parseAntigravityQuota(body: unknown): UsageWindow[] {
   const root = object(body); const quota = object(root?.quota);
-  if (root?.ok !== true || !quota || !Array.isArray(quota.groups)) throw new Error(text(root?.error) ?? "invalid Antigravity quota");
+  if (root?.ok !== true || !quota || !Array.isArray(quota.groups)) throw new Error("invalid Antigravity quota");
   const groups = quota.groups.map(object).filter((group): group is Record<string, unknown> => /^Gemini\b/u.test(text(group?.displayName) ?? ""));
   const windows: UsageWindow[] = [];
   for (const group of groups) {
@@ -157,7 +157,7 @@ function parseAntigravityQuota(body: unknown): UsageWindow[] {
     for (const entry of group.buckets) {
       const bucket = object(entry); const kind = text(bucket?.window); const fraction = number(bucket?.remainingFraction);
       if (!kind || fraction === null || fraction < 0 || fraction > 1) throw new Error("invalid Antigravity quota bucket");
-      const [label, duration] = ANTIGRAVITY_WINDOWS[kind] ?? [kind, null];
+      const [label, duration] = Object.hasOwn(ANTIGRAVITY_WINDOWS, kind) ? ANTIGRAVITY_WINDOWS[kind]! : [kind, null];
       windows.push(window(`${name}-${kind}`.toLowerCase().replace(/[^a-z0-9]+/gu, "-"), groups.length === 1 ? label : `${name} ${label}`,
         { usedPercent: Math.round((1 - fraction) * 1_000) / 10, resetsAt: iso(bucket!.resetTime), windowSeconds: duration }));
     }
@@ -648,7 +648,7 @@ export class ProviderUsageOwner {
       this.options.events.emit(usage.channel, { reply: (result: unknown) => { clearTimeout(timer); resolve(result); } });
     }).then((body) => {
       let windows: UsageWindow[];
-      try { windows = usage.parse(body); } catch (error) { return this.failed(meta, key, "unavailable", error instanceof Error ? error.message.slice(0, 200) : "Provider usage response was malformed", null); }
+      try { windows = usage.parse(body); } catch { return this.failed(meta, key, "unavailable", "Provider usage response was malformed", null); }
       const snapshot: ProviderUsageSnapshot = { providerId, status: "available", source: usage.source, scope: usage.scope, updatedAt: new Date(this.options.now()).toISOString(), retryAt: null, stale: false, message: null, windows, balances: [] };
       this.cache.set(key, { key, snapshot, expiresAt: this.options.now() + FRESH_MS }); this.trimCache(); return snapshot;
     }, () => this.failed(meta, key, "unavailable", "Provider usage request timed out", null))

@@ -300,7 +300,7 @@ describe("Anthropic usage under Pi's built-in OAuth", () => {
 });
 
 describe("Antigravity usage from its provider extension", () => {
-  it("reads the extension's quota reply, shows only groups covering served models and lets an exhausted window skip the queue", async () => {
+  it("reads the extension's quota reply, keeps only Gemini quota groups and lets an exhausted window skip the queue", async () => {
     const root = await mkdtemp(join(tmpdir(), "gateway-antigravity-usage-"));
     const credential: Credential = { type: "api_key", key: "managed" };
     const credentials: CredentialStore = {

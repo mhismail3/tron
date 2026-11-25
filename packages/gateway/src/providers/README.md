@@ -49,7 +49,9 @@ and before worker controls, reading canonical fixed settings and the worker fact
   global extension event bus and the provider package answers from agy's own `/usage`
   command (no inference); Gemini groups become Weekly and 5h windows, other groups
   (models Tron cannot route there) are dropped, and no reply within the timeout is
-  `unavailable`.
+  `unavailable`. The quota is agy's own signed-in account, cached 60 s per runtime and
+  auth binding; only the global extension bus is asked, so a project-scoped install
+  reports `unavailable`.
   Custom base URLs are unsupported and never sent to a first-party endpoint. Values a
   provider omits stay absent. Exhaustion is a readable window at 100%; no usage read
   skips a model-queue entry. At most 16 providers, 16 windows, 4 balances; successes
