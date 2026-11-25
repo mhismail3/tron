@@ -441,7 +441,7 @@ package enum SessionProcessAdmissionPolicy {
               process.childSessionRef.map({ boundedNonempty($0, 512) && !$0.contains("/") && !$0.contains("\\") }) ?? true,
               [process.durationMs, process.toolCount, process.turnCount, process.childCount]
                 .allSatisfy({ $0.map { $0 >= 0 } ?? true }),
-              admits(process.lifecycle, visibility: process.visibility) else { return false }
+              admits(process.lifecycle) else { return false }
         switch process.kind {
         case .subagent:
             guard process.executionMode == .synchronous || process.executionMode == .asynchronous,
@@ -474,17 +474,8 @@ package enum SessionProcessAdmissionPolicy {
               boundedCount(overview.activeCount),
               boundedCount(overview.recentCount),
               boundedCount(overview.problemCount),
-              overview.problemCount <= overview.activeCount + overview.recentCount,
-              (overview.recentCount > 0) == (overview.nearestExpiry != nil),
               admits(overview.omissions) else { return false }
-        switch overview.visibility {
-        case .hidden:
-            return overview.activeCount == 0 && overview.recentCount == 0 && overview.nearestExpiry == nil
-        case .active:
-            return overview.activeCount > 0
-        case .recent:
-            return overview.activeCount == 0 && overview.recentCount > 0 && overview.nearestExpiry != nil
-        }
+        return true
     }
 
     package static func admits(_ delta: PresentedProcessDelta) -> Bool {
@@ -498,38 +489,7 @@ package enum SessionProcessAdmissionPolicy {
               Set(removals).count == removals.count,
               removals.allSatisfy({ boundedNonempty($0, 512) }),
               delta.activity != nil || !removals.isEmpty else { return false }
-        guard let activity = delta.activity else { return true }
-        guard admits(activity) else { return false }
-        switch activity.visibility {
-        case .active:
-            return delta.overview.visibility == .active && delta.overview.activeCount > 0
-        case .recent:
-            return delta.overview.visibility != .hidden && delta.overview.recentCount > 0
-        case .historical, .unknown:
-            return false
-        }
-    }
-
-    package static func admitsMountedSubset(
-        _ activities: [PresentedProcessActivity],
-        overview: PresentedProcessOverview
-    ) -> Bool {
-        guard activities.allSatisfy({ $0.visibility == .active || $0.visibility == .recent }) else { return false }
-        let active = activities.filter { $0.visibility == .active }.count
-        let recentRows = activities.filter { $0.visibility == .recent }
-        guard active <= overview.activeCount, recentRows.count <= overview.recentCount else { return false }
-        switch overview.visibility {
-        case .hidden:
-            guard activities.isEmpty else { return false }
-        case .active:
-            guard active > 0 else { return false }
-        case .recent:
-            guard active == 0, !recentRows.isEmpty else { return false }
-        }
-        if let mountedNearest = recentRows.compactMap({ $0.lifecycle.recentUntil }).min(),
-           let overviewNearest = overview.nearestExpiry,
-           overviewNearest > mountedNearest { return false }
-        return true
+        return delta.activity.map(admits) ?? true
     }
 
     package static func admitsSnapshotFacts(_ snapshot: SessionSnapshot) -> Bool {
@@ -539,21 +499,6 @@ package enum SessionProcessAdmissionPolicy {
         let activities = snapshot.processActivities ?? []
         guard admits(overview), activities.count <= maximumActivities,
               activities.allSatisfy(admits) else { return false }
-        if (overview.activeCount > 0 || overview.recentCount > 0), snapshot.processActivities == nil { return false }
-        guard admitsMountedSubset(activities, overview: overview) else { return false }
-        let active = activities.filter { $0.visibility == .active }.count
-        let recentRows = activities.filter { $0.visibility == .recent }
-        let recent = recentRows.count
-        if overview.omissions == nil {
-            guard active == overview.activeCount, recent == overview.recentCount else { return false }
-            let nearest = recentRows.compactMap { $0.lifecycle.recentUntil }.min()
-            guard nearest == overview.nearestExpiry else { return false }
-        } else {
-            guard active <= overview.activeCount, recent <= overview.recentCount else { return false }
-            if let mountedNearest = recentRows.compactMap({ $0.lifecycle.recentUntil }).min(),
-               let overviewNearest = overview.nearestExpiry,
-               overviewNearest > mountedNearest { return false }
-        }
         return true
     }
 
@@ -567,26 +512,13 @@ package enum SessionProcessAdmissionPolicy {
         return change.revision != nil || change.closed == true
     }
 
-    private static func admits(_ lifecycle: PresentedProcessLifecycle, visibility: PresentedProcessVisibility) -> Bool {
-        guard lifecycle.version == 1, lifecycle.sequence >= 0,
-              validTimestamp(lifecycle.observedAt),
-              lifecycle.producerUpdatedAt.map(validTimestamp) ?? true,
-              lifecycle.terminalAt.map(validTimestamp) ?? true,
-              lifecycle.recentUntil.map(validTimestamp) ?? true else { return false }
-        switch visibility {
-        case .active:
-            return lifecycle.isActiveWork && lifecycle.terminalAt == nil && lifecycle.recentUntil == nil
-        case .recent, .historical:
-            guard lifecycle.isSettled,
-                  let terminal = lifecycle.terminalAt.flatMap(GatewayTimestamp.parse),
-                  let expiry = lifecycle.recentUntil.flatMap(GatewayTimestamp.parse) else { return false }
-            return abs(expiry.timeIntervalSince(terminal) - recentInterval) < 0.001
-        case .unknown:
-            return lifecycle.state == .unknown && lifecycle.terminalAt == nil && lifecycle.recentUntil == nil
-        }
+    private static func admits(_ lifecycle: PresentedProcessLifecycle) -> Bool {
+        lifecycle.version == 1 && lifecycle.sequence >= 0
+            && validTimestamp(lifecycle.observedAt)
+            && (lifecycle.producerUpdatedAt.map(validTimestamp) ?? true)
+            && (lifecycle.terminalAt.map(validTimestamp) ?? true)
+            && (lifecycle.recentUntil.map(validTimestamp) ?? true)
     }
-
-    private static let recentInterval: TimeInterval = 5 * 60
 
     private static func admits(_ omissions: SessionProcessOmissions?) -> Bool {
         guard let omissions else { return true }

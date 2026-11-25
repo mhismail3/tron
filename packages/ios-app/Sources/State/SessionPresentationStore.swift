@@ -2547,10 +2547,6 @@ extension SessionPresentationStore {
                 guard result.1 else { return snapshot.sessionId }
                 next = result.0
             }
-            guard SessionProcessAdmissionPolicy.admitsMountedSubset(
-                next,
-                overview: delta.overview
-            ) else { return snapshot.sessionId }
             snapshot.processOverview = delta.overview
             snapshot.processActivities = next
             advance(&snapshot, envelope)

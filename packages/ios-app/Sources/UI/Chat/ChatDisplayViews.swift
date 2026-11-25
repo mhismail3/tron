@@ -957,7 +957,7 @@ struct DisplayHTMLWebView: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    func makeUIView(context: Context) -> WKWebView {
+    func makeUIView(context: Context) -> TronTopBlurWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         configuration.userContentController.add(networkBlock)
@@ -973,19 +973,15 @@ struct DisplayHTMLWebView: UIViewRepresentable {
                 )
             }
         }
-        let view = DisplayHTMLHostView(frame: .zero, configuration: configuration)
+        let view = TronTopBlurWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
         view.allowsLinkPreview = false
-        view.isOpaque = false
-        view.backgroundColor = UIColor(Color.tronBackground)
-        view.scrollView.backgroundColor = UIColor(Color.tronBackground)
-        view.scrollView.topEdgeEffect.isHidden = true
-        view.scrollView.contentInsetAdjustmentBehavior = .always
         return view
     }
 
-    func updateUIView(_ view: WKWebView, context: Context) {
+    func updateUIView(_ view: TronTopBlurWebView, context: Context) {
+        view.reportTopBlur(to: context.environment.tronTopBlurFeed)
         guard context.coordinator.loadedHTML != html else { return }
         context.coordinator.loadedHTML = html
         context.coordinator.awaitsRequestedLoad = true
@@ -1084,13 +1080,6 @@ enum DisplayHTMLSandbox {
 
     static func disablePeerConnections(_ preferences: WKPreferences) -> Bool { false }
     #endif
-}
-
-private final class DisplayHTMLHostView: WKWebView {
-    override func safeAreaInsetsDidChange() {
-        super.safeAreaInsetsDidChange()
-        obscuredContentInsets = safeAreaInsets
-    }
 }
 
 private struct DisplayVideoArtifactView: View {
