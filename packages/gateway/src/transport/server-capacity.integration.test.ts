@@ -807,7 +807,7 @@ describe("WebSocket connection and outbound capacity", () => {
           const fence = new Promise<void>(resolve => { fenced = resolve; });
           socket.on("message", bytes => {
             const frame = JSON.parse(bytes.toString());
-            if (frame.type === "hello" && frame.protocolVersion === 9) ready();
+            if (frame.type === "hello" && frame.protocolVersion === PROTOCOL_VERSION) ready();
             if (frame.topic === "session.summary") {
               if (events.length >= 128) { socket.terminate(); return; }
               events.push([frame.payload.sessionId, frame.payload.summaryRevision]);
