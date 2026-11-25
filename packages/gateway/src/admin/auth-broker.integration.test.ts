@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
+import net, { type AddressInfo } from "node:net";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { fauxProvider, type Provider } from "@earendil-works/pi-ai";
@@ -38,6 +39,34 @@ function authEvents() {
 async function settleWorkEntry(predicate: () => boolean): Promise<void> {
   for (let turn = 0; turn < 256 && !predicate(); turn += 1) await Promise.resolve();
   if (!predicate()) throw new Error("auth work did not settle");
+}
+
+function remapChatGptCallbackPort(): { port: () => number | undefined; restore: () => void } {
+  const listen = net.Server.prototype.listen;
+  const connect = net.Socket.prototype.connect;
+  let port: number | undefined;
+  net.Server.prototype.listen = function (this: net.Server, ...args: unknown[]) {
+    if (args[0] === 1455) {
+      args[0] = 0;
+      this.once("listening", () => { port = (this.address() as AddressInfo).port; });
+    }
+    return (listen as (...values: unknown[]) => net.Server).apply(this, args);
+  } as typeof listen;
+  net.Socket.prototype.connect = function (this: net.Socket, ...args: unknown[]) {
+    const first = Array.isArray(args[0]) ? args[0][0] : args[0];
+    if (typeof first === "object" && first !== null && Number((first as { port?: unknown }).port) === 1455) {
+      if (port === undefined) throw new Error("ChatGPT callback listener was not remapped");
+      args[0] = { ...(first as object), port };
+    }
+    return (connect as (...values: unknown[]) => net.Socket).apply(this, args);
+  } as typeof connect;
+  return {
+    port: () => port,
+    restore: () => {
+      net.Server.prototype.listen = listen;
+      net.Socket.prototype.connect = connect;
+    },
+  };
 }
 
 describe("AuthBroker", () => {
@@ -631,6 +660,8 @@ describe("AuthBroker", () => {
       modelsPath: null,
       refreshOnCreate: false,
     });
+    const callbackPort = remapChatGptCallbackPort();
+    onTestFinished(callbackPort.restore);
     const originalFetch = globalThis.fetch;
     const requests: Array<{ url: string; body: string }> = [];
     vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
@@ -648,6 +679,7 @@ describe("AuthBroker", () => {
       await waitFor(() => events.some((event) => event.topic === "auth.event" || event.topic === "auth.completed"), "an auth event or completion");
       const event = events.find((item) => item.topic === "auth.event")?.payload as Record<string, JsonValue> | undefined;
       expect(event).toBeDefined();
+      expect(callbackPort.port()).toEqual(expect.any(Number));
       const authEvent = event.event as Record<string, JsonValue>;
       const authorization = new URL(authEvent.url as string);
       expect(authorization.searchParams.get("ext_agent_host_id")).toBe(`urn:uuid:${settingsManager.getOrCreateDeviceId()}`);

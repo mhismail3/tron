@@ -133,8 +133,9 @@ not the worker session being resumed.
   between turns progresses through its live async runs), then exact cancellation and grace; only-suspect
   `terminal-receipt-persistence` blockers proceed at once. The proven block `sessions/restart-drain`
   (`packages/core`) makes that decision over millisecond times; `restart-drain.ts` carries its stall timer between
-  polls. A blocker time that is not a `Date#toISOString` instant at or after 1970 fails the restart drain
-  (`gateway.restart-drain-failed`, exit 1). The stop drain has no stall
+  polls. A blocker time that is not a `Date#toISOString` instant at or after 1970 reads as unset, like an
+  absent time: the stall timer runs from the progress time when there is one, else from the admission
+  time when there is one, else from the first poll that sees it. The stop drain has no stall
   bound: a stop exits 0 and nothing relaunches to recover cut work, so it waits for
   every accepted owner; a caller needing a deadline stops waiting itself (Mac Quit waits
   unbounded while the drain is reachable, `packages/mac-app/README.md`). Both name their blockers

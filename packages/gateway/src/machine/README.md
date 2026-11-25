@@ -97,7 +97,8 @@ The iPhone pins the private host identity at enrollment
   from model input. Refused, malformed, non-zero or disconnected results are refusal
   or `outcomeUnknown`, never success or replay. Every driver process has a 10 s deadline
   (`type_text` 125 s, past the driver's own 120 s request bound); a call that never answers
-  is killed and reported as an uncertain effect, so Stop waits at most that long;
+  is killed and reported as an uncertain effect; Stop kills an in-flight driver call at once
+  with the same uncertain result;
   `close()` gives up after 10 s. Help strips the reserved
   fields from the driver schema; driver and adapter staleness both say
   `stale_element_token`. Actions need fresh observations from the same load. Observation images come from
