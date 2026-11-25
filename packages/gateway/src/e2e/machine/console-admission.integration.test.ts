@@ -182,6 +182,7 @@ describe.skipIf(process.platform !== "darwin")("console admission for computer a
     const f = await fixture();
     expect(await heldAssertions()).toBe(0);
     await f.mode("hold");
+    if (stop) boundary.deadlineScale = 0.001;
     const prompting = f.turn([desktop("desktop")]);
     await waitFor(() => f.dispatched(), "accepted driver observation");
     await waitFor(async () => await heldAssertions() === 1, "the scoped OS assertion while the computer turn runs");
