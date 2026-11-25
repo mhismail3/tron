@@ -176,6 +176,7 @@ export class HomeOwner {
 
   async obligationTool(sessionId: string, callId: string, request: ObligationRequest): Promise<unknown> {
     admitObligation(request);
+    const action = request.action;
     return this.recordMutex.run(async () => {
       const record = this.record;
       if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId) throw new GatewayError("conflict", "Home obligations are unavailable");
@@ -189,7 +190,7 @@ export class HomeOwner {
         if (count > 10000) throw new GatewayError("conflict", "Home obligation history exceeds 10000 events; no partial list is available");
         replayObligations(entries, chapter.sessionId, items);
       }
-      if (request.action === "list") {
+      if (action === "list") {
         const result = { items: [...items.values()].filter(owed), total: items.size };
         if (Buffer.byteLength(JSON.stringify(result)) > 128 * 1024) throw new GatewayError("conflict", "Home owed list exceeds 128 KiB; no partial list is available");
         return result;
@@ -209,13 +210,12 @@ export class HomeOwner {
       const before = items.get(request.id!);
       if (existing?.type === "custom") {
         const event = existing.data as ObligationEvent;
-        if (event.id !== request.id || event.action !== request.action || event.source.entryId !== source.id || event.source.quote !== request.quote
+        if (event.id !== request.id || event.action !== action || event.source.entryId !== source.id || event.source.quote !== request.quote
           || event.text !== request.text || event.issue !== request.issue || event.evidence?.entryId !== request.evidenceEntryId || event.evidence?.quote !== request.evidenceQuote) {
           throw new GatewayError("conflict", "Obligation receipt identity has different input");
         }
         return { item: before, receiptId };
       }
-      const action = request.action as ObligationEvent["action"];
       const step = obligationStep(before, action, items.size);
       if (count >= 10000 || (action === "request" && obligationStep(undefined, action, items.size) === "full")) throw new GatewayError("conflict", "Home obligation history is full; no event was appended");
       if (action === "request" ? !!before : !before) throw new GatewayError("conflict", "Obligation id already exists or is unavailable; never re-create a closed item");

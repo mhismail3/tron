@@ -65,7 +65,8 @@ describe("Home obligation ledger replay (home/obligations block)", () => {
       await home.prompt(text);
       await waitFor(() => home.snapshot().operation === undefined, "maintainer turn settled");
     };
-    const results = () => home.canonicalSessionEntries().flatMap(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "obligation" ? [!entry.message.isError] : []);
+    const results = () => home.canonicalSessionEntries().flatMap(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "obligation"
+      ? [entry.message.isError ? JSON.stringify(entry.message.content).match(/Reopening|already exists|already closed/)?.[0] ?? "refused" : true] : []);
     const ledger = () => home.canonicalSessionEntries().flatMap(entry => entry.type === "custom" && entry.customType === HOME_OBLIGATION ? [(entry.data as { action: string }).action] : []);
     await turn("I will rotate the key.", [
       call({ action: "request", id: "key", text: "Rotate the key", quote: "I will rotate the key." }, "open"),
@@ -79,10 +80,10 @@ describe("Home obligation ledger replay (home/obligations block)", () => {
       call({ action: "request", id: "key", text: "Recreated", quote: "The key is rotated." }, "recreate"),
     ]);
     await turn("It failed; reopen the key rotation.", [call({ action: "reopened", id: "key", quote: "reopen the key rotation" }, "reopen")]);
-    expect(results()).toEqual([true, false, false, true, false, false, false, true]);
+    expect(results()).toEqual([true, "Reopening", "already exists", true, "already closed", "Reopening", "already exists", true]);
     expect(ledger()).toEqual(["request", "reported-done", "reopened"]);
     expect(((await owner.obligationTool(home.id, "owed", { action: "list" })) as { items: Array<{ id: string }> }).items.map(item => item.id)).toEqual(["key"]);
     await expect(owner.obligationTool(home.id, "no-turn", { action: "reported-done", id: "key", quote: "It failed" })).rejects.toMatchObject({ code: "invalid_request" });
     expect(ledger()).toHaveLength(3);
-  }, 60_000);
+  });
 });
