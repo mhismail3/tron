@@ -90,6 +90,7 @@ export class SessionSearchService {
   private coverageOmittedSessions = 0;
   private coverageReason: string | undefined;
   private readonly dirtySessions = new Map<string, number>();
+  private readonly unadmitted = new Map<string, string>();
   private dirtyGeneration = 0;
   private dirtyRefresh: Promise<void> | undefined;
   private semanticTask: Promise<void> | undefined;
@@ -290,6 +291,7 @@ export class SessionSearchService {
     this.coverageSessionsTotal = eligible.length;
     this.coverageOmittedSessions = 0;
     this.coverageReason = undefined;
+    this.unadmitted.clear();
     const identities = await this.catalogIdentities();
     const stored = new Map(this.index.sessionFacts().map(facts => [facts.sessionId, facts]));
     const published = new Set(eligible.map(session => session.id));
@@ -311,12 +313,12 @@ export class SessionSearchService {
       }
       const document = await this.loadDocument(session.id);
       if (this.warmupAbort.signal.aborted) return;
-      if (!document) { this.coverageOmittedSessions += 1; this.coverageReason = "One or more canonical sessions could not be admitted for search"; continue; }
+      if (!document) { this.unadmitted.set(session.id, candidate?.fileIdentity ?? ""); this.coverageOmittedSessions += 1; this.coverageReason = "One or more canonical sessions could not be admitted for search"; continue; }
       corpusFacts.push(`${document.sessionId}:${document.branchDigest}`);
       try {
         await this.index.replace(document, document.runtimeGeneration ? undefined : candidate);
         this.indexParsed += 1;
-      } catch { this.coverageOmittedSessions += 1; this.coverageReason = "One or more sessions exceeded bounded search index capacity"; }
+      } catch { this.unadmitted.set(session.id, candidate?.fileIdentity ?? ""); this.coverageOmittedSessions += 1; this.coverageReason = "One or more sessions exceeded bounded search index capacity"; }
       await this.yieldSlice();
     }
     this.corpusRevision = digest(corpusFacts);
@@ -419,40 +421,60 @@ export class SessionSearchService {
   }
 
   private async refreshDirty(signal?: AbortSignal): Promise<void> {
-    if (!this.dirtySessions.size) return;
-    if (!this.dirtyRefresh) {
-      const entries = [...this.dirtySessions.entries()];
-      this.dirtyRefresh = (async () => {
-        const refreshed: Array<{ id: string; generation: number; document?: SearchDocument }> = [];
-        for (const [id, processedGeneration] of entries) {
-          try {
-            const document = await this.loadDocument(id);
-            if (document) await this.index.replace(document);
-            else await this.index.remove(id);
-            refreshed.push({ id, generation: processedGeneration, ...(document ? { document } : {}) });
-          } catch {
-            await this.index.remove(id);
-            this.coverageReason = "A changed session could not be indexed and will be retried on a later search";
-          }
-          if (this.dirtySessions.get(id) === processedGeneration) this.dirtySessions.delete(id);
-        }
-        if (refreshed.length > 0) {
-          void this.enqueueSemantic(() => this.refreshSemanticDocuments(refreshed)).catch(error => {
-            if (!this.semanticAbort.signal.aborted) this.semanticReason = error instanceof Error ? error.message : "Semantic refresh failed";
-          });
-        }
-      })().finally(() => { this.dirtyRefresh = undefined; });
-    }
-    await awaitWithAbort(this.dirtyRefresh, signal);
+    let eligible: Array<{ id: string }> | undefined;
     try {
       const catalog = await awaitWithAbort(this.sessions.catalog("user"), signal);
-      const eligible = catalog.sessions.filter(session => !this.sessions.isLineageMember(session.id));
-      this.coverageSessionsTotal = eligible.length;
-      const stats = this.index.stats();
-      this.coverageOmittedSessions = Math.max(0, eligible.length - stats.sessionsIndexed);
-      this.semanticTotal = this.semanticVectors.size;
+      const identities = await awaitWithAbort(this.readCatalogIdentities(), signal);
+      eligible = catalog.sessions.filter(session => !this.sessions.isLineageMember(session.id));
+      const published = new Set(eligible.map(session => session.id));
+      for (const id of this.unadmitted.keys()) if (!published.has(id)) this.unadmitted.delete(id);
+      const indexed = new Set(this.index.sessionFacts().map(facts => facts.sessionId));
+      for (const session of eligible) {
+        const identity = identities?.get(session.id)?.fileIdentity ?? "";
+        if (indexed.has(session.id) || this.dirtySessions.has(session.id) || this.unadmitted.get(session.id) === identity) continue;
+        if (this.dirtySessions.size >= MAX_DIRTY_SESSIONS) break;
+        this.unadmitted.set(session.id, identity);
+        this.dirtyGeneration += 1;
+        this.dirtySessions.set(session.id, this.dirtyGeneration);
+      }
     } catch (error) { if (signal?.aborted) throw error; this.coverageReason = "Coverage could not be refreshed from the current catalog"; }
+    if (this.dirtyRefresh) await awaitWithAbort(this.dirtyRefresh, signal);
+    this.startDirtyRefresh();
+    if (this.dirtyRefresh) await awaitWithAbort(this.dirtyRefresh, signal);
+    if (eligible) {
+      this.coverageSessionsTotal = eligible.length;
+      this.coverageOmittedSessions = Math.max(0, eligible.length - this.index.stats().sessionsIndexed);
+      if (this.coverageOmittedSessions > 0) this.coverageReason ??= "One or more canonical sessions could not be admitted for search";
+      this.semanticTotal = this.semanticVectors.size;
+    }
     if (this.dirtyOverflow) { this.semanticCoverage = "partial"; }
+  }
+
+  private startDirtyRefresh(): void {
+    if (!this.dirtySessions.size || this.dirtyRefresh) return;
+    const entries = [...this.dirtySessions.entries()];
+    this.dirtyRefresh = (async () => {
+      const refreshed: Array<{ id: string; generation: number; document?: SearchDocument }> = [];
+      for (const [id, processedGeneration] of entries) {
+        try {
+          const document = await this.loadDocument(id);
+          if (document) {
+            await this.index.replace(document);
+            this.unadmitted.delete(id);
+          } else await this.index.remove(id);
+          refreshed.push({ id, generation: processedGeneration, ...(document ? { document } : {}) });
+        } catch {
+          await this.index.remove(id);
+          this.coverageReason = "A changed session could not be indexed for search";
+        }
+        if (this.dirtySessions.get(id) === processedGeneration) this.dirtySessions.delete(id);
+      }
+      if (refreshed.length > 0) {
+        void this.enqueueSemantic(() => this.refreshSemanticDocuments(refreshed)).catch(error => {
+          if (!this.semanticAbort.signal.aborted) this.semanticReason = error instanceof Error ? error.message : "Semantic refresh failed";
+        });
+      }
+    })().finally(() => { this.dirtyRefresh = undefined; });
   }
 
   private async refreshSemanticDocuments(refreshed: Array<{ id: string; generation: number; document?: SearchDocument }>): Promise<void> {
