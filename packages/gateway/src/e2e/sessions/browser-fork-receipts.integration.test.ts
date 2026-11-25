@@ -135,14 +135,7 @@ describe("packaged agent-browser receipts", () => {
       return toolResult(slot,id);
     };
     step=(id,args,fresh=false)=>call(id,"agent_browser",{args,...(fresh?{sessionMode:"fresh"}:{})});
-      await cli("--profile",join(root,"unrecorded-profile"),"open","about:blank");
-      const unowned=(await cli("get","cdp-url")).cdpUrl;
-      const refusal=await step("unowned",["connect",unowned],true);
-      expect(refusal).toMatchObject({isError:true});
-      expect(JSON.stringify(refusal)).toContain("recorded Tron-owned launch");
-      expect(refusal.details.agentBrowserStarted).not.toBe(true);
-      expect((await cli("get","cdp-url")).cdpUrl).toBe(unowned);
-      expect(await step("login",["open",base+"/login"])).toMatchObject({isError:false});
+      expect(await step("login",["open",base+"/login"],true)).toMatchObject({isError:false});
       const opened=await step("endpoint",["get","cdp-url"]);
       expect(opened).toMatchObject({isError:false});
       endpoint=opened.details.data.cdpUrl;
@@ -150,6 +143,15 @@ describe("packaged agent-browser receipts", () => {
       expect(execFileSync("/bin/ps",["-o","command=","-p",String(launch.pid)],{encoding:"utf8"})).toMatch(/--disable-backgrounding-occluded-windows.*--disable-renderer-backgrounding.*--disable-background-timer-throttling/);
       sockets=opened.details.managedSessionSocketDir;
       expect(typeof sockets).toBe("string");
+    });
+    it("refuses a running debug-enabled browser without a recorded owned launch and leaves it running", async () => {
+      await cli("--profile",join(root,"unrecorded-profile"),"open","about:blank");
+      const unowned=(await cli("get","cdp-url")).cdpUrl;
+      const refusal=await step("unowned",["connect",unowned],true);
+      expect(refusal).toMatchObject({isError:true});
+      expect(JSON.stringify(refusal)).toContain("recorded Tron-owned launch");
+      expect(refusal.details.agentBrowserStarted).not.toBe(true);
+      expect((await cli("get","cdp-url")).cdpUrl).toBe(unowned);
     });
     it.each([0,5,10,15])("admits five owned authenticated attaches starting at %i", async first => {
       for(let i=first;i<first+5;i++){
