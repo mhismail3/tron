@@ -26,9 +26,9 @@ abstract module SecurityPublicHostLaws {
   // it passes the first two hextets of that normalized form (a group compressed by `::` is 0). Host names are not
   // resolved: a name that resolves to a private address is outside this guard.
   // Assumption A2: a key's attempt times are the ones this block returned for it, the shell calls with the
-  // Gateway clock (non-decreasing within a run), a window of at least 1 ms and the limiter's maximum. The LRU map
-  // may evict the least recently used key when it holds its maximum number of keys; an evicted key starts again
-  // with no attempts, so the window law holds for each key while it is retained.
+  // Gateway clock (non-decreasing within a run), a window of at least 1 ms and the limiter's maximum. The shell
+  // drops a key only when none of its attempts still counts; when it holds its maximum number of keys and none can be
+  // dropped, it refuses a new key without asking, so a retained key's attempt times are never reset.
 
   // Elems: the items of a linked list, in order.
   ghost function Elems<T>(l: List<T>): seq<T> { if l.Nil? then [] else [l.head] + Elems(l.tail) }
@@ -70,10 +70,12 @@ abstract module SecurityPublicHostLaws {
     ensures BlockedV4(a, b, c, d) <==> ListedV4(V(a as int, b as int, c as int, d as int))
 
   // B6 ipv6-ranges: an IPv6 address is admitted exactly when it is global unicast (2000::/3: its first hextet from
-  // 0x2000 to 0x3fff) and not documentation (2001:db8::/32). So :: (unspecified), ::1 (loopback), ULA fc00::/7,
+  // 0x2000 to 0x3fff), not documentation (2001:db8::/32, 3fff::/20) and not a transition address that can embed a
+  // private IPv4 target (Teredo 2001::/32, 6to4 2002::/16). So :: (unspecified), ::1 (loopback), ULA fc00::/7,
   // link local fe80::/10, multicast ff00::/8 and every other address outside 2000::/3 are refused.
   lemma B6Ranges(h0: Hextet, h1: Hextet)
-    ensures !BlockedV6(h0, h1) <==> 0x2000 <= h0 <= 0x3fff && !(h0 == 0x2001 && h1 == 0x0db8)
+    ensures !BlockedV6(h0, h1) <==> (0x2000 <= h0 <= 0x3fff && !(h0 == 0x2001 && (h1 == 0x0db8 || h1 == 0))
+      && h0 != 0x2002 && !(h0 == 0x3fff && h1 < 0x1000))
 
   // M6 ipv4-mapped: every address whose first hextet is 0 or 0x64 is refused, whatever follows: so every IPv4-mapped
   // (::ffff:0:0/96), IPv4-compatible (::/96) and NAT64 (64:ff9b::/96) address is refused, whichever IPv4 address it

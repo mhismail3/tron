@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeviceStore } from "../security/device-store.js";
 import { GatewayServer } from "./server.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 
 const MAXIMUM_FRAME_BYTES = 16_384;
 const OVERSIZED_CONTENT = "producer-content-".repeat(4 * MAXIMUM_FRAME_BYTES / 16);
@@ -51,7 +52,7 @@ async function startGateway() {
     sessions: { subscribe: vi.fn(), unsubscribe: vi.fn(), unsubscribeClient: vi.fn() } as any,
     auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
     service: {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 9, minProtocolVersion: 9, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: PROTOCOL_VERSION, minProtocolVersion: MIN_PROTOCOL_VERSION, machineId: "machine", machineName: "test", capabilities: [] }),
       releaseClient: vi.fn(), invoke,
     } as any,
   });
@@ -77,7 +78,7 @@ async function startGateway() {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve, reject) => { socket.once("open", resolve); socket.once("error", reject); });
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 9, clientRole: "mobile" }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION, clientRole: "mobile" }));
     await waitFor(() => frames.some((frame) => frame.type === "hello"), "hello");
     const openedRecords = logger.log.mock.calls.filter((call) => call[2]?.event === "connection.opened");
     return { socket, frames, transport: () => transport!, negotiated, opened: openedRecords.at(-1)?.[1] as string };

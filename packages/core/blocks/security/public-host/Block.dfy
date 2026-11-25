@@ -17,7 +17,7 @@ module SecurityPublicHost refines SecurityPublicHostLaws {
   }
 
   predicate BlockedV6(h0: Hextet, h1: Hextet) {
-    h0 < 0x2000 || h0 > 0x3fff || (h0 == 0x2001 && h1 == 0x0db8)
+    h0 < 0x2000 || h0 > 0x3fff || h0 == 0x2002 || (h0 == 0x2001 && (h1 == 0x0db8 || h1 == 0)) || (h0 == 0x3fff && h1 < 0x1000)
   }
 
   // Whether an attempt at t still counts at now.

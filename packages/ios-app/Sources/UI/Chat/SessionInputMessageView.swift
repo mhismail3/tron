@@ -254,7 +254,6 @@ struct InboundContextMessagePresentation: Equatable {
 
 struct InboundProducerMessageView: View {
     let item: TranscriptItem
-    @Environment(\.chatTranscriptSheetRoutes) private var sheetRoutes
     @State private var showingDetails = false
 
     private var presentation: InboundContextMessagePresentation {

@@ -4,20 +4,20 @@
   "tier": "high-stakes",
   "laws": "blocks/security/public-host/Block.dfy",
   "toolHash": "ac4ab6d9eb34842e",
-  "mutants": 224,
-  "stillborn": 36,
-  "valid": 188,
-  "killed": 188,
+  "mutants": 245,
+  "stillborn": 41,
+  "valid": 204,
+  "killed": 204,
   "survived": 0,
   "accepted": 0,
-  "seconds": 168,
+  "seconds": 236,
   "score": 1,
   "unknown": 0,
-  "stillbornRatio": 0.161,
+  "stillbornRatio": 0.167,
   "filter": null,
-  "generated": 224,
+  "generated": 245,
   "pass": true,
-  "inputsHash": "999970da6d5645be"
+  "inputsHash": "1c576e8c2b2552ab"
  },
  "perLaw": [
   {
@@ -27,8 +27,8 @@
   },
   {
    "law": "B6 ipv6-ranges",
-   "killed": 15,
-   "only": 9
+   "killed": 31,
+   "only": 21
   },
   {
    "law": "M6 ipv4-mapped",
@@ -56,6 +56,6 @@
    "only": 0
   }
  ],
- "statuses": "706404e4064f70166fa64ab831c797af893ae9f1601f701c1573dd6a40a0fa8d",
+ "statuses": "fcef60322bb39311efdb242adab1d9cc4b5bae628445b6616cd47570e17feafe",
  "notKilled": []
 }

@@ -8,6 +8,7 @@ import { GatewayServer, MAXIMUM_REKEYED_SESSION_IDS } from "./server.js";
 import type { OrderedOutboundQueue } from "./ordered-outbound-queue.js";
 import { DeviceStore } from "../security/device-store.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { await Promise.all(cleanups.splice(0).map((cleanup) => cleanup())); });
@@ -35,7 +36,7 @@ describe("two-phase session synchronization protocol", () => {
     const failNext = { value: false };
     const oversizedNext = { value: false };
     const service = {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 9, minProtocolVersion: 9, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: PROTOCOL_VERSION, minProtocolVersion: MIN_PROTOCOL_VERSION, machineId: "machine", machineName: "test", capabilities: [] }),
 
       releaseClient: vi.fn(),
       releaseSessionProcessTranscripts: vi.fn(),
@@ -106,7 +107,7 @@ describe("two-phase session synchronization protocol", () => {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 9 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
     await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
 
     const request = (id: string, method: string, sessionId: string, extra: Record<string, unknown> = {}) => {
@@ -190,7 +191,7 @@ const mobile = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { au
     const mobileFrames: any[] = [];
     mobile.on("message", (raw) => mobileFrames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => mobile.once("open", () => resolve()));
-    mobile.send(JSON.stringify({ type: "hello", protocolVersion: 9, clientRole: "mobile" }));
+    mobile.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION, clientRole: "mobile" }));
     await waitFor(() => mobileFrames.some((frame) => frame.type === "hello"), "the hello frame");
     const mobileOpenSync = async (prefix: string, sessionId: string) => {
       const expectedCount = (startedCounts.get(sessionId) ?? 0) + 1;
@@ -279,7 +280,7 @@ describe("synchronization catch-up overflow recovery", () => {
     const openCounts = new Map<string, number>();
     const recoveryStarted = new Promise<void>((resolve) => { recoveryStartedResolve = resolve; });
     const service = {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 9, minProtocolVersion: 9, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: PROTOCOL_VERSION, minProtocolVersion: MIN_PROTOCOL_VERSION, machineId: "machine", machineName: "test", capabilities: [] }),
 
       releaseClient: vi.fn(),
       recoverySnapshot: async (sessionId: string) => {
@@ -352,7 +353,7 @@ describe("synchronization catch-up overflow recovery", () => {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 9 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
     await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
 
     const openAndSync = async (idPrefix: string, sessionId: string) => {
@@ -454,7 +455,7 @@ describe("connection-wide synchronization ownership", () => {
     let pendingOpenStartedResolve: (() => void) | undefined;
     const pendingOpenStarted = new Promise<void>((resolve) => { pendingOpenStartedResolve = resolve; });
     const service = {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 9, minProtocolVersion: 9, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: PROTOCOL_VERSION, minProtocolVersion: MIN_PROTOCOL_VERSION, machineId: "machine", machineName: "test", capabilities: [] }),
 
       releaseClient: vi.fn(),
       releaseSessionProcessTranscripts: vi.fn(),
@@ -501,7 +502,7 @@ describe("connection-wide synchronization ownership", () => {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 9 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
     await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
     const request = async (id: string, method: string, sessionId: string, extra: Record<string, unknown> = {}) => {
       socket.send(JSON.stringify({ type: "request", id, method, params: { sessionId, ...extra } }));
@@ -622,7 +623,7 @@ describe("outbound queue coalescing across a synchronization barrier", () => {
     let releaseOpen!: () => void;
     const openGate = new Promise<void>((resolve) => { releaseOpen = resolve; });
     const service = {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 9, minProtocolVersion: 9, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: PROTOCOL_VERSION, minProtocolVersion: MIN_PROTOCOL_VERSION, machineId: "machine", machineName: "test", capabilities: [] }),
 
       releaseClient: vi.fn(),
       invoke: async (context: ClientContext, method: string, params: ClientRequest) => {
@@ -662,7 +663,7 @@ describe("outbound queue coalescing across a synchronization barrier", () => {
     const frames: Array<{ type?: string }> = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 9 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
     await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
 
     const connection = [...(gateway as unknown as {
@@ -741,7 +742,7 @@ describe("disposable read cancellation", () => {
     let releaseGatedSync: (() => void) | undefined;
     const records: Array<{ level: string; message: string; metadata: Record<string, unknown> }> = [];
     const service = {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 9, minProtocolVersion: 9, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: PROTOCOL_VERSION, minProtocolVersion: MIN_PROTOCOL_VERSION, machineId: "machine", machineName: "test", capabilities: [] }),
 
       releaseClient: vi.fn(),
       releaseSessionProcessTranscripts: vi.fn(),
@@ -800,7 +801,7 @@ describe("disposable read cancellation", () => {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 9 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
     await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
 
     const connection = [...(gateway as unknown as {
@@ -933,7 +934,7 @@ describe("mobile presentation slot", () => {
     const openStarts: string[] = [];
     const openGates = new Map<string, () => void>();
     const service = {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 9, minProtocolVersion: 9, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: PROTOCOL_VERSION, minProtocolVersion: MIN_PROTOCOL_VERSION, machineId: "machine", machineName: "test", capabilities: [] }),
 
       releaseClient: vi.fn(),
       releaseSessionProcessTranscripts: vi.fn(),
@@ -981,7 +982,7 @@ describe("mobile presentation slot", () => {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 9, clientRole: "mobile" }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION, clientRole: "mobile" }));
     await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
 
     const answered = (id: string): any => frames.find((frame) => frame.id === id);

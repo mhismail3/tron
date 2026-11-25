@@ -34,14 +34,6 @@ enum TronPaths {
         return homeDirectory.appendingPathComponent(profile.homeName, isDirectory: true)
     }
 
-    static func agentHome(profile: TronGatewayProfile) -> URL {
-        if profile == .stable, let explicit = ProcessInfo.processInfo.environment[piCodingAgentDirEnv], !explicit.isEmpty {
-            precondition(explicit.hasPrefix("/"), "\(piCodingAgentDirEnv) must be an absolute path")
-            return URL(fileURLWithPath: explicit, isDirectory: true)
-        }
-        return tronHome(profile: profile).appendingPathComponent(profile.agentDirectoryName, isDirectory: true)
-    }
-
     static func bearerTokenPath(profile: TronGatewayProfile) -> URL {
         tronHome(profile: profile).appendingPathComponent("state", isDirectory: true)
             .appendingPathComponent("local-auth.json", isDirectory: false)

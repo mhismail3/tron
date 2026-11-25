@@ -1399,8 +1399,10 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         if httpBlackhole { values["http"] = .bool(true) }
         request.httpBody = try JSONEncoder.gateway.encode(values)
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            throw BoundaryFailure.invalidFixture("Isolated fault control did not acknowledge \(mode)")
+        let status = (response as? HTTPURLResponse)?.statusCode
+        guard status == 200 else {
+            let refusal = String(decoding: data.prefix(512), as: UTF8.self)
+            throw BoundaryFailure.invalidFixture("Isolated fault control did not acknowledge \(mode): HTTP \(status.map(String.init) ?? "none") \(refusal)")
         }
         return try JSONDecoder.gateway.decode(JSONValue.self, from: data)
     }

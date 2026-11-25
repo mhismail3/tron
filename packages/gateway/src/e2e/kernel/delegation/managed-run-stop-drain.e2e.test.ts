@@ -104,6 +104,11 @@ describe("Managed subagents: intentional stop drain", () => {
     expect(new RestartDrainProgress().evaluate(snapshot, Date.parse(heldAt) + limit, limit)).toEqual({ outcome: "waiting" });
     expect(new RestartDrainProgress().evaluate(snapshot, Date.parse(runProgress) + limit, limit))
       .toMatchObject({ outcome: "stalled", blocker: { sessionId: run.sessionId }, ageMs: limit });
+    const settledRun = new RestartDrainProgress();
+    expect(settledRun.evaluate(snapshot, Date.parse(runProgress), limit)).toEqual({ outcome: "waiting" });
+    const taskOnly = { ...snapshot, blockerCount: 1, blockers: [task] };
+    expect(settledRun.evaluate(taskOnly, Date.parse(runProgress) + limit - 1, limit)).toEqual({ outcome: "waiting" });
+    expect(settledRun.evaluate(taskOnly, Date.parse(runProgress) + limit, limit)).toMatchObject({ outcome: "stalled", blocker: { id: task.id }, ageMs: limit });
     const untimed = { ...snapshot, blockerCount: 1, blockers: [{ id: task.id, category: task.category, state: task.state }] };
     const carried = new RestartDrainProgress();
     expect(carried.evaluate(untimed, 1_000, limit)).toEqual({ outcome: "waiting" });

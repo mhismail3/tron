@@ -17,6 +17,7 @@ import { GatewayServer } from "../../transport/server.js";
 import { settingsDependencies } from "../../../test-support/settings-dependencies.js";
 import { sessionSettingChange, changedRevision, type SessionSetting } from "../../../test-support/session-settings-change.js";
 import { waitFor } from "../../../test-support/wait-for.js";
+import { PROTOCOL_VERSION } from "../../version.js";
 
 const REPORT_PATH = join(process.cwd(), "test-results", "rpc-idle-admission.integration.json");
 const report: {
@@ -192,7 +193,7 @@ async function fixture(options: {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await waitFor(() => socket.readyState === WebSocket.OPEN, "socket open");
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 9 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
     await waitFor(() => frames.some((frame) => frame.type === "hello"), "hello");
     return {
       frames,

@@ -103,11 +103,6 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
   have separate stores. Row preflight examines the generated summary, not the presentation wrapper.
   Client-only Gateway profile fields live in `CatalogSession` and are never stored.
 
-- **Static UI locks.** Only `HOSTED_TEST` with `TRON_UI_LOCK_RENDERING=1` disables
-  animation at each `TronPresentationSurface` content root. Native sheets create
-  independent transaction roots; their layout updates cannot rely on the presenter's
-  transaction. Normal journeys are unchanged.
-
 - **Hosted idle evidence.** `PresentationActivityCoordinator` exposes only aggregate current
   mounted/activity counts to `HostedPresentationProbe` through bounded weak references, never
   copied surface state or surface identity strings. The simulator process supervisor owns

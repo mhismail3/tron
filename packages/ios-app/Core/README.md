@@ -69,12 +69,13 @@ the hosted test targets link.
 - **Share handoff.** At most 32 providers, 64 KiB per UTF-8 fragment and 128 KiB in total; prompts
   ≤ 192 KiB; `PendingShareStoring` rejects documents above 256 KiB and reports save failure, so the
   extension opens the app only after a successful write. One slot, cleared after confirmed send.
-- **Display URLs.** Strict transcript decoding admits HTTPS display URLs with DNS hosts regardless
-  of label count. Four-label hosts ending in a decimal or hexadecimal number must be valid IPv4,
-  matching the Gateway URL parser; other four-label hosts follow DNS admission. Only four numeric
-  octets in 0–255 enter the IPv4 range restrictions; private, loopback, reserved and documentation
-  ranges stay blocked. Credentials, queries, fragments,
-  local hostnames and nonpublic IPv6 remain prohibited.
+- **Display URLs.** Strict transcript decoding admits only the canonical forms the Gateway's WHATWG
+  normalizer emits. DNS hosts pass regardless of label count; a host whose last label is a decimal or
+  hexadecimal number must be a canonical dotted quad (four labels, no leading zeros), so shorthand,
+  octal and hexadecimal IPv4 are refused rather than reinterpreted. Private, loopback, reserved and
+  documentation IPv4 ranges stay blocked; IPv6 must be global unicast (2000::/3) outside
+  2001:db8::/32, read by hextet value. Credentials (even empty), queries, fragments and local
+  hostnames remain prohibited.
 - **Models.** Model identity is always `(provider, id)`. Cross-file references are plain value
   composition; no model is a second cache or reducer. Extension activity lifecycle presentation
   records temporarily retain their existing Encodable representation for handwritten snapshot
