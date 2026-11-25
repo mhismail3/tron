@@ -2,6 +2,7 @@
 """The one admission to main: merge, check and push within one end-to-end deadline (tools/verify/README.md)."""
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -126,11 +127,25 @@ class Gate:
             stream.close()
         self.streams.clear()
 
+    def hold(self) -> None:
+        """One gate per clone at a time: every worktree shares the common Git directory, so overlapping gates refuse."""
+        common = Path(self.git('rev-parse', '--path-format=absolute', '--git-common-dir'))
+        self.lock = os.open(common / 'tron-gate.lock', os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            holder = os.pread(self.lock, 4096, 0).decode(errors='replace').strip() or 'unknown'
+            raise Refused(f'another gate is running ({holder}); rerun when it finishes') from None
+        os.ftruncate(self.lock, 0)
+        os.pwrite(self.lock, f'pid {os.getpid()} in {self.root}'.encode(), 0)
+
     def admit(self, checks, tip: str | None = None, push: str = 'push', remote: str = 'origin') -> int:
         outcome, reason, base, merged = 'refused', '', None, None
         pushing = False
+        self.lock = None
         tree = Path(tempfile.mkdtemp(prefix='tron-gate-'))
         try:
+            self.hold()
             if tip is None:
                 if self.git('status', '--porcelain'):
                     raise Refused('commit or remove every change first; the gate admits only committed work')
@@ -162,6 +177,8 @@ class Gate:
                 reason += f'; main may have moved: compare {remote}/main with {merged}'
         finally:
             self.stop()
+            if self.lock is not None:
+                os.close(self.lock)
             try:
                 subprocess.run(['git', 'worktree', 'remove', '--force', str(tree)], cwd=self.root, env=clean_environment(),
                                capture_output=True, timeout=10)
