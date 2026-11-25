@@ -1246,6 +1246,23 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     }
   });
 
+  it("judges a listed blocker by its session's progress even when the progressing blocker is past the 64 cap (#2682)", async () => {
+    const fixture = await coldFixture("drain-cap-session-progress");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const base = Date.now() - 3_600_000;
+    const at = (offset: number) => new Date(base + offset).toISOString();
+    vi.spyOn(slot, "administrativeDrainBlockers").mockReturnValue(Array.from({ length: 70 }, (_, index) => ({
+      category: "detached-extension-run" as const, key: `run-${index}`, state: "active" as const,
+      admittedAt: at(index), progressAt: at(index === 69 ? 600_000 : index),
+    })));
+    const snapshot = fixture.registry.administrativeDrainSnapshot();
+    expect(snapshot).toMatchObject({ blockerCount: 70, omittedCount: 6 });
+    const limit = 180_000;
+    expect(new RestartDrainProgress().evaluate(snapshot, base + 200_000, limit)).toEqual({ outcome: "waiting" });
+    expect(new RestartDrainProgress().evaluate(snapshot, base + 600_000 + limit, limit))
+      .toMatchObject({ outcome: "stalled", ageMs: limit });
+  });
+
   it("retains nonterminal artifact authority until receipt capacity is available", async () => {
     const workRegistry = new GatewayWorkRegistry("epoch", 2);
     const fixture = await coldFixture("artifact-receipt-capacity", { workRegistry });

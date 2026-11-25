@@ -126,7 +126,8 @@ not the worker session being resumed.
   retryable.
 - `gateway.drain.status` returns `AdministrativeDrainSnapshot` (counts, ≤ 64 blocker
   summaries with category, state, age, progress and an `rpc-mutation`'s method, earliest
-  admitted first and unadmitted last, so the oldest admitted blocker is always listed;
+  admitted first and unadmitted last, so the oldest admitted blocker is always listed, and a
+  listed blocker's progress is at least the latest of its session's omitted blockers;
   never IDs, prompts or paths). `gateway.restart` accepts `restartNow: true` to
   escalate; `gateway.stop` uses the same drain, exits only after a zero-blocker proof
   and records `failed` otherwise. The restart drain stalls after the oldest blocker makes
