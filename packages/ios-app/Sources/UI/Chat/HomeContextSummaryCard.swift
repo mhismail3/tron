@@ -105,11 +105,11 @@ struct HomeContextSummaryCard: View {
 
     private func statisticLines(_ lines: [String], alignment: HorizontalAlignment) -> some View {
         VStack(alignment: alignment, spacing: TronSpacing.xxs) {
-            ForEach(lines, id: \.self) { Text($0).lineLimit(1) }
+            ForEach(lines, id: \.self) { Text($0).multilineTextAlignment(alignment == .trailing ? .trailing : .leading) }
         }
         .font(SessionSummaryTypography.usageValue)
         .foregroundStyle(Color.tronTextSecondary)
-        .fixedSize()
+        .fixedSize(horizontal: false, vertical: true)
         .accessibilityElement(children: .combine)
     }
 
@@ -125,7 +125,8 @@ struct HomeContextSummaryCard: View {
         if case .available(let used, let window, _) = usage {
             context = "\(used.formatted(.number.notation(.compactName)))/\(window.formatted(.number.notation(.compactName)))"
         } else {
-            context = "—"
+            context = SessionContextUsageRefreshPresentation(
+                lastTranscriptKind: snapshot.lastTranscriptKind, assistantMessages: snapshot.stats.assistantMessages).detail
         }
         let tokens = snapshot.stats.tokens
         let total = (tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite)
