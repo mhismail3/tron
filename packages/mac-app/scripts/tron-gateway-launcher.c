@@ -374,7 +374,6 @@ static int collect_finger_entries(const char *directory, const char *root,
     struct dirent *entry;
     int result = 0;
     while ((entry = readdir(handle)) != NULL) {
-
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
         if (!safe_name(entry->d_name)) { result = -1; break; }
         char child[PATH_MAX], childRelative[PATH_MAX];
@@ -607,7 +606,6 @@ static int validate_payload(const char *payload, const char *expectedChannel, co
     char actualFingerprint[65];
     if (payload_fingerprint(root, actualFingerprint) != 0 || strcmp(actualFingerprint, identity.fingerprint) != 0) return -1;
     if (selectedIdentity != NULL) *selectedIdentity = identity;
-
     if (required_path(root, "app/dist/index.js", entrypoint, PATH_MAX, 0, 1024, 0) != 0 ||
         required_path(root, runtimeRelative, node, PATH_MAX, 1, 1024 * 1024, 0) != 0) return -1;
     return 0;
@@ -1027,7 +1025,6 @@ int main(int argc, char **argv) {
     char selectedPayloadRoot[PATH_MAX];
     const char *channel = getenv("TRON_GATEWAY_CHANNEL");
     if (channel == NULL || channel[0] == '\0') channel = "stable";
-
     if (strcmp(channel, "stable") != 0 && strcmp(channel, "dev") != 0) {
         fprintf(stderr, "Invalid TRON_GATEWAY_CHANNEL.\n");
         return 78;

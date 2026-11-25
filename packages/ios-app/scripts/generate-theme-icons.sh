@@ -1,4 +1,5 @@
 #!/bin/bash
+# Host tooling, not an iOS compilation input.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/tron-theme-icons.XXXXXX")"
