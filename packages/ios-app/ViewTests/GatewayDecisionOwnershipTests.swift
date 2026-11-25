@@ -33,10 +33,10 @@ final class GatewayDecisionOwnershipTests: XCTestCase {
 
     func testTheAppInstallsTheGatewaysDecidedExtensionLifecycleRecencyAndOrder() {
         let decided = ExtensionActivityLifecycle(state: .completed, sequence: 2, observedAt: observed, terminalAt: observed,
-                                                 recentUntil: "2026-11-23T23:59:00.000Z", visibility: .recent)
+                                                 recentUntil: "2026-11-23T23:59:00.000Z", visibility: .unknown)
         let unknownChild = ExtensionRunChild(id: "child", label: "child", status: .running, lifecycle: .unknown)
         let sent = extensionActivity("decided", updatedAt: observed, lifecycle: decided, status: .running, children: [unknownChild])
-        XCTAssertTrue(ExtensionActivityAdmissionPolicy.admits(sent), "The app installs the Gateway's lifecycle, recency and child state as sent")
+        XCTAssertEqual(ExtensionActivityAdmissionPolicy.admitted([sent]), [sent], "The app installs the Gateway's lifecycle, recency and child state as sent")
         XCTAssertFalse(ExtensionActivityAdmissionPolicy.admits(extensionActivity("oversized", updatedAt: observed, lifecycle: decided,
                                                                                  title: String(repeating: "x", count: 513))),
                        "Bounds admission of untrusted input stays")
@@ -44,7 +44,9 @@ final class GatewayDecisionOwnershipTests: XCTestCase {
         let gatewayOrder = (0..<33).map { index in
             extensionActivity("activity-\(index)", updatedAt: String(format: "2026-11-24T00:00:%02d.000Z", 59 - index),
                               lifecycle: ExtensionActivityLifecycle(state: .completed, sequence: 1, observedAt: observed,
-                                                                    terminalAt: observed, visibility: index.isMultiple(of: 2) ? .recent : .historical))
+                                                                    terminalAt: observed, recentUntil: index.isMultiple(of: 2) ? "2026-11-24T00:15:00.000Z" : nil,
+                                                                    visibility: index.isMultiple(of: 2) ? .recent : .historical,
+                                                                    remainingMs: index.isMultiple(of: 2) ? 60_000 : nil))
         }
         XCTAssertEqual(ExtensionActivityAdmissionPolicy.admitted(gatewayOrder).map(\.id), gatewayOrder.prefix(32).map(\.id),
                        "Past the cap the app keeps the Gateway's order")
