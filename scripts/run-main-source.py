@@ -5,6 +5,7 @@ This selects build source, not check results. Never mutates a worker's checkout.
 """
 import argparse
 import os
+import secrets
 from pathlib import Path
 import signal
 import subprocess
@@ -45,7 +46,9 @@ def main():
         worktree = Path(directory) / "source"
         git(root, "worktree", "add", "--detach", str(worktree), revision)
         try:
-            env = {**os.environ, "TRON_MAIN_SOURCE_ROOT": str(worktree), "TRON_MAIN_SOURCE_REF": ref}
+            nonce = secrets.token_hex(16)
+            (Path(directory) / "main-source-admission").write_text(nonce)
+            env = {**os.environ, "TRON_MAIN_SOURCE_NONCE": nonce, "TRON_MAIN_SOURCE_REF": ref}
             child = subprocess.Popen([str(worktree / command[0]), *command[1:]], cwd=worktree, env=env,
                                      start_new_session=True)
             def stop(signum, _frame):

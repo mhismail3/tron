@@ -28,7 +28,7 @@ def main():
         script.write_text('''#!/bin/sh
 set -eu
 git rev-parse HEAD > "$SOURCE_REPORT"
-printf "%s\\n" "$TRON_MAIN_SOURCE_ROOT" "$TRON_MAIN_SOURCE_REF" "$@" >> "$SOURCE_REPORT"
+printf "%s\\n" "$PWD" "$TRON_MAIN_SOURCE_REF" "$@" >> "$SOURCE_REPORT"
 nested=packages/ios-app/build/DerivedData-fast-debug/SourcePackages/checkouts/generated
 mkdir -p "$nested"
 git -C "$nested" init -q
@@ -70,7 +70,8 @@ exit "${BUILD_STATUS:-0}"
                 assert (user / "dirty").read_text() == "keep caller draft"
                 registrations = git(repo, "worktree", "list", "--porcelain")
                 assert len(registrations.split("worktree ")) == 2, registrations
-        result = subprocess.run([script, "install", "--fast-debug"], env={**env, "TRON_MAIN_SOURCE_ROOT": str(repo)},
+        (root / "main-source-admission").write_text("other-run")
+        result = subprocess.run([script, "install", "--fast-debug"], env={**env, "TRON_MAIN_SOURCE_ROOT": str(repo), "TRON_MAIN_SOURCE_NONCE": "inherited"},
                                 text=True, capture_output=True, timeout=15)
         assert result.returncode == 0, (result.stdout, result.stderr)
         report = (root / "report").read_text().splitlines()
@@ -118,7 +119,7 @@ exit "${BUILD_STATUS:-0}"
         assert resolved == main_sha
         artifact = ROOT / "test-results/main-source.json"
         artifact.parent.mkdir(exist_ok=True)
-        artifact.write_text(json.dumps({"revision": main_sha, "cases": ["real install/share entry points", "success/failure nested-clone cleanup", "dirty caller and unpublished nested work preserved", "no receipts", "read-only source resolution", "signal while the build awaits reaping", "share --ref builds the fetched branch; install --ref, bare and absent refs refused", "an inherited TRON_MAIN_SOURCE_ROOT and a local origin/main branch cannot select the caller's source"]}, indent=2) + "\n")
+        artifact.write_text(json.dumps({"revision": main_sha, "cases": ["real install/share entry points", "success/failure nested-clone cleanup", "dirty caller and unpublished nested work preserved", "no receipts", "read-only source resolution", "signal while the build awaits reaping", "share --ref builds the fetched branch; install --ref, bare and absent refs refused", "an inherited admission nonce and a local origin/main branch cannot select the caller's source"]}, indent=2) + "\n")
         print(f"Passed fetched-main source journey; evidence: {artifact}")
 
 
