@@ -361,8 +361,8 @@ describe("Antigravity usage from its provider extension", () => {
       expect(await service.invoke(client, "provider.usage", {})).toMatchObject({ providers: [{
         providerId: "antigravity-acp", status: "available", source: "antigravity-acp.usage", scope: "account", stale: false,
         windows: [
-          { id: "gemini-models-weekly", label: "Weekly", usedPercent: 1, resetsAt: "2026-12-02T00:27:00.000Z", windowSeconds: 604_800 },
           { id: "gemini-models-5h", label: "5h", usedPercent: 2, resetsAt: "2026-11-25T05:27:00.000Z", windowSeconds: 18_000 },
+          { id: "gemini-models-weekly", label: "Weekly", usedPercent: 1, resetsAt: "2026-12-02T00:27:00.000Z", windowSeconds: 604_800 },
         ],
       }] });
       expect((await queue.availability("subagent")).models).toEqual([{ model: "antigravity-acp/gemini-4-neon", available: true }]);

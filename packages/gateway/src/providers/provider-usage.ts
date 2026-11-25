@@ -154,13 +154,15 @@ function parseAntigravityQuota(body: unknown): UsageWindow[] {
   for (const group of groups) {
     const name = text(group.displayName)!;
     if (!Array.isArray(group.buckets)) throw new Error("invalid Antigravity quota group");
+    const groupWindows: UsageWindow[] = [];
     for (const entry of group.buckets) {
       const bucket = object(entry); const kind = text(bucket?.window); const fraction = number(bucket?.remainingFraction);
       if (!kind || fraction === null || fraction < 0 || fraction > 1) throw new Error("invalid Antigravity quota bucket");
       const [label, duration] = Object.hasOwn(ANTIGRAVITY_WINDOWS, kind) ? ANTIGRAVITY_WINDOWS[kind]! : [kind, null];
-      windows.push(window(`${name}-${kind}`.toLowerCase().replace(/[^a-z0-9]+/gu, "-"), groups.length === 1 ? label : `${name} ${label}`,
+      groupWindows.push(window(`${name}-${kind}`.toLowerCase().replace(/[^a-z0-9]+/gu, "-"), groups.length === 1 ? label : `${name} ${label}`,
         { usedPercent: Math.round((1 - fraction) * 1_000) / 10, resetsAt: iso(bucket!.resetTime), windowSeconds: duration }));
     }
+    windows.push(...groupWindows.sort((a, b) => (a.windowSeconds ?? Number.MAX_VALUE) - (b.windowSeconds ?? Number.MAX_VALUE)));
   }
   if (windows.length === 0) throw new Error("Antigravity quota has no Gemini limits");
   return capWindows(windows);
