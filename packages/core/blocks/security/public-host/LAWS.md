@@ -6,7 +6,7 @@ Block hash: `999970da6d5645be` (over `blocks/security/public-host/Block.dfy`, `l
 | Gate | Status |
 |---|---|
 | Proof (pinned Dafny, --verify-included-files) | PASS: blocks/security/public-host/Block.dfy: Dafny program verifier finished with 42 verified, 0 errors;  |
-| Independent review | MISSING |
+| Independent review | ACCEPT by reviewer (run 6d8ec4c4) (anthropic/claude-haiku-5-5, transcript-verified); writer parent (Home task, #2640) (anthropic/claude-opus-5-5); 2026-11-25 |
 | Mutation check | PASS: 188 valid mutants, 188 killed by laws, 0 survived, 0 accepted (blocks/security/public-host/MUTATION.json; statuses 706404e4064f7016) |
 | Cut over | the only implementation: `packages/gateway/src/core/security/public-host` runs this block's compiled core (scripts/tron proof facade) |
 
@@ -21,7 +21,7 @@ lemma B4Ranges(a: Octet, b: Octet, c: Octet, d: Octet)
 
 **Mutation results.** kills 121 of 188 valid mutants; 95 killed by this law alone.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: BlockedV4 matches ListedV4 range for range, including 192.0.0.0/16 and 198.18/15; matches the old TS conditions. Witnesses: 8.8.8.8 admitted, 10.0.0.1 refused.
 
 ## B6 ipv6-ranges
 
@@ -34,7 +34,7 @@ lemma B6Ranges(h0: Hextet, h1: Hextet)
 
 **Mutation results.** kills 15 of 188 valid mutants; 9 killed by this law alone.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: The exact negation of BlockedV6; matches the old TS on normalized forms. Scope note: 6to4, Teredo and 3fff::/20 are admitted, as the old guard admitted them.
 
 ## M6 ipv4-mapped
 
@@ -47,7 +47,7 @@ lemma M6Mapped(h1: Hextet)
 
 **Mutation results.** kills 1 of 188 valid mutants; 0 killed by this law alone.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: The English matches the lemma for ::/96, ::ffff:0:0/96 and 64:ff9b::/96 whatever IPv4 they embed; entailed by B6, kept as a named security statement.
 
 ## P1 prune
 
@@ -78,7 +78,7 @@ lemma LiveRevSpec(ts: List<Ms>, now: Ms, window: Ms, acc: List<Ms>)
 
 **Mutation results.** kills 29 of 188 valid mutants; 15 killed by this law alone.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: LiveRevSpec and RevOntoSpec give Elems(Recent) == FreshOf; same keep-set as the old timestamp > now - window filter. Witness: [0,500,1000] at 1000, window 1000 keeps [500,1000].
 
 ## A1 admission
 
@@ -102,7 +102,7 @@ lemma FewerSpec(l: List<Ms>, m: Count)
 
 **Mutation results.** kills 21 of 188 valid mutants; 11 killed by this law alone.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: Admitted iff fewer than maximum fresh attempts, keeping them followed by now; the old recent.length < maximum then push. Witness: empty with maximum 1 is admitted with [now].
 
 ## S1 stale
 
@@ -116,7 +116,7 @@ lemma S1Stale(ts: List<Ms>, now: Ms, window: Ms, maximum: Count)
 
 **Mutation results.** kills 0 of 188 valid mutants; 0 killed by this law alone. Kills nothing here: implied by other laws or by the world model; the reviewer must say which.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: Corollary of A1 with NoneFresh; kills nothing alone, which is structural and acceptable.
 
 ## W1 window
 
@@ -145,7 +145,7 @@ lemma KeptCounts(nows: seq<Ms>, window: Ms, maximum: Count, t: Ms)
 
 **Mutation results.** kills 0 of 188 valid mutants; 0 killed by this law alone. Kills nothing here: implied by other laws or by the world model; the reviewer must say which.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: Per admitted attempt, via KeptCounts and A1; the window consequence holds for non-decreasing time (Assumption A2), eviction covered by A2; kills nothing alone.
 
 ## Proof helpers (statements only; not laws, but part of what is proven)
 
@@ -349,3 +349,7 @@ ghost function AdmittedTimes(nows: seq<Ms>, window: Ms, maximum: Count): seq<Ms>
   if |nows| == 0 then []
   else AdmittedTimes(nows[..|nows| - 1], window, maximum) + (if Admitted(nows, window, maximum) then [nows[|nows| - 1]] else [])
 ```
+
+## Reviewer: general notes
+
+Shell matches the laws and the old TS on every normalized input enumerated. Residual scope notes for the maintainer: LRU eviction above 4096 active addresses (behaviour unchanged from the old code) and 6to4/Teredo/3fff::/20 admission.
