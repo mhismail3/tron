@@ -95,9 +95,9 @@ let SessionsRestartDrain = (function() {
       } else {
         let _0_o = SessionsRestartDrain.__default.OldestOf((blockers).dtor_tail, (blockers).dtor_head);
         let _1_p = ((((_0_o).dtor_session).is_NoSession) ? ((_0_o).dtor_progress) : (SessionsRestartDrain.__default.LatestFor(blockers, ((_0_o).dtor_session).dtor_session, SessionsRestartDrain.Time.create_Unset())));
-        let _2_since = (((((((tracked).is_Tracking) && (((tracked).dtor_id) === ((_0_o).dtor_id))) && (SessionsRestartDrain.__default.SameState((tracked).dtor_state, (_0_o).dtor_state))) && (SessionsRestartDrain.__default.SameTime((tracked).dtor_progress, _1_p))) && (SessionsRestartDrain.__default.SameTime((tracked).dtor_admitted, (_0_o).dtor_admitted))) ? ((tracked).dtor_since) : ((((_1_p).is_At) ? ((_1_p).dtor_ms) : (((((_0_o).dtor_admitted).is_At) ? (((_0_o).dtor_admitted).dtor_ms) : (now))))));
+        let _2_since = ((((((tracked).is_Tracking) && (((tracked).dtor_id) === ((_0_o).dtor_id))) && (SessionsRestartDrain.__default.SameState((tracked).dtor_state, (_0_o).dtor_state))) && (SessionsRestartDrain.__default.SameTime((tracked).dtor_admitted, (_0_o).dtor_admitted))) ? (((((_1_p).is_At) && (((_1_p).dtor_ms) > ((tracked).dtor_since))) ? ((_1_p).dtor_ms) : ((tracked).dtor_since))) : ((((_1_p).is_At) ? ((_1_p).dtor_ms) : (((((_0_o).dtor_admitted).is_At) ? (((_0_o).dtor_admitted).dtor_ms) : (now))))));
         let _3_age = (((now) <= (_2_since)) ? (0) : ((now) - (_2_since)));
-        return SessionsRestartDrain.Step.create_Step((((_3_age) >= (limit)) ? (SessionsRestartDrain.Outcome.create_Stalled((_0_o).dtor_id, _3_age)) : (SessionsRestartDrain.Outcome.create_Waiting())), SessionsRestartDrain.Tracked.create_Tracking((_0_o).dtor_id, (_0_o).dtor_state, _1_p, (_0_o).dtor_admitted, _2_since));
+        return SessionsRestartDrain.Step.create_Step((((_3_age) >= (limit)) ? (SessionsRestartDrain.Outcome.create_Stalled((_0_o).dtor_id, _3_age)) : (SessionsRestartDrain.Outcome.create_Waiting())), SessionsRestartDrain.Tracked.create_Tracking((_0_o).dtor_id, (_0_o).dtor_state, (_0_o).dtor_admitted, _2_since));
       }
     };
   };
@@ -431,11 +431,10 @@ let SessionsRestartDrain = (function() {
       let $dt = new Tracked(0);
       return $dt;
     }
-    static create_Tracking(id, state, progress, admitted, since) {
+    static create_Tracking(id, state, admitted, since) {
       let $dt = new Tracked(1);
       $dt.id = id;
       $dt.state = state;
-      $dt.progress = progress;
       $dt.admitted = admitted;
       $dt.since = since;
       return $dt;
@@ -444,14 +443,13 @@ let SessionsRestartDrain = (function() {
     get is_Tracking() { return this.$tag === 1; }
     get dtor_id() { return this.id; }
     get dtor_state() { return this.state; }
-    get dtor_progress() { return this.progress; }
     get dtor_admitted() { return this.admitted; }
     get dtor_since() { return this.since; }
     toString() {
       if (this.$tag === 0) {
         return "SessionsRestartDrain.Tracked.Untracked";
       } else if (this.$tag === 1) {
-        return "SessionsRestartDrain.Tracked.Tracking" + "(" + _dafny.toString(this.id) + ", " + _dafny.toString(this.state) + ", " + _dafny.toString(this.progress) + ", " + _dafny.toString(this.admitted) + ", " + _dafny.toString(this.since) + ")";
+        return "SessionsRestartDrain.Tracked.Tracking" + "(" + _dafny.toString(this.id) + ", " + _dafny.toString(this.state) + ", " + _dafny.toString(this.admitted) + ", " + _dafny.toString(this.since) + ")";
       } else  {
         return "<unexpected>";
       }
@@ -462,7 +460,7 @@ let SessionsRestartDrain = (function() {
       } else if (this.$tag === 0) {
         return other.$tag === 0;
       } else if (this.$tag === 1) {
-        return other.$tag === 1 && this.id === other.id && _dafny.areEqual(this.state, other.state) && _dafny.areEqual(this.progress, other.progress) && _dafny.areEqual(this.admitted, other.admitted) && this.since === other.since;
+        return other.$tag === 1 && this.id === other.id && _dafny.areEqual(this.state, other.state) && _dafny.areEqual(this.admitted, other.admitted) && this.since === other.since;
       } else  {
         return false; // unexpected
       }

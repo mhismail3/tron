@@ -18,7 +18,7 @@ export type Time =
   | { readonly $: "At"; readonly ms: number };
 export type Tracked =
   | { readonly $: "Untracked" }
-  | { readonly $: "Tracking"; readonly id: number; readonly state: State; readonly progress: Time; readonly admitted: Time; readonly since: number };
+  | { readonly $: "Tracking"; readonly id: number; readonly state: State; readonly admitted: Time; readonly since: number };
 
 export interface Core {
   Evaluate(count: number, blockers: readonly Blocker[], tracked: Tracked, now: number, limit: number): Step;
@@ -43,8 +43,8 @@ export function bind(M: any): Core {
   const toTime = (v: Time): unknown => { switch (v?.$) { case "Unset": return theTime.Unset; case "At": return M.Time.create_At(inMs(v.ms)); default: return unknown("Time", v); } };
   const fromTime = (v: any): Time => v.is_Unset ? { $: "Unset" } : v.is_At ? { $: "At", ms: inMs(v.dtor_ms) } : bad("Time");
   const theTracked: Record<string, unknown> = Object.assign(Object.create(null), { Untracked: M.Tracked.create_Untracked() });
-  const toTracked = (v: Tracked): unknown => { switch (v?.$) { case "Untracked": return theTracked.Untracked; case "Tracking": return M.Tracked.create_Tracking(inToken(v.id), toState(v.state), toTime(v.progress), toTime(v.admitted), inMs(v.since)); default: return unknown("Tracked", v); } };
-  const fromTracked = (v: any): Tracked => v.is_Untracked ? { $: "Untracked" } : v.is_Tracking ? { $: "Tracking", id: inToken(v.dtor_id), state: fromState(v.dtor_state), progress: fromTime(v.dtor_progress), admitted: fromTime(v.dtor_admitted), since: inMs(v.dtor_since) } : bad("Tracked");
+  const toTracked = (v: Tracked): unknown => { switch (v?.$) { case "Untracked": return theTracked.Untracked; case "Tracking": return M.Tracked.create_Tracking(inToken(v.id), toState(v.state), toTime(v.admitted), inMs(v.since)); default: return unknown("Tracked", v); } };
+  const fromTracked = (v: any): Tracked => v.is_Untracked ? { $: "Untracked" } : v.is_Tracking ? { $: "Tracking", id: inToken(v.dtor_id), state: fromState(v.dtor_state), admitted: fromTime(v.dtor_admitted), since: inMs(v.dtor_since) } : bad("Tracked");
   return {
     Evaluate: (count: number, blockers: readonly Blocker[], tracked: Tracked, now: number, limit: number) => { const count$ = inCount(count); const blockers$ = toList(blockers, (x: Blocker) => toBlocker(x)); const tracked$ = toTracked(tracked); const now$ = inMs(now); const limit$ = inMs(limit); return fromStep(M.__default.Evaluate(count$, blockers$, tracked$, now$, limit$)); },
   };
