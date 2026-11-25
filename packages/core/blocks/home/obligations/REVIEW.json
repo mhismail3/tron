@@ -1,0 +1,34 @@
+{
+ "packetHash": "d82c68c6b04abd5c",
+ "tier": "high-stakes",
+ "date": "2026-11-25",
+ "writer": {
+  "agent": "parent (Home task, #2637)",
+  "model": "anthropic/claude-opus-5-5"
+ },
+ "reviewer": {
+  "agent": "reviewer (run 76e8e47f)",
+  "model": "anthropic/claude-haiku-5-5",
+  "session": "2026-11-25T08-26-34-867Z_01a211d0-51f3-7244-9039-a6ac5b182c19/0ceab7ef-7a22-40fc-9198-f5a8e8ffd1bc/run-0/session.jsonl"
+ },
+ "laws": {
+  "O1 owed": {
+   "verdict": "ACCEPT",
+   "notes": "Owed(s) <==> s.request? || s.reopened? matches the English and the old owed. Witness: s=request. Near-definitional; kills one mutant."
+  },
+  "T1 transitions": {
+   "verdict": "ACCEPT",
+   "notes": "Next <==> Legal && !(request && size>=Cap) and Next ==> state==a match the English; the old transitions match Legal exactly. Witnesses: Present(request) to reportedDone gives Next; Absent to request at size 1000 gives Full."
+  },
+  "C1 contradiction": {
+   "verdict": "ACCEPT",
+   "notes": "Contradictory <==> !Legal matches the English and the old refusal conditions. Witness: Present(request) to request is contradictory at any size."
+  },
+  "K1 cap": {
+   "verdict": "ACCEPT",
+   "notes": "Full <==> Legal && request && size>=Cap and Next && Absent ==> size<Cap are satisfiable (Absent/request/1000 gives Full; 999 gives Next). 'Only a request adds an item' follows from Legal(Absent,a) => a=request in T1/C1 rather than K1's own ensures."
+  }
+ },
+ "acceptedMutants": {},
+ "general": "A1 matches the shell (replay checks in home-obligations.ts, write checks in home-owner.ts including the reopen-same-message refusal). Law-kind table: T1 is also exact-results; the receipt-identity replay of a write is shell-owned."
+}
