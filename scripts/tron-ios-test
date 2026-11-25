@@ -600,6 +600,7 @@ build_products() {
       -parallel-testing-enabled NO \
       -enableCodeCoverage YES \
       -resultBundlePath "$build_result_bundle" \
+      ONLY_ACTIVE_ARCH=YES \
       -showBuildTimingSummary || build_status=$?
   if ((build_status != 0)); then
     python3 "$FAILURES" --build --root "$ROOT" "$build_result_bundle" >&2 || true
