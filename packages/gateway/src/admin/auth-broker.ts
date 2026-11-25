@@ -89,6 +89,7 @@ const MAX_CALLBACK_QUERY_BYTES = 16 * 1_024;
 const CALLBACK_RELAY_TIMEOUT_MS = 35_000;
 const MAX_CALLBACK_RESPONSE_BYTES = 64 * 1_024;
 const DEFAULT_PREDECESSOR_SETTLE_TIMEOUT_MS = 30_000;
+const LOGIN_CATALOG_REFRESH_TIMEOUT_MS = 15_000;
 
 function isMcpTarget(value: JsonValue | undefined): value is { kind: "mcp"; sessionId: string; server: string } {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -433,6 +434,11 @@ export class AuthBroker {
         await modelRuntime.login(providerId, authType, interaction, {
           ...(this.getDeviceId ? { getDeviceId: this.getDeviceId } : {}),
         });
+        const refreshed = await modelRuntime.refresh({ providers: [providerId], signal: AbortSignal.any([operation.controller.signal, AbortSignal.timeout(LOGIN_CATALOG_REFRESH_TIMEOUT_MS)]) })
+          .catch(() => undefined);
+        if (!refreshed || refreshed.aborted || refreshed.errors.size > 0) {
+          this.log("warning", `Provider login for ${providerId} kept its cached model catalog`, "auth.login.catalog-stale");
+        }
       })
       .then(
         () => this.complete(operation, true),

@@ -248,6 +248,8 @@ describe("AuthBroker", () => {
   });
   it("forwards an interactive runtime prompt and stores the response without returning credentials", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-auth-broker-"));
+    vi.stubEnv("PI_OFFLINE", "1");
+    onTestFinished(() => vi.unstubAllEnvs());
     const runtime = await ModelRuntime.create({
       authPath: join(root, "auth.json"),
       modelsPath: null,
@@ -755,6 +757,8 @@ describe("AuthBroker", () => {
   it("captures a ChatGPT OAuth URL with the stable device ID and relays its fake token exchange", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-auth-chatgpt-"));
     const settingsManager = SettingsManager.create(root, root, { projectTrusted: false });
+    vi.stubEnv("PI_OFFLINE", "1");
+    onTestFinished(() => vi.unstubAllEnvs());
     const runtime = await ModelRuntime.create({
       authPath: join(root, "auth.json"),
       modelsPath: null,
