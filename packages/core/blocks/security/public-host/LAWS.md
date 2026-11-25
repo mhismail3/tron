@@ -6,7 +6,7 @@ Block hash: `1c576e8c2b2552ab` (over `blocks/security/public-host/Block.dfy`, `l
 | Gate | Status |
 |---|---|
 | Proof (pinned Dafny, --verify-included-files) | PASS: blocks/security/public-host/Block.dfy: Dafny program verifier finished with 42 verified, 0 errors;  |
-| Independent review | NOT ACCEPTED: STALE (reviewed 999970da6d5645be, current 1c576e8c2b2552ab); reviewer transcript never mentions the current block hash (it did not review this version) |
+| Independent review | ACCEPT by delegate (run 8bf6e315) (anthropic/claude-haiku-5-5, transcript-verified); writer parent (Home task, #2686) (anthropic/claude-opus-5-5); 2026-11-25 |
 | Mutation check | PASS: 204 valid mutants, 204 killed by laws, 0 survived, 0 accepted (blocks/security/public-host/MUTATION.json; statuses fcef60322bb39311) |
 | Cut over | the only implementation: `packages/gateway/src/core/security/public-host` runs this block's compiled core (scripts/tron proof facade) |
 
@@ -35,7 +35,7 @@ lemma B6Ranges(h0: Hextet, h1: Hextet)
 
 **Mutation results.** kills 31 of 204 valid mutants; 21 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: The exact negation of BlockedV6; matches the old TS on normalized forms. Scope note: 6to4, Teredo and 3fff::/20 are admitted, as the old guard admitted them.
+**Reviewer notes.** ACCEPT: !BlockedV6 is exactly 2000::/3 minus documentation (2001:db8::/32, 3fff::/20: h0 == 0x3fff && h1 < 0x1000), Teredo (2001::/32: h0 == 0x2001 && h1 == 0) and 6to4 (2002::/16), matching the English and BlockedV6.
 
 ## M6 ipv4-mapped
 
@@ -353,4 +353,4 @@ ghost function AdmittedTimes(nows: seq<Ms>, window: Ms, maximum: Count): seq<Ms>
 
 ## Reviewer: general notes
 
-Shell matches the laws and the old TS on every normalized input enumerated. Residual scope notes for the maintainer: LRU eviction of a key that still has fresh attempts once 4,096 addresses are retained, which can reset its window (protocol.md promises an exact window over at most 4,096 LRU addresses); unchanged from the old code, whose !has(key) guard ran after delete(key) and was always true, and confirmed by the differential's identical retainedKeyCount; and 6to4/Teredo/3fff::/20 admission, as before.
+Hash 1c576e8c2b2552ab at 6c8e533fa; MUTATION.json inputsHash matches (204 valid, 204 killed). #2686: B6 refuses Teredo, 6to4 and 3fff::/20; the shell limiter refuses a new key while every retained key still has a fresh attempt and drops only keys whose attempts no longer count, so a retained key is never reset; A2 states this. Residual: a flood of distinct addresses with fresh attempts refuses new pairing addresses until the window passes (fail closed, as #2686 recommends).
