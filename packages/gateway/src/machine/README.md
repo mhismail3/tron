@@ -73,7 +73,7 @@ Prepare the CLI with `scripts/tron build gateway`, then the maintainer may run
 `scripts/tron terminal-ssh status|start|stop|recover --home <existing-tron-home>`.
 Status is read-only. Start requires the user's GUI launchd domain and a free port;
 stop/recover refuse an unknown label, plist, executable or argument list.
-No Gateway startup hook installs or starts the service.
+Gateway startup only restarts a service that is already enabled; an intentional stop (`gateway.stop`, Quit) boots out its job and keeps the enabled LaunchAgent, so the next start brings it back. A restart (exit 75) leaves it running. Nothing installs it at startup.
 
 The iPhone pins the private host identity at enrollment
 ([iOS Mac Terminal](../../../ios-app/docs/architecture.md#mac-terminal)).

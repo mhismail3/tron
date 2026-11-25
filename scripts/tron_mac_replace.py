@@ -648,6 +648,22 @@ def runner_label(operation):
     return f'com.tron.mac.replace.{operation[:8]}'
 
 
+def retire_runners(platform):
+    """Boot out every exited runner job whose plist lives in this store, so settled operations leave no launchd label."""
+    code, listing, _ = capture(['/bin/launchctl', 'list'], timeout=30)
+    if code != 0:
+        raise Failure('cannot list launchd jobs to retire settled replacement runners')
+    store = os.path.realpath(platform.store)
+    for line in listing.splitlines()[1:]:
+        fields = line.split('\t')
+        if len(fields) != 3 or fields[0] != '-' or not fields[2].startswith(runner_label('')):
+            continue
+        code, info, _ = capture(['/bin/launchctl', 'print', f'gui/{os.getuid()}/{fields[2]}'], timeout=15)
+        path = re.search(r'^\tpath = (.+)$', info, re.M)
+        if code == 0 and path and os.path.dirname(os.path.dirname(os.path.realpath(path[1]))) == store:
+            capture(['/bin/launchctl', 'bootout', f'gui/{os.getuid()}/{fields[2]}'], timeout=30)
+
+
 def stage_runner(platform, journal, script_dir):
     runtime = private_mkdir(journal.directory / 'runner')
     for name in (*(f'tron_mac_replace{part}.py' for part in ('', '_journal', '_platform', '_rpc')), 'tron_rebuild_lock.py', *platform.runner_files()):
@@ -699,8 +715,10 @@ def start(platform, root, client_protocol=None, allow_protocol_change=False, scr
                 return journal, 'already running'
             journal.data['source'].update(clientProtocol=client_protocol, allowProtocolChange=allow_protocol_change)
             journal.save()
+            retire_runners(platform)
             launch_runner(platform, journal, script_dir or Path(__file__).resolve().parent)
             return journal, 'resuming interrupted'
+        retire_runners(platform)
         decided = plan(platform, root)
         if decided['path'] == 'none':
             raise Failure(decided['reason'])
@@ -743,7 +761,15 @@ def run_operation(platform, operation):
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         return 0
-    return Runner(platform, journal).run()
+    code = Runner(platform, journal).run()
+    retire_own_runner(operation)
+    return code
+
+
+def retire_own_runner(operation):
+    """Boot out this runner's own launchd job from a detached launchctl, which outlives the job it removes."""
+    subprocess.Popen(['/bin/launchctl', 'bootout', f'gui/{os.getuid()}/{runner_label(operation)}'], start_new_session=True,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def follow(platform, as_json):

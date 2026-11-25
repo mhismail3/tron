@@ -59,6 +59,7 @@ import { migratePushPolicy } from "./notifications/push-policy-migration.js";
 import { handledSignalExitCode, SUPERVISOR_RELAUNCH_EXIT_CODE } from "./lifecycle/supervisor-exit-policy.js";
 import { shutdownStep } from "./lifecycle/shutdown-step.js";
 import { exitAfterShutdown } from "./lifecycle/exit-after-shutdown.js";
+import { ShareHostJob } from "./lifecycle/share-host-job.js";
 import { STARTUP_LISTEN_BUDGET_MS, startupBudget, type StartupStepTiming } from "./lifecycle/startup-budget.js";
 import { configureAgentBinEnvironment, configureHomebrewPath, configureSupervisedNodeCommandEnvironment } from "./runtime/node-command-environment.js";
 import { AutomationStore } from "./automations/automation-store.js";
@@ -176,6 +177,10 @@ const display = new DisplayOwner(displayArtifacts, browserLiveViews, () => sessi
 const macTerminalKeys = new MacTerminalService({ root: tronHomePath(config.tronHome, "state/mac-terminal") });
 await macTerminalKeys.restore().catch(error => {
   logger.log("warning", "Private SSH startup failed", { event: "mac-terminal.startup-failed", error: String(error) });
+});
+const shareHost = new ShareHostJob(config.tronHome);
+await shareHost.restore().catch(error => {
+  logger.log("warning", "Build share host startup failed", { event: "share-host.startup-failed", source: "lifecycle", error: String(error) });
 });
 const settingsSchema = createGatewaySettingsSchema();
 await writeSettingsGuide(config.tronHome, settingsSchema);
@@ -601,6 +606,15 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
     await shutdownStep("modules-stop", () => modules.stop(), recordShutdownStep);
     await shutdownStep("model-runtime-settle", () => modelRuntime.settleCredentialWrites(), recordShutdownStep);
     await shutdownStep("command-receipts-dispose", () => receipts.dispose(), recordShutdownStep);
+    if (exitCode === 0 && stopDrainId) {
+      await shutdownStep("sidecars-suspend", async () => {
+        for (const [name, sidecar] of [["mac-terminal", macTerminalKeys], ["share-host", shareHost]] as const) {
+          await sidecar.suspend().catch(error => logger.log("error", `Could not stop ${name} with the Gateway; it keeps running`, {
+            event: "gateway.sidecar-suspend-failed", source: "lifecycle", code: name, error: String(error),
+          }));
+        }
+      }, recordShutdownStep);
+    }
     await shutdownStep("runtime-lock-release", () => releaseRuntimeLock(), recordShutdownStep);
     if (forced) clearTimeout(forced);
     if (exitCode === 0 && stopDrainId) {
