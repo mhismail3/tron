@@ -811,13 +811,8 @@ package enum SessionSnapshotTranscriptAdmissionPolicy {
         guard policy.model == snapshot.model,
               !policy.model.provider.isEmpty, policy.model.provider.utf8.count <= 480,
               !policy.model.id.isEmpty, policy.model.id.utf8.count <= 1_200,
-              policy.minimum > 0, policy.maximum >= policy.minimum, policy.maximum <= 100_000_000,
-              policy.default >= policy.minimum, policy.default <= policy.maximum,
-              policy.effective > 0, policy.effective <= 100_000_000,
-              policy.override == nil || (policy.override! > 0 && policy.override! <= 100_000_000),
-              ["model", "global", "project", "session"].contains(policy.source),
-              (policy.source == "session") == (policy.override != nil),
-              snapshot.contextUsage == nil || snapshot.contextUsage?.contextWindow == policy.effective else { return false }
+              [policy.minimum, policy.maximum, policy.default, policy.effective, policy.override ?? 1].allSatisfy({ $0 > 0 }),
+              ["model", "global", "project", "session"].contains(policy.source) else { return false }
         if let warning = policy.warning { return warning.utf8.count <= 4_096 }
         return true
     }

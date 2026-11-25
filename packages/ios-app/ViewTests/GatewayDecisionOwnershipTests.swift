@@ -1,5 +1,5 @@
 import XCTest
-import TronMobileCore
+@testable import TronMobileCore
 @testable import TronMobile
 
 final class GatewayDecisionOwnershipTests: XCTestCase {
@@ -39,6 +39,12 @@ final class GatewayDecisionOwnershipTests: XCTestCase {
         let limits = ContextWindowLimits(minimum: 4_096, maximum: 200_000_000, default: 1_000_000, longContextThreshold: 200_000)
         let model = ModelSummary(provider: "fixture", id: "large", name: "Large", virtual: false, reasoning: false, input: ["text"],
                                  contextWindow: 1_000_000, contextWindowLimits: limits, maxTokens: 64_000, available: true)
+        var snapshot = SnapshotCacheFixtureGateway.snapshot()
+        snapshot.model = ModelRef(provider: "fixture", id: "large")
+        snapshot.contextWindowPolicy = ContextWindowPolicy(model: ModelRef(provider: "fixture", id: "large"), minimum: 4_096,
+                                                           maximum: 200_000_000, default: 1_000_000, effective: 150_000_000,
+                                                           override: nil, source: "model", warning: nil)
+        XCTAssertTrue(SessionSnapshotTranscriptAdmissionPolicy.admit(snapshot), "A session snapshot shows the Gateway's limits as sent")
         var catalog = ModelCatalogAccumulator()
         try catalog.append([model], hasNextPage: false)
         XCTAssertEqual(catalog.models.first?.contextWindowLimits, limits)
