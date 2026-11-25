@@ -4,7 +4,7 @@ import type { ImageContent } from "../../kernel/pi/ai.js";
 import { utf8Page } from "../../kernel/host/utf8-page.js";
 import { isWakeEvidence, WakeInboxOwner, type HomeWakeEvidence, type HomeWakeEvidenceScope, type HomeWakeRoute, type HomeWakeTrigger } from "./home-wake-inbox.js";
 import { parseEntry, readCanonicalSession, visitCanonicalSessionEntries } from "../../kernel/session/canonical-reader.js";
-import { HOME_OBLIGATION, admitObligation, replayObligations, owed, type ObligationEvent, type ObligationRequest } from "./home-obligations.js";
+import { HOME_OBLIGATION, admitObligation, replayObligations, obligationStep, owed, type ObligationEvent, type ObligationRequest } from "./home-obligations.js";
 import { createHash } from "node:crypto";
 import type { NotificationService } from "../../notifications/notification-service.js";
 import { randomUUID } from "node:crypto";
@@ -215,13 +215,12 @@ export class HomeOwner {
         }
         return { item: before, receiptId };
       }
-      if (count >= 10000 || (request.action === "request" && items.size >= 1000)) throw new GatewayError("conflict", "Home obligation history is full; no event was appended");
-      if (request.action === "request" ? !!before : !before) throw new GatewayError("conflict", "Obligation id already exists or is unavailable; never re-create a closed item");
-      if (request.action === "reopened") {
-        if (owed(before!) || before!.latest.source.entryId === source.id) throw new GatewayError("conflict", "Reopening requires a new maintainer message for a closed obligation");
-      } else if (before && !owed(before) && !(request.action === "verified" && before.state === "reported-done")) {
-        throw new GatewayError("conflict", "The human action is already closed; missing proof cannot reopen it");
-      }
+      const action = request.action as ObligationEvent["action"];
+      const step = obligationStep(before, action, items.size);
+      if (count >= 10000 || (action === "request" && obligationStep(undefined, action, items.size) === "full")) throw new GatewayError("conflict", "Home obligation history is full; no event was appended");
+      if (action === "request" ? !!before : !before) throw new GatewayError("conflict", "Obligation id already exists or is unavailable; never re-create a closed item");
+      if (action === "reopened" && (step !== "next" || before!.latest.source.entryId === source.id)) throw new GatewayError("conflict", "Reopening requires a new maintainer message for a closed obligation");
+      if (step !== "next") throw new GatewayError("conflict", "The human action is already closed; missing proof cannot reopen it");
       let evidence: ObligationEvent["evidence"];
       if (request.action === "verified") {
         const entry = branch.slice(start).find(candidate => candidate.id === request.evidenceEntryId);

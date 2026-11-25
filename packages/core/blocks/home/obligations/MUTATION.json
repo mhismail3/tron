@@ -1,0 +1,46 @@
+{
+ "summary": {
+  "block": "home/obligations",
+  "tier": "high-stakes",
+  "laws": "blocks/home/obligations/Block.dfy",
+  "toolHash": "ac4ab6d9eb34842e",
+  "mutants": 38,
+  "stillborn": 0,
+  "valid": 38,
+  "killed": 38,
+  "survived": 0,
+  "accepted": 0,
+  "seconds": 12,
+  "score": 1,
+  "unknown": 0,
+  "stillbornRatio": 0,
+  "filter": null,
+  "generated": 38,
+  "pass": true,
+  "inputsHash": "d82c68c6b04abd5c"
+ },
+ "perLaw": [
+  {
+   "law": "O1 owed",
+   "killed": 1,
+   "only": 0
+  },
+  {
+   "law": "T1 transitions",
+   "killed": 33,
+   "only": 6
+  },
+  {
+   "law": "C1 contradiction",
+   "killed": 23,
+   "only": 0
+  },
+  {
+   "law": "K1 cap",
+   "killed": 19,
+   "only": 0
+  }
+ ],
+ "statuses": "a2e708bc9e4f4d2e85edda4cb3e683a82dd8f89780e5210fc60b8bae3ed6a3cf",
+ "notKilled": []
+}
