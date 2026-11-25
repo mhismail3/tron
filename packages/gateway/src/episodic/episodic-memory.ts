@@ -15,7 +15,7 @@ import { EpisodicSourceChangedError, episodicDigest } from "../kernel/session/ca
 import { type EpisodicSourceDelta } from "./episodic-projection.js";
 import { EpisodicStore, type EpisodicStoreSnapshot } from "./episodic-store.js";
 import {
-  EPISODIC_MAX_LEVEL, decodeContextRuns, encodeNodeCode, foldViewSliced, freeNodeText, freezeView, mergedFreeText, nodeAddress, rebalanceView,
+  EPISODIC_MAX_LEVEL, decodeContextRuns, encodeNodeCode, foldViewSliced, freeNodeText, freezeView, mergedFreeText, nodeAddress,
   recentViewHigh, viewTotals,
   parseNodeAddress, placeholderBytes, snippetAround, utf8Bytes,
   type EpisodicViewPart,
@@ -108,7 +108,6 @@ export class EpisodicMemory {
   private liveBytes = 0;
   private readonly building = new Set<string>();
   private view: EpisodicViewPart[] = [];
-  private frozen = false;
   private foldPending = false;
   private layoutWritten: string | undefined;
   private readonly lineDigests = new Map<string, string>();
@@ -173,16 +172,12 @@ export class EpisodicMemory {
           counts: { bytes: snapshot.recoveredTornBytes },
         });
       }
-      memory.frozen = layout !== undefined;
-      if (!memory.frozen) memory.view = await memory.foldView([], false);
       await memory.repairOrphanedDependencies();
       memory.assertConsistent();
       await memory.repairCatalogMismatch();
-      if (layout !== undefined) {
-        memory.view = await memory.loadLayout(layout);
-        memory.fit();
-        await memory.saveLayout();
-      }
+      memory.view = await memory.loadLayout(layout);
+      memory.fit();
+      await memory.saveLayout();
       return memory;
     } catch (error) {
       EpisodicMemory.openStores.delete(storeKey);
@@ -534,7 +529,7 @@ export class EpisodicMemory {
       await this.block("source-unavailable", "Canonical source belongs to another memory owner");
       return;
     }
-    if (this.frozen && this.sourceCursor && cut.cursor.home.chapters.length > this.sourceCursor.home.chapters.length) this.foldPending = true;
+    if (this.sourceCursor && cut.cursor.home.chapters.length > this.sourceCursor.home.chapters.length) this.foldPending = true;
     if (this.sourceCursor && cut.incremental
       && cut.cursor.completeBytes === this.sourceCursor.completeBytes && cut.cursor.leafEntryId === this.sourceCursor.leafEntryId) {
       this.sourceCursor = cut.cursor;
@@ -815,7 +810,7 @@ export class EpisodicMemory {
     const first = this.firstUnbuilt();
     const totals = viewTotals(this.view, part => this.partBytes(part));
     const needsMerge = totals.total > this.limits.viewBytes;
-    const recentMerge = this.frozen && totals.recent > recentViewHigh(this.limits.viewBytes);
+    const recentMerge = totals.recent > recentViewHigh(this.limits.viewBytes);
     for (let level = 0; 2 ** level <= count; level += 1) {
       const span = 2 ** level;
       for (let index = 0; (index + 1) * span <= count; index += 1) {
@@ -1012,23 +1007,14 @@ export class EpisodicMemory {
   }
 
   private fit(): void {
-    if (this.frozen) {
-      const fitted = freezeView(this.view, this.messages.size, this.limits.viewBytes, part => this.partBytes(part), address => this.nodes.has(address), this.foldPending);
-      if (fitted.folded || fitted.total <= this.limits.viewBytes) this.foldPending = false;
-    } else rebalanceView(this.view, this.messages.size, this.limits.viewBytes, part => this.partBytes(part), address => this.nodes.has(address));
+    const fitted = freezeView(this.view, this.messages.size, this.limits.viewBytes, part => this.partBytes(part), address => this.nodes.has(address), this.foldPending);
+    if (fitted.folded || fitted.total <= this.limits.viewBytes) this.foldPending = false;
     this.settleWaiters();
   }
 
-  private async foldView(parts: EpisodicViewPart[], frozen: boolean): Promise<EpisodicViewPart[]> {
+  private async foldView(parts: EpisodicViewPart[]): Promise<EpisodicViewPart[]> {
     const bytesOf = (part: EpisodicViewPart) => this.partBytes(part);
     const isBuilt = (address: string) => this.nodes.has(address);
-    if (!frozen) {
-      let total = 0;
-      return foldViewSliced(parts, this.messages.size, (fold, count) => {
-        total += bytesOf(fold.at(-1)!).bytes;
-        total = rebalanceView(fold, count, this.limits.viewBytes, bytesOf, isBuilt, total);
-      });
-    }
     let totals = viewTotals(parts, bytesOf);
     return foldViewSliced(parts, this.messages.size, (fold, count) => {
       const bytes = bytesOf(fold.at(-1)!).bytes;
@@ -1038,9 +1024,9 @@ export class EpisodicMemory {
 
   private async loadLayout(layout: readonly EpisodicLayoutLine[] | "unreadable"): Promise<EpisodicViewPart[]> {
     const count = this.messages.size;
-    if (layout === "unreadable" || layout.length === 0) {
-      if (layout === "unreadable") this.layoutRebuilt("unreadable", { kept: 0, split: 0, appended: count });
-      return this.foldView([], false);
+    if (layout === "unreadable") {
+      this.layoutRebuilt("unreadable", { kept: 0, split: 0, appended: count });
+      return this.foldView([]);
     }
     const parts: EpisodicViewPart[] = [];
     const halves = (part: EpisodicViewPart): EpisodicViewPart[] => [
@@ -1078,7 +1064,7 @@ export class EpisodicMemory {
     }
     const appended = count - cursor;
     if (reason !== undefined) this.layoutRebuilt(reason, { kept, split, appended });
-    return this.foldView(parts, true);
+    return this.foldView(parts);
   }
 
   private layoutRebuilt(reason: string, counts: Record<string, number>): void {
@@ -1100,7 +1086,7 @@ export class EpisodicMemory {
   }
 
   private async saveLayout(): Promise<void> {
-    if (!this.frozen || this.messages.size === 0) return;
+    if (this.messages.size === 0) return;
     await this.enqueueAppend(async () => {
       const text = `${JSON.stringify({ lines: this.view.map(part => [part.start, part.span, this.lineDigest(part)]) })}\n`;
       const current = new Set(this.view.map(part => `${part.start}+${part.span}`));
