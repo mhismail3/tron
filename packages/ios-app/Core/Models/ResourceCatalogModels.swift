@@ -104,17 +104,6 @@ package struct ProviderSummary: Codable, Hashable, Identifiable, Sendable {
     package var isLocalOnly: Bool { localOnly == true }
 }
 
-extension ContextWindowLimits {
-    package func admits(_ value: Int) -> Bool {
-        value >= minimum && value <= maximum
-    }
-
-    package var isValid: Bool {
-        minimum > 0 && maximum >= minimum && maximum <= 100_000_000 && admits(`default`)
-            && (longContextThreshold == nil || (longContextThreshold! > 0 && longContextThreshold! <= maximum))
-    }
-}
-
 extension ModelSummary: Identifiable {
     package var ref: ModelRef { ModelRef(provider: provider, id: id) }
 }
