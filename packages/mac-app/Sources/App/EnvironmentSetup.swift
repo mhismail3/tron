@@ -117,7 +117,6 @@ struct EnvironmentSetup: Sendable {
 
     private static func makeLive(profile: TronGatewayProfile) -> EnvironmentSetup {
         let home = TronPaths.tronHome(profile: profile)
-        _ = TronPaths.agentHome(profile: profile)
         let bearer = TronPaths.bearerTokenPath(profile: profile)
         let enrollment = TronPaths.enrollmentCodePath(profile: profile)
         let cache = TronPaths.networkCachePath(profile: profile)
