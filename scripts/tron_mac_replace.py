@@ -38,7 +38,6 @@ from tron_mac_replace_rpc import RpcError  # noqa: E402
 from tron_rebuild_lock import RebuildLock, RebuildBusy  # noqa: E402
 
 LIBC = ctypes.CDLL(None, use_errno=True)
-DISK_RESERVE = {'full': 15 * 1024 ** 3, 'quick': 3 * 1024 ** 3}
 WORKER_STOP_TIMEOUT = 10 * 60
 KEPT_APP_NAME = 'Tron.app.kept'
 STAGED_REGISTRY = Path(home_layout.REGISTRY).name
@@ -209,8 +208,8 @@ class Runner:
             checks.append('installed dependencies match lock')
         checks.append(f'source {self.revision[:9]}')
         free = shutil.disk_usage(platform.home).free
-        if free < DISK_RESERVE[path]:
-            raise Failure(f'only {free // 1024 ** 3} GiB free; need {DISK_RESERVE[path] // 1024 ** 3} GiB')
+        if free < platform.disk_reserve[path]:
+            raise Failure(f'only {free // 1024 ** 3} GiB free; need {platform.disk_reserve[path] // 1024 ** 3} GiB')
         checks.append(f'{free // 1024 ** 3} GiB free')
         gateway, helper = platform.helper_state()
         self.offline_retry = (path == 'full' and self.data.get('stopRequested')

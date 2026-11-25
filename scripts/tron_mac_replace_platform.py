@@ -90,6 +90,7 @@ class MacPlatform:
     quit_timeout = 45 * 60
     drain_settle_timeout = 5 * 60
     start_timeout = 5 * 60
+    disk_reserve = {'full': 15 * 1024 ** 3, 'quick': 3 * 1024 ** 3}
 
     def __init__(self, home=None):
         self.home = Path(home or pwd.getpwuid(os.getuid()).pw_dir)

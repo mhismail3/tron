@@ -54,6 +54,7 @@ REPO = HERE.parent
 class FixturePlatform(MacPlatform):
     quit_timeout = 120
     start_timeout = 45
+    disk_reserve = {'full': 1024 ** 3, 'quick': 1024 ** 3}
 
     def __init__(self, config_path):
         self.config_path = Path(config_path)
@@ -576,8 +577,9 @@ def rpc_journey():
                 try:
                     import select
                     ready, _, _ = select.select([server.stdout], [], [], 10)
-                    check(bool(ready), 'fixture socket starts within 10 seconds', evidence)
-                    port = int(server.stdout.readline().strip())
+                    line = server.stdout.readline().strip() if ready else ''
+                    check(line.isdigit(), 'fixture socket starts within 10 seconds', evidence)
+                    port = int(line)
 
                     class RpcPlatform(MacPlatform):
                         def node(self):
@@ -1107,6 +1109,10 @@ if __name__ == '__main__':
     checkout_result = checkout_journey()
     if checkout_result or '--checkout-only' in sys.argv:
         sys.exit(checkout_result)
+    print('Mac replacement E2E: verifying dependencies', flush=True)
+    node = Path(subprocess.run([REPO / 'scripts/tron-node'], check=True, capture_output=True, text=True).stdout.strip())
+    subprocess.run([node, REPO / 'scripts/gateway-install-inputs.mjs', 'ensure',
+                    REPO / 'packages/gateway', node.parent], check=True, cwd=REPO)
     rpc_result = rpc_journey()
     if rpc_result or '--rpc-only' in sys.argv:
         sys.exit(rpc_result)
@@ -1114,10 +1120,7 @@ if __name__ == '__main__':
         sys.exit(1)
     if quit_journey():
         sys.exit(1)
-    print('Mac replacement E2E: verifying dependencies and building the current-source Gateway', flush=True)
-    node = Path(subprocess.run([REPO / 'scripts/tron-node'], check=True, capture_output=True, text=True).stdout.strip())
-    subprocess.run([node, REPO / 'scripts/gateway-install-inputs.mjs', 'ensure',
-                    REPO / 'packages/gateway', node.parent], check=True, cwd=REPO)
+    print('Mac replacement E2E: building the current-source Gateway', flush=True)
     subprocess.run([REPO / 'scripts/tron-node', 'exec', 'npm', '--prefix',
                     REPO / 'packages/gateway', 'run', 'build'], check=True, cwd=REPO)
     sys.exit(journeys())
