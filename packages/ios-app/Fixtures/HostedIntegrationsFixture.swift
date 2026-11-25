@@ -200,6 +200,10 @@ actor HostedIntegrationsGateway {
                 let date = calendar.date(byAdding: .day, value: -days, to: now)!
                 return String(format: "%04d-%02d-%02d_%@", calendar.component(.year, from: date), calendar.component(.month, from: date), calendar.component(.day, from: date), slug)
             }
+            if let count = HostedLaunch.arguments.drop(while: { $0 != "-artifacts-reports" }).dropFirst().first.flatMap({ Int($0) }) {
+                let reports = (0..<count).map { entry("reports", dated($0 / 3, "report-\($0)"), "Report \($0 + 1)", at(days: $0 / 3, hours: Double($0 % 3)), day: true) }
+                return (.object(["tools": .array([]), "reports": .array(reports)]), nil)
+            }
             let tools = [entry("artifacts", "ios-dev-builds", "Tron iOS development builds", at(days: 0, hours: 2), day: false),
                          entry("artifacts", "usage-dashboard", "Provider usage dashboard", at(days: 3, hours: 0), day: false)]
             let reports = [entry("reports", dated(0, "weekly-status"), "Weekly status", at(days: 0, hours: 1), day: true),

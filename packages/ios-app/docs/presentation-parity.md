@@ -251,8 +251,10 @@ selected primary theme; semantic statuses keep their colors.
   header and count above it only when multiple nonempty sections remain; a single-category
   section keeps its category tint instead of the primary identity. Feeds (Memory, Tasks, Session History, Subagent History) are a
   `TronFeed` of `TronFeedCard`s, with the next page loaded by `FeedStore` while 5 rows remain.
-  Long feeds overlay a bottom-centred position chip whose 44-pt target takes every touch (tap:
-  newest); the feed ends with room to clear it. The chip labels its unit as Items; Home
+  A feed that scrolls (its sheet does not fit its content) overlays a bottom-centred position chip,
+  pinned to the sheet's bottom edge so it appears where it rests; a feed that fits never shows it, so
+  its room never feeds the fitted height. Its 44-pt target takes every touch (tap: newest); the feed
+  ends with room to clear it. The chip labels its unit as Items; Home
   Memory and Tasks count rows newest-first, not memory catalog addresses. Their total is the
   current scoped list's loaded row count, marked `+` (VoiceOver: “at least”) until its final
   page; Memory's RPC message count is not a row total. The capsule keeps an elevated surface
