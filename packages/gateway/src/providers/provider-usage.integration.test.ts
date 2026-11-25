@@ -10,6 +10,7 @@ import { GlobalProviderResources } from "../admin/global-provider-resources.js";
 import { ModelQueueOwner } from "./model-queue.js";
 import { createProviderModelRuntime } from "./provider-runtime.js";
 import { ProviderUsageOwner } from "./provider-usage.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const client = { id: "provider-usage", identity: "device:provider-usage", isLocal: false, isSubscribed: () => false, isRevoked: () => false, revokeDevice: () => {} } as unknown as ClientContext;
 const usageBody = {
@@ -302,22 +303,23 @@ describe("Anthropic usage under Pi's built-in OAuth", () => {
 });
 
 describe("Antigravity usage from its provider extension", () => {
-  it("reads the extension's quota reply, keeps only Gemini quota groups and lets an exhausted window skip the queue", async () => {
+  it("discovers the catalog at OAuth sign-in, reads the extension's quota reply, keeps only Gemini quota groups and lets an exhausted window skip the queue", async () => {
     const root = await mkdtemp(join(tmpdir(), "gateway-antigravity-usage-"));
-    const credential: Credential = { type: "api_key", key: "managed" };
-    const credentials: CredentialStore = {
-      read: async (providerId) => providerId === "antigravity-acp" ? credential : undefined,
-      list: async () => [{ providerId: "antigravity-acp", type: "api_key" }],
-      modify: async (providerId, fn) => providerId === "antigravity-acp" ? fn(credential) : undefined,
-      delete: async () => {},
-    };
-    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false, allowModelNetwork: false, credentials });
+    const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false, allowModelNetwork: false });
     const agentDir = join(root, "agent");
     await mkdir(agentDir, { recursive: true });
     await writeFile(join(root, "antigravity.ts"), `export default (pi) => {
-      pi.registerProvider("antigravity-acp", { name: "Google Antigravity", api: "antigravity-acp", baseUrl: "https://antigravity.invalid", apiKey: "managed",
-        streamSimple: () => { throw new Error("not streamed"); },
-        models: [{ id: "gemini-4-neon", name: "Gemini 4 Neon", reasoning: true, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 1000000, maxTokens: 65536 }] });
+      const discovered = { id: "gemini-4-neon", name: "Gemini 4 Neon", api: "antigravity-acp", provider: "antigravity-acp", baseUrl: "", reasoning: true, input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 1000000, maxTokens: 65536 };
+      let models = [];
+      pi.registerProvider({ id: "antigravity-acp", name: "Google Antigravity",
+        auth: { oauth: { name: "Google Antigravity", login: async () => ({ type: "oauth", refresh: "managed", access: "managed", expires: Number.MAX_SAFE_INTEGER }),
+          refresh: async (credential) => credential, toAuth: async () => ({ apiKey: "managed" }) } },
+        getModels: () => models,
+        refreshModels: async (context) => {
+          if (context.allowNetwork) await context.publish({ persist: { models: [discovered], checkedAt: 0 }, update: () => { models = [discovered]; } });
+        },
+        stream: () => { throw new Error("not streamed"); }, streamSimple: () => { throw new Error("not streamed"); } });
       pi.events.on("antigravity-acp:quota:request", (data) => globalThis.antigravityQuotaRequest(data));
     };\n`);
     await writeFile(join(agentDir, "settings.json"), JSON.stringify({ extensions: [join(root, "antigravity.ts")] }));
@@ -336,7 +338,9 @@ describe("Antigravity usage from its provider extension", () => {
         { displayName: "Claude and GPT models", buckets: [{ window: "weekly", remainingFraction: 0 }] },
       ] } });
     };
-    await GlobalProviderResources.create({ cwd: root, agentDir, modelRuntime: runtime, auth: new AuthBroker(runtime, () => {}), eventBus: events, log: () => {}, broadcast: () => {} });
+    const authEvents: string[] = [];
+    const auth = new AuthBroker(runtime, (_client, topic) => authEvents.push(topic));
+    await GlobalProviderResources.create({ cwd: root, agentDir, modelRuntime: runtime, auth, eventBus: events, log: () => {}, broadcast: () => {} });
     let clock = Date.parse("2026-11-25T00:30:00Z");
     const providerUsage = new ProviderUsageOwner({ now: () => clock, timeoutMs: 200, events });
     const queue = new ModelQueueOwner({ tronHome: root, runtime, usage: providerUsage, queue: async () => ["antigravity-acp/gemini-4-neon"], now: () => clock });
@@ -347,9 +351,13 @@ describe("Antigravity usage from its provider extension", () => {
       sessions: { recentModelUsage: () => [] },
       receipts: { execute: async (_identity: string, _method: string, _commandId: string, operation: () => Promise<unknown>) => operation(), status: async () => undefined },
     } as unknown as GatewayServiceDependencies);
+    const antigravity = async () => (await service.invoke(client, "provider.list", {}) as { providers: Array<{ id: string; usageSupported: boolean; modelCount: number }> })
+      .providers.find((provider) => provider.id === "antigravity-acp");
     try {
-      const list = await service.invoke(client, "provider.list", {}) as { providers: Array<{ id: string; usageSupported: boolean }> };
-      expect(list.providers.find((provider) => provider.id === "antigravity-acp")?.usageSupported).toBe(true);
+      expect(await antigravity()).toMatchObject({ usageSupported: false, modelCount: 0 });
+      auth.start("phone", "antigravity-acp", "oauth");
+      await waitFor(() => authEvents.includes("auth.completed"), "the Antigravity sign-in completion");
+      expect(await antigravity()).toMatchObject({ usageSupported: true, modelCount: 1 });
       expect(await service.invoke(client, "provider.usage", {})).toMatchObject({ providers: [{
         providerId: "antigravity-acp", status: "available", source: "antigravity-acp.usage", scope: "account", stale: false,
         windows: [

@@ -29,6 +29,8 @@ Durable stores: `<tronHome>/state/settings/` (`changes/`,
 
 ## Contract
 
+A successful provider sign-in refreshes that provider's model catalog (network allowed, 15 s bound, cancelled with the operation) before it completes, so providers that discover models with the credential, such as Google Antigravity, list them; a failed or timed-out refresh keeps the cached catalog and logs `auth.login.catalog-stale`.
+
 Provider sign-out runs through `AuthBroker.logout`: it blocks new sign-in for the same runtime/provider, cancels and joins pending sign-in, awaits the native provider's optional `auth.oauth.logout()` cleanup hook, then deletes Pi's credential marker. Cleanup failure is a failed sign-out; the marker is retained for retry. Ordinary providers without external credential storage need no hook. Hooks take no arguments, return `Promise<void>`, and own their external credentials, active processes and saved account/session state. The broker holds global provider-resource refresh until sign-out settles.
 
 The pinned `tron:pi-subagents@…#…` package source identifies Tron's bundled payload, not a
@@ -167,6 +169,7 @@ are installed; schema access never evaluates their late-bound service getter.
 | `auth.login.started` | info | A provider login was admitted; provider and auth type in the message |
 | `auth.login.recovered` | info | An existing login was reattached to a new client |
 | `auth.login.succeeded` | info | The login retired with a stored credential, or SDK-confirmed commitment was projected after it ended; a later success corrects an earlier retirement |
+| `auth.login.catalog-stale` | warning | Sign-in stored its credential but the provider's catalog refresh failed or timed out; the cached catalog stays |
 | `auth.login.ended` | warning | The login retired before SDK completion or failed (reason, elapsed seconds); retirement alone does not prove no credential committed |
 
 ## Verify
