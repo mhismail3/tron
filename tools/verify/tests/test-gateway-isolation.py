@@ -132,5 +132,42 @@ class GatewayTestOrphanReaping(unittest.TestCase):
             self.assertEqual(left, [])
 
 
+class ChromeForTestingProvisioning(unittest.TestCase):
+    def provision(self, binaries: int) -> tuple[subprocess.CompletedProcess, Path]:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        base = Path(temporary.name).resolve()
+        verify = base / "tools/verify"
+        verify.mkdir(parents=True)
+        (verify / "gateway.py").write_text((ROOT / "tools/verify/gateway.py").read_text())
+        engine = base / "packages/gateway/node_modules/agent-browser"
+        (engine / "bin").mkdir(parents=True)
+        (engine / "package.json").write_text('{"version": "0.0.0-fixture"}')
+        (engine / "bin/agent-browser.js").write_text(
+            "const fs = require('node:fs');\n"
+            f"for (let i = 0; i < {binaries}; i++) {{ const d = `.agent-browser/browsers/chrome-${{i}}/Google Chrome for Testing.app/Contents/MacOS`;"
+            " fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(`${d}/Google Chrome for Testing`, ''); }\n")
+        commit_fixture(base)
+        node = subprocess.check_output([str(ROOT / "scripts/tron-node")], text=True).strip()
+        result = subprocess.run([sys.executable, "-c", f"import sys; sys.path.insert(0, {str(verify)!r}); import gateway; "
+                                 f"print(gateway.provision_chrome_for_testing({node!r}))"],
+                                capture_output=True, text=True, timeout=60)
+        return result, base / ".git/verify/fixtures"
+
+    def test_an_installer_without_exactly_one_binary_is_refused_and_leaves_no_staging_or_target(self) -> None:
+        for count in (0, 2):
+            result, fixtures = self.provision(count)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(f"produced {count} Chrome for Testing binaries", result.stderr)
+            self.assertEqual(sorted(path.name for path in fixtures.iterdir()), ["chrome-for-testing.lock"])
+
+    def test_one_binary_is_published(self) -> None:
+        result, fixtures = self.provision(1)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        binary = Path(result.stdout.strip())
+        self.assertTrue(binary.is_file())
+        self.assertEqual(binary.relative_to(fixtures).parts[0], "chrome-for-testing-agent-browser-0.0.0-fixture")
+
+
 if __name__ == "__main__":
     unittest.main()
