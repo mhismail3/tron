@@ -88,7 +88,7 @@ describe("global provider resources", () => {
     await writeFile(f.extensionPath, `export default (pi) => {
       pi.registerProvider("virtual-physical", {
         name: "Virtual fixture", api: "openai-completions", baseUrl: "https://example.invalid/v1",
-        models: [{ id: "physical", name: "Physical", api: "openai-completions", reasoning: false, input: ["text"], cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 }, contextWindow: 8192, maxTokens: 1024 }]
+        models: ["physical", "physical-20250101"].map(id => ({ id, name: "Physical", api: "openai-completions", reasoning: false, input: ["text"], cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 }, contextWindow: 8192, maxTokens: 1024 }))
       });
       pi.registerVirtualModel({ provider: "virtual-physical", id: "router", name: "Router", contextWindow: 4096, route: () => ({ model: pi.modelRegistry.find("virtual-physical", "physical"), thinkingLevel: "off" }) });
     };`);
@@ -98,14 +98,16 @@ describe("global provider resources", () => {
     const result = await gateway.invoke(client, "model.list", { limit: 200 }) as { models: Array<Record<string, unknown>>; nextCursor?: string };
     const models = [...result.models];
     let cursor = result.nextCursor;
-    while (cursor && !models.some(({ id }) => id === "router")) {
+    while (cursor) {
       const page = await gateway.invoke(client, "model.list", { limit: 200, cursor }) as typeof result;
       models.push(...page.models);
       cursor = page.nextCursor;
     }
     expect(models.find(({ id }) => id === "router")).toMatchObject({
-      provider: "virtual-physical", virtual: true, contextWindow: 4096,
+      provider: "virtual-physical", providerName: "Virtual fixture", virtual: true, contextWindow: 4096, latest: false,
     });
+    expect(models.filter(({ provider }) => provider === "virtual-physical").map(({ id, latest }) => [id, latest]).sort())
+      .toEqual([["physical", true], ["physical-20250101", false], ["router", false]]);
     expect(f.runtime.getModels().some(({ id }) => id === "router")).toBe(true);
   });
 

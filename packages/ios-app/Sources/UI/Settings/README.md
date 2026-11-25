@@ -47,18 +47,18 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   `TronSettingsSections`, including conditional groups. Settings subsheets
   opt in with `hidesLoneHeading: true`: one container has no heading, multiple containers retain
   their headings, and explanatory detail remains. Top-level Settings has no headings.
-- **Model card rows.** Revert sits before the value; the value pill is rightmost, with independent
-  44-point targets, and an override shows the shared Overridden pill beside the row title.
+- **Model card rows.** The value pill is rightmost with a 44-point target. The rows have no inline
+  Revert; the Switch Model picker's Reset to inherited toolbar action resets an overridden model.
 - **Writes.** Every write is a `settings.change`: dry run first, and a refusal shows under its row.
   The model card shares the pending receipt and the session owner's admission state with
-  `ModelSelectionAvailability`: model browsing stays available while choices, Revert and picker reset
+  `ModelSelectionAvailability`: model browsing stays available while choices and picker reset
   are disabled, and its change gate serializes writes. Every other setting, outside-change recovery
   (`applyAgain`) and Undo go through the agent's `settings` tool. The Gateway supplies override
   presence and permissions; rows never infer ownership from value equality.
 - **Manage Home and the chat model card.** Manage Home lists Profile, Memory, Chapters and Tasks; its toolbar
   leads with the Pause/Resume memory and Disable Home controls, each confirmed in a `TronConfirmationSheet`.
   The chat model card (`ManageModelConfigurationCard`, `session-model-summary` or `home-model-summary`) reads
-  `settings.resolve` for the three chat-model keys. Switch Model lists the catalog, Thinking lists the session's
+  `settings.resolve` for the three chat-model keys. Switch Model lists the catalog, Effort lists the session's
   thinking levels, and Context Window lists the selected model's limits. Writes are `settings.change` at the
   chat's Session scope (Home writes its saved settings). A Project-owned value is read-only and names its file.
   The Project sheet keeps the trust row (`TrustSettingsView`) and the Workspace row; the app does not show

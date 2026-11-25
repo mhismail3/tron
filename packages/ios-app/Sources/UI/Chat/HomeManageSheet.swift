@@ -25,30 +25,22 @@ extension HomeSheet {
 
     func manageRows(_ read: HomeManageDTO?, unresolved: Bool) -> some View {
         let status = read?.status
-        let memoryBrowser = model.gatewayInfo?.capabilities.contains("home-memory-view.v1") == true
-        let chapterList = model.gatewayInfo?.capabilities.contains("home-chapter-list.v1") == true
-        let profileList = model.gatewayInfo?.capabilities.contains("home-profile-list.v1") == true
         return TronGlassCard(accent: accent) {
             VStack(spacing: 0) {
-                if profileList {
-                    navigationRow(icon: "person.text.rectangle",
-                                  subtitle: read.map { HomeManageRowPresentation.profile($0.profile) },
-                                  loading: read == nil, destination: .profile, id: "home-manage-profile")
+                navigationRow(icon: "person.text.rectangle",
+                              subtitle: read.map { HomeManageRowPresentation.profile($0.profile) },
+                              loading: read == nil, destination: .profile, id: "home-manage-profile")
+                divider()
+                navigationRow(icon: "brain",
+                              subtitle: status.map { HomeStatusLinePresentation.memory($0, unresolvedCommand: unresolved) },
+                              loading: read == nil, destination: .memory(sessionID: nil, chapterOrdinal: nil), id: "home-manage-memory-browser")
+                if read == nil || status?.chapter != nil {
                     divider()
-                }
-                if memoryBrowser {
-                    navigationRow(icon: "brain",
-                                  subtitle: status.map { HomeStatusLinePresentation.memory($0, unresolvedCommand: unresolved) },
-                                  loading: read == nil, destination: .memory(sessionID: nil, chapterOrdinal: nil), id: "home-manage-memory-browser")
-                }
-                let showsChapters = chapterList && (read == nil || status?.chapter != nil)
-                if showsChapters {
-                    if memoryBrowser { divider() }
                     navigationRow(icon: "book",
-                                  subtitle: read.flatMap { HomeManageRowPresentation.chapters($0.chapters, fallback: $0.status.chapter) },
+                                  subtitle: read.map { HomeManageRowPresentation.chapters($0.chapters) },
                                   loading: read == nil, destination: .chapters, id: "home-manage-chapters")
                 }
-                if memoryBrowser || showsChapters { divider() }
+                divider()
                 navigationRow(icon: "checklist",
                               subtitle: read.map { HomeManageRowPresentation.tasks($0.tasks, admitted: $0.status.admitsTaskReads) },
                               loading: read == nil, destination: .tasks, id: "home-manage-tasks")

@@ -21,7 +21,6 @@ function profileModelChange(sessionId, session) {
 
 const PRESENTATION_LEASE_RENEWAL_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 30_000;
-const PROTOCOL_VERSION = 9;
 const PHONE_RETRY_INITIAL_SECONDS = 2;
 const PHONE_RETRY_MULTIPLIER = 1.7;
 const PHONE_RETRY_MAXIMUM_SECONDS = 15;
@@ -35,6 +34,8 @@ if (!["seed", "run", "catalog", "multi"].includes(command) || !configPath) {
 const config = JSON.parse(readFileSync(configPath, "utf8"));
 const CONNECTION_CONTRACT = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)),
   "..", "packages", "protocol-fixtures", "gateway-connection-contract.json"), "utf8"));
+const { protocolVersion: PROTOCOL_VERSION } = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)),
+  "..", "config", "GatewayProtocol.json"), "utf8"));
 const CONNECTION = {
   pingIntervalMs: CONNECTION_CONTRACT.clientPingInterval.milliseconds,
   pongDeadlineMs: CONNECTION_CONTRACT.clientPongDeadline.milliseconds,

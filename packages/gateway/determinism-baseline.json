@@ -87,8 +87,14 @@
       "sleep": 1,
       "timeout-literal": 14
     },
-    "src/e2e/modules/home/home-task-tool.e2e.test.ts": {
-      "timeout-literal": 3,
+    "src/e2e/modules/home/home-task-tool-interrupt.e2e.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/modules/home/home-task-tool-stop.e2e.test.ts": {
+      "timeout-literal": 1
+    },
+    "src/e2e/modules/home/home-task-tool-wire.e2e.test.ts": {
+      "timeout-literal": 1,
       "wall-clock-expect": 1
     },
     "src/e2e/modules/home/home-task-worker-model.e2e.test.ts": {

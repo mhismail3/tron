@@ -30,7 +30,7 @@ struct SettingsView: View {
                     settingsLink("MCP Servers", summary: "Tool providers and their sign-ins", icon: "server.rack") {
                         MCPServersSettingsView()
                     }
-                    if model.homeStatus.capabilityEnabled, let profileID = model.selectedGatewayProfileID() {
+                    if model.homeStatus.isAvailable, let profileID = model.selectedGatewayProfileID() {
                         HomeTaskSheet(permissionsFor: profileID)
                     }
                 }
@@ -161,7 +161,6 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
             ) {
                 NavigationStack {
                     themed(destination()
-                        .environment(\.tronSettingsRowAccessory, nil)
                         .toolbar {
                         ToolbarItem(placement: .confirmationAction) {
                             Button { isPresented = false } label: {

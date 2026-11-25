@@ -2807,7 +2807,7 @@ extension AppModel {
             )
         }
         acknowledgePushNavigation(tap)
-        let home = try await (lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true ? HomeStatus.validated(lifecycle.client.requestValue(
+        let home = try await (lifecycle.gatewayInfo != nil ? HomeStatus.validated(lifecycle.client.requestValue(
             "home.status", JSONValue.object([:]), expectedConnection: GatewayConnectionAdmission(connectionID: routeAdmission.connectionID))) : nil)
         guard lifecycle.admits(routeAdmission) else { throw CancellationError() }
         let homeSessionID: String? = if let home, [home.sessionId, home.openSessionId].contains(route.sessionID),
@@ -3821,7 +3821,7 @@ extension AppModel {
             mountHomeStatus(surfaceToken: surfaceToken, activityCoordinator: activityCoordinator)
             return true
         }
-        guard lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true else { return false }
+        guard lifecycle.gatewayInfo != nil else { return false }
         installHomeStatus(surfaceToken: surfaceToken, activityCoordinator: activityCoordinator, cadence: .connectionOnly(route))
         return true
     }
@@ -3838,7 +3838,7 @@ extension AppModel {
                   let admission = self.lifecycle.admission,
                   let currentConnectionID = admission.connectionID,
                   String(currentConnectionID) == fence.connectionID,
-                  self.lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true,
+                  self.lifecycle.gatewayInfo != nil,
                   self.lifecycle.admits(admission) else { throw CancellationError() }
             let value = try await self.lifecycle.client.requestValue(
                 "home.status", JSONValue.object([:]),
@@ -3851,15 +3851,14 @@ extension AppModel {
         }
         guard let profileID = lifecycle.selectedProfileID else { return }
         let connectionID = lifecycle.admission?.connectionID.map(String.init)
-        let capable = lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true
-        homeStatus.configure(profileID: profileID, connectionID: connectionID, capabilityEnabled: capable)
+        homeStatus.configure(profileID: profileID, connectionID: connectionID, isAvailable: lifecycle.gatewayInfo != nil)
     }
 
     func homeSheetReadIdentity(profileID: String, surfaceToken: PresentationSurfaceToken?) -> HomeSheetReadIdentity? {
         guard let surfaceToken, lifecycle.selectedProfileID == profileID,
               let admission = lifecycle.admission, lifecycle.admits(admission),
               let connectionID = admission.connectionID,
-              lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true else { return nil }
+              lifecycle.gatewayInfo != nil else { return nil }
         return HomeSheetReadIdentity(profileID: profileID, connectionID: connectionID,
                                      lifecycleGeneration: lifecycle.currentLifecycleGeneration, surfaceToken: surfaceToken)
     }
@@ -3879,37 +3878,23 @@ extension AppModel {
         func readTaskStatus() async throws -> HomeStatus {
             try HomeStatus.validated(try await read("home.status"))
         }
-        func requireMemoryBrowser() throws {
-            guard lifecycle.gatewayInfo?.capabilities.contains("home-memory-view.v1") == true else {
-                throw GatewayFailure(code: "unsupported", message: "This Gateway does not support the memory browser.", retryable: false, details: nil)
-            }
-        }
         func optionalRead<Value>(_ value: () async throws -> Value) async throws -> Value? {
             do { return try await value() }
             catch is CancellationError { throw CancellationError() }
             catch { return nil }
         }
-        func chapterListCapable() -> Bool {
-            lifecycle.gatewayInfo?.capabilities.contains("home-chapter-list.v1") == true
-        }
         func readChapterList() async throws -> HomeChapterList {
             try HomeChapterList.validated(try await read("home.chapterList"))
         }
-        func profileListCapable() -> Bool {
-            lifecycle.gatewayInfo?.capabilities.contains("home-profile-list.v1") == true
-        }
         switch query {
         case .manage:
-            let readsChapters = chapterListCapable()
             async let statusValue = read("home.status")
             async let contextValue = read("home.context")
-            async let chapterValue: JSONValue? = readsChapters ? read("home.chapterList") : nil
-            async let profileList: HomeProfileList? = profileListCapable()
-                ? optionalRead { try HomeProfileList.validated(try await read("home.profileList")) } : nil
+            async let chapterValue = read("home.chapterList")
+            async let profileList: HomeProfileList? = optionalRead { try HomeProfileList.validated(try await read("home.profileList")) }
             let status = try HomeStatus.validated(try await statusValue)
             let context = try HomeContextProjection.validated(try await contextValue)
-            let chapterJSON = try await chapterValue
-            let chapters = try chapterJSON.map { try HomeChapterList.validated($0) }
+            let chapters = try HomeChapterList.validated(try await chapterValue)
             let tasks = status.admitsTaskReads ? try await optionalRead {
                 try HomeTaskPage.validated(try await read("home.taskList", .object(["limit": .number(20)])))
             } : nil
@@ -3933,28 +3918,19 @@ extension AppModel {
             let status = try await readTaskStatus()
             return .permissions(status.admitsTaskReads ? try HomeTaskPermissionsDTO.decode(try await read("home.taskPermissions")) : nil, status)
         case .chapters:
-            guard chapterListCapable() else {
-                throw GatewayFailure(code: "unsupported", message: "This Gateway does not support the chapter list.", retryable: false, details: nil)
-            }
             return .chapters(try await readChapterList())
         case .profile:
-            guard profileListCapable() else {
-                throw GatewayFailure(code: "unsupported", message: "This Gateway does not list the learned profile.", retryable: false, details: nil)
-            }
             return .profile(try HomeProfileList.validated(try await read("home.profileList")))
         case .memory(let sessionID, let continuation):
-            try requireMemoryBrowser()
             var values: [String: JSONValue] = ["limit": .number(20)]
             if let continuation { values["cursor"] = .string(continuation.cursor) }
             if let sessionID { values["sessionId"] = .string(sessionID) }
             return .memory(try HomeMemoryView.validated(try await read("home.memory.view", .object(values)), continuation: continuation))
         case .memoryPart(let sessionID, let line):
-            try requireMemoryBrowser()
             var values: [String: JSONValue] = ["part": .object(["start": .number(Double(line.start)), "span": .number(Double(line.span))])]
             if let sessionID { values["sessionId"] = .string(sessionID) }
             return .memory(try HomeMemoryView.validated(try await read("home.memory.view", .object(values)), continuation: nil, part: line))
         case .evidence(let source, let offset):
-            try requireMemoryBrowser()
             let params = JSONValue.object(["evidence": try JSONValue.wire(source.encode()), "offset": .number(Double(offset))])
             return .evidence(try HomeMemoryEvidencePage.validated(try await read("home.memory.evidence", params), evidence: source, offset: offset))
         }
@@ -3979,8 +3955,8 @@ extension AppModel {
     func navigationRouteForHome(profileID: String, status: HomeStatus) throws -> SessionNavigationRoute {
         guard lifecycle.selectedProfileID == profileID,
               connectionState == .connected,
-              gatewayInfo?.capabilities.contains("home.v1") == true,
-              homeStatus.capabilityEnabled,
+              gatewayInfo != nil,
+              homeStatus.isAvailable,
               homeStatus.status == status,
               case .open(let sessionID) = HomePinnedRowPolicy.action(for: status) else {
             throw CancellationError()
@@ -4506,8 +4482,7 @@ extension AppModel: SessionPresentationStoreDelegate {
             let read = await DeliveredNotificationRead.capture(machineID: profile.machineId, before: date)
             guard isCurrent() else { return }
             var sessions: Set<String> = [target.sessionID]
-            if read.hasOtherSessions(than: target.sessionID),
-               self.gatewayInfo?.capabilities.contains("home-chapter-list.v1") == true {
+            if read.hasOtherSessions(than: target.sessionID) {
                 if let value = try? await self.lifecycle.client.requestValue("home.chapterList", JSONValue.object([:]),
                     expectedConnection: GatewayConnectionAdmission(connectionID: connectionID)),
                    let chapters = try? HomeChapterList.validated(value),
@@ -4680,7 +4655,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         homeStatus.configure(
             profileID: profileID,
             connectionID: String(connectionID),
-            capabilityEnabled: gatewayInfo?.capabilities.contains("home.v1") == true
+            isAvailable: gatewayInfo != nil
         )
     }
 

@@ -44,7 +44,7 @@ struct HostedForegroundSheetScenario {
 
     mutating func capabilities(_ base: [String]) -> [String] {
         connections += 1
-        return base + (queueEnabled ? [QueuedMessageManagementPolicy.capability] : [])
+        return base
     }
 
     var devices: JSONValue {

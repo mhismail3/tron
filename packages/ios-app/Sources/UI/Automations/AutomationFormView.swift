@@ -443,7 +443,7 @@ struct AutomationFormView: View {
                 VStack(spacing: 0) {
                     if actionKind == .sessionPrompt {
                         TronSelectionRow(icon: "arrow.turn.down.right", title: "Destination", value: targetMode.title) {
-                            ForEach(AutomationTargetMode.allCases.filter { $0 != .home || selectedEndpoint?.profile.capabilities.contains("home.v1") == true }) { mode in
+                            ForEach(AutomationTargetMode.allCases.filter { $0 != .home || selectedEndpoint != nil }) { mode in
                                 Button(mode.title) { targetMode = mode }
                                     .accessibilityIdentifier("automation.destination.\(mode.rawValue)")
                             }
@@ -755,7 +755,7 @@ struct AutomationFormView: View {
         let generation = presentationReadGeneration
         let foreground = model.foregroundReconciliationGeneration
         homeTargetStatus = nil
-        guard let client, selectedEndpoint?.profile.capabilities.contains("home.v1") == true else { return }
+        guard let client else { return }
         do {
             let value: JSONValue = try await client.request("home.status")
             let status = try HomeStatus.validated(value)
