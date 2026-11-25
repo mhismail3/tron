@@ -107,6 +107,20 @@ final class GatewayDecisionOwnershipTests: XCTestCase {
         XCTAssertEqual(SessionRebaselineAdmission.evaluate(current: current, incoming: next(1, 1, "restarted")), .install)
     }
 
+    func testDisplayURLsAdmitTheGatewaysCanonicalHostsAndRefuseRawFormsItWouldBlock() {
+        for url in ["https://mooses-macbook-server.tail3b6e78.ts.net:8443/", "https://one.two.example.com/", "https://a.b.c.d/",
+                    "https://8.8.8.8/", "https://1.2.0.3/", "https://[2606:4700::1111]/", "https://example.com./"] {
+            XCTAssertTrue(DisplayRemoteURLPolicy.admits(url), url)
+        }
+        for url in ["https://127.1/", "https://012.0.0.1/", "https://0x7f.0.0.1/", "https://08.8.8.8/", "https://1.2.3/",
+                    "https://4294967295/", "https://example.123/", "https://a.b.c.1/", "https://1.2.3.4.5/",
+                    "https://10.0.0.1/", "https://127.0.0.1/", "https://192.168.1.1/", "https://100.64.0.1/", "https://203.0.113.1/",
+                    "https://[2001:0db8::1]/", "https://[2001:db8::1]/", "https://[::1]/", "https://[::ffff:8.8.8.8]/", "https://[fe80::1]/",
+                    "https://@example.com/", "https://user@example.com/", "https://example.com/?q", "https://localhost/"] {
+            XCTAssertFalse(DisplayRemoteURLPolicy.admits(url), url)
+        }
+    }
+
     func testExtensionLifecycleIntegerProjectionFailsAsAnInvalidResponse() throws {
         let method = "fixture.extensionLifecycle"
         let valid: [String: JSONValue] = ["version": .number(1), "state": .string("running"), "attention": .string("none"),

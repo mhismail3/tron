@@ -385,20 +385,19 @@ package enum DisplayRemoteURLPolicy {
         }
         if host.contains(":") {
             let normalized = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-            guard normalized != "::", normalized != "::1",
-                  !normalized.hasPrefix("2001:db8:"),
-                  let firstText = normalized.split(separator: ":", omittingEmptySubsequences: true).first,
-                  let first = UInt16(firstText, radix: 16), first >= 0x2000, first <= 0x3fff else {
-                return false
-            }
-            return true
+            let head = normalized.components(separatedBy: "::").first ?? ""
+            let groups = head.isEmpty ? [] : head.split(separator: ":", omittingEmptySubsequences: false)
+            let hextet = { (index: Int) in index < groups.count ? UInt16(groups[index], radix: 16) : 0 }
+            guard let first = hextet(0), let second = hextet(1) else { return false }
+            return first >= 0x2000 && first <= 0x3fff && !(first == 0x2001 && second == 0x0db8)
         }
         let components = host.split(separator: ".", omittingEmptySubsequences: false)
-        guard components.count == 4 else { return true }
-        let octets = components.compactMap { UInt8($0) }
-        guard octets.count == 4 else {
-            return components.last?.range(of: #"^(?:[0-9]+|0x[0-9a-f]*)$"#, options: .regularExpression) == nil
+        guard let last = components.last,
+              last.range(of: #"^(?:[0-9]+|0x[0-9a-f]*)$"#, options: .regularExpression) != nil else { return true }
+        let octets = components.compactMap { label in
+            label.range(of: #"^(?:0|[1-9][0-9]{0,2})$"#, options: .regularExpression) == nil ? nil : UInt8(label)
         }
+        guard components.count == 4, octets.count == 4 else { return false }
         let a = Int(octets[0]), b = Int(octets[1]), c = Int(octets[2])
         return !(a == 0 || a == 10 || a == 127 || a >= 224
             || (a == 100 && b >= 64 && b <= 127)
