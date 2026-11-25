@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "rollbackVersion": "1.5.0",
+  "rollbackVersion": "1.5.1",
   "knownOneWayDeltas": [
     {
       "store": "mcp-auth",
