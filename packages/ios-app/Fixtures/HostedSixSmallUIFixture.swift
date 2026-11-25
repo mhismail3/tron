@@ -81,7 +81,7 @@ struct HostedSixSmallUIFixture: View {
         ("kimi-k2.7-code", "Kimi K2.7 Code", 0.40, 1.60)
     ].map { id, name, input, output in
         try! ModelSummary.decode(wParse(String(decoding: JSONSerialization.data(withJSONObject: [
-            "provider": "opencode-go", "id": id, "name": name, "reasoning": true, "input": ["text"],
+            "provider": "opencode-go", "providerName": "OpenCode Go", "id": id, "name": name, "latest": false, "reasoning": true, "input": ["text"],
             "contextWindow": 1000000, "maxTokens": 32768, "available": true,
             "cost": ["input": input, "output": output, "cacheRead": 0, "cacheWrite": 0], "releaseDate": "2026-09-01"
         ]), as: UTF8.self)))
