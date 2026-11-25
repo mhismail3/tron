@@ -3532,7 +3532,11 @@ export class RuntimeRegistry implements SessionOperations {
         facts.push({ ...fact, sessionId: slot.id, key: `slot:${slot.id}:${fact.key}` });
       }
     }
-    facts.sort((left, right) => (left.admittedAt ?? "").localeCompare(right.admittedAt ?? "")
+    const admitted = (fact: { admittedAt?: string }): number => {
+      const milliseconds = fact.admittedAt === undefined ? Number.NaN : Date.parse(fact.admittedAt);
+      return Number.isFinite(milliseconds) ? milliseconds : Number.POSITIVE_INFINITY;
+    };
+    facts.sort((left, right) => admitted(left) - admitted(right)
       || left.category.localeCompare(right.category) || left.key.localeCompare(right.key));
     const answered = answeringWorkToken === undefined ? facts : facts.filter((fact) => fact.key !== `work:${answeringWorkToken}`);
     const counts: Partial<Record<AdministrativeDrainBlockerCategory, number>> = {};
