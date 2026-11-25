@@ -31,6 +31,7 @@ interface AuthOperation {
   providerId: string;
   authType: AuthType;
   targetKey: string;
+  modelRuntime: ModelRuntime;
   controller: AbortController;
   prompt: PendingPrompt | undefined;
   latestEvent: JsonValue | undefined;
@@ -181,7 +182,8 @@ export class AuthBroker {
   private readonly workRegistry: GatewayWorkRegistry | undefined;
   private pendingGlobalProviderRefresh: (() => Promise<void>) | undefined;
   private runningGlobalProviderRefresh = false;
-  private readonly unsettledGlobalAuthOperations = new Set<AuthOperation>();
+  private readonly unsettledAuthOperations = new Set<AuthOperation>();
+  private readonly providerLogouts = new Map<ModelRuntime, Set<string>>();
   private readonly log: AuthLifecycleLog;
 
   constructor(
@@ -219,6 +221,41 @@ export class AuthBroker {
   requestGlobalProviderRefresh(refresh: () => Promise<void>): void {
     this.pendingGlobalProviderRefresh = refresh;
     this.drainGlobalProviderRefresh();
+  }
+
+  async logout(providerId: string, modelRuntime: ModelRuntime = this.modelRuntime): Promise<void> {
+    const pending = this.providerLogouts.get(modelRuntime) ?? new Set<string>();
+    if (pending.has(providerId)) throw new GatewayError("busy", "Provider sign-out is already finishing", true);
+    pending.add(providerId);
+    this.providerLogouts.set(modelRuntime, pending);
+    try {
+      const logins = [...this.unsettledAuthOperations].filter(operation =>
+        operation.modelRuntime === modelRuntime && operation.providerId === providerId);
+      for (const operation of logins) {
+        operation.controller.abort();
+        const completion: AuthCompletion = {
+          operationId: operation.id,
+          providerId: operation.providerId,
+          ...(operation.target === undefined ? {} : { target: operation.target }),
+          success: false,
+          error: "Provider signed out",
+        };
+        if (this.retire(operation, "Provider signed out", completion)) {
+          this.emitToOperation(operation, "auth.completed", completion as unknown as JsonValue);
+        }
+      }
+      await this.awaitPredecessor(Promise.all(logins.map(operation => operation.settled)).then(() => {}));
+      const oauth = modelRuntime.getProvider(providerId)?.auth.oauth;
+      if (oauth && "logout" in oauth && oauth.logout !== undefined) {
+        if (typeof oauth.logout !== "function") throw new GatewayError("unsupported", "Provider sign-out hook is invalid");
+        await oauth.logout();
+      }
+      await modelRuntime.logout(providerId);
+    } finally {
+      pending.delete(providerId);
+      if (pending.size === 0) this.providerLogouts.delete(modelRuntime);
+      this.drainGlobalProviderRefresh();
+    }
   }
 
   startMcp(
@@ -260,6 +297,9 @@ export class AuthBroker {
     target?: JsonValue,
   ): AuthAdmission {
     this.pruneRetainedState();
+    if (this.providerLogouts.get(modelRuntime)?.has(providerId)) {
+      throw new GatewayError("busy", "Provider sign-out is still finishing", true);
+    }
     const receiptKey = commandId ? `${ownerIdentity}\0${commandId}` : undefined;
     if (receiptKey) {
       const receipt = this.beginReceipts.get(receiptKey);
@@ -345,6 +385,7 @@ export class AuthBroker {
       providerId,
       authType,
       targetKey,
+      modelRuntime,
       controller,
       prompt: undefined,
       latestEvent: undefined,
@@ -356,7 +397,7 @@ export class AuthBroker {
       ...(work ? { work } : {}),
     };
     this.operations.set(operation.id, operation);
-    if (targetKey === "global") this.unsettledGlobalAuthOperations.add(operation);
+    this.unsettledAuthOperations.add(operation);
     if (receiptKey) this.recordReceipt(receiptKey, operation, replaceOperationId, false);
     this.log("info", `Provider login started for ${providerId} (${authType})`, "auth.login.started");
 
@@ -400,10 +441,8 @@ export class AuthBroker {
       .finally(() => {
         operation.work?.settle();
         if (this.unsettledLogins.get(loginKey) === operation.settled) this.unsettledLogins.delete(loginKey);
-        if (operation.targetKey === "global") {
-          this.unsettledGlobalAuthOperations.delete(operation);
-          this.drainGlobalProviderRefresh();
-        }
+        this.unsettledAuthOperations.delete(operation);
+        this.drainGlobalProviderRefresh();
       });
     this.unsettledLogins.set(loginKey, operation.settled);
     return { operationId: operation.id, recovered: false };
@@ -680,7 +719,8 @@ export class AuthBroker {
 
   private drainGlobalProviderRefresh(): void {
     if (this.runningGlobalProviderRefresh || !this.pendingGlobalProviderRefresh
-      || this.unsettledGlobalAuthOperations.size > 0) return;
+      || this.providerLogouts.size > 0
+      || [...this.unsettledAuthOperations].some(operation => operation.targetKey === "global")) return;
     const refresh = this.pendingGlobalProviderRefresh;
     this.pendingGlobalProviderRefresh = undefined;
     this.runningGlobalProviderRefresh = true;
@@ -709,6 +749,7 @@ export class AuthBroker {
   }
 
   private complete(operation: AuthOperation, success: boolean, error?: unknown): void {
+    if (this.providerLogouts.get(operation.modelRuntime)?.has(operation.providerId)) return;
     if (this.operations.get(operation.id) !== operation && operation.controller.signal.aborted
       && error instanceof CredentialSynchronizationError && error.providerId === operation.providerId
       && error.operation === "login" && error.credential?.type === operation.authType

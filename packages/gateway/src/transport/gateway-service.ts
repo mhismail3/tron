@@ -1678,7 +1678,7 @@ export class GatewayService {
       }
       case "auth.logout":
         return this.mutation(client, method, params, async () => {
-          await (await this.modelRuntime(params)).logout(string(params.providerId, "providerId", { max: 120 }));
+          await this.dependencies.auth.logout(string(params.providerId, "providerId", { max: 120 }), await this.modelRuntime(params));
           this.dependencies.broadcast("providers.changed", {});
           return { loggedOut: true };
         });

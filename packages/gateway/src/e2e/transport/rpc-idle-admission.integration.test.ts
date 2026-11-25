@@ -3,7 +3,7 @@ import { appendFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "no
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
-import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxProvider, fauxToolCall, type OAuthCredential } from "@earendil-works/pi-ai";
 import WebSocket from "ws";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { AuthBroker } from "../../admin/auth-broker.js";
@@ -1034,6 +1034,45 @@ describe("receipt-backed mutations against their own session work entry", () => 
       rejectedByRun,
       rejectedByConcurrentBash: "chat.tools",
     });
+  });
+});
+
+describe("paired-client provider sign-out", () => {
+  it("awaits provider cleanup, propagates its failure, and replays successful sign-out without repeating deletion", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-rpc-provider-logout-"));
+    cleanup.push(() => rm(root, { recursive: true, force: true }));
+    const authRuntime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
+    const fixtureProvider = fauxProvider({ provider: "external-logout" }).provider;
+    let cleanupCalls = 0;
+    let denied = true;
+    const provider = {
+      ...fixtureProvider,
+      auth: { oauth: {
+        name: "External logout fixture",
+        async login() { return { type: "oauth" as const, refresh: "marker", access: "marker", expires: Number.MAX_SAFE_INTEGER }; },
+        async refresh(credential: OAuthCredential) { return credential; },
+        async toAuth() { return { apiKey: "marker" }; },
+        async logout() {
+          cleanupCalls += 1;
+          if (denied) throw new Error("Fixture Keychain deletion denied");
+        },
+      } },
+    };
+    authRuntime.registerNativeProvider(provider);
+    await authRuntime.login("external-logout", "oauth", { prompt: async () => "", notify() {} });
+    const f = await fixture({ authRuntime });
+    const client = await f.connect();
+    const failure = await client.request("logout-denied", "auth.logout", { commandId: "logout-denied-command", providerId: "external-logout" });
+    expect(failure).toMatchObject({ ok: false });
+    expect(await authRuntime.getAuth("external-logout")).toBeDefined();
+    denied = false;
+    const params = { commandId: "logout-success-command", providerId: "external-logout" };
+    const success = await client.request("logout-success", "auth.logout", params);
+    expect(success).toMatchObject({ ok: true, result: { loggedOut: true } });
+    const replay = await client.request("logout-replay", "auth.logout", params);
+    expect(replay.result).toEqual(success.result);
+    expect(cleanupCalls).toBe(2);
+    expect(await authRuntime.getAuth("external-logout")).toBeUndefined();
   });
 });
 
