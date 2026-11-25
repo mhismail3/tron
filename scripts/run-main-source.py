@@ -37,7 +37,7 @@ def main():
         git(root, "check-ref-format", "--branch", ref)
         command = command[:index] + command[index + 2:]
     git(root, "fetch", "--no-tags", "origin", f"refs/heads/{ref}:refs/remotes/origin/{ref}")
-    revision = git(root, "rev-parse", f"origin/{ref}^{{commit}}")
+    revision = git(root, "rev-parse", f"refs/remotes/origin/{ref}^{{commit}}")
     if not command:
         print(revision)
         return 0
