@@ -22,8 +22,7 @@ struct ExtensionFormSheet: View {
     @PresentationState private var errorMessage: String?
     @PresentationState private var now = Date()
     @PresentationState private var pendingOtherFocusQuestionID: String?
-    @State private var pageDragOffset: CGFloat = 0 // view-local: a rebuilt view has no active finger drag
-    @State private var peekQuestionIndex: Int? // view-local: the transient drag neighbour resets with the gesture
+    @State private var pagePosition: CGFloat = 0 // view-local: reset() re-anchors it to currentQuestionIndex
     @State private var pageWidth: CGFloat = 0 // view-local: geometry is measured again for the rebuilt view
     @FocusState private var focusedQuestionID: String?
 
@@ -43,14 +42,14 @@ struct ExtensionFormSheet: View {
         NavigationStack {
             ZStack {
                 if let form, form.questions.indices.contains(currentQuestionIndex) {
-                    ForEach(visiblePageIndices(form), id: \.self) { index in
+                    ForEach(form.questions.indices, id: \.self) { index in
                         let current = index == currentQuestionIndex
                         questionPage(form.questions[index], index: index, form: form)
-                            .offset(x: CGFloat(index - currentQuestionIndex) * pageWidth + pageDragOffset)
+                            .offset(x: reduceMotion ? 0 : (CGFloat(index) - pagePosition) * pageWidth)
+                            .opacity(reduceMotion && !current ? 0 : 1)
                             .allowsHitTesting(current)
                             .accessibilityHidden(!current)
-                            .transformEnvironment(\.tronSheetMeasuresContent) { $0 = $0 && current }
-                            .transition(reduceMotion ? .opacity : .identity)
+                            .tronSheetFitReports(current)
                     }
                 } else {
                     Label("This form is unavailable.", systemImage: "exclamationmark.triangle.fill")
@@ -102,7 +101,14 @@ struct ExtensionFormSheet: View {
         }
         .tronTopBlur(.sheet)
         .interactiveDismissDisabled(submitting)
-        .onAppear { reset() }
+        .onAppear {
+            reset()
+            #if HOSTED_TEST
+            HostedPresentationProbe.questionPageDrag = { state, translation, velocity in
+                if let form { trackPageDrag(.init(state: state, translation: translation, velocity: velocity), form: form) }
+            }
+            #endif
+        }
         .onChange(of: ExtensionInteractionScope(interaction)) { _, _ in reset() }
         .onChange(of: currentQuestionIndex) { _, _ in
             focusedQuestionID = nil
@@ -245,51 +251,22 @@ struct ExtensionFormSheet: View {
         }
     }
 
-    private func visiblePageIndices(_ form: ExtensionFormDescriptor) -> [Int] {
-        guard let peek = peekQuestionIndex, peek != currentQuestionIndex,
-              form.questions.indices.contains(peek) else { return [currentQuestionIndex] }
-        return [currentQuestionIndex, peek].sorted()
-    }
-
     private func trackPageDrag(_ sample: QuestionPagePanGesture.Sample, form: ExtensionFormDescriptor) {
         let dx = sample.translation
         let target = currentQuestionIndex + (dx < 0 ? 1 : -1)
         let hasTarget = form.questions.indices.contains(target)
         switch sample.state {
         case .began, .changed:
-            guard !reduceMotion else { return }
+            guard !reduceMotion, pageWidth > 0 else { return }
             if sample.state == .began { focusedQuestionID = nil }
-            let peek = hasTarget ? target : nil
-            if peekQuestionIndex != peek { peekQuestionIndex = peek }
-            pageDragOffset = hasTarget ? dx : dx / 3
-        case .ended:
-            let projected = dx + sample.velocity * 0.2
-            let turns = hasTarget && abs(projected) > max(pageWidth / 3, 60) && (projected < 0) == (dx < 0)
-            let animation = ChatMotion.questionPageTurn(reduceMotion: reduceMotion)
-            guard turns else { settlePage(animation); return }
-            if reduceMotion {
-                withAnimation(animation) { currentQuestionIndex = target }
-                return
-            }
-            let previous = currentQuestionIndex
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                currentQuestionIndex = target
-                peekQuestionIndex = previous
-                pageDragOffset += CGFloat(target - previous) * pageWidth
-            }
-            settlePage(animation)
+            pagePosition = CGFloat(currentQuestionIndex) - (hasTarget ? dx : dx / 3) / pageWidth
         default:
-            settlePage(ChatMotion.questionPageTurn(reduceMotion: reduceMotion))
-        }
-    }
-
-    private func settlePage(_ animation: Animation) {
-        withAnimation(animation, completionCriteria: .removed) {
-            pageDragOffset = 0
-        } completion: {
-            if pageDragOffset == 0 { peekQuestionIndex = nil }
+            let projected = dx + sample.velocity * 0.2
+            let turns = sample.state == .ended && hasTarget && abs(projected) > max(pageWidth / 3, 60) && (projected < 0) == (dx < 0)
+            withAnimation(ChatMotion.questionPageTurn(reduceMotion: reduceMotion)) {
+                if turns { currentQuestionIndex = target }
+                pagePosition = CGFloat(currentQuestionIndex)
+            }
         }
     }
 
@@ -464,6 +441,7 @@ struct ExtensionFormSheet: View {
             activeOtherQuestionIDs = []
             currentQuestionIndex = 0
         }
+        pagePosition = CGFloat(currentQuestionIndex)
         submitting = false
         errorMessage = nil
         focusedQuestionID = nil

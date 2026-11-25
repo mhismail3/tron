@@ -235,7 +235,29 @@ private struct HostedAskUserFixture {
                 options: [optionA, optionB],
                 multiSelect: !styled,
                 allowOther: true
-            )] + (HostedLaunch.arguments.contains("-tron-ask-user-multiple") ? [
+            )] + (HostedLaunch.arguments.contains("-tron-ask-user-four-pages") ? [
+                ExtensionFormQuestion(
+                    id: "timing", question: "When should the change happen?",
+                    options: [ExtensionFormOption(id: "now", label: "Now", description: nil),
+                              ExtensionFormOption(id: "later", label: "Later", description: nil)],
+                    multiSelect: false, allowOther: false
+                ),
+                ExtensionFormQuestion(
+                    id: "command", header: "Command", question: "Which command should publish it?",
+                    context: "Either command works:\n\n```sh\nscripts/tron-ios-device share --ref feat/ios-sheets-fluid\nscripts/tron-ios-device install\n```",
+                    options: [ExtensionFormOption(id: "share", label: "Share", description: "Publish to the tailnet build page."),
+                              ExtensionFormOption(id: "install", label: "Install", description: "Install on the connected phone.")],
+                    multiSelect: false, allowOther: true
+                ),
+                ExtensionFormQuestion(
+                    id: "review", header: "Review", question: "Who reviews the build?",
+                    options: [ExtensionFormOption(id: "opus", label: "Opus", description: "An independent model reviewer reads the exact diff."),
+                              ExtensionFormOption(id: "mohsin", label: "Mohsin", description: "The maintainer judges the feel on his phone."),
+                              ExtensionFormOption(id: "both", label: "Both", description: "Model review first, then the phone check."),
+                              ExtensionFormOption(id: "none", label: "Nobody", description: nil)],
+                    multiSelect: true, allowOther: true
+                ),
+            ] : []) + (HostedLaunch.arguments.contains("-tron-ask-user-multiple") ? [
                 ExtensionFormQuestion(
                     id: "timing", question: "When should the change happen?",
                     options: [ExtensionFormOption(id: "now", label: "Now", description: nil),
