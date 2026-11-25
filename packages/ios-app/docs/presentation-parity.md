@@ -102,7 +102,7 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   On sheets it is invisible at rest: its opacity follows the scroll offset 1:1 with no animation,
   from 0 at the top (and in pull-down overscroll) to 1 after the style's height, so a sheet that
   cannot scroll never shows it. SwiftUI scroll views report through `onScrollGeometryChange`;
-  UIKit readers (`TronReadOnlyTextView`, PDF, terminal) report their `UIScrollView` through
+  UIKit readers (`TronReadOnlyTextView`, PDF, terminal, `TronTopBlurWebView`) report their `UIScrollView` through
   `tronTopBlurFeed`.
   The loading reveal applies to scroll content before this overlay: the blur stays at its final
   opacity and position while cards fade and rise beneath it. Every native scroll edge is soft

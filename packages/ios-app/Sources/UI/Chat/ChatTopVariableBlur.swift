@@ -247,6 +247,8 @@ extension View {
 }
 
 final class TronTopBlurWebView: WKWebView {
+    private let topBlur = TronTopBlurScrollObservation()
+
     override init(frame: CGRect, configuration: WKWebViewConfiguration) {
         super.init(frame: frame, configuration: configuration)
         isOpaque = false
@@ -261,6 +263,10 @@ final class TronTopBlurWebView: WKWebView {
     override func safeAreaInsetsDidChange() {
         super.safeAreaInsetsDidChange()
         obscuredContentInsets = safeAreaInsets
+    }
+
+    func reportTopBlur(to feed: TronTopBlurFeed?) {
+        topBlur.attach(scrollView, feed: feed)
     }
 }
 

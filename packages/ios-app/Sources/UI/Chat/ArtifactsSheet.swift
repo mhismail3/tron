@@ -236,7 +236,7 @@ private struct ArtifactWebView: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(origin: url, external: external, failed: failed) }
 
-    func makeUIView(context: Context) -> WKWebView {
+    func makeUIView(context: Context) -> TronTopBlurWebView {
         let view = TronTopBlurWebView(frame: .zero, configuration: WKWebViewConfiguration())
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
@@ -245,7 +245,9 @@ private struct ArtifactWebView: UIViewRepresentable {
         return view
     }
 
-    func updateUIView(_ view: WKWebView, context: Context) {}
+    func updateUIView(_ view: TronTopBlurWebView, context: Context) {
+        view.reportTopBlur(to: context.environment.tronTopBlurFeed)
+    }
 
     @MainActor final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         let origin: URL

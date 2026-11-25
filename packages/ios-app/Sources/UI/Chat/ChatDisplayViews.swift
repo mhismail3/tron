@@ -957,7 +957,7 @@ struct DisplayHTMLWebView: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    func makeUIView(context: Context) -> WKWebView {
+    func makeUIView(context: Context) -> TronTopBlurWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         configuration.userContentController.add(networkBlock)
@@ -980,7 +980,8 @@ struct DisplayHTMLWebView: UIViewRepresentable {
         return view
     }
 
-    func updateUIView(_ view: WKWebView, context: Context) {
+    func updateUIView(_ view: TronTopBlurWebView, context: Context) {
+        view.reportTopBlur(to: context.environment.tronTopBlurFeed)
         guard context.coordinator.loadedHTML != html else { return }
         context.coordinator.loadedHTML = html
         context.coordinator.awaitsRequestedLoad = true
