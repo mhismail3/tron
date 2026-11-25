@@ -15,6 +15,7 @@ import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { EpisodicMemoryError } from "../errors.js";
 import { resolveLimits, type EpisodicLimits, type EpisodicMemoryStatus, type EpisodicSummarizer } from "./episodic-contract.js";
 import { EpisodicMemory } from "./episodic-memory.js";
+import { freezeView, recentViewHigh } from "./episodic-tree.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
 import { homeChapterSource, singleChapterSource } from "../../test-support/episodic-chapter-source.js";
@@ -118,33 +119,10 @@ function partBytes(part: Part, nodes: Map<string, OracleNode>): number {
 }
 
 function fit(view: Part[], count: number, budget: number, nodes: Map<string, OracleNode>): void {
-  const size = () => view.reduce((sum, part) => sum + partBytes(part, nodes), 0);
-  if (size() <= budget) return;
-  const before = [...view];
-  const target = budget - Math.floor(budget / 8);
-  for (;;) {
-    if (size() <= target) break;
-    let best: { position: number; due: number } | undefined;
-    for (let position = 0; position + 1 < view.length; position += 1) {
-      const a = view[position]!;
-      const b = view[position + 1]!;
-      if (a.level !== b.level || a.index % 2 !== 0 || b.index !== a.index + 1) continue;
-      if (!nodes.has(address(a.level + 1, a.index / 2))) continue;
-      const due = (count - a.start) / 2 ** (a.level + 2);
-      if (!best || due > best.due) best = { position, due };
-    }
-    if (!best) break;
-    const a = view[best.position]!;
-    view.splice(best.position, 2, { level: a.level + 1, index: a.index / 2, start: a.start, span: a.span * 2 });
-  }
-  const reducible = view.some((a, index) => {
-    const b = view[index + 1];
-    return b && a.level === b.level && a.index % 2 === 0 && b.index === a.index + 1;
-  });
-  if (size() > target && reducible) {
-    view.length = 0;
-    for (const part of before) view.push(part);
-  }
+  freezeView(view, count, budget, part => {
+    const node = nodes.get(address(part.level, part.index));
+    return { built: node !== undefined, bytes: partBytes(part, nodes) };
+  }, key => nodes.has(key), false);
 }
 
 function expandInvalidated(view: Part[], invalid: Set<string>): Part[] {
@@ -571,14 +549,14 @@ describe("episodic memory end to end", () => {
     } finally { await reopened?.dispose(); }
   });
 
-  it("admits higher summaries only while the retained view exceeds its budget", async () => {
-    const fx = await fixture("scheduler-budget", { viewBytes: 8_192, jobs: 2, retryMs: 0 },
+  it("admits higher summaries only while the view or its recent band exceeds its mark", async () => {
+    const fx = await fixture("scheduler-budget", { viewBytes: 40_000, jobs: 2, retryMs: 0 },
       () => fauxAssistantMessage(`summary ${"s".repeat(400)}`));
     for (let index = 0; index < 16; index += 1) {
       fx.manager.appendMessage(userMessage(`replayed message ${index}: ${"m".repeat(600)}`));
     }
     report.schedulerReplay = [];
-    const sample = (memory: EpisodicMemory, phase: "fitting" | "reopened" | "pressure") => {
+    const sample = (memory: EpisodicMemory, phase: "fitting" | "reopened" | "recent" | "pressure") => {
       const status = memory.status();
       const rendered = memory.renderView(status.messages).text;
       const result = {
@@ -603,7 +581,9 @@ describe("episodic memory end to end", () => {
       afterRepeatedDrain = sample(memory, "fitting");
     } finally { await memory.dispose(); }
 
-    const reopenedMemory = await openMemory({ ...fx, limits: resolveLimits({ ...fx.limits, viewBytes: fitting.viewBytes }) });
+    let markBudget = fitting.viewBytes;
+    while (recentViewHigh(markBudget) < fitting.viewBytes) markBudget += 1;
+    const reopenedMemory = await openMemory({ ...fx, limits: resolveLimits({ ...fx.limits, viewBytes: markBudget }) });
     let reopened: ReturnType<typeof sample>;
     try {
       await reopenedMemory.entriesCommitted(fx.sessionId);
@@ -611,6 +591,14 @@ describe("episodic memory end to end", () => {
     } finally { await reopenedMemory.dispose(); }
     const fittingRecords = readJsonlSafe(fx.nodesPath);
     const fittingHigherSummaries = fittingRecords.filter(record => record.kind === "summary" && typeof record.level === "number" && record.level > 0).length;
+
+    const recentMemory = await openMemory({ ...fx, limits: resolveLimits({ ...fx.limits, viewBytes: markBudget - 1 }) });
+    let recent: ReturnType<typeof sample>;
+    try {
+      await recentMemory.entriesCommitted(fx.sessionId);
+      await recentMemory.whenReady(recentMemory.status().messages);
+      recent = sample(recentMemory, "recent");
+    } finally { await recentMemory.dispose(); }
 
     const pressureMemory = await openMemory({ ...fx, limits: resolveLimits({ ...fx.limits, viewBytes: 2_048 }) });
     let pressure: ReturnType<typeof sample>;
@@ -632,9 +620,14 @@ describe("episodic memory end to end", () => {
     expect(afterRepeatedDrain.rendered).toBe(fitting.rendered);
     expect(afterRepeatedDrain.modelCalls).toBe(fitting.modelCalls);
     expect(reopened.rendered).toBe(fitting.rendered);
-    expect(reopened.viewBytes).toBe(reopened.budgetBytes);
+    expect(recentViewHigh(reopened.budgetBytes), "the recent band sits exactly at its mark").toBe(reopened.viewBytes);
     expect(reopened.modelCalls).toBe(fitting.modelCalls);
     expect(reopened.fauxProviderTokens).toBe(fitting.fauxProviderTokens);
+    expect(recent.viewBytes, "one byte over the recent mark is still far under the view budget").toBeLessThan(recent.budgetBytes);
+    expect(recent.mergeCalls, "a recent band over its mark merges recent pairs").toBeGreaterThan(0);
+    expect(recent.higherSummaries).toBeGreaterThan(0);
+    expect(recent.viewBytes).toBeLessThanOrEqual(recentViewHigh(recent.budgetBytes));
+    expect(recent.status.view.unbuilt).toBe(0);
     expect(pressure.admittedMessages).toBe(fitting.admittedMessages);
     expect(pressure.higherSummaries).toBeGreaterThan(0);
     expect(pressure.mergeCalls).toBeGreaterThan(0);
@@ -684,7 +677,7 @@ describe("episodic memory end to end", () => {
   });
 
   it("keeps the newest chapter topics across sparse and merged trees", async () => {
-    const fx = await fixture("sparse-chapter-topics", { viewBytes: 8_192 });
+    const fx = await fixture("sparse-chapter-topics", { viewBytes: 65_536 });
     const texts = Array.from({ length: 16 }, (_, index) => `chapter topic ${index}: ${"t".repeat(700)}`);
     for (const text of texts) fx.manager.appendMessage(userMessage(text));
     let expected: string[] = [];
@@ -718,15 +711,18 @@ describe("episodic memory end to end", () => {
       report.chapterTopics!.reopened = true;
     } finally { await reopened.dispose(); }
 
-    const merged = await openMemory({ ...fx, limits: resolveLimits({ ...fx.limits, viewBytes: 128 }) });
+    const merged = await openMemory({ ...fx, limits: resolveLimits({ ...fx.limits, viewBytes: 8_192 }) });
     try {
       await merged.entriesCommitted(fx.sessionId);
+      await merged.whenReady(merged.status().messages);
+      expect(merged.status().view.bytes, "the recent band merges while the view is under its budget").toBeLessThan(8_192);
       const nodes = liveNodes(fx);
-      expect(nodes.get(address(4, 0))).toBeDefined();
+      expect(nodes.get(address(3, 0))).toBeDefined();
+      expect(nodes.get(address(3, 1))).toBeDefined();
       const calls = fx.compactor.calls;
       expect(calls).toBeGreaterThan(0);
       expect(merged.recentSummaries([fx.sessionId], 3).get(fx.sessionId))
-        .toEqual([nodes.get(address(0, 16))?.text, nodes.get(address(4, 0))?.text]);
+        .toEqual([nodes.get(address(0, 16))?.text, nodes.get(address(3, 1))?.text, nodes.get(address(3, 0))?.text]);
       expect(fx.compactor.calls).toBe(calls);
       report.chapterTopics!.mergedCoverPreserved = true;
     } finally { await merged.dispose(); }
@@ -1254,10 +1250,6 @@ describe("frozen view", () => {
     });
   }
 
-  async function switchToFrozen(fx: FrozenFixture): Promise<void> {
-    await writeFile(join(fx.storeRoot, "layout.json"), `${JSON.stringify({ lines: [] })}\n`, { mode: 0o600, flag: "wx" });
-  }
-
   function viewLines(memory: EpisodicMemory): string[] {
     return memory.renderView(memory.status().messages).text.split("\n");
   }
@@ -1276,12 +1268,11 @@ describe("frozen view", () => {
     await memory.whenReady(memory.status().messages);
   }
 
-  it("keeps settled lines byte-identical until the hard cap or a chapter rollover, writes no layout for an unmigrated store, and reopens the same view", async () => {
+  it("keeps settled lines byte-identical until the hard cap or a chapter rollover, writes the layout from creation, and reopens the same view", async () => {
     const fx = await frozenFixture("cap");
-    const unmigrated = await openFrozen(fx);
-    try { await commit(fx, unmigrated); } finally { await unmigrated.dispose(); }
-    await expect(readFile(join(fx.storeRoot, "layout.json"))).rejects.toMatchObject({ code: "ENOENT" });
-    await switchToFrozen(fx);
+    const created = await openFrozen(fx);
+    try { await commit(fx, created); } finally { await created.dispose(); }
+    expect(JSON.parse(await readFile(join(fx.storeRoot, "layout.json"), "utf8")).lines, "a new store freezes from creation").not.toHaveLength(0);
 
     const memory = await openFrozen(fx);
     let reopenedView: string;

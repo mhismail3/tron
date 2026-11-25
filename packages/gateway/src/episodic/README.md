@@ -11,8 +11,7 @@ lifecycle: one memory keyed by `homeId` across chapters
 ## Owns
 
 `episodic-memory.ts`, `episodic-store.ts`, `episodic-tree.ts`, `episodic-compactor.ts`,
-`episodic-projection.ts`, `episodic-contract.ts`, `cache-layout.ts`, `home-source.ts`,
-`episodic-layout-migration.ts` (the offline switch to the frozen layout).
+`episodic-projection.ts`, `episodic-contract.ts`, `cache-layout.ts`, `home-source.ts`.
 `home-memory-browser.ts` owns memory-browser admission, cursors and display projection.
 Canonical filesystem readers and digests live in [K1](../kernel/session/README.md);
 the shared refusal class lives in `errors.ts`. Projection and cursor orchestration
@@ -87,13 +86,11 @@ workspace record `state/workspace-state/episodic-initialized.json`.
   delimited tokens fit within the budget with a visible `…` (a `.` for budgets
   below three bytes); an oversized unbroken token leaves only that marker. Repairs
   ask for a complete rewrite, never demonstrate a chopped prefix. The source and
-  children remain available by zoom. A store without `layout.json` leaves the view
-  alone within `VIEW` bytes and, once over, fits down to seven eighths by merging built
-  pairs by largest `due` (batched so cached heads stay stable, #491). A store with
-  `layout.json` is **frozen**: lines of 64 or more messages (`VIEW_SETTLED_SPAN`, the
+  children remain available by zoom. The view is **frozen**: lines of 64 or more messages (`VIEW_SETTLED_SPAN`, the
   settled cache mark) merge only in a planned fold, when the view without the recent
   band's excess over `3·VIEW/16` passes `VIEW + VIEW/8`, or passes `VIEW` while a chapter
-  rollover (the admitted chapter count grew) is pending; the fold is that batched fit.
+  rollover (the admitted chapter count grew) is pending; the fold fits down to seven
+  eighths by merging built pairs by largest `due` (batched so cached heads stay stable, #491).
   Otherwise only recent lines (under 64 messages) merge, by `due`, once their bytes pass
   `3·VIEW/16`, down toward `5·VIEW/64`. A pending rollover lives in memory only; a lost
   one degrades to the cap. The cap bounds that measure, so the total can pass it while the
@@ -101,7 +98,7 @@ workspace record `state/workspace-state/episodic-initialized.json`.
   a node only when unbuilt, its children built and every view part before its end
   built (leaves in order); up to
   `JOBS` at once, refilled per completion; paid merges only while the view exceeds
-  `VIEW`, or, in a frozen store, for recent pairs while the recent band is over its mark. Chapter topics are a newest-first non-overlapping cover of built nodes and
+  `VIEW`, or for recent pairs while the recent band is over its mark. Chapter topics are a newest-first non-overlapping cover of built nodes and
   never start work. Browser lines report exact live-view membership and mark
   the oldest leaf of its contiguous single-message tail when older summaries exist;
   chapter-filtered or zoomed children are not falsely marked as view lines. These
@@ -111,8 +108,8 @@ workspace record `state/workspace-state/episodic-initialized.json`.
   `contextRuns`; stored summaries that hold runs stay readable and invalidation
   still honours them. A Gateway whose reader requires runs on every summary refuses
   a store holding run-less summaries (`invalid-store`): rolling back across this
-  needs a restored pre-change backup of `state/episodic/`. An unfrozen
-  view refolds from message 0 only at load (yielding every 2,000 messages); revoked
+  needs a restored pre-change backup of `state/episodic/`. A rebuilt
+  layout refolds from message 0 only at load (yielding every 2,000 messages); revoked
   merged parts expand to leaves; invalidation carries ancestors and is written
   ancestor-first in chunks of ≤ 2,048 nodes (`open` repairs crashed chunks); blocked
   is persisted with bounded retries; every record has a revision; null edits and
@@ -174,19 +171,13 @@ workspace record `state/workspace-state/episodic-initialized.json`.
   lines from 0: the first gap, overlap, misaligned or past-catalog line stops the walk
   and the rest of the catalog is appended through the rule; a line whose digest differs,
   or whose summary is gone (an invalidation through stored context runs), is replaced by
-  its built descendants, so no multi-message line enters the view unbuilt; an unreadable,
-  oversized, malformed or empty file is rebuilt by the full fold; an unsafe one, or an I/O
-  error other than a missing file, refuses the store like every store file. A rebuild logs
-  `episodic.layout-rebuilt`; history and catalog are never written. Saves go through
+  its built descendants, so no multi-message line enters the view unbuilt; a missing file (a new
+  store), or one with no lines, takes the full fold silently; an unreadable, oversized,
+  malformed or empty one is rebuilt by it and logs `episodic.layout-rebuilt`; an unsafe one, or an I/O error other than a missing
+  file, refuses the store like every store file; history and catalog are never written. Saves go through
   `ensureRoot` and the append queue (temp, fsync, rename, directory fsync) only for a
-  frozen store holding messages, at the end of open, each ingest cut, each drain and
+  store holding messages, at the end of open, each ingest cut, each drain and
   `dispose`; a failed save logs `episodic.layout-unsaved` and never blocks memory.
-- **Freeze migration.** No Gateway start migrates. A store becomes frozen only through
-  `scripts/tron home-layout freeze-memory` (stopped home, maintenance lock, backup with
-  manifest outside the home, recheck, then one atomic create of an empty `layout.json`;
-  v2 files are never written, so a pre-freeze Gateway still reads the store). Without the
-  file the store keeps the unfrozen rule: this bridge serves the live Home store until its
-  migration (removal issue in [docs/tron-home.md](../../../../docs/tron-home.md#memory-freeze)).
 - Ingestion, invalidation, `resumeIngested()` and `dispose()` share one mutex; the
   pump runs outside it, and a result whose generation, children or message changed
   is discarded, never appended.
@@ -215,8 +206,7 @@ scripts/tron test gateway src/episodic
 `episodic-memory.e2e.test.ts` (`test-results/episodic-memory/report.json`),
 `episodic-memory-recovery.integration.test.ts`, `episodic-reasoning-model.e2e.test.ts`,
 `home-source.e2e.test.ts`, `home-state.e2e.test.ts`, `episodic.store.lock.integration.test.ts`,
-`episodic-checkpoint-amortization.e2e.test.ts`, `episodic-tool-read-cancel.e2e.test.ts`,
-`episodic-layout-migration.integration.test.ts`;
+`episodic-checkpoint-amortization.e2e.test.ts`, `episodic-tool-read-cancel.e2e.test.ts`;
 the memory tools: `src/e2e/sessions/home-memory-tools.e2e.test.ts`.
 The browser membership RPC journey prepares its real 362-message forest in a bounded
 suite hook, then checks exact page intervals, live-view/zoom flags, the individual

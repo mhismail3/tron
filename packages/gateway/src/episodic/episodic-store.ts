@@ -111,14 +111,14 @@ export class EpisodicStore {
     await cleanupCheckpoints(paths, pointer?.directory ?? null, this.fileSystem);
   }
 
-  async readLayout(): Promise<readonly EpisodicLayoutLine[] | "unreadable" | undefined> {
+  async readLayout(): Promise<readonly EpisodicLayoutLine[] | "unreadable"> {
     const paths = await this.paths();
-    if (!(await this.namespaceExists(paths))) return undefined;
+    if (!(await this.namespaceExists(paths))) return [];
     const info = await lstat(paths.layout).catch((error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT") return undefined;
       throw new EpisodicMemoryError("unsafe-store", "Episodic layout could not be inspected");
     });
-    if (!info) return undefined;
+    if (!info) return [];
     if (!info.isFile() || info.uid !== process.getuid?.() || (info.mode & 0o077) !== 0) {
       throw new EpisodicMemoryError("unsafe-store", "Episodic layout is not an owner-only regular file");
     }

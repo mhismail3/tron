@@ -35,7 +35,6 @@ GATEWAY_TESTS = [
     'src/e2e/sessions/sdk-behavior-trace.integration.test.ts',
     'src/e2e/sessions/session-search.privacy.lock.integration.test.ts',
     'src/e2e/transport/server-revocation.integration.test.ts',
-    'src/episodic/episodic-layout-migration.integration.test.ts',
     'src/modules/home/home-ledger-crash.e2e.test.ts',
     'src/modules/home/home-receipt-crash.e2e.test.ts',
     'src/notifications/push-policy-migration.integration.test.ts',

@@ -354,7 +354,6 @@ async function frozenRecoveryFixture(label: string, pairs: number): Promise<Reco
   const prebuild = new TronWorkspace(fx.home);
   const memory = await openMemory({ ...fx, workspace: prebuild }, stubSummarizer, FROZEN_LIMITS);
   try { await memory.entriesCommitted(fx.sessionId); } finally { await memory.dispose(); await prebuild.dispose(); }
-  await writeFile(join(fx.storeRoot, "layout.json"), `${JSON.stringify({ lines: [] })}\n`, { mode: 0o600, flag: "wx" });
   for (let index = 1; index < pairs; index += 1) {
     fx.manager.appendMessage({ role: "user", content: `recovery prompt ${index} ${"r".repeat(700)}`, timestamp: Date.now() } satisfies Message);
     fx.manager.appendMessage(fauxAssistantMessage([{ type: "text", text: `recovery reply ${index} ${"s".repeat(700)}` }]));

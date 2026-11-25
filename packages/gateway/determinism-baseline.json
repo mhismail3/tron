@@ -187,9 +187,6 @@
       "sleep": 2,
       "timeout-literal": 8
     },
-    "src/episodic/episodic-layout-migration.integration.test.ts": {
-      "timeout-literal": 2
-    },
     "src/episodic/episodic-memory-recovery.integration.test.ts": {
       "timeout-literal": 8
     },
