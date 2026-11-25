@@ -153,6 +153,16 @@ describe("packaged agent-browser receipts", () => {
       expect(refusal.details.agentBrowserStarted).not.toBe(true);
       expect((await cli("get","cdp-url")).cdpUrl).toBe(unowned);
     });
+    it("refuses the engine's debug-port relaunch guidance and keeps other skills", async () => {
+      for(const args of [["skills","get","electron"],["skills","get","electron","--full"],["skills","get","--all"]]){
+        const refused=JSON.stringify(await step("guidance-"+args.join("-"),args));
+        expect(refused).toContain("owned_launch_required");
+        expect(refused).not.toContain("remote-debugging-port");
+      }
+      const slack=await step("guidance-slack",["skills","get","slack"]);
+      expect(slack).toMatchObject({isError:false});
+      expect(JSON.stringify(slack)).toContain("Slack");
+    });
     it.each([0,5,10,15])("admits five owned authenticated attaches starting at %i", async first => {
       for(let i=first;i<first+5;i++){
         const started=performance.now();
@@ -187,8 +197,6 @@ describe("packaged agent-browser receipts", () => {
       expect(timing.every(ms=>ms<2000)).toBe(true);
       expect(receipts).toHaveLength(21);
       expect(receipts.at(-1)).toBe(nonce);
-      await mkdir(join(process.cwd(),"test-results"),{recursive:true});
-      await writeFile(join(process.cwd(),"test-results/2556-packaged-owned-browser.json"),JSON.stringify({package:JSON.parse(await readFile(join(installedFork,"package.json"),"utf8")).version,unownedRefused:true,ownedAttaches:20,timing,protectedReceipts:21,authenticatedRestart:true},null,2));
     });
     it("records an isolated external Chrome producer before generic connect and cleans its retired profile", async () => {
       const prepared=await step("producer-prepare",["owned-launch","prepare"]);
