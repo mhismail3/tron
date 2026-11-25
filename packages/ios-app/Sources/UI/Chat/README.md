@@ -162,9 +162,9 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   capability-gated stop (`process-transcript-abort.v1`).
 - **Manage Session.** Usage card (tokens left over the used line, Compact Now trailing), then
   `MCPSignInCard` (only while an MCP server reported by `mcp.list` needs sign-in; Sign In starts
-  `mcp.auth.start` for this session and opens `MCPAuthSheet`), then the shared primary-themed `ManageModelConfigurationCard` (catalog model/provider, Switch Model, Thinking and
+  `mcp.auth.start` for this session and opens `MCPAuthSheet`), then the shared primary-themed `ManageModelConfigurationCard` (catalog model/provider, Switch Model, Effort and
   Context Window), read from `settings.resolve`, the model catalog and the session's thinking levels; writes
-  and Revert go through `settings.change`; the shared approval sheet owns request review.
+  go through `settings.change`; the shared approval sheet owns request review.
   Session container: Workspace (`workspace-inspector.v1`), Instructions, Session
   History (`session-history-pages.v1`), Subagent History;
   Terminal and Export as HTML/JSON. Workspace gives its single-line horizontally scrolling path a full line above a

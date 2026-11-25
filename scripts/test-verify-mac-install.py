@@ -23,12 +23,14 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 REPORT = ROOT / "test-results/mac-verify/report.json"
+PROTOCOL = json.loads((ROOT / "config/GatewayProtocol.json").read_text())
 
 SERVER = r"""
 const fs = require('node:fs');
 const https = require('node:https');
 const { WebSocketServer } = require(process.env.FIXTURE_WS);
 const servers = [];
+const protocol = JSON.parse(process.env.FIXTURE_PROTOCOL);
 const modes = () => fs.readFileSync(process.env.FIXTURE_MODE, 'utf8').trim();
 function gateway(host, channel, kind) {
   const server = new WebSocketServer({host, port: 0}); servers.push(server);
@@ -38,8 +40,8 @@ function gateway(host, channel, kind) {
       const frame = JSON.parse(raw.toString());
       fs.appendFileSync(process.env.FIXTURE_EVENTS, JSON.stringify({kind, type:frame.type, method:frame.method})+'\n');
       if (frame.type === 'hello') {
-        if (frame.protocolVersion !== 9 || frame.minProtocolVersion !== 9) return ws.close(1008);
-        return ws.send(JSON.stringify({type:'hello',protocolVersion:9,minProtocolVersion:9}));
+        if (frame.protocolVersion !== protocol.protocolVersion || frame.minProtocolVersion !== protocol.minProtocolVersion) return ws.close(1008);
+        return ws.send(JSON.stringify({type:'hello',protocolVersion:protocol.protocolVersion,minProtocolVersion:protocol.minProtocolVersion}));
       }
       if (frame.type !== 'request' || frame.method !== 'system.info') return ws.close(1008);
       const result = {gatewayChannel:channel,buildFingerprint:'a'.repeat(64),sourceRevision:'b'.repeat(40),runtimeEpoch:'fixture-epoch'};
@@ -140,7 +142,7 @@ class VerifierJourney(unittest.TestCase):
             app = root / "Tron.app"
             native = app / "Contents/Library/Native"
             host = native / "Tron Native Host.app"
-            document(app / "Contents/Info.plist", {"TRONGatewayProtocolVersion": "9", "TRONGatewayMinProtocolVersion": "9", "TronSigningTeam": "FIXTURE123"}, plist=True)
+            document(app / "Contents/Info.plist", {"TRONGatewayProtocolVersion": str(PROTOCOL["protocolVersion"]), "TRONGatewayMinProtocolVersion": str(PROTOCOL["minProtocolVersion"]), "TronSigningTeam": "FIXTURE123"}, plist=True)
             document(host / "Contents/Info.plist", {"CFBundleIdentifier": "com.tron.mac.native-host", "CFBundleExecutable": "TronNativeHost", "TronSigningTeam": "FIXTURE123", "LSUIElement": True, "LSBackgroundOnly": False, "TronCuaDriverSHA256": pin["binarySHA256"]}, plist=True)
             executable(host / "Contents/MacOS/TronNativeHost", "#!/bin/sh\nexit 0\n")
             (native / "tron-native-capture.node").write_bytes(b"x" * 1024)
@@ -152,8 +154,8 @@ class VerifierJourney(unittest.TestCase):
             document(app / "Contents/Library/LaunchAgents/com.tron.server.plist", {"Label": "com.tron.server", "AssociatedBundleIdentifiers": ["com.tron.mac"], "BundleProgram": "Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron", "EnvironmentVariables": {"TRON_GATEWAY_SUPERVISED": "1", "TRON_GATEWAY_CHANNEL": "stable"}, "ProgramArguments": ["tron"]}, plist=True)
             executable(app / "Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron", "#!/bin/sh\nprintf '%064d\\n' 0 | tr 0 a\n")
             payload = app / "Contents/Resources/Gateway"
-            document(payload / "manifest.json", {"schema": 1, "kind": "tron-gateway-payload", "channel": "dev", "version": "fixture", "payloadFingerprint": "a" * 64, "protocolVersion": "9", "minProtocolVersion": "9", "sourceRevision": "b" * 40, "runtimeEpoch": "fixture-epoch"})
-            executable(payload / "app/dist/version.js", "export const PROTOCOL_VERSION = 9;\nexport const MIN_PROTOCOL_VERSION = 9;\n")
+            document(payload / "manifest.json", {"schema": 1, "kind": "tron-gateway-payload", "channel": "dev", "version": "fixture", "payloadFingerprint": "a" * 64, "protocolVersion": str(PROTOCOL["protocolVersion"]), "minProtocolVersion": str(PROTOCOL["minProtocolVersion"]), "sourceRevision": "b" * 40, "runtimeEpoch": "fixture-epoch"})
+            executable(payload / "app/dist/version.js", f"export const PROTOCOL_VERSION = {PROTOCOL['protocolVersion']};\nexport const MIN_PROTOCOL_VERSION = {PROTOCOL['minProtocolVersion']};\n")
             (payload / "app/PushService.xcconfig").write_text("fixture")
             shutil.copytree(ROOT / "packages/gateway/node_modules/ws", payload / "app/node_modules/ws")
             executable(payload / "app/node_modules/@earendil-works/pi-coding-agent/cli.js", "#!/bin/sh\nexit 0\n")
@@ -188,7 +190,7 @@ class VerifierJourney(unittest.TestCase):
                 executable(tools / name, f"#!{sys.executable}\n" + PLATFORM)
             key, cert = root / "key.pem", root / "cert.pem"
             subprocess.run(["/usr/bin/openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", key, "-out", cert, "-days", "1", "-subj", "/CN=localhost"], check=True, capture_output=True)
-            environment.update({"PATH": f"{tools}:{Path(sys.executable).parent}:/usr/bin:/bin:/usr/sbin:/sbin", "TRON_APP_PATH": str(app), "FIXTURE_STATE": str(state), "FIXTURE_MODE": str(mode), "FIXTURE_EVENTS": str(events), "FIXTURE_PORTS": str(ports), "FIXTURE_CUT": str(cut), "FIXTURE_WS": str(payload / "app/node_modules/ws"), "FIXTURE_KEY": str(key), "FIXTURE_CERT": str(cert)})
+            environment.update({"PATH": f"{tools}:{Path(sys.executable).parent}:/usr/bin:/bin:/usr/sbin:/sbin", "TRON_APP_PATH": str(app), "FIXTURE_STATE": str(state), "FIXTURE_MODE": str(mode), "FIXTURE_EVENTS": str(events), "FIXTURE_PORTS": str(ports), "FIXTURE_CUT": str(cut), "FIXTURE_WS": str(payload / "app/node_modules/ws"), "FIXTURE_KEY": str(key), "FIXTURE_PROTOCOL": json.dumps(PROTOCOL), "FIXTURE_CERT": str(cert)})
             server = root / "server.cjs"
             server.write_text(SERVER)
             observations = []

@@ -161,7 +161,6 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
             ) {
                 NavigationStack {
                     themed(destination()
-                        .environment(\.tronSettingsRowAccessory, nil)
                         .toolbar {
                         ToolbarItem(placement: .confirmationAction) {
                             Button { isPresented = false } label: {

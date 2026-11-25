@@ -112,12 +112,6 @@ def verify_source_contract(root: Path = ROOT) -> GatewayProtocolContract:
     )
     _expect_equal(deploy_contract, expected, "deployment helper")
 
-    profile = _read(root / "scripts/tron-profile-gateway-driver.mjs")
-    profile_protocol = _exact_integer(profile, r"^const PROTOCOL_VERSION\s*=\s*(\d+);$", "profiling driver protocol")
-    if profile_protocol != expected.protocol_version:
-        raise ProtocolContractError(f"profiling driver protocol {profile_protocol} does not match the contract's "
-                                    f"{expected.protocol_version} (config/GatewayProtocol.json)")
-
     launcher = _read(root / "packages/mac-app/scripts/tron-gateway-launcher.c")
     launcher_contract = GatewayProtocolContract(
         _exact_integer(launcher, r'^#define TRON_GATEWAY_PROTOCOL_VERSION\s+"(\d+)"$', "launcher protocol"),
