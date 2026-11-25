@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { DefaultPackageManager, DefaultResourceLoader, SettingsManager, type ModelRuntime } from "../kernel/pi/coding-agent.js";
+import { DefaultPackageManager, DefaultResourceLoader, SettingsManager, type EventBus, type ModelRuntime } from "../kernel/pi/coding-agent.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { GatewayError } from "../errors.js";
 import { modelsErrorSummary } from "./model-config-service.js";
@@ -43,13 +43,14 @@ export class GlobalProviderResources {
     agentDir: string;
     modelRuntime: ModelRuntime;
     auth: AuthBroker;
+    eventBus?: EventBus;
     workRegistry?: GatewayWorkRegistry;
     log: (level: "error" | "warning" | "info", message: string) => void;
     broadcast: () => void;
   }): Promise<GlobalProviderResources> {
     const cwd = options.cwd || homedir();
     const settingsManager = SettingsManager.create(cwd, options.agentDir, { projectTrusted: false });
-    const loader = new DefaultResourceLoader({ cwd, agentDir: options.agentDir, settingsManager });
+    const loader = new DefaultResourceLoader({ cwd, agentDir: options.agentDir, settingsManager, ...(options.eventBus ? { eventBus: options.eventBus } : {}) });
     const packageManager = new DefaultPackageManager({ cwd, agentDir: options.agentDir, settingsManager });
     const resources = new GlobalProviderResources(
       loader,

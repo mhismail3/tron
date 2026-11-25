@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { upstreamAccountRefusal } from "../util/upstream-error.js";
-import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
+import type { EventBus, ModelRuntime } from "../kernel/pi/coding-agent.js";
 import { CLAUDE_CODE_VERSION } from "./claude-code-identity.js";
 
 export const PROVIDER_USAGE_CAPABILITY = "provider-usage.v1";
@@ -72,6 +72,7 @@ interface ProviderUsageOptions {
   fetch?: typeof globalThis.fetch;
   now?: () => number;
   timeoutMs?: number;
+  events?: EventBus;
 }
 
 const adapters: Record<string, Adapter> = {
@@ -139,6 +140,35 @@ interface BorrowedUsage { shapes: readonly ProviderShape[]; from: string; }
 const borrowedUsage: Record<string, BorrowedUsage> = {
   openai: { shapes: [{ api: "openai-responses", baseUrl: "https://api.openai.com/v1" }], from: "openai-codex" },
 };
+
+interface ExtensionUsage { api: string; channel: string; source: string; scope: "account"; parse(body: unknown): UsageWindow[]; }
+const extensionUsage: Record<string, ExtensionUsage> = {
+  "antigravity-acp": { api: "antigravity-acp", channel: "antigravity-acp:quota:request", source: "antigravity-acp.usage", scope: "account", parse: parseAntigravityQuota },
+};
+const ANTIGRAVITY_WINDOWS: Record<string, [string, number]> = { weekly: ["Weekly", 604_800], "5h": ["5h", 18_000] };
+function parseAntigravityQuota(body: unknown): UsageWindow[] {
+  const root = object(body); const quota = object(root?.quota);
+  if (root?.ok !== true || !quota || !Array.isArray(quota.groups)) throw new Error("invalid Antigravity quota");
+  const groups = quota.groups.map(object).filter((group): group is Record<string, unknown> => /^Gemini\b/u.test(text(group?.displayName) ?? ""));
+  const windows: UsageWindow[] = [];
+  for (const group of groups) {
+    const name = text(group.displayName)!;
+    if (!Array.isArray(group.buckets)) throw new Error("invalid Antigravity quota group");
+    for (const entry of group.buckets) {
+      const bucket = object(entry); const kind = text(bucket?.window); const fraction = number(bucket?.remainingFraction);
+      if (!kind || fraction === null || fraction < 0 || fraction > 1) throw new Error("invalid Antigravity quota bucket");
+      const [label, duration] = Object.hasOwn(ANTIGRAVITY_WINDOWS, kind) ? ANTIGRAVITY_WINDOWS[kind]! : [kind, null];
+      windows.push(window(`${name}-${kind}`.toLowerCase().replace(/[^a-z0-9]+/gu, "-"), groups.length === 1 ? label : `${name} ${label}`,
+        { usedPercent: Math.round((1 - fraction) * 1_000) / 10, resetsAt: iso(bucket!.resetTime), windowSeconds: duration }));
+    }
+  }
+  if (windows.length === 0) throw new Error("Antigravity quota has no Gemini limits");
+  return capWindows(windows);
+}
+function extensionUsageFor(runtime: ModelRuntime, id: string): ExtensionUsage | undefined {
+  const usage = extensionUsage[id]; const models = runtime.getModels(id);
+  return usage && models.length > 0 && models.every((model) => model.api === usage.api) ? usage : undefined;
+}
 
 function emptySnapshot(providerId: string, status: ProviderStatus, source: string | null = null, scope: "account" | "key" | null = null, message: string | null = null): ProviderUsageSnapshot {
   return { providerId, status, source, scope, updatedAt: null, retryAt: null, stale: false, message, windows: [], balances: [] };
@@ -411,6 +441,7 @@ function parseBalances(value: unknown): UsageBalance[] {
 }
 
 export function providerUsageSupported(runtime: ModelRuntime, providerId: string): boolean {
+  if (extensionUsage[providerId]) return extensionUsageFor(runtime, providerId) !== undefined;
   const borrowed = borrowedUsage[providerId];
   if (borrowed) return borrowerQualifies(runtime, providerId, borrowed) && adapterFor(runtime, borrowed.from) !== undefined;
   const adapter = adapterFor(runtime, providerId);
@@ -490,12 +521,12 @@ export class ProviderUsageOwner {
   private activeReads = 0;
   private readonly options: Required<ProviderUsageOptions>;
   constructor(options: ProviderUsageOptions = {}) {
-    this.options = { fetch: options.fetch ?? globalThis.fetch, now: options.now ?? Date.now, timeoutMs: options.timeoutMs ?? REQUEST_TIMEOUT_MS };
+    this.options = { fetch: options.fetch ?? globalThis.fetch, now: options.now ?? Date.now, timeoutMs: options.timeoutMs ?? REQUEST_TIMEOUT_MS, events: options.events ?? { emit: () => {}, on: () => () => {} } };
   }
 
   async read(runtime: ModelRuntime, providerId: string | undefined, signal?: AbortSignal): Promise<ProviderUsageResponse> {
     const ids = providerId === undefined
-      ? [...Object.keys(adapters), ...Object.keys(borrowedUsage)].filter((id) => providerUsageSupported(runtime, id) && runtime.hasConfiguredAuth(id))
+      ? [...Object.keys(adapters), ...Object.keys(borrowedUsage), ...Object.keys(extensionUsage)].filter((id) => providerUsageSupported(runtime, id) && runtime.hasConfiguredAuth(id))
       : [providerId];
     const providers = await Promise.all(ids.slice(0, MAX_PROVIDERS).map((id) => this.readOne(runtime, id, signal)));
     return { providers };
@@ -503,6 +534,7 @@ export class ProviderUsageOwner {
   private async readOne(runtime: ModelRuntime, providerId: string, signal?: AbortSignal): Promise<ProviderUsageSnapshot> {
     const borrowed = borrowedUsage[providerId];
     if (borrowed) return this.readBorrowed(runtime, providerId, borrowed, signal);
+    if (extensionUsage[providerId]) return raceAbort(this.readExtension(runtime, providerId), signal);
     const admission = this.acquireAdmission();
     if (!admission) return emptySnapshot(providerId, "unavailable", adapters[providerId]?.source ?? null, adapters[providerId]?.scope ?? null, "Provider usage is busy");
     try { return await this.readOneAdmitted(runtime, providerId, signal, admission); }
@@ -601,6 +633,38 @@ export class ProviderUsageOwner {
     }
     return { ...lent, providerId };
   }
+  private readExtension(runtime: ModelRuntime, providerId: string): Promise<ProviderUsageSnapshot> {
+    const usage = extensionUsageFor(runtime, providerId);
+    const meta = { id: providerId, source: extensionUsage[providerId]!.source, scope: extensionUsage[providerId]!.scope };
+    if (!usage) return Promise.resolve(emptySnapshot(providerId, "unsupported", meta.source, meta.scope, "Usage is not supported for this provider configuration"));
+    if (!runtime.hasConfiguredAuth(providerId)) return Promise.resolve(emptySnapshot(providerId, "unconfigured", meta.source, meta.scope, "Provider authentication is not configured"));
+    const key = `${this.runtimeIdentity(runtime)}:${providerId}:${providerBinding(runtime, providerId).authBinding}`;
+    const cached = this.cache.get(key);
+    if (cached && cached.expiresAt > this.options.now()) return Promise.resolve({ ...cached.snapshot, windows: cached.snapshot.windows.map((w) => ({ ...w })), balances: [] });
+    const existing = this.inflight.get(key);
+    if (existing) return existing.promise;
+    const promise = new Promise<unknown>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new DOMException("Timed out", "AbortError")), this.options.timeoutMs);
+      this.options.events.emit(usage.channel, { reply: (result: unknown) => { clearTimeout(timer); resolve(result); } });
+    }).then((body) => {
+      let windows: UsageWindow[];
+      try { windows = usage.parse(body); } catch { return this.failed(meta, key, "unavailable", "Provider usage response was malformed", null); }
+      const snapshot: ProviderUsageSnapshot = { providerId, status: "available", source: usage.source, scope: usage.scope, updatedAt: new Date(this.options.now()).toISOString(), retryAt: null, stale: false, message: null, windows, balances: [] };
+      this.cache.set(key, { key, snapshot, expiresAt: this.options.now() + FRESH_MS }); this.trimCache(); return snapshot;
+    }, () => this.failed(meta, key, "unavailable", "Provider usage request timed out", null))
+      .finally(() => { if (this.inflight.get(key)?.promise === promise) this.inflight.delete(key); });
+    this.inflight.set(key, { promise, waiters: 0 });
+    return promise;
+  }
+  private runtimeIdentity(runtime: ModelRuntime): number {
+    const runtimeObject = runtime as unknown as object;
+    let identity = this.runtimeIdentities.get(runtimeObject);
+    if (identity === undefined) {
+      identity = this.nextRuntimeIdentity++;
+      this.runtimeIdentities.set(runtimeObject, identity);
+    }
+    return identity;
+  }
   private acquireAdmission(): ReadAdmission | undefined {
     if (this.activeReads >= MAX_ACTIVE_READS) return undefined;
     this.activeReads += 1;
@@ -661,14 +725,8 @@ export class ProviderUsageOwner {
     }
   }
   private usageKey(runtime: ModelRuntime, adapter: Adapter, auth: ResolvedAuth): string {
-    const runtimeObject = runtime as unknown as object;
-    let runtimeIdentity = this.runtimeIdentities.get(runtimeObject);
-    if (runtimeIdentity === undefined) {
-      runtimeIdentity = this.nextRuntimeIdentity++;
-      this.runtimeIdentities.set(runtimeObject, runtimeIdentity);
-    }
     const binding = providerBinding(runtime, adapter.id);
-    return `${runtimeIdentity}:${adapter.id}:${binding.providerBaseUrl ?? ""}:${binding.modelSignature}:${binding.authBinding}:${fingerprint(auth)}`;
+    return `${this.runtimeIdentity(runtime)}:${adapter.id}:${binding.providerBaseUrl ?? ""}:${binding.modelSignature}:${binding.authBinding}:${fingerprint(auth)}`;
   }
   private async fetchOne(adapter: Adapter, auth: ResolvedAuth, key: string): Promise<ProviderUsageSnapshot> {
     const started = this.options.now(); const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), this.options.timeoutMs);
@@ -708,7 +766,7 @@ export class ProviderUsageOwner {
       return this.failed(adapter, key, "unavailable", "Provider usage request failed", null);
     } finally { clearTimeout(timer); }
   }
-  private failed(adapter: Adapter, key: string, status: ProviderStatus, message: string, retryAt: string | null): ProviderUsageSnapshot {
+  private failed(adapter: Pick<Adapter, "id" | "source" | "scope">, key: string, status: ProviderStatus, message: string, retryAt: string | null): ProviderUsageSnapshot {
     const retry = retryAt ?? new Date(this.options.now() + NEGATIVE_RETRY_MS).toISOString();
     const prior = this.cache.get(key)?.snapshot;
     const snapshot = prior
