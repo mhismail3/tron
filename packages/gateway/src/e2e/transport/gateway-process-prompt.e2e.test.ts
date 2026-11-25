@@ -124,7 +124,7 @@ describe("prompt journeys across the real Gateway process", () => {
       const bin = join(gateway.root, "bin");
       const pidFile = join(gateway.root, "npm.pid");
       await mkdir(bin);
-      await writeFile(join(bin, "npm"), `#!${process.execPath}\nrequire("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);\n`, { mode: 0o755 });
+      await writeFile(join(bin, "npm"), `#!${process.execPath}\nconst fs = require("node:fs"); if (!fs.fstatSync(0).isSocket()) process.exit(1); fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);\n`, { mode: 0o755 });
       await gateway.restart({ environment: { PATH: `${bin}${delimiter}${process.env.PATH ?? ""}` } });
       expectExactlyOnce(await freshSnapshot(gateway, sessionId));
       lookupPid = await waitFor(async () => {
@@ -133,6 +133,7 @@ describe("prompt journeys across the real Gateway process", () => {
           return undefined;
         }
       }, "the real session started its global npm discovery");
+      process.kill(lookupPid, 0);
       const restartStarted = performance.now();
       await gateway.restart({ whileStopped: async () => {
         console.info("npm discovery shutdown join ms", performance.now() - restartStarted);
