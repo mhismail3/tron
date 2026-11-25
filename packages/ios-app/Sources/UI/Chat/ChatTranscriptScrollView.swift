@@ -931,7 +931,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         let aliasID = installed.queuePresentationIDByOperationID[message.id]
         let suppressed = canonicalSubmissionIDs.contains(renderedID)
         let availability = QueuedMessageManagementPolicy.availability(
-            queueManagementCapability: installed.tag.queueManagementCapability,
+            queueManagementAdmitted: installed.tag.queueManagementAdmitted,
             queueRevision: installed.queueRevision,
             hasAuthoritativeItems: installed.supportsQueueManagement
         )

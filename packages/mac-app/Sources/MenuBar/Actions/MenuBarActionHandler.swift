@@ -156,7 +156,7 @@ final class MenuBarActionHandler {
         alert.informativeText = """
         This unregisters the Tron Agent Login Item.
 
-        Canonical Tron sessions and provider credentials are preserved. Legacy Tron files are also left untouched.
+        Canonical Tron sessions and provider credentials are preserved.
         """
         alert.alertStyle = .warning
         let resetOptionsStack = NSStackView()

@@ -245,9 +245,8 @@ struct HostedHomeDashboardFixture: View {
 
     init() {
         let arguments = HostedLaunch.arguments
-        let capabilityEnabled = !arguments.contains("-home-capability-absent")
         let initialState = arguments.first(where: { $0.hasPrefix("-home-shell-") })?.replacingOccurrences(of: "-home-shell-", with: "") ?? "undesignated"
-        let gateway = HostedHomeShellGateway(capabilityEnabled: capabilityEnabled, initialState: initialState,
+        let gateway = HostedHomeShellGateway(initialState: initialState,
             phase: arguments.first(where: { $0.hasPrefix("-home-phase-") })?.replacingOccurrences(of: "-home-phase-", with: ""),
             delayed: arguments.contains("-home-control-delayed"),
             browserState: arguments.first(where: { $0.hasPrefix("-home-browser-") })?.replacingOccurrences(of: "-home-browser-", with: ""),
@@ -309,7 +308,7 @@ struct HostedHomeDashboardFixture: View {
                             Text("sheet-feedback:\(TronHapticsProbe.shared.count(.sheetPresented))").accessibilityIdentifier("fixture.sheet-feedback")
                             Text(dashboardReads).accessibilityIdentifier("fixture.dashboard-catalog-reads")
                             Text(HomeUsageLayoutProbe.shared.summary).accessibilityIdentifier("fixture.home-usage-layout")
-                            Text("home-diagnostics connected=\(model.connectionState) home-capable=\(model.homeStatus.capabilityEnabled) capabilities=\(String(describing: model.gatewayInfo?.capabilities)) home-phase=\(String(describing: model.homeStatus.status?.phase)) selected-profile=\(String(describing: model.profiles.selected?.id))")
+                            Text("home-diagnostics connected=\(model.connectionState) home-capable=\(model.homeStatus.isAvailable) capabilities=\(String(describing: model.gatewayInfo?.capabilities)) home-phase=\(String(describing: model.homeStatus.status?.phase)) selected-profile=\(String(describing: model.profiles.selected?.id))")
                                 .accessibilityIdentifier("fixture.home-diagnostics")
                         }
                         .font(.system(size: 1)).opacity(0.01)
@@ -431,7 +430,6 @@ struct HostedHomeDashboardFixture: View {
 }
 
 private actor HostedHomeShellGateway {
-    private let capabilityEnabled: Bool
     private let initialState: String
     private var designated: Bool
     private var homeStatusCount = 0
@@ -496,11 +494,10 @@ private actor HostedHomeShellGateway {
     private var profileItems: [HostedProfileItem] = HostedHomeToolFixture.profileItems
     private var profileUndo: [String: (before: [HostedProfileItem], after: [HostedProfileItem])] = [:]
     private var profileChangeCount = 0
-    init(capabilityEnabled: Bool, initialState: String, phase: String? = nil, delayed: Bool = false, browserState: String? = nil, emptyContext: Bool = false, sheetState: String? = nil) {
+    init(initialState: String, phase: String? = nil, delayed: Bool = false, browserState: String? = nil, emptyContext: Bool = false, sheetState: String? = nil) {
         self.sheetState = sheetState
         self.browserState = browserState
         self.emptyContext = emptyContext
-        self.capabilityEnabled = capabilityEnabled
         self.initialState = initialState
         designated = initialState == "ready" || initialState == "rollover"
         self.phase = phase ?? "ready"
@@ -558,7 +555,7 @@ private actor HostedHomeShellGateway {
     func configuredModelIdentity() -> String { configuredModels.isEmpty ? "none" : configuredModels.joined(separator: ",") }
     func lastPromptRoute() -> String { promptRoutes.last ?? "none" }
     func lastOpenedSession() -> String { openedSessions.last ?? "none" }
-    func capabilities() -> [String] { foreground.capabilities(capabilityEnabled ? (sheetState == "dashboard-workers" ? [ProviderUsageCapability.name] : []) + ["sessions.v1", "home.v1", "home-chapter-list.v1", "home-profile-list.v1", "home-profile-edit.v1", "context-window.v1", "skill-prompt.v1"] + (sheetState == "browser-unsupported" ? [] : ["home-memory-view.v1"]) : ["sessions.v1"]) }
+    func capabilities() -> [String] { foreground.capabilities((sheetState == "dashboard-workers" ? [ProviderUsageCapability.name] : []) + ["sessions.v1", "context-window.v1", "skill-prompt.v1"]) }
 
     private var homeReads: [String: Int] = [:]
     private var onHomeRead: (@MainActor @Sendable (String) -> Void)?
@@ -1013,12 +1010,12 @@ private actor HostedHomeShellGateway {
     }
 
     private func model(_ id: String, name: String, virtual: Bool = false) -> JSONValue {
-        .object(["provider": .string("fixture"), "id": .string(id), "name": .string(name), "reasoning": .bool(false),
+        .object(["provider": .string("fixture"), "providerName": .string("Fixture"), "id": .string(id), "name": .string(name), "latest": .bool(false), "reasoning": .bool(false),
                  "input": .array([.string("text")]), "contextWindow": .number(8192), "maxTokens": .number(1024),
                  "available": .bool(true), "virtual": .bool(virtual)])
     }
     private func anthropicModel(_ id: String, name: String, window: Int) -> JSONValue {
-        .object(["provider": .string("anthropic"), "id": .string(id), "name": .string(name), "reasoning": .bool(true),
+        .object(["provider": .string("anthropic"), "providerName": .string("Anthropic"), "id": .string(id), "name": .string(name), "latest": .bool(false), "reasoning": .bool(true),
                  "input": .array([.string("text")]), "contextWindow": .number(Double(window)), "maxTokens": .number(64_000),
                  "available": .bool(true), "virtual": .bool(false)])
     }

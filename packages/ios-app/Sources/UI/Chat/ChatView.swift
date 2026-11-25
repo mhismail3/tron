@@ -1321,11 +1321,8 @@ struct ChatView: View {
         }
     }
 
-    private var queueManagementCapabilityForProjection: Bool {
-        guard let gatewayInfo = model.gatewayInfo else {
-            return transcriptPresentation.installed?.tag.queueManagementCapability ?? false
-        }
-        return gatewayInfo.capabilities.contains(QueuedMessageManagementPolicy.capability)
+    private var queueManagementAdmittedForProjection: Bool {
+        model.gatewayInfo != nil || transcriptPresentation.installed?.tag.queueManagementAdmitted == true
     }
 
     private struct DeferredLiveProjectionRevision: Equatable {
@@ -1374,7 +1371,7 @@ struct ChatView: View {
                 || model.foregroundReconciliationGeneration == 0
                 ? nil
                 : model.foregroundReconciliationGeneration,
-            queueManagementCapability: queueManagementCapabilityForProjection,
+            queueManagementAdmitted: queueManagementAdmittedForProjection,
             handoff: handoff,
             queuePresentationIDByOperationID: queuePresentationIDs
         )
@@ -2695,7 +2692,7 @@ struct ChatView: View {
     private var manageHomeContext: (profileID: String, status: HomeStatus)? {
         guard let profileID = composerScope?.profileID,
               profileID == model.profiles.selected?.id,
-              model.homeStatus.capabilityEnabled,
+              model.homeStatus.isAvailable,
               let status = model.homeStatus.status,
               HomeChatRouteKey.forChat(sessionID: sessionID, isHome: isHomeRoute).matches(status),
               status.enabled || model.homeMutations.ownsUnresolvedCommand(profileID: profileID) else { return nil }
@@ -2969,7 +2966,7 @@ struct ChatView: View {
     private var queueEditorCommit: QueuedMessageManagementCommit? {
         let installed = QueuedMessageManagementPolicy.installedCommit(for: transcriptPresentation.installed)
         guard sessionPresentation.queuedMessageEditor != nil else { return installed }
-        guard queueManagementCapabilityForProjection else { return nil }
+        guard queueManagementAdmittedForProjection else { return nil }
         guard let queue = model.sessionQueuePresentation(for: sessionID) else { return installed }
         guard queue.runtimeGeneration == transcriptPresentation.installed?.tag.runtimeGeneration else { return nil }
         return QueuedMessageManagementCommit(expectedRevision: queue.revision, items: queue.items)

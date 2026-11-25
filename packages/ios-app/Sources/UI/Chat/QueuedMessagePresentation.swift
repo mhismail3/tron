@@ -7,7 +7,6 @@ struct QueuedMessageEditorRoute: Identifiable, Hashable {
 
 enum QueuedMessageManagementAvailability: Equatable, Sendable {
     case available
-    case requiresGatewayUpdate
     case invalidProjection
 
     var isManageable: Bool { self == .available }
@@ -151,22 +150,19 @@ enum ChatQueueMutationProjectionPolicy {
 }
 
 enum QueuedMessageManagementPolicy {
-    static let capability = "queue-management.v1"
-
     static func availability(
-        queueManagementCapability: Bool,
+        queueManagementAdmitted: Bool,
         queueRevision: Int?,
         hasAuthoritativeItems: Bool
     ) -> QueuedMessageManagementAvailability {
-        guard queueManagementCapability else { return .requiresGatewayUpdate }
-        return queueRevision != nil && hasAuthoritativeItems ? .available : .invalidProjection
+        queueManagementAdmitted && queueRevision != nil && hasAuthoritativeItems ? .available : .invalidProjection
     }
 
     static func installedCommit(
         for installed: InstalledChatTranscript?
     ) -> QueuedMessageManagementCommit? {
         guard let installed,
-              installed.tag.queueManagementCapability,
+              installed.tag.queueManagementAdmitted,
               installed.supportsQueueManagement,
               let expectedRevision = installed.queueRevision else { return nil }
         return QueuedMessageManagementCommit(
@@ -466,8 +462,6 @@ struct QueuedMessageRow: View {
         switch managementAvailability {
         case .available:
             ""
-        case .requiresGatewayUpdate:
-            "Update Tron on Mac to edit or remove queued messages"
         case .invalidProjection:
             "Reconnect to Tron on Mac to restore queue editing"
         }

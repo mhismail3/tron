@@ -140,7 +140,7 @@ extension HomeContextProjection {
 struct HomeManageDTO: Equatable, Sendable {
     let status: HomeStatus
     let context: HomeContextProjection
-    let chapters: HomeChapterList?
+    let chapters: HomeChapterList
     let tasks: HomeTaskPage?
     var profile: HomeProfileList? = nil
 }
@@ -188,15 +188,6 @@ enum HomeChapterPresentation {
         let prefix = String(plain.prefix(limit))
         let cut = prefix.lastIndex(of: " ").map { String(prefix[..<$0]) } ?? prefix
         return cut.trimmingCharacters(in: .punctuationCharacters.union(.whitespaces)) + "…"
-    }
-
-    static func manageSubtitle(_ chapter: HomeStatusChapter) -> String {
-        let count = chapter.count == 1 ? "1 chapter" : "\(chapter.count.formatted()) chapters"
-        switch chapter.recoveryDecision {
-        case .none: return count
-        case .reserved: return "\(count) · Successor reserved"
-        case .materializing: return "\(count) · Materializing"
-        }
     }
 
     static func stateLabel(_ state: HomeChapterSummaryState) -> String {

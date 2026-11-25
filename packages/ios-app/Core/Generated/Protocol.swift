@@ -1565,8 +1565,10 @@ package struct ModelTokenPrice: Hashable, Sendable {
 }
 package struct ModelSummary: Hashable, Sendable {
   package let provider: String
+  package let providerName: String
   package let id: String
   package let name: String
+  package let latest: Bool
   package let virtual: Bool
   package let reasoning: Bool
   package let input: [String]
@@ -1576,10 +1578,12 @@ package struct ModelSummary: Hashable, Sendable {
   package let available: Bool
   package let releaseDate: String?
   package let cost: ModelTokenPrice?
-  package init(provider: String, id: String, name: String, virtual: Bool, reasoning: Bool, input: [String], contextWindow: Int, contextWindowLimits: ContextWindowLimits? = nil, maxTokens: Int, available: Bool, releaseDate: String? = nil, cost: ModelTokenPrice? = nil) {
+  package init(provider: String, providerName: String, id: String, name: String, latest: Bool, virtual: Bool, reasoning: Bool, input: [String], contextWindow: Int, contextWindowLimits: ContextWindowLimits? = nil, maxTokens: Int, available: Bool, releaseDate: String? = nil, cost: ModelTokenPrice? = nil) {
     self.provider = provider
+    self.providerName = providerName
     self.id = id
     self.name = name
+    self.latest = latest
     self.virtual = virtual
     self.reasoning = reasoning
     self.input = input
@@ -1593,8 +1597,10 @@ package struct ModelSummary: Hashable, Sendable {
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> ModelSummary {
     let o = try wObj(v, p)
     let f_provider: String = wAbsent(o.value("provider")) ? "" : try wStr(o.value("provider")!, p + ".provider")
+    let f_providerName: String = wAbsent(o.value("providerName")) ? "" : try wStr(o.value("providerName")!, p + ".providerName")
     let f_id: String = wAbsent(o.value("id")) ? "" : try wStr(o.value("id")!, p + ".id")
     let f_name: String = wAbsent(o.value("name")) ? "" : try wStr(o.value("name")!, p + ".name")
+    let f_latest: Bool = wAbsent(o.value("latest")) ? false : try wBool(o.value("latest")!, p + ".latest")
     let f_virtual: Bool = wAbsent(o.value("virtual")) ? false : try wBool(o.value("virtual")!, p + ".virtual")
     let f_reasoning: Bool = wAbsent(o.value("reasoning")) ? false : try wBool(o.value("reasoning")!, p + ".reasoning")
     let f_input: [String] = wAbsent(o.value("input")) ? [] : try wSeq(o.value("input")!, p + ".input") { x, q in try wStr(x, q) }
@@ -1604,13 +1610,15 @@ package struct ModelSummary: Hashable, Sendable {
     let f_available: Bool = wAbsent(o.value("available")) ? false : try wBool(o.value("available")!, p + ".available")
     let f_releaseDate: String? = wAbsent(o.value("releaseDate")) ? nil : try wStr(o.value("releaseDate")!, p + ".releaseDate")
     let f_cost: ModelTokenPrice? = wAbsent(o.value("cost")) ? nil : try ModelTokenPrice.decode(o.value("cost")!, p + ".cost")
-    return ModelSummary(provider: f_provider, id: f_id, name: f_name, virtual: f_virtual, reasoning: f_reasoning, input: f_input, contextWindow: f_contextWindow, contextWindowLimits: f_contextWindowLimits, maxTokens: f_maxTokens, available: f_available, releaseDate: f_releaseDate, cost: f_cost)
+    return ModelSummary(provider: f_provider, providerName: f_providerName, id: f_id, name: f_name, latest: f_latest, virtual: f_virtual, reasoning: f_reasoning, input: f_input, contextWindow: f_contextWindow, contextWindowLimits: f_contextWindowLimits, maxTokens: f_maxTokens, available: f_available, releaseDate: f_releaseDate, cost: f_cost)
   }
   package func encode() -> String {
     var s = ""
     s += ",\"provider\":" + wEscape(self.provider)
+    s += ",\"providerName\":" + wEscape(self.providerName)
     s += ",\"id\":" + wEscape(self.id)
     s += ",\"name\":" + wEscape(self.name)
+    s += ",\"latest\":" + (self.latest ? "true" : "false")
     s += ",\"virtual\":" + (self.virtual ? "true" : "false")
     s += ",\"reasoning\":" + (self.reasoning ? "true" : "false")
     s += ",\"input\":" + "[" + self.input.map { wEscape($0) }.joined(separator: ",") + "]"
