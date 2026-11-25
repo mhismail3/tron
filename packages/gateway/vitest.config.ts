@@ -10,7 +10,7 @@ export default defineConfig({
     environment: "node",
     maxWorkers: Math.min(4, availableParallelism()),
     testTimeout: 15_000,
-    sequence: { shuffle: true },
+    sequence: { shuffle: { files: false, tests: true } },
     setupFiles: ["test-support/network-isolation.ts", "test-support/tron-home-environment-guard.ts"],
   },
 });

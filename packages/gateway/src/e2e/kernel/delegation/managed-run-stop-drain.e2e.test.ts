@@ -60,17 +60,20 @@ describe("Managed subagents: intentional stop drain", () => {
     expect(slot.administrativeDrainBlockers()).toEqual([]);
   }, 60_000);
 
-  it("a live Home task waiting on its async run holds the stop, is named on its worker session, and the stop completes after the task settles (#2259)", async () => {
+  it("a live Home task waiting on its async run holds the stop, is named on its worker session, is judged by its live run's progress rather than the task's last transition, and the stop completes after the task settles (#2259, #2363)", async () => {
     const f = await fixture(false, false, undefined, true);
     const child = await childModel(f);
     f.faux.setResponses([
-      holdingAsyncLaunch("async-launch"),
+      holdingAsyncLaunch("async-launch", "HOLD-CHILD CALL-TOOL HOLD-AFTER-TOOL background search"),
       fauxAssistantMessage("Launched the background check."),
     ]);
     const run = await dispatch(f);
     const slot = await f.registry.acquire(run.sessionId);
     await waitFor(() => child.heldRequests() === 1, "async child live", bound);
     await waitBetweenTurns(slot);
+    const blocker = (category: string) => f.registry.administrativeDrainSnapshot().blockers
+      .find(entry => entry.sessionId === run.sessionId && entry.category === category);
+    const heldAt = blocker("foreground-agent-operation")!.progressAt!;
 
     const root = await mkdtemp(join(tmpdir(), "tron-2259-stop-drain-"));
     roots.push(root);
@@ -89,29 +92,6 @@ describe("Managed subagents: intentional stop drain", () => {
     expect(named.filter(blocker => blocker.state === "suspect")).toEqual([]);
     expect(settled).toBe(false);
 
-    child.releaseHeld();
-    expect(await run.completion).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "unknown", reason: "no-report", sessionId: run.sessionId } });
-    const final = await drain;
-    const waiting = (await records(logPath)).filter(record => record.event === "gateway.stop-drain.waiting");
-    await mkdir("test-results/2259", { recursive: true });
-    await writeFile("test-results/2259/home-task-stop-drain.json", JSON.stringify({ waiting, final }, null, 2));
-    expect(final).toMatchObject({ phase: "complete", blockerCount: 0 });
-  }, 60_000);
-
-  it("a restart drain judges a held Home task by its live async run's progress, not by the task's last transition (#2363)", async () => {
-    const f = await fixture(false, false, undefined, true);
-    const child = await childModel(f);
-    f.faux.setResponses([
-      holdingAsyncLaunch("async-launch", "HOLD-CHILD CALL-TOOL HOLD-AFTER-TOOL background search"),
-      fauxAssistantMessage("Launched the background check."),
-    ]);
-    const run = await dispatch(f);
-    const slot = await f.registry.acquire(run.sessionId);
-    await waitFor(() => child.heldRequests() === 1, "async child live", bound);
-    await waitBetweenTurns(slot);
-    const blocker = (category: string) => f.registry.administrativeDrainSnapshot().blockers
-      .find(entry => entry.sessionId === run.sessionId && entry.category === category);
-    const heldAt = blocker("foreground-agent-operation")!.progressAt!;
     await new Promise(resolve => setTimeout(resolve, 20));
     child.releaseHeld();
     await waitFor(() => child.heldRequests() === 2, "the run progressed and is live again", bound);
@@ -146,7 +126,13 @@ describe("Managed subagents: intentional stop drain", () => {
       expect(decided(unparsed, now)).toEqual(decided(unset, now));
       expect(decided(early, now)).toEqual(decided(unset, now));
     }
+
     child.releaseHeld();
-    await run.completion.catch(() => {});
+    expect(await run.completion).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "unknown", reason: "no-report", sessionId: run.sessionId } });
+    const final = await drain;
+    const waiting = (await records(logPath)).filter(record => record.event === "gateway.stop-drain.waiting");
+    await mkdir("test-results/2259", { recursive: true });
+    await writeFile("test-results/2259/home-task-stop-drain.json", JSON.stringify({ waiting, final }, null, 2));
+    expect(final).toMatchObject({ phase: "complete", blockerCount: 0 });
   }, 60_000);
 });
