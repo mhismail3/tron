@@ -117,6 +117,8 @@ final class GatewayDecisionOwnershipTests: XCTestCase {
                     "https://10.0.0.1/", "https://127.0.0.1/", "https://192.168.1.1/", "https://100.64.0.1/", "https://203.0.113.1/",
                     "https://[2001:0db8::1]/", "https://[2001:db8::1]/", "https://[::1]/", "https://[::ffff:8.8.8.8]/", "https://[fe80::1]/", "https://[+2001::1]/",
                     "https://[2400:cb00::1%25x]/", "https://[2001:::1]/", "https://[2001::1::2]/",
+                    "https://[2001:1:2:3:4:5:6:7::]/", "https://[2001:2:3:4:5:6:7::8]/", "https://[2001:1:2:3:4:5:6::7]/",
+                    "https://[2001:1:2:3:4::5:6:7:8]/", "https://[2001:1:2:3:4:5:6:7:8::]/",
                     "https://@example.com/", "https://user@example.com/", "https://example.com/?q", "https://localhost/"] {
             XCTAssertFalse(DisplayRemoteURLPolicy.admits(url), url)
         }
