@@ -6,7 +6,7 @@ Block hash: `97b95378bd233b27` (over `blocks/sessions/restart-drain/Block.dfy`, 
 | Gate | Status |
 |---|---|
 | Proof (pinned Dafny, --verify-included-files) | PASS: blocks/sessions/restart-drain/Block.dfy: Dafny program verifier finished with 51 verified, 0 errors;  |
-| Independent review | NOT ACCEPTED: STALE (reviewed 9b52b76ca038ba27, current 97b95378bd233b27); reviewer transcript never mentions the current block hash (it did not review this version); accepted mutant Evaluate/boundary/>->>=#1 lacks the reviewer's AGREE |
+| Independent review | ACCEPT by delegate (run 5b7059a5) (anthropic/claude-haiku-5-5, transcript-verified); writer parent (Home task, #2685) (anthropic/claude-opus-5-5); 2026-11-25 |
 | Mutation check | PASS: 108 valid mutants, 103 killed by laws, 0 survived, 5 accepted (blocks/sessions/restart-drain/MUTATION.json; statuses 4d146a0aa0e1c89a) |
 | Cut over | the only implementation: `packages/gateway/src/core/sessions/restart-drain` runs this block's compiled core (scripts/tron proof facade) |
 
@@ -122,7 +122,7 @@ lemma ProgressSpec(blockers: List<Blocker>, o: Blocker)
 
 **Mutation results.** kills 24 of 108 valid mutants; 10 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: Oldest matches OldestOf; Progress equals LatestOf over the session's listed blockers (ProgressSpec, LatestSpec), which under A2 carry the latest progress of the session's omitted blockers (runtime-registry.ts omitted-progress carry).
+**Reviewer notes.** ACCEPT: Oldest matches OldestOf (OldestSpec); Tracking carries the oldest blocker's id, state and admission time; the timer start is R1's.
 
 ## R1 timer-reset
 
@@ -148,7 +148,7 @@ lemma SameSpec(a: State, b: State, s: Time, t: Time)
 
 **Mutation results.** kills 28 of 108 valid mutants; 13 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: since == (if Unchanged(tracked, o, p) then tracked.since else Signal(p, o.admitted, now)) with p O1's judged progress, matching the English and Evaluate via SameSpec. A backward move to an older judged progress also resets the timer; that pre-existing behaviour is tracked as #2685 and needs its own law revision.
+**Reviewer notes.** ACCEPT: Same(tracked, o) is id, state and admission unchanged (SameSpec), then Kept(since, p) is the later of since and p; otherwise Signal(p, admitted, now). Progress for the same tracked blocker never moves since back. A state change of the tracked blocker still resets to Signal, as the English states.
 
 ## T1 stalled
 
@@ -352,9 +352,9 @@ ghost function Age(now: Ms, since: Ms): Ms { if now <= since then 0 else now - s
 | `LatestFor/boundary/>->>=#1` | `>` -> `>=` | equivalent (proven): on equal milliseconds both keep a time At(ms) of the same value, so the running latest is the same Time either way [law reviewer (REVIEW.json acceptedMutants)] | AGREE |
 | `Evaluate/swap-args/tracked.state, o.state->o.state, tracked.state#1` | `tracked.state, o.state` -> `o.state, tracked.state` | equivalent (proven): SameState and SameTime are symmetric (each is equality, SameSpec), so swapping the tracked and the current value cannot change which branch Evaluate takes [law reviewer (REVIEW.json acceptedMutants)] | AGREE |
 | `Evaluate/swap-args/tracked.admitted, o.admitted->o.admitted, tracked.admitted#1` | `tracked.admitted, o.admitted` -> `o.admitted, tracked.admitted` | equivalent (proven): SameState and SameTime are symmetric (each is equality, SameSpec), so swapping the tracked and the current value cannot change which branch Evaluate takes [law reviewer (REVIEW.json acceptedMutants)] | AGREE |
-| `Evaluate/boundary/>->>=#1` | `>` -> `>=` | equivalent (proven): when the progress time equals the tracked time both keep that same millisecond as the timer's start [law reviewer (REVIEW.json acceptedMutants)] | - |
+| `Evaluate/boundary/>->>=#1` | `>` -> `>=` | equivalent (proven): when the progress time equals the tracked time both keep that same millisecond as the timer's start [law reviewer (REVIEW.json acceptedMutants)] | AGREE |
 | `Evaluate/boundary/<=-><#1` | `<=` -> `<` | equivalent (proven): when now equals since both give the age 0 (now - since is 0) [law reviewer (REVIEW.json acceptedMutants)] | AGREE |
 
 ## Reviewer: general notes
 
-Hash 9b52b76ca038ba27; MUTATION.json inputsHash matches. Since cf3d58e0fde201a4 only comments in laws/sessions/RestartDrain.dfy changed: A2 states the listing rule (earliest admitted first, unadmitted last, at most 64, omitted progress carried onto listed blockers of the same session), the future-progress clamp, the shared host clock and that extension-reported admission times are not clamped; R1 names O1's judged progress. A1-A3 hold of the shell (runtime-registry.ts administrativeDrainSnapshot, restart-drain.ts instant(), extension-run-projection.ts progressTime, gateway-main.ts fresh RestartDrainProgress per drain). The five accepted equivalences AGREE. Residual: #2685 (timer moves back when a session's progressing blocker settles), pre-existing and tracked separately.
+Hash 97b95378bd233b27 at a9307075f; MUTATION.json inputsHash matches. R1 keeps the stall timer monotone while the tracked blocker, state and admission are unchanged (#2685); Tracked.progress removed. A1-A3 hold of restart-drain.ts (tracked spread carries id, state, admitted, since; id re-tokenised per call). The five accepted equivalences AGREE. Residual: a state change of the tracked blocker resets the timer to its current signal, stated by R1.

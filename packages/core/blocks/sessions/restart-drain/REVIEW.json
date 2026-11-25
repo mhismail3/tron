@@ -1,15 +1,15 @@
 {
-  "packetHash": "9b52b76ca038ba27",
+  "packetHash": "97b95378bd233b27",
   "tier": "high-stakes",
   "date": "2026-11-25",
   "writer": {
-    "agent": "parent (Home task, #2682)",
+    "agent": "parent (Home task, #2685)",
     "model": "anthropic/claude-opus-5-5"
   },
   "reviewer": {
-    "agent": "reviewer (run caf7c496)",
+    "agent": "delegate (run 5b7059a5)",
     "model": "anthropic/claude-haiku-5-5",
-    "session": "2026-11-25T08-26-32-519Z_01a211d0-48c7-7244-9039-a6aafcff4105/caf7c496-78d6-472e-9065-38a3d7640faf/run-0/session.jsonl"
+    "session": "2026-11-25T10-15-37-951Z_01a21234-28df-7244-9039-a6bf2ceda56d/e29ec52e-39d4-4f64-87eb-0885e894ca68/run-0/session.jsonl"
   },
   "laws": {
     "C1 completed": {
@@ -26,11 +26,11 @@
     },
     "O1 oldest-tracked": {
       "verdict": "ACCEPT",
-      "notes": "Oldest matches OldestOf; Progress equals LatestOf over the session's listed blockers (ProgressSpec, LatestSpec), which under A2 carry the latest progress of the session's omitted blockers (runtime-registry.ts omitted-progress carry)."
+      "notes": "Oldest matches OldestOf (OldestSpec); Tracking carries the oldest blocker's id, state and admission time; the timer start is R1's."
     },
     "R1 timer-reset": {
       "verdict": "ACCEPT",
-      "notes": "since == (if Unchanged(tracked, o, p) then tracked.since else Signal(p, o.admitted, now)) with p O1's judged progress, matching the English and Evaluate via SameSpec. A backward move to an older judged progress also resets the timer; that pre-existing behaviour is tracked as #2685 and needs its own law revision."
+      "notes": "Same(tracked, o) is id, state and admission unchanged (SameSpec), then Kept(since, p) is the later of since and p; otherwise Signal(p, admitted, now). Progress for the same tracked blocker never moves since back. A state change of the tracked blocker still resets to Signal, as the English states."
     },
     "T1 stalled": {
       "verdict": "ACCEPT",
@@ -40,9 +40,9 @@
   "acceptedMutants": {
     "LatestFor/boundary/>->>=#1": "AGREE",
     "Evaluate/swap-args/tracked.state, o.state->o.state, tracked.state#1": "AGREE",
-    "Evaluate/swap-args/tracked.progress, p->p, tracked.progress#1": "AGREE",
     "Evaluate/swap-args/tracked.admitted, o.admitted->o.admitted, tracked.admitted#1": "AGREE",
+    "Evaluate/boundary/>->>=#1": "AGREE",
     "Evaluate/boundary/<=-><#1": "AGREE"
   },
-  "general": "Hash 9b52b76ca038ba27; MUTATION.json inputsHash matches. Since cf3d58e0fde201a4 only comments in laws/sessions/RestartDrain.dfy changed: A2 states the listing rule (earliest admitted first, unadmitted last, at most 64, omitted progress carried onto listed blockers of the same session), the future-progress clamp, the shared host clock and that extension-reported admission times are not clamped; R1 names O1's judged progress. A1-A3 hold of the shell (runtime-registry.ts administrativeDrainSnapshot, restart-drain.ts instant(), extension-run-projection.ts progressTime, gateway-main.ts fresh RestartDrainProgress per drain). The five accepted equivalences AGREE. Residual: #2685 (timer moves back when a session's progressing blocker settles), pre-existing and tracked separately."
+  "general": "Hash 97b95378bd233b27 at a9307075f; MUTATION.json inputsHash matches. R1 keeps the stall timer monotone while the tracked blocker, state and admission are unchanged (#2685); Tracked.progress removed. A1-A3 hold of restart-drain.ts (tracked spread carries id, state, admitted, since; id re-tokenised per call). The five accepted equivalences AGREE. Residual: a state change of the tracked blocker resets the timer to its current signal, stated by R1."
 }
