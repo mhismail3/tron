@@ -10,6 +10,7 @@ import { NotificationService } from "../../../notifications/notification-service
 import { PushRelayClient } from "../../../notifications/relay-client.js";
 import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
 import { droppingAnyTurnFrame } from "../../../../test-support/turn-frame.js";
+import { decodeHomeTaskStatusResult } from "../../../protocol/types.js";
 
 const LOCK = "home-activation-wake";
 const LOCK_PROVIDER = `tron-lock-${LOCK}`;
@@ -191,6 +192,7 @@ describe("gateway/home scenario lock", () => {
 
     const task = await phone.request("home.taskStatus", { taskId: TASK_ID });
     expect(task.ok, JSON.stringify(task)).toBe(true);
+    expect(decodeHomeTaskStatusResult(task.result), "home.taskStatus sends exactly HomeTaskStatusResult").toEqual(task.result);
     const workerSessionId = task.result.sessionId as string;
     await gateway.settled(workerSessionId);
     await waitFor(async () => {
@@ -253,8 +255,10 @@ describe("gateway/home scenario lock", () => {
       wake: { acknowledgedAt: "<timestamp>", createdAt: "<timestamp>", eventId: EVENT_ID, push: "decided", redeliveries: [], routeGeneration: 1, state: "acknowledged",
         delivery: { generation: 1, messageDigest: "<base64:64>", operationId: "<id>", routeGeneration: 1, sessionId: "<id>" } } };
     expect(answers[9], "the task: terminal by its explicit report, its wake delivered and acknowledged").toEqual({ error: null, ok: true, result: {
-      ...TASK, checkins: [], ownerSettlement: null, project: "workspace", subagentRuns: { runs: [], total: 0 }, subagents: { started: 0, stoppedAtEnd: 0 },
-      title: "Lock task", workerModel: { id: "<id>", provider: LOCK_PROVIDER } } });
+      checkins: [], createdAt: "<timestamp>", homeId: "<id>", intent: { text: INTENT }, lifecycle: "terminal", operationId: "<id>", project: "workspace",
+      sessionId: "<id>", spend: SPEND, subagentRuns: { runs: [], total: 0 }, subagents: { started: 0, stoppedAtEnd: 0 }, target: "<tmp>/workspace",
+      taskId: TASK_ID, terminalEvidence: { outcome: "final", reason: "explicit-report" }, title: "Lock task", updatedAt: "<timestamp>",
+      wake: { delivery: TASK.wake.delivery, routeGeneration: 1, state: "acknowledged" }, workerModel: { id: "<id>", provider: LOCK_PROVIDER } } });
     expect(answers[10], "the task list").toEqual({ error: null, ok: true, result: { counts: { active: 0, finished: 1 }, items: [{
       attention: false, checkins: [], createdAt: "<timestamp>", lifecycle: "terminal", outcome: "final", pendingGrant: false, project: "workspace", sessionId: "<id>",
       spend: SPEND, target: "<tmp>/workspace", taskId: TASK_ID, title: "Lock task", updatedAt: "<timestamp>" }] } });
