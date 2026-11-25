@@ -2,7 +2,6 @@ import SwiftUI
 import TronMobileCore
 
 struct ManageModelConfigurationCard: View {
-    static let keys: Set<String> = ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow"]
     let sessionID: String
     var home = false
     @Environment(AppModel.self) private var model

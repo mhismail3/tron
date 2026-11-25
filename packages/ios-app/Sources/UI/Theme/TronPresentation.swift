@@ -1381,17 +1381,6 @@ enum TronSettingsGroupSurfaceStyle: Equatable, Sendable {
     case scrollOptimized
 }
 
-private struct TronSettingsRowStatusKey: EnvironmentKey {
-    static let defaultValue: String? = nil
-}
-
-extension EnvironmentValues {
-    var tronSettingsRowStatus: String? {
-        get { self[TronSettingsRowStatusKey.self] }
-        set { self[TronSettingsRowStatusKey.self] = newValue }
-    }
-}
-
 struct TronSettingsGroup<Content: View>: View {
     let title: String?
     let detail: String?
@@ -1487,7 +1476,6 @@ struct TronSettingsRow<Trailing: View>: View {
     @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
     @Environment(\.controlSize) private var controlSize
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Environment(\.tronSettingsRowStatus) private var status
 
     init(
         icon: String?,
@@ -1538,7 +1526,6 @@ struct TronSettingsRow<Trailing: View>: View {
         ) {
             rowLabels
             trailing
-                .environment(\.tronSettingsRowStatus, nil)
         }
         .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
         .padding(.vertical, labelsOwnInsets ? 0 : feedTrailing == nil ? TronSpacing.xl : TronSpacing.md)
@@ -1587,24 +1574,6 @@ struct TronSettingsRow<Trailing: View>: View {
                             .foregroundStyle(Color.tronTextMuted)
                             .lineLimit(1)
                             .fixedSize()
-                    }
-                } else if let status {
-                    let titleText = Text(title).font(titleFont).foregroundStyle(titleColor)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if stacksAtLargeText {
-                        VStack(alignment: .leading, spacing: TronSpacing.xs) {
-                            titleText
-                            TronStatusPill(text: status, accent: settingsTheme?.accent ?? accent).fixedSize()
-                        }
-                    } else {
-                        HStack(alignment: .firstTextBaseline, spacing: TronSpacing.md) {
-                            titleText
-                            TronTitleLineCenteredLayout {
-                                Text(verbatim: "X").font(titleFont).hidden()
-                                TronStatusPill(text: status, accent: settingsTheme?.accent ?? accent)
-                                    .fixedSize()
-                            }
-                        }
                     }
                 } else {
                     Text(title).font(titleFont).foregroundStyle(titleColor)

@@ -47,9 +47,8 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   `TronSettingsSections`, including conditional groups. Settings subsheets
   opt in with `hidesLoneHeading: true`: one container has no heading, multiple containers retain
   their headings, and explanatory detail remains. Top-level Settings has no headings.
-- **Model card rows.** The value pill is rightmost with a 44-point target, and an override shows the
-  shared Overridden pill beside the row title. The rows have no inline Revert; the Switch Model picker's
-  Reset to inherited toolbar action resets an overridden model.
+- **Model card rows.** The value pill is rightmost with a 44-point target. The rows have no inline
+  Revert; the Switch Model picker's Reset to inherited toolbar action resets an overridden model.
 - **Writes.** Every write is a `settings.change`: dry run first, and a refusal shows under its row.
   The model card shares the pending receipt and the session owner's admission state with
   `ModelSelectionAvailability`: model browsing stays available while choices and picker reset

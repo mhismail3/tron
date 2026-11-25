@@ -147,13 +147,13 @@ Device-local settings (S=no, P=no, safety=no, immediate presentation effect; not
 Every settings sheet hides its top drag indicator and follows the shared presentation contract:
 managed/progressive presentation, native top-right Done, inherited title/action tint, shared top
 chrome and standard detents. No local sheet-style or toolbar replacement; interactive Project
-pills and passive Overridden tags reuse the shared control/status owners.
+pills reuse the shared control owners.
 
 | Surface / owner | Proposed disposition |
 | --- | --- |
 | Global `SettingsView`, section links/cards | Keep current group styling/order; every setting row editable, never an inspection clone |
 | Session `SessionContextSheet`, Home `HomeManageSheet` | One Settings row each; remove competing model/tool settings cards from Manage Session, keep composer shortcuts on same owner |
-| Inherited / explicit override row | Plain effective Global value / Overridden tag plus existing round Revert; no source badge/link |
+| Inherited / explicit override row | Plain effective value; no inline Revert, source badge or link (the chat model card resets from its Switch Model picker) |
 | Non-overridable Project keys | One “Set by Project” row/subsheet, read-only actual allowed Project values only; no unrelated Global values |
 | Untrusted/disallowed Project values | Diagnostic notice/details, not active Project overrides or disabled Session controls |
 | `SettingsConfigurationInspection` | Delete destination, routes and solely-owned fixtures/assertions; no read-only Global Configuration anywhere |
