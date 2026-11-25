@@ -42,10 +42,10 @@ module SessionsRestartDrain refines SessionsRestartDrainLaws {
       var o := OldestOf(blockers.tail, blockers.head);
       var p := if o.session.NoSession? then o.progress else LatestFor(blockers, o.session.session, Unset);
       var since := if tracked.Tracking? && tracked.id == o.id && SameState(tracked.state, o.state)
-        && SameTime(tracked.progress, p) && SameTime(tracked.admitted, o.admitted) then tracked.since
+        && SameTime(tracked.admitted, o.admitted) then (if p.At? && p.ms > tracked.since then p.ms else tracked.since)
         else if p.At? then p.ms else if o.admitted.At? then o.admitted.ms else now;
       var age := if now <= since then 0 else now - since;
-      Step(if age >= limit then Stalled(o.id, age) else Waiting, Tracking(o.id, o.state, p, o.admitted, since))
+      Step(if age >= limit then Stalled(o.id, age) else Waiting, Tracking(o.id, o.state, o.admitted, since))
   }
 
   // ---------- proofs ----------
@@ -186,10 +186,7 @@ module SessionsRestartDrain refines SessionsRestartDrainLaws {
   {
     Facts(count, blockers, i);
     var o := Elems(blockers)[i];
-    if tracked.Tracking? {
-      SameSpec(tracked.state, o.state, tracked.progress, Progress(Elems(blockers), o));
-      SameSpec(tracked.state, o.state, tracked.admitted, o.admitted);
-    }
+    if tracked.Tracking? { SameSpec(tracked.state, o.state, tracked.admitted, o.admitted); }
   }
 
   lemma T1Stalled(count: Count, blockers: List<Blocker>, tracked: Tracked, now: Ms, limit: Ms, i: int)

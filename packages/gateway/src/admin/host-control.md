@@ -132,8 +132,8 @@ not the worker session being resumed.
   escalate; `gateway.stop` uses the same drain, exits only after a zero-blocker proof
   and records `failed` otherwise. The restart drain stalls after the oldest blocker makes
   no progress for 180 s, counting progress by any blocker on its session (a Home task held
-  between turns progresses through its live async runs; when that run settles the timer restarts from the
-  task's own older progress, #2685), then exact cancellation and grace; only-suspect
+  between turns progresses through its live async runs; the timer never moves back when that run settles),
+  then exact cancellation and grace; only-suspect
   `terminal-receipt-persistence` blockers proceed at once. The proven block `sessions/restart-drain`
   (`packages/core`) makes that decision over millisecond times; `restart-drain.ts` carries its stall timer between
   polls. A blocker time that is not a `Date#toISOString` instant at or after 1970 reads as unset, like an

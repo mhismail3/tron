@@ -26,9 +26,9 @@ abstract module SessionsRestartDrainLaws {
   // Blocker: one listed blocker of the snapshot: its id; whether it is a terminal-receipt persistence write; its
   // session, state, admission time and progress time.
   datatype Blocker = Blocker(id: Token, receipt: bool, session: Session, state: State, admitted: Time, progress: Time)
-  // Tracked: the blocker the stall timer follows (its id, state, progress and admission times as last seen) and the
-  // time the timer runs from, or nothing.
-  datatype Tracked = Untracked | Tracking(id: Token, state: State, progress: Time, admitted: Time, since: Ms)
+  // Tracked: the blocker the stall timer follows (its id, state and admission time as last seen) and the time the
+  // timer runs from, or nothing.
+  datatype Tracked = Untracked | Tracking(id: Token, state: State, admitted: Time, since: Ms)
   // Outcome: the drain is complete; it waits; it proceeds over unresolved owners; or it stalled on a blocker (by
   // id) after an age.
   datatype Outcome = Completed | Waiting | UnresolvedOwners | Stalled(blocker: Token, age: Ms)
@@ -100,10 +100,13 @@ abstract module SessionsRestartDrainLaws {
   // Signal: the time a blocker was last seen to move: its progress time, else its admission time, else now.
   ghost function Signal(p: Time, a: Time, now: Ms): Ms { if p.At? then p.ms else if a.At? then a.ms else now }
 
-  // Unchanged: the timer already tracks blocker o, with the same state, progress time p and admission time.
-  ghost predicate Unchanged(t: Tracked, o: Blocker, p: Time) {
-    t.Tracking? && t.id == o.id && t.state == o.state && t.progress == p && t.admitted == o.admitted
+  // Same: the timer already tracks blocker o, with the same state and admission time.
+  ghost predicate Same(t: Tracked, o: Blocker) {
+    t.Tracking? && t.id == o.id && t.state == o.state && t.admitted == o.admitted
   }
+
+  // Kept: the later of the time since and progress time p; since when p is unset.
+  ghost function Kept(since: Ms, p: Time): Ms { if p.At? && p.ms > since then p.ms else since }
 
   // Age: the time from since to now, never below zero.
   ghost function Age(now: Ms, since: Ms): Ms { if now <= since then 0 else now - since }
@@ -131,22 +134,21 @@ abstract module SessionsRestartDrainLaws {
     ensures Evaluate(count, blockers, tracked, now, limit) == Step(Waiting, tracked)
 
   // O1 oldest-tracked: otherwise the timer tracks the oldest blocker (the first admitted at the earliest admission
-  // time, or the first blocker when none has one) with its id, state and admission time, and the latest progress
-  // time of its session's blockers (its own when it has no session).
+  // time, or the first blocker when none has one) with its id, state and admission time.
   lemma O1OldestTracked(count: Count, blockers: List<Blocker>, tracked: Tracked, now: Ms, limit: Ms, i: int)
     requires count != 0 && !OnlyOwners(count, Elems(blockers)) && Oldest(Elems(blockers), i)
     ensures var o, t := Elems(blockers)[i], Evaluate(count, blockers, tracked, now, limit).tracked;
       t.Tracking? && t.id == o.id && t.state == o.state && t.admitted == o.admitted
-      && t.progress == Progress(Elems(blockers), o)
 
-  // R1 timer-reset: the stall timer restarts from the oldest blocker's last signal (its progress time as O1 judges
-  // it, else its admission time, else now) exactly when the tracked blocker, its state, that progress time or its
-  // admission time changed since the last poll; otherwise it keeps running from the tracked time.
+  // R1 timer-reset: the stall timer restarts from the oldest blocker's last signal (the latest progress time of its
+  // session's blockers, its own when it has no session; else its admission time; else now) exactly when the tracked
+  // blocker, its state or its admission time changed since the last poll; otherwise it runs from the later of the
+  // tracked time and that progress time, so it never moves back when a session's progressing blocker settles.
   lemma R1TimerReset(count: Count, blockers: List<Blocker>, tracked: Tracked, now: Ms, limit: Ms, i: int)
     requires count != 0 && !OnlyOwners(count, Elems(blockers)) && Oldest(Elems(blockers), i)
     ensures var o, t := Elems(blockers)[i], Evaluate(count, blockers, tracked, now, limit).tracked;
       var p := Progress(Elems(blockers), o);
-      t.Tracking? && t.since == (if Unchanged(tracked, o, p) then tracked.since else Signal(p, o.admitted, now))
+      t.Tracking? && t.since == (if Same(tracked, o) then Kept(tracked.since, p) else Signal(p, o.admitted, now))
 
   // T1 stalled: then the drain has stalled, naming the oldest blocker and its age, exactly when the age (now minus
   // the timer's start, never below zero) has reached the stall limit; otherwise it waits.
