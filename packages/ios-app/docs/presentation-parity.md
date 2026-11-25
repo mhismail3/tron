@@ -111,7 +111,7 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 - **Loading.** Whole-content loading is a `TronSheetLoadingState` preference that the enclosing
   `TronPresentationSurface` draws once as a centered pulse; while present it sets
   `tronSheetContentLoading`, hiding every `tronScrollEdgeChrome` scroll view (title and Done stay
-  usable). The pulse leaves without a fade and content fades and rises 8 points with
+  usable). The pulse fades out as content fades and rises 8 points with
   `ChatMotion.transcriptViewReveal` (Reduce Motion: fade only). Owners request it only while they
   have no content, so cached or refreshed content is never hidden or replayed. A sheet whose
   structure is known (Manage Home) lays out every card at once and renders values still loading
@@ -128,7 +128,8 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   takes one `.height` detent at that size, or `.large` when it overflows or at accessibility text
   sizes. With the keyboard up the sheet stays fitted and grows by the keyboard's height above the
   bottom safe area, so a field that expands (the ask_user "Other" answer) grows the sheet smoothly. While a `TronSheetLoadingState` is shown the sheet holds its last
-  settled height (medium before the first), so a reopened sheet opens at its final size; a first open shows medium until content settles. The sizer owns the
+  settled height; a sheet that is loading before it has ever settled opens at `.large` and stays there,
+  so its detent and native style are decided up front and never swap when content arrives. The sizer owns the
   native detent: every change after presentation goes through
   `UISheetPresentationController.animateChanges` (the system sheet spring), including growth to and
   from full height; Reduce Motion applies it instantly. A sheet's height preference never reaches
@@ -277,8 +278,8 @@ selected primary theme; semantic statuses keep their colors.
   names the active chapter's soft-limit share: the larger of bytes/24 MiB and entries/50,000.
   Memory summary rows tag exact current-view members; a primary-tinted divider after the
   oldest contiguous individual message explains the resolution change, not exclusion.
-  Reads are revisioned snapshots, labelled as such; a new canonical Home snapshot retires
-  old pages/cursors and hides stale resolution markers before its replacement read.
+  Reads are revisioned snapshots, labelled as such, read once per open: live Home session events never
+  reload an open feed; a changed memory revision refuses old cursors and Reload reads the first page.
   The revision reads AppModel's canonical snapshot forwarding accessor in both hosted
   validation and signed device builds; it does not maintain separate snapshot state.
 - Technical detail uses `TronMetadataTable` for metadata and JSON (field, short type, trailing code
