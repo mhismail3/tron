@@ -942,8 +942,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertFalse(labelled("Input needed").exists, "push alerts are Global settings the agent changes")
         let device = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Details for ' AND label CONTAINS ' on '")).firstMatch
         XCTAssertTrue(device.waitForExistence(timeout: 30), app.debugDescription)
-        let label = device.label.dropFirst("Details for ".count)
-        let deviceName = String(label[..<(label.range(of: " on ", options: .backwards)?.lowerBound ?? label.endIndex)])
         device.tap()
         XCTAssertTrue(app.buttons["device-rename"].waitForExistence(timeout: 30), app.debugDescription)
         keepScreenshot(app, name: "963-device-detail")
