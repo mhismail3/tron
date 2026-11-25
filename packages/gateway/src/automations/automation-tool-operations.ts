@@ -19,13 +19,16 @@ function requireField<T>(value: T | undefined, name: string): T {
   return value;
 }
 
-function automationTrigger(request: ScheduleToolRequest, now: number): AutomationTrigger {
+const HOME_INTERVAL_GRID_MS = 10 * 60_000;
+
+function automationTrigger(request: ScheduleToolRequest, now: number, home: boolean): AutomationTrigger {
   const kinds = [request.at !== undefined, request.everyMinutes !== undefined,
     request.timezone !== undefined || request.localTime !== undefined || request.weekdays !== undefined].filter(Boolean).length;
   if (kinds !== 1) throw new GatewayError("invalid_request", `${request.action} requires exactly one trigger form`);
   if (request.at !== undefined) return { kind: "once", at: request.at };
   if (request.everyMinutes !== undefined) {
-    return { kind: "interval", everySeconds: request.everyMinutes * 60, anchorAt: new Date(now).toISOString() };
+    const anchor = home ? Math.ceil(now / HOME_INTERVAL_GRID_MS) * HOME_INTERVAL_GRID_MS : now;
+    return { kind: "interval", everySeconds: request.everyMinutes * 60, anchorAt: new Date(anchor).toISOString() };
   }
   return {
     kind: "calendar",
@@ -100,6 +103,12 @@ export class GatewayScheduleToolOperations implements ScheduleToolOperations {
     return { message, details: object.details ?? null };
   }
 
+  private home(target: AutomationRecord["target"]): boolean {
+    if (target.kind === "home") return true;
+    if (target.kind !== "existingSession") return false;
+    try { return this.service.homeRoute().sessionId === target.sessionId; } catch { return false; }
+  }
+
   private async target(sessionId: string, target: ScheduleToolRequest["target"]): Promise<AutomationRecord["target"]> {
     if (target === "home") {
       const route = this.service.homeRoute();
@@ -112,11 +121,12 @@ export class GatewayScheduleToolOperations implements ScheduleToolOperations {
 
   private async mutate(sessionId: string, toolCallId: string, request: ScheduleToolRequest): Promise<JsonValue> {
     if (request.action === "create") {
+      const target = await this.target(sessionId, request.target);
       const created = await this.service.create({
         name: requireField(request.name, "name"),
         activation: request.activate === true ? "enabled" : "draft",
-        target: await this.target(sessionId, request.target),
-        trigger: automationTrigger(request, this.now()),
+        target,
+        trigger: automationTrigger(request, this.now(), this.home(target)),
         misfirePolicy: "latest",
         overlapPolicy: "skip",
         action: automationAction(request),
@@ -131,10 +141,11 @@ export class GatewayScheduleToolOperations implements ScheduleToolOperations {
       if (request.activate !== undefined || request.expiresAt !== undefined) throw new GatewayError("invalid_request", "Update preserves activation and expiry; use enable or pause to change activation");
       const hasTrigger = [request.at, request.everyMinutes, request.timezone, request.localTime, request.weekdays].some(value => value !== undefined);
       const hasAction = request.prompt !== undefined || request.notificationMessage !== undefined;
+      const target = request.target === undefined ? current.target : await this.target(sessionId, request.target);
       const updated = await this.service.update(id, requireField(request.expectedRevision, "expectedRevision"), {
         name: request.name ?? current.name, ...(current.description === undefined ? {} : { description: current.description }),
-        target: request.target === undefined ? current.target : await this.target(sessionId, request.target),
-        trigger: hasTrigger ? automationTrigger(request, this.now()) : current.trigger,
+        target,
+        trigger: hasTrigger ? automationTrigger(request, this.now(), this.home(target)) : current.trigger,
         action: hasAction ? automationAction(request) : current.action,
         misfirePolicy: current.misfirePolicy, overlapPolicy: current.overlapPolicy, executionDeadlineSeconds: current.executionDeadlineSeconds,
       });
