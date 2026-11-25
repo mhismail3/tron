@@ -131,8 +131,7 @@ package enum ExtensionActivityAdmissionPolicy {
               activity.currentPath.map({ bounded($0, maximumStringBytes) }) ?? true,
               activity.output.map({ bounded($0, 32 * 1_024, newlines: true) }) ?? true,
               nonnegative(activity.toolCount), nonnegative(activity.turnCount),
-              nonnegative(activity.durationMs), activity.children.count <= maximumChildren,
-              validReceiptTimeline(activity) else { return false }
+              nonnegative(activity.durationMs), activity.children.count <= maximumChildren else { return false }
         for child in activity.children {
             guard admits(child, depth: 0, budget: &descendantBudget) else { return false }
         }
@@ -142,14 +141,7 @@ package enum ExtensionActivityAdmissionPolicy {
                   lifecycle.producerUpdatedAt.map({ bounded($0, 128) && GatewayTimestamp.parse($0) != nil }) ?? true,
                   lifecycle.terminalAt.map({ bounded($0, 128) && GatewayTimestamp.parse($0) != nil }) ?? true,
                   lifecycle.recentUntil.map({ bounded($0, 128) && GatewayTimestamp.parse($0) != nil }) ?? true,
-                  lifecycle.remainingMs.map({ $0 >= 0 }) ?? true,
-                  lifecycle.isTerminal == (lifecycle.terminalAt != nil),
-                  validLifecycleCombination(state: lifecycle.state, status: activity.status,
-                                            visibility: lifecycle.visibility,
-                                            remainingMs: lifecycle.remainingMs,
-                                            recentUntil: lifecycle.recentUntil) else { return false }
-            if let terminalAt = lifecycle.terminalAt, let recentUntil = lifecycle.recentUntil,
-               let terminal = GatewayTimestamp.parse(terminalAt), let expiry = GatewayTimestamp.parse(recentUntil), expiry < terminal { return false }
+                  lifecycle.remainingMs.map({ $0 >= 0 }) ?? true else { return false }
         }
         var childIDs = Set<String>()
         guard activity.children.allSatisfy({ child in
@@ -166,10 +158,8 @@ package enum ExtensionActivityAdmissionPolicy {
         }
         guard result.count > maximumActivities else { return result }
         let protected = Array(result.filter { protectedIDs.contains($0.stableID) }.prefix(maximumActivities))
-        let candidates = result.filter { !protectedIDs.contains($0.stableID) }
-        let sorted = candidates.sorted { evictionPrecedes($0, $1) }
-        let keepCount = max(0, maximumActivities - protected.count)
-        result = protected + Array(sorted.suffix(keepCount))
+        let others = result.filter { !protectedIDs.contains($0.stableID) }
+        result = protected + Array(others.prefix(max(0, maximumActivities - protected.count)))
         return result
     }
 
@@ -221,50 +211,10 @@ package enum ExtensionActivityAdmissionPolicy {
         guard budget >= 0 else { return false }
         var childIDs = Set<String>()
         guard (child.children ?? []).allSatisfy({ child in childIDs.insert(child.id).inserted }) else { return false }
-        guard validChildLifecycleCombination(state: child.lifecycle, status: child.status) else { return false }
         for nested in child.children ?? [] {
             guard admits(nested, depth: depth + 1, budget: &budget) else { return false }
         }
         return true
-    }
-
-    private static func validLifecycleCombination(
-        state: ExtensionActivityLifecycleState,
-        status: ExtensionRunActivity.Status,
-        visibility: ExtensionActivityVisibility?,
-        remainingMs: Int?,
-        recentUntil: String?
-    ) -> Bool {
-        switch state {
-        case .queued, .running, .paused:
-            return status == .running && (visibility == nil || visibility == .current)
-                && remainingMs == nil && recentUntil == nil
-        case .completed:
-            return status == .completed && visibility != .current
-                && (visibility == .recent ? remainingMs.map { $0 > 0 } == true : remainingMs == nil || remainingMs == 0)
-        case .failed:
-            return status == .failed && visibility != .current
-                && (visibility == .recent ? remainingMs.map { $0 > 0 } == true : remainingMs == nil || remainingMs == 0)
-        case .stopped, .rejected:
-            return status == .completed && visibility != .current
-                && (visibility == .recent ? remainingMs.map { $0 > 0 } == true : remainingMs == nil || remainingMs == 0)
-        case .unknown:
-            return visibility == .unknown && remainingMs == nil
-        }
-    }
-
-    private static func validChildLifecycleCombination(
-        state: ExtensionActivityLifecycleState?,
-        status: ExtensionRunChild.Status
-    ) -> Bool {
-        guard let state else { return true }
-        switch state {
-        case .queued, .running, .paused: return status == .running
-        case .completed: return status == .completed
-        case .failed: return status == .failed
-        case .stopped, .rejected: return status == .completed
-        case .unknown: return false
-        }
     }
 
     private static func validID(_ value: String, maximum: Int) -> Bool {
@@ -279,24 +229,9 @@ package enum ExtensionActivityAdmissionPolicy {
         bounded(value, 128) && GatewayTimestamp.parse(value) != nil
     }
 
-    private static func validReceiptTimeline(_ activity: ExtensionRunActivity) -> Bool {
-        guard let terminalAt = activity.lifecycle?.terminalAt ?? activity.completedAt else { return true }
-        guard let started = GatewayTimestamp.parse(activity.startedAt),
-              let terminal = GatewayTimestamp.parse(terminalAt),
-              let observed = GatewayTimestamp.parse(activity.lifecycle?.observedAt ?? activity.updatedAt) else { return false }
-        return started <= terminal && terminal <= observed
-    }
-
     private static func validSource(_ source: ExtensionToolOrigin) -> Bool {
         guard boundedNonEmpty(source.source, maximumStringBytes), source.owner.map(admits) ?? true else { return false }
         return source.owner != nil || !source.source.contains(where: { $0 == "/" || $0 == "\\" })
-    }
-
-    private static func evictionPrecedes(_ left: ExtensionRunActivity, _ right: ExtensionRunActivity) -> Bool {
-        let leftPriority = left.isLive ? 2 : (left.lifecycle?.visibility == .recent ? 1 : 0)
-        let rightPriority = right.isLive ? 2 : (right.lifecycle?.visibility == .recent ? 1 : 0)
-        if leftPriority != rightPriority { return leftPriority < rightPriority }
-        return left.updatedAt < right.updatedAt
     }
 
     private static func bounded(_ value: String, _ bytes: Int, newlines: Bool = false) -> Bool {
