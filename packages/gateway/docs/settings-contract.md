@@ -290,5 +290,6 @@ A key's canonical type, validation and runtime clamping apply to every change.
 not a pending-request inbox. Global writes Global, Session the Session scope, Home its saved settings;
 Project is inspection only. Session/Home reuse Global's renderer and editors; a row whose value comes
 from Project stays editable as a Session override (its file and key, `projectSetting`, are served to the
-`settings` tool only; the app does not show them), explicit overrides have Overridden/Revert,
+`settings` tool only; the app does not show them), the app has no inline Revert (the chat model card resets
+the model from its Switch Model picker),
 and the app has no Changes entry: audit history and Undo are the `settings` tool's. Hand-built screens remain only for guided flows and viewers.

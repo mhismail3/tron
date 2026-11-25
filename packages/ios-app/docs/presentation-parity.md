@@ -193,16 +193,13 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   spills from its column while labels keep full Dynamic Type. Section-owned rows add no second
   inset.
 - **Inline actions (#939).** Icon-only actions use `TronInlineActionLabel` without an empty text
-  slot: a 28-point circle in a 44-point target. Reset/Revert aligns the circle leading,
-  with invisible target width trailing, so the zero-gap reset/value cluster preserves a
-  16-point visible gap. Standalone actions align trailing; value pills share the row's
-  trailing edge and 14-point inset without overlapping hit regions.
-- **Overrides.** Inherited values have no source affordance. Session/Home overrides show the
-  shared Overridden status pill beside the row title (the value's trailing room is the same with
-  or without it) and Revert before the rightmost value pill. A value that comes from Project keeps the editor
-  enabled, since a Session choice beats Project. Absent non-secret values
-  render a dash. Values, pills and resets remain independent sibling targets, not nested buttons;
-  the Overridden pill and a tool selection's "N of M tools" count never truncate. At
+  slot: a 28-point circle in a 44-point target. Standalone actions align trailing; value pills
+  share the row's trailing edge and 14-point inset without overlapping hit regions.
+- **Overrides.** Inherited values have no source affordance, and rows have no inline Revert: the chat
+  model card resets an overridden model from the Switch Model picker's Reset to inherited. A value that
+  comes from Project keeps the editor enabled, since a Session choice beats Project. Absent non-secret
+  values render a dash. Values and pills remain independent sibling targets, not nested buttons;
+  a tool selection's "N of M tools" count never truncates. At
   accessibility sizes, or when the cluster would leave the title less than a 96-point column,
   the cluster stacks under the text column.
 - **Reset.** Settings, the chat model card and Controls use the preview/confirmation/receipted
