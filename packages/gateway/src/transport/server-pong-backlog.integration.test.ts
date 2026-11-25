@@ -8,6 +8,7 @@ import { DeviceStore } from "../security/device-store.js";
 import { GatewayServer } from "./server.js";
 import type { PeerPathLookup, PeerPathReader } from "./tailscale-peer.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { PROTOCOL_VERSION } from "../version.js";
 
 const NO_TAILSCALE_PATH: PeerPathReader = { lookup: async (): Promise<PeerPathLookup> => ({ peerPath: "unknown", peerPathSource: "not-tailscale", peerRelay: "" }) };
 
@@ -48,7 +49,7 @@ async function pongAgainstBacklog(): Promise<{ backlogBeforePong: number; pendin
     sessions: { unsubscribeClient: vi.fn() } as never,
     auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as never,
     service: {
-      info: () => ({ protocolVersion: 9 }),
+      info: () => ({ protocolVersion: PROTOCOL_VERSION }),
 
       releaseClient: vi.fn(),
       invoke: vi.fn(),
@@ -73,7 +74,7 @@ async function pongAgainstBacklog(): Promise<{ backlogBeforePong: number; pendin
   });
   socket.on("pong", () => { backlogBeforePong = backlogTopicsInOrder.length; });
   await new Promise<void>((resolve, reject) => { socket.once("open", () => resolve()); socket.once("error", reject); });
-  socket.send(JSON.stringify({ type: "hello", protocolVersion: 9, diagnostics: { clientId: "client-pong", attemptId: "initial", epoch: "1" } }));
+  socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION, diagnostics: { clientId: "client-pong", attemptId: "initial", epoch: "1" } }));
   await waitFor(() => connection()?.ready === true, "hello");
 
   const transport = (socket as unknown as { _socket: { pause(): void; resume(): void } })._socket;

@@ -10,6 +10,7 @@ import { GatewayServer } from "./server.js";
 import type { HostMemory } from "../foundation/host-memory.js";
 import { StallSampler } from "./stall-diagnostics.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { PROTOCOL_VERSION } from "../version.js";
 
 const DURING_SQUEEZE: HostMemory = {
   freeBytes: 1_240_000_000,
@@ -78,7 +79,7 @@ async function startGateway(): Promise<Harness> {
     sessions: { unsubscribeClient: vi.fn() } as never,
     auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as never,
     service: {
-      info: () => ({ protocolVersion: 9 }),
+      info: () => ({ protocolVersion: PROTOCOL_VERSION }),
 
       releaseClient: vi.fn(),
       invoke: vi.fn(),
@@ -112,7 +113,7 @@ async function startGateway(): Promise<Harness> {
       const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
       sockets.push(socket);
       await new Promise<void>((resolve, reject) => { socket.once("open", () => resolve()); socket.once("error", reject); });
-      socket.send(JSON.stringify({ type: "hello", protocolVersion: 9 }));
+      socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
       await waitFor(() => records("connection.opened").length === before + 1, "connection opened record");
       return socket;
     },

@@ -25,6 +25,7 @@ import { HOME_SOFT_BYTES } from "../../modules/home/home-chapter-state.js";
 import type { RuntimeSlot } from "../../kernel/run/runtime-slot.js";
 import { INVOCATION_RECEIPT_TYPE } from "../../kernel/receipts/invocation-receipts.js";
 import { waitFor } from "../../../test-support/wait-for.js";
+import { MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../../version.js";
 
 function barrier() {
   let release!: () => void;
@@ -150,7 +151,7 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
       uploads: {} as any, sessions: value.registry,
       auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
       service: {
-        info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 9, minProtocolVersion: 9, machineId: "machine-terminal-test", machineName: "test", capabilities: [] }),
+        info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: PROTOCOL_VERSION, minProtocolVersion: MIN_PROTOCOL_VERSION, machineId: "machine-terminal-test", machineName: "test", capabilities: [] }),
 
         releaseClient: vi.fn(),
         invoke: async (context: any, method: string, params: any) => {
@@ -180,7 +181,7 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
       const frames: any[] = [];
       socket.on("message", raw => frames.push(JSON.parse(raw.toString())));
       await once(socket, "open");
-      socket.send(JSON.stringify({ type: "hello", protocolVersion: 9, ...(mobile ? { clientRole: "mobile" } : {}) }));
+      socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION, ...(mobile ? { clientRole: "mobile" } : {}) }));
       await waitFor(() => frames.some(frame => frame.type === "hello"), `${prefix} hello`);
       const request = async (id: string, method: string, params: Record<string, unknown>) => {
         socket.send(JSON.stringify({ type: "request", id, method, params }));
@@ -341,7 +342,7 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     const frames: any[] = [];
     socket.on("message", raw => frames.push(JSON.parse(raw.toString())));
     await once(socket, "open");
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 9, clientRole: "mobile" }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION, clientRole: "mobile" }));
     await waitFor(() => frames.some(frame => frame.type === "hello"), "the mobile hello");
     let requestSequence = 0;
     const request = async (method: string, params: object) => {

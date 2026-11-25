@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeviceStore } from "../security/device-store.js";
 import { GatewayServer } from "./server.js";
 import { awaitsWithin, HOOK_HANG_BOUND_MS } from "../../test-support/wait-for.js";
+import { PROTOCOL_VERSION } from "../version.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { await Promise.all(cleanups.splice(0).map((cleanup) => cleanup())); });
@@ -37,7 +38,7 @@ describe("Gateway HTTP admission and retirement", () => {
     const port = await unusedPort();
     const gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1", port, maxFrameBytes: 16_384, devices, uploads: {} as any, sessions: {} as any,
-      auth: {} as any, service: { info: () => ({ protocolVersion: 9 }) } as any, logger: { log: () => {} } as any,
+      auth: {} as any, service: { info: () => ({ protocolVersion: PROTOCOL_VERSION }) } as any, logger: { log: () => {} } as any,
     });
     await gateway.listen();
     cleanups.push(async () => { await awaitsWithin(gateway.close(), "pair gateway close", HOOK_HANG_BOUND_MS); await rm(root, { recursive: true, force: true }); });
@@ -63,7 +64,7 @@ describe("Gateway HTTP admission and retirement", () => {
     const headers = new Promise<void>(resolve => { received = resolve; });
     const gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1", port, maxFrameBytes: 16_384, devices, uploads: {} as any, sessions: {} as any,
-      auth: {} as any, service: { info: () => ({ protocolVersion: 9 }) } as any, logger: { log: () => {} } as any,
+      auth: {} as any, service: { info: () => ({ protocolVersion: PROTOCOL_VERSION }) } as any, logger: { log: () => {} } as any,
     });
     (gateway as unknown as { server: import("node:http").Server }).server.once("connection", socket => socket.once("data", received));
     let peer: ReturnType<typeof createConnection> | undefined;
@@ -106,7 +107,7 @@ describe("Gateway HTTP admission and retirement", () => {
     const gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1", port, maxFrameBytes: 16_384, devices, uploads: {} as any,
       sessions: { unsubscribeClient: vi.fn() } as any, auth: { detachClient: vi.fn() } as any,
-      service: { info: () => ({ protocolVersion: 9 }), releaseClient: vi.fn(), invoke } as any,
+      service: { info: () => ({ protocolVersion: PROTOCOL_VERSION }), releaseClient: vi.fn(), invoke } as any,
       logger: logger as any,
     });
     await gateway.listen();
@@ -153,7 +154,7 @@ describe("Gateway HTTP admission and retirement", () => {
       devices, uploads: {} as any, sessions: sessions as any,
       auth: { detachClient: vi.fn() } as any,
       service: {
-        info: () => ({ protocolVersion: 9 }), releaseClient: vi.fn(),
+        info: () => ({ protocolVersion: PROTOCOL_VERSION }), releaseClient: vi.fn(),
       } as any,
       logger: logger as any,
     });
