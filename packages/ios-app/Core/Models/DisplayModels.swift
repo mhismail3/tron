@@ -387,8 +387,10 @@ package enum DisplayRemoteURLPolicy {
             let normalized = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
             let head = normalized.components(separatedBy: "::").first ?? ""
             let groups = head.isEmpty ? [] : head.split(separator: ":", omittingEmptySubsequences: false)
-            guard normalized.components(separatedBy: "::").count <= 2,
-                  normalized.split(separator: ":").allSatisfy({ $0.range(of: #"^[0-9a-f]{1,4}$"#, options: .regularExpression) != nil })
+            let sides = normalized.components(separatedBy: "::")
+            guard sides.count == 2 || normalized.split(separator: ":").count == 8,
+                  sides.count <= 2,
+                  sides.allSatisfy({ $0.range(of: #"^(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4})*)?$"#, options: .regularExpression) != nil })
             else { return false }
             let hextet = { (index: Int) in index < groups.count ? UInt16(groups[index], radix: 16) : 0 }
             guard let first = hextet(0), let second = hextet(1) else { return false }
