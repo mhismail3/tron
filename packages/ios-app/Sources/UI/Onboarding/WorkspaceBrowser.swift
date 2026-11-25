@@ -48,8 +48,8 @@ struct WorkspaceBrowser: View {
     var body: some View {
         NavigationStack {
             browser
-                .opacity(navigating ? 0.62 : 1)
-                .animation(.easeInOut(duration: 0.16), value: navigating)
+            .opacity(navigating ? 0.62 : 1)
+            .animation(.easeInOut(duration: 0.16), value: navigating)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {

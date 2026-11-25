@@ -846,7 +846,7 @@ private actor HostedHomeShellGateway {
                 snapshot.transcriptStart = start
                 snapshot.transcriptTotal = transcript.count
             }
-            if sessionID == "home-session" { memorySnapshot = snapshot }
+            if sessionID == "home-session" { homeSnapshot = snapshot }
             return (.object(["session": try! JSONValue.encode(snapshot), "syncToken": .string("fixture-sync"),
                 "subscriptionToken": .string("fixture-subscription"), "completionRevision": .number(HostedLaunch.arguments.contains("-home-dashboard-behavior") ? 1 : 0)]), nil)
         case "session.transcript" where HostedLaunch.arguments.contains("-home-tool-paged-transcript"):
@@ -1049,12 +1049,12 @@ private actor HostedHomeShellGateway {
         .object(["index": .number(Double(index)), "sessionId": .string(sessionID), "entryId": .string("source-entry"),
                  "sourceDigest": .string(String(repeating: "a", count: 64))])
     }
-    private var memorySnapshot: SessionSnapshot?
+    private var homeSnapshot: SessionSnapshot?
     func advanceLiveHomeSession() -> SessionSnapshot? {
-        guard var snapshot = memorySnapshot else { return nil }
+        guard var snapshot = homeSnapshot else { return nil }
         snapshot.revision += 1
         snapshot.eventSequence += 1
-        memorySnapshot = snapshot
+        homeSnapshot = snapshot
         return snapshot
     }
     private static let memoryTotal = 40

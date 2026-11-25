@@ -280,8 +280,6 @@ selected primary theme; semantic statuses keep their colors.
   oldest contiguous individual message explains the resolution change, not exclusion.
   Reads are revisioned snapshots, labelled as such, read once per open: live Home session events never
   reload an open feed; a changed memory revision refuses old cursors and Reload reads the first page.
-  The revision reads AppModel's canonical snapshot forwarding accessor in both hosted
-  validation and signed device builds; it does not maintain separate snapshot state.
 - Technical detail uses `TronMetadataTable` for metadata and JSON (field, short type, trailing code
   preview; stacked at accessibility sizes); the raw JSON reader is one selectable, wrapping,
   vertically scrolling sheet, never a horizontal viewport.
