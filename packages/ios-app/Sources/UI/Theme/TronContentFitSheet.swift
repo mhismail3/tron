@@ -62,7 +62,7 @@ private struct TronContentFitSheetModifier: ViewModifier {
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { note in
                 let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue ?? .zero
-                update { keyboard = TronSheetWindowMetrics.current.keyboardLift(frame) }
+                update { keyboard = TronSheetWindowMetrics.keyboardLift(frame) }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
                 update { keyboard = 0 }
@@ -144,7 +144,6 @@ private struct TronSheetDetentDriver: UIViewControllerRepresentable {
 private struct TronSheetWindowMetrics {
     let bottomInset: CGFloat
     let maximumDetent: CGFloat
-    var height: CGFloat = .infinity
 
     @MainActor static var current: TronSheetWindowMetrics {
         guard let window = UIApplication.shared.connectedScenes
@@ -153,13 +152,16 @@ private struct TronSheetWindowMetrics {
         }
         let insets = window.safeAreaInsets
         return TronSheetWindowMetrics(bottomInset: insets.bottom,
-                                      maximumDetent: window.bounds.height - insets.top - insets.bottom,
-                                      height: window.bounds.height)
+                                      maximumDetent: window.bounds.height - insets.top - insets.bottom)
     }
 
-    func keyboardLift(_ frame: CGRect) -> CGFloat {
-        guard frame.maxY >= height - 0.5 else { return 0 }
-        return max(height - frame.minY - bottomInset, 0)
+    @MainActor static func keyboardLift(_ screenFrame: CGRect) -> CGFloat {
+        guard let window = UIApplication.shared.connectedScenes
+            .compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else { return 0 }
+        let frame = window.convert(screenFrame, from: window.screen.coordinateSpace)
+        let bottom = window.bounds.maxY
+        guard frame.maxY >= bottom - 0.5 else { return 0 }
+        return max(bottom - frame.minY - window.safeAreaInsets.bottom, 0)
     }
 }
 

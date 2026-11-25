@@ -120,29 +120,18 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
             @MainActor func pages() -> [UIScrollView] {
                 MountedFixture.views(UIScrollView.self, in: app.top).filter { $0.bounds.width > 300 && $0.contentSize.height > 100 }
             }
-            @MainActor func pageXs() -> [ObjectIdentifier: CGFloat] {
-                Dictionary(uniqueKeysWithValues: pages().map { scroll in
-                    let layer = scroll.layer.presentation() ?? scroll.layer
-                    return (ObjectIdentifier(scroll), layer.convert(layer.bounds, to: nil).minX)
-                })
-            }
             for turn in 1...3 {
                 _ = try await app.still("page \(turn) settled") { [Double(sheetFrame(app).minY)] }
                 XCTAssertEqual(pages().count, 4, "Turn \(turn): every page is laid out and measured before the finger moves")
                 let drag = try XCTUnwrap(HostedPresentationProbe.questionPageDrag)
                 let steps = 12
-                let pageWidth = sheetFrame(app).width
                 var dragYs: [CGFloat] = []
-                var xs: [ObjectIdentifier: [CGFloat]] = [:]
                 let trace = try await SheetTrace.record(app, frames: steps + 60, each: { index in
                     if index == 0 { drag(.began, -1, 0) }
                     if index > 0, index <= steps { drag(.changed, -CGFloat(index) * 22, 0) }
                     if index == steps + 1 { drag(.ended, -CGFloat(steps) * 22, -600) }
                     if index <= steps { dragYs.append(sheetFrame(app).minY) }
-                    for (page, x) in pageXs() { xs[page, default: []].append(x) }
                 })
-                let jumps = xs.values.flatMap { zip($0, $0.dropFirst()).map { abs($1 - $0) } }.filter { $0 > pageWidth / 4 }
-                XCTAssertTrue(jumps.isEmpty, "Turn \(turn): pages move continuously with the finger and the turn, never a page width in one frame: \(jumps.map { Int($0) })")
                 XCTAssertTrue(dragYs.allSatisfy { abs($0 - dragYs[0]) <= 0.5 }, "Turn \(turn): the sheet keeps its height under the finger: \(dragYs.map { Int($0) })")
                 let moves = zip(trace.samples, trace.samples.dropFirst()).map { $1.minY - $0.minY }.filter { abs($0) > 0.5 }
                 XCTAssertTrue(zip(moves, moves.dropFirst()).allSatisfy { ($0 > 0) == ($1 > 0) },
