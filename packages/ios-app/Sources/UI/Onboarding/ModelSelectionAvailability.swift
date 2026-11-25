@@ -21,19 +21,18 @@ struct ModelSelectionLockInfoLink: View {
     let reason: String
     var body: some View {
         TronProgressiveSheetLink(
-            accessibilityLabel: "Why configuration is unavailable",
-            accent: .tronPurple
+            accessibilityLabel: "Why configuration is unavailable"
         ) {
             ScrollView {
-                TronInfoCard(icon: "lock", text: reason, accent: .tronPurple)
+                TronInfoCard(icon: "lock", text: reason, accent: .tronPrimary)
                     .padding(18)
             }
             .tronScrollEdgeChrome()
-            .tronNavigationTitle("Configuration", accent: .tronPurple)
+            .tronNavigationTitle("Configuration")
         } label: {
             Image(systemName: "lock")
                 .font(TronTypography.buttonSM)
-                .foregroundStyle(Color.tronPurple)
+                .tronToolbarAction()
                 .frame(minWidth: 44, minHeight: 44)
         }
         .accessibilityValue(reason)
