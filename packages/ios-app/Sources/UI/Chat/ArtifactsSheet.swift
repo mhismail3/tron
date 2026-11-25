@@ -223,6 +223,7 @@ private struct ArtifactViewer: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ArtifactWebView(url: entry.url, external: { openURL($0) }) { failure = $0 }
+                    .tronDocumentTopBlurSurface()
             }
         }
     }
@@ -236,11 +237,9 @@ private struct ArtifactWebView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(origin: url, external: external, failed: failed) }
 
     func makeUIView(context: Context) -> WKWebView {
-        let view = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        let view = TronTopBlurWebView(frame: .zero, configuration: WKWebViewConfiguration())
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
-        view.isOpaque = false
-        view.backgroundColor = UIColor(Color.tronBackground)
         view.accessibilityIdentifier = "artifact-viewer"
         view.load(URLRequest(url: url))
         return view

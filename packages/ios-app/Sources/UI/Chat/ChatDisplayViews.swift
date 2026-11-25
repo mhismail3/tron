@@ -973,15 +973,10 @@ struct DisplayHTMLWebView: UIViewRepresentable {
                 )
             }
         }
-        let view = DisplayHTMLHostView(frame: .zero, configuration: configuration)
+        let view = TronTopBlurWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
         view.allowsLinkPreview = false
-        view.isOpaque = false
-        view.backgroundColor = UIColor(Color.tronBackground)
-        view.scrollView.backgroundColor = UIColor(Color.tronBackground)
-        view.scrollView.topEdgeEffect.isHidden = true
-        view.scrollView.contentInsetAdjustmentBehavior = .always
         return view
     }
 
@@ -1084,13 +1079,6 @@ enum DisplayHTMLSandbox {
 
     static func disablePeerConnections(_ preferences: WKPreferences) -> Bool { false }
     #endif
-}
-
-private final class DisplayHTMLHostView: WKWebView {
-    override func safeAreaInsetsDidChange() {
-        super.safeAreaInsetsDidChange()
-        obscuredContentInsets = safeAreaInsets
-    }
 }
 
 private struct DisplayVideoArtifactView: View {

@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import WebKit
 
 enum TronTopBlurStyle {
     case chat
@@ -242,6 +243,24 @@ extension View {
 
     func tronDocumentTopBlurSurface() -> some View {
         modifier(TronDocumentTopBlurSurfaceModifier())
+    }
+}
+
+final class TronTopBlurWebView: WKWebView {
+    override init(frame: CGRect, configuration: WKWebViewConfiguration) {
+        super.init(frame: frame, configuration: configuration)
+        isOpaque = false
+        backgroundColor = UIColor(Color.tronBackground)
+        scrollView.backgroundColor = UIColor(Color.tronBackground)
+        scrollView.topEdgeEffect.isHidden = true
+        scrollView.contentInsetAdjustmentBehavior = .always
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func safeAreaInsetsDidChange() {
+        super.safeAreaInsetsDidChange()
+        obscuredContentInsets = safeAreaInsets
     }
 }
 
