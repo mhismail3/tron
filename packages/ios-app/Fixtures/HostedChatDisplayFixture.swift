@@ -304,6 +304,8 @@ struct HostedHomeDashboardFixture: View {
                             Text("sheet-read-peak:\(sheetReadPeak)")
                                 .accessibilityIdentifier("fixture.home-sheet-read-peak")
                             Text("home-reads:\(homeReads)").accessibilityIdentifier("fixture.home-read-counts")
+                            Text("home-session-revision:\(model.selectedSnapshot?.revision ?? 0)")
+                                .accessibilityIdentifier("fixture.home-session-revision")
                             Text(TronDashboardRevealProbe.shared.summary).accessibilityIdentifier("fixture.dashboard-reveals")
                             Text("menu-feedback:\(TronHapticsProbe.shared.count(.menuOpened))").accessibilityIdentifier("fixture.menu-feedback")
                             Text("sheet-feedback:\(TronHapticsProbe.shared.count(.sheetPresented))").accessibilityIdentifier("fixture.sheet-feedback")
@@ -1052,6 +1054,13 @@ private actor HostedHomeShellGateway {
     private var memoryParts: [(start: Int, span: Int)] {
         memoryAdvanced ? [(0, 32), (32, 4)] + (36..<40).map { ($0, 1) } : Self.memoryViewParts
     }
+    func advanceLiveHomeSession() -> SessionSnapshot? {
+        guard var snapshot = memorySnapshot else { return nil }
+        snapshot.revision += 1
+        snapshot.eventSequence += 1
+        memorySnapshot = snapshot
+        return snapshot
+    }
     func takeMemorySnapshot() -> SessionSnapshot? {
         defer { pendingMemorySnapshot = nil }
         return pendingMemorySnapshot
@@ -1255,6 +1264,17 @@ private actor HostedHomeShellSocket: GatewaySocketConnection {
                 "machineId": .string(machineID), "machineName": .string("Home fixture"),
                 "gatewayChannel": .string("stable"), "capabilities": .array(caps.map(JSONValue.string))]))
             await deliver(data)
+            if HostedLaunch.arguments.contains("-home-live-session") { await liveHomeSession() }
+        }
+    }
+    private func liveHomeSession() async {
+        for _ in 0..<200 where !closed {
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !closed, let snapshot = await gateway.advanceLiveHomeSession(),
+                  let event = try? JSONEncoder.gateway.encode(JSONValue.object([
+                      "type": .string("event"), "topic": .string("session.snapshot"), "sessionId": .string(snapshot.sessionId),
+                      "subscriptionToken": .string("fixture-subscription"), "payload": try JSONValue.encode(snapshot)])) else { continue }
+            deliver(event)
         }
     }
     func send(_ data: Data) async throws {

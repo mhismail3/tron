@@ -216,6 +216,52 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         }
     }
 
+    func testMemorySubsheetOpensAtTheHeightItLoadsInto() async throws {
+        try await mounted(["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-browser-loading"]) { app in
+            try await openManageHome(app)
+            UIView.setAnimationsEnabled(true)
+            try await app.activate("home-manage-memory-browser")
+            var loadingAtOpen = false
+            var loadedAt: Int?
+            var detents: [String] = []
+            let trace = try await SheetTrace.record(app, frames: 420, ready: { app.element("home-sheet-done-memory") != nil }) { index in
+                if index == 0 { loadingAtOpen = app.element("sheet-loading") != nil }
+                if index == 20 { capture(app, "memory-loading") }
+                if loadedAt == nil, app.element("home-memory-row-39") != nil { loadedAt = index; capture(app, "memory-loaded") }
+                let detent = sheetChain(app).last?.sheetPresentationController?.detents.map(\.identifier.rawValue).joined(separator: ",") ?? "none"
+                if detents.last != detent { detents.append(detent) }
+            }
+            XCTAssertTrue(loadingAtOpen, "The memory sheet opens while its first page is still loading\n\(app.tree())")
+            let loaded = try XCTUnwrap(loadedAt, "The first memory page arrives during the trace\n\(trace)")
+            XCTAssertEqual(detents.count, 1, "Loading and loaded share one detent: \(detents)\n\(trace)")
+            XCTAssertEqual(trace.samples[loaded].minY, trace.final.minY, accuracy: 0.5,
+                           "The sheet already stands at its loaded height when the first page arrives\n\(trace)")
+            trace.assertStill("The memory sheet opens once, at the height it loads into", against: app)
+        }
+    }
+
+    func testMemorySubsheetLoadsOnceWhileHomeIsLive() async throws {
+        try await mounted(["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-live-session"]) { app in
+            try await openManageHome(app)
+            try await app.activate("home-manage-memory-browser")
+            try await app.until("the memory sheet") { app.element("home-sheet-done-memory") != nil }
+            let startRevision = fixtureCount(app, "fixture.home-session-revision", "home-session-revision:")
+            for _ in 0..<240 { await MountedFixture.nextFrame() }
+            XCTAssertGreaterThan(fixtureCount(app, "fixture.home-session-revision", "home-session-revision:"), startRevision + 3,
+                                 "Home's session stays live while the memory sheet is open")
+            XCTAssertEqual(fixtureCount(app, "fixture.home-read-counts", "home.memory.view="), 1,
+                           "An open memory sheet reads its first page once; live Home events never reload it")
+            XCTAssertNotNil(app.element("home-memory-row-39"), "The first page stays on screen\n\(app.tree())")
+            XCTAssertNil(app.element("sheet-loading"), "The sheet is not loading again")
+        }
+    }
+
+    private func fixtureCount(_ app: MountedFixture, _ id: String, _ prefix: String) -> Int {
+        let label = app.element(id, in: app.window)?.accessibilityLabel ?? ""
+        guard let range = label.range(of: prefix) else { return -1 }
+        return Int(label[range.upperBound...].prefix { $0.isNumber }) ?? -1
+    }
+
     private func openManageHome(_ app: MountedFixture) async throws {
         try await app.activate("home-pinned-row")
         try await app.activate("session-context-button")
