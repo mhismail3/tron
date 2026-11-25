@@ -541,7 +541,7 @@ private actor HostedHomeShellGateway {
                 .object(["sessionId": .string("home-session"), "ordinal": .number(2), "state": .string("active"),
                          "createdAt": .string(isoAgo(3 * 86_400)), "activationStarted": .bool(true),
                          "sessionPresent": .bool(true),
-                         "bytes": .number(HostedLaunch.arguments.contains("-memory-boundary-regression") ? 5_536_481 : 480), "entries": .number(12),
+                         "bytes": .number(480), "entries": .number(12),
                          "contents": .object(["firstAt": .string(isoAgo(3 * 86_400)), "lastAt": .string(isoAgo(3 * 60)),
                              "userMessages": .number(6), "homeReplies": .number(6), "tasksDelegated": .number(1),
                              "topics": .array([.string("Garden redesign")])])]),
@@ -1048,22 +1048,13 @@ private actor HostedHomeShellGateway {
         .object(["index": .number(Double(index)), "sessionId": .string(sessionID), "entryId": .string("source-entry"),
                  "sourceDigest": .string(String(repeating: "a", count: 64))])
     }
-    private var memoryAdvanced = false
     private var memorySnapshot: SessionSnapshot?
-    private var pendingMemorySnapshot: SessionSnapshot?
-    private var memoryParts: [(start: Int, span: Int)] {
-        memoryAdvanced ? [(0, 32), (32, 4)] + (36..<40).map { ($0, 1) } : Self.memoryViewParts
-    }
     func advanceLiveHomeSession() -> SessionSnapshot? {
         guard var snapshot = memorySnapshot else { return nil }
         snapshot.revision += 1
         snapshot.eventSequence += 1
         memorySnapshot = snapshot
         return snapshot
-    }
-    func takeMemorySnapshot() -> SessionSnapshot? {
-        defer { pendingMemorySnapshot = nil }
-        return pendingMemorySnapshot
     }
     private static let memoryTotal = 40
     private static let memorySealedEnd = 32
@@ -1128,8 +1119,8 @@ private actor HostedHomeShellGateway {
     private func memoryLine(start: Int, span: Int) -> JSONValue {
         var line: [String: JSONValue] = ["start": .number(Double(start)), "span": .number(Double(span)),
             "truncated": .bool(false), "firstAt": .string(memoryTime(start)), "lastAt": .string(memoryTime(start + span - 1)),
-            "inCurrentView": .bool(memoryParts.contains { $0.start == start && $0.span == span }),
-            "startsIndividualMessages": .bool(start == (memoryAdvanced ? 36 : 34) && span == 1)]
+            "inCurrentView": .bool(Self.memoryViewParts.contains { $0.start == start && $0.span == span }),
+            "startsIndividualMessages": .bool(start == 34 && span == 1)]
         if span == 1 {
             let message = memoryMessage(start)
             line["text"] = .string(message.text); line["kind"] = .string(message.kind); line["item"] = memoryItem(start)
@@ -1140,7 +1131,7 @@ private actor HostedHomeShellGateway {
     }
 
     private func memoryView(_ params: [String: JSONValue], empty: Bool) -> JSONValue {
-        let revision = JSONValue.string(String(repeating: memoryAdvanced ? "b" : "a", count: 64))
+        let revision = JSONValue.string(String(repeating: "a", count: 64))
         if HostedLaunch.arguments.contains("-memory-position-regression") {
             let scoped = params["sessionId"]?.stringValue == "home-chapter-sealed"
             let count = scoped ? 32 : 40
@@ -1155,23 +1146,14 @@ private actor HostedHomeShellGateway {
             return .object(result)
         }
         if let part = params["part"]?.objectValue, let start = part["start"]?.intValue, let span = part["span"]?.intValue {
-            let result = view([memoryLine(start: start, span: span / 2), memoryLine(start: start + span / 2, span: span / 2)])
-            if HostedLaunch.arguments.contains("-memory-boundary-regression"), !memoryAdvanced,
-               var snapshot = memorySnapshot {
-                memoryAdvanced = true
-                snapshot.revision += 1
-                snapshot.eventSequence += 1
-                memorySnapshot = snapshot
-                pendingMemorySnapshot = snapshot
-            }
-            return result
+            return view([memoryLine(start: start, span: span / 2), memoryLine(start: start + span / 2, span: span / 2)])
         }
         let range = switch params["sessionId"]?.stringValue {
         case "home-chapter-sealed": 0..<Self.memorySealedEnd
         case "home-session": Self.memorySealedEnd..<Self.memoryTotal
         default: 0..<Self.memoryTotal
         }
-        let lines = memoryParts.filter { range.contains($0.start) }.reversed().map { memoryLine(start: $0.start, span: $0.span) }
+        let lines = Self.memoryViewParts.filter { range.contains($0.start) }.reversed().map { memoryLine(start: $0.start, span: $0.span) }
         guard params["sessionId"] == nil, lines.count > 10 else { return view(Array(lines)) }
         return params["cursor"] == nil ? view(Array(lines.prefix(10)), next: "fixture-next") : view(Array(lines.dropFirst(10)))
     }
@@ -1244,7 +1226,7 @@ private actor HostedHomeShellGateway {
             "memory": .object(["configured": .bool(configured), "open": .bool(true), "paused": .bool(paused),
                 "blocked": phase == "blocked" && configured ? .string("source-unavailable") : .null,
                 "episodic": .object(["messages": .number(Double(Self.memoryTotal)),
-                    "view": .object(["built": .number(Double(memoryParts.count)), "unbuilt": .number(0)])]),
+                    "view": .object(["built": .number(Double(Self.memoryViewParts.count)), "unbuilt": .number(0)])]),
                 "spentTokens": .number(10_000_000), "models": .array((configuredModels.isEmpty && configured ? ["anthropic/claude-haiku-5-5"] : configuredModels).map(JSONValue.string))])])
     }
 }
@@ -1293,12 +1275,6 @@ private actor HostedHomeShellSocket: GatewaySocketConnection {
         if let body = result.0 { response["result"] = body }
         if let failure = result.1 { response["error"] = failure }
         await deliver(try JSONEncoder.gateway.encode(JSONValue.object(response)))
-        if let snapshot = await gateway.takeMemorySnapshot() {
-            await deliver(try JSONEncoder.gateway.encode(JSONValue.object([
-                "type": .string("event"), "topic": .string("session.snapshot"), "sessionId": .string(snapshot.sessionId),
-                "subscriptionToken": .string("fixture-subscription"), "payload": try JSONValue.encode(snapshot)
-            ])))
-        }
         if method == "session.attention.read", HostedLaunch.arguments.contains("-home-dashboard-behavior") {
             await deliver(try JSONEncoder.gateway.encode(JSONValue.object([
                 "type": .string("event"), "topic": .string("session.listChanged"), "payload": .object([:])
