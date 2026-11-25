@@ -9,9 +9,6 @@ struct TronMobileApp: App {
 
     init() {
         HostedPresentationProbe.installIdleCapture()
-        if ProcessInfo.processInfo.environment["TRON_UI_LOCK_RENDERING"] == "1" {
-            UIView.setAnimationsEnabled(false)
-        }
         _hostedModel = State(initialValue: AppModel())
         HostedFixtureRoot.prepareLaunch()
     }
