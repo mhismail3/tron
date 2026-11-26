@@ -23,6 +23,7 @@ final class AppLogUploader {
     private let interval: Duration
     private let connection: @MainActor () -> Connection?
     private var owner: Task<Void, Never>?
+    private var ticker: Task<Void, Never>?
     private var wakes: AsyncStream<Void>.Continuation?
 
     init(log: AppLog, interval: Duration = .seconds(60), connection: @escaping @MainActor () -> Connection?) {
@@ -36,10 +37,16 @@ final class AppLogUploader {
         let (stream, continuation) = AsyncStream.makeStream(of: Void.self, bufferingPolicy: .bufferingNewest(1))
         wakes = continuation
         let interval = interval
-        owner = Task { [weak self] in
+        ticker = Task {
             while !Task.isCancelled {
+                try? await Task.sleep(for: interval)
+                continuation.yield(())
+            }
+        }
+        owner = Task { [weak self] in
+            await self?.pass()
+            for await _ in stream {
                 await self?.pass()
-                await Self.waitForNextPass(stream, interval: interval)
             }
         }
     }
@@ -49,19 +56,12 @@ final class AppLogUploader {
     }
 
     func stop() {
+        ticker?.cancel()
+        ticker = nil
         owner?.cancel()
         owner = nil
         wakes?.finish()
         wakes = nil
-    }
-
-    private static func waitForNextPass(_ stream: AsyncStream<Void>, interval: Duration) async {
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { try? await Task.sleep(for: interval) }
-            group.addTask { for await _ in stream { break } }
-            await group.next()
-            group.cancelAll()
-        }
     }
 
     private func pass() async {
