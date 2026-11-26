@@ -13,9 +13,9 @@ final class AppLogUploaderTests: XCTestCase {
 
         let timedPasses = PassCounter()
         let timed = AppLogUploader(log: log, interval: .milliseconds(100)) { timedPasses.value += 1; return nil }
+        defer { timed.stop() }
         timed.start()
         try await Task.sleep(for: .seconds(1))
-        timed.stop()
         XCTAssertGreaterThanOrEqual(timedPasses.value, 2, "the interval timer must start the next pass")
         XCTAssertLessThanOrEqual(timedPasses.value, 15, "after the timer wins, each pass must still wait one interval (#2692)")
 
