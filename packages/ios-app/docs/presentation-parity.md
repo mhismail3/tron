@@ -252,6 +252,10 @@ selected primary theme; semantic statuses keep their colors.
   header and count above it only when multiple nonempty sections remain; a single-category
   section keeps its category tint instead of the primary identity. Feeds (Memory, Tasks, Session History, Subagent History) are a
   `TronFeed` of `TronFeedCard`s, with the next page loaded by `FeedStore` while 5 rows remain.
+  A feed lays its rows out lazily, except while its content-fit sheet is fitted: a fitted sheet is
+  shorter than the screen, so its rows are laid out eagerly and its content height is exact. A lazy
+  tail that sits under the bottom safe area (the iPhone Artifacts sheet) otherwise re-estimates its
+  height on every pass, and the sheet's detent follows it forever.
   A feed whose content overflows its viewport overlays a bottom-centred position chip whose 44-pt
   target takes every touch (tap: newest); a feed that fits its viewport never shows it,
   and a content-fit sheet never shows it while it is fitted. The chip is an overlay that takes no layout space; outside a content-fit sheet the feed keeps
