@@ -178,7 +178,7 @@ not depend on the Transport logger implementation. Optional logging and metadata
   operation) or the installed controller with exact run and child (async); `canAbort` says
   which. Closing the parent presentation retires every lease.
 - Proof: `child-session-admission`, `managed-workflow-children`
-  (`test-results/managed-workflow-resume.json`), `home-task-subagents-reports.e2e.test.ts` and
+  (`test-results/managed-workflow-resume.json`), `home-task-subagents-controls.e2e.test.ts` and
   `subagent-parity.integration.test.ts`, which drives the managed provider through single,
   workflow, question and steering checkpoints (`test-results/subagent-parity.json`).
 

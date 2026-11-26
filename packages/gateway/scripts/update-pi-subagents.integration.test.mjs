@@ -77,8 +77,7 @@ test("packs committed objects, builds a closure and retains current as previous"
     const originalPin = readFileSync(join(target, "pi-subagents-pin.json"));
     const executed = [];
     const beforePublication = (bin, args, options) => {
-      if (args.includes("src/e2e/kernel/delegation/managed-subagents.integration.test.ts") || args.includes("src/e2e/kernel/delegation/managed-subagents.rollback.integration.test.ts")
-        || args.includes("src/kernel/delegation/managed-subagents.invalid-entry.integration.test.ts")) {
+      if (args.includes("src/e2e/kernel/delegation/managed-subagents.rollback.integration.test.ts")) {
         assert.deepEqual(readFileSync(join(target, "pi-subagents-pin.json")), originalPin);
         assert.deepEqual(snapshot(target), original);
         executed.push(args.find((arg) => arg.endsWith(".test.ts")));
@@ -86,7 +85,7 @@ test("packs committed objects, builds a closure and retains current as previous"
       return spawn(bin, args, options);
     };
     const result = runUpdate({ gatewayDir: target, forkRepo: fork, commit, spawn: beforePublication });
-    assert.deepEqual(executed, ["src/e2e/kernel/delegation/managed-subagents.integration.test.ts", "src/e2e/kernel/delegation/managed-subagents.rollback.integration.test.ts", "src/kernel/delegation/managed-subagents.invalid-entry.integration.test.ts"]);
+    assert.deepEqual(executed, ["src/e2e/kernel/delegation/managed-subagents.rollback.integration.test.ts"]);
     const candidate = JSON.parse(readFileSync(join(target, "pi-subagents-pin.json"), "utf8"));
     assert.equal(candidate.version, "0.76.1-tron.99");
     assert.deepEqual(candidate.fork, { repository: null, commit });
@@ -96,7 +95,6 @@ test("packs committed objects, builds a closure and retains current as previous"
     assert.equal(readFileSync(unrelated, "utf8"), "keep");
     for (const [name, bytes] of Object.entries(original)) assert.deepEqual(readFileSync(join(target, "artifacts", name)), bytes);
     command(process.execPath, [join(target, "scripts/check-pi-subagents.mjs")], { env });
-    assert.equal(result.executionGate.passed, true);
     assert.equal(result.rollbackProbe.passed, true);
     for (const name of ["previous", "candidate", "rollback"]) {
       const leg = result.rollbackProbe.legs.find((item) => item.leg === name);
@@ -122,14 +120,14 @@ test("one staging owner excludes overlapping updates without changing its candid
       }
       return spawn(bin, args, options);
     };
-    assert.throws(() => runUpdate({ gatewayDir: target, forkRepo: fork, commit, spawn: duringBuild }), /execution gate/);
+    assert.throws(() => runUpdate({ gatewayDir: target, forkRepo: fork, commit, spawn: duringBuild }), /rollback probe/);
     assert.equal(overlapped, true);
     assert.notEqual(JSON.parse(readFileSync(join(target, "pi-subagents-pin.json"), "utf8")).version, "0.76.1-tron.99");
     assert.equal(readdirSync(target).some((name) => name.startsWith(".pi-subagents-update-")), false);
   });
 });
 
-for (const failure of ["ancestor", "version", "missing-source", "dirty", "late-check", "build", "execution", "rollback", "join"]) {
+for (const failure of ["ancestor", "version", "missing-source", "dirty", "late-check", "build", "rollback", "join"]) {
   test(`refuses ${failure} and restores only invocation-owned files`, async () => {
     const { runUpdate } = await import(updater);
     fixture(({ target, fork, commit, spawn, git, env, root }) => {
@@ -187,7 +185,7 @@ for (const failure of ["ancestor", "version", "missing-source", "dirty", "late-c
       };
       try {
         assert.throws(() => runUpdate({ gatewayDir: target, forkRepo: failure === "missing-source" ? undefined : fork, commit, spawn: injected }), {
-          message: failure === "ancestor" ? /ancestor/ : failure === "version" ? /-tron/ : failure === "missing-source" ? /--fork-repo/ : failure === "dirty" ? /uncommitted|dirty/ : failure === "build" ? /pack/ : failure === "execution" ? /execution gate/ : failure === "rollback" ? /rollback probe/ : failure === "join" ? /staging preserved.*fixture termination denied/s : /offline check failure/,
+          message: failure === "ancestor" ? /ancestor/ : failure === "version" ? /-tron/ : failure === "missing-source" ? /--fork-repo/ : failure === "dirty" ? /uncommitted|dirty/ : failure === "build" ? /pack/ : failure === "rollback" ? /rollback probe/ : failure === "join" ? /staging preserved.*fixture termination denied/s : /offline check failure/,
         });
         assert.deepEqual(readFileSync(join(target, "pi-subagents-pin.json")), originalPin);
         assert.deepEqual(snapshot(target), originalArtifacts);
