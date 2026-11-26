@@ -29,7 +29,14 @@ final class HomeDelegationViewTests: ShuffledTestCase {
                     XCTAssertFalse(titleFrame.intersects(status.accessibilityFrame), "The status pill covers the \(rowID) title\n\(app.tree())")
                 }
             }
-            XCTAssertNil(app.element("settings-home-delegation"), "The old Settings row is gone\n\(app.tree())")
+        }
+        try await mounted(["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-permissions-granted"]) { app in
+            try await app.activate("home-pinned-row")
+            try await app.activate("Settings")
+            try await app.until("Settings opens") { app.element("settings-link-MCP Servers") != nil }
+            for _ in 0..<10 { await MountedFixture.nextFrame() }
+            XCTAssertNil(app.element("settings-home-delegation"), "Settings has no Home delegation row\n\(app.tree())")
+            XCTAssertNil(app.element("home-delegation"), "Settings has no Home delegation row\n\(app.tree())")
         }
         try await mounted(["-tron-home-dashboard-fixture", "-home-shell-ready"]) { app in
             try await openManageHome(app)

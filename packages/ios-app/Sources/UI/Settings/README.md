@@ -25,7 +25,7 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
   Connections, Model Providers and MCP Servers. Every destination
   uses the selected theme's `tronPrimary`; semantic statuses retain their colors. The leading toolbar holds
   Notifications and Mac Terminal (`apple.terminal`), which opens `MacTerminalSheet`.
-- **Home delegation** lives in Manage Home (Chat README), not Settings.
+  Home delegation lives in Manage Home (Chat README), not Settings.
   The `trust` group has no Global view; the
   `connections` group (Mac Terminal key and private SSH service) is owned by the Mac Terminal sheet.
   There is no Value & Source sheet.
