@@ -393,16 +393,7 @@ struct TronFeedStateRow: View {
 final class TronFeedPosition {
     var newest: Int?
     var oldest: Int?
-    var long = false
-    static let hysteresis: CGFloat = 60
-}
-
-private struct TronFeedChipSpace: View {
-    let position: TronFeedPosition
-    @ScaledMetric(relativeTo: .caption) private var height = TronFeedPositionChip.height
-    var body: some View {
-        Color.clear.frame(height: position.long ? height : 0).accessibilityHidden(true)
-    }
+    var overflows = false
 }
 
 struct TronFeedPositionChip: View {
@@ -414,10 +405,11 @@ struct TronFeedPositionChip: View {
     let totalIsExact: Bool
     let jump: () -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.tronSheetFitsContent) private var fits
     @State private var presentedScale: CGFloat = 1
 
     var body: some View {
-        if position.long, let newest = position.newest, let oldest = position.oldest {
+        if position.overflows, !fits, let newest = position.newest, let oldest = position.oldest {
             let low = min(newest, oldest), high = max(newest, oldest)
             Button(action: jump) {
                 HStack(spacing: 8) {
@@ -504,6 +496,8 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
     @ViewBuilder let row: (Item) -> Row
     @State private var position = TronFeedPosition()
     @State private var ordinals: [Item.ID: Int] = [:]
+    @Environment(\.tronSheetFitsContent) private var fits
+    @ScaledMetric(relativeTo: .caption) private var chipRoom = TronFeedPositionChip.height
 
     var body: some View {
         let trigger = items.count > 5 ? items[items.count - 5].id : items.last?.id
@@ -518,11 +512,11 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
                     }
                     TronFeedStateRow(tail: tail, retry: retry)
                         .onAppear { if tail == .idle { loadMore() } }
-                    TronFeedChipSpace(position: position)
                 }
                 .scrollTargetLayout()
                 .tronFeedInsets()
             }
+            .safeAreaPadding(.bottom, fits ? 0 : chipRoom)
             .accessibilityIdentifier(identifier)
             .overlay(alignment: .bottom) {
                 TronFeedPositionChip(position: position, total: total, totalIsExact: totalIsExact) {
@@ -531,10 +525,9 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
                 }
             }
             .tronScrollEdgeChrome()
-            .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height - $0.containerSize.height } action: { _, excess in
-                if position.long { if excess < -TronFeedPosition.hysteresis { position.long = false } }
-                else if excess > 1 { position.long = true }
-            }
+            .onScrollGeometryChange(for: Bool.self) {
+                $0.contentInsets.top + $0.contentSize.height + $0.contentInsets.bottom > $0.containerSize.height + 0.5
+            } action: { _, overflows in position.overflows = overflows }
             .onScrollTargetVisibilityChange(idType: Item.ID.self, threshold: 0.3) { visible in
                 let values = visible.compactMap { ordinals[$0] }
                 guard let newest = values.max(), let oldest = values.min(),
