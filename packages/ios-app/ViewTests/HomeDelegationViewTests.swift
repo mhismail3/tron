@@ -13,18 +13,18 @@ final class HomeDelegationViewTests: ShuffledTestCase {
                 return row != nil
             }
             try await app.reveal(row!)
-            for (rowID, revoke) in [("home-delegation", "Revoke scope scope-one"), ("home-delegation-grant-grant-one", "Revoke grant grant-one")] {
+            for rowID in ["home-delegation", "home-delegation-grant-grant-one"] {
                 var title: NSObject?
                 var button: NSObject?
                 try await app.until("\(rowID) lays out its title and Revoke") {
                     title = app.element("\(rowID)-title")
-                    button = app.button(revoke)
+                    button = app.element("\(rowID)-action")
                     return title != nil && button != nil
                 }
                 let titleFrame = title!.accessibilityFrame
                 XCTAssertGreaterThan(titleFrame.width, 0, "\(rowID) has a visible title\n\(app.tree())")
                 XCTAssertFalse(titleFrame.intersects(button!.accessibilityFrame),
-                               "\(revoke) is drawn over the \(rowID) title\n\(app.tree())")
+                               "Revoke is drawn over the \(rowID) title\n\(app.tree())")
                 if let status = app.element("\(rowID)-status") {
                     XCTAssertFalse(titleFrame.intersects(status.accessibilityFrame), "The status pill covers the \(rowID) title\n\(app.tree())")
                 }
