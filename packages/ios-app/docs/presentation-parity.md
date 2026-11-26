@@ -253,8 +253,8 @@ selected primary theme; semantic statuses keep their colors.
   section keeps its category tint instead of the primary identity. Feeds (Memory, Tasks, Session History, Subagent History) are a
   `TronFeed` of `TronFeedCard`s, with the next page loaded by `FeedStore` while 5 rows remain.
   A feed whose content overflows its viewport overlays a bottom-centred position chip whose 44-pt
-  target takes every touch (tap: newest); a feed that fits (and any content-fit sheet) never shows
-  it. The chip is an overlay that takes no layout space; outside a content-fit sheet the feed keeps
+  target takes every touch (tap: newest); a feed that fits its viewport never shows it,
+  and a content-fit sheet never shows it while it is fitted. The chip is an overlay that takes no layout space; outside a content-fit sheet the feed keeps
   constant bottom safe-area room to clear it, so the chip's visibility never changes the content
   height a content-fit sheet measures. The chip labels its unit as Items; Home
   Memory and Tasks count rows newest-first, not memory catalog addresses. Their total is the
