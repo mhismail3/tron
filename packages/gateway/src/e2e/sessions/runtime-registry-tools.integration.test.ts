@@ -1170,6 +1170,40 @@ export default function (pi) {
     expect(slot.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
   });
 
+  it("settles a tool's open dialog when its turn is aborted, so drain is not blocked by a dead prompt (#2694)", async () => {
+    const root = await temporaryRoot("tron-aborted-tool-dialog-");
+    const agentDir = join(root, "agent"), cwd = join(root, "workspace"), extensionDir = join(cwd, ".pi", "extensions");
+    await Promise.all([mkdir(agentDir), mkdir(extensionDir, { recursive: true })]);
+    await writeFile(join(extensionDir, "ask.ts"), `export default function (pi) {
+      pi.registerTool({ name: "ask", label: "Ask", description: "Asks without forwarding its signal", parameters: { type: "object", properties: {} },
+        execute: async (_id, _params, _signal, _onUpdate, ctx) => {
+          await ctx.ui.select("Allow?", ["Allow", "Deny"]);
+          return { content: [{ type: "text", text: "answered" }], details: {} };
+        } });
+    }\n`);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const faux = fauxProvider({ provider: "tron-aborted-tool-dialog", tokensPerSecond: 10_000 });
+    faux.setResponses([fauxAssistantMessage([fauxToolCall("ask", {}, { id: "call-ask" })], { stopReason: "toolUse" })]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const registry = await createTestRegistry({ agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
+      modelRuntimeFactory: async () => runtime, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {} });
+    registries.push(registry);
+    await initializeRegistry(registry);
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    const prompting = slot.prompt("ask for permission");
+    await waitFor(() => slot.snapshot().extensionPresentation.pendingInteractions.length === 1, "the tool's dialog");
+    const operationId = slot.snapshot().operation?.id;
+    await slot.abort("agent", operationId);
+    await prompting;
+    await waitFor(() => slot.snapshot().phase === "idle", "the aborted turn to settle");
+    expect(slot.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
+    expect(slot.administrativeDrainBlockers()).toEqual([]);
+  });
+
   it("permits one delayed agent start owned by an accepted extension command during drain", async () => {
     const root = await temporaryRoot("tron-drain-extension-command-start-");
     const agentDir = join(root, "agent");
