@@ -1525,7 +1525,7 @@ struct TronSettingsRow<Trailing: View>: View {
             stackedLeadingInset: icon == nil ? 0 : TronSettingsLayoutPolicy.iconSize + TronSpacing.xl
         ) {
             rowLabels
-            trailing
+            HStack(spacing: TronSpacing.md) { trailing }
         }
         .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
         .padding(.vertical, labelsOwnInsets ? 0 : feedTrailing == nil ? TronSpacing.xl : TronSpacing.md)
@@ -1564,6 +1564,7 @@ struct TronSettingsRow<Trailing: View>: View {
                     }
                     .scrollBounceBehavior(.basedOnSize)
                     .accessibilityLabel(title)
+                    .tronListMarker(.title)
                 } else if let feedTrailing {
                     HStack(alignment: .firstTextBaseline, spacing: TronSpacing.md) {
                         Text(title).font(titleFont).foregroundStyle(titleColor)

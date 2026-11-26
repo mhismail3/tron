@@ -224,6 +224,13 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   (`home-manage-pause`/`home-manage-resume`, `home-manage-disable`), read from the sheet's own
   `home.manage` status; each tap presents a `TronConfirmationSheet` before the mutation. An
   unresolved Home command replaces them with Check completion (`home-manage-check-completion`).
+- Home delegation is global (one Home per Gateway) and shows in Manage Home below its rows
+  (`HomeTaskSheet(permissionsFor:)`, polled `home.taskPermissions`) only when there is something to act on:
+  an active or to-be-reconfirmed scope (`home-delegation`: title "Home delegation", subtitle "All trusted
+  projects", Active/Reconfirm pill and Revoke as trailing content that stacks below the labels before it
+  could cover them), Reconfirm permissions when needed, and each available one-use grant (key, target, Revoke).
+  With none, it shows nothing, including no loading or error state. Every Revoke confirms in a
+  `TronConfirmationSheet`; granting stays on the native approval card.
 - Tasks default to in-progress/attention lineages; the shared toolbar filter exposes finished
   and all work. The Gateway owns grouping by explicit resume links, never by title.
 - Task check-ins use shared list insets and line/block spacing once per record: summary headline,
