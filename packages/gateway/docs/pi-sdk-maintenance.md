@@ -215,8 +215,7 @@ artifact checks. Browser live views are admitted only from `builtin:agent-browse
 - **Build:** `npm run build:pi-subagents-closure` with the pinned toolchain (`TRON_NODE_BIN`);
   predecessors only in disposable copies.
 - **Update:** verifies upstream tag and fork ancestry, builds a new `-tron.N` in a disposable
-  tree, and must pass the offline real-Gateway activation/child-execution gate and the previous
-  → candidate → previous probe before publishing immutable artifacts and renaming the pin
+  tree, and must pass the previous → candidate → previous probe before publishing immutable artifacts and renaming the pin
   (current kept as previous). `.pi-subagents-update-staging` is the exclusive lease; an
   interrupted update leaves it for the operator. It never edits the fork, homes or manifests.
 - **Home task gate:** every pin change also re-reviews the fork's launch/control contract
@@ -225,7 +224,7 @@ artifact checks. Browser live views are admitted only from `builtin:agent-browse
   installed-tool identity; the finite-task guard consumes its decision. A missing or
   unreviewed version is refused before launch. Validate actual Home-task launch/resume
   and retained refusals, not only an ordinary session's child execution. The pin module declares
-  `home-task-subagents-reports.e2e.test.ts` as a verification dependency, so a pin change exercises
+  `home-task-subagents-controls.e2e.test.ts` as a verification dependency, so a pin change exercises
   verified controls, the missing-pin refusal and real child/report settlement.
 - **Advertisement lifetime:** global npm discovery runs through the provider's owned setup-command primitive. Reload cancels and joins superseded lookups; session shutdown cancels and joins the current lookup before returning. Unavailable global discovery still permits local agents. The real Gateway prompt/restart journey holds an npm lookup open and checks its PID is gone before the replacement process launches.
 - **Install and activation:** `npm run install:pi-subagents -- <gateway-home>` extracts the
