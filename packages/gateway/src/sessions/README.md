@@ -40,7 +40,8 @@ Shared deadline bookkeeping lives in `../util/recency-deadlines.ts`; activity ow
   intent, so a later natural completion is `completed`; an actual SDK abort settles
   as interrupted. Every tool call runs under its own abort controller, and two
   seconds after cancellation a call that ignores its signal resolves as an error
-  naming the abandoned tool; its late result is discarded. Built-in bash kills its
+  naming the abandoned tool; its late result is discarded. A dialog a tool opens is bound to
+  that call's signal, so cancellation settles it. Built-in bash kills its
   process group on abort.
 - **Session-replacing extension commands** (`ctx.switchSession`, `ctx.newSession`,
   `ctx.fork`) settle `completed` in the origin at `beforeSessionInvalidate`; nothing
