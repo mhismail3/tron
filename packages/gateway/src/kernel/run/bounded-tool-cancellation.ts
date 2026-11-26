@@ -1,4 +1,5 @@
 import type { AgentSession } from "../pi/coding-agent.js";
+import { withToolCallSignal } from "../host/extension-execution-context.js";
 
 const TOOL_CANCELLATION_GRACE_MS = 2_000;
 export const TOOL_INTERRUPT_SIGNAL_GRACE_MS = 5_000;
@@ -71,7 +72,7 @@ export function boundToolCancellation(session: AgentSession, graceMs = TOOL_CANC
         if (controller.signal.aborted) abandon();
         else controller.signal.addEventListener("abort", abandon, { once: true });
         let running: Promise<unknown>;
-        try { running = Promise.resolve(execute.call(tool, id, params, controller.signal, ...rest)); }
+        try { running = Promise.resolve(withToolCallSignal(controller.signal, () => execute.call(tool, id, params, controller.signal, ...rest))); }
         catch (error) { running = Promise.reject(error); }
         running.then(
           value => { const interrupted = interrupt(); if (interrupted) reject(new Error(interruptedText(interrupted, tool.name, resultText(value)))); else resolve(value); },

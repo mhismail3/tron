@@ -8,6 +8,7 @@ interface InvocationExecutionContext {
   trigger?: import("./input-admission.js").InputTriggerAttribution | undefined;
 }
 const invocationStorage = new AsyncLocalStorage<InvocationExecutionContext>();
+const toolCallSignalStorage = new AsyncLocalStorage<AbortSignal>();
 
 export function currentExtensionOwner(): ExtensionOwner | undefined { return ownerStorage.getStore(); }
 export function withExtensionOwner<T>(owner: ExtensionOwner, operation: () => T): T {
@@ -16,4 +17,8 @@ export function withExtensionOwner<T>(owner: ExtensionOwner, operation: () => T)
 export function currentInvocationContext(): InvocationExecutionContext | undefined { return invocationStorage.getStore(); }
 export function withInvocationContext<T>(context: InvocationExecutionContext, operation: () => T): T {
   return invocationStorage.run(context, operation);
+}
+export function currentToolCallSignal(): AbortSignal | undefined { return toolCallSignalStorage.getStore(); }
+export function withToolCallSignal<T>(signal: AbortSignal, operation: () => T): T {
+  return toolCallSignalStorage.run(signal, operation);
 }

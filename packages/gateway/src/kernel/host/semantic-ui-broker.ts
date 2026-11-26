@@ -33,7 +33,7 @@ import {
   ExtensionPresentationStore,
 } from "./presentation/extension-presentation-store.js";
 import { stripTerminalControls } from "./presentation/terminal-sanitizer.js";
-import { currentExtensionOwner, currentInvocationContext } from "./extension-execution-context.js";
+import { currentExtensionOwner, currentInvocationContext, currentToolCallSignal } from "./extension-execution-context.js";
 
 export interface ExtensionNotificationInput {
   message: string;
@@ -297,6 +297,8 @@ export class SemanticUIBroker {
     input: ExtensionInteractionInput,
     options?: InteractionRequestOptions,
   ): Promise<unknown> {
+    const signals = [options?.signal, currentToolCallSignal()].filter((signal): signal is AbortSignal => signal !== undefined);
+    if (signals.length > 0) options = { ...options, signal: signals.length === 1 ? signals[0]! : AbortSignal.any(signals) };
     try {
       this.assertActive();
       const title = stripTerminalPresentation(input.title);
