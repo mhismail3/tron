@@ -105,7 +105,7 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
                 let trace = try await SheetTrace.record(app, frames: 150, ready: { app.element("Done") != nil }) { _ in
                     chips.append(app.element("feed-position-chip") != nil)
                 }
-                try await app.until("the report rows") { app.element("artifacts-placeholder") == nil && app.element("feed-end") != nil }
+                try await app.until("the report rows") { MountedFixture.elements(in: app.top).contains { (MountedFixture.identifier($0) ?? "").hasSuffix("_report-1-container") } }
                 try await settle(app, "artifacts-2\(delayed ? "-delayed" : "")")
                 let scroll = try XCTUnwrap(mainScroll(app))
                 let needed = scroll.contentSize.height + scroll.adjustedContentInset.top + scroll.adjustedContentInset.bottom
