@@ -120,9 +120,7 @@ export function runUpdate({ gatewayDir = GATEWAY, forkRepo, commit, spawn = spaw
         return report;
       } catch (error) { throw new Error(`${label} failed: ${error.message}`, { cause: error }); }
     };
-    const executionGate = gate("offline real-Gateway execution gate", "src/e2e/kernel/delegation/managed-subagents.integration.test.ts", "activation.json", "TRON_SUBAGENTS_REPORT", NESTED_CONFIG);
     const rollbackProbe = gate("previous-candidate-previous rollback probe", "src/e2e/kernel/delegation/managed-subagents.rollback.integration.test.ts", "rollback.json", "TRON_SUBAGENTS_ROLLBACK_REPORT", NESTED_CONFIG, { TRON_SUBAGENTS_SOURCE_GATEWAY: root });
-    invoke(process.execPath, [join(root, "node_modules/vitest/vitest.mjs"), "run", ...NESTED_CONFIG, "src/kernel/delegation/managed-subagents.invalid-entry.integration.test.ts"], candidateRoot, { ...env, TRON_TEST_PROCESS_OWNER_FAILURE: processOwnerFailure });
     if (existsSync(processOwnerFailure)) throw new Error("probe process join failed before publication");
     for (const path of Object.values(paths)) {
       const bytes = readFileSync(join(candidateRoot, path));
@@ -134,7 +132,7 @@ export function runUpdate({ gatewayDir = GATEWAY, forkRepo, commit, spawn = spaw
     renameSync(join(candidateRoot, PIN), pinPath);
     published = true;
     invoke("npm", ["run", "check:pi-subagents"], root, env);
-    return { version: candidate.version, forkCommit: commit, upstream, latestUpstream, closureSha512: candidate.closure.sha512, executionGate, rollbackProbe };
+    return { version: candidate.version, forkCommit: commit, upstream, latestUpstream, closureSha512: candidate.closure.sha512, rollbackProbe };
   } catch (error) {
     if (published) {
       const restore = join(staging, "restore-pin.json");

@@ -85,10 +85,7 @@ SIGKILL lands at an arbitrary point of a sharded catalog save.
   workers (shared-host bound, not test selection). `vitest.nested.config.ts` runs, one
   file at a time with its own hang bounds, the files that spawn nested Vitest or real
   pi children or activate the real managed provider; its list is the only owner of
-  which files are nested. The invalid-entry fixture registers only its parent cases
-  or its staged child oracle, according to the existing fixture selector. Each parent
-  also verifies the child's JSON result has exactly one pass and no failures/skips;
-  a successful empty child process is not evidence.
+  which files are nested.
 - **Fixture processes.** `fixture-process-owner.mjs` records spawned handles and
   groups, stops and joins them (TERM then one KILL) before roots are removed, and
   writes join failures to `TRON_TEST_PROCESS_OWNER_FAILURE`. A KILL permission

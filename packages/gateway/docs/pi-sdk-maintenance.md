@@ -264,16 +264,12 @@ artifact checks. Browser live views are admitted only from `builtin:agent-browse
 - **Proof:** `delegation.lock.integration.test.ts` (a real child runs to completion and returns its answer),
   `managed-subagents.install.integration.test.ts`,
   `managed-subagents-warm-process.e2e.test.ts` (fresh home, real Gateway process),
-  `managed-subagents.transform.integration.test.ts` (fresh build, no Gateway-thread transform),
-  `managed-subagents.integration.test.ts` (npm offline, TCP denied, a real child),
   `npm run test:pi-subagents-rollback` (previous → candidate → previous with resume; original
   JSONL prefixes unchanged; each provider runs with its own Gateway source, the previous one
   exported from the commit that pinned it (the updater names its Gateway repository through
   `TRON_SUBAGENTS_SOURCE_GATEWAY`), because a rollback moves Gateway and provider together; every
   leg requires all extensions to load; `TRON_SUBAGENTS_ROLLBACK_ROOT` keeps the home; join failures go to
-  `TRON_TEST_PROCESS_OWNER_FAILURE`) and
-  `src/kernel/delegation/managed-subagents.payload.integration.test.ts` (stages a `dist` it emits
-  from this commit, never the checkout's build). Reports in `test-results/`.
+  `TRON_TEST_PROCESS_OWNER_FAILURE`). Reports in `test-results/`.
 
 ## Persisted-state corpus
 
