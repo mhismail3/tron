@@ -50,6 +50,7 @@ from tron_mac_replace_platform import Failure, MacPlatform, capture, run  # noqa
 from tron_mac_replace_journal import write_json_atomic  # noqa: E402
 
 REPO = HERE.parent
+PROTOCOL = json.loads((REPO / 'config/GatewayProtocol.json').read_text())
 
 
 class FixturePlatform(MacPlatform):
@@ -526,14 +527,15 @@ def quit_journey():
 RPC_RESPONDER = r'''
 const { WebSocketServer } = require("ws");
 const fs = require("node:fs");
+const protocol = JSON.parse(process.argv[2]);
 const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
 server.on("listening", () => console.log(server.address().port));
 server.on("connection", (ws, request) => {
   if (request.headers.authorization !== "Bearer fixture-token") return ws.close(1008, "bad token");
   ws.on("message", raw => {
     const frame = JSON.parse(raw);
-    if (frame.type === "hello" && frame.protocolVersion === 9) {
-      return ws.send(JSON.stringify({ type: "hello", protocolVersion: 9, minProtocolVersion: 9 }));
+    if (frame.type === "hello" && frame.protocolVersion === protocol.protocolVersion) {
+      return ws.send(JSON.stringify({ type: "hello", ...protocol }));
     }
     fs.appendFileSync(process.argv[1], frame.method + "\n");
     if (frame.type === "request" && frame.method === "gateway.drain.status") {
@@ -573,7 +575,8 @@ def rpc_journey():
             calls = root / 'calls'
             env = dict(os.environ, HOME=str(home), TMPDIR=str(temporary), NODE_PATH=str(modules))
             with (root / 'server.log').open('w') as log:
-                server = subprocess.Popen([node, '-e', RPC_RESPONDER, str(calls)], env=env,
+                server = subprocess.Popen([node, '-e', RPC_RESPONDER, str(calls),
+                                           json.dumps({k: PROTOCOL[k] for k in ('protocolVersion', 'minProtocolVersion')})], env=env,
                                           stdout=subprocess.PIPE, stderr=log, text=True)
                 try:
                     import select
@@ -590,7 +593,7 @@ def rpc_journey():
                             return 'fixture-token'
 
                         def protocol(self):
-                            return 9
+                            return PROTOCOL['protocolVersion']
 
                         def endpoints(self):
                             return [f'ws://127.0.0.1:{port}/v1/socket']

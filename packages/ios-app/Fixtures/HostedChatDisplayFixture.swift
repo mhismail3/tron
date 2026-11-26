@@ -245,9 +245,8 @@ struct HostedHomeDashboardFixture: View {
 
     init() {
         let arguments = HostedLaunch.arguments
-        let capabilityEnabled = !arguments.contains("-home-capability-absent")
         let initialState = arguments.first(where: { $0.hasPrefix("-home-shell-") })?.replacingOccurrences(of: "-home-shell-", with: "") ?? "undesignated"
-        let gateway = HostedHomeShellGateway(capabilityEnabled: capabilityEnabled, initialState: initialState,
+        let gateway = HostedHomeShellGateway(initialState: initialState,
             phase: arguments.first(where: { $0.hasPrefix("-home-phase-") })?.replacingOccurrences(of: "-home-phase-", with: ""),
             delayed: arguments.contains("-home-control-delayed"),
             browserState: arguments.first(where: { $0.hasPrefix("-home-browser-") })?.replacingOccurrences(of: "-home-browser-", with: ""),
@@ -304,12 +303,14 @@ struct HostedHomeDashboardFixture: View {
                             Text("sheet-read-peak:\(sheetReadPeak)")
                                 .accessibilityIdentifier("fixture.home-sheet-read-peak")
                             Text("home-reads:\(homeReads)").accessibilityIdentifier("fixture.home-read-counts")
+                            Text("home-session-revision:\(model.selectedSnapshot?.revision ?? 0)")
+                                .accessibilityIdentifier("fixture.home-session-revision")
                             Text(TronDashboardRevealProbe.shared.summary).accessibilityIdentifier("fixture.dashboard-reveals")
                             Text("menu-feedback:\(TronHapticsProbe.shared.count(.menuOpened))").accessibilityIdentifier("fixture.menu-feedback")
                             Text("sheet-feedback:\(TronHapticsProbe.shared.count(.sheetPresented))").accessibilityIdentifier("fixture.sheet-feedback")
                             Text(dashboardReads).accessibilityIdentifier("fixture.dashboard-catalog-reads")
                             Text(HomeUsageLayoutProbe.shared.summary).accessibilityIdentifier("fixture.home-usage-layout")
-                            Text("home-diagnostics connected=\(model.connectionState) home-capable=\(model.homeStatus.capabilityEnabled) capabilities=\(String(describing: model.gatewayInfo?.capabilities)) home-phase=\(String(describing: model.homeStatus.status?.phase)) selected-profile=\(String(describing: model.profiles.selected?.id))")
+                            Text("home-diagnostics connected=\(model.connectionState) home-capable=\(model.homeStatus.isAvailable) capabilities=\(String(describing: model.gatewayInfo?.capabilities)) home-phase=\(String(describing: model.homeStatus.status?.phase)) selected-profile=\(String(describing: model.profiles.selected?.id))")
                                 .accessibilityIdentifier("fixture.home-diagnostics")
                         }
                         .font(.system(size: 1)).opacity(0.01)
@@ -431,7 +432,6 @@ struct HostedHomeDashboardFixture: View {
 }
 
 private actor HostedHomeShellGateway {
-    private let capabilityEnabled: Bool
     private let initialState: String
     private var designated: Bool
     private var homeStatusCount = 0
@@ -496,11 +496,10 @@ private actor HostedHomeShellGateway {
     private var profileItems: [HostedProfileItem] = HostedHomeToolFixture.profileItems
     private var profileUndo: [String: (before: [HostedProfileItem], after: [HostedProfileItem])] = [:]
     private var profileChangeCount = 0
-    init(capabilityEnabled: Bool, initialState: String, phase: String? = nil, delayed: Bool = false, browserState: String? = nil, emptyContext: Bool = false, sheetState: String? = nil) {
+    init(initialState: String, phase: String? = nil, delayed: Bool = false, browserState: String? = nil, emptyContext: Bool = false, sheetState: String? = nil) {
         self.sheetState = sheetState
         self.browserState = browserState
         self.emptyContext = emptyContext
-        self.capabilityEnabled = capabilityEnabled
         self.initialState = initialState
         designated = initialState == "ready" || initialState == "rollover"
         self.phase = phase ?? "ready"
@@ -539,7 +538,7 @@ private actor HostedHomeShellGateway {
                 .object(["sessionId": .string("home-session"), "ordinal": .number(2), "state": .string("active"),
                          "createdAt": .string(isoAgo(3 * 86_400)), "activationStarted": .bool(true),
                          "sessionPresent": .bool(true),
-                         "bytes": .number(HostedLaunch.arguments.contains("-memory-boundary-regression") ? 5_536_481 : 480), "entries": .number(12),
+                         "bytes": .number(480), "entries": .number(12),
                          "contents": .object(["firstAt": .string(isoAgo(3 * 86_400)), "lastAt": .string(isoAgo(3 * 60)),
                              "userMessages": .number(6), "homeReplies": .number(6), "tasksDelegated": .number(1),
                              "topics": .array([.string("Garden redesign")])])]),
@@ -558,13 +557,13 @@ private actor HostedHomeShellGateway {
     func configuredModelIdentity() -> String { configuredModels.isEmpty ? "none" : configuredModels.joined(separator: ",") }
     func lastPromptRoute() -> String { promptRoutes.last ?? "none" }
     func lastOpenedSession() -> String { openedSessions.last ?? "none" }
-    func capabilities() -> [String] { foreground.capabilities(capabilityEnabled ? (sheetState == "dashboard-workers" ? [ProviderUsageCapability.name] : []) + ["sessions.v1", "home.v1", "home-chapter-list.v1", "home-profile-list.v1", "home-profile-edit.v1", "context-window.v1", "skill-prompt.v1"] + (sheetState == "browser-unsupported" ? [] : ["home-memory-view.v1"]) : ["sessions.v1"]) }
+    func capabilities() -> [String] { foreground.capabilities((sheetState == "dashboard-workers" ? [ProviderUsageCapability.name] : []) + ["sessions.v1", "context-window.v1", "skill-prompt.v1"]) }
 
     private var homeReads: [String: Int] = [:]
     private var onHomeRead: (@MainActor @Sendable (String) -> Void)?
     func observeHomeReads(_ observer: @escaping @MainActor @Sendable (String) -> Void) { onHomeRead = observer }
     func homeReadSummary() -> String {
-        ["home.status", "home.context", "home.chapterList", "home.memory.view", "home.taskList", "home.taskStatus"]
+        ["home.status", "home.context", "home.chapterList", "home.memory.view", "home.memory.view.first", "home.taskList", "home.taskStatus"]
             .map { "\($0)=\(homeReads[$0, default: 0])" }.joined(separator: ",")
     }
 
@@ -621,6 +620,7 @@ private actor HostedHomeShellGateway {
         await ForegroundSheetProbe.record("rpc", method, params: params)
         if method.hasPrefix("home.") {
             homeReads[method, default: 0] += 1
+            if method == "home.memory.view", params["cursor"] == nil, params["part"] == nil { homeReads["home.memory.view.first", default: 0] += 1 }
             if let onHomeRead { await onHomeRead(homeReadSummary()) }
         }
         switch method {
@@ -843,7 +843,7 @@ private actor HostedHomeShellGateway {
                 snapshot.transcriptStart = start
                 snapshot.transcriptTotal = transcript.count
             }
-            if sessionID == "home-session" { memorySnapshot = snapshot }
+            if sessionID == "home-session" { homeSnapshot = snapshot }
             return (.object(["session": try! JSONValue.encode(snapshot), "syncToken": .string("fixture-sync"),
                 "subscriptionToken": .string("fixture-subscription"), "completionRevision": .number(HostedLaunch.arguments.contains("-home-dashboard-behavior") ? 1 : 0)]), nil)
         case "session.transcript" where HostedLaunch.arguments.contains("-home-tool-paged-transcript"):
@@ -1013,12 +1013,12 @@ private actor HostedHomeShellGateway {
     }
 
     private func model(_ id: String, name: String, virtual: Bool = false) -> JSONValue {
-        .object(["provider": .string("fixture"), "id": .string(id), "name": .string(name), "reasoning": .bool(false),
+        .object(["provider": .string("fixture"), "providerName": .string("Fixture"), "id": .string(id), "name": .string(name), "latest": .bool(false), "reasoning": .bool(false),
                  "input": .array([.string("text")]), "contextWindow": .number(8192), "maxTokens": .number(1024),
                  "available": .bool(true), "virtual": .bool(virtual)])
     }
     private func anthropicModel(_ id: String, name: String, window: Int) -> JSONValue {
-        .object(["provider": .string("anthropic"), "id": .string(id), "name": .string(name), "reasoning": .bool(true),
+        .object(["provider": .string("anthropic"), "providerName": .string("Anthropic"), "id": .string(id), "name": .string(name), "latest": .bool(false), "reasoning": .bool(true),
                  "input": .array([.string("text")]), "contextWindow": .number(Double(window)), "maxTokens": .number(64_000),
                  "available": .bool(true), "virtual": .bool(false)])
     }
@@ -1046,15 +1046,13 @@ private actor HostedHomeShellGateway {
         .object(["index": .number(Double(index)), "sessionId": .string(sessionID), "entryId": .string("source-entry"),
                  "sourceDigest": .string(String(repeating: "a", count: 64))])
     }
-    private var memoryAdvanced = false
-    private var memorySnapshot: SessionSnapshot?
-    private var pendingMemorySnapshot: SessionSnapshot?
-    private var memoryParts: [(start: Int, span: Int)] {
-        memoryAdvanced ? [(0, 32), (32, 4)] + (36..<40).map { ($0, 1) } : Self.memoryViewParts
-    }
-    func takeMemorySnapshot() -> SessionSnapshot? {
-        defer { pendingMemorySnapshot = nil }
-        return pendingMemorySnapshot
+    private var homeSnapshot: SessionSnapshot?
+    func advanceLiveHomeSession() -> SessionSnapshot? {
+        guard var snapshot = homeSnapshot else { return nil }
+        snapshot.revision += 1
+        snapshot.eventSequence += 1
+        homeSnapshot = snapshot
+        return snapshot
     }
     private static let memoryTotal = 40
     private static let memorySealedEnd = 32
@@ -1119,8 +1117,8 @@ private actor HostedHomeShellGateway {
     private func memoryLine(start: Int, span: Int) -> JSONValue {
         var line: [String: JSONValue] = ["start": .number(Double(start)), "span": .number(Double(span)),
             "truncated": .bool(false), "firstAt": .string(memoryTime(start)), "lastAt": .string(memoryTime(start + span - 1)),
-            "inCurrentView": .bool(memoryParts.contains { $0.start == start && $0.span == span }),
-            "startsIndividualMessages": .bool(start == (memoryAdvanced ? 36 : 34) && span == 1)]
+            "inCurrentView": .bool(Self.memoryViewParts.contains { $0.start == start && $0.span == span }),
+            "startsIndividualMessages": .bool(start == 34 && span == 1)]
         if span == 1 {
             let message = memoryMessage(start)
             line["text"] = .string(message.text); line["kind"] = .string(message.kind); line["item"] = memoryItem(start)
@@ -1131,7 +1129,7 @@ private actor HostedHomeShellGateway {
     }
 
     private func memoryView(_ params: [String: JSONValue], empty: Bool) -> JSONValue {
-        let revision = JSONValue.string(String(repeating: memoryAdvanced ? "b" : "a", count: 64))
+        let revision = JSONValue.string(String(repeating: "a", count: 64))
         if HostedLaunch.arguments.contains("-memory-position-regression") {
             let scoped = params["sessionId"]?.stringValue == "home-chapter-sealed"
             let count = scoped ? 32 : 40
@@ -1146,23 +1144,14 @@ private actor HostedHomeShellGateway {
             return .object(result)
         }
         if let part = params["part"]?.objectValue, let start = part["start"]?.intValue, let span = part["span"]?.intValue {
-            let result = view([memoryLine(start: start, span: span / 2), memoryLine(start: start + span / 2, span: span / 2)])
-            if HostedLaunch.arguments.contains("-memory-boundary-regression"), !memoryAdvanced,
-               var snapshot = memorySnapshot {
-                memoryAdvanced = true
-                snapshot.revision += 1
-                snapshot.eventSequence += 1
-                memorySnapshot = snapshot
-                pendingMemorySnapshot = snapshot
-            }
-            return result
+            return view([memoryLine(start: start, span: span / 2), memoryLine(start: start + span / 2, span: span / 2)])
         }
         let range = switch params["sessionId"]?.stringValue {
         case "home-chapter-sealed": 0..<Self.memorySealedEnd
         case "home-session": Self.memorySealedEnd..<Self.memoryTotal
         default: 0..<Self.memoryTotal
         }
-        let lines = memoryParts.filter { range.contains($0.start) }.reversed().map { memoryLine(start: $0.start, span: $0.span) }
+        let lines = Self.memoryViewParts.filter { range.contains($0.start) }.reversed().map { memoryLine(start: $0.start, span: $0.span) }
         guard params["sessionId"] == nil, lines.count > 10 else { return view(Array(lines)) }
         return params["cursor"] == nil ? view(Array(lines.prefix(10)), next: "fixture-next") : view(Array(lines.dropFirst(10)))
     }
@@ -1235,7 +1224,7 @@ private actor HostedHomeShellGateway {
             "memory": .object(["configured": .bool(configured), "open": .bool(true), "paused": .bool(paused),
                 "blocked": phase == "blocked" && configured ? .string("source-unavailable") : .null,
                 "episodic": .object(["messages": .number(Double(Self.memoryTotal)),
-                    "view": .object(["built": .number(Double(memoryParts.count)), "unbuilt": .number(0)])]),
+                    "view": .object(["built": .number(Double(Self.memoryViewParts.count)), "unbuilt": .number(0)])]),
                 "spentTokens": .number(10_000_000), "models": .array((configuredModels.isEmpty && configured ? ["anthropic/claude-haiku-5-5"] : configuredModels).map(JSONValue.string))])])
     }
 }
@@ -1251,10 +1240,21 @@ private actor HostedHomeShellSocket: GatewaySocketConnection {
         Task {
             let caps = await gateway.capabilities()
             let data = try! JSONEncoder.gateway.encode(JSONValue.object(["type": .string("hello"), "gatewayVersion": .string("fixture"),
-                "piVersion": .string("fixture"), "protocolVersion": .number(9), "minProtocolVersion": .number(9),
+                "piVersion": .string("fixture"), "protocolVersion": .number(Double(TronGatewayProtocolContract.protocolVersion)), "minProtocolVersion": .number(Double(TronGatewayProtocolContract.minimumProtocolVersion)),
                 "machineId": .string(machineID), "machineName": .string("Home fixture"),
                 "gatewayChannel": .string("stable"), "capabilities": .array(caps.map(JSONValue.string))]))
             await deliver(data)
+            if HostedLaunch.arguments.contains("-home-live-session") { await liveHomeSession() }
+        }
+    }
+    private func liveHomeSession() async {
+        for _ in 0..<200 where !closed {
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !closed, let snapshot = await gateway.advanceLiveHomeSession(),
+                  let event = try? JSONEncoder.gateway.encode(JSONValue.object([
+                      "type": .string("event"), "topic": .string("session.snapshot"), "sessionId": .string(snapshot.sessionId),
+                      "subscriptionToken": .string("fixture-subscription"), "payload": try JSONValue.encode(snapshot)])) else { continue }
+            deliver(event)
         }
     }
     func send(_ data: Data) async throws {
@@ -1273,12 +1273,6 @@ private actor HostedHomeShellSocket: GatewaySocketConnection {
         if let body = result.0 { response["result"] = body }
         if let failure = result.1 { response["error"] = failure }
         await deliver(try JSONEncoder.gateway.encode(JSONValue.object(response)))
-        if let snapshot = await gateway.takeMemorySnapshot() {
-            await deliver(try JSONEncoder.gateway.encode(JSONValue.object([
-                "type": .string("event"), "topic": .string("session.snapshot"), "sessionId": .string(snapshot.sessionId),
-                "subscriptionToken": .string("fixture-subscription"), "payload": try JSONValue.encode(snapshot)
-            ])))
-        }
         if method == "session.attention.read", HostedLaunch.arguments.contains("-home-dashboard-behavior") {
             await deliver(try JSONEncoder.gateway.encode(JSONValue.object([
                 "type": .string("event"), "topic": .string("session.listChanged"), "payload": .object([:])
@@ -1316,7 +1310,7 @@ private actor HostedChatDisplaySocket: GatewaySocketConnection {
         guard !closed else { throw CancellationError() }
         if hello {
             hello = false
-            return Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":9,"minProtocolVersion":9,"machineId":"fixture-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
+            return Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":\#(TronGatewayProtocolContract.protocolVersion),"minProtocolVersion":\#(TronGatewayProtocolContract.minimumProtocolVersion),"machineId":"fixture-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
         }
         if !inbound.isEmpty { return inbound.removeFirst() }
         return try await withCheckedThrowingContinuation { receiver = $0 }

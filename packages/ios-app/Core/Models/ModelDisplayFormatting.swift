@@ -1,29 +1,6 @@
 import Foundation
 
 package enum ModelDisplayFormatting {
-    private static let providerAliases: [String: String] = [
-        "amazon-bedrock": "Amazon Bedrock",
-        "anthropic": "Anthropic",
-        "azure": "Azure OpenAI",
-        "azure-openai": "Azure OpenAI",
-        "deepseek": "DeepSeek",
-        "github-copilot": "GitHub Copilot",
-        "google": "Google",
-        "google-gemini": "Google Gemini",
-        "groq": "Groq",
-        "lm-studio": "LM Studio",
-        "mistral": "Mistral",
-        "ollama": "Ollama",
-        "openai": "OpenAI",
-        "openai-codex": "OpenAI Codex",
-        "openrouter": "OpenRouter",
-        "together-ai": "Together AI",
-        "vertex-ai": "Vertex AI",
-        "xai": "xAI"
-    ]
-
-    private static let latestAliases: Set<String> = ["claude-haiku-4-5", "claude-opus-4-5", "claude-sonnet-4-5"]
-
     private static let wordAliases: [String: String] = [
         "ai": "AI",
         "api": "API",
@@ -33,14 +10,13 @@ package enum ModelDisplayFormatting {
         "llm": "LLM",
         "lm": "LM",
         "openai": "OpenAI",
+        "openrouter": "OpenRouter",
         "xai": "xAI"
     ]
 
     package static func provider(_ value: String) -> String {
         let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return "Unknown provider" }
-        let normalized = normalizeKey(clean)
-        if let alias = providerAliases[normalized] { return alias }
         return words(in: clean).map(formatWord).joined(separator: " ")
     }
 
@@ -58,8 +34,7 @@ package enum ModelDisplayFormatting {
             joinsVersion = isVersion && (joinsVersion || !previousIsNumber)
             previousIsNumber = isNumber
         }
-        let name = parts.map(formatWord).joined(separator: " ")
-        return latestAliases.contains(key) ? "\(name) (latest)" : name
+        return parts.map(formatWord).joined(separator: " ")
     }
 
     package static func reference(provider: String, model: String) -> String {
@@ -68,7 +43,7 @@ package enum ModelDisplayFormatting {
 
     static func pickerIdentity(for model: ModelSummary) -> String {
         let identifier = "\(model.provider)/\(model.id)"
-        if latestAliases.contains(model.id) {
+        if model.latest {
             return "Latest alias · \(identifier)"
         }
         if let date = ModelReleaseDate.pinnedReleaseDate(inID: model.id) {
@@ -111,14 +86,9 @@ package enum ModelReleaseDate {
         let digits = id[match].dropFirst()
         return "\(digits.prefix(4))-\(digits.dropFirst(4).prefix(2))-\(digits.suffix(2))"
     }
-
-    static func compact(_ value: String) -> String {
-        value.replacingOccurrences(of: "-", with: "")
-    }
 }
 
 extension ModelRef {
-    package var displayProviderName: String { ModelDisplayFormatting.provider(provider) }
     package var displayName: String { ModelDisplayFormatting.model(id) }
     package var displayDescription: String {
         ModelDisplayFormatting.reference(provider: provider, model: id)
@@ -127,7 +97,7 @@ extension ModelRef {
 
 extension ProviderSummary {
     package var displayName: String {
-        ModelDisplayFormatting.provider(name.isEmpty ? id : name)
+        name.isEmpty ? ModelDisplayFormatting.provider(id) : name
     }
 }
 
@@ -136,12 +106,8 @@ extension ModelSummary {
     package var admittedReleaseDate: String? {
         releaseDate.flatMap { ModelReleaseDate.admits($0) ? $0 : nil }
     }
-    package var displayProviderName: String { ModelDisplayFormatting.provider(provider) }
     package var displayName: String {
         ModelDisplayFormatting.model(name.isEmpty ? id : name)
-    }
-    var displayDescription: String {
-        ModelDisplayFormatting.reference(provider: provider, model: name.isEmpty ? id : name)
     }
 }
 

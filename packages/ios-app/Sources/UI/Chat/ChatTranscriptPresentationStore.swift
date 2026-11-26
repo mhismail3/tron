@@ -26,14 +26,14 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
         let runtimeItems: [ChatTranscriptRenderItem]
         let hiddenThinkingLabel: String?
         let isCachedProjection: Bool
-        let queueManagementCapability: Bool
+        let queueManagementAdmitted: Bool
         let visibleSessionFacts: ChatVisibleSessionFacts
         let transcript: [TranscriptItem]
 
         init(
             snapshot: SessionSnapshot,
             hiddenThinkingLabel: String?,
-            queueManagementCapability: Bool
+            queueManagementAdmitted: Bool
         ) {
             transcriptStart = snapshot.transcriptStart
             transcriptTotal = snapshot.transcriptTotal
@@ -45,7 +45,7 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
             runtimeItems = ChatTranscriptProjectionKernel.runtimeItems(in: snapshot)
             self.hiddenThinkingLabel = hiddenThinkingLabel
             isCachedProjection = snapshot.isCachedProjection == true
-            self.queueManagementCapability = queueManagementCapability
+            self.queueManagementAdmitted = queueManagementAdmitted
             visibleSessionFacts = ChatVisibleSessionFacts(snapshot: snapshot)
             transcript = Array(snapshot.transcript.suffix(ChatTranscriptPageRequest.maximumItemCount))
         }
@@ -167,7 +167,7 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
     let transcriptCount: Int
     let firstTranscriptID: String?
     let lastTranscriptID: String?
-    let queueManagementCapability: Bool
+    let queueManagementAdmitted: Bool
     private let layoutIdentityStorage: LayoutIdentityStorage
     var layoutIdentity: LayoutIdentity { layoutIdentityStorage.value }
     var handoffIdentity: HandoffIdentity
@@ -181,7 +181,7 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
         canonicalGeneration: Int? = nil,
         timelineGeneration: Int? = nil,
         entranceSuppressionGeneration: Int? = nil,
-        queueManagementCapability: Bool = false,
+        queueManagementAdmitted: Bool = false,
         handoff: ChatTranscriptHandoffCommit = .none,
         queuePresentationIDByOperationID: [String: String] = [:],
         handoffIdentity: HandoffIdentity? = nil
@@ -204,13 +204,13 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
         transcriptCount = snapshot.transcript.count
         firstTranscriptID = snapshot.transcript.first?.id
         lastTranscriptID = snapshot.transcript.last?.id
-        self.queueManagementCapability = queueManagementCapability
+        self.queueManagementAdmitted = queueManagementAdmitted
         let projectedHiddenThinkingLabel = (authoritySnapshot ?? snapshot)
             .extensionPresentation.semanticState.hiddenThinkingLabel
         layoutIdentityStorage = LayoutIdentityStorage(LayoutIdentity(
             snapshot: snapshot,
             hiddenThinkingLabel: projectedHiddenThinkingLabel,
-            queueManagementCapability: queueManagementCapability
+            queueManagementAdmitted: queueManagementAdmitted
         ))
         self.handoffIdentity = handoffIdentity ?? HandoffIdentity(
             commit: handoff,
@@ -1245,7 +1245,7 @@ private actor ChatTranscriptProjectionWorker {
             queuedMessages: snapshot.displayedQueuedMessages,
             queuePresentationIDByOperationID: queuePresentationIDByOperationID,
             queueRevision: snapshot.queueRevision,
-            supportsQueueManagement: tag.queueManagementCapability,
+            supportsQueueManagement: tag.queueManagementAdmitted,
             sourceWindow: .init(snapshot: snapshot)
         )
     }
@@ -1356,7 +1356,7 @@ final class ChatTranscriptPresentationStore {
            installed.sourceWindow == InstalledChatTranscript.SourceWindow(snapshot: snapshot),
            installed.queuedMessages == snapshot.displayedQueuedMessages,
            installed.queueRevision == snapshot.queueRevision,
-           installed.supportsQueueManagement == tag.queueManagementCapability,
+           installed.supportsQueueManagement == tag.queueManagementAdmitted,
            installed.runtimeItems == tag.layoutIdentity.runtimeItems {
             let replacement = installed.replacingLifecycle(
                 tag: tag,

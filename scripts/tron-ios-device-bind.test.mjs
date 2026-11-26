@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
@@ -10,6 +10,7 @@ import { parseArguments } from "./tron-ios-device-bind.mjs";
 
 const require = createRequire(new URL("../packages/gateway/package.json", import.meta.url));
 const { WebSocketServer } = require("ws");
+const { protocolVersion, minProtocolVersion } = JSON.parse(await readFile(new URL("../config/GatewayProtocol.json", import.meta.url), "utf8"));
 const targetIdentifier = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE";
 
 test("binding options require exact identities and local-only destinations", () => {
@@ -34,7 +35,7 @@ test("CLI authenticates locally, lists paired IDs, and sends one explicit bindin
     ws.on("message", (raw) => {
       const frame = JSON.parse(raw.toString());
       if (frame.type === "hello") {
-        ws.send(JSON.stringify({ type: "hello", protocolVersion: 9, minProtocolVersion: 9 }));
+        ws.send(JSON.stringify({ type: "hello", protocolVersion, minProtocolVersion }));
       } else {
         calls.push(frame);
         ws.send(JSON.stringify({ type: "response", id: frame.id, ok: true, result:

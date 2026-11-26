@@ -2375,7 +2375,7 @@ struct TronSheetLoadingHostModifier: ViewModifier {
                             .accessibilityElement(children: .ignore)
                             .accessibilityLabel(request.label)
                             .accessibilityIdentifier("sheet-loading")
-                            .transition(.asymmetric(insertion: .opacity, removal: .identity))
+                            .transition(.opacity)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

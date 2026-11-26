@@ -17,6 +17,7 @@ private struct TronContentFitSheetModifier: ViewModifier {
     @State private var measured: CGFloat?
     @State private var settled: CGFloat?
     @State private var loading = false
+    @State private var opensLarge = false
     @State private var appeared = false
     @State private var keyboard: CGFloat = 0
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -24,7 +25,7 @@ private struct TronContentFitSheetModifier: ViewModifier {
     @Environment(\.tronPadSheetScene) private var padScene
 
     private var fitHeight: CGFloat? {
-        guard padScene?.mode == nil, !dynamicTypeSize.isAccessibilitySize else { return nil }
+        guard !opensLarge, padScene?.mode == nil, !dynamicTypeSize.isAccessibilitySize else { return nil }
         let window = TronSheetWindowMetrics.current
         guard let content = loading ? settled : measured else { return nil }
         let height = (content - window.bottomInset + keyboard).rounded(.up)
@@ -32,9 +33,7 @@ private struct TronContentFitSheetModifier: ViewModifier {
     }
 
     private var target: TronSheetDetentDriver.Target {
-        if let fitHeight { return .fit(fitHeight) }
-        let opensMedium = loading && settled == nil && padScene?.mode == nil && !dynamicTypeSize.isAccessibilitySize
-        return opensMedium ? .medium : .large
+        fitHeight.map { .fit($0) } ?? .large
     }
 
     private func update(_ change: () -> Void) {
@@ -58,7 +57,10 @@ private struct TronContentFitSheetModifier: ViewModifier {
             .onPreferenceChange(TronSheetLoadingPreferenceKey.self) { request in
                 let next = request != nil
                 guard next != loading else { return }
-                update { loading = next }
+                update {
+                    loading = next
+                    if next, settled == nil { opensLarge = true }
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { note in
                 let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue ?? .zero
@@ -74,7 +76,7 @@ private struct TronContentFitSheetModifier: ViewModifier {
 }
 
 private struct TronSheetDetentDriver: UIViewControllerRepresentable {
-    enum Target: Equatable { case fit(CGFloat), medium, large }
+    enum Target: Equatable { case fit(CGFloat), large }
     let target: Target
     let animated: Bool
 
@@ -98,8 +100,7 @@ private struct TronSheetDetentDriver: UIViewControllerRepresentable {
         private func floored(_ target: Target, under presenter: Target?) -> Target {
             switch (target, presenter) {
             case (.fit(let height), .fit(let floor)): .fit(max(height, floor))
-            case (.medium, .fit(let floor)): .fit(floor)
-            case (.fit, .medium), (.fit, .large), (.medium, .large): .large
+            case (.fit, .large): .large
             default: target
             }
         }
@@ -112,7 +113,6 @@ private struct TronSheetDetentDriver: UIViewControllerRepresentable {
             Self.appliedByRoot.setObject(Box(target), forKey: root)
             let detent: UISheetPresentationController.Detent = switch target {
             case .fit(let height): .custom(identifier: .init("tron.content-fit")) { _ in height }
-            case .medium: .medium()
             case .large: .large()
             }
             guard applied != target || sheet.detents.map(\.identifier) != [detent.identifier] else { return }
