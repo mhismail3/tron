@@ -17,16 +17,17 @@ final class AppLogUploader {
         let reason: String?
     }
 
-    static let interval: Duration = .seconds(60)
     static let capability = "device-logs.v1"
 
     private let log: AppLog
+    private let interval: Duration
     private let connection: @MainActor () -> Connection?
     private var owner: Task<Void, Never>?
     private var wakes: AsyncStream<Void>.Continuation?
 
-    init(log: AppLog, connection: @escaping @MainActor () -> Connection?) {
+    init(log: AppLog, interval: Duration = .seconds(60), connection: @escaping @MainActor () -> Connection?) {
         self.log = log
+        self.interval = interval
         self.connection = connection
     }
 
@@ -34,10 +35,11 @@ final class AppLogUploader {
         guard owner == nil else { return }
         let (stream, continuation) = AsyncStream.makeStream(of: Void.self, bufferingPolicy: .bufferingNewest(1))
         wakes = continuation
+        let interval = interval
         owner = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.pass()
-                await Self.waitForNextPass(stream)
+                await Self.waitForNextPass(stream, interval: interval)
             }
         }
     }
@@ -53,7 +55,7 @@ final class AppLogUploader {
         wakes = nil
     }
 
-    private static func waitForNextPass(_ stream: AsyncStream<Void>) async {
+    private static func waitForNextPass(_ stream: AsyncStream<Void>, interval: Duration) async {
         await withTaskGroup(of: Void.self) { group in
             group.addTask { try? await Task.sleep(for: interval) }
             group.addTask { for await _ in stream { break } }
