@@ -76,7 +76,7 @@ struct HostedIntegrationsFixtureView: View {
                     .environment(model)
                     .tronPresentation()
                     .tronSettingsLayout()
-                    .tronSettingsVisualTheme(accent: .tronCyan)
+                    .tronSettingsVisualTheme(accent: .tronPrimary)
                     .environment(\.dynamicTypeSize, HostedLaunch.arguments.contains("-fixture-large-type") ? .accessibility3 : .large)
                 } else {
                     NavigationStack {
@@ -90,7 +90,7 @@ struct HostedIntegrationsFixtureView: View {
                     .environment(model)
                     .tronPresentation()
                     .tronSettingsLayout()
-                    .tronSettingsVisualTheme(accent: .tronCyan)
+                    .tronSettingsVisualTheme(accent: .tronPrimary)
                 }
             } else if let error { Text(error) }
             else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
