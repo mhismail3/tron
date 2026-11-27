@@ -110,7 +110,7 @@ def patch_file(path: Path, target_blueprint: str, values: dict[str, str]) -> Non
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 11:
+    if len(argv) != 10:
         print(
             "usage: patch-ios-gateway-e2e-xctestrun.py XCTESTRUN TARGET PORT CODE WORKSPACE PI_VERSION PROXY_TOKEN AGENT_DIR TRON_HOME",
             file=sys.stderr,
