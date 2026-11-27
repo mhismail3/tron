@@ -76,6 +76,68 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         }
     }
 
+    func testScrollingFeedShowsThePositionChipWhereItRests() async throws {
+        try await mounted(["-tron-integrations-fixture", "-integrations-scenario", "artifacts", "-artifacts-reports", "40"]) { app in
+            try await app.activate("Artifacts")
+            var chips: [CGFloat?] = []
+            let trace = try await SheetTrace.record(app, frames: 150, ready: { app.element("Done") != nil }) { _ in
+                chips.append(app.element("feed-position-chip").map { $0.accessibilityFrame.maxY - sheetFrame(app).maxY })
+            }
+            try await app.waitForTopSheetToSettle()
+            try await settle(app, "artifacts-40")
+            let rests = app.element("feed-position-chip").map { $0.accessibilityFrame.maxY - sheetFrame(app).maxY }
+            let scroll = try XCTUnwrap(mainScroll(app))
+            let scrolls = scroll.contentSize.height + scroll.adjustedContentInset.top + scroll.adjustedContentInset.bottom > scroll.bounds.height + 1
+            let log = "chip offsets per frame: \(chips.map { $0.map { "\(Int($0))" } ?? "-" }.joined(separator: " "))\n\(trace)"
+            XCTAssertTrue(scrolls, "Forty reports scroll in the full-height sheet")
+            let rest = try XCTUnwrap(rests, "A feed that scrolls shows the position chip\n\(log)")
+            let first = try XCTUnwrap(chips.firstIndex { $0 != nil }, "The chip appears while the sheet opens\n\(log)")
+            XCTAssertTrue(chips[first...].allSatisfy { $0.map { abs($0 - rest) <= 0.5 } ?? false },
+                          "Once shown, the chip stays at its resting position on every frame\n\(log)")
+        }
+    }
+
+    func testFeedThatFitsItsViewportNeverShowsThePositionChip() async throws {
+        for delayed in [false, true] {
+            try await mounted(["-tron-integrations-fixture", "-integrations-scenario", "artifacts", "-artifacts-reports", "2"] + (delayed ? ["-artifacts-delay"] : [])) { app in
+                try await app.activate("Artifacts")
+                var chips: [Bool] = []
+                let trace = try await SheetTrace.record(app, frames: 150, ready: { app.element("Done") != nil }) { _ in
+                    chips.append(app.element("feed-position-chip") != nil)
+                }
+                try await app.until("the report rows") { MountedFixture.elements(in: app.top).contains { (MountedFixture.identifier($0) ?? "").hasSuffix("_report-1-container") } }
+                try await settle(app, "artifacts-2\(delayed ? "-delayed" : "")")
+                let scroll = try XCTUnwrap(mainScroll(app))
+                let needed = scroll.contentSize.height + scroll.adjustedContentInset.top + scroll.adjustedContentInset.bottom
+                XCTAssertLessThanOrEqual(needed, scroll.bounds.height + 0.5, "Two reports fit their viewport (delayed \(delayed))\n\(trace)")
+                XCTAssertNil(app.element("feed-position-chip"), "A feed that fits its viewport shows no position chip (delayed \(delayed))\n\(trace)")
+                XCTAssertFalse(chips.contains(true), "A feed that fits never shows the chip while its sheet opens (delayed \(delayed)): \(chips.map { $0 ? "C" : "-" }.joined())\n\(trace)")
+            }
+        }
+    }
+
+    func testArtifactsNearTheFitBoundaryKeepTheirHeightAndChipStill() async throws {
+        for reports in 7...12 {
+            try await mounted(["-tron-integrations-fixture", "-integrations-scenario", "artifacts", "-artifacts-reports", "\(reports)"]) { app in
+                try await app.activate("Artifacts")
+                var chips: [CGFloat?] = []
+                let trace = try await SheetTrace.record(app, frames: 150, ready: { app.element("Done") != nil }) { _ in
+                    chips.append(app.element("feed-position-chip").map { $0.accessibilityFrame.maxY - sheetFrame(app).maxY })
+                }
+                let log = "\(reports) reports; chip offsets per frame: \(chips.map { $0.map { "\(Int($0))" } ?? "-" }.joined(separator: " "))\n\(trace)"
+                trace.assertStill("\(reports) reports open at their final height", against: app)
+                try await settle(app, "artifacts-\(reports)")
+                let scroll = try XCTUnwrap(mainScroll(app))
+                let overflows = scroll.contentSize.height + scroll.adjustedContentInset.top + scroll.adjustedContentInset.bottom > scroll.bounds.height + 0.5
+                let rest = app.element("feed-position-chip").map { $0.accessibilityFrame.maxY - sheetFrame(app).maxY }
+                XCTAssertEqual(rest != nil, overflows, "The chip shows exactly when the feed overflows its viewport\n\(log)")
+                let first = chips.firstIndex { $0 != nil } ?? chips.endIndex
+                XCTAssertTrue(chips[first...].allSatisfy { chip in chip.map { abs($0 - (rest ?? .nan)) <= 0.5 } ?? false },
+                              "Once shown, the chip never hides or moves while the sheet opens\n\(log)")
+            }
+        }
+    }
+
     func testNestedSheetNeverTucksItsParentAndClosingRestoresIt() async throws {
         try await mounted(["-tron-settings-fixture", "-settings-nested", "-settings-expanded-review"]) { app in
             try await app.activate("Open Settings")
