@@ -310,10 +310,6 @@ struct HomeUsageProvidersSheet: View {
             accent: .tronPrimary,
             onDone: onDone
         ) {
-            TronDashboardFilterSectionTitle(
-                title: "Providers",
-                detail: "Choose the providers whose usage shows on the Home card."
-            )
             ForEach(HomeUsageProviders.all(model), id: \.id) { provider in
                 TronDashboardFilterOption(
                     title: provider.displayName,

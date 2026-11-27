@@ -70,24 +70,25 @@ struct AutomationsSheet: View {
             accent: .tronPrimary,
             onDone: onDone
         ) {
-            Button { createPresented = true } label: {
-                Image(systemName: "plus").font(TronTypography.buttonSM)
+            Button { showingFilters = true } label: {
+                Image(systemName: isFiltered ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease")
+                    .font(TronTypography.buttonSM)
             }
             .tronToolbarAction(accent: .tronPrimary)
-            .accessibilityLabel("New Automation")
-            .accessibilityIdentifier("automations.new")
+            .accessibilityLabel("Filter")
+            .accessibilityValue(isFiltered ? "Filtered" : "All")
+            .accessibilityIdentifier("automations.filter")
         } content: {
             content(rows)
                 .padding(.bottom, 64)
         }
         .overlay(alignment: .bottomTrailing) {
             DashboardFloatingButton(
-                symbol: isFiltered ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease",
+                symbol: "plus",
                 accent: .tronPrimary,
-                label: "Filter",
-                identifier: "automations.filter",
-                value: isFiltered ? "Filtered" : "All"
-            ) { showingFilters = true }
+                label: "New Automation",
+                identifier: "automations.new"
+            ) { createPresented = true }
         }
         .task(id: PresentationActivityTaskID(
             source: scenePhase,

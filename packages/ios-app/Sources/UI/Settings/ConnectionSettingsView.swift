@@ -87,6 +87,16 @@ struct ConnectionsSettingsView: View {
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             TronSettingsSections(alignment: .leading, spacing: 18, lazy: true, hidesLoneHeading: true) {
+                if let selected = model.profiles.selected, model.connectionState == .connected {
+                    QuickRebuildGroup(
+                        profile: selected,
+                        thisDevice: authorizedDevices.first {
+                            $0.profileID == selected.id && $0.device.id == selected.deviceId
+                        },
+                        showReplacement: { showingMacReplacement = true }
+                    )
+                }
+
                 TronSettingsGroup("Paired Macs") {
                     VStack(spacing: 0) {
                         ForEach(Array(pairedProfiles.enumerated()), id: \.element.id) { index, profile in
@@ -111,26 +121,6 @@ struct ConnectionsSettingsView: View {
                             .accessibilityHint("Shows connection status, gateway information, and server actions")
                         }
                     }
-                }
-
-                TronSettingsGroup(
-                    "Logs",
-                    detail: "The newest records from this iPhone. Works without a Mac.",
-                    accent: .tronPrimary
-                ) {
-                    Button {
-                        Task { UIPasteboard.general.string = await model.offlineLogText() }
-                    } label: {
-                        TronValueRow(
-                            icon: "doc.on.doc",
-                            title: "Copy Logs",
-                            detail: "Latest records, redacted, to the clipboard",
-                            accent: .tronPrimary
-                        )
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Copy Logs")
                 }
 
                 TronSettingsGroup(
@@ -170,14 +160,24 @@ struct ConnectionsSettingsView: View {
                     }
                 }
 
-                if let selected = model.profiles.selected, model.connectionState == .connected {
-                    QuickRebuildGroup(
-                        profile: selected,
-                        thisDevice: authorizedDevices.first {
-                            $0.profileID == selected.id && $0.device.id == selected.deviceId
-                        },
-                        showReplacement: { showingMacReplacement = true }
-                    )
+                TronSettingsGroup(
+                    "Logs",
+                    detail: "The newest records from this iPhone. Works without a Mac.",
+                    accent: .tronPrimary
+                ) {
+                    Button {
+                        Task { UIPasteboard.general.string = await model.offlineLogText() }
+                    } label: {
+                        TronValueRow(
+                            icon: "doc.on.doc",
+                            title: "Copy Logs",
+                            detail: "Latest records, redacted, to the clipboard",
+                            accent: .tronPrimary
+                        )
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Copy Logs")
                 }
 
             }
