@@ -325,7 +325,7 @@ def journeys():
         data = fixture.wait_settled(operation)
         message = (data.get('error') or {}).get('message', '')
         check(data['state'] == 'failed' and data['error']['step'] == 'preflight'
-              and 'TRON_IOS_GATEWAY_PROTOCOL_TARGET=source scripts/tron-ios-device share' in message,
+              and 'TRON_IOS_GATEWAY_PROTOCOL_TARGET=source scripts/tron-ios-device share' in message and len(message) <= 280,
               f'an out-of-range iPhone without a published new-protocol build of this revision is refused, naming the publish command: {message}', evidence)
         check(not (fixture.root / 'build-count').exists() and platform.system_info()['sourceRevision'] == fixture.old_revision,
               'the refusal builds and stops nothing', evidence)

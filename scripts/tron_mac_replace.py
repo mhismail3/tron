@@ -228,10 +228,9 @@ class Runner:
         if client is not None and not minimum <= client <= protocol:
             build = published_iphone_build(platform, self.revision, protocol, minimum)
             if build is None:
-                raise Failure(f'this iPhone speaks protocol {client} but the new Gateway needs {minimum}-{protocol}, and no iPhone '
-                              f'build of {self.revision[:9]} for protocol {protocol} is published on :8443. Publish it on the Mac with '
-                              '`TRON_IOS_GATEWAY_PROTOCOL_TARGET=source scripts/tron-ios-device share --title "Protocol '
-                              f'{protocol}" --notes "Install after the Mac replacement"`, then start the replacement again')
+                raise Failure(f'this iPhone speaks protocol {client}; the new Gateway needs {minimum}-{protocol}. Publish its iPhone '
+                              f'build of {self.revision[:9]} first: TRON_IOS_GATEWAY_PROTOCOL_TARGET=source scripts/tron-ios-device '
+                              f'share --title "Protocol {protocol}" --notes "{self.revision[:9]}", then retry')
             checks.append(f'this iPhone (protocol {client}) disconnects until you install build {build["id"]} from {build["page"]}')
         self.data['iphoneBuild'] = build
         self.data['source']['fromRevision'] = info.get('sourceRevision')
