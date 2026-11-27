@@ -62,7 +62,7 @@ struct ChangeReviewPresentation {
         return "\(verb) \(name) \(item.label)"
     }
 
-    static func readable(_ text: String) -> String {
+    private static func readable(_ text: String) -> String {
         text.split(separator: " ", omittingEmptySubsequences: false).map { readableToken(String($0)) }.joined(separator: " ")
     }
 
