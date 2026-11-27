@@ -159,7 +159,8 @@ lane ([runbook](../../docs/development.md#efficient-focused-tests)):
 ```bash
 scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronIntegrationSheetsUITests/testEstablishedSocketLossThenOpenTimeoutsBecomeUnreachable \
-  --only-testing TronMobileUITests/TronIntegrationSheetsUITests/testSecondaryRecoverySurvivesBackgroundAndResetsOnlyOnRetryOrSuccess
+  --only-testing TronMobileUITests/TronIntegrationSheetsUITests/testSecondaryRecoverySurvivesBackgroundAndResetsOnlyOnRetryOrSuccess \
+  --only-testing TronMobileUITests/TronIntegrationSheetsUITests/testRetryConnectionRecoversUnreachableDetails
 scripts/ios-gateway-e2e-test all
 scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground
 ```

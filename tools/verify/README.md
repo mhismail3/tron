@@ -37,10 +37,11 @@ at this exact commit. The lanes are `gateway` (Vitest files), `tooling` (every t
 the named files), `ios` (`scripts/tron-ios-test`: `build`, then `run` for the minimal set of in-process
 view tests and hosted reconnect journeys, or `checkpoint` for both) and `mac`. The remote side
 (`tools/verify/host.py`) refuses a dirty tree, pushes HEAD to the host's bare `~/tron-ci/tron.git`,
-runs one job per lane at a time in `~/tron-ci/jobs/<lane>` (a second waits and names the holder),
-`npm ci`s only when the Gateway lockfile or pinned Node changed, and streams the lane's own output and
-exit. Exit 69 means no result (unreachable, unset or unprepared host), never a test verdict; closing
-the session stops the remote lane. Real-Gateway iOS journeys stay `scripts/ios-gateway-e2e-test`.
+runs one job per host at a time (one heavy job per host; a second waits and names the holder) in
+`~/tron-ci/jobs/<lane>`, `npm ci`s only when the Gateway lockfile or pinned Node changed, and streams
+the lane's own output and exit. Exit 69 means no result (unreachable, unset or unprepared host, or
+stopped before the lane started), never a test verdict; closing the session stops the job, waiting or
+running. Real-Gateway iOS journeys stay `scripts/ios-gateway-e2e-test`.
 
 A host needs Xcode with the pinned iOS runtime, `scripts/tron-node install` and
 `scripts/install-ci-tools.sh xcodegen` with `TRON_CI_TOOLS_DIR=~/tron-ci/.ci-tools`, and

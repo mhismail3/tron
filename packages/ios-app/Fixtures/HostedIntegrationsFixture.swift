@@ -45,8 +45,8 @@ struct HostedIntegrationsFixtureView: View {
         Group {
             if scenario == "connection-secondary" {
                 HostedSecondaryRecoveryFixture()
-            } else if scenario == "connection-loss-unreachable" {
-                HostedConnectionRetryFixture()
+            } else if scenario.hasPrefix("connection-") {
+                HostedConnectionRetryFixture(scenario: scenario)
             } else if ready {
                 if scenario.hasPrefix("artifacts") {
                     NavigationStack {
@@ -340,8 +340,8 @@ private struct HostedConnectionRetryFixture: View {
     private let factory: HostedRecoverySocketFactory
     @State private var failedSockets = 0
 
-    init() {
-        let factory = HostedRecoverySocketFactory(failures: 2, dropsEstablishedConnection: true)
+    init(scenario: String) {
+        let factory = HostedRecoverySocketFactory(failures: 2, dropsEstablishedConnection: scenario == "connection-loss-unreachable")
         self.factory = factory
         let origin = ContinuousClock().now
         let clock = MonotonicClock(now: { ContinuousClock().now }, sleep: { duration in
