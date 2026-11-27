@@ -29,6 +29,7 @@ export const FUNCTIONS = [
   ["native-replace", "Select-all and replace a native field"],
   ["native-select", "Choose a native pop-up menu item"],
   ["native-modal", "Approve an in-app modal sheet (permission-prompt proxy)"],
+  ["native-sheet", "Click a fresh sheet-button token; stale and other-window tokens refuse"],
   ["desktop-screenshot", "Capture the full desktop"],
   ["background-delivery", "Act without changing the frontmost app"],
   ["foreground-delivery", "Foreground input that restores the frontmost app"],

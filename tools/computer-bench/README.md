@@ -59,8 +59,8 @@ Managed-browser ownership and authenticated restart qualification belong to Gate
 as production. The scorecard measures only isolated engine tasks, not personal-profile
 attachment or launch admission.
 
-`native-modal` also requires a stale sheet-button token and a fresh one aimed at another window to
-refuse before the fresh token approves the sheet (#2547).
+`native-sheet` requires a stale sheet-button token and a fresh one aimed at another window to refuse
+(the sheet stays open) before the fresh token closes it (#2547).
 
 `background-delivery` fails when any background
 Cua action changed the frontmost app. `foreground-delivery` runs only with `--foreground`
