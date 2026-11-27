@@ -144,7 +144,9 @@ struct HomeTaskSheet: View {
     @ViewBuilder private var content: some View {
         switch owner.state {
         case .idle, .loading(_, nil):
-            loadingState("Loading Home…")
+            if destination != nil { loadingState("Loading Home…") }
+        case .failed where destination == nil:
+            EmptyView()
         case .failed(_, let message):
             TronPlaceholderState(title: "Home could not be read", detail: message, icon: "exclamationmark.triangle", actionTitle: "Reload") { reload() }
         case .loaded(let read, let content), .loading(let read, .some(let content)):
@@ -154,23 +156,18 @@ struct HomeTaskSheet: View {
                 case .task(let task, let status):
                     recovery(status)
                     if let task { taskDetail(task, status: status) }
-                case .permissions(let permissions, let status):
-                    recovery(status)
+                case .permissions(let permissions, _):
                     if let permissions { permissionList(permissions) }
                 default: EmptyView()
                 }
-            } else {
+            } else if destination != nil {
                 loadingState("Waiting for Home…")
             }
         }
     }
 
-    @ViewBuilder private func loadingState(_ label: String) -> some View {
-        if destination == nil {
-            TronLoadingState(label: label, accent: accent)
-        } else {
-            TronSheetLoadingState(label: label, accent: accent)
-        }
+    private func loadingState(_ label: String) -> some View {
+        TronSheetLoadingState(label: label, accent: accent)
     }
 
     @ViewBuilder func recovery(_ status: HomeStatus) -> some View {

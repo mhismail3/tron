@@ -215,8 +215,7 @@ artifact checks. Browser live views are admitted only from `builtin:agent-browse
 - **Build:** `npm run build:pi-subagents-closure` with the pinned toolchain (`TRON_NODE_BIN`);
   predecessors only in disposable copies.
 - **Update:** verifies upstream tag and fork ancestry, builds a new `-tron.N` in a disposable
-  tree, and must pass the offline real-Gateway activation/child-execution gate and the previous
-  → candidate → previous probe before publishing immutable artifacts and renaming the pin
+  tree, and must pass the previous → candidate → previous probe before publishing immutable artifacts and renaming the pin
   (current kept as previous). `.pi-subagents-update-staging` is the exclusive lease; an
   interrupted update leaves it for the operator. It never edits the fork, homes or manifests.
 - **Home task gate:** every pin change also re-reviews the fork's launch/control contract
@@ -224,9 +223,10 @@ artifact checks. Browser live views are admitted only from `builtin:agent-browse
   That owner alone compares the canonical pin with the reviewed version and verifies
   installed-tool identity; the finite-task guard consumes its decision. A missing or
   unreviewed version is refused before launch. Validate actual Home-task launch/resume
-  and retained refusals, not only an ordinary session's child execution. The pin module declares
-  `home-task-subagents-reports.e2e.test.ts` as a verification dependency, so a pin change exercises
-  verified controls, the missing-pin refusal and real child/report settlement.
+  and retained refusals, not only an ordinary session's child execution:
+  `home-task-subagents-controls.e2e.test.ts` launches and controls real pinned children from a Home
+  task (an unreviewed version refuses its launch), and `home-task-dispatch.e2e.test.ts` asserts the
+  `unverified-provider` refusal for an unmanaged provider.
 - **Advertisement lifetime:** global npm discovery runs through the provider's owned setup-command primitive. Reload cancels and joins superseded lookups; session shutdown cancels and joins the current lookup before returning. Unavailable global discovery still permits local agents. The real Gateway prompt/restart journey holds an npm lookup open and checks its PID is gone before the replacement process launches.
 - **Install and activation:** `npm run install:pi-subagents -- <gateway-home>` extracts the
   closure offline into `<gateway-home>/cache/pi-subagents/<version>` with a receipt and
@@ -264,16 +264,12 @@ artifact checks. Browser live views are admitted only from `builtin:agent-browse
 - **Proof:** `delegation.lock.integration.test.ts` (a real child runs to completion and returns its answer),
   `managed-subagents.install.integration.test.ts`,
   `managed-subagents-warm-process.e2e.test.ts` (fresh home, real Gateway process),
-  `managed-subagents.transform.integration.test.ts` (fresh build, no Gateway-thread transform),
-  `managed-subagents.integration.test.ts` (npm offline, TCP denied, a real child),
   `npm run test:pi-subagents-rollback` (previous → candidate → previous with resume; original
   JSONL prefixes unchanged; each provider runs with its own Gateway source, the previous one
   exported from the commit that pinned it (the updater names its Gateway repository through
   `TRON_SUBAGENTS_SOURCE_GATEWAY`), because a rollback moves Gateway and provider together; every
   leg requires all extensions to load; `TRON_SUBAGENTS_ROLLBACK_ROOT` keeps the home; join failures go to
-  `TRON_TEST_PROCESS_OWNER_FAILURE`) and
-  `src/kernel/delegation/managed-subagents.payload.integration.test.ts` (stages a `dist` it emits
-  from this commit, never the checkout's build). Reports in `test-results/`.
+  `TRON_TEST_PROCESS_OWNER_FAILURE`). Reports in `test-results/`.
 
 ## Persisted-state corpus
 

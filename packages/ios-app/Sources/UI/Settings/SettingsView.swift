@@ -30,9 +30,6 @@ struct SettingsView: View {
                     settingsLink("MCP Servers", summary: "Tool providers and their sign-ins", icon: "server.rack") {
                         MCPServersSettingsView()
                     }
-                    if model.homeStatus.isAvailable, let profileID = model.selectedGatewayProfileID() {
-                        HomeTaskSheet(permissionsFor: profileID)
-                    }
                 }
                 .tronSettingsVisualTheme(accent: .tronPrimary)
                 .padding(.horizontal, 20)

@@ -22,13 +22,10 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
 
 - **Layout.** The gear opens one Settings sheet: a plain list of row containers with no section headers:
   Appearance (one sheet: Dashboard, Subagent Activity, Color Mode, Theme color, Text Font and Code Font),
-  Connections, Model Providers, MCP Servers and, on a Home Gateway, Home delegation. Every destination
+  Connections, Model Providers and MCP Servers. Every destination
   uses the selected theme's `tronPrimary`; semantic statuses retain their colors. The leading toolbar holds
   Notifications and Mac Terminal (`apple.terminal`), which opens `MacTerminalSheet`.
-- **Home delegation.** One Home per Gateway, so its task permissions are global: one row
-  "Home delegation: All trusted projects" (`HomeTaskSheet(permissionsFor:)`, polled `home.taskPermissions`) with
-  Active, Reconfirm or Not authorized and Revoke; Reconfirm permissions appears only when needed, one-use
-  grants only when any exist. Granting stays on the native approval card.
+  Home delegation lives in Manage Home (Chat README), not Settings.
   The `trust` group has no Global view; the
   `connections` group (Mac Terminal key and private SSH service) is owned by the Mac Terminal sheet.
   There is no Value & Source sheet.

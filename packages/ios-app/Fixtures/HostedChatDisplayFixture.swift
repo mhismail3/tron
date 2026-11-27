@@ -563,7 +563,7 @@ private actor HostedHomeShellGateway {
     private var onHomeRead: (@MainActor @Sendable (String) -> Void)?
     func observeHomeReads(_ observer: @escaping @MainActor @Sendable (String) -> Void) { onHomeRead = observer }
     func homeReadSummary() -> String {
-        ["home.status", "home.context", "home.chapterList", "home.memory.view", "home.memory.view.first", "home.taskList", "home.taskStatus"]
+        ["home.status", "home.context", "home.chapterList", "home.memory.view", "home.memory.view.first", "home.taskList", "home.taskStatus", "home.taskPermissions"]
             .map { "\($0)=\(homeReads[$0, default: 0])" }.joined(separator: ",")
     }
 
@@ -704,6 +704,10 @@ private actor HostedHomeShellGateway {
                 try? await Task.sleep(for: .seconds(1))
                 return (nil, .object(["code": .string("conflict"), "message": .string("Home task permissions refused"), "retryable": .bool(false),
                                       "details": .object(["reason": .string("not-initialized")])]))
+            }
+            if !HostedLaunch.arguments.contains("-home-permissions-granted") {
+                return (.object(["revision": .number(1), "scopes": .array([]), "needsReconfirmation": .bool(false),
+                                 "requests": .array([]), "decisions": .array([]), "grants": .array([])]), nil)
             }
             return (taskPermissions(), nil)
         case "home.redeliverTaskResult":

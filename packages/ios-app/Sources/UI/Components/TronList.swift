@@ -548,7 +548,7 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
     }
 }
 
-enum TronListMarkerKind: String { case leading, status, tags, title, metadata, subtext, container }
+enum TronListMarkerKind: String { case leading, status, tags, title, metadata, subtext, container, action }
 
 private struct TronListMarkerKey: PreferenceKey {
     static let defaultValue: [TronListMarkerKind: Anchor<CGRect>] = [:]
