@@ -19,7 +19,7 @@ Usage:
   scripts/tron-ios-simulator install
   scripts/tron-ios-simulator status
   scripts/tron-ios-simulator stop
-  scripts/tron-ios-simulator remember [SIMULATOR_ID]
+  scripts/tron-ios-simulator remember SIMULATOR_ID
 
 Commands:
   start      Boot the remembered simulator and launch its verified Tron Development app.
@@ -27,7 +27,7 @@ Commands:
   status     Show the remembered simulator, how long it has been booted, and validate its
              installed Tron Development app.
   stop       Terminate Development and shut down only the remembered simulator.
-  remember   Save an explicit simulator ID, or the Simulator app's current device.
+  remember   Save an explicit simulator ID (`xcrun simctl list devices available`).
 
 `start`, `install` and `stop` hold the Development simulator's host-wide lease
 (<state directory>/ios-simulator.lease.lock) for the whole command. A command
@@ -85,10 +85,6 @@ available_device_line() {
     xcrun simctl list devices available | grep -F "$simulator_id" | head -1
 }
 
-current_simulator_id() {
-    defaults read com.apple.iphonesimulator CurrentDeviceUDID 2>/dev/null || true
-}
-
 remember_simulator_id() {
     local simulator_id="$1"
     [ -n "$(available_device_line "$simulator_id")" ] \
@@ -105,7 +101,7 @@ resolve_simulator_id() {
     elif [ -s "$STATE_FILE" ]; then
         candidate="$(head -1 "$STATE_FILE")"
     else
-        die "no Development simulator is remembered; select one in Simulator and run '$0 remember'"
+        die "no Development simulator is remembered; run '$0 remember SIMULATOR_ID'"
     fi
 
     [ -n "$(available_device_line "$candidate")" ] \
@@ -236,8 +232,8 @@ case "$command" in
         stop_development "$simulator_id"
         ;;
     remember)
-        simulator_id="${2:-$(current_simulator_id)}"
-        [ -n "$simulator_id" ] || die "pass a simulator ID or select one in Simulator first"
+        simulator_id="${2:-}"
+        [ -n "$simulator_id" ] || die "usage: $0 remember SIMULATOR_ID (see 'xcrun simctl list devices available')"
         remember_simulator_id "$simulator_id"
         show_status "$simulator_id"
         ;;

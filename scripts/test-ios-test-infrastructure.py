@@ -6242,6 +6242,7 @@ Path(derived, "Build/Products", value("-configuration") + "-" + platform, "TronM
 ''',
     "codesign": 'print("Identifier=com.tron.mobile.beta", file=sys.stderr)\n',
     "open": 'log("open " + " ".join(sys.argv[1:]))\n',
+    "defaults": 'log("defaults " + " ".join(sys.argv[1:])); print(os.environ["FAKE_SIMULATOR_UDID"])\n',
     "xcode-select": 'print("/Applications/Xcode.app/Contents/Developer")\n',
     "xcodegen": '''if sys.argv[1:] == ["--version"]:
     print("Version: " + os.environ["FAKE_XCODEGEN_VERSION"]); raise SystemExit(0)
@@ -6560,6 +6561,19 @@ class DeviceLeaseFixture(ContainedFixture, unittest.TestCase):
         self.assertEqual(beta_derived.parent, derived_root)
         self.assertTrue(alpha_derived.name.startswith("alpha-"), alpha_derived)
         self.assertTrue(beta_derived.name.startswith("beta-"), beta_derived)
+
+    def test_the_development_simulator_is_chosen_only_by_an_explicit_id(self) -> None:
+        """#2704: no Simulator.app preference picks the remembered simulator."""
+        worktree = self.make_worktree("alpha")
+        state = Path(self.environment["TRON_IOS_SIMULATOR_STATE_DIR"]) / "ios-simulator-udid"
+        state.unlink()
+        for arguments in (("remember",), ("start",)):
+            refused = self.run_tool(worktree, "tron-ios-simulator", *arguments, caller="alpha")
+            self.assertNotEqual(refused.returncode, 0, refused.stderr)
+            self.assertIn("remember SIMULATOR_ID", refused.stderr)
+            self.assertNotIn("Simulator first", refused.stderr)
+        self.assertFalse(state.exists())
+        self.assertFalse([call for call in self.tool_calls("alpha") if call.startswith("defaults")], self.tool_calls("alpha"))
 
     def test_one_device_is_leased_for_build_install_and_launch_and_other_devices_are_not(self) -> None:
         """Failure modes 2, 4 and 7."""
