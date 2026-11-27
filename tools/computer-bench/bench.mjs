@@ -13,6 +13,7 @@ export const FUNCTIONS = [
   ["click", "Click a page button"],
   ["type", "Type into a page field"],
   ["replace", "Select-all and replace a page field's text"],
+  ["set-value", "Replace a page field's value in one operation (no select-all)"],
   ["caption-exact", "Replace a contenteditable with a 280-char Unicode caption, read back byte-exact"],
   ["form-controls", "Select a dropdown option and check a box"],
   ["upload", "Upload a file through a file input"],

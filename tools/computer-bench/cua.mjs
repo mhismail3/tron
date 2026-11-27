@@ -90,9 +90,9 @@ export function cua(options) {
     const warm = performance.now();
     const first = await observe(chrome.target);
     const visible = async () => (await observe(chrome.target)).elements.some((entry) => entry.label === "Increment");
-    const ready = first.elements.some((entry) => entry.label === "Increment") || await waitFor(visible, 30_000, 3000);
-    const firstHeld = first.elements.some((entry) => entry.label === "Increment");
-    ctx.notes.push(`cua: Chromium's web accessibility tree ${firstHeld ? `was in the first window read (${first.elements.length} elements, ${Math.round(performance.now() - warm)}ms)` : ready ? `appeared ${Math.round(performance.now() - warm)}ms after a first read of only browser chrome and menus (${first.elements.length} elements; reads 3s apart)` : "did not appear within 30s of reads 3s apart"}`);
+    const held = first.elements.some((entry) => entry.label === "Increment");
+    const ready = held || await waitFor(visible, 30_000, 3000);
+    ctx.notes.push(`cua: Chromium's web accessibility tree ${held ? `was in the first window read (${first.elements.length} elements, ${Math.round(performance.now() - warm)}ms)` : ready ? `appeared ${Math.round(performance.now() - warm)}ms after a first read of only browser chrome and menus (${first.elements.length} elements; reads 3s apart)` : "did not appear within 30s of reads 3s apart"}`);
   }
   async function stopChrome() {
     if (!chrome?.pid) return;
@@ -195,6 +195,13 @@ export function cua(options) {
         return report(value === "Ada Lovelace", `value "${value}"`, [step]);
       },
       async replace() {
+        const select = await act("hotkey", page(), { element_token: await token(page(), "AXTextField", "Prefilled"), keys: ["cmd", "a"] }).catch((error) => ({ claim: `error ${error.message.slice(0, 80)}` }));
+        const type = await act("type_text", page(), { element_token: await token(page(), "AXTextField", "Prefilled"), text: "new value" });
+        await waitFor(async () => (await pageValue("document.querySelector('#prefilled').value")) === "new value", 2000);
+        const value = await pageValue("document.querySelector('#prefilled').value");
+        return report(value === "new value", `value "${value}"`, [select, type]);
+      },
+      async "set-value"() {
         const step = await act("set_value", page(), { element_token: await token(page(), "AXTextField", "Prefilled"), value: "new value" });
         await waitFor(async () => (await pageValue("document.querySelector('#prefilled').value")) === "new value", 2000);
         const value = await pageValue("document.querySelector('#prefilled').value");
