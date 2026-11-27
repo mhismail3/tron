@@ -560,7 +560,7 @@ export class HomeOwner {
 
   private async drainWakes(): Promise<void> {
     try {
-      while (this.wakeRequested) {
+      while (this.wakeRequested && !this.disposed) {
         this.wakeRequested = false;
         if (await this.wakeOnce() === "busy") return;
       }
