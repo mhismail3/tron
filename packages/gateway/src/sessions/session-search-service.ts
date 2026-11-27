@@ -458,12 +458,14 @@ export class SessionSearchService {
       for (const [id, processedGeneration] of entries) {
         try {
           const document = await this.loadDocument(id);
+          if (this.dirtySessions.get(id) !== processedGeneration) continue;
           if (document) {
             await this.index.replace(document);
             this.unadmitted.delete(id);
           } else await this.index.remove(id);
           refreshed.push({ id, generation: processedGeneration, ...(document ? { document } : {}) });
         } catch {
+          if (this.dirtySessions.get(id) !== processedGeneration) continue;
           await this.index.remove(id);
           this.coverageReason = "A changed session could not be indexed for search";
         }
