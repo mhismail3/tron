@@ -26,6 +26,7 @@ const DEADLINE_MS = 5_000;
 const BUDGET_MS = DEADLINE_MS / 5;
 const CHAPTERS = 3;
 const MESSAGES_PER_CHAPTER = 405;
+const PAGE = 10;
 const client = { id: "scale", identity: "device:home-scale", isLocal: false, unsubscribe: () => {} } as unknown as ClientContext;
 
 const report: Record<string, unknown> = { generatedAt: new Date().toISOString() };
@@ -244,14 +245,14 @@ describe("Home memory browser at scale", () => {
             throw error;
           }
         };
-        const first = await timed(`${label}: first page`, () => view(gateway, { limit: 30 }));
+        const first = await timed(`${label}: first page`, () => view(gateway, { limit: PAGE }));
         const pages = [first.value];
         const pageMs = [first.ms];
         for (let next = first.value.nextCursor; next && pages.length < 6;) {
-          const page = await timed(`${label}: continuation ${pages.length + 1}`, () => view(gateway, { limit: 30, cursor: next }));
+          const page = await timed(`${label}: continuation ${pages.length + 1}`, () => view(gateway, { limit: PAGE, cursor: next }));
           pages.push(page.value); pageMs.push(page.ms); next = page.value.nextCursor;
         }
-        const chapter = await timed(`${label}: chapter scope`, () => view(gateway, { limit: 30, sessionId: chapterIds[1] }));
+        const chapter = await timed(`${label}: chapter scope`, () => view(gateway, { limit: PAGE, sessionId: chapterIds[1] }));
         const zoomLine = pages.flatMap(page => page.lines).find(line => line.span >= 2)!;
         const part = await timed(`${label}: zoom part`, () => view(gateway, { part: { start: zoomLine.start, span: zoomLine.span } }));
         const item = pages.flatMap(page => page.lines).find(line => line.item)!.item!;
@@ -290,10 +291,10 @@ describe("Home memory browser at scale", () => {
       expect(afterPages[0]!.revision === beforeRestart[0]!.revision).toBe(!decompositionChanged);
       if (decompositionChanged) {
         markStage("verify stale pre-restart cursor refusal");
-        await expect(view(g, { limit: 30, cursor: beforeRestart[0]!.nextCursor })).rejects.toMatchObject({ code: "conflict" });
+        await expect(view(g, { limit: PAGE, cursor: beforeRestart[0]!.nextCursor })).rejects.toMatchObject({ code: "conflict" });
       } else {
         markStage("verify unchanged cursor continuation");
-        const continued = await view(g, { limit: 30, cursor: beforeRestart[0]!.nextCursor });
+        const continued = await view(g, { limit: PAGE, cursor: beforeRestart[0]!.nextCursor });
         expect(continued).toEqual(beforeRestart[1]);
       }
 
@@ -312,13 +313,13 @@ describe("Home memory browser at scale", () => {
       (homeOwnerOf(g.registry) as unknown as { memory: { proofs: HomeSourceProofs } }).memory.proofs = new HomeSourceProofs();
       markStage("cancelled cold proof request");
       const cancelled = new AbortController();
-      const shed = g.service.invoke({ ...client, signal: cancelled.signal }, "home.memory.view", { limit: 30 }).then(() => undefined, error => error);
+      const shed = g.service.invoke({ ...client, signal: cancelled.signal }, "home.memory.view", { limit: PAGE }).then(() => undefined, error => error);
       setTimeout(() => cancelled.abort(new Error("deadline")), 5);
       expect(await shed).toBeDefined();
       markStage("retry after cancelled cold proof");
-      const retry = await timedRead(() => view(g, { limit: 30 }));
+      const retry = await timedRead(() => view(g, { limit: PAGE }));
       expect(retry.value).toEqual(first);
-      const afterRetry = await timedRead(() => view(g, { limit: 30 }));
+      const afterRetry = await timedRead(() => view(g, { limit: PAGE }));
 
       const dropProofs = () => { (homeOwnerOf(g.registry) as unknown as { memory: { proofs: HomeSourceProofs } }).memory.proofs = new HomeSourceProofs(); };
       const active = await g.registry.acquire(chapterIds[2]!);
@@ -326,23 +327,23 @@ describe("Home memory browser at scale", () => {
         active.sessionManager.appendMessage({ role: "user", content: `live turn input ${index} ${"while the browser is open ".repeat(30)}`, timestamp: Date.now() });
       }
       markStage("view after live append");
-      const appended = await timedRead(() => view(g, { limit: 30 }));
+      const appended = await timedRead(() => view(g, { limit: PAGE }));
       expect(appended.value.totalMessages).toBe(first.totalMessages + 4);
-      await expect(view(g, { limit: 30, cursor: first.nextCursor })).rejects.toMatchObject({ code: "conflict" });
+      await expect(view(g, { limit: PAGE, cursor: first.nextCursor })).rejects.toMatchObject({ code: "conflict" });
       dropProofs();
       markStage("reprove after append");
-      expect(await view(g, { limit: 30 })).toEqual(appended.value);
+      expect(await view(g, { limit: PAGE })).toEqual(appended.value);
       const branchFrom = first.lines.flatMap(line => line.item ? [line.item] : []).find(item => item.evidence.sessionId === chapterIds[2])!;
       active.sessionManager.branch(branchFrom.evidence.entryId);
       active.sessionManager.appendMessage({ role: "user", content: "a navigated branch", timestamp: Date.now() });
       markStage("view after session navigation");
-      const navigated = await view(g, { limit: 30 });
+      const navigated = await view(g, { limit: PAGE });
       expect(navigated.lines.some(line => line.item?.projection.omitted)).toBe(true);
       dropProofs();
       markStage("reprove after navigation");
-      expect(await view(g, { limit: 30 })).toEqual(navigated);
+      expect(await view(g, { limit: PAGE })).toEqual(navigated);
 
-      const beforeColdCatalog = await view(g, { limit: 30 });
+      const beforeColdCatalog = await view(g, { limit: PAGE });
       markStage("close for a restart without the catalog document");
       await closeGateway(g);
       await rm(join(root, "tron", "cache", "catalog-metadata-v3"), { recursive: true });
@@ -350,7 +351,7 @@ describe("Home memory browser at scale", () => {
       await g.registry.initialize();
       const cutBeforeRead = (g.registry as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut();
       markStage("restart without the catalog document: first page");
-      const coldCatalog = await view(g, { limit: 30 });
+      const coldCatalog = await view(g, { limit: PAGE });
       report.coldCatalogRestart = { cutBeforeRead };
       expect(coldCatalog.totalMessages).toBe(beforeColdCatalog.totalMessages);
       expect(coldCatalog.lines.map(line => line.start)).toEqual(beforeColdCatalog.lines.map(line => line.start));

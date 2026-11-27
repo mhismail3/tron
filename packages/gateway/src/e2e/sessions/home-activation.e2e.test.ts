@@ -795,7 +795,7 @@ describe("Tron Home activations end to end", () => {
     const slot = await designateHome(f, `cold-hard-${boundary}`);
     f.faux.setResponses([fauxAssistantMessage("initial canonical flush")]);
     await prepareThresholdFixture(f, slot, "initialize cold threshold evidence");
-    admissionLimits.bytes = 64 * 1_024;
+    admissionLimits.bytes = boundary === "bytes" ? 64 * 1_024 : 200 * 1_024 * 1_024;
     admissionLimits.entries = boundary === "entries" ? 100 : 100_000;
     for (let index = 0; index < 100 && (boundary === "bytes" ? statSync(slot.sessionFile!).size < admissionLimits.bytes : slot.canonicalEntryCount < admissionLimits.entries); index += 1) {
       slot.sessionManager.appendCustomEntry("admission-fixture", { padding: boundary === "bytes" ? "x".repeat(4_096) : "x" });
@@ -819,7 +819,7 @@ describe("Tron Home activations end to end", () => {
     const slot = await designateHome(f, `physical-hard-${boundary}`);
     f.faux.setResponses([fauxAssistantMessage("initial canonical flush")]);
     await prepareThresholdFixture(f, slot, "initialize physical threshold evidence");
-    admissionLimits.bytes = 64 * 1_024;
+    admissionLimits.bytes = boundary === "bytes" ? 64 * 1_024 : 200 * 1_024 * 1_024;
     admissionLimits.entries = boundary === "entries" ? 100 : 100_000;
     for (let index = 0; index < 100 && (boundary === "bytes" ? statSync(slot.sessionFile!).size < admissionLimits.bytes : slot.canonicalEntryCount < admissionLimits.entries); index += 1) {
       slot.sessionManager.appendCustomEntry("admission-fixture", { padding: boundary === "bytes" ? "x".repeat(4_096) : "x" });
@@ -3196,7 +3196,8 @@ describe("Tron Home activations end to end", () => {
     }
     await waitUntil(async () => {
       const memory = (await homeOwnerOf(f.registry).memoryStatus()).episodic;
-      return memory !== undefined && memory.pump.busy === 0 && memory.view.unbuilt === 0;
+      const admitted = (await canonicalMessages(slot)).filter(message => message.role !== "system").length;
+      return memory !== undefined && memory.coverage.admitted === admitted && memory.pump.busy === 0 && memory.view.unbuilt === 0;
     });
     const before = await rpc("home.memory.view", { limit: 50 }) as HomeMemoryView;
     const chapters = await rpc("home.chapterList", {});
