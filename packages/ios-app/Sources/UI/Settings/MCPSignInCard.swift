@@ -15,17 +15,16 @@ struct MCPSignInCard: View {
     var body: some View {
         Group {
             if !needsSignIn.isEmpty {
-                TronGlassCard(accent: .tronCyan) {
+                TronGlassCard {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(needsSignIn) { server in
                             Button { Task { await start(server.name) } } label: {
-                                TronSettingsRow(icon: "person.badge.key", title: server.name, subtitle: "Needs sign-in", titleIsIdentifier: !dynamicTypeSize.isAccessibilitySize,
-                                                accent: .tronCyan) { TronInlineActionLabel("Sign In", accent: .tronCyan) }
+                                TronSettingsRow(icon: "person.badge.key", title: server.name, subtitle: "Needs sign-in", titleIsIdentifier: !dynamicTypeSize.isAccessibilitySize) { TronInlineActionLabel("Sign In") }
                             }
                             .buttonStyle(.plain)
                             .disabled(starting != nil)
                             .accessibilityIdentifier("mcp-sign-in-\(server.name)")
-                            if server.id != needsSignIn.last?.id { TronSettingsDivider(accent: .tronCyan) }
+                            if server.id != needsSignIn.last?.id { TronSettingsDivider() }
                         }
                         if let error {
                             Label(error, systemImage: "exclamationmark.triangle").font(TronTypography.secondaryDescription)
@@ -41,7 +40,6 @@ struct MCPSignInCard: View {
             if let operationID = authOperationID {
                 MCPAuthSheet(operationID: operationID) { authOperationID = nil }
                     .environment(model)
-                    .tronSettingsVisualTheme(accent: .tronCyan)
             }
         }
     }

@@ -55,15 +55,19 @@ struct HostedIntegrationsFixtureView: View {
                     }
                     .environment(model)
                     .tronPresentation()
-                } else if scenario == "ollama-detail" {
+                } else if scenario == "ollama-detail" || scenario == "provider-info-code" {
                     NavigationStack {
-                        Button("Details for Ollama") { showingOllamaDetails = true }
+                        Button(scenario == "ollama-detail" ? "Details for Ollama" : "Sign in to Fixture OAuth") { showingOllamaDetails = true }
                             .tronManagedSheet(isPresented: $showingOllamaDetails, identity: "fixture.ollama-detail") {
                                 ProviderConfigurationSheet(
-                                    provider: ProviderSummary(
+                                    provider: scenario == "ollama-detail" ? ProviderSummary(
                                         id: "ollama", name: "Ollama", configured: true,
                                         usageSupported: false, localOnly: true, authSource: nil,
                                         credentialType: nil, authMethods: [], modelCount: 1
+                                    ) : ProviderSummary(
+                                        id: "fixture-oauth", name: "Fixture OAuth", configured: false,
+                                        usageSupported: false, localOnly: false, authSource: nil,
+                                        credentialType: nil, authMethods: ["oauth"], modelCount: 1
                                     ), target: .global
                                 )
                                 .environment(\.dynamicTypeSize, HostedLaunch.arguments.contains("-fixture-large-type") ? .accessibility3 : .large)
@@ -72,7 +76,7 @@ struct HostedIntegrationsFixtureView: View {
                     .environment(model)
                     .tronPresentation()
                     .tronSettingsLayout()
-                    .tronSettingsVisualTheme(accent: .tronCyan)
+                    .tronSettingsVisualTheme(accent: .tronPrimary)
                     .environment(\.dynamicTypeSize, HostedLaunch.arguments.contains("-fixture-large-type") ? .accessibility3 : .large)
                 } else {
                     NavigationStack {
@@ -86,7 +90,7 @@ struct HostedIntegrationsFixtureView: View {
                     .environment(model)
                     .tronPresentation()
                     .tronSettingsLayout()
-                    .tronSettingsVisualTheme(accent: .tronCyan)
+                    .tronSettingsVisualTheme(accent: .tronPrimary)
                 }
             } else if let error { Text(error) }
             else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
@@ -228,6 +232,15 @@ actor HostedIntegrationsGateway {
             authStarts += 1; authConsumed = false; publishMCPCounters()
             await emitAuthPrompt()
             return (.object(["operationId": .string(authOperationID)]), nil)
+        }
+        if method == "auth.begin" {
+            let operation: JSONValue = .string("fixture-provider-auth-operation")
+            await emitAuth("auth.event", payload: .object(["operationId": operation, "event": .object([
+                "type": .string("info"), "message": .string("Open the authorization page, approve access, then paste the code shown."),
+                "links": .array([.object(["url": .string("https://accounts.example.test/authorize"), "label": .string("Fixture authorization")])])])]))
+            await emitAuth("auth.prompt", payload: .object(["operationId": operation, "promptId": .string("fixture-provider-prompt"),
+                "prompt": .object(["type": .string("manual_code"), "message": .string("Paste the authorization code"), "placeholder": .string("Fixture code")])]))
+            return (.object(["operationId": operation]), nil)
         }
         if method == "auth.resume" {
             authResumes += 1; publishMCPCounters()

@@ -80,7 +80,7 @@ private struct MCPAddServerDraft: Equatable {
 struct MCPServersSettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronSettingsVisualTheme) private var theme
-    private var accent: Color { theme?.accent ?? .tronCyan }
+    private var accent: Color { theme?.accent ?? .tronPrimary }
     @Environment(\.tronPresentationActivity) private var activity
     @Environment(\.colorScheme) private var colorScheme
     let sessionID: String?
@@ -397,7 +397,7 @@ struct MCPServersSettingsView: View {
 
 struct MCPAddServerForm: View {
     @Environment(\.tronSettingsVisualTheme) private var theme
-    private var accent: Color { theme?.accent ?? .tronCyan }
+    private var accent: Color { theme?.accent ?? .tronPrimary }
     @Binding var serverName: String
     @Binding var transport: String
     @Binding var url: String

@@ -128,7 +128,8 @@ struct ProviderAuthFlowContent: View {
                 )
             }
             if let event = model.authEvent,
-               event.kind == .authURL || model.authPrompt == nil {
+               event.kind == .authURL || model.authPrompt == nil
+                || (event.kind == .info && ProviderAuthBrowserPolicy.supportsManualCallback(event: event, prompt: model.authPrompt)) {
                 AuthEventContent(event: event)
             }
             if let prompt = model.authPrompt, trail.replayAnswer(for: prompt) == nil {
@@ -166,7 +167,7 @@ private struct RecoveredAuthControls: View {
     @State private var working = false
 
     var body: some View {
-        OnboardingCard {
+        TronGlassCard {
             VStack(alignment: .leading, spacing: TronSpacing.md) {
                 Text("Login already in progress")
                     .tronSectionHeading()
@@ -185,6 +186,7 @@ private struct RecoveredAuthControls: View {
                 }
                 .disabled(working)
             }
+            .padding(TronSpacing.section)
         }
     }
 
@@ -221,23 +223,20 @@ private struct AuthPromptContent: View {
 
     var body: some View {
         TronSettingsSections(alignment: .leading, spacing: TronSpacing.section) {
-            Text(prompt.message)
-                .tronSectionHeading()
-                .foregroundStyle(Color.tronTextPrimary)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityAddTraits(.isHeader)
-
-            Group {
-                if prompt.kind == .secret {
-                    SecureField(prompt.placeholder ?? "Value", text: value)
-                        .textContentType(.password)
-                } else {
-                    TextField(prompt.placeholder ?? "Value", text: value)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+            TronSettingsGroup(prompt.message) {
+                Group {
+                    if prompt.kind == .secret {
+                        SecureField(prompt.placeholder ?? "Value", text: value)
+                            .textContentType(.password)
+                    } else {
+                        TextField(prompt.placeholder ?? "Value", text: value)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
                 }
+                .tronInlineField(monospaced: prompt.kind == .secret)
+                .padding(TronSpacing.xl)
             }
-            .tronField(monospaced: prompt.kind == .secret)
 
             TronPrimaryActionButton(
                 title: submitting ? "Submitting…" : (prompt.kind == .manualCode ? "Complete Login" : "Save"),
@@ -302,11 +301,12 @@ private struct AuthEventContent: View {
     @ViewBuilder private var authURLContent: some View {
         Group {
             if let instructions = event.instructions {
-                OnboardingCard {
+                TronGlassCard {
                     Text(instructions)
                         .font(TronTypography.body)
                         .foregroundStyle(Color.tronTextPrimary)
                         .fixedSize(horizontal: false, vertical: true)
+                        .padding(TronSpacing.section)
                 }
             }
             if let url = event.url {
@@ -339,7 +339,7 @@ private struct AuthEventContent: View {
 
     @ViewBuilder private var deviceCodeContent: some View {
         if let code = event.userCode {
-            OnboardingCard {
+            TronGlassCard {
                 VStack(spacing: TronSpacing.md) {
                     Text("Device code")
                         .font(TronTypography.bodySM)
@@ -354,6 +354,7 @@ private struct AuthEventContent: View {
                     }
                     .buttonStyle(TronActionButtonStyle())
                 }
+                .padding(TronSpacing.section)
             }
         }
         if let url = event.verificationURL {
@@ -420,11 +421,12 @@ private struct AuthEventContent: View {
 
     @ViewBuilder private var infoContent: some View {
         if let message = event.message {
-            OnboardingCard {
+            TronGlassCard {
                 Text(message)
                     .font(TronTypography.body)
                     .foregroundStyle(Color.tronTextPrimary)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(TronSpacing.section)
             }
         }
         ForEach(event.links) { link in
