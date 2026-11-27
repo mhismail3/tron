@@ -98,13 +98,13 @@ export function availableSubagentRow(subagent: AvailableSubagent): AvailableSuba
   };
 }
 
-async function discoverAgents(discovery: unknown, cwd: string): Promise<unknown> {
+async function discoverAgents(discovery: unknown, cwd: string, projectTrusted: boolean): Promise<unknown> {
   const exports = discovery as {
-    discoverAgentsAll?: (cwd: string) => unknown;
-    discoverAgents?: (cwd: string, scope: string) => unknown;
+    discoverAgentsAll?: (cwd: string, preferredModelProvider: undefined, options: { projectTrusted: boolean }) => unknown;
+    discoverAgents?: (cwd: string, scope: string, preferredModelProvider: undefined, options: { projectTrusted: boolean }) => unknown;
   };
-  if (typeof exports.discoverAgentsAll === "function") return await exports.discoverAgentsAll(cwd);
-  if (typeof exports.discoverAgents === "function") return await exports.discoverAgents(cwd, "both");
+  if (typeof exports.discoverAgentsAll === "function") return await exports.discoverAgentsAll(cwd, undefined, { projectTrusted });
+  if (typeof exports.discoverAgents === "function") return await exports.discoverAgents(cwd, "both", undefined, { projectTrusted });
   throw new Error(`${SUBAGENT_PACKAGE} exposes no agent discovery`);
 }
 
@@ -114,7 +114,7 @@ export async function loadSubagentCatalog(request: SubagentCatalogRequest): Prom
     const packageRoot = managed?.verify();
     if (!managed || !packageRoot) return unavailable(`managed ${SUBAGENT_PACKAGE} is not installed`);
     const discovery = await (request.loadDiscovery ? request.loadDiscovery(packageRoot) : managed.loadDiscovery());
-    const raw = await discoverAgents(discovery, request.cwd);
+    const raw = await discoverAgents(discovery, request.cwd, request.settingsManager.isProjectTrusted());
     const reports = raw !== null && typeof raw === "object" ? (raw as { agentDiagnostics?: unknown }).agentDiagnostics : undefined;
     const invalid = Array.isArray(reports) ? reports.filter((report): report is { error: string } =>
       report !== null && typeof report === "object" && typeof report.error === "string" && report.error.length > 0) : [];
