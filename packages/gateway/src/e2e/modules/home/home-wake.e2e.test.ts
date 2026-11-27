@@ -671,8 +671,16 @@ describe("Workers wait in place and stalls wake Home once (#2695, #2696)", () =>
     await waitFor(() => parked(f, a.sessionId), "A parks on B");
     expect(waiterTurns).toBe(2);
     expect((await settledTask(f, a.taskId)).lifecycle).toBe("active");
+    const delegation = f.registry.delegation;
+    const steer = delegation.steerWorker.bind(delegation);
+    const refused = vi.spyOn(delegation, "steerWorker").mockImplementationOnce(async () => { throw new Error("refused while a wake turn starts"); });
     hold.open();
     await b.completion;
+    await waitFor(() => refused.mock.calls.length === 1, "first release steer refused");
+    expect((await settledTask(f, a.taskId)).lifecycle).toBe("active");
+    expect(await parked(f, a.sessionId)).toBe(true);
+    refused.mockImplementation(steer);
+    await dispatcher(f).sweepStalls(Date.now());
     const final = await a.completion;
     expect(final).toMatchObject({ taskId: "wait-a", operationId: a.operationId, terminalEvidence: { outcome: "final" } });
     const worker = await f.registry.acquire(a.sessionId);

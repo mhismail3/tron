@@ -550,12 +550,9 @@ export class HomeTaskDispatcher {
         return { checkin: accepted, reply: this.checkinAccepted(task.taskId, reports, accepted, targetSettled) };
       }, async text => {
         const live = this.live.get(task.taskId);
-        try { if (!live) throw new Error("released task is no longer live"); await this.sessions.delegation.steerWorker(live.sessionId, { taskId: task.taskId, operationId }, text, "gateway"); return true; }
-        catch {
-          if (live && this.sessions.liveRuntime(live.sessionId)?.ownedTurns.waitingTask?.wakeOperationId !== undefined) return false;
-          await cancellation("wait-release-failed");
-          return true;
-        }
+        if (!live) return true;
+        try { await this.sessions.delegation.steerWorker(live.sessionId, { taskId: task.taskId, operationId }, text, "gateway"); return true; }
+        catch { return false; }
       });
       admissionReport = reports;
       reports.limitBudget(async entries => {
@@ -800,7 +797,11 @@ export class HomeTaskDispatcher {
   async sweepStalls(now = Date.now()): Promise<void> {
     for (const op of [...this.live.values()]) {
       const parked = this.sessions.liveRuntime(op.sessionId)?.ownedTurns.waitingTask;
-      if (op.reports.waiting || (parked && parked.wakeOperationId === undefined)) { delete op.stalledSince; continue; }
+      if (op.reports.waiting || (parked && parked.wakeOperationId === undefined)) {
+        delete op.stalledSince;
+        if (op.reports.waitReleased && parked && parked.wakeOperationId === undefined) op.reports.parked();
+        continue;
+      }
       const activity = this.activity(op.taskId, op.operationId);
       if (!activity.lastEntryAt || now - Date.parse(activity.lastEntryAt) < HOME_TASK_STALL_MS || op.stalledSince === activity.lastEntryAt) continue;
       op.stalledSince = activity.lastEntryAt;
