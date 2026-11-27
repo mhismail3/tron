@@ -44,6 +44,7 @@ const CONNECTION = {
   ...(config.connection ?? {}),
 };
 const gatewayRequire = createRequire(join(config.gatewayDir, "package.json"));
+const { applyTranscriptDelta } = await import(pathToFileURL(join(config.gatewayDir, "dist/protocol/transcript-delta.js")).href);
 const started = performance.now();
 const now = () => performance.now() - started;
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
@@ -696,15 +697,22 @@ class MountedChat {
       const payload = frame.payload;
       if (frame.type !== "event" || !payload || typeof payload !== "object") return;
       if ((payload.sessionId ?? frame.sessionId) !== this.sessionId) return;
-      if (frame.topic === "session.snapshot") {
-        if (payload.runtimeGeneration === this.cursor.generation && payload.eventSequence <= this.cursor.sequence) return;
-        this.latest = payload;
-        this.cursor = { generation: payload.runtimeGeneration, sequence: payload.eventSequence };
+      if (frame.topic === "session.snapshot" || frame.topic === "session.rebaseline") {
+        if (frame.topic === "session.rebaseline" && payload.subscriptionToken !== this.token) return;
+        const stated = frame.topic === "session.rebaseline" ? payload.snapshot : payload;
+        if (stated.runtimeGeneration === this.cursor.generation && stated.eventSequence <= this.cursor.sequence) return;
+        this.latest = stated;
+        this.cursor = { generation: stated.runtimeGeneration, sequence: stated.eventSequence };
         return;
       }
       if (typeof payload.eventSequence !== "number" || typeof payload.runtimeGeneration !== "string") return;
       if (payload.runtimeGeneration !== this.cursor.generation || payload.eventSequence !== this.cursor.sequence + 1) {
         this.sequenceGaps += 1;
+      }
+      if (frame.topic === "session.transcriptDelta") {
+        const applied = applyTranscriptDelta(this.latest, payload.data);
+        if (!applied) fail(`session.transcriptDelta at ${payload.eventSequence} did not extend the mounted transcript`);
+        this.latest = applied;
       }
       this.cursor = { generation: payload.runtimeGeneration, sequence: payload.eventSequence };
     };

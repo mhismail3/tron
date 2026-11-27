@@ -12,7 +12,11 @@ actor SnapshotCacheFixtureGateway {
         self.offline = offline
         self.pageWithoutSessions = pageWithoutSessions
     }
+    private var openSnapshot = SnapshotCacheFixtureGateway.snapshot()
+    private(set) var opens = 0
     func attach(_ socket: SnapshotCacheFixtureSocket) { self.socket = socket }
+    func serveOpen(_ snapshot: SessionSnapshot) { openSnapshot = snapshot }
+    func deliver(_ frame: Data) async { await socket?.deliver(frame) }
 
     static func row(name: String = "Before summary", archived: Bool = false) -> CatalogSession {
         CatalogSession(SessionSummary(id: archived ? "cache-archived" : "cache-live", name: name, cwd: "/fixture/cache",
@@ -38,7 +42,8 @@ actor SnapshotCacheFixtureGateway {
             return .object(["sessions": .array([try JSONValue.wire(Self.row().summary.encode())]), "nextCursor": .null,
                 "listRevision": .number(1), "projectionToken": .string("cache:1"), "archivedCount": .number(7)])
         case "session.open":
-            return .object(["session": try JSONValue.encode(Self.snapshot()), "syncToken": .string("cache-sync"),
+            opens += 1
+            return .object(["session": try JSONValue.encode(openSnapshot), "syncToken": .string("cache-sync"),
                 "subscriptionToken": .string("cache-subscription"), "completionRevision": .number(0)])
         case "session.sync": return .object(["synchronized": .bool(true)])
         case "session.close": return .object(["closed": .bool(true)])

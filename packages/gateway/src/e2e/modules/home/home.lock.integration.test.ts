@@ -27,7 +27,7 @@ interface HomeLockTrace {
   readonly systemEntries: { readonly home: TraceValue; readonly worker: TraceValue };
 }
 
-const SNAPSHOT_STATED_TOPICS = new Set(["session.snapshot", "session.rebaseline", "session.progress", "session.configuration",
+const SNAPSHOT_STATED_TOPICS = new Set(["session.snapshot", "session.transcriptDelta", "session.rebaseline", "session.progress", "session.configuration",
   "session.toolProgress", "session.processActivity", "session.extensionActivity", "session.compaction"]);
 const SIZE_KEYS = new Set(["bytes", "currentBytes", "viewBytes", "effectiveTokens", "inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "tokens"]);
 const ENTRY_ID = /^[0-9a-f]{8}$/;

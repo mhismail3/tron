@@ -901,6 +901,64 @@ package struct SessionContextPresentation: Hashable, Sendable {
     }
 }
 
+package struct SessionTranscriptDeltaReplacement: Codable, Hashable, Sendable {
+    package let index: Int
+    package let item: TranscriptItem
+}
+
+package struct SessionTranscriptDelta: Hashable, Sendable {
+    package static let maximumReplacements = 16
+    package let cut: SessionTranscriptDeltaCut
+    package let replaced: [SessionTranscriptDeltaReplacement]
+    package let snapshot: SessionSnapshot
+
+    private static func keys(_ value: JSONValue) -> Set<String> {
+        Set(value.objectValue.map { Array($0.keys) } ?? [])
+    }
+
+    package static func decode(_ data: JSONValue) throws -> Self {
+        guard let object = data.objectValue, Set(object.keys) == ["cut", "replaced", "snapshot"],
+              let cut = object["cut"], keys(cut) == ["baseTranscriptStart", "baseLeafEntryId", "transcriptStart"],
+              let replaced = object["replaced"]?.arrayValue, replaced.count <= maximumReplacements,
+              replaced.allSatisfy({ keys($0) == ["index", "item"] }),
+              let snapshot = object["snapshot"] else {
+            throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "session.transcriptDelta has an invalid shape"))
+        }
+        return Self(
+            cut: try cut.decodeWire(SessionTranscriptDeltaCut.decode),
+            replaced: try JSONValue.array(replaced).decode([SessionTranscriptDeltaReplacement].self),
+            snapshot: try snapshot.decode(SessionSnapshot.self)
+        )
+    }
+
+    package func applied(to current: SessionSnapshot) -> SessionSnapshot? {
+        guard let baseTotal = snapshot.transcriptStart,
+              let total = snapshot.transcriptTotal,
+              let currentStart = current.transcriptStart,
+              current.sessionId == snapshot.sessionId,
+              current.runtimeGeneration == snapshot.runtimeGeneration,
+              currentStart == cut.baseTranscriptStart,
+              current.transcriptTotal == baseTotal,
+              currentStart + current.transcript.count == baseTotal,
+              current.leafEntryId == cut.baseLeafEntryId.value,
+              cut.transcriptStart >= cut.baseTranscriptStart,
+              cut.transcriptStart <= baseTotal,
+              replaced.count <= Self.maximumReplacements,
+              baseTotal + snapshot.transcript.count == total else { return nil }
+        var retained = Array(current.transcript.dropFirst(cut.transcriptStart - cut.baseTranscriptStart))
+        for replacement in replaced {
+            let (offset, overflow) = replacement.index.subtractingReportingOverflow(cut.transcriptStart)
+            guard !overflow, offset >= 0, offset < retained.count,
+                  retained[offset].id == replacement.item.id else { return nil }
+            retained[offset] = replacement.item
+        }
+        var next = snapshot
+        next.transcript = retained + snapshot.transcript
+        next.transcriptStart = cut.transcriptStart
+        return next
+    }
+}
+
 package struct SessionEventEnvelope: Codable, Hashable, Sendable {
     package let runtimeGeneration: String
     package let eventSequence: Int

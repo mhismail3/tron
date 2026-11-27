@@ -22,7 +22,7 @@ requests, cancellation, receipts, ordered delivery and liveness. Methods:
   upgrade answers retryable `busy` meanwhile), `POST /v1/pair` (rate-limited one-time
   enrollment), `POST|DELETE|GET /v1/uploads[/:id]` ([uploads](../machine/uploads.md)),
   `GET /v1/blobs/:id`, `GET /v1/sessions/:id/display-artifacts/:id` and the live-view
-  routes ([display](../display/README.md)), `GET /v1/socket` (protocol 9 WebSocket).
+  routes ([display](../display/README.md)), `GET /v1/socket` (protocol 10 WebSocket).
 - `upload-http.ts` owns the three upload exchanges; its synchronous dispatcher returns
   no work for other paths, so live-view open/frame keep their credential cut without
   an inserted await.
@@ -69,7 +69,7 @@ on every hello. No unauthenticated route names the lane.
 
 ## Hello and identity
 
-Every socket starts with `{"type":"hello","protocolVersion":9}`. Hello, pairing and
+Every socket starts with `{"type":"hello","protocolVersion":10}`. Hello, pairing and
 `system.info` carry `machineId` (per Tron home), `gatewayChannel` (`stable` or `dev`;
 `TRON_GATEWAY_CHANNEL` is validated, absence means `stable`) and `machineGroupID`
 (one physical Mac across homes; a connection-group hint only, clients fall back to
@@ -145,6 +145,14 @@ keeps admission, frame preparation, broadcasts and retirement.
   directives and frames of another runtime generation. Without an installed token a
   snapshot supersedes nothing. Dropped frames release their reservation and appear as
   `outboundCoalescedFrames`/`Bytes` in `gateway.resources`.
+- A session snapshot reaches each subscribed connection as `session.transcriptDelta`
+  (`SessionTranscriptDelta`: the complete state, its transcript only the items after the
+  base total, at most 16 retained items replaced in place by identity) when the server's
+  per-connection transcript base (set by `session.open` and every snapshot it sends;
+  cleared by revocation, rekey, failed sends and overflow recovery) is extendable; otherwise, and during a synchronization barrier, as a full `session.snapshot`.
+  A client applies a delta only to the exact base (runtime, window start and total, leaf)
+  and otherwise reopens for one full snapshot. A superseded delta is rebaselined with the
+  full snapshot it carried.
 - A broadcast encodes once per operation; only `session.rebaseline` is per connection.
   Overflow closes that peer with `1013`; a stalled peer is force-closed after one
   second but holds capacity until physical close. Write failures terminate the exact

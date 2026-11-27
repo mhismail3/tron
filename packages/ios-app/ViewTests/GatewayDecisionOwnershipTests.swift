@@ -107,6 +107,118 @@ final class GatewayDecisionOwnershipTests: XCTestCase {
         XCTAssertEqual(SessionRebaselineAdmission.evaluate(current: current, incoming: next(1, 1, "restarted")), .install)
     }
 
+    private func transcriptItem(_ id: String, _ text: String) throws -> TranscriptItem {
+        try JSONDecoder.gateway.decode(TranscriptItem.self, from: JSONSerialization.data(withJSONObject: [
+            "id": id, "presentationId": id, "timestamp": observed, "kind": "message", "role": "assistant",
+            "content": [["id": "\(id)-text", "ordinal": 0, "type": "text", "text": text]]] as [String: Any]))
+    }
+
+    private func transcriptDeltaFrame(base: SessionSnapshot, next: SessionSnapshot, replaced: [(Int, TranscriptItem)] = [],
+                                      extra: [String: JSONValue] = [:]) throws -> Data {
+        var sparse = next
+        sparse.transcript = Array(next.transcript.dropFirst(base.transcriptTotal! - next.transcriptStart!))
+        sparse.transcriptStart = base.transcriptTotal
+        var data: [String: JSONValue] = [
+            "cut": .object(["baseTranscriptStart": .number(Double(base.transcriptStart!)),
+                            "baseLeafEntryId": base.leafEntryId.map(JSONValue.string) ?? .null,
+                            "transcriptStart": .number(Double(next.transcriptStart!))]),
+            "replaced": .array(try replaced.map { .object(["index": .number(Double($0.0)), "item": try JSONValue.encode($0.1)]) }),
+            "snapshot": try JSONValue.encode(sparse),
+        ]
+        data.merge(extra) { $1 }
+        return try JSONEncoder.gateway.encode(JSONValue.object([
+            "type": .string("event"), "topic": .string("session.transcriptDelta"), "sessionId": .string(next.sessionId),
+            "payload": .object(["runtimeGeneration": .string(next.runtimeGeneration), "eventSequence": .number(Double(next.eventSequence)),
+                                "revision": .number(Double(next.revision)), "data": .object(data)])]))
+    }
+
+    private func advanced(_ base: SessionSnapshot, appending items: [TranscriptItem], replacing replaced: [(Int, TranscriptItem)] = []) -> SessionSnapshot {
+        var next = base
+        for (index, item) in replaced { next.transcript[index - base.transcriptStart!] = item }
+        next.transcript += items
+        next.transcriptTotal = base.transcriptTotal! + items.count
+        next.leafEntryId = items.last?.id ?? base.leafEntryId
+        next.eventSequence += 1
+        next.revision += 1
+        return next
+    }
+
+    func testTranscriptDeltasDecodeStrictlyAndApplyOnlyToTheirExactBase() throws {
+        let base = SnapshotCacheFixtureGateway.snapshot()
+        let next = advanced(base, appending: [try transcriptItem("delta-1", "First appended row")])
+        let event = try JSONDecoder.gateway.decode(GatewayEvent.self, from: transcriptDeltaFrame(base: base, next: next))
+        guard case .transcriptDelta(let delta)? = event.preparedSessionEvent?.data else { return XCTFail("A well-formed delta prepares") }
+        XCTAssertEqual(delta.applied(to: base), next, "The delta rebuilds the Gateway's complete snapshot from the base")
+        XCTAssertNil(delta.applied(to: next), "A client already past the base refuses rather than guessing")
+        var otherLeaf = base
+        otherLeaf.leafEntryId = "elsewhere"
+        XCTAssertNil(delta.applied(to: otherLeaf), "A different leaf is a different base")
+        let unknown = try JSONDecoder.gateway.decode(GatewayEvent.self, from: transcriptDeltaFrame(base: base, next: next, extra: ["surplus": .bool(true)]))
+        guard case .invalid? = unknown.preparedSessionEvent?.data else { return XCTFail("An unknown delta field is refused") }
+        let foreign = try JSONDecoder.gateway.decode(GatewayEvent.self, from: transcriptDeltaFrame(
+            base: base, next: next, replaced: [(0, try transcriptItem("not-the-base-row", "Wrong identity"))]))
+        guard case .transcriptDelta(let mismatched)? = foreign.preparedSessionEvent?.data else { return XCTFail("The replacement decodes") }
+        XCTAssertNil(mismatched.applied(to: base), "A replacement must keep the retained row's identity")
+        var badFacts = next
+        badFacts.processOverview = PresentedProcessOverview(revision: 1, asOf: observed, activeCount: -1, recentCount: 0, problemCount: 0,
+                                                            visibility: .active)
+        let refusedFacts = try JSONDecoder.gateway.decode(GatewayEvent.self, from: transcriptDeltaFrame(base: base, next: badFacts))
+        guard case .invalid? = refusedFacts.preparedSessionEvent?.data else {
+            return XCTFail("A delta is admitted by the same snapshot checks as a full snapshot")
+        }
+    }
+
+    @MainActor
+    private func until(_ what: String, _ condition: @MainActor () -> Bool) async throws {
+        for _ in 0..<500 where !condition() { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(condition(), what)
+    }
+
+    @MainActor
+    func testTheMountedChatAppliesDeltasInOrderAndResynchronizesFromOneFullSnapshotWhenOffBase() async throws {
+        let gateway = SnapshotCacheFixtureGateway(offline: false)
+        let root = FileManager.default.temporaryDirectory.appending(path: "transcript-delta-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = AutomationFixtureProfileStore()
+        let profiles = GatewayProfileStore(metadata: store, tokens: store)
+        try profiles.save(GatewayProfile(id: "delta-fixture", label: "Delta", host: "delta.example.test", port: 9847,
+                                         machineId: "cache-fixture-machine", deviceId: "fixture-device"), token: "fixture-only-token")
+        let model = AppModel(client: GatewayClient(socketFactory: GatewaySocketFactory { _ in SnapshotCacheFixtureSocket(gateway: gateway) }),
+                             profiles: profiles, cache: SnapshotCache(root: root.appending(path: "snapshots")),
+                             composerDraftStore: ComposerDraftStore(root: root.appending(path: "drafts")))
+        await model.start()
+        _ = await model.refreshSessions()
+        _ = try await model.openSessionPresentation("cache-live")
+        let base = SnapshotCacheFixtureGateway.snapshot()
+        try await until("the full snapshot mounts") { model.selectedSnapshot?.eventSequence == base.eventSequence }
+
+        let first = advanced(base, appending: [try transcriptItem("delta-1", "First appended row")])
+        await gateway.deliver(try transcriptDeltaFrame(base: base, next: first))
+        try await until("an appended row mounts") { model.selectedSnapshot == first }
+
+        let settled = try transcriptItem("cache-message", "Re-projected in place")
+        let second = advanced(first, appending: [try transcriptItem("delta-2", "Second appended row")], replacing: [(0, settled)])
+        let secondFrame = try transcriptDeltaFrame(base: first, next: second, replaced: [(0, settled)])
+        await gateway.deliver(secondFrame)
+        try await until("an in-place replacement and an append mount together") { model.selectedSnapshot == second }
+        await gateway.deliver(secondFrame)
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertEqual(model.selectedSnapshot, second, "A duplicate delta is a no-op")
+        let opensBeforeGap = await gateway.opens
+
+        var authoritative = advanced(second, appending: [try transcriptItem("delta-3", "Missed row"), try transcriptItem("delta-4", "Latest row")])
+        authoritative.eventSequence += 5
+        await gateway.serveOpen(authoritative)
+        var stale = second
+        stale.transcriptTotal = 7
+        stale.transcriptStart = 7
+        stale.transcript = []
+        await gateway.deliver(try transcriptDeltaFrame(base: stale, next: advanced(stale, appending: [try transcriptItem("delta-9", "Off base")])))
+        try await until("an off-base delta resynchronizes from one full snapshot") { model.selectedSnapshot == authoritative }
+        let opensAfterGap = await gateway.opens
+        XCTAssertEqual(opensAfterGap, opensBeforeGap + 1, "Recovery opens exactly once")
+    }
+
     func testDisplayURLsAdmitTheGatewaysCanonicalHostsAndRefuseRawFormsItWouldBlock() {
         for url in ["https://mooses-macbook-server.tail3b6e78.ts.net:8443/", "https://one.two.example.com/", "https://a.b.c.d/",
                     "https://8.8.8.8/", "https://1.2.0.3/", "https://[2606:4700::1111]/", "https://example.com./"] {

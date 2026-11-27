@@ -6,7 +6,7 @@ import { abortableRead } from "../util/abortable-read.js";
 import { randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket, type PerMessageDeflateOptions } from "ws";
 import { GatewayError, publicError } from "../errors.js";
-import type { JsonValue } from "../protocol/types.js";
+import type { JsonValue, SessionSnapshot } from "../protocol/types.js";
 import type { DeviceIdentity, DeviceStore } from "../security/device-store.js";
 import { RateLimiter } from "../security/rate-limiter.js";
 import type { UploadStore } from "../machine/upload-store.js";
@@ -27,6 +27,7 @@ import { LanEndpoint, httpListenerOptions, type LanAdvertisement, type LanEndpoi
 import { isTailscaleAddress } from "../config.js";
 import { OrderedOutboundQueue, UNKNOWN_OUTBOUND_TOPIC, type OutboundFrame } from "./ordered-outbound-queue.js";
 import { handleUploadHttp } from "./upload-http.js";
+import { transcriptCut, transcriptDelta, type TranscriptCut } from "../protocol/transcript-delta.js";
 
 export const MAXIMUM_REKEYED_SESSION_IDS = 64;
 const MAXIMUM_UNANSWERED_HEARTBEATS = GATEWAY_CONNECTION_POLICY.missedHeartbeatLimit;
@@ -365,6 +366,7 @@ interface Connection {
   requestControllers: Map<string, InFlightRpc>;
   synchronizations: Map<string, ActiveSessionSynchronization>;
   subscriptionTokens: Map<string, string>;
+  transcriptBases: Map<string, TranscriptCut>;
   rekeyedSessionIds: Map<string, string>;
   synchronizationBytes: number;
   pendingSessionOpens: Map<string, SessionOpenFlight>;
@@ -419,6 +421,7 @@ function outboundFrameIdentity(
   value: unknown,
   prepared: PreparedOutboundFrame,
   maximumBytes: number,
+  deltaSnapshot: SessionSnapshot | undefined,
 ): OutboundFrameIdentity {
   if (prepared.fallback) return { topic: "transport.resyncRequired" };
   const frame = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
@@ -437,7 +440,8 @@ function outboundFrameIdentity(
     topic, sessionId, sequence,
     ...(runtimeGeneration === undefined ? {} : { runtimeGeneration }),
   };
-  if (topic !== "session.snapshot") return sequenced;
+  const stated = topic === "session.snapshot" ? payload : topic === "session.transcriptDelta" ? deltaSnapshot : undefined;
+  if (stated === undefined) return sequenced;
   const subscriptionToken = connection.subscriptionTokens.get(sessionId);
   if (subscriptionToken === undefined) return sequenced;
   const rebaseline = (): OutboundFrame | undefined => {
@@ -445,7 +449,7 @@ function outboundFrameIdentity(
       type: "event",
       topic: "session.rebaseline",
       sessionId,
-      payload: { reason: "superseded snapshot", subscriptionToken, snapshot: payload },
+      payload: { reason: "superseded snapshot", subscriptionToken, snapshot: stated },
     }, maximumBytes));
     if (!encoded) return undefined;
     bytes("frame.serialize", encoded.outputBytes);
@@ -542,6 +546,7 @@ export class GatewayServer {
   private readonly localSockets: WebSocketServer;
   private readonly pairedSockets: WebSocketServer;
   private readonly clients = new Map<string, Connection>();
+  private readonly deltaSnapshots = new WeakMap<object, SessionSnapshot>();
   private connectionAdmissions = 0;
   private readonly httpSockets = new Set<Duplex>();
   private readonly pendingUpgrades = new Set<() => void>();
@@ -837,6 +842,8 @@ export class GatewayServer {
       connection.subscriptionTokens.delete(nextSessionId);
 
       connection.subscriptionTokens.delete(previousSessionId);
+      connection.transcriptBases.delete(previousSessionId);
+      connection.transcriptBases.delete(nextSessionId);
       connection.synchronizations.delete(previousSessionId);
       if (sourceToken !== undefined) connection.subscriptionTokens.set(nextSessionId, sourceToken);
       if (pendingOwner !== undefined) connection.pendingSessionOpens.set(nextSessionId, pendingOwner);
@@ -884,6 +891,7 @@ export class GatewayServer {
       connection.synchronizations.delete(sessionId);
     }
     connection.subscriptionTokens.delete(sessionId);
+    connection.transcriptBases.delete(sessionId);
     this.clearRekeyedSessionIds(connection, sessionId);
     this.options.sessions.unsubscribe(connection.id, sessionId);
     this.options.service.releaseSessionProcessTranscripts?.(sessionId, connection.id, token);
@@ -908,6 +916,10 @@ export class GatewayServer {
     }
     if (topic === "session.snapshot") this.resourceSampler.recordSnapshotBuild(recipients);
     if (recipients === 0) return;
+    if (topic === "session.snapshot" && Array.isArray((payload as { transcript?: unknown } | null)?.transcript)) {
+      this.broadcastSessionSnapshot(sessionId, payload as unknown as SessionSnapshot, recipients);
+      return;
+    }
     const event: BufferedSessionEvent = { type: "event", topic, sessionId, payload };
     const prepared = this.prepareBroadcastFrame(event);
     for (const client of this.clients.values()) {
@@ -918,6 +930,40 @@ export class GatewayServer {
     }
     this.resourceSampler.recordTopicFrame(topic, prepared?.outputBytes ?? 0, recipients);
   }
+
+  private broadcastSessionSnapshot(sessionId: string, snapshot: SessionSnapshot, recipients: number): void {
+    const cut = stage("snapshot.cut", () => transcriptCut(snapshot));
+    const full: BufferedSessionEvent = { type: "event", topic: "session.snapshot", sessionId, payload: snapshot as unknown as JsonValue };
+    const sparse = new Map<TranscriptCut, BufferedSessionEvent>();
+    const prepared = new Map<BufferedSessionEvent, PreparedOutboundFrame | null>();
+    const prepare = (event: BufferedSessionEvent) => {
+      if (!prepared.has(event)) prepared.set(event, this.prepareBroadcastFrame(event));
+      return prepared.get(event)!;
+    };
+    const eventFrom = (base: TranscriptCut): BufferedSessionEvent => {
+      if (!sparse.has(base)) {
+        const delta = stage("snapshot.delta", () => transcriptDelta(base, cut, snapshot));
+        const event: BufferedSessionEvent = delta ? {
+          type: "event", topic: "session.transcriptDelta", sessionId,
+          payload: { runtimeGeneration: snapshot.runtimeGeneration, eventSequence: snapshot.eventSequence, revision: snapshot.revision, data: delta } as unknown as JsonValue,
+        } : full;
+        if (delta) this.deltaSnapshots.set(event, snapshot);
+        sparse.set(base, event);
+      }
+      return sparse.get(base)!;
+    };
+    for (const client of this.clients.values()) {
+      if (!client.ready || !client.subscriptionTokens.has(sessionId)) continue;
+      const barrier = client.synchronizations.get(sessionId)?.barrier;
+      const base = client.transcriptBases.get(sessionId);
+      const event = !barrier && base ? eventFrom(base) : full;
+      client.transcriptBases.set(sessionId, cut);
+      const deliverable = barrier ? barrier.offer(event, prepare(event)) : event;
+      if (deliverable && this.sendOutcome(client, deliverable, prepare(event)) !== "sent") client.transcriptBases.delete(sessionId);
+    }
+    for (const [event, frame] of prepared) this.resourceSampler.recordTopicFrame(event.topic, frame?.outputBytes ?? 0, recipients);
+  }
+
 
   broadcast(topic: string, payload: JsonValue): void {
     let recipients = 0;
@@ -955,6 +1001,7 @@ export class GatewayServer {
       }
       client.synchronizations.clear();
       client.subscriptionTokens.clear();
+      client.transcriptBases.clear();
       client.pendingSessionOpens.clear();
       this.options.sessions.unsubscribeClient(client.id);
       const isInitiatingRequest = origin?.connectionId === client.id
@@ -1474,6 +1521,7 @@ export class GatewayServer {
       requestControllers: new Map(),
       synchronizations: new Map(),
       subscriptionTokens: new Map(),
+      transcriptBases: new Map(),
       rekeyedSessionIds: new Map(),
       synchronizationBytes: 0,
       pendingSessionOpens: new Map(),
@@ -1664,6 +1712,7 @@ export class GatewayServer {
       }
       if (connection.subscriptionTokens.get(sessionId) !== token) return false;
       connection.subscriptionTokens.delete(sessionId);
+      connection.transcriptBases.delete(sessionId);
       clearRekeyedSessionIds(sessionId);
       this.options.sessions.unsubscribe(connection.id, sessionId);
       this.options.service.releaseSessionProcessTranscripts?.(sessionId, connection.id, token);
@@ -1757,6 +1806,8 @@ export class GatewayServer {
             throw new GatewayError("conflict", "Session synchronization is owned by another request", true);
           }
           active.barrier.establish(snapshot);
+          if (Array.isArray(snapshot.transcript)) connection.transcriptBases.set(sessionId, transcriptCut(snapshot));
+          else connection.transcriptBases.delete(sessionId);
         },
         completeSynchronization: (sessionId, syncToken) => {
           sessionId = resolveSessionId(sessionId);
@@ -1914,6 +1965,7 @@ export class GatewayServer {
           }
 
           active.barrier.establish(recovery);
+          connection.transcriptBases.delete(completion.sessionId);
           const recovered = active.barrier.commit(completion.syncToken);
           clearTimeout(active.timeout);
           if (recovered.overflowed) {
@@ -2260,7 +2312,7 @@ export class GatewayServer {
         const valueFrame = value as { type?: unknown; topic?: unknown };
         const type = valueFrame?.type === "response" ? "response" : valueFrame?.type === "event" ? "event" : "other";
         const topic = typeof valueFrame?.topic === "string"
-          && ["session.snapshot", "session.rebaseline", "session.progress", "session.summary"].includes(valueFrame.topic)
+          && ["session.snapshot", "session.transcriptDelta", "session.rebaseline", "session.progress", "session.summary"].includes(valueFrame.topic)
           ? valueFrame.topic : "other";
         this.options.logger.log("warning", `Outbound projection exceeded frame limit (type=${type} topic=${topic} bytes=${frame.bytes} maximumBytes=${this.options.maxFrameBytes} nodeCountAtLeast=${frame.nodes ?? "unknown"} maximumNodes=${GATEWAY_JSON_MAXIMUM_NODES}; ${this.pressureDiagnostic()})`, {
           event: "connection.projection-rejected", source: "transport",
@@ -2269,7 +2321,7 @@ export class GatewayServer {
 
       if (!connection.outbound.enqueue({
         encoded: frame.output, bytes: frame.outputBytes,
-        ...outboundFrameIdentity(connection, value, frame, this.options.maxFrameBytes),
+        ...outboundFrameIdentity(connection, value, frame, this.options.maxFrameBytes, this.deltaSnapshots.get(value as object)),
       })) return "failed";
       return frame.fallback ? "fallback" : "sent";
     } catch {
@@ -2311,6 +2363,7 @@ export class GatewayServer {
     }
     connection.synchronizations.clear();
     connection.subscriptionTokens.clear();
+    connection.transcriptBases.clear();
     for (const flight of connection.pendingSessionOpens.values()) {
       flight.controller.abort(new GatewayError("cancelled", "The connection retired during this session open", true));
     }

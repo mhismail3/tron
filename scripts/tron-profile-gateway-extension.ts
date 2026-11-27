@@ -80,7 +80,7 @@ function textOf(content: unknown): string {
 function latestDirective(messages: readonly { role: string; content?: unknown }[]): { directive: Directive; toolResults: number } {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (message.role !== "user") continue;
+    if (message.role !== "user" || textOf(message.content).startsWith("<turn-frame>")) continue;
     const match = /^tron-profile ([a-z-]+)((?: [a-z]+=\d+)*)\s*$/.exec(textOf(message.content).trim());
     if (!match) throw new Error("The profile model only answers tron-profile directives");
     const values: Record<string, number> = {};

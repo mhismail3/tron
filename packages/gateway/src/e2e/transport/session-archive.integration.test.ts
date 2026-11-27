@@ -16,6 +16,7 @@ import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { GatewayService } from "../../transport/gateway-service.js";
 import { GatewayServer } from "../../transport/server.js";
 import { waitFor } from "../../../test-support/wait-for.js";
+import { sessionStates } from "../../../test-support/session-states.js";
 import { PROTOCOL_VERSION } from "../../version.js";
 
 const REPORT_PATH = join(process.cwd(), "test-results", "session-archive.integration.json");
@@ -367,24 +368,17 @@ function failArchiveRemovals(registry: RuntimeRegistry): () => void {
 const listChangedFrames = (client: Client) =>
   client.frames.filter((frame) => frame.type === "event" && frame.topic === "session.listChanged").length;
 
-const snapshotFrames = (client: Client, sessionId: string) =>
-  client.frames.filter((frame) => frame.type === "event" && frame.topic === "session.snapshot" && frame.sessionId === sessionId);
-
 const deliveredAuthorityFrames = (client: Client, sessionId: string) =>
-  client.frames.flatMap((frame) => {
-    if (frame.type !== "event" || frame.sessionId !== sessionId) return [];
-    if (frame.topic === "session.snapshot") return [frame];
-    if (frame.topic === "session.rebaseline" && frame.payload?.snapshot !== undefined) {
-      return [{ ...frame, topic: "session.snapshot", payload: frame.payload.snapshot }];
-    }
-    return [];
-  });
+  sessionStates(client.frames, sessionId)
+    .filter(({ index }) => client.frames[index].type === "event")
+    .map(({ snapshot }) => ({ payload: snapshot }));
+
 
 const runningInRegistry = (registry: RuntimeRegistry, sessionId: string): boolean =>
   (registry as unknown as { latestSummaries: Map<string, { phase?: string }> }).latestSummaries.get(sessionId)?.phase === "running";
 
 const latestSnapshot = (client: Client, sessionId: string) =>
-  snapshotFrames(client, sessionId).at(-1)?.payload as { archivedAt?: string } | undefined;
+  deliveredAuthorityFrames(client, sessionId).at(-1)?.payload as { archivedAt?: string } | undefined;
 
 const search = async (service: SessionSearchService, query: string) => service.search({ query, maxResults: 10 });
 
@@ -1111,12 +1105,12 @@ describe("session archive over the real Gateway", () => {
     const opened = client.frames.find((frame) => frame.id === `open-${session.id}`);
     expect(opened.result.session.archivedAt).toBe(archivedWhileCold.archivedAt);
 
-    const beforeUnarchive = snapshotFrames(client, session.id).length;
+    const beforeUnarchive = deliveredAuthorityFrames(client, session.id).length;
     const unarchive = await client.request("snapshot-unarchive", "session.archive.set", {
       commandId: "snapshot-unarchive-command", sessionId: session.id, archived: false,
     });
     expect(unarchive.ok, JSON.stringify(unarchive)).toBe(true);
-    await waitFor(() => snapshotFrames(client, session.id).length > beforeUnarchive
+    await waitFor(() => deliveredAuthorityFrames(client, session.id).length > beforeUnarchive
       && latestSnapshot(client, session.id)?.archivedAt === undefined, "unarchive republish");
 
     const archivedWhileLive = await archiveSession(client, session.id, "snapshot-live-archive-command");
