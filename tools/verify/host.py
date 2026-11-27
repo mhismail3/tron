@@ -65,6 +65,14 @@ def local(host: str, arguments: list[str]) -> int:
 
 
 def remote(job: dict) -> int:
+    try:
+        return job_run(job)
+    finally:
+        subprocess.run(['git', '--git-dir', str(Path.home() / BASE / 'tron.git'), 'update-ref', '-d', f'refs/tron-jobs/{job["sha"]}'],
+                       capture_output=True)
+
+
+def job_run(job: dict) -> int:
     sha, lane = job['sha'], job['lane']
     base = Path.home() / BASE
     checkout = base / 'jobs' / lane
@@ -114,7 +122,6 @@ def remote(job: dict) -> int:
         else:
             steps = [('git', '--git-dir', str(base / 'tron.git'), 'worktree', 'prune'),
                      ('git', '--git-dir', str(base / 'tron.git'), 'worktree', 'add', '--quiet', '--detach', str(checkout), sha)]
-        steps.append(('git', '--git-dir', str(base / 'tron.git'), 'update-ref', '-d', f'refs/tron-jobs/{sha}'))
         for step in steps:
             if stopped.is_set():
                 return no_result('stopped while preparing the checkout')
