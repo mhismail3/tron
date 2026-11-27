@@ -88,13 +88,14 @@ export class HomeTaskReportOwner {
   private admission: { interrupt: () => Promise<void> } | undefined;
   constructor(identity: HomeTaskWorkerIdentity, interrupt: () => Promise<void>,
     private readonly checkin?: (sessionId: string, request: HomeTaskCheckinRequest) => Promise<{ checkin: HomeTaskCheckin; reply: string }>,
-    private readonly deliverRelease?: (text: string) => Promise<void>) {
+    private readonly deliverRelease?: (text: string) => Promise<boolean>) {
     this.identity = Object.freeze({ ...identity });
     this.admission = { interrupt };
   }
 
   private wait: { request: HomeTaskWaitFor; release?: string; parked?: true; delivered?: true } | undefined;
   get waiting(): HomeTaskWaitFor | undefined { return this.wait?.request; }
+  get waitReleased(): boolean { return this.wait?.release !== undefined; }
   openWait(request: HomeTaskWaitFor): void { this.wait = { request }; }
   endWait(): void { this.wait = undefined; }
   release(text: string): void {
@@ -118,7 +119,7 @@ export class HomeTaskReportOwner {
   private deliver(wait: NonNullable<HomeTaskReportOwner["wait"]>): void {
     if (wait.delivered || !this.deliverRelease) return;
     wait.delivered = true;
-    void this.deliverRelease(wait.release!).catch(() => {});
+    void this.deliverRelease(wait.release!).then(delivered => { if (!delivered) delete wait.delivered; }, () => {});
   }
 
   private budget: ((entries: readonly FileEntry[]) => Promise<boolean>) | undefined;

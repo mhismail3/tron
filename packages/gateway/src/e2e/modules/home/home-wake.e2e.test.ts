@@ -683,6 +683,43 @@ describe("Workers wait in place and stalls wake Home once (#2695, #2696)", () =>
     checkinEvidence.push({ case: "wait-task-release", final });
   }, 30_000);
 
+  it("refuses a task wait during a heavy phase and hands the heavy slot to the parked waiter on heavy done", async () => {
+    const f = await fixture();
+    await configure(f);
+    const hold = gate();
+    let holderTurns = 0;
+    let waiterTurns = 0;
+    const respond: FauxResponseFactory = async context => {
+      if (isWorker(context) && briefed(context, "Heavy holder")) {
+        holderTurns++;
+        if (holderTurns === 1) return fauxAssistantMessage([fauxToolCall("checkin", { step: "Suite", done: "Built", next: "Run", heavy: "start" })], { stopReason: "toolUse" });
+        if (holderTurns === 2) { await hold.wait; return fauxAssistantMessage([fauxToolCall("checkin", { step: "Suite", done: "Ran", next: "Wait", waitFor: { task: "heavy-waiter", until: "settled" } })], { stopReason: "toolUse" }); }
+        if (holderTurns === 3) return fauxAssistantMessage([fauxToolCall("checkin", { step: "Suite", done: "Ran", next: "Report", heavy: "done" })], { stopReason: "toolUse" });
+        return fauxAssistantMessage([reportCall("holder-done", "Suite ran")], { stopReason: "toolUse" });
+      }
+      if (isWorker(context)) {
+        waiterTurns++;
+        if (waiterTurns === 1) return fauxAssistantMessage([fauxToolCall("checkin", { step: "Need a slot", done: "Ready", next: "Run", waitFor: { heavy: true } })], { stopReason: "toolUse" });
+        if (waiterTurns === 2) return fauxAssistantMessage("Parked for a heavy slot.");
+        return fauxAssistantMessage([reportCall("waiter-done", "Ran in the freed slot")], { stopReason: "toolUse" });
+      }
+      return fauxAssistantMessage("Noted.");
+    };
+    f.faux.setResponses(Array.from({ length: 20 }, () => respond));
+    const holder = await start(f, "heavy-holder", "Heavy holder");
+    await waitFor(() => holderTurns === 2, "holder in heavy phase");
+    const waiter = await start(f, "heavy-waiter", "Heavy waiter");
+    await waitFor(() => parked(f, waiter.sessionId), "waiter parks on the heavy slot");
+    hold.open();
+    const holderFinal = await holder.completion;
+    expect(holderFinal.terminalEvidence).toMatchObject({ outcome: "final" });
+    const entries = JSON.stringify((await f.registry.acquire(holder.sessionId)).canonicalSessionEntries());
+    expect(entries).toContain("Wait refused: this task is in a heavy phase");
+    expect((await waiter.completion)).toMatchObject({ operationId: waiter.operationId, terminalEvidence: { outcome: "final" } });
+    expect(JSON.stringify((await f.registry.acquire(waiter.sessionId)).canonicalSessionEntries())).toContain("a heavy slot is free");
+    checkinEvidence.push({ case: "heavy-slot-handoff", holder: holderFinal.terminalEvidence });
+  }, 30_000);
+
   it("settles an open wait as needs-input on Stop and on a drain", async () => {
     const f = await fixture();
     await configure(f);

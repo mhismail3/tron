@@ -550,8 +550,12 @@ export class HomeTaskDispatcher {
         return { checkin: accepted, reply: this.checkinAccepted(task.taskId, reports, accepted, targetSettled) };
       }, async text => {
         const live = this.live.get(task.taskId);
-        try { if (!live) throw new Error("released task is no longer live"); await this.sessions.delegation.steerWorker(live.sessionId, { taskId: task.taskId, operationId }, text, "gateway"); }
-        catch { await cancellation("wait-release-failed"); }
+        try { if (!live) throw new Error("released task is no longer live"); await this.sessions.delegation.steerWorker(live.sessionId, { taskId: task.taskId, operationId }, text, "gateway"); return true; }
+        catch {
+          if (live && this.sessions.liveRuntime(live.sessionId)?.ownedTurns.waitingTask?.wakeOperationId !== undefined) return false;
+          await cancellation("wait-release-failed");
+          return true;
+        }
       });
       admissionReport = reports;
       reports.limitBudget(async entries => {
@@ -729,7 +733,8 @@ export class HomeTaskDispatcher {
 
   private waitCycle(taskId: string, target: string): boolean {
     for (let next: string | undefined = target, hops = 0; next !== undefined && hops <= this.live.size; hops++) {
-      next = this.live.get(next)?.reports.waiting?.task;
+      const reports: HomeTaskReportOwner | undefined = this.live.get(next)?.reports;
+      next = reports?.waitReleased ? undefined : reports?.waiting?.task;
       if (next === taskId) return true;
     }
     return false;
@@ -748,6 +753,7 @@ export class HomeTaskDispatcher {
     const wait = checkin.waitFor;
     let reply = `Check-in saved. Attention: ${checkin.attention}.`;
     if (!wait) reply += " Continue working.";
+    else if (op?.heavy && wait.home === undefined) reply += " Wait refused: this task is in a heavy phase; check in heavy done first. Continue working.";
     else if (wait.home !== undefined && checkin.attention !== "requested") reply += ` Wait refused: Home's wake is ${checkin.attention}. Continue, or report needs-input.`;
     else if (wait.task !== undefined && (targetSettled || this.settled.has(wait.task))) reply += ` Task ${wait.task} has already settled; continue now.`;
     else if (wait.task !== undefined && this.waitCycle(taskId, wait.task)) reply += ` Wait refused: task ${wait.task} already waits for this task, which would make a cycle. Continue, or report needs-input.`;
