@@ -22,10 +22,14 @@ Commands:
                                     every mutating Gateway lifecycle transition
   chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]
                                     Attach terminal chat to the Gateway-owned runtime
-  test gateway [vitest args...]     Run Gateway tests with pinned Node under an isolated HOME
-  test ios [runner args...]         Run the owned iOS runner (scripts/tron-ios-test); on demand
-  test mac [test classes...]        Build and run the Mac integration tests under a temporary HOME
-  test tooling [test files...]      Run Python script integration suites
+  test [--host <name>] <lane> [args...]
+                                    One lane, here or on the host `git config tron.verify.<name>`
+                                    names, at this exact commit (tools/verify/README.md#lanes):
+    gateway [vitest args...]        Gateway tests with pinned Node under an isolated HOME
+    tooling [test files...]         Python tooling tests; all tracked test-*.py by default
+    ios [runner args...]            The iOS runner (scripts/tron-ios-test); `ios build`, then
+                                    `ios run` for the minimal set
+    mac [test classes...]           Mac integration tests under a temporary HOME
   provider-smoke [--probe-only] [--live --agent-dir <dir>] [--require-fable-5-2] [--json]
                                     Claude subscription smoke of the pinned Pi: Fable 5.2,
                                     the Claude Code version it sends, Tron's wiring tests
@@ -193,6 +197,10 @@ case "$cmd" in
     exec node "$GATEWAY/dist/client/terminal-chat.js" "$@"
     ;;
   test)
+    if [[ "${1:-}" == --host ]]; then
+      (($# >= 3)) || { usage >&2; exit 64; }
+      exec python3 "$ROOT/tools/verify/host.py" "${@:2}"
+    fi
     suite="${1:-}"; shift || true
     case "$suite" in
       gateway)
@@ -203,7 +211,9 @@ case "$cmd" in
       ios) exec "$ROOT/scripts/tron-ios-test" "$@" ;;
       mac) exec python3 "$ROOT/tools/verify/mac.py" "$@" ;;
       tooling)
-        if (($# == 0)); then set -- "$ROOT"/tools/work/tests/test-*.py; fi
+        if (($# == 0)); then
+          while IFS= read -r suite; do set -- "$@" "$ROOT/$suite"; done < <(git -C "$ROOT" ls-files -- ':(glob)**/test-*.py')
+        fi
         status=0
         for suite in "$@"; do python3 "$suite" || { code=$?; [[ "$status" -ne 0 ]] || status=$code; }; done
         exit "$status"

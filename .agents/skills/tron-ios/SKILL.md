@@ -41,8 +41,9 @@ before `devicectl` when their signed protocol metadata differs.
 ## Commands
 
 Simulator tests are on-demand proof, never part of the gate. Commit the source first, then use
-`scripts/tron test ios` (this host's `scripts/tron-ios-test`); run one heavy job per host under the global
-Shared machines rules. Native helpers below
+`scripts/tron test ios` (this host's `scripts/tron-ios-test`), or `scripts/tron test --host mini ios ...`
+for the same command on the Mac mini at this commit; heavy simulator work goes to the mini. Run one heavy
+job per host under the global Shared machines rules. Native helpers below
 remain host-local execution owners for in-lease work. Their 3 host slots are a ceiling, not a target.
 
 ```bash
@@ -52,8 +53,9 @@ scripts/tron-ios-simulator status
 scripts/tron-ios-simulator stop
 scripts/tron test ios build
 scripts/tron test ios run --only-testing TronMobileUITests/<Class>/<method>
-scripts/tron test ios run                 # the smoke set, with current built products
-scripts/tron test ios checkpoint         # build, then the smoke set
+scripts/tron test ios run                 # the minimal set, with current built products
+scripts/tron test ios checkpoint         # build, then the minimal set
+scripts/tron test --host mini ios checkpoint
 scripts/tron test ios status --all
 scripts/tron test ios lanes
 ```

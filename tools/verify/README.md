@@ -29,6 +29,26 @@ deletion on main.
 Gateway dependencies come from this checkout's `packages/gateway/node_modules`
 (`scripts/tron-node exec npm --prefix packages/gateway ci --include=dev`); the gate never installs.
 
+## Lanes
+
+`scripts/tron test <lane>` runs one lane here; `scripts/tron test --host <name> <lane>` runs the same
+command on the host `git config tron.verify.<name>` names (an ssh destination; `mini` is the Mac mini),
+at this exact commit. The lanes are `gateway` (Vitest files), `tooling` (every tracked `test-*.py`, or
+the named files), `ios` (`scripts/tron-ios-test`: `build`, then `run` for the minimal set of in-process
+view tests and hosted reconnect journeys, or `checkpoint` for both) and `mac`. The remote side
+(`tools/verify/host.py`) refuses a dirty tree, pushes HEAD to the host's bare `~/tron-ci/tron.git`,
+runs one job per lane at a time in `~/tron-ci/jobs/<lane>` (a second waits and names the holder),
+`npm ci`s only when the Gateway lockfile or pinned Node changed, and streams the lane's own output and
+exit. Exit 69 means no result (unreachable, unset or unprepared host), never a test verdict; closing
+the session stops the remote lane. Real-Gateway iOS journeys stay `scripts/ios-gateway-e2e-test`.
+
+A host needs Xcode with the pinned iOS runtime, `scripts/tron-node install` and
+`scripts/install-ci-tools.sh xcodegen` with `TRON_CI_TOOLS_DIR=~/tron-ci/.ci-tools`, and
+`git init --bare ~/tron-ci/tron.git`. Signed device and share builds on the mini use automatic
+signing with the App Store Connect API key in `~/.appstoreconnect/private_keys` and an Apple
+Development identity in `~/Library/Keychains/tron-signing.keychain-db`, whose random password is
+`~/.tron-signing/keychain.pass` (600); unlock that keychain in the ssh session before signing.
+
 ## On-demand proof
 
 Everything else is proof an agent runs when it chooses, never admission:
