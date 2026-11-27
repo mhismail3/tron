@@ -1,5 +1,5 @@
 import { createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
-import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -723,6 +723,22 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
     }
     expect(row.staleTextServed).toBe(false);
   }, 180_000);
+
+  it("never reopens or writes the memory store once the Home owner is disposed", async () => {
+    const f = await fixture("disposed");
+    await prompt(f, "disposed start", "reply-r0");
+    await waitForBuiltTree(f);
+    const owner = homeOwnerOf(f.registry);
+    const store = join(f.tronHome, "workspace", "state", "episodic", f.homeId);
+    const concurrent = owner.readMemoryView({ limit: 1 }).then(() => "read", () => "refused");
+    await owner.dispose();
+    await concurrent;
+    await rm(store, { recursive: true });
+    const late = await owner.readMemoryView({ limit: 1 }).then(() => "read", () => "refused");
+    const row = { late, storeRecreated: await stat(store).then(() => true, () => false) };
+    report.cases.push({ case: "disposed", ...row });
+    expect(row).toEqual({ late: "refused", storeRecreated: false });
+  }, 120_000);
 
   it("reconfigures the memory while a commit is still ingesting it", async () => {
     const f = await fixture("race");
