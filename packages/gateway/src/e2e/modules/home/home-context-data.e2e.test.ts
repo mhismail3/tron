@@ -154,7 +154,7 @@ describe("Home chapters, task names and memory pages", () => {
       fauxAssistantMessage([fauxToolCall("delegate", { taskId: "task-titled", title: "Count the chapter", intent: "Finite work", target: f.cwd }, { id: "call-delegate" })], { stopReason: "toolUse" }),
       fauxAssistantMessage("Delegated; the report will wake me."),
       fauxAssistantMessage("Wake reply with the report."),
-    ], [reportCall("titled-report", "Titled result")]);
+    ], [fauxAssistantMessage([reportCall("titled-report", "Titled result")], { stopReason: "toolUse" })]);
     await home.prompt("Delegate the count");
     await waitFor(async () => (await owner.taskList({})).items.some(item => item.taskId === "task-titled"), "task admitted");
     await owner.chapterList();
@@ -187,7 +187,7 @@ describe("Home chapters, task names and memory pages", () => {
     const f = await fixture();
     await configure(f);
     const owner = homeOwnerOf(f.registry);
-    f.faux.setResponses([reportCall("plain-report", "Plain result"), fauxAssistantMessage("Plain wake reply")]);
+    f.faux.setResponses([fauxAssistantMessage([reportCall("plain-report", "Plain result")], { stopReason: "toolUse" }), fauxAssistantMessage("Plain wake reply")]);
     const run = await dispatch(f, "task-plain");
     await run.completion;
     await waitFor(async () => (await owner.taskResult("task-plain")).wake?.state === "acknowledged", "plain wake acknowledged");

@@ -8,6 +8,7 @@ export class ExtensionLifecycleCoordinator {
   private readonly observedStarts = new Set<string>();
   private shutdownRequested = false;
   private drainRequested = false;
+  private readonly drained = new AbortController();
   private readonly permittedStartsAfterDrain = new Set<string>();
   private retired = false;
 
@@ -29,6 +30,7 @@ export class ExtensionLifecycleCoordinator {
   get hasRetainedPresentation(): boolean { return this.activity.hasRetainedPresentation; }
   get isShutdownRequested(): boolean { return this.shutdownRequested; }
   get isDraining(): boolean { return this.drainRequested; }
+  get drainSignal(): AbortSignal { return this.drained.signal; }
   get preventsOperationalQuiescence(): boolean {
     return this.preventsNonRuntimeQuiescence || this.hasRuntimeWork();
   }
@@ -44,6 +46,7 @@ export class ExtensionLifecycleCoordinator {
   beginDrain(): void {
     if (this.retired || this.drainRequested) return;
     this.drainRequested = true;
+    this.drained.abort();
     for (const owner of this.pendingPreflights) this.permittedStartsAfterDrain.add(owner);
     for (const owner of this.acceptedStarts) this.permittedStartsAfterDrain.add(owner);
   }

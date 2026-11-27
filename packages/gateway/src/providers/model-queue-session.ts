@@ -30,7 +30,7 @@ export function modelQueueSessionExtensions(queue: ModelQueueOwner | undefined, 
     ].join("\n") || undefined;
   });
   return [{ name: "tron-model-queue", factory: (pi) => {
-    if (worker) createModelQueueExtension("worker", source)(pi);
+    if (worker) createModelQueueExtension("worker", source, { stopSignal: () => session.taskStopSignal() })(pi);
     createModelQueueExtension("subagent", source, { virtualModel: true, ...(worker ? { guidance: () => Boolean(selection("subagent")?.length) } : {}) })(pi);
     let registration: { dispose(): void } | undefined;
     const registerChildPolicy = async (sessionId: string) => {

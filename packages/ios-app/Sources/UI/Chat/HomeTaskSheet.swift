@@ -65,7 +65,10 @@ struct HomeTaskSheet: View {
     var body: some View {
         Group {
             if destination == nil {
-                contents
+                Group(subviews: sections) { subviews in
+                    TronSettingsSections(alignment: .leading, spacing: 18) { subviews }
+                        .padding(.top, subviews.isEmpty ? 0 : 18)
+                }
             } else {
                 sheet
             }
@@ -100,21 +103,19 @@ struct HomeTaskSheet: View {
         .onPresentationRetire { owner.retire() }
     }
 
-    private var contents: some View {
-        TronSettingsSections(alignment: .leading, spacing: 18) {
-            content
-            if model.homeMutations.ownsUnresolvedCommand(profileID: profileID) {
-                TronPlaceholderState(title: "Home change unresolved", detail: "Check completion; do not repeat the change.", icon: "clock")
-                checkCompletionRow
-            }
-            if let failure { TronPlaceholderState(title: "Home change", detail: failure, icon: "exclamationmark.triangle") }
+    @ViewBuilder private var sections: some View {
+        content
+        if model.homeMutations.ownsUnresolvedCommand(profileID: profileID) {
+            TronPlaceholderState(title: "Home change unresolved", detail: "Check completion; do not repeat the change.", icon: "clock")
+            checkCompletionRow
         }
+        if let failure { TronPlaceholderState(title: "Home change", detail: failure, icon: "exclamationmark.triangle") }
     }
 
     private var sheet: some View {
         NavigationStack {
             ScrollView {
-                contents.padding(18)
+                TronSettingsSections(alignment: .leading, spacing: 18) { sections }.padding(18)
             }
             .tronScrollEdgeChrome()
             .navigationBarTitleDisplayMode(.inline)

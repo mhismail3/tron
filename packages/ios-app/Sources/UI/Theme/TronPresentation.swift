@@ -2241,56 +2241,107 @@ struct TronPulseLoadingIndicator: View {
     var body: some View {
         let resolvedAccent = settingsTheme?.accent ?? accent
         let visualSize = TronPulseLoadingIndicatorEngine.visualSize(for: size)
-        TimelineView(.animation(
-            minimumInterval: 1 / 30,
-            paused: TronPulseLoadingIndicatorEngine.animationPaused(
-                reduceMotion: reduceMotion,
-                sceneActive: scenePhase == .active,
-                surfaceActive: presentationActivity.allowsContinuousAnimation && isVisible
-            )
-        )) { _ in
-            Canvas(rendersAsynchronously: true) { context, canvasSize in
-                let diameter = min(canvasSize.width, canvasSize.height)
-                let center = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
-                if reduceMotion {
-                    let radius = diameter * 0.24
-                    context.fill(
-                        Path(ellipseIn: CGRect(
-                            x: center.x - radius,
-                            y: center.y - radius,
-                            width: radius * 2,
-                            height: radius * 2
-                        )),
-                        with: .color(resolvedAccent.opacity(0.72))
+        Group {
+            if reduceMotion {
+                Circle()
+                    .fill(resolvedAccent.opacity(0.72))
+                    .frame(width: visualSize * 0.48, height: visualSize * 0.48)
+            } else {
+                TronPulseRings(
+                    accent: resolvedAccent,
+                    animating: !TronPulseLoadingIndicatorEngine.animationPaused(
+                        reduceMotion: reduceMotion,
+                        sceneActive: scenePhase == .active,
+                        surfaceActive: presentationActivity.allowsContinuousAnimation && isVisible
                     )
-                } else {
-                    let time = ProcessInfo.processInfo.systemUptime
-                    for pulse in 0..<TronPulseLoadingIndicatorEngine.pulseCount {
-                        let progress = TronPulseLoadingIndicatorEngine.progress(
-                            pulse: pulse,
-                            time: time
-                        )
-                        let radius = diameter * 0.5
-                            * TronPulseLoadingIndicatorEngine.scale(progress: progress)
-                        context.fill(
-                            Path(ellipseIn: CGRect(
-                                x: center.x - radius,
-                                y: center.y - radius,
-                                width: radius * 2,
-                                height: radius * 2
-                            )),
-                            with: .color(resolvedAccent.opacity(
-                                TronPulseLoadingIndicatorEngine.opacity(progress: progress)
-                            ))
-                        )
-                    }
-                }
+                )
             }
         }
         .frame(width: visualSize, height: visualSize)
         .onAppear { isVisible = true }
         .onDisappear { isVisible = false }
         .accessibilityHidden(true)
+    }
+}
+
+private struct TronPulseRings: UIViewRepresentable {
+    let accent: Color
+    let animating: Bool
+
+    func makeUIView(context: Context) -> TronPulseRingsView { TronPulseRingsView() }
+
+    func updateUIView(_ view: TronPulseRingsView, context: Context) {
+        view.update(color: accent.resolve(in: context.environment).cgColor, animating: animating)
+    }
+}
+
+private final class TronPulseRingsView: UIView {
+    private let rings = (0..<TronPulseLoadingIndicatorEngine.pulseCount).map { _ in CAShapeLayer() }
+    private var animating: Bool?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        rings.forEach(layer.addSublayer)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for ring in rings {
+            ring.frame = bounds
+            ring.path = UIBezierPath(ovalIn: bounds).cgPath
+        }
+        CATransaction.commit()
+    }
+
+    func update(color: CGColor, animating: Bool) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        rings.forEach { $0.fillColor = color }
+        if animating != self.animating || (animating && rings.first?.animation(forKey: "pulse") == nil) {
+            self.animating = animating
+            animating ? start() : freeze()
+        }
+        CATransaction.commit()
+    }
+
+    private func start() {
+        let now = CACurrentMediaTime()
+        let cycle = TronPulseLoadingIndicatorEngine.cycleDuration
+        for (pulse, ring) in rings.enumerated() {
+            let begin = ring.convertTime(
+                now - TronPulseLoadingIndicatorEngine.progress(pulse: pulse, time: now) * cycle, from: nil)
+            let scale = CABasicAnimation(keyPath: "transform.scale")
+            scale.fromValue = TronPulseLoadingIndicatorEngine.scale(progress: 0)
+            scale.toValue = TronPulseLoadingIndicatorEngine.scale(progress: 1)
+            let opacity = CABasicAnimation(keyPath: "opacity")
+            opacity.fromValue = TronPulseLoadingIndicatorEngine.opacity(progress: 0)
+            opacity.toValue = TronPulseLoadingIndicatorEngine.opacity(progress: 1)
+            opacity.timingFunction = CAMediaTimingFunction(controlPoints: 1 / 3, 2 / 3, 2 / 3, 1)
+            let group = CAAnimationGroup()
+            group.animations = [scale, opacity]
+            group.duration = cycle
+            group.repeatCount = .infinity
+            group.beginTime = begin
+            group.isRemovedOnCompletion = false
+            ring.add(group, forKey: "pulse")
+        }
+    }
+
+    private func freeze() {
+        let now = CACurrentMediaTime()
+        for (pulse, ring) in rings.enumerated() {
+            let progress = TronPulseLoadingIndicatorEngine.progress(pulse: pulse, time: now)
+            ring.removeAnimation(forKey: "pulse")
+            ring.setAffineTransform(CGAffineTransform(
+                scaleX: TronPulseLoadingIndicatorEngine.scale(progress: progress),
+                y: TronPulseLoadingIndicatorEngine.scale(progress: progress)))
+            ring.opacity = Float(TronPulseLoadingIndicatorEngine.opacity(progress: progress))
+        }
     }
 }
 

@@ -6550,6 +6550,7 @@ class DeviceLeaseFixture(ContainedFixture, unittest.TestCase):
         self.open_gate("build")
         self.assertEqual(holder.wait(timeout=60), 0, self.output_of(holder))
         self.assertIn(f"xcrun simctl launch {UDID_A} com.tron.mobile.beta", self.tool_calls("alpha"))
+        self.assertFalse([call for call in self.tool_calls("alpha") if call.startswith("open")], self.tool_calls("alpha"))
         admitted = self.run_tool(beta, "tron-ios-simulator", "install", caller="beta")
         self.assertEqual(admitted.returncode, 0, admitted.stderr)
 
