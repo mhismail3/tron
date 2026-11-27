@@ -102,7 +102,10 @@ stays the page owner. Do not build or publish iOS just to preview CSS.
 For an explicitly source-built Debug Gateway on 9848, use
 `TRON_IOS_GATEWAY_PROTOCOL_TARGET=source scripts/tron-ios-device install`; this
 still verifies the source and iOS artifact contract but does not claim Stable is
-ready. Never use that target to bypass a mismatched Stable installation.
+ready. Never use that target to bypass a mismatched Stable installation. Its one
+Stable use is a protocol bump: `TRON_IOS_GATEWAY_PROTOCOL_TARGET=source
+scripts/tron-ios-device share` publishes (never installs) the new-protocol build of
+main that the iPhone's Replace Mac App preflight requires, installed after the swap.
 
 The iOS build-output root, its worktree-local test products and its shared-test
 lease ownership are documented

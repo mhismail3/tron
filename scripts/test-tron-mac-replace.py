@@ -9,7 +9,8 @@ home. The fixture platform replaces only what needs a real Release install
 (Xcode build, Developer ID team, the menu-bar app).
 
 Journeys, in order, on one fixture:
-  1. failing preflight: an active manual reinstall stops it at preflight; nothing changes.
+  1. failing preflight: an active manual reinstall stops it at preflight; nothing changes. An iPhone
+     outside the new protocol is refused until a matching iPhone build of the revision is published.
   2. interrupted completed stop resumes offline without replaying worker stops.
   3. partial app copy fails, cleans staging, and restores the previous app.
   4. failure after the swap: the new Gateway never answers; the old app is restored automatically.
@@ -34,6 +35,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import re
 import shutil
 import socket
 import subprocess
@@ -41,6 +43,7 @@ import sys
 import tempfile
 import time
 import uuid
+import zipfile
 from types import SimpleNamespace
 
 HERE = Path(__file__).resolve().parent
@@ -50,7 +53,6 @@ from tron_mac_replace_platform import Failure, MacPlatform, capture, run  # noqa
 from tron_mac_replace_journal import write_json_atomic  # noqa: E402
 
 REPO = HERE.parent
-PROTOCOL = json.loads((REPO / 'config/GatewayProtocol.json').read_text())
 
 
 class FixturePlatform(MacPlatform):
@@ -226,6 +228,7 @@ class Fixture:
                                'FIXTURE_GATEWAY': str(REPO / 'packages/gateway')}}, stream)
         subprocess.run(['/bin/launchctl', 'bootstrap', f'gui/{os.getuid()}', plist], check=True)
         self.platform = FixturePlatform(self.config_path)
+        self.client_protocol = None
         self.wait_revision(self.old_revision)
 
     def wait_revision(self, revision, timeout=90):
@@ -242,7 +245,7 @@ class Fixture:
         raise AssertionError(f'fixture Gateway did not report {revision} (last: {last})\n{log}')
 
     def start(self):
-        journal, outcome = replace.start(self.platform, self.source, script_dir=HERE)
+        journal, outcome = replace.start(self.platform, self.source, self.client_protocol, script_dir=HERE)
         return journal.data['id'], outcome
 
     def wait_settled(self, operation, timeout=400):
@@ -253,6 +256,19 @@ class Fixture:
                 return data
             time.sleep(1)
         raise AssertionError(f'operation {operation} did not settle; see {self.platform.store / operation}')
+
+    def publish_iphone_build(self, commit, protocol):
+        """Publish a fixture iPhone app through the real OTA publisher, as `scripts/tron-ios-device share` does."""
+        ipa = self.root / 'TronMobile.ipa'
+        with zipfile.ZipFile(ipa, 'w') as archive:
+            archive.writestr('Payload/TronMobile.app/Info.plist', plistlib.dumps({
+                'CFBundleIdentifier': 'com.tron.mobile', 'TRONGatewayProtocolVersion': str(protocol),
+                'TRONGatewayMinProtocolVersion': str(protocol)}))
+        published = subprocess.run([sys.executable, HERE / 'ios-share-publish.py', '--ipa', ipa,
+                                    '--dir', self.platform.tron_home / 'workspace/builds/ios-ota',
+                                    '--base-url', 'https://fixture.invalid:8443', '--title', 'fixture', '--notes', 'fixture',
+                                    '--commit', commit, '--branch', 'main'], check=True, capture_output=True, text=True).stdout
+        return re.search(r'^Published (\S+)', published, re.M)[1]
 
     def status_text(self):
         return subprocess.run([sys.executable, HERE / 'test-tron-mac-replace.py', '--fixture', self.config_path, '--status'],
@@ -301,6 +317,20 @@ def journeys():
         check(data['notification']['state'] == 'requested', 'the failure was pushed through the running Gateway', evidence)
         (platform.maintenance / 'active.json').unlink()
 
+        protocol, _ = replace.source_protocol(fixture.source, fixture.revision)
+        fixture.client_protocol = protocol - 1
+        fixture.publish_iphone_build(fixture.old_revision, protocol)
+        fixture.publish_iphone_build(fixture.revision, protocol - 1)
+        operation, outcome = fixture.start()
+        data = fixture.wait_settled(operation)
+        message = (data.get('error') or {}).get('message', '')
+        check(data['state'] == 'failed' and data['error']['step'] == 'preflight'
+              and 'TRON_IOS_GATEWAY_PROTOCOL_TARGET=source scripts/tron-ios-device share' in message and len(message) <= 280,
+              f'an out-of-range iPhone without a published new-protocol build of this revision is refused, naming the publish command: {message}', evidence)
+        check(not (fixture.root / 'build-count').exists() and platform.system_info()['sourceRevision'] == fixture.old_revision,
+              'the refusal builds and stops nothing', evidence)
+        iphone_build = fixture.publish_iphone_build(fixture.revision, protocol)
+
         (fixture.root / 'fail-copy').write_text('')
         (fixture.root / 'hold-after-stop').write_text('')
         retry_operation, outcome = fixture.start()
@@ -322,6 +352,10 @@ def journeys():
         retry_operation, outcome = fixture.start()
         check(outcome == 'resuming interrupted', 'interrupted pre-swap stop resumes without a live Gateway', evidence)
         data = fixture.wait_settled(operation)
+        preflight = next(step['detail'] for step in data['steps'] if step['name'] == 'preflight')
+        check(f'this iPhone (protocol {protocol - 1}) disconnects until you install build {iphone_build} from https://fixture.invalid:8443/' in preflight
+              and data['iphoneBuild']['id'] == iphone_build,
+              f'a published new-protocol build of this revision admits the old iPhone and is recorded: {preflight}', evidence)
         check('already retired' in next(step['detail'] for step in data['steps'] if step['name'] == 'drain-workers'),
               'offline retry preserves worker records instead of replaying stops against closed transport', evidence)
         check(data['state'] == 'rolled-back' and data['error']['step'] == 'swap-app',
@@ -368,7 +402,10 @@ def journeys():
         data = fixture.wait_settled(operation)
         log = journal.log_path.read_text()
         check('restoring the previous app first' in log, 'the resumed runner restored the previous app before retrying', evidence)
-        check(data['state'] == 'succeeded' and data['attempt'] == 6, 'the resumed retry succeeds', evidence)
+        check(data['state'] == 'succeeded' and data['attempt'] == 7, 'the resumed retry succeeds', evidence)
+        finish = next(step['detail'] for step in data['steps'] if step['name'] == 'finish')
+        check(f'install iPhone build {iphone_build} from https://fixture.invalid:8443/' in finish,
+              f'the finish names the iPhone build to install: {finish}', evidence)
         check((fixture.root / 'build-count').read_text() == '1', 'the verified build was reused, not rebuilt', evidence)
         check(platform.system_info()['sourceRevision'] == fixture.revision, 'the new Gateway runs the source revision', evidence)
         check(platform.codesign_identity(platform.installed)['cdhash'] == data['artifact']['cdhash'], 'the installed app is the verified artifact', evidence)
@@ -573,10 +610,11 @@ def rpc_journey():
             node = Path(capture([REPO / 'scripts/tron-node'])[1].strip())
             modules = REPO / 'packages/gateway/node_modules'
             calls = root / 'calls'
+            contract = json.loads((REPO / 'config/GatewayProtocol.json').read_text())
             env = dict(os.environ, HOME=str(home), TMPDIR=str(temporary), NODE_PATH=str(modules))
             with (root / 'server.log').open('w') as log:
                 server = subprocess.Popen([node, '-e', RPC_RESPONDER, str(calls),
-                                           json.dumps({k: PROTOCOL[k] for k in ('protocolVersion', 'minProtocolVersion')})], env=env,
+                                           json.dumps({k: contract[k] for k in ('protocolVersion', 'minProtocolVersion')})], env=env,
                                           stdout=subprocess.PIPE, stderr=log, text=True)
                 try:
                     import select
@@ -593,7 +631,7 @@ def rpc_journey():
                             return 'fixture-token'
 
                         def protocol(self):
-                            return PROTOCOL['protocolVersion']
+                            return contract['protocolVersion']
 
                         def endpoints(self):
                             return [f'ws://127.0.0.1:{port}/v1/socket']
