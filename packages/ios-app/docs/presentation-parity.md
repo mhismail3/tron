@@ -351,6 +351,8 @@ canonical state, is never persisted, and is not a second state authority.
   work. Its ancestors continue only bounded data publication a visible descendant needs
   (`allowsDataPublication`), so tool output and completion stay current without covered loads,
   polls, automatic presentation, animation or viewport observation.
+  The shared pulse indicator animates in Core Animation, so running rows on an idle surface cost
+  the main thread nothing between updates; it pauses with the same gates.
   An accepted command's outcome (a refusal behind a retiring review card) also publishes under
   that gate, into state the surface's restarted reads do not clear.
   A partial sheet that shows its presenter (`keepsPresenterViewport`, the staged annotation
