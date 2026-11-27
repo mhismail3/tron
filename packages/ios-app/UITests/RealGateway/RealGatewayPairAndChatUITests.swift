@@ -479,7 +479,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(progress.waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertTrue(app.staticTexts["Replace Mac App"].exists)
         XCTAssertTrue(app.staticTexts["Step 2 of 9 · Build signed app"].waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertEqual(app.staticTexts["Replace Mac App"].frame.minX, app.staticTexts["Rebuild Gateway"].frame.minX, accuracy: 1,
+        XCTAssertEqual(app.staticTexts["Replace Mac App"].frame.minX, app.staticTexts["Rebuild iPhone App"].frame.minX, accuracy: 1,
                        "the replacement row aligns with the shared rebuild rows")
         keepScreenshot(app, name: "984-connections-row-running")
 

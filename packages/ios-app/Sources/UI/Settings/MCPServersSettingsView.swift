@@ -228,11 +228,13 @@ struct MCPServersSettingsView: View {
                         Button(server.enabled ? "Turn Off" : "Turn On", systemImage: "power") {
                             Task { await changeServer(server.name, to: MCPServerPresentationPolicy.value(value, enabled: !server.enabled), destination: destination) }
                         }
-                        Picker("Exposure", selection: Binding(
+                        Picker(selection: Binding(
                             get: { MCPServerPresentationPolicy.exposureChoice(server.exposure) },
                             set: { exposure in Task { await changeServer(server.name, to: MCPServerPresentationPolicy.value(value, exposure: exposure), destination: destination) } }
                         )) {
                             ForEach(MCPServerPresentationPolicy.exposures, id: \.value) { Text($0.title).tag($0.value) }
+                        } label: {
+                            Label("Exposure", systemImage: "eye")
                         }
                         .pickerStyle(.menu)
                         if value.objectValue?["url"] != nil {
