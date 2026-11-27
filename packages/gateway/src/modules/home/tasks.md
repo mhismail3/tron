@@ -62,8 +62,10 @@ Home's `task transcript {taskId, subagentSessionId?, offset?, limit?}` reads can
 including tool calls/results and operations resumed in the same session, while running or
 settled. It is available on wakes and maintainer turns. Pages use UTF-8 byte offsets and
 at most 4096 bytes, like `task report`; `nextOffset` continues a growing transcript.
-`task report` and `task status` on an unsettled task return its live control row and tell Home
-to end the turn: the settled result wakes Home, so polling never helps.
+`task report` on an unsettled task returns its live control row. A running row carries live
+activity read from the worker's live runtime, never persisted: `lastEntryAt` (newest canonical
+entry of the operation), `runningTool` (`name`, `startedAt`, an 80-character `command` prefix),
+`heavy` and `waitingFor`.
 Cold source files over 64 MiB refuse with `busy` rather than reading an unbounded source.
 Offsets refer to the current projection; restart at zero after context edits or newly
 discovered children change earlier text.
@@ -77,12 +79,38 @@ present, must agree with that layout. Root chats, unrelated children and ambiguo
 
 ## Worker progress check-ins
 
-`checkin` (current worker operation only; never seals or pauses): `step` (256 bytes), `done`,
-`next`, optional `blocker` (512 each), `refs` (`branch`, `commit`, `issue`), `needsAttention`;
-≤ 4 KiB. Each operation keeps twelve and shows three of its own; a resume starts empty. Routine
-check-ins never wake or push. `needsAttention` needs a blocker and requests at most one wake per
-30 minutes per lineage through a task outbox (`requested`, `rate-limited`, `pending`, `none`),
-kept for a paused Home. Progress is never success evidence.
+`checkin` (current worker operation only; never seals): `step` (256 bytes), `done`,
+`next`, optional `blocker` (512 each), `refs` (`branch`, `commit`, `issue`), `needsAttention`,
+`heavy` (`start` | `done`) and `waitFor`; ≤ 4 KiB. Each operation keeps twelve and shows three of
+its own; a resume starts empty. Routine check-ins never wake or push. `needsAttention` needs a
+blocker and requests at most one wake per 30 minutes per lineage through a task outbox
+(`requested`, `rate-limited`, `pending`, `none`), kept for a paused Home. Progress is never
+success evidence.
+
+### In-session waits
+
+`waitFor` is exactly one of `{home}` (a question, 512 bytes), `{task, until: settled|heavy-done}`
+or `{heavy: true}`. The `HomeTaskReportOwner` holds the open wait; `workerFinishTurn` sends no
+report reminder and `OwnedTurnOwner` parks the operation in its `waitingTask` slot, keeping the
+task ID, operation and worker slot.
+- `home` takes the needsAttention outbox and limit (a refused wake refuses the wait); Home's
+  message is worker-authored with `authority: none`, and Home answers with `task steer`.
+- `task` and `heavy` waits are released by the dispatcher, which keeps the live operations in
+  memory: a target that settles or checks in `heavy: done`, or a free heavy slot (no other live
+  operation in a heavy phase or holding a released claim; oldest waiter first). The release is
+  one gateway steer with `authority: none`; a release that cannot be admitted ends the operation.
+  Waiting on itself, an unknown task or a cycle is refused; a target already settled continues at once.
+- Any accepted steer ends the wait. Stop, the 24-hour ceiling, a drain or a failed release settle
+  an open wait as `needs-input` (`wait-stopped`, `wait-deadline`, `wait-drained`, `wait-ended`)
+  with the wait as `detail`; resume continues it as usual. A drain releases a parked wait and a
+  turn ending during a drain does not park.
+
+### Stall wake
+
+Every 60 s the dispatcher checks each running operation. One with no canonical entry for
+45 minutes that is not parked stores a `stall` outbox (`task-stall-<digest>`: operation, idle
+since, running tool) beside `attention` and wakes Home once per idle span (`home.task.stall`).
+It is not counted against the needsAttention limit; a new entry re-arms it.
 
 ## Dispatch and workers
 

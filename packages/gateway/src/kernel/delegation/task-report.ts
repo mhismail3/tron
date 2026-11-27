@@ -2,7 +2,7 @@ import { Type } from "../pi/ai.js";
 import type { FileEntry, ToolDefinition } from "../pi/coding-agent.js";
 import { AsyncMutex } from "../../util/async-mutex.js";
 import { HOME_TASK_CHECKIN_PARAMETERS, parseHomeTaskCheckinRequest } from "./task-checkin.js";
-import type { HomeTaskCheckin, HomeTaskCheckinRequest } from "../../protocol/types.js";
+import type { HomeTaskCheckin, HomeTaskCheckinRequest, HomeTaskWaitFor } from "../../protocol/types.js";
 
 export const HOME_TASK_MARKER = "tron-home-task";
 export const HOME_TASK_REPORT = "tron-home-task-report";
@@ -87,9 +87,38 @@ export class HomeTaskReportOwner {
   readonly identity: Readonly<HomeTaskWorkerIdentity>;
   private admission: { interrupt: () => Promise<void> } | undefined;
   constructor(identity: HomeTaskWorkerIdentity, interrupt: () => Promise<void>,
-    private readonly checkin?: (sessionId: string, request: HomeTaskCheckinRequest) => Promise<HomeTaskCheckin>) {
+    private readonly checkin?: (sessionId: string, request: HomeTaskCheckinRequest) => Promise<{ checkin: HomeTaskCheckin; reply: string }>,
+    private readonly deliverRelease?: (text: string) => Promise<void>) {
     this.identity = Object.freeze({ ...identity });
     this.admission = { interrupt };
+  }
+
+  private wait: { request: HomeTaskWaitFor; release?: string; parked?: true; delivered?: true } | undefined;
+  get waiting(): HomeTaskWaitFor | undefined { return this.wait?.request; }
+  openWait(request: HomeTaskWaitFor): void { this.wait = { request }; }
+  endWait(): void { this.wait = undefined; }
+  release(text: string): boolean {
+    const wait = this.wait;
+    if (!wait || wait.release !== undefined) return false;
+    wait.release = text;
+    if (wait.parked) this.deliver(wait);
+    return true;
+  }
+  parked(): void {
+    const wait = this.wait;
+    if (!wait) return;
+    wait.parked = true;
+    if (wait.release !== undefined) this.deliver(wait);
+  }
+  takeReleaseInTurn(): string | undefined {
+    const text = this.wait?.release;
+    if (text !== undefined) this.wait = undefined;
+    return text;
+  }
+  private deliver(wait: NonNullable<HomeTaskReportOwner["wait"]>): void {
+    if (wait.delivered || !this.deliverRelease) return;
+    wait.delivered = true;
+    void this.deliverRelease(wait.release!).catch(() => {});
   }
 
   private budget: ((entries: readonly FileEntry[]) => Promise<boolean>) | undefined;
@@ -140,15 +169,15 @@ export class HomeTaskReportOwner {
 
   checkinTool(sessionId: () => string, operationId: () => string | undefined): ToolDefinition {
     return { name: "checkin", label: "Check in", annotations: { openWorldHint: false },
-      description: "Send Home a short durable progress check-in without pausing or ending work. Use at milestones and about every 30 minutes: step, done, next, optional blocker and branch/commit/issue refs. Quiet by default. needsAttention requires a blocker and requests a Home wake at most once per 30 minutes across resumes; it is not a final report.",
+      description: "Send Home a short durable progress check-in at milestones: step, done, next, optional blocker and branch/commit/issue refs. Quiet by default. needsAttention requires a blocker and requests a Home wake at most once per 30 minutes across resumes; it is not a final report. heavy: start before a heavy run and done when it ends. waitFor parks this task in place instead of settling it: {home: question} wakes Home once (same limit) and Home answers with a steer; {task, until: settled|heavy-done} or {heavy: true} is released by the Gateway when it holds. After a waitFor check-in, end your turn; your next turn starts with the answer or release. Questions only the maintainer can answer still go in report needs-input.",
       parameters: HOME_TASK_CHECKIN_PARAMETERS, executionMode: "sequential",
       execute: async (_id, value) => {
         const request = parseHomeTaskCheckinRequest(value);
-        const checkin = await this.mutex.run(async () => {
+        const { checkin, reply } = await this.mutex.run(async () => {
           if (operationId() !== this.identity.operationId || !this.acceptsSteering || this.signal.aborted || !this.checkin) throw new Error("Check-in refused: task operation is stale, stopping or sealed");
           return this.checkin(sessionId(), request);
         });
-        return { content: [{ type: "text", text: `Check-in saved. Attention: ${checkin.attention}. Continue working.` }], details: { checkin } };
+        return { content: [{ type: "text", text: reply }], details: { checkin } };
       },
     };
   }

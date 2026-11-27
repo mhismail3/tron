@@ -48,6 +48,7 @@ export interface OwnedTurnRuntime {
   };
   readonly ui: { readonly hostEpoch: string };
   readonly catalogHasActiveSubagents: boolean;
+  readonly lifecycle: { readonly isDraining: boolean };
   readonly isAgentAdmissionSettling: boolean;
   readonly processOperationIDs: ReadonlyMap<string, string>;
   readonly processActivities: ReadonlyMap<string, SessionProcessActivity>;

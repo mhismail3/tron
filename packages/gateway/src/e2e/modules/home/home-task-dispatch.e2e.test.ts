@@ -1228,7 +1228,7 @@ describe("Home task list RPC", () => {
     await waitFor(async () => (await owner.taskResult("checking")).wake?.state === "acknowledged", "checked-in result delivered once");
     await waitFor(() => home.snapshot().phase === "idle" && home.snapshot().operation === undefined, "Home idle after the checked-in result");
     expect(firstWorkerMessages.user).not.toContain("Send a short checkin");
-    expect(firstWorkerMessages.system).toContain("Send a lightweight checkin at milestones and about every 30 minutes");
+    expect(firstWorkerMessages.system).toContain("Send a lightweight checkin at milestones");
     expect(home.canonicalSessionEntries().filter(entry => entry.type === "custom_message" && (entry as { details?: { taskId?: string } }).details?.taskId === "checking")).toHaveLength(1);
     f.faux.setResponses([fauxAssistantMessage([reportCall("late", "Late result")], { stopReason: "toolUse" }), fauxAssistantMessage("Late result read")]);
     await (await dispatch(f, "late")).completion;

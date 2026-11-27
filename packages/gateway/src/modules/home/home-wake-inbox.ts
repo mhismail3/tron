@@ -9,7 +9,7 @@ import { GatewayError } from "../../errors.js";
 import { injectedText, INJECTED_TEXT_BODY_BYTES } from "../../kernel/host/injected-text.js";
 import { EpisodicMemoryError } from "../../errors.js";
 import { AsyncMutex } from "../../util/async-mutex.js";
-import type { HomeTaskRecord, HomeTaskStore } from "./home-task-store.js";
+import { stallEventId, type HomeTaskRecord, type HomeTaskStore } from "./home-task-store.js";
 import type { HomeTaskCheckin } from "../../protocol/types.js";
 import type { HomeTaskSubagents } from "../../kernel/delegation/task-subagents.js";
 
@@ -80,19 +80,28 @@ export class WakeInboxOwner {
   }
   private *outboxes(task: HomeTaskRecord): Generator<HomeTaskRecord> {
     if (task.wake) yield task;
-    if (task.attention) yield this.attentionTask(task);
+    if (task.attention) yield this.sideTask(task, task.attention.wake);
+    if (task.stall) yield this.sideTask(task, task.stall.wake);
   }
-  private attentionTask(task: HomeTaskRecord): HomeTaskRecord {
-    return { ...task, wake: task.attention!.wake, reportRef: null, terminalEvidence: null };
+  private sideTask(task: HomeTaskRecord, wake: HomeWakeEvent): HomeTaskRecord {
+    return { ...task, wake, reportRef: null, terminalEvidence: null };
   }
   private isAttention(task: HomeTaskRecord): boolean { return task.wake?.eventId === task.attention?.wake.eventId; }
+  private isStall(task: HomeTaskRecord): boolean { return task.wake?.eventId === task.stall?.wake.eventId; }
+  private view(stored: HomeTaskRecord, before: HomeTaskRecord): HomeTaskRecord {
+    return this.isAttention(before) && stored.attention ? this.sideTask(stored, stored.attention.wake)
+      : this.isStall(before) && stored.stall ? this.sideTask(stored, stored.stall.wake) : stored;
+  }
   attentionEvent(task: HomeTaskRecord, checkin: HomeTaskCheckin): HomeWakeEvent {
     return { ...this.event(task), eventId: `task-attention-${checkin.id}`, createdAt: checkin.at, push: "decided" };
+  }
+  stallEvent(task: HomeTaskRecord, operationId: string, idleSince: string, at: string): HomeWakeEvent {
+    return { ...this.event(task), eventId: stallEventId(operationId, idleSince), createdAt: at, push: "decided" };
   }
   async publishAttention(taskId: string): Promise<void> {
     await this.mutex.run(async () => {
       const task = await this.store.read(taskId);
-      if (task?.attention?.wake.state === "pending" && await this.options.wakeAvailable(task.homeId)) this.options.wake(task.homeId);
+      if ((task?.attention?.wake.state === "pending" || task?.stall?.wake.state === "pending") && await this.options.wakeAvailable(task.homeId)) this.options.wake(task.homeId);
     });
   }
 
@@ -199,7 +208,9 @@ export class WakeInboxOwner {
         envelope.signal.throwIfAborted();
         const wake = task.wake!;
         const attention = this.isAttention(task) ? task.attention!.checkin : undefined;
-        const result = attention ? { task, text: JSON.stringify(attention), subagents: { started: 0, stoppedAtEnd: 0 } } : await this.options.result(task.taskId);
+        const stall = this.isStall(task) ? task.stall! : undefined;
+        const side = attention ?? stall;
+        const result = side ? { task, text: JSON.stringify(side), subagents: { started: 0, stoppedAtEnd: 0 } } : await this.options.result(task.taskId);
         if (!result.task || JSON.stringify(result.task.reportRef) !== JSON.stringify(task.reportRef)
           || JSON.stringify(result.task.terminalEvidence) !== JSON.stringify(task.terminalEvidence)) throw new GatewayError("conflict", "Immutable inbox result is unavailable");
         envelope.signal.throwIfAborted();
@@ -212,13 +223,17 @@ export class WakeInboxOwner {
             return `${canonical.text}\n\nEvidence:\n${canonical.evidence.map(item => `- ${item}`).join("\n")}`;
           })()
           : `No accepted report. Outcome: ${task.terminalEvidence?.outcome ?? "unknown"} (${task.terminalEvidence?.reason ?? "unknown"}${task.terminalEvidence?.failureCause ? `; ${task.terminalEvidence.failureCause}` : ""}${task.terminalEvidence?.detail ? `: ${task.terminalEvidence.detail}` : ""}).`;
-        let content = attention ? `Home worker needs attention (not a final report). Task: ${task.taskId}; worker operation: ${attention.operationId}; at: ${attention.at}.\nStep: ${attention.step}\nDone: ${attention.done}\nNext: ${attention.next}\nBlocker: ${attention.blocker}\nThis check-in did not pause the worker. Inspect task status before steering.` : `${header}\n\n${reportText}`;
-        const message = (): HomeWakeMessage => ({ customType: HOME_TASK_RESULT_MESSAGE, display: true, content: injectedText(content, "worker", attention ? "checkin" : "task-result", "none",
-          `task ${JSON.stringify(attention ? { action: "status", taskId: task.taskId } : { action: "report", taskId: task.taskId, offset: 0, limit: 4096 })}`),
+        let content = attention?.waitFor?.home !== undefined
+          ? `Home worker asks (it is parked in this task until you steer it). Task: ${task.taskId}; worker operation: ${attention.operationId}; at: ${attention.at}.\nQuestion: ${attention.waitFor.home}\nStep: ${attention.step}\nDone: ${attention.done}\nNext: ${attention.next}\nAnswer with task steer; questions only the maintainer can answer go to him.`
+          : attention ? `Home worker needs attention (not a final report). Task: ${task.taskId}; worker operation: ${attention.operationId}; at: ${attention.at}.\nStep: ${attention.step}\nDone: ${attention.done}\nNext: ${attention.next}\nBlocker: ${attention.blocker}\nThis check-in did not pause the worker. Inspect task status before steering.`
+          : stall ? `Home worker has written nothing since ${stall.idleSince} (not a final report). Task: ${task.taskId}; worker operation: ${stall.operationId}; running tool: ${stall.runningTool ?? "none"}.\nA long command may be legitimate. Inspect task status or transcript; steer, interrupt or stop only if it is stuck.`
+          : `${header}\n\n${reportText}`;
+        const message = (): HomeWakeMessage => ({ customType: HOME_TASK_RESULT_MESSAGE, display: true, content: injectedText(content, "worker", side ? "checkin" : "task-result", "none",
+          `task ${JSON.stringify(side ? { action: "status", taskId: task.taskId } : { action: "report", taskId: task.taskId, offset: 0, limit: 4096 })}`),
           details: { eventId: wake.eventId, taskId: task.taskId, taskTitle: result.title ?? title, resultRef: task.reportRef, terminalEvidence: task.terminalEvidence,
             operationId, routeGeneration: route.routeGeneration } });
-        if (Buffer.byteLength(content) > INJECTED_TEXT_BODY_BYTES || cost(message()) > envelope.freshTokens - cost(count)) content = attention
-          ? `Home worker needs attention: ${task.taskId}. Check-in ${attention.id}, worker operation ${attention.operationId}.\n[Full text: task ${JSON.stringify({ action: "status", taskId: task.taskId })}.]`
+        if (Buffer.byteLength(content) > INJECTED_TEXT_BODY_BYTES || cost(message()) > envelope.freshTokens - cost(count)) content = side
+          ? `Home worker needs attention: ${task.taskId}, worker operation ${side.operationId}.\n[Full text: task ${JSON.stringify({ action: "status", taskId: task.taskId })}.]`
           : `${header}: immutable report, ${Buffer.byteLength(result.text)} bytes.\n[Full text: task ${JSON.stringify({ action: "report", taskId: task.taskId, offset: 0, limit: 4096 })}.]`;
         const selectedMessage = message(); const selectedTokens = cost(selectedMessage);
         const selectedBytes = canonicalMessageBytes(selectedMessage);
@@ -259,7 +274,7 @@ export class WakeInboxOwner {
     await this.mutex.run(async () => {
       const stored = await this.store.read(taskId);
       if (!stored) return;
-      for (const task of [stored, ...(stored.attention ? [this.attentionTask(stored)] : [])]) {
+      for (const task of this.outboxes(stored)) {
         if (task.wake?.eventId === eventId && task.wake.state === "admitted" && task.wake.delivery?.operationId === operationId) await this.release(task);
       }
     });
@@ -304,7 +319,7 @@ export class WakeInboxOwner {
     }
     for (const before of proven) {
       const stored = await this.store.read(before.taskId);
-      const task = stored && (this.isAttention(before) ? this.attentionTask(stored) : stored);
+      const task = stored && this.view(stored, before);
       if (task?.wake?.eventId === before.wake!.eventId && task.wake.state === "terminal") await this.ack(task, route);
     }
   }
@@ -378,7 +393,7 @@ export class WakeInboxOwner {
 
   private async change(before: HomeTaskRecord, change: (wake: HomeWakeEvent) => HomeWakeEvent, reason: string): Promise<HomeTaskRecord> {
     const stored = await this.store.updateWake(before.taskId, change, before.wake!.eventId);
-    const task = this.isAttention(before) ? this.attentionTask(stored) : stored;
+    const task = this.view(stored, before);
     this.options.diagnostic?.({ event: "home.task.inbox", eventHash: hash(task.wake!.eventId).slice(0, 16), state: task.wake!.state, reason });
     return task;
   }

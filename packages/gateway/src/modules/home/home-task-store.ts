@@ -35,6 +35,7 @@ export interface HomeTaskRecord {
   checkins?: HomeTaskCheckin[];
   lastAttentionAt?: string;
   attention?: { checkin: HomeTaskCheckin; wake: HomeWakeEvent };
+  stall?: { operationId: string; idleSince: string; runningTool: string | null; wake: HomeWakeEvent };
   intent: { text: string };
   intentDigest: string;
   target: string;
@@ -238,14 +239,15 @@ export class HomeTaskStore {
       if (!authorization) throw new HomeTaskStoreError("not-initialized");
       const current = await this.readTask(taskId, authorization);
       const attention = eventId !== undefined && current?.attention?.wake.eventId === eventId;
-      const before = attention ? current?.attention?.wake : current?.wake;
+      const stall = eventId !== undefined && current?.stall?.wake.eventId === eventId;
+      const before = attention ? current?.attention?.wake : stall ? current?.stall?.wake : current?.wake;
       if (!current || !before || (eventId !== undefined && before.eventId !== eventId)) throw new HomeTaskStoreError("missing-state");
       const wake = structuredClone(change(structuredClone(before)));
       if (JSON.stringify(wake) === JSON.stringify(before)) return current;
       if (wake.eventId !== before.eventId || wake.createdAt !== before.createdAt
         || before.state === "acknowledged" || (before.push === "decided" && wake.push !== "decided")) throw new HomeTaskStoreError("invalid-record");
       const next = { ...current, revision: current.revision + 1, updatedAt: Math.max(Date.now(), current.updatedAt),
-        ...(attention ? { attention: { ...current.attention!, wake } } : { wake }) };
+        ...(attention ? { attention: { ...current.attention!, wake } } : stall ? { stall: { ...current.stall!, wake } } : { wake }) };
       validateTask(next);
       await this.publish(this.taskPath(next), next, TASK_BYTES);
       return next;
@@ -488,7 +490,7 @@ function validateAuthorityReferences(task: HomeTaskRecord, authorization: HomeTa
 
 function validateTask(value: unknown): HomeTaskRecord {
   if (!keys(value, ["version", "taskId", "revision", "createdAt", "updatedAt", "homeId", "generation", "intent", "intentDigest", "target",
-    "grantRef", "scopeRef", "lifecycle", "sessionId", "operationId", "stopIntent", "spend", "reportRef", "terminalEvidence", "routeGeneration", "wake"], ["budget", "resumes", "queuedAt", "checkins", "attention", "lastAttentionAt"])
+    "grantRef", "scopeRef", "lifecycle", "sessionId", "operationId", "stopIntent", "spend", "reportRef", "terminalEvidence", "routeGeneration", "wake"], ["budget", "resumes", "queuedAt", "checkins", "attention", "lastAttentionAt", "stall"])
     || value.version !== 1 || !identifier(value.taskId) || value.taskId === "authorization" || !positive(value.revision)
     || !timestamp(value.createdAt) || (value.createdAt as number) > 9_999_999_999_999
     || !timestamp(value.updatedAt) || (value.updatedAt as number) < (value.createdAt as number)
@@ -541,9 +543,13 @@ function validateTask(value: unknown): HomeTaskRecord {
     if (checkin.taskId !== value.taskId || checkin.operationId !== value.operationId || checkin.sessionId !== value.sessionId
       || checkin.attention !== "requested" || value.lastAttentionAt !== checkin.at) invalid();
   }
+  if (value.stall !== undefined && (!keys(value.stall, ["operationId", "idleSince", "runningTool", "wake"]) || !identifier(value.stall.operationId)
+    || !text(value.stall.idleSince, 64) || !Number.isFinite(Date.parse(value.stall.idleSince as string))
+    || (value.stall.runningTool !== null && !text(value.stall.runningTool, 512)) || !object(value.stall.wake))) invalid();
   if ((value.lifecycle === "terminal") !== (value.wake !== null)) invalid();
   const wakes = [{ wake: value.wake, id: `task-result-${createHash("sha256").update(value.taskId as string).digest("hex")}` },
-    ...(value.attention ? [{ wake: value.attention.wake, id: `task-attention-${(value.attention.checkin as unknown as HomeTaskCheckin).id}` }] : [])];
+    ...(value.attention ? [{ wake: value.attention.wake, id: `task-attention-${(value.attention.checkin as unknown as HomeTaskCheckin).id}` }] : []),
+    ...(value.stall ? [{ wake: value.stall.wake, id: stallEventId(value.stall.operationId as string, value.stall.idleSince as string) }] : [])];
   for (const { wake, id } of wakes) {
     if (wake === null) continue;
     if (!keys(wake, ["eventId", "routeGeneration", "createdAt", "state", "push", "delivery", "acknowledgedAt", "redeliveries"])
@@ -618,4 +624,8 @@ function parseTaskName(value: string): TaskName {
 }
 function compareTaskNames(a: TaskName, b: TaskName): number {
   return b.createdAt - a.createdAt || (a.taskId < b.taskId ? -1 : a.taskId > b.taskId ? 1 : 0);
+}
+
+export function stallEventId(operationId: string, idleSince: string): string {
+  return `task-stall-${createHash("sha256").update(`${operationId}\n${idleSince}`).digest("hex").slice(0, 32)}`;
 }

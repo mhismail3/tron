@@ -52,7 +52,6 @@ import { tronHomePath } from "../../foundation/tron-home-layout.js";
 const VERSION = 2;
 const MAXIMUM_RECORD_BYTES = 16 * 1_024 * 1_024;
 const HOME_POLICY_REVISION = 3;
-const UNSETTLED_TASK_NEXT = "This task has not settled, so it has no report yet. Its settled result wakes Home by itself: end this turn now instead of polling report or status.";
 
 export interface HomeChapter {
   sessionId: string;
@@ -319,8 +318,7 @@ export class HomeOwner {
         + "Call {\"action\":\"list\"} for your tasks.", false, { taskId, similar }));
     }
     if (named.homeId !== record.homeId) throw refuse(new GatewayError("conflict", `task ${action}: "${taskId}" belongs to another Home`), "home-generation-changed");
-    if (action === "status") return { control: await owner.controlRow(named, await this.continuation(named)), ...await this.taskStatus(taskId), host: owner.hostReading(),
-      ...(named.lifecycle === "terminal" ? {} : { next: UNSETTLED_TASK_NEXT }) };
+    if (action === "status") return { control: await owner.controlRow(named, await this.continuation(named)), ...await this.taskStatus(taskId), host: owner.hostReading() };
     if (action === "transcript") {
       if (!named.sessionId) throw new GatewayError("not_found", "Task has no worker session");
       const binding = this.routeBinding();
@@ -331,7 +329,7 @@ export class HomeOwner {
       return { taskId: named.taskId, sessionId: source.sessionId, untrusted: true, thinking: "excluded", ...utf8Page(text, "task transcript", request.offset, request.limit) };
     }
     if (action === "report") {
-      if (named.lifecycle !== "terminal") return { taskId: named.taskId, settled: false, control: await owner.controlRow(named), next: UNSETTLED_TASK_NEXT };
+      if (named.lifecycle !== "terminal") return { taskId: named.taskId, settled: false, control: await owner.controlRow(named) };
       const { text } = await this.immutableTaskReport(taskId);
       return { taskId: named.taskId, ...utf8Page(text, "task report", request.offset, request.limit) };
     }
@@ -1273,6 +1271,7 @@ export class HomeOwner {
 
   async dispose(): Promise<void> {
     this.policies.clear();
+    this.tasks.disposeTimers();
     await this.tasks.commands.dispose();
     const memory = this.memory;
     this.memory = undefined;

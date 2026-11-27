@@ -2157,6 +2157,16 @@ module Protocol {
   // @wire
   datatype HomeTaskCheckinRequestRefs = HomeTaskCheckinRequestRefs(branch: Option<string>, commit: Option<string>, issue: Option<string>)
 
+  // @wire enum
+  datatype HomeTaskHeavyPhase = start | done
+
+  // @wire enum
+  datatype HomeTaskWaitUntil = settled | {:wire "heavy-done"} heavyDone
+
+  /// Exactly one of `home`, `task` (with `until`) or `heavy` is set.
+  // @wire
+  datatype HomeTaskWaitFor = HomeTaskWaitFor(home: Option<string>, task: Option<string>, until: Option<HomeTaskWaitUntil>, heavy: Option<bool>)
+
   // @wire
   datatype HomeTaskCheckinRequest = HomeTaskCheckinRequest(
       step: string,
@@ -2164,7 +2174,9 @@ module Protocol {
       next: string,
       blocker: Option<string>,
       refs: Option<HomeTaskCheckinRequestRefs>,
-      needsAttention: Option<bool>
+      needsAttention: Option<bool>,
+      heavy: Option<HomeTaskHeavyPhase>,
+      waitFor: Option<HomeTaskWaitFor>
     )
 
   // @wire enum
@@ -2178,6 +2190,8 @@ module Protocol {
       blocker: Option<string>,
       refs: Option<HomeTaskCheckinRequestRefs>,
       needsAttention: Option<bool>,
+      heavy: Option<HomeTaskHeavyPhase>,
+      waitFor: Option<HomeTaskWaitFor>,
       id: string,
       taskId: string,
       sessionId: string,

@@ -199,6 +199,7 @@ operations: RunOperations<unknown>,
           invocation.lifecycle = "accepted";
           operations.runInvocations.invocations.set(invocationId, invocation);
           operations.noteAcceptedSteering(operationId);
+          if (ownership?.kind !== "subagentWake" && operations.ownedTurns.worker && operationId !== operations.ownedTurns.worker.identity.operationId) operations.ownedTurns.worker.endWait();
           if (!ownership) operations.homeRequestPolicy?.responseTiming.accepted(operationId);
           acceptedResolve(true);
         },

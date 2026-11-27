@@ -20,6 +20,13 @@ export function workerFinishTurn(worker: WorkerTurnRuntime, created: { readonly 
     const decision = await finishTurn?.(turn, signal);
     const ending = taskWorker.reportSealed || await taskWorker.exceedsBudget(worker.canonicalSessionEntries());
     if (!ending) {
+      const release = turn.message.stopReason === "stop" && !signal?.aborted ? taskWorker.takeReleaseInTurn() : undefined;
+      if (release !== undefined) {
+        await created.session.sendCustomMessage({ customType: "tron.home-task-wait-release.v1",
+          content: injectedText(release, "gateway", "steer", "none"), display: true }, { triggerTurn: true });
+        return { action: "continue" };
+      }
+      if (taskWorker.waiting) return decision ?? undefined;
       if (!decision && turn.message.stopReason === "stop" && !signal?.aborted
         && !created.session.agent.hasQueuedMessages() && !worker.hasDetachedDashboardWork()
         && taskWorker.takeReportReminder()) {
