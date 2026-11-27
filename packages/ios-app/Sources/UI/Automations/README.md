@@ -30,9 +30,9 @@ The Tron menu and the Automations sheet (list, detail, run detail, create/edit) 
   Automations list first, then paused, drafts and finished ones (attention, running, next
   occurrence, name, ID within each group). `AutomationInventory` projects every row's strings once
   per sheet body evaluation, never while rows scroll; an equatable lazy list draws them as shared `TronListRow` feed cards
-  (action icon, name with one status pill, cadence, Gateway tag, last run). Toolbar New Automation; a floating Filter opens the filter sheet, which owns
+  (action icon, name with one status pill, cadence, Gateway tag, last run). Toolbar Filter opens the filter sheet, which owns
   status, action and Gateway choices, persisted with the shell's preferences by
-  `AutomationDashboardPreferencesOwner`. No search. Opening a session from an Automation, or a push
+  `AutomationDashboardPreferencesOwner`; a floating button adds an Automation. No search. Opening a session from an Automation, or a push
   route, dismisses the sheet first. No pull-to-refresh: `automation.changed` drives refresh while
   presented.
 - **Styling.** Automations follow the user's primary theme; only attention and failure read
