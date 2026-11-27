@@ -147,6 +147,7 @@ operations: RunOperations<unknown>,
         operations.activeOperationId = operationId;
         if ((ownership?.kind === "subagentWake" || operations.ownedTurns.sharedTaskSteering(ownership)) && operations.ownedTurns.waitingTask && operations.ownedTurns.waitingTask.wakeOperationId === undefined) {
           operations.ownedTurns.waitingTask.wakeOperationId = operationId;
+          operations.ownedTurns.worker?.woken();
         }
         phaseBeforeAdmission = operations.phase;
         operations.phase = "running";
@@ -199,6 +200,7 @@ operations: RunOperations<unknown>,
           invocation.lifecycle = "accepted";
           operations.runInvocations.invocations.set(invocationId, invocation);
           operations.noteAcceptedSteering(operationId);
+          if (ownership?.kind !== "subagentWake" && operations.ownedTurns.worker && operationId !== operations.ownedTurns.worker.identity.operationId) operations.ownedTurns.worker.endWait();
           if (!ownership) operations.homeRequestPolicy?.responseTiming.accepted(operationId);
           acceptedResolve(true);
         },

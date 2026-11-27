@@ -47,7 +47,7 @@ export class DelegationOperations<Session extends OwnedSession> {
     return root === undefined ? Promise.resolve(asyncDirs.length === 0) : homeTaskSubagentRunsSettled(asyncDirs, root);
   }
 
-  async steerWorker(sessionId: string, control: TaskWorkerControl, text: string, from: "tron-home" | "maintainer"): Promise<void> {
+  async steerWorker(sessionId: string, control: TaskWorkerControl, text: string, from: "tron-home" | "maintainer" | "gateway"): Promise<void> {
     const slot = await this.sessions.acquire(sessionId);
     await slot.prompt(...taskWorkerSteeringInput(control, text, from));
   }

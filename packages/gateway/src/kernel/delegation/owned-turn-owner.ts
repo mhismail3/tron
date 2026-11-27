@@ -132,6 +132,7 @@ export class OwnedTurnOwner {
     if (this.worker && (terminal.operationId === this.worker.identity.operationId || this.waitingTask?.wakeOperationId === terminal.operationId)) {
       if (this.taskTurnAwaitsWake(terminal)) {
         this.waitingTask = { observer, terminal };
+        this.worker?.parked();
         return;
       }
       this.waitingTask = undefined;
@@ -158,7 +159,7 @@ export class OwnedTurnOwner {
     if (terminal.lifecycle !== "completed" || !this.worker?.acceptsSteering) return false;
     const last = this.operations.sessionManager.getBranch().findLast(entry => entry.type === "message" && entry.message.role === "assistant");
     return last?.type === "message" && last.message.role === "assistant" && last.message.stopReason === "stop"
-      && this.operations.hasDetachedDashboardWork();
+      && (this.operations.hasDetachedDashboardWork() || (this.worker.waiting !== undefined && !this.operations.lifecycle.isDraining));
   }
 
   async releaseWaitingTaskForDrain(): Promise<void> {

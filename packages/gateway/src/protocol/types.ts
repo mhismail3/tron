@@ -3269,6 +3269,24 @@ export function decodeHomeTaskCheckinRequestRefs(v: unknown, p = "$"): HomeTaskC
 export function encodeHomeTaskCheckinRequestRefs(v: HomeTaskCheckinRequestRefs): string {
   return "{" + ((v.branch === undefined ? "" : ',"branch":' + JSON.stringify(v.branch)) + (v.commit === undefined ? "" : ',"commit":' + JSON.stringify(v.commit)) + (v.issue === undefined ? "" : ',"issue":' + JSON.stringify(v.issue))).slice(1) + "}";
 }
+export type HomeTaskHeavyPhase = "start" | "done";
+const HomeTaskHeavyPhaseValues: ReadonlyArray<unknown> = ["start", "done"];
+export function decodeHomeTaskHeavyPhase(v: unknown, p = "$"): HomeTaskHeavyPhase { if (!HomeTaskHeavyPhaseValues.includes(v)) throw new WireError(p, `unknown value ${JSON.stringify(v)}`); return v as HomeTaskHeavyPhase; }
+export function encodeHomeTaskHeavyPhase(v: HomeTaskHeavyPhase): string { return JSON.stringify(v); }
+export type HomeTaskWaitUntil = "settled" | "heavy-done";
+const HomeTaskWaitUntilValues: ReadonlyArray<unknown> = ["settled", "heavy-done"];
+export function decodeHomeTaskWaitUntil(v: unknown, p = "$"): HomeTaskWaitUntil { if (!HomeTaskWaitUntilValues.includes(v)) throw new WireError(p, `unknown value ${JSON.stringify(v)}`); return v as HomeTaskWaitUntil; }
+export function encodeHomeTaskWaitUntil(v: HomeTaskWaitUntil): string { return JSON.stringify(v); }
+/** Exactly one of `home`, `task` (with `until`) or `heavy` is set. */
+export interface HomeTaskWaitFor { home?: string; task?: string; until?: HomeTaskWaitUntil; heavy?: boolean }
+export function decodeHomeTaskWaitFor(v: unknown, p = "$"): HomeTaskWaitFor {
+  const o = obj(v, p);
+  only(o, p, ["home","task","until","heavy"]);
+  return { ...(own(o, "home") === undefined ? {} : { home: str(own(o, "home"), p + ".home") }), ...(own(o, "task") === undefined ? {} : { task: str(own(o, "task"), p + ".task") }), ...(own(o, "until") === undefined ? {} : { until: decodeHomeTaskWaitUntil(own(o, "until"), p + ".until") }), ...(own(o, "heavy") === undefined ? {} : { heavy: bool(own(o, "heavy"), p + ".heavy") }) };
+}
+export function encodeHomeTaskWaitFor(v: HomeTaskWaitFor): string {
+  return "{" + ((v.home === undefined ? "" : ',"home":' + JSON.stringify(v.home)) + (v.task === undefined ? "" : ',"task":' + JSON.stringify(v.task)) + (v.until === undefined ? "" : ',"until":' + encodeHomeTaskWaitUntil(v.until)) + (v.heavy === undefined ? "" : ',"heavy":' + JSON.stringify(v.heavy))).slice(1) + "}";
+}
 export interface HomeTaskCheckinRequest {
   step: string;
   done: string;
@@ -3276,14 +3294,16 @@ export interface HomeTaskCheckinRequest {
   blocker?: string;
   refs?: HomeTaskCheckinRequestRefs;
   needsAttention?: boolean;
+  heavy?: HomeTaskHeavyPhase;
+  waitFor?: HomeTaskWaitFor;
 }
 export function decodeHomeTaskCheckinRequest(v: unknown, p = "$"): HomeTaskCheckinRequest {
   const o = obj(v, p);
-  only(o, p, ["step","done","next","blocker","refs","needsAttention"]);
-  return { step: str(own(o, "step"), p + ".step"), done: str(own(o, "done"), p + ".done"), next: str(own(o, "next"), p + ".next"), ...(own(o, "blocker") === undefined ? {} : { blocker: str(own(o, "blocker"), p + ".blocker") }), ...(own(o, "refs") === undefined ? {} : { refs: decodeHomeTaskCheckinRequestRefs(own(o, "refs"), p + ".refs") }), ...(own(o, "needsAttention") === undefined ? {} : { needsAttention: bool(own(o, "needsAttention"), p + ".needsAttention") }) };
+  only(o, p, ["step","done","next","blocker","refs","needsAttention","heavy","waitFor"]);
+  return { step: str(own(o, "step"), p + ".step"), done: str(own(o, "done"), p + ".done"), next: str(own(o, "next"), p + ".next"), ...(own(o, "blocker") === undefined ? {} : { blocker: str(own(o, "blocker"), p + ".blocker") }), ...(own(o, "refs") === undefined ? {} : { refs: decodeHomeTaskCheckinRequestRefs(own(o, "refs"), p + ".refs") }), ...(own(o, "needsAttention") === undefined ? {} : { needsAttention: bool(own(o, "needsAttention"), p + ".needsAttention") }), ...(own(o, "heavy") === undefined ? {} : { heavy: decodeHomeTaskHeavyPhase(own(o, "heavy"), p + ".heavy") }), ...(own(o, "waitFor") === undefined ? {} : { waitFor: decodeHomeTaskWaitFor(own(o, "waitFor"), p + ".waitFor") }) };
 }
 export function encodeHomeTaskCheckinRequest(v: HomeTaskCheckinRequest): string {
-  return "{" + (',"step":' + JSON.stringify(v.step) + ',"done":' + JSON.stringify(v.done) + ',"next":' + JSON.stringify(v.next) + (v.blocker === undefined ? "" : ',"blocker":' + JSON.stringify(v.blocker)) + (v.refs === undefined ? "" : ',"refs":' + encodeHomeTaskCheckinRequestRefs(v.refs)) + (v.needsAttention === undefined ? "" : ',"needsAttention":' + JSON.stringify(v.needsAttention))).slice(1) + "}";
+  return "{" + (',"step":' + JSON.stringify(v.step) + ',"done":' + JSON.stringify(v.done) + ',"next":' + JSON.stringify(v.next) + (v.blocker === undefined ? "" : ',"blocker":' + JSON.stringify(v.blocker)) + (v.refs === undefined ? "" : ',"refs":' + encodeHomeTaskCheckinRequestRefs(v.refs)) + (v.needsAttention === undefined ? "" : ',"needsAttention":' + JSON.stringify(v.needsAttention)) + (v.heavy === undefined ? "" : ',"heavy":' + encodeHomeTaskHeavyPhase(v.heavy)) + (v.waitFor === undefined ? "" : ',"waitFor":' + encodeHomeTaskWaitFor(v.waitFor))).slice(1) + "}";
 }
 export type HomeTaskCheckinAttention = "none" | "requested" | "rate-limited" | "pending";
 const HomeTaskCheckinAttentionValues: ReadonlyArray<unknown> = ["none", "requested", "rate-limited", "pending"];
@@ -3296,6 +3316,8 @@ export interface HomeTaskCheckin {
   blocker?: string;
   refs?: HomeTaskCheckinRequestRefs;
   needsAttention?: boolean;
+  heavy?: HomeTaskHeavyPhase;
+  waitFor?: HomeTaskWaitFor;
   id: string;
   taskId: string;
   sessionId: string;
@@ -3305,11 +3327,11 @@ export interface HomeTaskCheckin {
 }
 export function decodeHomeTaskCheckin(v: unknown, p = "$"): HomeTaskCheckin {
   const o = obj(v, p);
-  only(o, p, ["step","done","next","blocker","refs","needsAttention","id","taskId","sessionId","operationId","at","attention"]);
-  return { step: str(own(o, "step"), p + ".step"), done: str(own(o, "done"), p + ".done"), next: str(own(o, "next"), p + ".next"), ...(own(o, "blocker") === undefined ? {} : { blocker: str(own(o, "blocker"), p + ".blocker") }), ...(own(o, "refs") === undefined ? {} : { refs: decodeHomeTaskCheckinRequestRefs(own(o, "refs"), p + ".refs") }), ...(own(o, "needsAttention") === undefined ? {} : { needsAttention: bool(own(o, "needsAttention"), p + ".needsAttention") }), id: str(own(o, "id"), p + ".id"), taskId: str(own(o, "taskId"), p + ".taskId"), sessionId: str(own(o, "sessionId"), p + ".sessionId"), operationId: str(own(o, "operationId"), p + ".operationId"), at: str(own(o, "at"), p + ".at"), attention: decodeHomeTaskCheckinAttention(own(o, "attention"), p + ".attention") };
+  only(o, p, ["step","done","next","blocker","refs","needsAttention","heavy","waitFor","id","taskId","sessionId","operationId","at","attention"]);
+  return { step: str(own(o, "step"), p + ".step"), done: str(own(o, "done"), p + ".done"), next: str(own(o, "next"), p + ".next"), ...(own(o, "blocker") === undefined ? {} : { blocker: str(own(o, "blocker"), p + ".blocker") }), ...(own(o, "refs") === undefined ? {} : { refs: decodeHomeTaskCheckinRequestRefs(own(o, "refs"), p + ".refs") }), ...(own(o, "needsAttention") === undefined ? {} : { needsAttention: bool(own(o, "needsAttention"), p + ".needsAttention") }), ...(own(o, "heavy") === undefined ? {} : { heavy: decodeHomeTaskHeavyPhase(own(o, "heavy"), p + ".heavy") }), ...(own(o, "waitFor") === undefined ? {} : { waitFor: decodeHomeTaskWaitFor(own(o, "waitFor"), p + ".waitFor") }), id: str(own(o, "id"), p + ".id"), taskId: str(own(o, "taskId"), p + ".taskId"), sessionId: str(own(o, "sessionId"), p + ".sessionId"), operationId: str(own(o, "operationId"), p + ".operationId"), at: str(own(o, "at"), p + ".at"), attention: decodeHomeTaskCheckinAttention(own(o, "attention"), p + ".attention") };
 }
 export function encodeHomeTaskCheckin(v: HomeTaskCheckin): string {
-  return "{" + (',"step":' + JSON.stringify(v.step) + ',"done":' + JSON.stringify(v.done) + ',"next":' + JSON.stringify(v.next) + (v.blocker === undefined ? "" : ',"blocker":' + JSON.stringify(v.blocker)) + (v.refs === undefined ? "" : ',"refs":' + encodeHomeTaskCheckinRequestRefs(v.refs)) + (v.needsAttention === undefined ? "" : ',"needsAttention":' + JSON.stringify(v.needsAttention)) + ',"id":' + JSON.stringify(v.id) + ',"taskId":' + JSON.stringify(v.taskId) + ',"sessionId":' + JSON.stringify(v.sessionId) + ',"operationId":' + JSON.stringify(v.operationId) + ',"at":' + JSON.stringify(v.at) + ',"attention":' + encodeHomeTaskCheckinAttention(v.attention)).slice(1) + "}";
+  return "{" + (',"step":' + JSON.stringify(v.step) + ',"done":' + JSON.stringify(v.done) + ',"next":' + JSON.stringify(v.next) + (v.blocker === undefined ? "" : ',"blocker":' + JSON.stringify(v.blocker)) + (v.refs === undefined ? "" : ',"refs":' + encodeHomeTaskCheckinRequestRefs(v.refs)) + (v.needsAttention === undefined ? "" : ',"needsAttention":' + JSON.stringify(v.needsAttention)) + (v.heavy === undefined ? "" : ',"heavy":' + encodeHomeTaskHeavyPhase(v.heavy)) + (v.waitFor === undefined ? "" : ',"waitFor":' + encodeHomeTaskWaitFor(v.waitFor)) + ',"id":' + JSON.stringify(v.id) + ',"taskId":' + JSON.stringify(v.taskId) + ',"sessionId":' + JSON.stringify(v.sessionId) + ',"operationId":' + JSON.stringify(v.operationId) + ',"at":' + JSON.stringify(v.at) + ',"attention":' + encodeHomeTaskCheckinAttention(v.attention)).slice(1) + "}";
 }
 export type HomeTaskLifecycle = "pending" | "active" | "terminal";
 const HomeTaskLifecycleValues: ReadonlyArray<unknown> = ["pending", "active", "terminal"];

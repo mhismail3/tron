@@ -5,9 +5,9 @@ import { GatewayError } from "../../errors.js";
 import type { TaskWorkerControl } from "./worker-contract.js";
 import type { HomeTaskReportOwner } from "./task-report.js";
 
-export function taskWorkerSteeringInput(control: TaskWorkerControl, text: string, from: "tron-home" | "maintainer") {
+export function taskWorkerSteeringInput(control: TaskWorkerControl, text: string, from: "tron-home" | "maintainer" | "gateway") {
   const images: ImageContent[] = [];
-  return [injectedText(text, from, "steer", "task"), images, "steer", undefined, undefined, {
+  return [injectedText(text, from, "steer", from === "gateway" ? "none" : "task"), images, "steer", undefined, undefined, {
     operationId: randomUUID(), originalText: text, taskFence: structuredClone(control),
     origin: { kind: "gateway", ownerId: control.taskId, title: "Home steering", confidence: "boundary" }, onTerminal: () => {},
   }] as const;

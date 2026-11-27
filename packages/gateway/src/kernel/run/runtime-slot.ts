@@ -1023,6 +1023,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
 
   beginAdministrativeDrainCutoff(): void {
     this.lifecycle.beginDrain();
+    if (this.ownedTurns.worker?.waiting) void this.ownedTurns.releaseWaitingTaskForDrain().catch(() => {});
   }
 
   async prepareForAdministrativeDrain(): Promise<void> {

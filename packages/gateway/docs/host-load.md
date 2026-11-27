@@ -16,8 +16,10 @@ cleanup:
 - Each command cleans up its own processes and simulator. Settling a task reaps what its commands left
   (below). Do not kill another worker or Stable.
 
-Workers follow the "Heavy work" paragraph of their brief, announce heavy phases in check-ins that begin
-`Heavy start:` and `Heavy done:`, and read the host with the `host-resources` skill before they start.
+Workers follow the "Heavy work" paragraph of their brief, mark heavy phases with the check-in field
+`heavy: "start" | "done"` (task rows show `heavy`), and read the host with the `host-resources` skill
+before they start. A worker that must wait parks with `waitFor: {heavy: true}` or
+`{task, until: "heavy-done"}`; the Gateway releases it (one heavy waiter at a time, oldest first).
 Use ordinary Git/gh to inspect current branches, worktrees and issues. A parked claim is not proof of
 live work.
 See the [Git/gh skill](../../../.agents/skills/tron-work/SKILL.md).

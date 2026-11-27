@@ -22,12 +22,12 @@ const HOME_TASK_GRANT_USE_MS = 60_000;
 import { HomeTaskStore, HomeTaskStoreError, taskIntentDigest, type HomeTaskRecord, type HomeTaskWrite, type HomeTaskFailureCause, type HomeTaskStoreDiagnostic, type HomeTaskStoreCode } from "./home-task-store.js";
 import { homeTaskPromptTokens, homeTaskSpend, type HomeTaskSpend } from "./home-task-spend.js";
 import type { WakeInboxOwner, HomeWakeDiagnostic } from "./home-wake-inbox.js";
-import { HOME_TASK_ATTENTION_INTERVAL_MS, HOME_TASK_CHECKIN_LIMIT, HOME_TASK_CHECKIN_VISIBLE } from "../../kernel/delegation/task-checkin.js";
+import { HOME_TASK_ATTENTION_INTERVAL_MS, HOME_TASK_CHECKIN_LIMIT, HOME_TASK_CHECKIN_VISIBLE, homeTaskWaitText } from "../../kernel/delegation/task-checkin.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, HomeTaskReportOwner, homeTaskOperationSpan, parseHomeTaskReport, type HomeTaskReport } from "../../kernel/delegation/task-report.js";
 import type { HomeTaskWorkerChoice, HomeTaskPolicy } from "./home-task-worker-choice.js";
 import type { FixedSetting } from "../../kernel/settings/tool-contract.js";
 import { HOME_TASK_SUBAGENTS, HOME_TASK_STATUS_RUN_LIMIT, homeTaskSubagentLaunches, homeTaskSubagentsProjection, parseHomeTaskSubagentsEntry, type HomeTaskSubagentRuns, type HomeTaskSubagents } from "../../kernel/delegation/task-subagents.js";
-import type { HomeTaskCheckin, HomeTaskCounts, HomeTaskDisplay, HomeTaskPage, HomeTaskSummary } from "../../protocol/types.js";
+import type { HomeTaskCheckin, HomeTaskCounts, HomeTaskDisplay, HomeTaskPage, HomeTaskSummary, HomeTaskWaitFor } from "../../protocol/types.js";
 import { basename } from "node:path";
 import { TRON_ASK_USER_INTERRUPTED } from "../../extensions/tron-ask-user-contract.js";
 import { abortableRead } from "../../util/abortable-read.js";
@@ -57,6 +57,7 @@ export type HomeTaskDiagnostic =
   | { event: "home.task.transition"; taskHash: string; revision: number; transition: HomeTaskRecord["lifecycle"]; reason: string; operationHash: string | null; errorCode?: string; failureCause?: HomeTaskFailureCause }
   | { event: "home.task.history-summary"; taskHash: string; counts: { lineages: number; operations: number; resumes: number; complete: number; rootCreatedAtMs: number } }
   | { event: "home.task.checkin"; taskHash: string; operationHash: string; revision: number; attention: HomeTaskCheckin["attention"] }
+  | { event: "home.task.stall"; taskHash: string; operationHash: string; idleMs: number }
   | { event: "home.task.spend"; taskHash: string; spendReference: string; inputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; outputTokens: number }
   | { event: "home.inbox.admission-slow"; delivery: "user" | "wake"; durationMs: number }
   | { event: "home.task.dispatch-stage"; taskHash: string; stage: HomeTaskDispatchStage; outcome: "slow" | "timeout" | "cancelled" | "abandon-failed"; durationMs: number }
@@ -88,8 +89,19 @@ interface HomeTaskControlRow {
   continuedAs?: string;
   updatedAt: string;
   checkins: HomeTaskCheckin[];
+  waitingFor?: HomeTaskWaitFor;
+  heavy?: true;
+  lastEntryAt?: string;
+  runningTool?: HomeTaskRunningTool;
   actions: Array<"status" | "report" | "steer" | "interrupt" | "stop" | "resume" | "rename">;
 }
+interface HomeTaskRunningTool { name: string; startedAt: string }
+interface LiveOperation {
+  taskId: string; sessionId: string; operationId: string; reports: HomeTaskReportOwner;
+  heavy: boolean; heavyClaim: boolean; heavyDone: number; waitBaseline: number; waitSince: number; stalledSince?: string;
+}
+const HOME_TASK_STALL_MS = 45 * 60 * 1000;
+const HOME_TASK_STALL_SWEEP_MS = 60_000;
 
 function editDistance(a: string, b: string): number {
   let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
@@ -184,6 +196,9 @@ const currentCheckins = (task: HomeTaskRecord): HomeTaskCheckin[] =>
 export class HomeTaskDispatcher {
   private readonly listFlights = new Map<string, ListFlight>();
   private readonly running = new Set<string>();
+  private readonly live = new Map<string, LiveOperation>();
+  private readonly settled = new Set<string>();
+  private stallTimer: NodeJS.Timeout | undefined;
   private readonly pressure: HostPressure;
   readonly commands: TaskCommandSweep;
   private readonly setup = new AsyncMutex();
@@ -198,7 +213,12 @@ export class HomeTaskDispatcher {
   }
 
   recover(): Promise<HomeTaskRecoveryStatus> {
-    return this.recovery ??= this.recoverOwned().then(() => { this.commands.start(); return { available: true as const }; }, error => {
+    return this.recovery ??= this.recoverOwned().then(() => {
+      this.commands.start();
+      this.stallTimer ??= setInterval(() => void this.sweepStalls().catch(() => {}), HOME_TASK_STALL_SWEEP_MS);
+      this.stallTimer.unref();
+      return { available: true as const };
+    }, error => {
       const reason = error instanceof HomeTaskStoreError ? error.code : "unsafe-state";
       if (!(error instanceof HomeTaskStoreError)) this.diagnostic?.({ event: "home.task.store-refused", reason });
       return { available: false as const, reason };
@@ -512,11 +532,13 @@ export class HomeTaskDispatcher {
         this.diagnostic?.({ event: "home.task.control", taskHash: hash(task.taskId), operationHash: hash(operationId), action: "stop", disposition: "persisted" });
         await cancellation("task-stop");
       }, async (sessionId, request) => {
+        const wait = request.waitFor;
+        const targetSettled = wait?.task !== undefined && await this.waitTargetSettled(task.taskId, wait);
         let accepted!: HomeTaskCheckin;
         const saved = await this.store.update(task.taskId, current => {
           if (current.lifecycle !== "active" || current.stopIntent || current.operationId !== operationId || current.sessionId !== sessionId) throw new GatewayError("conflict", "Check-in operation is no longer active");
           const now = Date.now();
-          const attention = !request.needsAttention ? "none"
+          const attention = !request.needsAttention && wait?.home === undefined ? "none"
             : current.lastAttentionAt && now - Date.parse(current.lastAttentionAt) < HOME_TASK_ATTENTION_INTERVAL_MS ? "rate-limited"
               : current.attention && !["acknowledged", "blocked", "outcome-unknown"].includes(current.attention.wake.state) ? "pending" : "requested";
           accepted = { ...request, id: randomUUID(), taskId: current.taskId, sessionId, operationId, at: new Date(now).toISOString(), attention };
@@ -525,7 +547,12 @@ export class HomeTaskDispatcher {
         });
         this.diagnostic?.({ event: "home.task.checkin", taskHash: hash(saved.taskId), operationHash: hash(operationId), revision: saved.revision, attention: accepted.attention });
         if (accepted.attention === "requested") await this.inbox.publishAttention(saved.taskId).catch(() => {});
-        return accepted;
+        return { checkin: accepted, reply: this.checkinAccepted(task.taskId, reports, accepted, targetSettled) };
+      }, async text => {
+        const live = this.live.get(task.taskId);
+        if (!live) return true;
+        try { await this.sessions.delegation.steerWorker(live.sessionId, { taskId: task.taskId, operationId }, text, "gateway"); return true; }
+        catch { return false; }
       });
       admissionReport = reports;
       reports.limitBudget(async entries => {
@@ -573,6 +600,7 @@ export class HomeTaskDispatcher {
         late => { this.transition(late, "operation-bound"); void this.refuseAdmission(late, "admission-cancelled").catch(() => {}); });
       this.transition(task, "operation-bound");
       this.commands.bind(slot.id, task.taskId);
+      this.live.set(task.taskId, { taskId: task.taskId, sessionId: slot.id, operationId, reports, heavy: false, heavyClaim: false, heavyDone: 0, waitBaseline: 0, waitSince: 0 });
       let resolve!: (terminal: OwnedOperationTerminal) => void;
       const terminal = new Promise<OwnedOperationTerminal>(done => { resolve = done; });
       const cancellation = async (reason = "interrupted") => {
@@ -623,12 +651,16 @@ export class HomeTaskDispatcher {
         if (stoppedBeforeConversation && (!cut.operationSettled || !(await this.store.read(active.taskId))?.stopIntent || deadlineStopFailed || reportStopFailed || detached)) {
           throw new GatewayError("conflict", "Task canonical evidence is unavailable");
         }
-        const final = await this.store.update(active.taskId, current => ({ ...current, lifecycle: "terminal", spend, wake: this.inbox.event(current),
+        const wait = !report && !stoppedBeforeConversation && !detached && !deadlineStopFailed && !reportStopFailed ? reports.waiting : undefined;
+        const final = await this.store.update(active.taskId, current => wait ? { ...current, lifecycle: "terminal", spend, wake: this.inbox.event(current), reportRef: null,
+          terminalEvidence: { outcome: "needs-input", sessionId: slot.id, entryIds: last ? [last.id] : [],
+            reason: current.stopIntent ? "wait-stopped" : deadlineStopped ? "wait-deadline" : !this.sessions.administrativeWorkRegistry.isAdmissionOpen ? "wait-drained" : "wait-ended",
+            detail: [...`Waiting for ${homeTaskWaitText(wait)}`].slice(0, HOME_TASK_REFUSAL_DETAIL_CHARACTERS).join("") } } : { ...current, lifecycle: "terminal", spend, wake: this.inbox.event(current),
           reportRef: report && evidence ? { resultId: report.resultId, sessionId: slot.id, entryId: evidence.entryId, digest: reportDigest(report) } : null,
           terminalEvidence: { outcome: stoppedBeforeConversation ? "interrupted" : detached || deadlineStopFailed || reportStopFailed ? "unknown" : report ? report.outcome : reports.budgetExceeded || deadlineStopped || lastMessage?.stopReason === "length" ? "limited" : interrupted && current.stopIntent ? "interrupted" : "unknown",
             sessionId: slot.id, entryIds: evidence ? [evidence.entryId] : [...(interruption ? [interruption.id] : []), ...(last ? [last.id] : [])],
             reason: stoppedBeforeConversation ? "stopped-before-conversation" : detached ? "detached-work-outlived-task" : deadlineStopFailed ? "deadline-stop-failed" : reportStopFailed ? current.stopIntent ? "task-stop-failed" : "report-stop-failed" : report ? "explicit-report" : reports.budgetExceeded ? "budget" : deadlineStopped ? "deadline" : lastMessage?.stopReason === "length" ? "length" : interrupted && current.stopIntent ? "task-stop" : "no-report",
-            ...(failureCause && !current.stopIntent ? { failureCause } : {}) } }));
+            ...(failureCause && !current.stopIntent ? { failureCause } : {}) } });
         this.transition(final, final.terminalEvidence!.reason);
         if (detached) this.diagnostic?.({ event: "home.task.detached-work", taskHash: hash(final.taskId), operationHash: hash(operationId), reason: "detached-work-outlived-task" });
         const subagents = cut.state === "present" ? homeTaskSubagentsProjection(entries, operationId) : { started: 0, stoppedAtEnd: 0 };
@@ -647,7 +679,7 @@ export class HomeTaskDispatcher {
         await this.commands.settle(slot.id, active.taskId);
         await dispatch.acknowledge(slot.id, operationId, ownedLease).catch(() => {});
         return final;
-      }).finally(() => { deadline!.disarm(); reports.retire(); ownedLease.release(); work.settle(); this.releaseSlot(taskId); });
+      }).finally(() => { deadline!.disarm(); reports.retire(); ownedLease.release(); work.settle(); this.releaseSlot(taskId); this.settleLive(taskId, reports); });
       void completion.catch(() => {});
       return { taskId: task.taskId, sessionId: slot.id, operationId, completion };
     } catch (error) {
@@ -681,6 +713,113 @@ export class HomeTaskDispatcher {
 
   private releaseSlot(taskId: string): void {
     this.running.delete(taskId);
+  }
+
+  private settleLive(taskId: string, reports: HomeTaskReportOwner): void {
+    if (this.live.get(taskId)?.reports === reports) this.live.delete(taskId);
+    this.releaseWaits();
+  }
+
+  private async waitTargetSettled(taskId: string, wait: HomeTaskWaitFor): Promise<boolean> {
+    const target = wait.task!;
+    if (target === taskId) throw new GatewayError("invalid_request", "A task cannot wait for itself");
+    const record = await this.store.read(target).catch(() => undefined);
+    if (!record) throw new GatewayError("invalid_request", `No task "${target}" to wait for`);
+    return record.lifecycle === "terminal";
+  }
+
+  private waitCycle(taskId: string, target: string): boolean {
+    for (let next: string | undefined = target, hops = 0; next !== undefined && hops <= this.live.size; hops++) {
+      const reports: HomeTaskReportOwner | undefined = this.live.get(next)?.reports;
+      next = reports?.waitReleased ? undefined : reports?.waiting?.task;
+      if (next === taskId) return true;
+    }
+    return false;
+  }
+
+  private heavyFree(taskId: string): boolean {
+    return [...this.live.values()].every(op => op.taskId === taskId || (!op.heavy && !op.heavyClaim));
+  }
+
+  private checkinAccepted(taskId: string, reports: HomeTaskReportOwner, checkin: HomeTaskCheckin, targetSettled: boolean): string {
+    const op = this.live.get(taskId);
+    if (op && checkin.heavy) {
+      op.heavy = checkin.heavy === "start"; op.heavyClaim = false;
+      if (checkin.heavy === "done") op.heavyDone += 1;
+    }
+    const wait = checkin.waitFor;
+    let reply = `Check-in saved. Attention: ${checkin.attention}.`;
+    if (!wait) reply += " Continue working.";
+    else if (op?.heavy && wait.home === undefined) reply += " Wait refused: this task is in a heavy phase; check in heavy done first. Continue working.";
+    else if (wait.home !== undefined && checkin.attention !== "requested") reply += ` Wait refused: Home's wake is ${checkin.attention}. Continue, or report needs-input.`;
+    else if (wait.task !== undefined && (targetSettled || this.settled.has(wait.task))) reply += ` Task ${wait.task} has already settled; continue now.`;
+    else if (wait.task !== undefined && this.waitCycle(taskId, wait.task)) reply += ` Wait refused: task ${wait.task} already waits for this task, which would make a cycle. Continue, or report needs-input.`;
+    else if (wait.heavy && op && this.heavyFree(taskId)) { op.heavyClaim = true; reply += " A heavy slot is free: check in heavy start and continue now."; }
+    else {
+      if (op) { op.waitBaseline = wait.task ? this.live.get(wait.task)?.heavyDone ?? 0 : 0; op.waitSince = Date.now(); op.heavyClaim = false; }
+      reports.openWait(wait);
+      reply += ` Waiting for ${homeTaskWaitText(wait)} in this same task. End your turn now; your next turn starts with ${wait.home !== undefined ? "Home's steer" : "the release"}.`;
+    }
+    this.releaseWaits();
+    return reply;
+  }
+
+  private releaseWaits(): void {
+    for (const op of this.live.values()) {
+      const wait = op.reports.waiting;
+      if (wait?.task === undefined) continue;
+      const target = this.live.get(wait.task);
+      if (this.settled.has(wait.task)) op.reports.release(`The wait is over: task ${wait.task} has settled. Continue this task.`);
+      else if (target && wait.until === "heavy-done" && target.heavyDone > op.waitBaseline) op.reports.release(`The wait is over: task ${wait.task} posted heavy done. Continue this task.`);
+    }
+    const waiters = [...this.live.values()].filter(op => op.reports.waiting?.heavy && !op.heavyClaim).sort((a, b) => a.waitSince - b.waitSince);
+    for (const op of waiters) {
+      if (!this.heavyFree(op.taskId)) break;
+      op.heavyClaim = true;
+      op.reports.release("The wait is over: a heavy slot is free. Check in heavy start, then run your heavy work.");
+    }
+  }
+
+  private activity(taskId: string, operationId: string | null): Pick<HomeTaskControlRow, "waitingFor" | "heavy" | "lastEntryAt" | "runningTool"> {
+    const op = this.live.get(taskId);
+    if (!op || op.operationId !== operationId) return {};
+    const slot = this.sessions.liveRuntime(op.sessionId);
+    const entries = slot?.canonicalSessionEntries() ?? [];
+    const span = homeTaskOperationSpan(entries, op.operationId);
+    const last = span.run.at(-1) ?? (span.index < 0 ? undefined : entries[span.index]);
+    const tool = slot ? [...slot.toolExecutions.values()].filter(call => call.status === "running").at(-1) : undefined;
+    const waitingFor = op.reports.waiting;
+    return { ...(waitingFor ? { waitingFor: structuredClone(waitingFor) } : {}), ...(op.heavy ? { heavy: true as const } : {}),
+      ...(last ? { lastEntryAt: last.timestamp } : {}),
+      ...(tool ? { runningTool: { name: tool.toolName, startedAt: tool.startedAt } } : {}) };
+  }
+
+  async sweepStalls(now = Date.now()): Promise<void> {
+    for (const op of [...this.live.values()]) {
+      const parked = this.sessions.liveRuntime(op.sessionId)?.ownedTurns.waitingTask;
+      if (op.reports.waiting || (parked && parked.wakeOperationId === undefined)) {
+        delete op.stalledSince;
+        if (op.reports.waitReleased && parked && parked.wakeOperationId === undefined) op.reports.parked();
+        continue;
+      }
+      const activity = this.activity(op.taskId, op.operationId);
+      if (!activity.lastEntryAt || now - Date.parse(activity.lastEntryAt) < HOME_TASK_STALL_MS || op.stalledSince === activity.lastEntryAt) continue;
+      op.stalledSince = activity.lastEntryAt;
+      const runningTool = activity.runningTool?.name ?? null;
+      const saved = await this.store.update(op.taskId, current => current.lifecycle !== "active" || current.operationId !== op.operationId
+        || (current.stall && !["acknowledged", "blocked", "outcome-unknown"].includes(current.stall.wake.state)) ? current
+        : { ...current, stall: { operationId: op.operationId, idleSince: activity.lastEntryAt!, runningTool,
+          wake: this.inbox.stallEvent(current, op.operationId, activity.lastEntryAt!, new Date(now).toISOString()) } });
+      if (saved.stall?.idleSince === activity.lastEntryAt && saved.stall.operationId === op.operationId) {
+        this.diagnostic?.({ event: "home.task.stall", taskHash: hash(op.taskId), operationHash: hash(op.operationId), idleMs: now - Date.parse(activity.lastEntryAt) });
+        await this.inbox.publishAttention(op.taskId).catch(() => {});
+      }
+    }
+  }
+
+  disposeTimers(): void {
+    if (this.stallTimer) clearInterval(this.stallTimer);
+    this.stallTimer = undefined;
   }
 
   workers(): { running: number } {
@@ -832,6 +971,7 @@ export class HomeTaskDispatcher {
     return { taskId: task.taskId, title: (await this.display(task)).title, state, outcome: evidence?.outcome ?? null,
       ...(evidence ? { reason: evidence.reason } : {}), ...(evidence?.failureCause ? { failureCause: evidence.failureCause } : {}), ...(evidence?.detail ? { detail: evidence.detail } : {}),
       sessionId: task.sessionId, operationId: task.operationId, checkins: currentCheckins(task),
+      ...(state === "running" ? this.activity(task.taskId, task.operationId) : {}),
       ...(task.resumes ? { resumes: task.resumes.taskId } : {}),
       ...(continuedAs ? { continuedAs } : {}), updatedAt: new Date(task.updatedAt).toISOString(), actions };
   }
@@ -1029,6 +1169,7 @@ export class HomeTaskDispatcher {
       transition: task.lifecycle, reason, operationHash: task.operationId ? hash(task.operationId) : null, ...(errorCode ? { errorCode } : {}),
       ...(task.terminalEvidence?.failureCause ? { failureCause: task.terminalEvidence.failureCause } : {}) });
     if (task.sessionId) this.sessions.recordTaskWorkers([[task.sessionId, task.taskId]]);
+    if (task.lifecycle === "terminal") { this.settled.add(task.taskId); this.releaseWaits(); }
     if (task.lifecycle === "terminal" && task.sessionId) {
       const sessionId = task.sessionId;
       void Promise.resolve().then(() => this.sessions.taskWorkerSettled(sessionId, task.taskId)).catch(() => {});

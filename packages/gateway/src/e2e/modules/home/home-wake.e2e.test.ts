@@ -598,3 +598,184 @@ describe("Home wakes on its own task results (#749)", () => {
     expect(f.notifications.filter(isWakePush)).toHaveLength(0);
   }, 60_000);
 });
+
+describe("Workers wait in place and stalls wake Home once (#2695, #2696)", () => {
+  const isWorker = (context: Parameters<FauxResponseFactory>[0]) => context.messages.some(message => message.role === "system" && JSON.stringify(message).includes("This is a finite Home task."));
+  const briefed = (context: Parameters<FauxResponseFactory>[0], marker: string) => JSON.stringify(context.messages).includes(marker);
+  const start = (f: Fixture, taskId: string, intent: string) => homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId, intent, target: f.cwd });
+  const dispatcher = (f: Fixture) => (homeOwnerOf(f.registry) as unknown as { tasks: { sweepStalls(now: number): Promise<void> } }).tasks;
+  const parked = async (f: Fixture, sessionId: string) => {
+    const waiting = (await f.registry.acquire(sessionId)).ownedTurns.waitingTask;
+    return waiting !== undefined && waiting.wakeOperationId === undefined;
+  };
+
+  it("parks on a Home question with no authority, continues under the same task on Home's steer, and is no stall", async () => {
+    const f = await fixture();
+    await configure(f);
+    const owner = homeOwnerOf(f.registry);
+    let workerTurns = 0;
+    let homeTurns = 0;
+    const respond: FauxResponseFactory = context => {
+      if (isWorker(context)) {
+        workerTurns++;
+        if (workerTurns === 1) return fauxAssistantMessage([fauxToolCall("checkin", { step: "Choosing branch", done: "Mapped both", next: "Implement", waitFor: { home: "Land on main or on the release branch?" } })], { stopReason: "toolUse" });
+        if (workerTurns === 2) return fauxAssistantMessage("Waiting for Home.");
+        return fauxAssistantMessage([reportCall("answered", "Used the release branch")], { stopReason: "toolUse" });
+      }
+      homeTurns++;
+      return fauxAssistantMessage("Noted the question.");
+    };
+    f.faux.setResponses(Array.from({ length: 12 }, () => respond));
+    const run = await start(f, "asks-home", "Finite work with a question");
+    await waitFor(async () => (await settledTask(f, run.taskId)).attention?.wake.state === "acknowledged" && await parked(f, run.sessionId), "question wakes Home while the worker is parked");
+    const home = await f.registry.acquire(f.home.sessionId);
+    const delivered = results(home.canonicalSessionEntries() as Entry[]) as Array<Entry & { content: string }>;
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]!.content.startsWith("[from: worker; kind: checkin; authority: none]\n")).toBe(true);
+    expect(delivered[0]!.content).toContain("Question: Land on main or on the release branch?");
+    expect(homeTurns).toBe(1);
+    const row = (await owner.taskTool(f.home.sessionId, { action: "status", taskId: run.taskId }) as { control: Record<string, unknown> }).control;
+    expect(row).toMatchObject({ state: "running", waitingFor: { home: "Land on main or on the release branch?" }, lastEntryAt: expect.any(String) });
+    await dispatcher(f).sweepStalls(Date.now() + 46 * 60 * 1000);
+    expect((await settledTask(f, run.taskId)).stall).toBeUndefined();
+    expect(workerTurns).toBe(2);
+    await owner.taskTool(f.home.sessionId, { action: "steer", taskId: run.taskId, text: "Use the release branch." });
+    const final = await run.completion;
+    expect(final).toMatchObject({ taskId: run.taskId, operationId: run.operationId, terminalEvidence: { outcome: "final", reason: "explicit-report" } });
+    expect(workerTurns).toBe(3);
+    checkinEvidence.push({ case: "wait-home-steer", delivered: delivered[0], row, final });
+  });
+
+  it("releases a task wait when the named task settles, under the same task and operation", async () => {
+    const f = await fixture();
+    await configure(f);
+    const hold = gate();
+    let waiterTurns = 0;
+    const respond: FauxResponseFactory = async context => {
+      if (isWorker(context) && briefed(context, "Blocking work B")) {
+        await hold.wait;
+        if (!briefed(context, "would make a cycle")) return fauxAssistantMessage([fauxToolCall("checkin", { step: "Circular", done: "Tried", next: "Wait on A", waitFor: { task: "wait-a", until: "settled" } })], { stopReason: "toolUse" });
+        return fauxAssistantMessage([reportCall("b-done", "B done")], { stopReason: "toolUse" });
+      }
+      if (isWorker(context)) {
+        waiterTurns++;
+        if (waiterTurns === 1) return fauxAssistantMessage([fauxToolCall("checkin", { step: "Waiting on B", done: "Prepared", next: "Integrate B", waitFor: { task: "wait-b", until: "settled" } })], { stopReason: "toolUse" });
+        if (waiterTurns === 2) return fauxAssistantMessage("Parked until B settles.");
+        return fauxAssistantMessage([reportCall("a-done", "Integrated B")], { stopReason: "toolUse" });
+      }
+      return fauxAssistantMessage("Result noted.");
+    };
+    f.faux.setResponses(Array.from({ length: 16 }, () => respond));
+    const b = await start(f, "wait-b", "Blocking work B");
+    const a = await start(f, "wait-a", "Waiting work A");
+    await waitFor(() => parked(f, a.sessionId), "A parks on B");
+    expect(waiterTurns).toBe(2);
+    expect((await settledTask(f, a.taskId)).lifecycle).toBe("active");
+    const delegation = f.registry.delegation;
+    const steer = delegation.steerWorker.bind(delegation);
+    const refused = vi.spyOn(delegation, "steerWorker").mockImplementationOnce(async () => { throw new Error("refused while a wake turn starts"); });
+    hold.open();
+    await b.completion;
+    await waitFor(() => refused.mock.calls.length === 1, "first release steer refused");
+    expect((await settledTask(f, a.taskId)).lifecycle).toBe("active");
+    expect(await parked(f, a.sessionId)).toBe(true);
+    refused.mockImplementation(steer);
+    await dispatcher(f).sweepStalls(Date.now());
+    const final = await a.completion;
+    expect(final).toMatchObject({ taskId: "wait-a", operationId: a.operationId, terminalEvidence: { outcome: "final" } });
+    const worker = await f.registry.acquire(a.sessionId);
+    const release = (worker.canonicalSessionEntries() as Array<{ type: string; message?: { role: string; content?: unknown } }>)
+      .filter(entry => entry.type === "message" && entry.message?.role === "user" && JSON.stringify(entry.message.content).includes("task wait-b has settled"));
+    expect(release).toHaveLength(1);
+    expect(JSON.stringify(release[0]!.message!.content)).toContain("[from: gateway; kind: steer; authority: none]");
+    checkinEvidence.push({ case: "wait-task-release", final });
+  });
+
+  it("refuses a task wait during a heavy phase and hands the heavy slot to the parked waiter on heavy done", async () => {
+    const f = await fixture();
+    await configure(f);
+    const hold = gate();
+    let holderTurns = 0;
+    let waiterTurns = 0;
+    const respond: FauxResponseFactory = async context => {
+      if (isWorker(context) && briefed(context, "Heavy holder")) {
+        holderTurns++;
+        if (holderTurns === 1) return fauxAssistantMessage([fauxToolCall("checkin", { step: "Suite", done: "Built", next: "Run", heavy: "start" })], { stopReason: "toolUse" });
+        if (holderTurns === 2) { await hold.wait; return fauxAssistantMessage([fauxToolCall("checkin", { step: "Suite", done: "Ran", next: "Wait", waitFor: { task: "heavy-waiter", until: "settled" } })], { stopReason: "toolUse" }); }
+        if (holderTurns === 3) return fauxAssistantMessage([fauxToolCall("checkin", { step: "Suite", done: "Ran", next: "Report", heavy: "done" })], { stopReason: "toolUse" });
+        return fauxAssistantMessage([reportCall("holder-done", "Suite ran")], { stopReason: "toolUse" });
+      }
+      if (isWorker(context)) {
+        waiterTurns++;
+        if (waiterTurns === 1) return fauxAssistantMessage([fauxToolCall("checkin", { step: "Need a slot", done: "Ready", next: "Run", waitFor: { heavy: true } })], { stopReason: "toolUse" });
+        if (waiterTurns === 2) return fauxAssistantMessage("Parked for a heavy slot.");
+        return fauxAssistantMessage([reportCall("waiter-done", "Ran in the freed slot")], { stopReason: "toolUse" });
+      }
+      return fauxAssistantMessage("Noted.");
+    };
+    f.faux.setResponses(Array.from({ length: 20 }, () => respond));
+    const holder = await start(f, "heavy-holder", "Heavy holder");
+    await waitFor(() => holderTurns === 2, "holder in heavy phase");
+    const waiter = await start(f, "heavy-waiter", "Heavy waiter");
+    await waitFor(() => parked(f, waiter.sessionId), "waiter parks on the heavy slot");
+    hold.open();
+    const holderFinal = await holder.completion;
+    expect(holderFinal.terminalEvidence).toMatchObject({ outcome: "final" });
+    const entries = JSON.stringify((await f.registry.acquire(holder.sessionId)).canonicalSessionEntries());
+    expect(entries).toContain("Wait refused: this task is in a heavy phase");
+    expect((await waiter.completion)).toMatchObject({ operationId: waiter.operationId, terminalEvidence: { outcome: "final" } });
+    expect(JSON.stringify((await f.registry.acquire(waiter.sessionId)).canonicalSessionEntries())).toContain("a heavy slot is free");
+    checkinEvidence.push({ case: "heavy-slot-handoff", holder: holderFinal.terminalEvidence });
+  });
+
+  it("settles an open wait as needs-input on Stop and on a drain", async () => {
+    const f = await fixture();
+    await configure(f);
+    let turns = 0;
+    const respond: FauxResponseFactory = context => {
+      if (isWorker(context)) {
+        if (++turns % 2 === 1) return fauxAssistantMessage([fauxToolCall("checkin", { step: "Need a heavy slot", done: "Built", next: "Run suite", waitFor: { home: "May I take the mini?" } })], { stopReason: "toolUse" });
+        return fauxAssistantMessage("Waiting.");
+      }
+      return fauxAssistantMessage("Noted.");
+    };
+    f.faux.setResponses(Array.from({ length: 16 }, () => respond));
+    const stopped = await start(f, "wait-stop", "Finite stop work");
+    await waitFor(() => parked(f, stopped.sessionId), "parked before Stop");
+    await homeOwnerOf(f.registry).stopTask({ taskId: stopped.taskId, operationId: stopped.operationId });
+    expect((await stopped.completion).terminalEvidence).toMatchObject({ outcome: "needs-input", reason: "wait-stopped", detail: "Waiting for Home's answer: May I take the mini?" });
+    const drained = await start(f, "wait-drain", "Finite drain work");
+    await waitFor(() => parked(f, drained.sessionId), "parked before drain");
+    f.registry.beginAdministrativeDrain();
+    expect((await drained.completion).terminalEvidence).toMatchObject({ outcome: "needs-input", reason: "wait-drained" });
+    checkinEvidence.push({ case: "wait-stop-drain" });
+  });
+
+  it("wakes Home once per idle span for a running worker that writes nothing for 45 minutes", async () => {
+    const f = await fixture();
+    await configure(f);
+    let homeTurns = 0;
+    const respond: FauxResponseFactory = (context, options) => {
+      if (isWorker(context)) return untilStopped("stopped")(context, options);
+      homeTurns++;
+      return fauxAssistantMessage("Leaving it.");
+    };
+    f.faux.setResponses(Array.from({ length: 8 }, () => respond));
+    const run = await start(f, "stalled", "Finite stalled work");
+    await waitFor(async () => (await settledTask(f, run.taskId)).lifecycle === "active", "worker running");
+    await dispatcher(f).sweepStalls(Date.now() + 10 * 60 * 1000);
+    expect((await settledTask(f, run.taskId)).stall).toBeUndefined();
+    await dispatcher(f).sweepStalls(Date.now() + 46 * 60 * 1000);
+    await waitFor(async () => (await settledTask(f, run.taskId)).stall?.wake.state === "acknowledged", "stall wake delivered");
+    await dispatcher(f).sweepStalls(Date.now() + 90 * 60 * 1000);
+    const home = await f.registry.acquire(f.home.sessionId);
+    const delivered = results(home.canonicalSessionEntries() as Entry[]) as Array<Entry & { content: string }>;
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]!.content).toMatch(/^\[from: worker; kind: checkin; authority: none\]\nHome worker has written nothing since/u);
+    expect(homeTurns).toBe(1);
+    expect((await settledTask(f, run.taskId)).lifecycle).toBe("active");
+    await homeOwnerOf(f.registry).stopTask({ taskId: run.taskId, operationId: run.operationId });
+    await run.completion;
+    checkinEvidence.push({ case: "stall-wake-once", delivered: delivered[0] });
+  });
+});

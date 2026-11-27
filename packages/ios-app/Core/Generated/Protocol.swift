@@ -3409,6 +3409,68 @@ package struct HomeTaskCheckinRequestRefs: Hashable, Sendable {
     return "{" + String(s.dropFirst()) + "}"
   }
 }
+package enum HomeTaskHeavyPhase: String, CaseIterable, Hashable, Sendable {
+  case start = "start"
+  case done = "done"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeTaskHeavyPhase {
+    switch v {
+    case .string("start"): return .start
+    case .string("done"): return .done
+    default: throw WireError(path: p, message: "unknown value")
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .start: return "\"start\""
+    case .done: return "\"done\""
+    }
+  }
+}
+package enum HomeTaskWaitUntil: String, CaseIterable, Hashable, Sendable {
+  case settled = "settled"
+  case heavyDone = "heavy-done"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeTaskWaitUntil {
+    switch v {
+    case .string("settled"): return .settled
+    case .string("heavy-done"): return .heavyDone
+    default: throw WireError(path: p, message: "unknown value")
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .settled: return "\"settled\""
+    case .heavyDone: return "\"heavy-done\""
+    }
+  }
+}
+package struct HomeTaskWaitFor: Hashable, Sendable {
+  package let home: String?
+  package let task: String?
+  package let until: HomeTaskWaitUntil?
+  package let heavy: Bool?
+  package init(home: String? = nil, task: String? = nil, until: HomeTaskWaitUntil? = nil, heavy: Bool? = nil) {
+    self.home = home
+    self.task = task
+    self.until = until
+    self.heavy = heavy
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeTaskWaitFor {
+    let o = try wObj(v, p)
+    let f_home: String? = wAbsent(o.value("home")) ? nil : try wStr(o.value("home")!, p + ".home")
+    let f_task: String? = wAbsent(o.value("task")) ? nil : try wStr(o.value("task")!, p + ".task")
+    let f_until: HomeTaskWaitUntil? = wAbsent(o.value("until")) ? nil : try HomeTaskWaitUntil.decode(o.value("until")!, p + ".until")
+    let f_heavy: Bool? = wAbsent(o.value("heavy")) ? nil : try wBool(o.value("heavy")!, p + ".heavy")
+    return HomeTaskWaitFor(home: f_home, task: f_task, until: f_until, heavy: f_heavy)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += (self.home == nil ? "" : ",\"home\":" + wEscape(self.home!))
+    s += (self.task == nil ? "" : ",\"task\":" + wEscape(self.task!))
+    s += (self.until == nil ? "" : ",\"until\":" + self.until!.encode())
+    s += (self.heavy == nil ? "" : ",\"heavy\":" + (self.heavy! ? "true" : "false"))
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
 package enum HomeTaskCheckinAttention: String, CaseIterable, Hashable, Sendable {
   case none = "none"
   case requested = "requested"
@@ -3439,19 +3501,23 @@ package struct HomeTaskCheckin: Hashable, Sendable {
   package let blocker: String?
   package let refs: HomeTaskCheckinRequestRefs?
   package let needsAttention: Bool?
+  package let heavy: HomeTaskHeavyPhase?
+  package let waitFor: HomeTaskWaitFor?
   package let id: String
   package let taskId: String
   package let sessionId: String
   package let operationId: String
   package let at: String
   package let attention: HomeTaskCheckinAttention
-  package init(step: String, done: String, next: String, blocker: String? = nil, refs: HomeTaskCheckinRequestRefs? = nil, needsAttention: Bool? = nil, id: String, taskId: String, sessionId: String, operationId: String, at: String, attention: HomeTaskCheckinAttention = .none) {
+  package init(step: String, done: String, next: String, blocker: String? = nil, refs: HomeTaskCheckinRequestRefs? = nil, needsAttention: Bool? = nil, heavy: HomeTaskHeavyPhase? = nil, waitFor: HomeTaskWaitFor? = nil, id: String, taskId: String, sessionId: String, operationId: String, at: String, attention: HomeTaskCheckinAttention = .none) {
     self.step = step
     self.done = done
     self.next = next
     self.blocker = blocker
     self.refs = refs
     self.needsAttention = needsAttention
+    self.heavy = heavy
+    self.waitFor = waitFor
     self.id = id
     self.taskId = taskId
     self.sessionId = sessionId
@@ -3467,13 +3533,15 @@ package struct HomeTaskCheckin: Hashable, Sendable {
     let f_blocker: String? = wAbsent(o.value("blocker")) ? nil : try wStr(o.value("blocker")!, p + ".blocker")
     let f_refs: HomeTaskCheckinRequestRefs? = wAbsent(o.value("refs")) ? nil : try HomeTaskCheckinRequestRefs.decode(o.value("refs")!, p + ".refs")
     let f_needsAttention: Bool? = wAbsent(o.value("needsAttention")) ? nil : try wBool(o.value("needsAttention")!, p + ".needsAttention")
+    let f_heavy: HomeTaskHeavyPhase? = wAbsent(o.value("heavy")) ? nil : try HomeTaskHeavyPhase.decode(o.value("heavy")!, p + ".heavy")
+    let f_waitFor: HomeTaskWaitFor? = wAbsent(o.value("waitFor")) ? nil : try HomeTaskWaitFor.decode(o.value("waitFor")!, p + ".waitFor")
     let f_id: String = wAbsent(o.value("id")) ? "" : try wStr(o.value("id")!, p + ".id")
     let f_taskId: String = wAbsent(o.value("taskId")) ? "" : try wStr(o.value("taskId")!, p + ".taskId")
     let f_sessionId: String = wAbsent(o.value("sessionId")) ? "" : try wStr(o.value("sessionId")!, p + ".sessionId")
     let f_operationId: String = wAbsent(o.value("operationId")) ? "" : try wStr(o.value("operationId")!, p + ".operationId")
     let f_at: String = wAbsent(o.value("at")) ? "" : try wStr(o.value("at")!, p + ".at")
     let f_attention: HomeTaskCheckinAttention = wAbsent(o.value("attention")) ? .none : try HomeTaskCheckinAttention.decode(o.value("attention")!, p + ".attention")
-    return HomeTaskCheckin(step: f_step, done: f_done, next: f_next, blocker: f_blocker, refs: f_refs, needsAttention: f_needsAttention, id: f_id, taskId: f_taskId, sessionId: f_sessionId, operationId: f_operationId, at: f_at, attention: f_attention)
+    return HomeTaskCheckin(step: f_step, done: f_done, next: f_next, blocker: f_blocker, refs: f_refs, needsAttention: f_needsAttention, heavy: f_heavy, waitFor: f_waitFor, id: f_id, taskId: f_taskId, sessionId: f_sessionId, operationId: f_operationId, at: f_at, attention: f_attention)
   }
   package func encode() -> String {
     var s = ""
@@ -3483,6 +3551,8 @@ package struct HomeTaskCheckin: Hashable, Sendable {
     s += (self.blocker == nil ? "" : ",\"blocker\":" + wEscape(self.blocker!))
     s += (self.refs == nil ? "" : ",\"refs\":" + self.refs!.encode())
     s += (self.needsAttention == nil ? "" : ",\"needsAttention\":" + (self.needsAttention! ? "true" : "false"))
+    s += (self.heavy == nil ? "" : ",\"heavy\":" + self.heavy!.encode())
+    s += (self.waitFor == nil ? "" : ",\"waitFor\":" + self.waitFor!.encode())
     s += ",\"id\":" + wEscape(self.id)
     s += ",\"taskId\":" + wEscape(self.taskId)
     s += ",\"sessionId\":" + wEscape(self.sessionId)
