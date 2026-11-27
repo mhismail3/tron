@@ -2,7 +2,7 @@ import SwiftUI
 
 struct TronDocumentSheet<Content: View>: View {
     let title: String
-    let leadingAction: TronDocumentSheetAction?
+    let leadingActions: [TronDocumentSheetAction]
     let hostsNavigation: Bool
     @ViewBuilder let content: () -> Content
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
@@ -11,12 +11,12 @@ struct TronDocumentSheet<Content: View>: View {
 
     init(
         title: String,
-        leadingAction: TronDocumentSheetAction? = nil,
+        leadingActions: [TronDocumentSheetAction] = [],
         hostsNavigation: Bool = true,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.title = title
-        self.leadingAction = leadingAction
+        self.leadingActions = leadingActions
         self.hostsNavigation = hostsNavigation
         self.content = content
     }
@@ -26,7 +26,7 @@ struct TronDocumentSheet<Content: View>: View {
             if hostsNavigation {
                 NavigationStack {
                     content()
-                        .tronDocumentSheetChrome(title: title, leadingAction: leadingAction)
+                        .tronDocumentSheetChrome(title: title, leadingActions: leadingActions)
                 }
             } else {
                 content()
@@ -40,7 +40,7 @@ struct TronDocumentSheet<Content: View>: View {
 
 private struct TronDocumentSheetChrome: ViewModifier {
     let title: String
-    let leadingAction: TronDocumentSheetAction?
+    let leadingActions: [TronDocumentSheetAction]
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
@@ -54,14 +54,16 @@ private struct TronDocumentSheetChrome: ViewModifier {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar, .bottomBar)
             .toolbar(.hidden, for: .bottomBar)
             .toolbar {
-                if let leadingAction {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button(action: leadingAction.action) {
-                            Image(systemName: leadingAction.systemImage)
-                                .font(TronTypography.buttonSM)
-                                .tronToolbarAction(accent: resolvedAccent)
+                if !leadingActions.isEmpty {
+                    ToolbarItemGroup(placement: .topBarLeading) {
+                        ForEach(leadingActions, id: \.accessibilityLabel) { action in
+                            Button(action: action.action) {
+                                Image(systemName: action.systemImage)
+                                    .font(TronTypography.buttonSM)
+                                    .tronToolbarAction(accent: resolvedAccent)
+                            }
+                            .accessibilityLabel(action.accessibilityLabel)
                         }
-                        .accessibilityLabel(leadingAction.accessibilityLabel)
                     }
                 }
                 ToolbarItem(placement: .principal) {
@@ -84,8 +86,8 @@ private struct TronDocumentSheetChrome: ViewModifier {
 }
 
 extension View {
-    func tronDocumentSheetChrome(title: String, leadingAction: TronDocumentSheetAction? = nil) -> some View {
-        modifier(TronDocumentSheetChrome(title: title, leadingAction: leadingAction))
+    func tronDocumentSheetChrome(title: String, leadingActions: [TronDocumentSheetAction] = []) -> some View {
+        modifier(TronDocumentSheetChrome(title: title, leadingActions: leadingActions))
     }
 }
 

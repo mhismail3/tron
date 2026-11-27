@@ -11,7 +11,8 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   swipe actions, `ArchivedSessionsSection`, `SessionTitleSearch`, `HomePinnedRow`, `HomeUsageSummaryCard`,
   `ArtifactsSheet` (`artifacts.list`: a `TronFeed` with a Tools section by last update and Reports
   grouped by day; a row opens the page in the in-app WebKit viewer, its menu and the viewer's
-  toolbar in Safari).
+  toolbar in Safari; the viewer's Share downloads the page to a title-named `.html` file and shares
+  that file, since the tailnet URL works only on the tailnet).
 - Chat route: `ChatView` (composition and lifecycle root), `ChatRoutes`, `ChatTranscriptSheetRoutes`,
   `ChatSessionPresentation`, `ChatTranscriptScrollView`, `ChatTranscriptOrientation`,
   `ChatScrollCoordinator`, `ChatComposerView`, `ChatTranscriptPresentationStore`,

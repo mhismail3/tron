@@ -2275,7 +2275,7 @@ private struct TronPulseRings: UIViewRepresentable {
     }
 }
 
-private final class TronPulseRingsView: UIView {
+final class TronPulseRingsView: UIView {
     private let rings = (0..<TronPulseLoadingIndicatorEngine.pulseCount).map { _ in CAShapeLayer() }
     private var animating: Bool?
 
@@ -2292,7 +2292,8 @@ private final class TronPulseRingsView: UIView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for ring in rings {
-            ring.frame = bounds
+            ring.bounds = bounds
+            ring.position = CGPoint(x: bounds.midX, y: bounds.midY)
             ring.path = UIBezierPath(ovalIn: bounds).cgPath
         }
         CATransaction.commit()
@@ -2313,6 +2314,7 @@ private final class TronPulseRingsView: UIView {
         let now = CACurrentMediaTime()
         let cycle = TronPulseLoadingIndicatorEngine.cycleDuration
         for (pulse, ring) in rings.enumerated() {
+            ring.transform = CATransform3DIdentity
             let begin = ring.convertTime(
                 now - TronPulseLoadingIndicatorEngine.progress(pulse: pulse, time: now) * cycle, from: nil)
             let scale = CABasicAnimation(keyPath: "transform.scale")

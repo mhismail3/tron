@@ -6,12 +6,6 @@ enum QuickRebuildRowState: Equatable {
     case running
     case unavailable(String)
 
-    static func gateway(supported: Bool, configured: Bool, active: Bool) -> Self {
-        guard supported else { return .unavailable("Not supported by this Gateway") }
-        if active { return .running }
-        return configured ? .ready : .unavailable("Set a source repository in server details")
-    }
-
     static func device(supported: Bool, configured: Bool, active: Bool) -> Self {
         guard supported else { return .unavailable("Not supported by this Gateway") }
         if active { return .running }
@@ -51,9 +45,6 @@ struct QuickRebuildGroup: View {
     let thisDevice: GatewayAuthorizedDevice?
     let showReplacement: () -> Void
 
-    @State private var gatewayConfigured = false
-    @State private var gatewayStatus: GatewayUpdateStatus?
-    @State private var gatewayCommandID: String?
     @State private var installConfigured = false
     @State private var installStatus: IosDeviceInstallStatus?
     @State private var requesting = false
@@ -63,14 +54,6 @@ struct QuickRebuildGroup: View {
     @State private var loadGeneration = 0
 
     private var capabilities: [String] { model.gatewayInfo?.capabilities ?? [] }
-
-    private var gatewayState: QuickRebuildRowState {
-        .gateway(
-            supported: AppModel.supportsGatewayUpdate(capabilities: capabilities),
-            configured: gatewayConfigured,
-            active: gatewayCommandID != nil || gatewayStatus?.isActive == true
-        )
-    }
 
     private var deviceState: QuickRebuildRowState {
         .device(
@@ -94,19 +77,11 @@ struct QuickRebuildGroup: View {
         return false
     }
 
-    private var isRunning: Bool { gatewayState == .running || deviceState == .running || replacementRunning }
+    private var isRunning: Bool { deviceState == .running || replacementRunning }
 
     var body: some View {
         TronSettingsGroup("Quick Rebuild", detail: "Rebuild from source on \(profile.label).", accent: .tronPrimary) {
             VStack(spacing: 0) {
-                row(
-                    icon: "desktopcomputer",
-                    title: "Rebuild Gateway",
-                    readyDetail: profile.label,
-                    state: gatewayState,
-                    accessibilityName: "Gateway"
-                ) { await rebuildGateway() }
-                TronSettingsDivider(accent: .tronPrimary)
                 row(
                     icon: "iphone",
                     title: "Rebuild iPhone App",
@@ -207,18 +182,6 @@ struct QuickRebuildGroup: View {
         let generation = loadGeneration
         func current() -> Bool { generation == loadGeneration && admitsRead }
 
-        if AppModel.supportsGatewayUpdate(capabilities: capabilities) {
-            let config = await model.loadGatewayUpdateConfig(for: profile)
-            guard current() else { return }
-            gatewayConfigured = config != nil
-            if let status = await model.loadGatewayUpdateStatus(for: profile), current() {
-                gatewayStatus = status
-                if let commandID = gatewayCommandID,
-                   GatewayUpdatePollingDecision.decide(status, commandID: commandID) == .terminal {
-                    gatewayCommandID = nil
-                }
-            }
-        }
         if AppModel.supportsMacReplacement(capabilities: capabilities) {
             let status = await model.loadMacReplacementStatus(for: profile)
             guard current() else { return }
@@ -241,15 +204,6 @@ struct QuickRebuildGroup: View {
             installStatus = status
         } catch {
             return
-        }
-    }
-
-    private func rebuildGateway() async {
-        guard !requesting, gatewayState == .ready else { return }
-        requesting = true
-        defer { requesting = false }
-        if let commandID = await model.requestGatewayUpdate(for: profile, mode: "source") {
-            gatewayCommandID = commandID
         }
     }
 

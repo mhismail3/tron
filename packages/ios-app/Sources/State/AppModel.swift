@@ -2098,8 +2098,8 @@ extension AppModel {
 
     func requestGatewayUpdate(
         for profile: GatewayProfile,
-        mode: String = "source",
-        debugCandidate: GatewayDebugPromotionCandidate? = nil
+        mode: String,
+        debugCandidate: GatewayDebugPromotionCandidate?
     ) async -> String? {
         guard profiles.selected?.id == profile.id,
               let admission = lifecycle.generationAdmission else { return nil }
