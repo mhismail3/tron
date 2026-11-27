@@ -13,7 +13,7 @@ import {
   fauxAssistantMessage, fauxProvider, fauxToolCall, getCurrentTools,
   type FauxProviderHandle, type ToolCall, type Message,
 } from "@earendil-works/pi-ai";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { TrustService } from "../../kernel/resources/trust-service.js";
 import type { HomeRequestRecord } from "../../modules/home/home-request-policy.js";
@@ -764,6 +764,38 @@ describe("Tron Home research tools", () => {
     expect(read!.text).toContain("PUBLICATION-CURRENT-DECISION");
     expect(read!.text).not.toContain("PUBLICATION-RACE-NEEDLE");
     recordCase("search-publication-edit", { staleCitationDropped: true, canonicalEditReadable: true, localEmbeddings: embedded.length });
+  }, 60_000);
+
+  it("keeps the rebuilt current passage when a dirty refresh loaded before a rekey finishes after the rebuild", async () => {
+    const f = await fixture("search-rekey-dirty");
+    const ordinary = await f.registry.create(f.project);
+    await ordinary.setModel(PROVIDER, MODEL_ID);
+    f.faux.setResponses([fauxAssistantMessage("ALPHAORIGINAL first decision")]);
+    await ordinary.prompt("a rekeyed historical decision");
+    await waitFor(() => ordinary.snapshot().phase === "idle" || undefined, "historical answer settled");
+    const staleCut = structuredClone(await f.registry.readSearchCut(ordinary.id));
+    const anchor = staleCut.entries.find(entry => entry.type === "message" && entry.message.role === "assistant");
+    if (!anchor) throw new Error("fixture has no source answer");
+    (ordinary as unknown as { sessionManager: SessionManager }).sessionManager.appendContextEdit(anchor.id, { content: [{ type: "text", text: "ZEBRAQUOKKA" }] });
+    expect((await f.search.search({ query: "ZEBRAQUOKKA" })).results.map(hit => hit.entryId)).toContain(anchor.id);
+    const invalidate = (f.registry as unknown as { searchInvalidator: (sessionID: string, nextSessionID?: string) => void }).searchInvalidator;
+    let release!: () => void;
+    let held = false;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const hook = vi.spyOn(f.registry, "readSearchCut").mockImplementationOnce(async () => { held = true; await gate; return staleCut; });
+    invalidate(ordinary.id);
+    const dirty = f.search.search({ query: "ALPHAORIGINAL" });
+    let rebuilt: ReturnType<SessionSearchService["search"]> | undefined;
+    try {
+      await waitFor(() => held || undefined, "dirty refresh holding a loaded cut");
+      invalidate(ordinary.id, ordinary.id);
+      rebuilt = f.search.search({ query: "ZEBRAQUOKKA" });
+      await waitFor(() => (f.search as unknown as { initialized: boolean }).initialized || undefined, "rebuild finished before the held refresh");
+    } finally { release(); hook.mockRestore(); }
+    await dirty;
+    expect((await rebuilt!).results.map(hit => hit.entryId)).toContain(anchor.id);
+    expect((await f.search.search({ query: "ZEBRAQUOKKA" })).results.map(hit => hit.entryId)).toContain(anchor.id);
+    recordCase("search-rekey-dirty", { currentPassageKept: true });
   }, 60_000);
 
   it("reads every exported source revision and citation through the existing Home file tool", async () => {
