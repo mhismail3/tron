@@ -95,7 +95,7 @@ interface HomeTaskControlRow {
   runningTool?: HomeTaskRunningTool;
   actions: Array<"status" | "report" | "steer" | "interrupt" | "stop" | "resume" | "rename">;
 }
-interface HomeTaskRunningTool { name: string; startedAt: string; command?: string }
+interface HomeTaskRunningTool { name: string; startedAt: string }
 interface LiveOperation {
   taskId: string; sessionId: string; operationId: string; reports: HomeTaskReportOwner;
   heavy: boolean; heavyClaim: boolean; heavyDone: number; waitBaseline: number; waitSince: number; stalledSince?: string;
@@ -197,6 +197,7 @@ export class HomeTaskDispatcher {
   private readonly listFlights = new Map<string, ListFlight>();
   private readonly running = new Set<string>();
   private readonly live = new Map<string, LiveOperation>();
+  private readonly settled = new Set<string>();
   private stallTimer: NodeJS.Timeout | undefined;
   private readonly pressure: HostPressure;
   readonly commands: TaskCommandSweep;
@@ -532,7 +533,7 @@ export class HomeTaskDispatcher {
         await cancellation("task-stop");
       }, async (sessionId, request) => {
         const wait = request.waitFor;
-        const holds = wait?.task !== undefined ? await this.waitTargetHolds(task.taskId, wait) : undefined;
+        const targetSettled = wait?.task !== undefined && await this.waitTargetSettled(task.taskId, wait);
         let accepted!: HomeTaskCheckin;
         const saved = await this.store.update(task.taskId, current => {
           if (current.lifecycle !== "active" || current.stopIntent || current.operationId !== operationId || current.sessionId !== sessionId) throw new GatewayError("conflict", "Check-in operation is no longer active");
@@ -546,7 +547,7 @@ export class HomeTaskDispatcher {
         });
         this.diagnostic?.({ event: "home.task.checkin", taskHash: hash(saved.taskId), operationHash: hash(operationId), revision: saved.revision, attention: accepted.attention });
         if (accepted.attention === "requested") await this.inbox.publishAttention(saved.taskId).catch(() => {});
-        return { checkin: accepted, reply: this.checkinAccepted(task.taskId, reports, accepted, holds) };
+        return { checkin: accepted, reply: this.checkinAccepted(task.taskId, reports, accepted, targetSettled) };
       }, async text => {
         const live = this.live.get(task.taskId);
         try { if (!live) throw new Error("released task is no longer live"); await this.sessions.delegation.steerWorker(live.sessionId, { taskId: task.taskId, operationId }, text, "gateway"); }
@@ -718,24 +719,27 @@ export class HomeTaskDispatcher {
     this.releaseWaits();
   }
 
-  private async waitTargetHolds(taskId: string, wait: HomeTaskWaitFor): Promise<string | undefined> {
+  private async waitTargetSettled(taskId: string, wait: HomeTaskWaitFor): Promise<boolean> {
     const target = wait.task!;
     if (target === taskId) throw new GatewayError("invalid_request", "A task cannot wait for itself");
-    for (let next: string | undefined = target, hops = 0; next !== undefined && hops <= this.live.size; hops++) {
-      next = this.live.get(next)?.reports.waiting?.task;
-      if (next === taskId) throw new GatewayError("invalid_request", `Waiting for ${target} would make a cycle: it already waits for this task`);
-    }
-    if (this.live.has(target)) return undefined;
     const record = await this.store.read(target).catch(() => undefined);
     if (!record) throw new GatewayError("invalid_request", `No task "${target}" to wait for`);
-    return `Task ${target} has already settled`;
+    return record.lifecycle === "terminal";
+  }
+
+  private waitCycle(taskId: string, target: string): boolean {
+    for (let next: string | undefined = target, hops = 0; next !== undefined && hops <= this.live.size; hops++) {
+      next = this.live.get(next)?.reports.waiting?.task;
+      if (next === taskId) return true;
+    }
+    return false;
   }
 
   private heavyFree(taskId: string): boolean {
     return [...this.live.values()].every(op => op.taskId === taskId || (!op.heavy && !op.heavyClaim));
   }
 
-  private checkinAccepted(taskId: string, reports: HomeTaskReportOwner, checkin: HomeTaskCheckin, holds: string | undefined): string {
+  private checkinAccepted(taskId: string, reports: HomeTaskReportOwner, checkin: HomeTaskCheckin, targetSettled: boolean): string {
     const op = this.live.get(taskId);
     if (op && checkin.heavy) {
       op.heavy = checkin.heavy === "start"; op.heavyClaim = false;
@@ -745,10 +749,11 @@ export class HomeTaskDispatcher {
     let reply = `Check-in saved. Attention: ${checkin.attention}.`;
     if (!wait) reply += " Continue working.";
     else if (wait.home !== undefined && checkin.attention !== "requested") reply += ` Wait refused: Home's wake is ${checkin.attention}. Continue, or report needs-input.`;
-    else if (holds) reply += ` ${holds}; continue now.`;
+    else if (wait.task !== undefined && (targetSettled || this.settled.has(wait.task))) reply += ` Task ${wait.task} has already settled; continue now.`;
+    else if (wait.task !== undefined && this.waitCycle(taskId, wait.task)) reply += ` Wait refused: task ${wait.task} already waits for this task, which would make a cycle. Continue, or report needs-input.`;
     else if (wait.heavy && op && this.heavyFree(taskId)) { op.heavyClaim = true; reply += " A heavy slot is free: check in heavy start and continue now."; }
     else {
-      if (op) { op.waitBaseline = wait.task ? this.live.get(wait.task)?.heavyDone ?? 0 : 0; op.waitSince = Date.now(); }
+      if (op) { op.waitBaseline = wait.task ? this.live.get(wait.task)?.heavyDone ?? 0 : 0; op.waitSince = Date.now(); op.heavyClaim = false; }
       reports.openWait(wait);
       reply += ` Waiting for ${homeTaskWaitText(wait)} in this same task. End your turn now; your next turn starts with ${wait.home !== undefined ? "Home's steer" : "the release"}.`;
     }
@@ -761,8 +766,8 @@ export class HomeTaskDispatcher {
       const wait = op.reports.waiting;
       if (wait?.task === undefined) continue;
       const target = this.live.get(wait.task);
-      if (!target) op.reports.release(`The wait is over: task ${wait.task} has settled. Continue this task.`);
-      else if (wait.until === "heavy-done" && target.heavyDone > op.waitBaseline) op.reports.release(`The wait is over: task ${wait.task} posted heavy done. Continue this task.`);
+      if (this.settled.has(wait.task)) op.reports.release(`The wait is over: task ${wait.task} has settled. Continue this task.`);
+      else if (target && wait.until === "heavy-done" && target.heavyDone > op.waitBaseline) op.reports.release(`The wait is over: task ${wait.task} posted heavy done. Continue this task.`);
     }
     const waiters = [...this.live.values()].filter(op => op.reports.waiting?.heavy && !op.heavyClaim).sort((a, b) => a.waitSince - b.waitSince);
     for (const op of waiters) {
@@ -780,11 +785,10 @@ export class HomeTaskDispatcher {
     const span = homeTaskOperationSpan(entries, op.operationId);
     const last = span.run.at(-1) ?? (span.index < 0 ? undefined : entries[span.index]);
     const tool = slot ? [...slot.toolExecutions.values()].filter(call => call.status === "running").at(-1) : undefined;
-    const command = tool && typeof (tool.arguments as { command?: unknown } | null)?.command === "string" ? [...(tool.arguments as { command: string }).command].slice(0, 80).join("") : undefined;
     const waitingFor = op.reports.waiting;
     return { ...(waitingFor ? { waitingFor: structuredClone(waitingFor) } : {}), ...(op.heavy ? { heavy: true as const } : {}),
       ...(last ? { lastEntryAt: last.timestamp } : {}),
-      ...(tool ? { runningTool: { name: tool.toolName, startedAt: tool.startedAt, ...(command ? { command } : {}) } } : {}) };
+      ...(tool ? { runningTool: { name: tool.toolName, startedAt: tool.startedAt } } : {}) };
   }
 
   async sweepStalls(now = Date.now()): Promise<void> {
@@ -794,7 +798,7 @@ export class HomeTaskDispatcher {
       const activity = this.activity(op.taskId, op.operationId);
       if (!activity.lastEntryAt || now - Date.parse(activity.lastEntryAt) < HOME_TASK_STALL_MS || op.stalledSince === activity.lastEntryAt) continue;
       op.stalledSince = activity.lastEntryAt;
-      const runningTool = activity.runningTool ? `${activity.runningTool.name}${activity.runningTool.command ? `: ${activity.runningTool.command}` : ""}` : null;
+      const runningTool = activity.runningTool?.name ?? null;
       const saved = await this.store.update(op.taskId, current => current.lifecycle !== "active" || current.operationId !== op.operationId
         || (current.stall && !["acknowledged", "blocked", "outcome-unknown"].includes(current.stall.wake.state)) ? current
         : { ...current, stall: { operationId: op.operationId, idleSince: activity.lastEntryAt!, runningTool,
@@ -1158,6 +1162,7 @@ export class HomeTaskDispatcher {
       transition: task.lifecycle, reason, operationHash: task.operationId ? hash(task.operationId) : null, ...(errorCode ? { errorCode } : {}),
       ...(task.terminalEvidence?.failureCause ? { failureCause: task.terminalEvidence.failureCause } : {}) });
     if (task.sessionId) this.sessions.recordTaskWorkers([[task.sessionId, task.taskId]]);
+    if (task.lifecycle === "terminal") { this.settled.add(task.taskId); this.releaseWaits(); }
     if (task.lifecycle === "terminal" && task.sessionId) {
       const sessionId = task.sessionId;
       void Promise.resolve().then(() => this.sessions.taskWorkerSettled(sessionId, task.taskId)).catch(() => {});

@@ -604,8 +604,10 @@ describe("Workers wait in place and stalls wake Home once (#2695, #2696)", () =>
   const briefed = (context: Parameters<FauxResponseFactory>[0], marker: string) => JSON.stringify(context.messages).includes(marker);
   const start = (f: Fixture, taskId: string, intent: string) => homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId, intent, target: f.cwd });
   const dispatcher = (f: Fixture) => (homeOwnerOf(f.registry) as unknown as { tasks: { sweepStalls(now: number): Promise<void> } }).tasks;
-  const parked = async (f: Fixture, sessionId: string) => (await f.registry.acquire(sessionId)).ownedTurns.waitingTask?.wakeOperationId === undefined
-    && (await f.registry.acquire(sessionId)).ownedTurns.waitingTask !== undefined;
+  const parked = async (f: Fixture, sessionId: string) => {
+    const waiting = (await f.registry.acquire(sessionId)).ownedTurns.waitingTask;
+    return waiting !== undefined && waiting.wakeOperationId === undefined;
+  };
 
   it("parks on a Home question with no authority, continues under the same task on Home's steer, and is no stall", async () => {
     const f = await fixture();
@@ -652,6 +654,7 @@ describe("Workers wait in place and stalls wake Home once (#2695, #2696)", () =>
     const respond: FauxResponseFactory = async context => {
       if (isWorker(context) && briefed(context, "Blocking work B")) {
         await hold.wait;
+        if (!briefed(context, "would make a cycle")) return fauxAssistantMessage([fauxToolCall("checkin", { step: "Circular", done: "Tried", next: "Wait on A", waitFor: { task: "wait-a", until: "settled" } })], { stopReason: "toolUse" });
         return fauxAssistantMessage([reportCall("b-done", "B done")], { stopReason: "toolUse" });
       }
       if (isWorker(context)) {

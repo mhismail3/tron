@@ -64,7 +64,7 @@ settled. It is available on wakes and maintainer turns. Pages use UTF-8 byte off
 at most 4096 bytes, like `task report`; `nextOffset` continues a growing transcript.
 `task report` on an unsettled task returns its live control row. A running row carries live
 activity read from the worker's live runtime, never persisted: `lastEntryAt` (newest canonical
-entry of the operation), `runningTool` (`name`, `startedAt`, an 80-character `command` prefix),
+entry of the operation), `runningTool` (`name`, `startedAt`; never arguments),
 `heavy` and `waitingFor`.
 Cold source files over 64 MiB refuse with `busy` rather than reading an unbounded source.
 Offsets refer to the current projection; restart at zero after context edits or newly
@@ -99,11 +99,11 @@ task ID, operation and worker slot.
   memory: a target that settles or checks in `heavy: done`, or a free heavy slot (no other live
   operation in a heavy phase or holding a released claim; oldest waiter first). The release is
   one gateway steer with `authority: none`; a release that cannot be admitted ends the operation.
-  Waiting on itself, an unknown task or a cycle is refused; a target already settled continues at once.
+  Waiting on itself or an unknown task is refused, a cycle is refused by reply (checked synchronously as the wait opens), and a target already terminal (not merely pending) continues at once.
 - Any accepted steer ends the wait. Stop, the 24-hour ceiling, a drain or a failed release settle
   an open wait as `needs-input` (`wait-stopped`, `wait-deadline`, `wait-drained`, `wait-ended`)
   with the wait as `detail`; resume continues it as usual. A drain releases a parked wait and a
-  turn ending during a drain does not park.
+  turn ending during a drain neither parks nor takes a release. A heavy claim ends when its holder opens another wait.
 
 ### Stall wake
 

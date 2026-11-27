@@ -8,6 +8,7 @@ import type { TaskWorkerDiagnostic } from "./worker-contract.js";
 
 interface WorkerTurnRuntime {
   readonly runQueue: { readonly queuedMessages: { readonly length: number } };
+  readonly lifecycle: { readonly isDraining: boolean };
   readonly dependencies: { homeTaskDiagnostic?: (record: TaskWorkerDiagnostic) => void };
   canonicalSessionEntries(): FileEntry[];
   hasDetachedDashboardWork(): boolean;
@@ -20,7 +21,7 @@ export function workerFinishTurn(worker: WorkerTurnRuntime, created: { readonly 
     const decision = await finishTurn?.(turn, signal);
     const ending = taskWorker.reportSealed || await taskWorker.exceedsBudget(worker.canonicalSessionEntries());
     if (!ending) {
-      const release = turn.message.stopReason === "stop" && !signal?.aborted ? taskWorker.takeReleaseInTurn() : undefined;
+      const release = turn.message.stopReason === "stop" && !signal?.aborted && !worker.lifecycle.isDraining ? taskWorker.takeReleaseInTurn() : undefined;
       if (release !== undefined) {
         await created.session.sendCustomMessage({ customType: "tron.home-task-wait-release.v1",
           content: injectedText(release, "gateway", "steer", "none"), display: true }, { triggerTurn: true });

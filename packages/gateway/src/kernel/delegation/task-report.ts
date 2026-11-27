@@ -97,13 +97,13 @@ export class HomeTaskReportOwner {
   get waiting(): HomeTaskWaitFor | undefined { return this.wait?.request; }
   openWait(request: HomeTaskWaitFor): void { this.wait = { request }; }
   endWait(): void { this.wait = undefined; }
-  release(text: string): boolean {
+  release(text: string): void {
     const wait = this.wait;
-    if (!wait || wait.release !== undefined) return false;
+    if (!wait || wait.release !== undefined) return;
     wait.release = text;
     if (wait.parked) this.deliver(wait);
-    return true;
   }
+  woken(): void { if (this.wait) delete this.wait.parked; }
   parked(): void {
     const wait = this.wait;
     if (!wait) return;
