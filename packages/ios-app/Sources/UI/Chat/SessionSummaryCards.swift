@@ -4,7 +4,7 @@ import TronMobileCore
 @MainActor
 enum SessionSummaryTypography {
     static let metadataSizeAdjustment = TronSettingsLayoutPolicy.metadataSizeAdjustment
-    static var headline: Font { TronTypography.sans(size: TronTypography.sizeXL, weight: .bold) }
+    static var headline: Font { TronTypography.summaryHeadline }
     static var detail: Font { TronTypography.sans(size: TronTypography.sizeSecondary + metadataSizeAdjustment) }
     static var usageValue: Font { TronTypography.code(size: TronTypography.sizeSecondary + metadataSizeAdjustment) }
     static var metric: Font { TronTypography.code(size: TronTypography.sizeSecondary + metadataSizeAdjustment, weight: .semibold) }

@@ -168,10 +168,10 @@ struct AutomationHeaderCard: View {
 }
 
 struct AutomationFact: Identifiable {
-    let icon: String
     let title: String
     let value: String
     var isIdentifier = false
+    var isBlock = false
     var id: String { title }
 }
 
@@ -194,15 +194,34 @@ struct AutomationFactsGroup<Footer: View>: View {
         TronSettingsGroup(section.title) {
             VStack(spacing: 0) {
                 ForEach(Array(section.facts.enumerated()), id: \.element.id) { index, fact in
-                    if index > 0 { TronSettingsDivider() }
-                    TronSettingsRow(
-                        icon: fact.icon, title: fact.title, subtitle: fact.value, subtitleLineLimit: nil,
-                        subtitleFont: fact.isIdentifier ? TronTypography.code(size: TronTypography.sizeBodySM) : TronTypography.subheadline
-                    )
-                    .textSelection(.enabled)
+                    if index > 0 { TronSettingsDivider(leadingPadding: TronSettingsLayoutPolicy.rowHorizontalPadding) }
+                    if fact.isBlock { block(fact) } else { row(fact) }
                 }
                 footer()
             }
+        }
+    }
+
+    private func block(_ fact: AutomationFact) -> some View {
+        Text(fact.value)
+            .font(TronTypography.body)
+            .foregroundStyle(Color.tronTextPrimary)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
+            .padding(.vertical, TronSpacing.xl)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityLabel("\(fact.title), \(fact.value)")
+    }
+
+    private func row(_ fact: AutomationFact) -> some View {
+        TronSettingsRow(icon: nil, title: fact.title, titleFont: TronTypography.sans(size: TronTypography.sizeBody, weight: .medium)) {
+            Text(fact.value)
+                .font(fact.isIdentifier ? TronTypography.secondaryCodeDescription : TronTypography.settingsRowSubtext)
+                .foregroundStyle(Color.tronTextSecondary)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
         }
     }
 }
@@ -233,48 +252,42 @@ struct AutomationActionRow: View {
 
 extension AutomationFactSection {
     static func detail(record: GatewayAutomationRecord, server: String, targetLabel: String) -> [Self] {
-        var basics: [AutomationFact] = []
-        if let description = record.description, !description.isEmpty {
-            basics.append(AutomationFact(icon: "text.alignleft", title: "Description", value: description))
+        var schedule = [AutomationFact(title: "Repeats", value: record.trigger.summary)]
+        if let next = record.nextOccurrenceAt {
+            schedule.append(AutomationFact(title: "Next run", value: AutomationDateFormatting.date(next)))
         }
-        basics.append(AutomationFact(icon: "desktopcomputer", title: "Gateway", value: server))
+        if let run = record.currentRun {
+            schedule.append(AutomationFact(title: "Current run", value: AutomationDateFormatting.date(run.scheduledFor)))
+        }
+        let lastRun = record.currentRun?.startedAt ?? record.lastRun?.startedAt ?? record.lastRun?.terminalAt ?? record.lastRun?.scheduledFor
+        schedule.append(AutomationFact(title: "Last run", value: lastRun.map { AutomationDateFormatting.date($0) } ?? "No runs yet"))
+        schedule.append(AutomationFact(title: "Timezone", value: record.trigger.timezone ?? TimeZone.current.identifier))
+        if let expiresAt = record.provenance.expiresAt {
+            schedule.append(AutomationFact(title: "Expires", value: AutomationDateFormatting.date(expiresAt)))
+        }
 
         let kind = record.action.typedKind ?? .sessionPrompt
-        var action = [AutomationFact(icon: kind.icon, title: kind == .notification ? "Message" : "Prompt",
-                                     value: record.action.content.isEmpty ? "No action content returned." : record.action.content)]
+        let content = kind == .notification ? "Message" : "Prompt"
+        var action = [AutomationFact(title: content, value: record.action.content.isEmpty ? "No action content returned." : record.action.content,
+                                     isBlock: true)]
         if let invocation = record.action.resourceInvocation {
-            action.append(AutomationFact(icon: "sparkles",
-                                         title: invocation.source == .prompt ? "Prompt template" : invocation.source.rawValue.capitalized,
+            action.append(AutomationFact(title: invocation.source == .prompt ? "Prompt template" : invocation.source.rawValue.capitalized,
                                          value: invocation.name))
         }
 
-        var target = [AutomationFact(icon: "arrow.turn.down.right", title: "Destination", value: targetLabel)]
-        if case let .workspace(cwd, _) = record.target {
-            target.append(AutomationFact(icon: "folder", title: "Workspace", value: cwd, isIdentifier: true))
-        }
-
-        var schedule = [
-            AutomationFact(icon: "repeat", title: "Repeats", value: record.trigger.summary),
-            AutomationFact(icon: "globe", title: "Timezone", value: record.trigger.timezone ?? TimeZone.current.identifier),
-        ]
-        if let next = record.nextOccurrenceAt {
-            schedule.append(AutomationFact(icon: "calendar.badge.clock", title: "Next", value: AutomationDateFormatting.date(next)))
-        }
-        if let run = record.currentRun {
-            schedule.append(AutomationFact(icon: "play.circle", title: "Current run", value: AutomationDateFormatting.date(run.scheduledFor)))
-        }
-        let lastRun = record.currentRun?.startedAt ?? record.lastRun?.startedAt ?? record.lastRun?.terminalAt ?? record.lastRun?.scheduledFor
-        schedule.append(AutomationFact(icon: "clock.arrow.circlepath", title: "Last run",
-                                       value: lastRun.map { AutomationDateFormatting.date($0) } ?? "No runs yet"))
-
-        let behavior = [
-            AutomationFact(icon: "clock.arrow.circlepath", title: "After downtime",
+        let delivery = [
+            AutomationFact(title: "Destination", value: targetLabel),
+            AutomationFact(title: "Gateway", value: server),
+            AutomationFact(title: "After downtime",
                            value: record.misfirePolicy == "latest" ? "Run latest missed occurrence" : "Skip missed occurrences"),
-            AutomationFact(icon: "rectangle.stack.badge.play", title: "While running",
+            AutomationFact(title: "While running",
                            value: record.overlapPolicy == "queueLatest" ? "Queue latest occurrence" : "Skip overlapping occurrences"),
-            AutomationFact(icon: "timer", title: "Deadline", value: "\(record.executionDeadlineSeconds / 60) minutes"),
+            AutomationFact(title: "Deadline", value: "\(record.executionDeadlineSeconds / 60) minutes"),
         ]
+        return [Self(title: "Schedule", facts: schedule), Self(title: content, facts: action), Self(title: "Delivery", facts: delivery)]
+    }
 
+    static func technical(record: GatewayAutomationRecord) -> [TronTechnicalMetadataItem] {
         let creator = switch record.provenance.kind {
         case "mobile": "iPhone"
         case "local": "Mac"
@@ -282,19 +295,18 @@ extension AutomationFactSection {
         case "home": "Tron Home"
         default: record.provenance.kind
         }
-        var about = [
-            AutomationFact(icon: "calendar", title: "Created", value: AutomationDateFormatting.date(record.createdAt)),
-            AutomationFact(icon: "pencil", title: "Updated", value: AutomationDateFormatting.date(record.updatedAt)),
-            AutomationFact(icon: "person", title: "Created by", value: creator),
-            AutomationFact(icon: "number", title: "Revision", value: "\(record.revision)"),
+        var items = [
+            TronTechnicalMetadataItem(title: "Automation ID", value: record.id, icon: "number"),
+            TronTechnicalMetadataItem(title: "Revision", value: "\(record.revision)", icon: "number"),
+            TronTechnicalMetadataItem(title: "Created", value: AutomationDateFormatting.date(record.createdAt), icon: "calendar"),
+            TronTechnicalMetadataItem(title: "Updated", value: AutomationDateFormatting.date(record.updatedAt), icon: "pencil"),
+            TronTechnicalMetadataItem(title: "Created by", value: creator, icon: "person"),
         ]
-        if let expiresAt = record.provenance.expiresAt {
-            about.append(AutomationFact(icon: "hourglass", title: "Expires", value: AutomationDateFormatting.date(expiresAt)))
+        switch record.target {
+        case let .workspace(cwd, _): items.append(TronTechnicalMetadataItem(title: "Workspace", value: cwd, icon: "folder"))
+        case let .existingSession(sessionID): items.append(TronTechnicalMetadataItem(title: "Session ID", value: sessionID, icon: "bubble.left.and.bubble.right"))
+        case .home: break
         }
-        return [
-            Self(title: "Basics", facts: basics), Self(title: "Action", facts: action),
-            Self(title: "Target", facts: target), Self(title: "Schedule", facts: schedule),
-            Self(title: "Behavior", facts: behavior), Self(title: "About", facts: about),
-        ]
+        return items
     }
 }

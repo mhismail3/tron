@@ -9,6 +9,8 @@ struct ChangeReviewSheet: View {
     let close: (() -> Void)?
     let approve: () -> Void
     let cancel: () -> Void
+    @PresentationState private var showingTechnicalDetails = false
+    private var presentation: ChangeReviewPresentation { ChangeReviewPresentation(review) }
 
     init(review: ChangeReview, submitting: Bool = false, secret: Binding<String>? = nil, failure: String? = nil,
          close: (() -> Void)? = nil, approve: @escaping () -> Void, cancel: @escaping () -> Void) {
@@ -20,19 +22,14 @@ struct ChangeReviewSheet: View {
         NavigationStack {
             ScrollView {
                 TronSettingsSections(alignment: .leading, spacing: TronSpacing.section) {
-                    TronSettingsGroup(nil) {
-                        TronSettingsRow(icon: "checkmark.shield", title: review.title, subtitle: review.reason, subtitleLineLimit: nil)
-                    }
-                    ForEach(Array(review.items.enumerated()), id: \.offset) { _, item in
+                    header
+                    ForEach(Array(presentation.items.enumerated()), id: \.offset) { _, item in
                         TronSettingsGroup(item.label) {
                             value("Before", item.before)
-                            TronSettingsDivider()
+                            TronSettingsDivider(leadingPadding: TronSettingsLayoutPolicy.rowHorizontalPadding)
                             value("After", item.after)
                         }
-                        .tronSettingsCaption(item.detail)
-                        if let exact = item.exact {
-                            TronSettingsGroup("Exact values") { TronSettingsCodeRow(text: exact) }
-                        }
+                        .tronSettingsCaption(item.note)
                     }
                     if let secret {
                         TronSettingsGroup("API key") {
@@ -50,6 +47,18 @@ struct ChangeReviewSheet: View {
                                 }
                         }
                         .tronSettingsCaption("Sent once to your Mac and stored in its Keychain. It is never shown again.")
+                    }
+                    TronGlassCard {
+                        Button { showingTechnicalDetails = true } label: {
+                            TronSettingsRow(icon: "info.circle", title: "Technical details",
+                                            subtitle: "Exact values, scope and digest") {
+                                Image(systemName: "chevron.right")
+                                    .font(TronTypography.buttonSM)
+                                    .foregroundStyle(Color.tronTextMuted)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("change-review-technical-details")
                     }
                     if let failure {
                         Label(failure, systemImage: "exclamationmark.triangle.fill")
@@ -104,6 +113,43 @@ struct ChangeReviewSheet: View {
         }
         .tronTopBlur(.sheet)
         .interactiveDismissDisabled(close != nil || submitting)
+        .tronManagedSheet(isPresented: $showingTechnicalDetails, identity: "change-review.technical.\(review.digest)") {
+            TronDocumentSheet(title: "Technical details") {
+                ScrollView {
+                    TronSettingsSections(alignment: .leading, spacing: TronSpacing.section) {
+                        TronTechnicalMetadataSection(title: "Change", items: presentation.change, accent: .tronPrimary)
+                        ForEach(presentation.technical) { section in
+                            TronTechnicalMetadataSection(title: section.title, items: section.facts, accent: .tronPrimary)
+                            if let exact = section.exact {
+                                TronSettingsGroup("\(section.title) exact values") { TronSettingsCodeRow(text: exact) }
+                            }
+                        }
+                    }
+                    .padding(18)
+                    .accessibilityIdentifier("change-review-technical")
+                }
+                .tronScrollEdgeChrome()
+            }
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text(verbatim: presentation.title)
+                .font(TronTypography.summaryHeadline)
+                .foregroundStyle(Color.tronTextPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let reason = presentation.reason {
+                Text(verbatim: reason)
+                    .font(TronTypography.settingsRowSubtext)
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .tronGlassSurface(accent: .tronPrimary, tintOpacity: 0.14)
+        .accessibilityElement(children: .combine)
     }
 
     private func value(_ label: String, _ text: String) -> some View {

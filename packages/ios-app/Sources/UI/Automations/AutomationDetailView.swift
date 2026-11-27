@@ -42,6 +42,7 @@ struct AutomationDetailView: View {
     @PresentationState private var runLoadGeneration = 0
     @PresentationState private var presentationReadGeneration = 0
     @PresentationState private var runLoadTask: Task<Void, Never>?
+    @PresentationState private var showingTechnicalDetails = false
 
     init(selection: AutomationSummarySelection, onOpenSession: (@MainActor (String, String) -> Void)? = nil) {
         self.selection = selection
@@ -85,6 +86,14 @@ struct AutomationDetailView: View {
             .tronScrollEdgeChrome()
             .tronNavigationTitle("Automation", accent: .tronPrimary)
             .toolbar {
+                if record != nil {
+                    ToolbarItem(placement: .topBarLeading) {
+                        TronSheetInfoButton(accessibilityLabel: "Technical details", accent: .tronPrimary) {
+                            showingTechnicalDetails = true
+                        }
+                        .accessibilityIdentifier("automation-technical-details")
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
@@ -121,6 +130,19 @@ struct AutomationDetailView: View {
         .tronManagedSheet(isPresented: $formPresented, identity: "automation.edit.\(selection.id)") {
             AutomationFormView(selection: selection) { formPresented = false; loadRevision &+= 1 }
         }
+        .tronManagedSheet(isPresented: $showingTechnicalDetails, identity: "automation.technical.\(selection.id)") {
+            if let record {
+                TronDocumentSheet(title: "Technical details") {
+                    ScrollView {
+                        TronTechnicalMetadataSection(title: "Automation", items: AutomationFactSection.technical(record: record),
+                                                     accent: .tronPrimary)
+                            .padding(18)
+                    }
+                    .tronScrollEdgeChrome()
+                }
+                .tronSettingsVisualTheme(accent: .tronPrimary, surfaceAccent: .tronPrimarySurface)
+            }
+        }
         .tronManagedSheet(item: $selectedRun, identity: { "automation.run.\($0.runId)" }) { run in
             AutomationRunDetailView(
                 automation: selection,
@@ -147,15 +169,16 @@ struct AutomationDetailView: View {
         let summary = AutomationSummaryPresentation(record: record, server: server)
         AutomationHeaderCard(
             title: summary.name, status: summary.status, statusColor: summary.statusColor,
-            detail: "\(summary.actionKind?.label ?? "Action") · \(summary.cadence)",
+            detail: [record.description, "\(summary.actionKind?.label ?? "Action") · \(targetLabel(record.target))"]
+                .compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: "\n"),
             note: summary.blockedReason
         )
         .accessibilityIdentifier("automation-detail-summary")
-        ForEach(AutomationFactSection.detail(record: record, server: server, targetLabel: targetLabel(record.target))) { section in
-            AutomationFactsGroup(section)
-        }
+        let sections = AutomationFactSection.detail(record: record, server: server, targetLabel: targetLabel(record.target))
+        ForEach(sections.prefix(2)) { AutomationFactsGroup($0) }
         controls(record)
         recentRuns
+        ForEach(sections.dropFirst(2)) { AutomationFactsGroup($0) }
     }
 
     private func controls(_ record: GatewayAutomationRecord) -> some View {
