@@ -243,7 +243,9 @@ describe("prompt journeys across the real Gateway process", () => {
       expect(replayed.snapshot.transcript).toEqual(final.transcript);
 
       const stated = replayed.frames;
-      const transcriptBytes = stated.reduce((total, frame) => total + itemBytes(frame.transcript), 0);
+      const restated = stated.filter((frame) => frame.topic === "session.rebaseline");
+      const transcriptBytes = stated.filter((frame) => frame.topic !== "session.rebaseline")
+        .reduce((total, frame) => total + itemBytes(frame.transcript), 0);
       const appended = final.transcript.slice(base.transcriptTotal - final.transcriptStart);
       const settledPrompt = appended.find((item) => item.kind === "message" && item.role === "user")!;
       console.info("#2473 per tool call", JSON.stringify({
@@ -254,11 +256,14 @@ describe("prompt journeys across the real Gateway process", () => {
       }));
       expect(stated.length / tools, "transcript-bearing frames per tool call").toBeLessThanOrEqual(3);
       expect(transcriptBytes, "each canonical item crosses the wire once; the prompt row again when its lifecycle settles").toBeLessThanOrEqual(itemBytes(appended) + bytesOf(settledPrompt));
+      expect(stated.filter((frame) => frame.topic === "session.snapshot"), "no full snapshot while the phone holds the base").toEqual([]);
+      expect(restated.every((frame) => (frame.payload as { reason?: string }).reason === "superseded snapshot"),
+        "a full restatement only replaces frames the outbound queue had not yet sent").toBe(true);
 
-      const deltas = stated.filter((frame) => frame.topic === "session.transcriptDelta" && frame.transcript.length > 0);
-      expect(deltas.length).toBeGreaterThan(1);
-      const skipped = deltas.at(-2)!;
-      const behind = replay(base, phone.events.slice(start).filter((event) => event.sessionId === sessionId && event.payload !== skipped.payload), true);
+      const skipped = stated.find((frame, index) => frame.topic === "session.transcriptDelta" && frame.transcript.length > 0
+        && stated[index + 1]?.topic === "session.transcriptDelta");
+      expect(skipped, "two consecutive deltas to drop the first of").toBeDefined();
+      const behind = replay(base, phone.events.slice(start).filter((event) => event.sessionId === sessionId && event.payload !== skipped!.payload), true);
       expect(behind.refused, "a delta whose base the phone does not hold is refused, never guessed").toBe(true);
 
       const reopened = await phone.request("session.open", { sessionId });
@@ -272,7 +277,7 @@ describe("prompt journeys across the real Gateway process", () => {
         return state.snapshot.phase === "idle" && !state.snapshot.operation
           && messages(state.snapshot as unknown as Snapshot, "assistant").at(-1) === "Resynchronized reply." ? state : undefined;
       }, "deltas to continue from the resynchronized snapshot");
-      expect(continued.frames.every((frame) => frame.topic === "session.transcriptDelta")).toBe(true);
+      expect(continued.frames.filter((frame) => frame.topic === "session.snapshot")).toEqual([]);
       expect(continued.snapshot.transcript).toEqual((await freshSnapshot(gateway, sessionId) as unknown as SessionSnapshot).transcript);
     } finally {
       await phone.close();
