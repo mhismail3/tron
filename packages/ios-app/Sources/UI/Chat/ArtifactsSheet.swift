@@ -226,7 +226,9 @@ extension ArtifactEntry {
     }
 
     static func activityController(sharing file: URL) -> UIActivityViewController {
-        UIActivityViewController(activityItems: [file], applicationActivities: nil)
+        let controller = UIActivityViewController(activityItems: [file], applicationActivities: nil)
+        controller.completionWithItemsHandler = { _, _, _, _ in try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        return controller
     }
 }
 
