@@ -215,7 +215,7 @@ it("real Gateway: Home pauses and enables at the current revision, and a refused
     await gateway.settled(sessionId);
     const entry = (await gateway.registry.acquire(sessionId)).canonicalSessionEntries()
       .filter(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "schedule").at(-1)!;
-    const message = entry.message as unknown as { isError?: boolean; content: Array<{ text?: string }>; details: { activation?: string; revision?: number } };
+    const message = entry.message as unknown as { isError?: boolean; content: Array<{ text?: string }>; details: { activation?: string; revision?: number; currentRevision?: number } };
     return { ...message, text: message.content.map(part => part.text ?? "").join("") };
   };
   const paused = await call({ action: "pause", automationId: automation.id });
@@ -228,9 +228,11 @@ it("real Gateway: Home pauses and enables at the current revision, and a refused
   const stale = await call({ action: "pause", automationId: automation.id, expectedRevision: automation.revision });
   expect(stale.isError).toBe(true);
   expect(stale.text).toContain(`current revision is ${current}`);
+  expect(stale.details).toMatchObject({ currentRevision: current });
   const missing = await call({ action: "delete", automationId: automation.id });
   expect(missing.isError).toBe(true);
   expect(missing.text).toContain(`expectedRevision is required; current revision is ${current}`);
+  expect(missing.details).toMatchObject({ currentRevision: current });
   expect((await phone.request("automation.get", { automationId: automation.id })).result).toMatchObject({ activation: "enabled", revision: current });
   const deleted = await call({ action: "delete", automationId: automation.id, expectedRevision: current });
   expect(deleted.isError, deleted.text).not.toBe(true);
