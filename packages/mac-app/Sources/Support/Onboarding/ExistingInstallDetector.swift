@@ -3,9 +3,9 @@ import ServiceManagement
 
 enum ExistingInstallDetector {
     static func detect(
-        helperBundle: URL = TronPaths.serverHelperBundle,
-        helperBinary: URL = TronPaths.serverHelperBinary,
-        plistPath: URL = TronPaths.launchAgentPlistPath,
+        helperBundle: URL = TronPaths.serverHelperBundle(profile: .stable),
+        helperBinary: URL = TronPaths.serverHelperBinary(profile: .stable),
+        plistPath: URL = TronPaths.launchAgentPlistPath(profile: .stable),
         bundleVersionResolver: @Sendable (URL) -> String? = ExistingInstallDetector.readMarketingVersion,
         bundleSignatureProblemResolver: @Sendable (URL) async -> String? = { await ExistingInstallDetector.bundleSignatureProblem(of: $0) },
         gatewayPayloadProblemResolver: @Sendable () -> String? = { nil },
@@ -55,7 +55,7 @@ enum ExistingInstallDetector {
         case unknown(String)
     }
 
-    static func serviceStatus(label: String = TronPaths.launchAgentLabel) -> ServiceRegistrationStatus {
+    static func serviceStatus(label: String = TronGatewayProfile.stable.launchAgentLabel) -> ServiceRegistrationStatus {
         let service = SMAppService.agent(plistName: "\(label).plist")
         switch service.status {
         case .enabled:
@@ -87,9 +87,9 @@ enum ExistingInstallDetector {
     }
 
     static func validateBundledHelper(
-        helperBundle: URL = TronPaths.serverHelperBundle,
-        helperBinary: URL = TronPaths.serverHelperBinary,
-        plistPath: URL = TronPaths.launchAgentPlistPath,
+        helperBundle: URL = TronPaths.serverHelperBundle(profile: .stable),
+        helperBinary: URL = TronPaths.serverHelperBinary(profile: .stable),
+        plistPath: URL = TronPaths.launchAgentPlistPath(profile: .stable),
         profile: TronGatewayProfile = .stable,
         signatureProblemResolver: (@Sendable (URL) async -> String?)? = nil
     ) async -> String? {
@@ -118,12 +118,12 @@ enum ExistingInstallDetector {
     }
 
     static func launchAgentPlistIsCurrent(
-        plistPath: URL = TronPaths.launchAgentPlistPath,
-        label: String = TronPaths.launchAgentLabel,
-        port: Int = TronPaths.defaultServerPort,
-        bundleProgram expectedBundleProgram: String = TronPaths.serverHelperBundleProgram,
-        environmentVariables expectedEnvironmentVariables: [String: String] = TronPaths.launchAgentEnvironmentVariables,
-        associatedBundleIDs expectedAssociatedBundleIDs: [String] = TronPaths.associatedWrapperBundleIDs
+        plistPath: URL = TronPaths.launchAgentPlistPath(profile: .stable),
+        label: String = TronGatewayProfile.stable.launchAgentLabel,
+        port: Int = TronGatewayProfile.stable.port,
+        bundleProgram expectedBundleProgram: String = TronPaths.serverHelperBundleProgram(profile: .stable),
+        environmentVariables expectedEnvironmentVariables: [String: String] = TronPaths.launchAgentEnvironmentVariables(profile: .stable),
+        associatedBundleIDs expectedAssociatedBundleIDs: [String] = TronPaths.associatedWrapperBundleIDs(profile: .stable)
     ) -> Bool {
         guard let data = try? Data(contentsOf: plistPath),
               let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
@@ -170,7 +170,7 @@ enum ExistingInstallDetector {
 
     static func bundleSignatureProblem(
         of bundle: URL,
-        expectedBundleIdentifier: String = TronPaths.launchAgentLabel,
+        expectedBundleIdentifier: String = TronGatewayProfile.stable.launchAgentLabel,
         run: @Sendable (URL, [String], Subprocess.Policy) async -> ProcessResult = Subprocess.run
     ) async -> String? {
         let helperName = bundle.lastPathComponent
@@ -198,8 +198,8 @@ enum ExistingInstallDetector {
 
     static func codeSignatureIdentityProblem(
         _ identityText: String,
-        expectedBundleIdentifier: String = TronPaths.launchAgentLabel,
-        helperName: String = "\(TronPaths.agentBundleName).app"
+        expectedBundleIdentifier: String = TronGatewayProfile.stable.launchAgentLabel,
+        helperName: String = "\(TronGatewayProfile.stable.agentBundleName).app"
     ) -> String? {
         let lines = identityText.split(whereSeparator: \.isNewline)
         func uniqueValue(_ key: String) -> String? {

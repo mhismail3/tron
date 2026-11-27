@@ -126,7 +126,7 @@ struct IOSBetaStep: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 Button {
-                    copyTestFlightLink()
+                    WizardCopyFeedback.copy(IOSBetaStepContent.testFlightURL.absoluteString, mark: $copiedLink, as: true, clearTo: false)
                 } label: {
                     Image(systemName: copiedLink ? "checkmark" : "doc.on.doc")
                         .font(.system(size: 15, weight: .semibold))
@@ -139,25 +139,6 @@ struct IOSBetaStep: View {
                 }
                 .buttonStyle(.plain)
                 .help("Copy TestFlight link")
-            }
-        }
-    }
-
-    @MainActor
-    private func copyTestFlightLink() {
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.setString(IOSBetaStepContent.testFlightURL.absoluteString, forType: .string)
-
-        withAnimation(.snappy(duration: IOSBetaStepLayout.copyCheckInAnimationSeconds)) {
-            copiedLink = true
-        }
-
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: IOSBetaStepLayout.copyCheckHoldNanoseconds)
-            guard copiedLink else { return }
-            withAnimation(.snappy(duration: IOSBetaStepLayout.copyCheckOutAnimationSeconds)) {
-                copiedLink = false
             }
         }
     }
@@ -181,7 +162,4 @@ enum IOSBetaStepLayout {
     static let iconFrameSize: CGFloat = 28
     static let linkTextTopPadding: CGFloat = 8
     static let linkTextBottomPadding: CGFloat = 6
-    static let copyCheckInAnimationSeconds = 0.06
-    static let copyCheckOutAnimationSeconds = 0.12
-    static let copyCheckHoldNanoseconds: UInt64 = 2_000_000_000
 }

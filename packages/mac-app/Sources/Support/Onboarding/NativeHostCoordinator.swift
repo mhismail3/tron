@@ -123,7 +123,7 @@ private struct NativeHostPlatform: Sendable {
         }
     }
     func enable() async throws {
-        guard TronPaths.canManageLaunchAgent,
+        guard TronPaths.canManageLaunchAgent(profile: .stable),
               await ExistingInstallDetector.validateNativeHost(bundle: bundle,
                   executable: bundle.appendingPathComponent("Contents/MacOS/TronNativeHost")) == nil else {
             throw NativeHostError.bundleUnavailable
@@ -137,13 +137,13 @@ private struct NativeHostPlatform: Sendable {
         guard service.status == .enabled else { throw NativeHostError.serviceUnavailable }
     }
     func unregister() async throws {
-        guard TronPaths.canManageLaunchAgent else { throw NativeHostError.serviceUnavailable }
+        guard TronPaths.canManageLaunchAgent(profile: .stable) else { throw NativeHostError.serviceUnavailable }
         let service = SMAppService.agent(plistName: NativeHostTrust.launchAgentPlistName)
         if service.status != .notRegistered { try await service.unregister() }
     }
 
     func drain() async throws {
-        guard TronPaths.canManageLaunchAgent else { throw NativeHostError.serviceUnavailable }
+        guard TronPaths.canManageLaunchAgent(profile: .stable) else { throw NativeHostError.serviceUnavailable }
         try await NativeHostRetirementPolicy.drain(
             status: SMAppService.agent(plistName: NativeHostTrust.launchAgentPlistName).status
         ) {
@@ -184,7 +184,7 @@ private struct NativeHostPlatform: Sendable {
     }
 
     func request(_ permission: Permission, id: UUID) async -> PermissionStatus {
-        guard TronPaths.canManageLaunchAgent,
+        guard TronPaths.canManageLaunchAgent(profile: .stable),
               let native = NativeHostPermission(rawValue: permission.rawValue),
               let connection = try? connect() else { return .probeUnavailable }
         defer { connection.invalidate() }
