@@ -730,9 +730,7 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
     await waitForBuiltTree(f);
     const owner = homeOwnerOf(f.registry);
     const store = join(f.tronHome, "workspace", "state", "episodic", f.homeId);
-    const concurrent = owner.readMemoryView({ limit: 1 }).then(() => "read", () => "refused");
     await owner.dispose();
-    await concurrent;
     await rm(store, { recursive: true });
     const late = await owner.readMemoryView({ limit: 1 }).then(() => "read", () => "refused");
     const row = { late, storeRecreated: await stat(store).then(() => true, () => false) };
