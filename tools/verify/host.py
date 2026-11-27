@@ -40,7 +40,7 @@ def local(host: str, arguments: list[str]) -> int:
            '-o', 'ServerAliveCountMax=4', destination]
     started = time.monotonic()
     pushed = subprocess.run(['git', '-C', str(ROOT), 'push', '--quiet', f'{destination}:{BASE}/tron.git',
-                             f'{sha}:refs/tron-jobs/{sha}'], env={**os.environ, 'GIT_SSH_COMMAND': shlex.join(ssh[:-1])},
+                             f'{sha}:refs/tron-jobs/{sha}'], env={**os.environ, 'GIT_SSH_COMMAND': shlex.join(ssh[:-1]), 'GIT_LFS_SKIP_PUSH': '1'},
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     if pushed.returncode:
         return no_result(f'cannot push {sha[:12]} to {destination}:{BASE}/tron.git: {pushed.stdout.strip()}')
