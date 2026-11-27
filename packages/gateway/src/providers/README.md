@@ -163,7 +163,8 @@ failures. OpenCode Go's usage endpoint retains its distinct entitlement/auth/oth
 - A worker's provider error after Pi's retries (`model-queue-extension.ts`): the first in an
   operation waits 60 s (task Stop or drain cancels it) and retries the same model; a later one
   moves down the queue without recording the model in the shared usage ledger, so other
-  sessions keep it; the task's canonical `next` keeps the moved-to model across a resume. Each step appends a `tron.model-queue` entry (`waitedMs` or `skipped`, `next`) whose
+  sessions keep it; the task's canonical `next` keeps the moved-to model across a resume.
+  Each step appends a `tron.model-queue` entry (`waitedMs` or `skipped`, `next`) whose
   `reason` keeps the upstream error category, such as `authentication`, visible.
 - `readWorkerQueueSelection` projects this owner's canonical fallback entries
   after the latest explicit choice. Settings can mask that progression with
