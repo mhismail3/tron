@@ -30,6 +30,7 @@ it("executes previous → candidate → previous with detached resume through th
   try {
     if (retainedRoot) await mkdir(root);
     await Promise.all([mkdir(join(root, "agent")), mkdir(join(root, "workspace")), mkdir(join(root, "npm-cache")), mkdir(join(root, "home")), mkdir(join(root, "tmp"))]);
+    await promisify(execFile)("git", ["init", "-q", join(root, "workspace")]);
     const pin = JSON.parse(await readFile(join(gatewayRoot, "pi-subagents-pin.json"), "utf8"));
     const previousGateway = await gatewaySourceForSubagentsVersion(pin.previous.version);
     report.previousGateway = previousGateway.commit;

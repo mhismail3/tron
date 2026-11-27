@@ -45,7 +45,7 @@ import { type CommandReplacement } from "./run-invocations.js";
 import { RunOperations } from "./run-operations.js";
 import { successfulAssistantCompletion, type CanonicalAssistantCompletion, type SessionAttentionRebindDisposition } from "./completion-facts.js";
 import { RunRequestPipeline } from "./request-pipeline.js";
-import { docsIndex, skillsIndex } from "../resources/context-index.js";
+import { docsIndex, renderSkills, skillsIndex } from "../resources/context-index.js";
 import { admittedContextRules } from "../resources/context-rules.js";
 import type { RequestRecord } from "./request-record.js";
 import { boundToolCancellation } from "./bounded-tool-cancellation.js";
@@ -1290,7 +1290,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         resourceLoaderReloadOptions: this.resourceReloadOptions,
       });
       services.settingsManager = settingsManager;
-      await managedSubagents?.completeLoad(settingsManager, this.cwd, this.dependencies.agentDir, services.resourceLoader.getExtensions().extensions);
+      await managedSubagents?.completeLoad(settingsManager, trust.projectDir, this.dependencies.agentDir, services.resourceLoader.getExtensions().extensions);
       if (this.directBashProcesses?.hasActiveProcesses) {
         await this.directBashProcesses.abortAll();
       }
@@ -1315,7 +1315,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       const launchThinking = launchDefaults?.keys.find(row => row.key === "model.thinking[role=chat]")?.value as ThinkingLevel | undefined;
       const created = await createAgentSessionFromServices({
         preamble: this.dependencies.modules.policy("commonCore")!(await this.dependencies.workspace.describe()),
-        renderSkills: (skills, tool) => skillsIndex(skills, tool === "bash" ? "bash" : "read").text,
+        renderSkills,
         renderDocs: docsIndex,
         services,
         sessionManager,
@@ -1592,7 +1592,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     if (trust) session.settingsManager.setProjectTrusted(await trust.resolveProjectTrust());
     await session.resourceLoader.reload();
     if (this.liveProfile().managedSubagents) {
-      await this.dependencies.managedSubagents?.completeLoad(session.settingsManager, this.cwd, this.dependencies.agentDir, session.resourceLoader.getExtensions().extensions);
+      await this.dependencies.managedSubagents?.completeLoad(session.settingsManager, this.projectDir, this.dependencies.agentDir, session.resourceLoader.getExtensions().extensions);
     }
     await session.reload({ beforeSessionStart: () => this.rotateSemanticHost() });
   }
@@ -3872,7 +3872,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     if (!this.liveProfile().subagentCatalog) return { subagents: [] };
     return loadSubagentCatalog({
       agentDir: this.dependencies.agentDir,
-      cwd: this.cwd,
+      cwd: this.projectDir,
       settingsManager: this.runtime.session.settingsManager,
       ...(this.dependencies.managedSubagents ? { managedSubagents: this.dependencies.managedSubagents } : {}),
     });
