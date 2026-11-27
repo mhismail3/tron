@@ -8,12 +8,11 @@ final class ArtifactShareViewTests: ShuffledTestCase {
         try await mounted(["-tron-integrations-fixture", "-integrations-scenario", "artifacts", "-artifacts-base-url", "https://127.0.0.1:9"]) { app in
             try await app.activate("Artifacts")
             try await app.activate("artifact-row-usage-dashboard")
-            var share: NSObject?
-            try await app.until("the viewer's Share action") {
-                share = app.button("Share")
-                return share != nil && app.button("Open in Safari") != nil
+            try await app.until("the unreachable page's failure") {
+                MountedFixture.elements(in: app.top).contains { $0.accessibilityLabel?.hasPrefix("The page could not be opened") == true }
             }
-            XCTAssertTrue(share!.accessibilityActivate(), "Share activates")
+            XCTAssertNotNil(app.button("Open in Safari"))
+            try await app.activate("Share")
             try await app.until("the share failure is shown, never silent") {
                 MountedFixture.elements(in: app.top).contains { $0.accessibilityLabel?.hasPrefix("The page could not be shared") == true }
             }
