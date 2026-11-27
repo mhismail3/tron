@@ -222,7 +222,10 @@ scripts/tron mac replace --status --follow
   `launchctl`; every `start` also boots out exited runner jobs whose `runner.plist` lives in this
   store (never a running one or another store's), so settled operations leave no launchd label.
 - **Preflight** checks source, HEAD, disk, signing, registrations, protocol with the requesting
-  iPhone (`--allow-protocol-change`) and that no `mac reinstall` is active; it refuses wrappers
+  iPhone and that no `mac reinstall` is active. An iPhone outside the new protocol is admitted only
+  when an OTA build of the same revision for that protocol is published
+  (`TRON_IOS_GATEWAY_PROTOCOL_TARGET=source scripts/tron-ios-device share`); preflight and finish
+  name that build, which the iPhone installs from :8443 to reconnect. It refuses wrappers
   without `TronReplacementQuitVersion`, which need one manual reinstall first. Quick also
   verifies the checkout's installed dependency tree against its lock before stopping workers;
   missing or partial installs fail here with the pinned `npm ci --include=dev` repair command.

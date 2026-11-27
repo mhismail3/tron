@@ -129,9 +129,10 @@ function resultMessage(journal: Record<string, JsonValue>): string {
   const error = journal.error as Record<string, JsonValue> | null;
   const workers = Array.isArray(journal.workers) ? journal.workers.length : 0;
   const resume = workers ? ` ${workers} stopped worker${workers === 1 ? "" : "s"} can be resumed in Settings.` : "";
+  const iphone = journal.iphoneBuild as Record<string, JsonValue> | null | undefined;
   switch (journal.state) {
     case "succeeded":
-      return `Mac app replaced: Gateway ${String(result?.revision ?? "").slice(0, 9)} on protocol ${String(result?.protocol ?? "?")}${result?.cdhash ? `, signature ${String(result.cdhash).slice(0, 12)} verified` : ""}.${resume}`;
+      return `Mac app replaced: Gateway ${String(result?.revision ?? "").slice(0, 9)} on protocol ${String(result?.protocol ?? "?")}${result?.cdhash ? `, signature ${String(result.cdhash).slice(0, 12)} verified` : ""}.${iphone ? ` Install iPhone build ${String(iphone.id)} from ${String(iphone.page)} to reconnect.` : ""}${resume}`;
     case "rolled-back":
       return `Mac app replacement failed at ${String(error?.step ?? "?")} and was rolled back: ${String(error?.message ?? "").slice(0, 240)}${resume}`;
     case "rollback-failed":

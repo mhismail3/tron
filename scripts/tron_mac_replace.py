@@ -29,6 +29,7 @@ import subprocess
 import sys
 import time
 import uuid
+import zipfile
 
 sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[1] / 'tools/home-layout')]
 import home_layout  # noqa: E402
@@ -223,10 +224,16 @@ class Runner:
         info = ({'sourceRevision': self.data['source'].get('fromRevision'), 'protocolVersion': platform.protocol()}
                 if self.offline_retry else platform.system_info())
         protocol, minimum = source_protocol(self.root, self.revision)
-        client = self.data['source'].get('clientProtocol')
-        if client is not None and not minimum <= client <= protocol and not self.data['source'].get('allowProtocolChange'):
-            raise Failure(f'this iPhone speaks protocol {client} but the new Gateway needs {minimum}-{protocol}; '
-                          'install the matching iPhone build first, or start from the Mac terminal with --allow-protocol-change')
+        client, build = self.data['source'].get('clientProtocol'), None
+        if client is not None and not minimum <= client <= protocol:
+            build = published_iphone_build(platform, self.revision, protocol, minimum)
+            if build is None:
+                raise Failure(f'this iPhone speaks protocol {client} but the new Gateway needs {minimum}-{protocol}, and no iPhone '
+                              f'build of {self.revision[:9]} for protocol {protocol} is published on :8443. Publish it on the Mac with '
+                              '`TRON_IOS_GATEWAY_PROTOCOL_TARGET=source scripts/tron-ios-device share --title "Protocol '
+                              f'{protocol}" --notes "Install after the Mac replacement"`, then start the replacement again')
+            checks.append(f'this iPhone (protocol {client}) disconnects until you install build {build["id"]} from {build["page"]}')
+        self.data['iphoneBuild'] = build
         self.data['source']['fromRevision'] = info.get('sourceRevision')
         checks.append(f'protocol {info.get("protocolVersion")} → {protocol}')
         if path == 'full':
@@ -484,16 +491,17 @@ class Runner:
         raise Failure('the Gateway source update did not settle within 30 minutes')
 
     def step_finish(self):
+        build = self.data.get('iphoneBuild')
+        done = 'replacement complete' + (f'; install iPhone build {build["id"]} from {build["page"]} to reconnect' if build else '')
         if self.data['path'] != 'full':
-            return 'replacement complete'
+            return done
         try:
             failures = prune_store(self.platform, self.journal.directory, self.revision)
         except Exception as error:  # noqa: BLE001
             failures = [f'{self.platform.store}: {type(error).__name__}: {error}']
         for failure in failures:
             self.journal.note(f'prune: {failure}')
-        return 'replacement complete' + (f'; could not prune {len(failures)} superseded path(s), see journal.log'
-                                          if failures else '')
+        return done + (f'; could not prune {len(failures)} superseded path(s), see journal.log' if failures else '')
 
     def recover(self):
         swap = self.data['swap']
@@ -561,6 +569,23 @@ class Runner:
         except (RpcError, Failure, OSError, ValueError, KeyError) as error:
             self.data['notification'] = {'state': 'unavailable', 'detail': str(error)[:300]}
         self.journal.save()
+
+
+def published_iphone_build(platform, revision, protocol, minimum):
+    """The newest OTA build `scripts/tron-ios-device share` published from `revision` whose app speaks `protocol`."""
+    found = []
+    for record_path in (platform.tron_home / 'workspace/builds/ios-ota/builds').glob('*/build.json'):
+        try:
+            record = json.loads(record_path.read_text())
+            with zipfile.ZipFile(record_path.parent / 'TronMobile.ipa') as archive:
+                info = plistlib.loads(archive.read('Payload/TronMobile.app/Info.plist'))
+            ipa_url = plistlib.loads((record_path.parent / 'manifest.plist').read_bytes())['items'][0]['assets'][0]['url']
+        except (OSError, ValueError, KeyError, IndexError, zipfile.BadZipFile, plistlib.InvalidFileException):
+            continue
+        if (record.get('id') == record_path.parent.name and record.get('commit') == revision
+                and (info.get('TRONGatewayProtocolVersion'), info.get('TRONGatewayMinProtocolVersion')) == (str(protocol), str(minimum))):
+            found.append((record.get('time', ''), {'id': record['id'], 'page': ipa_url.split('/builds/', 1)[0] + '/'}))
+    return max(found, key=lambda entry: entry[0], default=(None, None))[1]
 
 
 def drain_blockers(snapshot):
@@ -705,7 +730,7 @@ def launch_runner(platform, journal, script_dir):
     journal.note(f'runner launched as launchd job {label}')
 
 
-def start(platform, root, client_protocol=None, allow_protocol_change=False, script_dir=None):
+def start(platform, root, client_protocol=None, script_dir=None):
     platform.store.mkdir(parents=True, exist_ok=True)
     private_mkdir(platform.store)
     with store_lock(platform):
@@ -713,7 +738,7 @@ def start(platform, root, client_protocol=None, allow_protocol_change=False, scr
         if journal and journal.data['state'] not in TERMINAL_STATES:
             if runner_alive(platform, journal):
                 return journal, 'already running'
-            journal.data['source'].update(clientProtocol=client_protocol, allowProtocolChange=allow_protocol_change)
+            journal.data['source'].update(clientProtocol=client_protocol)
             journal.save()
             retire_runners(platform)
             launch_runner(platform, journal, script_dir or Path(__file__).resolve().parent)
@@ -731,10 +756,10 @@ def start(platform, root, client_protocol=None, allow_protocol_change=False, scr
             journal = Journal.create(platform.store / operation, operation, decided['path'], decided['reason'], {
                 'root': decided['root'], 'revision': decided['revision'], 'head': decided['head'],
                 'running': decided['running'],
-                'clientProtocol': client_protocol, 'allowProtocolChange': allow_protocol_change})
+                'clientProtocol': client_protocol})
             write_json_atomic(platform.store / 'current.json', {'id': operation})
         else:
-            journal.data['source'].update(clientProtocol=client_protocol, allowProtocolChange=allow_protocol_change)
+            journal.data['source'].update(clientProtocol=client_protocol)
             journal.data['state'] = 'queued'
             journal.save()
         launch_runner(platform, journal, script_dir or Path(__file__).resolve().parent)
@@ -802,8 +827,6 @@ def main(platform_factory=MacPlatform, arguments=None):
     parser.add_argument('--follow', action='store_true', help='with --status: stream the journal until it settles')
     parser.add_argument('--json', action='store_true', help='machine-readable output')
     parser.add_argument('--client-protocol', type=int, help=argparse.SUPPRESS)
-    parser.add_argument('--allow-protocol-change', action='store_true',
-                        help='proceed although the requesting iPhone cannot speak the new protocol')
     args = parser.parse_args(arguments)
     platform = platform_factory()
     root = Path(__file__).resolve().parent.parent
@@ -816,7 +839,7 @@ def main(platform_factory=MacPlatform, arguments=None):
             print(json.dumps(decided) if args.json else f'{decided["path"]}: {decided["reason"]}')
             return 0
         if args.start:
-            journal, outcome = start(platform, root, args.client_protocol, args.allow_protocol_change)
+            journal, outcome = start(platform, root, args.client_protocol)
             if args.json:
                 print(json.dumps({'operationId': journal.data['id'], 'outcome': outcome, 'path': journal.data['path'],
                                   'reason': journal.data['reason'], 'journal': str(journal.log_path)}))
