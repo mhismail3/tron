@@ -930,7 +930,7 @@ describe("typed settings at real runtime boundaries", () => {
     await waitFor(() => workerRequests.length >= 3 || undefined, "worker's request after approval");
     expect(workerRequests[2]).toMatchObject({ model: REASONING.id, thinking: "low" });
     expect(workerRequests[2]!.signals).toHaveLength(2);
-    expect(workerRequests[2]!.signals[1]).toMatch(/^\[from: gateway; kind: settings; authority: none\]\n\[Tron settings\] Tron Home changed this session's settings while you work on task live-worker\. Reason: Cheaper final step\.\n- Thinking: High → Low \(from your next model request; /);
+    expect(workerRequests[2]!.signals[1]).toMatch(/^\[from: gateway; kind: settings; authority: none\]\n\[Tron settings\] Tron Home changed this session's settings while you work on task live-worker\. Reason: Cheaper final step\.\n- Effort: High → Low \(from your next model request; /);
     await waitFor(async () => (await homeOwnerOf(f.registry).taskStatus("live-worker").catch(() => undefined))?.lifecycle === "terminal" || undefined, "task terminal");
     await waitFor(() => home.snapshot().configurationBlocker === null || undefined, "Home settled after the result");
     steps.push({ requests: workerRequests, approved });
