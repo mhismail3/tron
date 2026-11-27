@@ -24,16 +24,16 @@ struct MCPAuthSheet: View {
                             onChangeStep: { _, _ in }
                         )
                     } else {
-                        TronSettingsNotice(message: "Waiting for the MCP server's sign-in request…", accent: .tronCyan)
+                        TronSettingsNotice(message: "Waiting for the MCP server's sign-in request…", accent: .tronPrimary)
                     }
                     if let error { TronSettingsNotice(message: error, accent: .tronError) }
                 }.padding(18)
             }
             .tronScrollEdgeChrome()
-            .tronNavigationTitle("MCP Sign In", accent: .tronCyan)
+            .tronNavigationTitle("MCP Sign In")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", role: .cancel) { Task { await cancel() } }.tronToolbarAction(accent: .tronCyan)
+                    Button("Cancel", role: .cancel) { Task { await cancel() } }.tronToolbarAction()
                 }
             }
             .tronPresentation()

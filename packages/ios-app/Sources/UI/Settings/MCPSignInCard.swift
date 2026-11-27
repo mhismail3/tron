@@ -41,7 +41,6 @@ struct MCPSignInCard: View {
             if let operationID = authOperationID {
                 MCPAuthSheet(operationID: operationID) { authOperationID = nil }
                     .environment(model)
-                    .tronSettingsVisualTheme(accent: .tronCyan)
             }
         }
     }
