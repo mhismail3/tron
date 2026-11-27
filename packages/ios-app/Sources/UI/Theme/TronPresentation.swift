@@ -2275,7 +2275,7 @@ private struct TronPulseRings: UIViewRepresentable {
     }
 }
 
-private final class TronPulseRingsView: UIView {
+final class TronPulseRingsView: UIView {
     private let rings = (0..<TronPulseLoadingIndicatorEngine.pulseCount).map { _ in CAShapeLayer() }
     private var animating: Bool?
 
