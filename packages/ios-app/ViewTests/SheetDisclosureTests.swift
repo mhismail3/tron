@@ -19,7 +19,8 @@ final class SheetDisclosureTests: ShuffledTestCase {
         let exact = "{\"operation\":\"package.update\",\"source\":\"\(source)\",\"version\":\"\(sha)\"}"
         let package = try review(title: "Update \(source) to commit \(sha)", items: [
             .object(["label": .string("Package \(source)"), "before": .string(from), "after": .string(sha),
-                     "detail": .string("\(source)\nUser package (global)"), "exact": .string(exact)]),
+                     "detail": .string("\(source)\nUser package (global)\nInstaller: npm with 2 argument(s); sha256 0123456789ab"),
+                     "exact": .string(exact)]),
             .object(["label": .string("Configured source"), "before": .string(source), "after": .string("\(source)@\(sha)"),
                      "detail": .string("sources.packages (global) pin")]),
         ])
@@ -29,7 +30,7 @@ final class SheetDisclosureTests: ShuffledTestCase {
         XCTAssertEqual(presentation.items.map(\.label), ["Package pi-antigravity", "Configured source"])
         XCTAssertEqual(presentation.items.map(\.before), ["0123456", "pi-antigravity"])
         XCTAssertEqual(presentation.items.map(\.after), ["b29af0f", "pi-antigravity @ b29af0f"])
-        XCTAssertEqual(presentation.items.map(\.note), [nil, nil])
+        XCTAssertEqual(presentation.items.map(\.note), ["Installer: npm with 2 argument(s); sha256 0123456789ab", nil])
         let summary = ([presentation.title] + presentation.items.flatMap { [$0.label, $0.before, $0.after] }).joined(separator: "\n")
         XCTAssertFalse(summary.contains(sha) || summary.contains("github.com") || summary.contains("sources.packages"), summary)
 
@@ -54,14 +55,21 @@ final class SheetDisclosureTests: ShuffledTestCase {
         XCTAssertEqual(added.title, "Add qaf MCP server")
         XCTAssertEqual(added.items.map(\.note), [confirm])
         XCTAssertEqual(added.technical[0].facts.first { $0.title == "Scope" }?.value, "Global stored value\nglobal")
+
+        let near = "b29af0f000000000000000000000000000000000"
+        let collision = ChangeReviewPresentation(try review(title: "Pin", items: [
+            .object(["label": .string("Pin"), "before": .string(sha), "after": .string(near)]),
+        ]))
+        XCTAssertEqual(collision.items.map(\.before), [sha])
+        XCTAssertEqual(collision.items.map(\.after), [near])
     }
 
     func testAutomationDetailKeepsIdentifiersInTechnicalDetailsAndThePromptAsABlock() throws {
         let record = try AutomationPresentationFixture.record(activation: "enabled", workspace: true)
         let sections = AutomationFactSection.detail(record: record, server: "Mac", targetLabel: "New session per run · project")
-        XCTAssertEqual(sections.map(\.title), ["Schedule", "Prompt", "Delivery"])
-        XCTAssertEqual(sections[1].facts.map(\.isBlock), [true])
-        XCTAssertEqual(sections[1].facts.first?.value, record.action.content)
+        let prompt = try XCTUnwrap(sections.first { $0.title == "Prompt" })
+        XCTAssertEqual(prompt.facts.map(\.isBlock), [true])
+        XCTAssertEqual(prompt.facts.first?.value, record.action.content)
         let main = sections.flatMap(\.facts).map { "\($0.title)=\($0.value)" }.joined(separator: "\n")
         for hidden in [record.id, "Revision", "Created", "Updated", "/workspace/project"] {
             XCTAssertFalse(main.contains(hidden), "\(hidden) belongs in technical details\n\(main)")

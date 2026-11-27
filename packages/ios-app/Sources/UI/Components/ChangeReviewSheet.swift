@@ -130,6 +130,7 @@ struct ChangeReviewSheet: View {
                 }
                 .tronScrollEdgeChrome()
             }
+            .tronSettingsVisualTheme(accent: .tronPrimary, surfaceAccent: .tronPrimarySurface)
         }
     }
 

@@ -26,8 +26,10 @@ struct ChangeReviewPresentation {
         title = Self.settingTitle(review) ?? Self.readable(review.title)
         reason = review.reason
         items = review.items.map { item in
-            Item(label: Self.readable(item.label), before: Self.readable(item.before), after: Self.readable(item.after),
-                 note: Self.detail(item.detail).note)
+            let before = Self.readable(item.before), after = Self.readable(item.after)
+            let collides = before == after && item.before != item.after
+            return Item(label: Self.readable(item.label), before: collides ? item.before : before, after: collides ? item.after : after,
+                        note: Self.detail(item.detail).note)
         }
         change = [
             TronTechnicalMetadataItem(title: "Title", value: review.title, icon: "text.alignleft"),
@@ -47,8 +49,9 @@ struct ChangeReviewPresentation {
 
     private static func detail(_ text: String?) -> (scope: String?, note: String?) {
         let lines = (text ?? "").split(separator: "\n").map(String.init)
-        let notes = lines.filter { $0.hasSuffix(".") }
-        let scope = lines.filter { !$0.hasSuffix(".") }
+        let isNote = { (line: String) in line.hasSuffix(".") || line.contains(": ") }
+        let notes = lines.filter(isNote)
+        let scope = lines.filter { !isNote($0) }
         return (scope.isEmpty ? nil : scope.joined(separator: "\n"), notes.isEmpty ? nil : notes.joined(separator: " "))
     }
 
