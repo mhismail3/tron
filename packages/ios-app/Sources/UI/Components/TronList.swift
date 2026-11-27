@@ -483,19 +483,6 @@ struct TronFeedEmptyState<Header: View, Placeholder: View>: View {
     }
 }
 
-private struct TronFeedStack<Content: View>: View {
-    let eager: Bool
-    @ViewBuilder let content: () -> Content
-
-    var body: some View {
-        if eager {
-            VStack(alignment: .leading, spacing: TronListMetrics.feedGap) { content() }.scrollTargetLayout()
-        } else {
-            LazyVStack(alignment: .leading, spacing: TronListMetrics.feedGap) { content() }.scrollTargetLayout()
-        }
-    }
-}
-
 struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID: Hashable & Sendable {
     let items: [Item]
     let identifier: String
@@ -516,7 +503,7 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
         let trigger = items.count > 5 ? items[items.count - 5].id : items.last?.id
         ScrollViewReader { reader in
             ScrollView {
-                TronFeedStack(eager: fits) {
+                LazyVStack(alignment: .leading, spacing: TronListMetrics.feedGap) {
                     header()
                     ForEach(items) { item in
                         row(item)
@@ -526,6 +513,7 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
                     TronFeedStateRow(tail: tail, retry: retry)
                         .onAppear { if tail == .idle { loadMore() } }
                 }
+                .scrollTargetLayout()
                 .tronFeedInsets()
             }
             .safeAreaPadding(.bottom, fits ? 0 : chipRoom)
