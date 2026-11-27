@@ -3,14 +3,14 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../../test-support/gateway-process.js";
-import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
+import { awaitsWithin, WAIT_HANG_BOUND_MS, waitFor } from "../../../test-support/wait-for.js";
 import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
 import { applyTranscriptDelta } from "../../protocol/transcript-delta.js";
 import { decodeSessionTranscriptDelta, type SessionSnapshot } from "../../protocol/types.js";
 
 let gateway: GatewayProcess;
-beforeAll(async () => { gateway = await startGatewayProcess({ providerName: "openrouter", settings: { enableInstallTelemetry: true } }); });
-afterAll(async () => { await gateway?.dispose(); });
+beforeAll(async () => { gateway = await startGatewayProcess({ providerName: "openrouter", settings: { enableInstallTelemetry: true } }); }, WAIT_HANG_BOUND_MS);
+afterAll(async () => { await gateway?.dispose(); }, WAIT_HANG_BOUND_MS);
 
 type Snapshot = { phase: string; operation?: unknown; transcript: Array<Record<string, any>> };
 
@@ -95,6 +95,7 @@ describe("prompt journeys across the real Gateway process", () => {
     let lookupPid: number | undefined;
     const prior = gateway.provider.requests.length;
     const sent = () => gateway.provider.requests.slice(prior);
+    const priorErrors = gateway.provider.errors.length;
     gateway.provider.script([() => ({ chunks: [head, async () => { reach(); await released; }, tail] })]);
 
     try {
@@ -162,13 +163,11 @@ describe("prompt journeys across the real Gateway process", () => {
       const callers = join(gateway.root, "npm.callers");
       await mkdir(bin);
       await writeFile(join(bin, "npm"), `#!${process.execPath}\nconst fs = require("node:fs"); fs.appendFileSync(${JSON.stringify(callers)}, fs.fstatSync(0).isSocket() ? "async\\n" : "sync\\n"); fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);\n`, { mode: 0o755 });
-      const normalRestartStarted = performance.now();
       await gateway.restart({ environment: { PATH: `${bin}${delimiter}${process.env.PATH ?? ""}` } });
-      console.info("normal Gateway process restart ms", performance.now() - normalRestartStarted);
       expectExactlyOnce(await freshSnapshot(gateway, sessionId));
       expect(sent()).toHaveLength(1);
       expect(withoutTurnFrame(sent()[0]!.messages).filter((message) => message.role === "user")).toHaveLength(1);
-      expect(gateway.provider.errors).toEqual([]);
+      expect(gateway.provider.errors.slice(priorErrors)).toEqual([]);
       lookupPid = await waitFor(async () => {
         try { return Number(await readFile(pidFile, "utf8")) || undefined; } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
