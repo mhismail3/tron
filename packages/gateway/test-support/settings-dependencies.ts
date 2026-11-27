@@ -32,7 +32,7 @@ export function settingsDependencies(input: {
   tronHome: string;
   trust: TrustService;
   modelRuntime: ModelRuntime;
-  sessions?: { reloadProject(cwd: string, trusted: boolean, force: boolean): Promise<unknown>; commitProjectReload(cwd: string): Promise<unknown> | unknown; abortProjectReload(cwd: string): Promise<unknown> | unknown };
+  sessions?: Pick<RuntimeRegistry, "setProjectTrust">;
   home?: () => HomeOwner | undefined;
   knowledge?: () => ProfileStore | undefined;
   registry?: { setSettings(model: SettingsModel, changes: SettingsChangePath, inventory: SettingsInventorySource): void; moduleHost: ModuleHost };
@@ -50,10 +50,8 @@ export function settingsDependencies(input: {
   }));
   const settingsChanges: SettingsChangePath = new SettingsChangePath(settingsModel, new SettingsChangeRecord(input.tronHome), {
     setTrust: async (project, decision) => {
-      return input.trust.setAndApply(project, decision,
-        async (inspection) => { await input.sessions?.reloadProject(inspection.cwd, inspection.effectiveDecision === true, false); },
-        async (inspection) => { await input.sessions?.commitProjectReload(inspection.cwd); },
-        async (inspection) => { await input.sessions?.abortProjectReload(inspection.cwd); });
+      if (!input.sessions) throw new Error("trust is not changed without a runtime registry");
+      return input.sessions.setProjectTrust(project, decision);
     },
     ...(input.knowledge ? { undoSubject: (entry, context) => new HomeProfileItems(() => input.knowledge?.()).undo(settingsChanges, entry, context) } : {}),
   }, input.now);
