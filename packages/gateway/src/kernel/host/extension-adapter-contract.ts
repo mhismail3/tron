@@ -5,6 +5,7 @@ export const TRON_FORM_CAPABILITY = "tron.form.v1";
 interface FormRequestInput {
   form: ExtensionFormDescriptor;
   signal?: AbortSignal;
+  timeout?: number;
 }
 
 export type FormRequest = (input: FormRequestInput) => Promise<ExtensionFormAnswer | undefined>;

@@ -64,6 +64,7 @@ import { SETTINGS_OUTCOME_MESSAGE, CONTEXT_DELIVERY_RECEIPT_TYPE } from "../rece
 import { explicitChoice, type SettingsSignal, type SettingsInventorySource, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting, type LayerId } from "../settings/tool-contract.js";
 import type { Actor } from "../settings/settings-record.js";
 import { piBuiltinExtensions, managedBrowserExtensions, toolSearchExtension } from "../host/pi-builtins.js";
+import { mcpElicitation } from "../host/mcp-elicitation.js";
 import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../host/extension-adapters.js";
 import type {
   ChatOrigin,
@@ -1258,7 +1259,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
                 throw new Error("MCP authorization URL does not match the active session operation");
               }
               this.dependencies.mcpAuth.openUrl(operationId, url, this.id, target.server);
-            }, sessionContext.defersRareTools),
+            }, sessionContext.defersRareTools, mcpElicitation(() => !this.ownedTurns.worker
+              && !currentInvocationContext()?.operationId?.startsWith("automation:"))),
             ...this.dependencies.modules.registrations(this.dependencies.modules.runtimeOrder, sessionContext),
             ...(modelRuntimePolicy?.extensions(sessionContext,
               managedSubagents?.requireChildExtensions.bind(managedSubagents)) ?? []),

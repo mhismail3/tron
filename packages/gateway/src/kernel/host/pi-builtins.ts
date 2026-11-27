@@ -7,6 +7,7 @@ import {
   createToolSearchExtension,
   serversSectionIntro,
   type ExtensionFactory,
+  type McpElicitation,
 } from "../pi/coding-agent.js";
 import { mcpServersIndex } from "../resources/context-index.js";
 import { managedBrowserEnabled } from "../pi/packages.js";
@@ -44,6 +45,7 @@ export function piBuiltinExtensions(
   agentDir: string,
   openMcpUrl?: (url: string) => void,
   activeToolSearch = false,
+  elicitation?: McpElicitation,
 ): Array<{ name: string; factory: ExtensionFactory; builtin: true; replaceable: true }> {
   return [
     { name: "codemode", factory: createCodemodeExtension(), builtin: true, replaceable: true },
@@ -54,6 +56,7 @@ export function piBuiltinExtensions(
         logPath: join(agentDir, "mcp.log"),
         openUrl: openMcpUrl ?? (() => { throw new Error("MCP sign-in requires an active Tron authorization operation"); }),
         renderServers: servers => mcpServersIndex(servers, serversSectionIntro(new Set(servers.map(server => server.reach)))),
+        ...(elicitation ? { elicitation } : {}),
       }),
       builtin: true,
       replaceable: true,
