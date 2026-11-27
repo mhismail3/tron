@@ -617,7 +617,8 @@ describe("Home task cold reconciliation", () => {
     let providers = 0;
     const effect = join(f.cwd, "effect");
     f.faux.setResponses([() => { providers++; return fauxAssistantMessage([fauxToolCall("write", { path: effect, content: "once" })], { stopReason: "toolUse" }); },
-      () => { providers++; return fauxAssistantMessage(cut === "before-report" ? "No report" : [reportCall()], { stopReason: cut === "before-report" ? "stop" : "toolUse" }); }]);
+      () => { providers++; return fauxAssistantMessage(cut === "before-report" ? "No report" : [reportCall()], { stopReason: cut === "before-report" ? "stop" : "toolUse" }); },
+      fauxAssistantMessage("Still no report")]);
     const update = store.update.bind(store);
     if (cut === "after-terminal") {
       vi.spyOn(store, "update").mockImplementation(freezeHomeLedgerWriter(update, task => task.lifecycle === "terminal"));
@@ -2438,7 +2439,10 @@ describe("Home task production dispatch", () => {
         return update(id, change);
       });
     }
-    f.faux.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: error })]);
+    const schedule = globalThis.setTimeout;
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) =>
+      schedule(callback, delay === 60_000 && f.faux.state.callCount > 0 ? 0 : delay, ...args)) as typeof setTimeout);
+    f.faux.setResponses(Array.from({ length: 2 }, () => fauxAssistantMessage("", { stopReason: "error", errorMessage: error })));
     const run = await dispatch(f);
     let registry = f.registry;
     if (cold) {

@@ -333,6 +333,64 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     expect(queue.models[0]).toMatchObject({ available: false, reason: expect.stringContaining("GoUsageLimitError") });
   });
 
+  it("waits once after a provider error Pi gave up on, then moves the worker down the queue in the same task (#2697)", async () => {
+    const f = await fixture();
+    const settings = installSettings(f);
+    const first = `${f.model.provider}/${f.model.id}`, second = `${f.model.provider}/${TASK_REASONING_MODEL_ID}`;
+    await writeFile(settings.profilePath, JSON.stringify({ modelQueue: { worker: [first, second] } }));
+    const observed: ObservedRequest[] = [];
+    const refusals: string[] = [];
+    f.faux.setResponses(Array.from({ length: 6 }, () => (context: TranscriptContext, options: SimpleStreamOptions | undefined, state: unknown, model: Model<string>) => {
+      if (isWorkerTurn(context) && model.id === f.model.id) {
+        observed.push({ model: model.id, reasoning: options?.reasoning });
+        return fauxAssistantMessage("", { stopReason: "error", errorMessage: '401 {"type":"error","error":{"type":"authentication_error","message":"token_expired"}}' });
+      }
+      return scriptedHome({ taskId: "provider-error", intent: "Finite work", target: f.cwd }, observed, refusals)(context, options, state, model);
+    }));
+    await setModelQueue(queueOwners(f), "background", [f.model]);
+    const waits: number[] = [];
+    const schedule = globalThis.setTimeout;
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => {
+      const providerWait = observed.length === 1 && delay === 60_000;
+      if (providerWait) waits.push(delay);
+      return schedule(callback, providerWait ? 0 : delay, ...args);
+    }) as typeof setTimeout);
+    const home = await f.registry.acquire(f.home.sessionId);
+    await home.prompt("Delegate the finite work");
+    await waitFor(() => home.snapshot().configurationBlocker === null, "Home delegation turn");
+    await taskIsTerminal(f, "provider-error");
+    expect(waits).toEqual([60_000]);
+    expect(refusals).toEqual([]);
+    const task = await homeOwnerOf(f.registry).taskStatus("provider-error");
+    expect(task.terminalEvidence?.outcome).toBe("final");
+    expect(observed.map(request => request.model)).toEqual([f.model.id, f.model.id, TASK_REASONING_MODEL_ID]);
+    expect(task.workerModel).toEqual({ provider: f.model.provider, id: TASK_REASONING_MODEL_ID });
+    const entries = await f.registry.readTaskEvidence(task.sessionId!);
+    const reason = expect.stringContaining("provider error (authentication): 401");
+    expect(entries.filter(entry => entry.type === "custom" && entry.customType === "tron.model-queue").map(entry => entry.type === "custom" ? entry.data : undefined))
+      .toEqual([{ role: "worker", waitedMs: 60_000, reason, next: first }, { role: "worker", skipped: first, reason, next: second }]);
+    const queue = await queueOwnerOf(f.registry)!.availability("worker", undefined, [first]);
+    expect(queue.models, "a provider error skips the model for this operation only").toEqual([{ model: first, available: true }]);
+  });
+
+  it("ends a worker's provider-error wait at once on Stop (#2697)", async () => {
+    const f = await fixture();
+    const settings = installSettings(f);
+    await writeFile(settings.profilePath, JSON.stringify({ modelQueue: { worker: [`${f.model.provider}/${f.model.id}`, `${f.model.provider}/${TASK_REASONING_MODEL_ID}`] } }));
+    let requests = 0;
+    f.faux.setResponses(Array.from({ length: 4 }, () => () => {
+      requests += 1;
+      return fauxAssistantMessage("", { stopReason: "error", errorMessage: "Cyber safeguards flagged this message" });
+    }));
+    const run = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "provider-wait-stop", intent: "Finite work", target: f.cwd });
+    const worker = await f.registry.acquire(run.sessionId);
+    await waitFor(() => requests === 1 && worker.snapshot().operation?.id === run.operationId, "worker waiting after its provider error");
+    await homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "stop", taskId: run.taskId });
+    const result = await run.completion;
+    expect(result.terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "task-stop" });
+    expect(requests).toBe(1);
+  });
+
   it("uses the live Home model for tool and direct Home dispatch while ordinary chats keep their own default", async () => {
     const f = await fixture();
     installSettings(f);
@@ -341,8 +399,10 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     const { observed } = await delegateThroughHome(f, { taskId: "live-home-model", intent: "Finite work", target: f.cwd });
     await taskIsTerminal(f, "live-home-model");
     expect(observed).toEqual([{ model: TASK_REASONING_MODEL_ID, reasoning: home.snapshot().thinkingLevel }]);
+    f.faux.appendResponses(Array.from({ length: 4 }, () => (context: TranscriptContext) => isWorkerTurn(context)
+      ? fauxAssistantMessage([reportCall("direct-report")], { stopReason: "toolUse" }) : fauxAssistantMessage("Noted.")));
     const direct = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "ordinary-default-control", intent: "Finite work", target: f.cwd });
-    await direct.completion;
+    expect((await direct.completion).terminalEvidence?.outcome).toBe("final");
     const worker = await f.registry.acquire(direct.sessionId);
     expect(worker.snapshot().model).toEqual({ provider: f.model.provider, id: TASK_REASONING_MODEL_ID });
     const ordinary = await f.registry.create(f.cwd);

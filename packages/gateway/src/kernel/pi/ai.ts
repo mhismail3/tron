@@ -6,6 +6,7 @@ export {
   getCurrentTools,
   getSupportedThinkingLevels,
   getSystemMessageText,
+  isContextOverflow,
   isRetryableAssistantError,
   lazyStream,
   normalizeContext,

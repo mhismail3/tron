@@ -135,7 +135,10 @@ dispatcher records pending intent, authorizes the snapshot, creates the worker t
 - Model: the first available `model.queue[role=worker]` (else Home's model) and
   `model.thinking[role=worker]` (else Home's), clamped; an explicit choice needs a `reason`.
   Choices are fixed in the brief and reported (`worker`, `subagentModels`; subagents default to
-  `tron/subagent`). A usage limit moves to the next worker model in place.
+  `tron/subagent`). A usage limit moves to the next worker model in place. Any other provider
+  error Pi's retries gave up on (not context overflow, abort or Stop) waits 60 s once per
+  operation (Stop or drain ends the wait and settles), retries the same model, and on a later
+  error moves down the queue for that operation only; `provider-error` means the queue is exhausted.
 - A worker has project tools plus `report` and `tool_search`; `jev`, `native_capture` and `projects` are
   deferred until `tool_search` loads them. A canonical `tron-home-task` marker is checked
   before cold construction. A sealed report ends the task at that turn boundary: a provider

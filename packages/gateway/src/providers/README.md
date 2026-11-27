@@ -160,6 +160,11 @@ failures. OpenCode Go's usage endpoint retains its distinct entitlement/auth/oth
   thinking settings and their recorded source) and the live subagent queue availability
   to the turn frame, and the `tron/subagent` extension sets the `subagent_models` system
   section with the standing launch guidance. Briefs carry only the task.
+- A worker's provider error after Pi's retries (`model-queue-extension.ts`): the first in an
+  operation waits 60 s (task Stop or drain cancels it) and retries the same model; a later one
+  skips that model for the operation only (never the shared usage ledger) and moves down the
+  queue. Each step appends a `tron.model-queue` entry (`waitedMs` or `skipped`, `next`) whose
+  `reason` keeps the upstream error category, such as `authentication`, visible.
 - `readWorkerQueueSelection` projects this owner's canonical fallback entries
   after the latest explicit choice. Settings can mask that progression with
   Project without resetting it to the original worker seed.
