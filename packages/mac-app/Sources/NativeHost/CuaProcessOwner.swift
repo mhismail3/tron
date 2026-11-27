@@ -37,7 +37,7 @@ final class CuaProcessOwner: @unchecked Sendable {
             child.executableURL = executable
             child.arguments = [
                 "serve", "--embedded", "--parent-liveness-stdio", "--no-permissions-gate",
-                "--host-bundle-id", hostBundleID, "--permission-mode", "standard",
+                "--host-bundle-id", hostBundleID, "--permission-mode", "standard", "--no-overlay",
                 "--socket", socket,
             ]
             child.environment = [

@@ -81,7 +81,7 @@ async function fixture() {
   const tool = process.argv[3], args = JSON.parse(process.argv[4]);
   if (tool === 'start_session') return console.log(JSON.stringify({ active: true, revived: false }));
   if (tool === 'end_session') return console.log(JSON.stringify({ active: false }));
-  await fs.writeFile(${JSON.stringify(dispatched)}, tool);
+  await fs.writeFile(${JSON.stringify(dispatched)}, JSON.stringify({ tool, args }));
   const mode = await fs.readFile(${JSON.stringify(join(root, "mode"))}, 'utf8').catch(() => '');
   if (mode === 'hold') await fs.readFile(${JSON.stringify(release)});
   if (mode === 'lock') await fs.writeFile(${JSON.stringify(boundary.lockFile)}, 'locked');
@@ -122,6 +122,7 @@ async function fixture() {
     root,
     mode: (value: "" | "hold" | "lock" | "stale") => writeFile(join(root, "mode"), value),
     dispatched: async () => !!await readFile(dispatched).catch(() => false),
+    lastCall: async () => JSON.parse(await readFile(dispatched, "utf8")) as { tool: string; args: Record<string, unknown> },
     release: () => writeFile(release, "released"),
     turn: async (calls: Array<[string, string, Record<string, unknown>]>) => {
       faux.setResponses([
@@ -221,6 +222,7 @@ describe.skipIf(process.platform !== "darwin")("console admission for computer a
     await f.turn([window("w1"), click("other", "s00000002:0"), window("w2"), click("row", "s00000001:0:1"), window("w3"), click("fresh", "s00000001:0")]);
     for (const id of ["other", "row"]) expect(JSON.stringify(f.result(id).content)).toContain("stale_element_token");
     expect(f.result("fresh").isError).not.toBe(true);
+    expect(await f.lastCall()).toMatchObject({ tool: "click", args: { post_action_wait: "none" } });
     await f.mode("stale");
     await f.turn([["window", "computer", { tool: "get_window_state", arguments: { pid: 1, window_id: 2, include_screenshot: false } }],
       ["click", "computer", { tool: "click", arguments: { element_token: "s00000001:0", pid: 1, window_id: 2 } }]]);
