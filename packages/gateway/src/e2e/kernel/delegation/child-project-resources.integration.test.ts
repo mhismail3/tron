@@ -58,4 +58,4 @@ it("a subdirectory chat lists and launches only Project-root agents, and the chi
     for (const [key, value] of previous) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
     await rm(root, { recursive: true, force: true });
   }
-}, 60_000);
+});
