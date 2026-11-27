@@ -148,8 +148,8 @@ keeps admission, frame preparation, broadcasts and retirement.
 - A session snapshot reaches each subscribed connection as `session.transcriptDelta`
   (`SessionTranscriptDelta`: the complete state, its transcript only the items after the
   base total, at most 16 retained items replaced in place by identity) when the server's
-  per-connection transcript base (set by `session.open` and every snapshot it sends) is
-  extendable; otherwise, and during a synchronization barrier, as a full `session.snapshot`.
+  per-connection transcript base (set by `session.open` and every snapshot it sends;
+  cleared by revocation, rekey, failed sends and overflow recovery) is extendable; otherwise, and during a synchronization barrier, as a full `session.snapshot`.
   A client applies a delta only to the exact base (runtime, window start and total, leaf)
   and otherwise reopens for one full snapshot. A superseded delta is rebaselined with the
   full snapshot it carried.

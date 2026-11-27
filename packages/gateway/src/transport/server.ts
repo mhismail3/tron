@@ -1712,6 +1712,7 @@ export class GatewayServer {
       }
       if (connection.subscriptionTokens.get(sessionId) !== token) return false;
       connection.subscriptionTokens.delete(sessionId);
+      connection.transcriptBases.delete(sessionId);
       clearRekeyedSessionIds(sessionId);
       this.options.sessions.unsubscribe(connection.id, sessionId);
       this.options.service.releaseSessionProcessTranscripts?.(sessionId, connection.id, token);

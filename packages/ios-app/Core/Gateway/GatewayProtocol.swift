@@ -278,6 +278,14 @@ package struct GatewayEvent: Decodable, Sendable, Equatable {
         func decodeWire<T>(_ decode: (WireJSON, String) throws -> T) throws -> T { try payload.decodeWire(decode) }
     }
 
+    private static func admitsSnapshot(_ snapshot: SessionSnapshot) -> Bool {
+        SessionSnapshotTranscriptAdmissionPolicy.admit(snapshot)
+            && SessionSnapshotQueueAdmissionPolicy.admit(snapshot)
+            && ExtensionPresentationPolicy.admit(snapshot.extensionPresentation)
+            && ExtensionActivityAdmissionPolicy.admitsSnapshotFacts(snapshot)
+            && SessionProcessAdmissionPolicy.admitsSnapshotFacts(snapshot)
+    }
+
     private static func prepare(topic: String, adapter: some PayloadAdapter) -> GatewayEventPreparation {
         switch topic {
         case "session.summary":
@@ -290,21 +298,12 @@ package struct GatewayEvent: Decodable, Sendable, Equatable {
                   NotificationInboxAdmissionPolicy.admits(change) else { return .none }
             return .notificationInboxChanged(change)
         case "session.snapshot":
-            guard let snapshot = try? adapter.decode(SessionSnapshot.self),
-                  SessionSnapshotTranscriptAdmissionPolicy.admit(snapshot),
-                  SessionSnapshotQueueAdmissionPolicy.admit(snapshot),
-                  ExtensionPresentationPolicy.admit(snapshot.extensionPresentation),
-                  ExtensionActivityAdmissionPolicy.admitsSnapshotFacts(snapshot),
-                  SessionProcessAdmissionPolicy.admitsSnapshotFacts(snapshot) else { return .none }
+            guard let snapshot = try? adapter.decode(SessionSnapshot.self), admitsSnapshot(snapshot) else { return .none }
             return .sessionSnapshot(snapshot)
         case "session.rebaseline":
             guard let payload = try? adapter.decode(RebaselinePayload.self),
                   GatewayTokenAdmissionPolicy.admit(payload.subscriptionToken),
-                  SessionSnapshotTranscriptAdmissionPolicy.admit(payload.snapshot),
-                  SessionSnapshotQueueAdmissionPolicy.admit(payload.snapshot),
-                  ExtensionPresentationPolicy.admit(payload.snapshot.extensionPresentation),
-                  ExtensionActivityAdmissionPolicy.admitsSnapshotFacts(payload.snapshot),
-                  SessionProcessAdmissionPolicy.admitsSnapshotFacts(payload.snapshot) else { return .none }
+                  admitsSnapshot(payload.snapshot) else { return .none }
             return .sessionRebaseline(PreparedSessionRebaseline(snapshot: payload.snapshot, subscriptionToken: payload.subscriptionToken))
         case "session.processTranscript.changed":
             guard let changed = try? adapter.decode(PresentedProcessTranscriptChanged.self),
@@ -338,7 +337,8 @@ package struct GatewayEvent: Decodable, Sendable, Equatable {
                    delta.snapshot.runtimeGeneration == envelope.runtimeGeneration,
                    delta.snapshot.eventSequence == envelope.eventSequence,
                    delta.snapshot.revision == envelope.revision,
-                   (delta.replaced.map(\.item) + delta.snapshot.transcript).allSatisfy(SessionSnapshotTranscriptAdmissionPolicy.admitsItem) {
+                   admitsSnapshot(delta.snapshot),
+                   delta.replaced.map(\.item).allSatisfy(SessionSnapshotTranscriptAdmissionPolicy.admitsItem) {
                     preparedData = .transcriptDelta(delta)
                 } else { preparedData = .invalid }
             case "session.toolProgress":

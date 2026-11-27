@@ -159,6 +159,13 @@ final class GatewayDecisionOwnershipTests: XCTestCase {
             base: base, next: next, replaced: [(0, try transcriptItem("not-the-base-row", "Wrong identity"))]))
         guard case .transcriptDelta(let mismatched)? = foreign.preparedSessionEvent?.data else { return XCTFail("The replacement decodes") }
         XCTAssertNil(mismatched.applied(to: base), "A replacement must keep the retained row's identity")
+        var badFacts = next
+        badFacts.processOverview = PresentedProcessOverview(revision: 1, asOf: observed, activeCount: -1, recentCount: 0, problemCount: 0,
+                                                            visibility: .active)
+        let refusedFacts = try JSONDecoder.gateway.decode(GatewayEvent.self, from: transcriptDeltaFrame(base: base, next: badFacts))
+        guard case .invalid? = refusedFacts.preparedSessionEvent?.data else {
+            return XCTFail("A delta is admitted by the same snapshot checks as a full snapshot")
+        }
     }
 
     @MainActor
