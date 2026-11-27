@@ -99,7 +99,8 @@ task ID, operation and worker slot.
   memory: a target that settles or checks in `heavy: done`, or a free heavy slot (no other live
   operation in a heavy phase or holding a released claim; oldest waiter first). The release is
   one gateway steer with `authority: none`; a steer that is refused (for example while Home's
-  steer is starting a turn) is kept and redelivered by the 60 s sweep or taken when that turn ends.
+  steer is starting a turn) is kept: taken when the current turn ends with `stop`, or redelivered by
+  the 60 s sweep while parked; an accepted steer ends the wait and drops it.
   A `task` or `heavy` wait is refused while the worker is in a heavy phase. Waiting on itself or an unknown task is refused, a cycle is refused by reply (checked synchronously as the wait opens), and a target already terminal (not merely pending) continues at once.
 - Any accepted steer ends the wait. Stop, the 24-hour ceiling or a drain settle
   an open wait as `needs-input` (`wait-stopped`, `wait-deadline`, `wait-drained`, else `wait-ended`)

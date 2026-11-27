@@ -644,7 +644,7 @@ describe("Workers wait in place and stalls wake Home once (#2695, #2696)", () =>
     expect(final).toMatchObject({ taskId: run.taskId, operationId: run.operationId, terminalEvidence: { outcome: "final", reason: "explicit-report" } });
     expect(workerTurns).toBe(3);
     checkinEvidence.push({ case: "wait-home-steer", delivered: delivered[0], row, final });
-  }, 30_000);
+  });
 
   it("releases a task wait when the named task settles, under the same task and operation", async () => {
     const f = await fixture();
@@ -689,7 +689,7 @@ describe("Workers wait in place and stalls wake Home once (#2695, #2696)", () =>
     expect(release).toHaveLength(1);
     expect(JSON.stringify(release[0]!.message!.content)).toContain("[from: gateway; kind: steer; authority: none]");
     checkinEvidence.push({ case: "wait-task-release", final });
-  }, 30_000);
+  });
 
   it("refuses a task wait during a heavy phase and hands the heavy slot to the parked waiter on heavy done", async () => {
     const f = await fixture();
@@ -726,7 +726,7 @@ describe("Workers wait in place and stalls wake Home once (#2695, #2696)", () =>
     expect((await waiter.completion)).toMatchObject({ operationId: waiter.operationId, terminalEvidence: { outcome: "final" } });
     expect(JSON.stringify((await f.registry.acquire(waiter.sessionId)).canonicalSessionEntries())).toContain("a heavy slot is free");
     checkinEvidence.push({ case: "heavy-slot-handoff", holder: holderFinal.terminalEvidence });
-  }, 30_000);
+  });
 
   it("settles an open wait as needs-input on Stop and on a drain", async () => {
     const f = await fixture();
@@ -749,7 +749,7 @@ describe("Workers wait in place and stalls wake Home once (#2695, #2696)", () =>
     f.registry.beginAdministrativeDrain();
     expect((await drained.completion).terminalEvidence).toMatchObject({ outcome: "needs-input", reason: "wait-drained" });
     checkinEvidence.push({ case: "wait-stop-drain" });
-  }, 30_000);
+  });
 
   it("wakes Home once per idle span for a running worker that writes nothing for 45 minutes", async () => {
     const f = await fixture();
@@ -777,5 +777,5 @@ describe("Workers wait in place and stalls wake Home once (#2695, #2696)", () =>
     await homeOwnerOf(f.registry).stopTask({ taskId: run.taskId, operationId: run.operationId });
     await run.completion;
     checkinEvidence.push({ case: "stall-wake-once", delivered: delivered[0] });
-  }, 30_000);
+  });
 });
