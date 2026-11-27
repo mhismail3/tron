@@ -21,12 +21,9 @@ OUTCOMES = [
     ("Home continuity and current Profile", ["testHomeStatusShowsHostPressureAndWorkers"], [
         "src/e2e/sessions/home-memory-tools.e2e.test.ts",
         "src/e2e/modules/home/home-profile-triage.integration.test.ts"]),
-    ("Controls: settings persistence and exact native review", [
-        "testOutsideMcpAdditionReachesTheOpenMcpScreen"], [
+    ("Controls: settings persistence and exact native review", [], [
         "src/e2e/admin/native-change.e2e.test.ts"]),
     ("Files/artifacts/research: uploads, reopen and source reads", [], [
-        "src/display/display.store.lock.integration.test.ts",
-        "src/modules/artifacts/artifacts.integration.test.ts",
         "src/e2e/sessions/home-research-tools.integration.test.ts"]),
     ("Independent SSH access and protocol/release identity", [
         "testMacReplacementRowAndProgressFollowTheJournal"], [

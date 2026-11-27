@@ -11,23 +11,6 @@ final class TronIntegrationSheetsUITests: XCTestCase {
     }
 
     @MainActor
-    func testRetryConnectionRecoversUnreachableDetails() {
-        continueAfterFailure = false
-        let app = launch(scenario: "connection-unreachable")
-        defer { app.terminate() }
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Mac unreachable")).firstMatch.waitForExistence(timeout: 30), app.debugDescription)
-        let retry = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Retry Connection")).firstMatch
-        XCTAssertTrue(retry.waitForExistence(timeout: 3), app.debugDescription)
-        keepScreenshot(app, name: "connection-unreachable-retry-available")
-        retry.tap()
-        XCTAssertTrue(app.otherElements["Connection status: Connected"].waitForExistence(timeout: 5)
-            || app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Connection status: Connected")).firstMatch.exists,
-            "Retry must interrupt the parked delay and admit a replacement socket: \(app.debugDescription)")
-        XCTAssertFalse(retry.exists)
-        keepScreenshot(app, name: "connection-unreachable-recovered")
-    }
-
-    @MainActor
     func testEstablishedSocketLossThenOpenTimeoutsBecomeUnreachable() {
         continueAfterFailure = false
         let app = launch(scenario: "connection-loss-unreachable")

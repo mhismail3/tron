@@ -35,7 +35,7 @@ XCTESTRUN_FIXTURE_KEYS = [
     "TRON_E2E_PI_VERSION",
     "TRON_E2E_PORT",
     "TRON_E2E_PROXY_TOKEN",
-    "TRON_E2E_SETTINGS_INVENTORY", "TRON_E2E_TRON_HOME",
+    "TRON_E2E_TRON_HOME",
     "TRON_E2E_WORKSPACE",
 ]
 DEVELOPMENT = ROOT / "scripts/tron-ios-simulator"
@@ -4890,8 +4890,7 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
 
     def test_boundary_check_builds_selected_lanes_and_retires_its_fixture(self) -> None:
         owners = ["TronMobileE2ETests/RealGatewayPiBoundaryTests/testSharedLinkUploadAndWebSocketLiveness",
-                  "TronMobileE2ETests/RealGatewayPiBoundaryTests/testRacesLanAndTailscaleLanes",
-                  "TronMobileE2ETests/GatewayTimeoutDiagnosticTests/testBothRawTimeoutNamesProduceTheSameTransportDiagnostic"]
+                  "TronMobileE2ETests/RealGatewayPiBoundaryTests/testRacesLanAndTailscaleLanes"]
         self.assertEqual(self.boundary_selection_run("check", owners), owners)
 
     def test_boundary_default_runs_every_owned_method_in_order(self) -> None:

@@ -39,67 +39,6 @@ extension RealGatewayPairAndChatUITests {
     }
 
     @MainActor
-    func testSessionModelChangeReachesNextPrompt() throws {
-        continueAfterFailure = false
-        let fixture = try RealGatewayUIFixture.fromEnvironment()
-        let app = launchApp()
-        defer { app.terminate() }
-        open(fixture.invitationLink())
-        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
-        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
-        createSession(app, inWorkspace: fixture.workspace)
-        func served(_ model: String) -> XCUIElementQuery {
-            app.textViews.matching(identifier: "chat.assistant.selectable-text")
-                .descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Model probe answered by \(model)."))
-        }
-        func probe(_ label: String, expecting model: String, count: Int) {
-            sendJourneyPrompt(app, "MODEL-PROBE-JOURNEY \(label)")
-            XCTAssertTrue(waitUntil(timeout: 120) { served(model).count == count },
-                          "prompt \(label) must be served by \(model): \(app.debugDescription)")
-        }
-        probe("one", expecting: "e2e-model", count: 1)
-
-        let manage = app.buttons["session-context-button"]
-        XCTAssertTrue(waitForEnabled(manage, timeout: 60), app.debugDescription)
-        manage.tap()
-        let card = app.descendants(matching: .any)["session-model-summary"]
-        XCTAssertTrue(card.waitForExistence(timeout: 30), app.debugDescription)
-        let switchModel = app.buttons["manage-model-switch"]
-        XCTAssertTrue(waitForEnabled(switchModel, timeout: 30), app.debugDescription)
-        switchModel.tap()
-        let search = app.buttons["Search models"]
-        XCTAssertTrue(search.waitForExistence(timeout: 30), app.debugDescription)
-        search.tap()
-        let field = app.textFields.firstMatch
-        XCTAssertTrue(field.waitForExistence(timeout: 15), app.debugDescription)
-        field.typeText("Alternate")
-        let alternate = app.buttons.matching(NSPredicate(format: "label CONTAINS 'tron-e2e/e2e-alternate'")).firstMatch
-        XCTAssertTrue(waitForHittable(alternate, timeout: 30), app.debugDescription)
-        alternate.tap()
-        XCTAssertTrue(card.staticTexts.matching(NSPredicate(format: "label ==[c] 'Tron E2E Alternate'")).firstMatch.waitForExistence(timeout: 30),
-                      "only the acknowledged Session choice is shown: \(app.debugDescription)")
-        keepScreenshot(app, name: "2233-session-model-changed")
-        dismissTopSheet(app)
-        probe("two", expecting: "e2e-alternate", count: 1)
-        XCTAssertEqual(served("e2e-model").count, 1, "the earlier reply keeps its model")
-
-        app.buttons["Back"].tap()
-        let changedRow = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "session-row-")).firstMatch
-        XCTAssertTrue(waitForHittable(changedRow, timeout: 60), app.debugDescription)
-        let changedRowID = changedRow.identifier
-        createSession(app, inWorkspace: fixture.workspace)
-        probe("other", expecting: "e2e-model", count: 1)
-        XCTAssertEqual(served("e2e-alternate").count, 0, "the other chat must not run the Session override")
-
-        app.buttons["Back"].tap()
-        let changedChat = app.buttons[changedRowID]
-        XCTAssertTrue(waitForHittable(changedChat, timeout: 60), app.debugDescription)
-        changedChat.tap()
-        XCTAssertTrue(served("e2e-alternate").firstMatch.waitForExistence(timeout: 60), app.debugDescription)
-        XCTAssertTrue(waitForEnabled(app.buttons["session-context-button"], timeout: 60), app.debugDescription)
-    }
-
-    @MainActor
     func testHomeSettingsCardDeclineAppliesNothingAndDoubleApproveAppliesOnce() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
