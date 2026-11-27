@@ -18,8 +18,10 @@ extension HomeSheet {
             }
             HomeContextSummaryCard(snapshot: sessionID.flatMap { model.sessionContextPresentation(for: $0) }, read: read)
             if let sessionID { ManageModelConfigurationCard(sessionID: sessionID, home: true) }
-            manageRows(read, unresolved: unresolved)
-            if read?.status.admitsTaskReads == true { HomeTaskSheet(permissionsFor: profileID) }
+            VStack(alignment: .leading, spacing: 0) {
+                manageRows(read, unresolved: unresolved)
+                if read?.status.admitsTaskReads == true { HomeTaskSheet(permissionsFor: profileID) }
+            }
         }
         .animation(.smooth(duration: 0.3), value: read)
     }
