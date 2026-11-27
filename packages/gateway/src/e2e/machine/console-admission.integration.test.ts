@@ -88,7 +88,7 @@ async function fixture() {
   if (mode === 'stale' && tool === 'click') { console.log(JSON.stringify({ status: 'refused', refusal: { code: 'stale_element_token', message: 'element_token is stale' } })); process.exit(1); }
   const png = Buffer.alloc(33); Buffer.from([137,80,78,71,13,10,26,10]).copy(png); png.writeUInt32BE(13, 8); png.write('IHDR', 12); png.writeUInt32BE(4, 16); png.writeUInt32BE(4, 20);
   if (args.screenshot_out_file) await fs.writeFile(args.screenshot_out_file, png);
-  const window = tool === 'get_window_state' ? { pid: 1, window_id: 2, elements: [{ element_token: 's00000001:0' }] } : {};
+  const window = tool === 'get_window_state' ? { pid: 1, window_id: 2, snapshot_id: 's00000001', tree_markdown: '- [0] AXButton "Approve"' } : {};
   console.log(JSON.stringify({ status: 'completed', ...window, ...(args.screenshot_out_file ? { screenshot_file_path: args.screenshot_out_file, screenshot_width: 4, screenshot_height: 4 } : {}) }));
 })().catch(error => { console.error(error); process.exit(1); });
 `);
@@ -210,12 +210,17 @@ describe.skipIf(process.platform !== "darwin")("console admission for computer a
     await waitFor(async () => await heldAssertions() === 0, "assertion release after the deadline");
   });
 
-  it("projects help without reserved fields and types a driver-side stale element refusal", async () => {
+  it("projects help without reserved fields, admits a fresh markdown-row token and types adapter- and driver-side stale refusals", async () => {
     const f = await fixture();
     await f.turn([["help", "computer", { tool: "help", arguments: { tool: "click" } }]]);
     const help = JSON.stringify(f.result("help").content);
     expect(help).toContain("element_token");
     expect(help).not.toContain("session");
+    const window = (id: string): [string, string, Record<string, unknown>] => [id, "computer", { tool: "get_window_state", arguments: { pid: 1, window_id: 2, include_screenshot: false } }];
+    const click = (id: string, element_token: string): [string, string, Record<string, unknown>] => [id, "computer", { tool: "click", arguments: { element_token, pid: 1, window_id: 2 } }];
+    await f.turn([window("w1"), click("other", "s00000002:0"), window("w2"), click("row", "s00000001:0:1"), window("w3"), click("fresh", "s00000001:0")]);
+    for (const id of ["other", "row"]) expect(JSON.stringify(f.result(id).content)).toContain("stale_element_token");
+    expect(f.result("fresh").isError).not.toBe(true);
     await f.mode("stale");
     await f.turn([["window", "computer", { tool: "get_window_state", arguments: { pid: 1, window_id: 2, include_screenshot: false } }],
       ["click", "computer", { tool: "click", arguments: { element_token: "s00000001:0", pid: 1, window_id: 2 } }]]);
