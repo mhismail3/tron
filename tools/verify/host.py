@@ -153,6 +153,11 @@ def job_run(job: dict) -> int:
         child = subprocess.Popen([str(checkout / 'scripts/tron'), 'test', lane, *job['args']], cwd=checkout, env=env,
                                  stdin=subprocess.DEVNULL, start_new_session=True)
         running.append(child)
+        if stopped.is_set():
+            try:
+                os.killpg(child.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
         code = child.wait()
         try:
             os.killpg(child.pid, signal.SIGKILL)

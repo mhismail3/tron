@@ -48,7 +48,8 @@ A host needs Xcode with the pinned iOS runtime, `scripts/tron-node install` and
 `git init --bare ~/tron-ci/tron.git`. Signed device and share builds on the mini use automatic
 signing with the App Store Connect API key in `~/.appstoreconnect/private_keys` and an Apple
 Development identity in `~/Library/Keychains/tron-signing.keychain-db`, whose random password is
-`~/.tron-signing/keychain.pass` (600); unlock that keychain in the ssh session before signing.
+`~/.tron-signing/keychain.pass` (600, a random URL-safe token); `scripts/tron test --host` unlocks it
+over `security -i` stdin before the lane; another ssh session unlocks it the same way before signing.
 
 ## On-demand proof
 
