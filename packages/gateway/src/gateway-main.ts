@@ -751,13 +751,7 @@ async function runStopDrain(): Promise<void> {
 }
 
 settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, {
-  setTrust: async (project, decision) => trust.setAndApply(
-    project,
-    decision,
-    async (inspection) => sessions.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false),
-    async (inspection) => sessions.commitProjectReload(inspection.projectDir),
-    async (inspection) => sessions.abortProjectReload(inspection.projectDir),
-  ),
+  setTrust: (project, decision) => sessions.setProjectTrust(project, decision),
   undoSubject: (entry, context) => new HomeProfileItems(() => knowledge).undo(settingsChanges, entry, context),
 });
 sessions.setSettings(settingsModel, settingsChanges, new SettingsInventoryReader(hookResources, packages, mcpAdmin, trust, modules, modelConfig));

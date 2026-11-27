@@ -218,6 +218,7 @@ export class PackageService {
         ...(this.managedSubagents ? { managedSubagents: this.managedSubagents } : {}),
         trust: this.trust,
         cwd,
+        projectDir: project.projectDir,
         settingsManager: settings,
         packages,
         resources,

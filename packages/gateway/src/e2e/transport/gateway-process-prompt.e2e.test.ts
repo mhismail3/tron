@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../../test-support/gateway-process.js";
-import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
+import { awaitsWithin, WAIT_HANG_BOUND_MS, waitFor } from "../../../test-support/wait-for.js";
 import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
 import { applyTranscriptDelta } from "../../protocol/transcript-delta.js";
 import { decodeSessionTranscriptDelta, type SessionSnapshot } from "../../protocol/types.js";
 
-const gateways: GatewayProcess[] = [];
-afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
+let gateway: GatewayProcess;
+beforeAll(async () => { gateway = await startGatewayProcess({ providerName: "openrouter", settings: { enableInstallTelemetry: true } }); }, WAIT_HANG_BOUND_MS);
+afterAll(async () => { await gateway?.dispose(); }, WAIT_HANG_BOUND_MS);
 
 type Snapshot = { phase: string; operation?: unknown; transcript: Array<Record<string, any>> };
 
@@ -83,9 +84,7 @@ function replay(base: SessionSnapshot, events: ReadonlyArray<{ topic: string; pa
 }
 
 describe("prompt journeys across the real Gateway process", () => {
-  it("settles one streamed reply exactly once across fresh-connection reads, a duplicate submit and a process restart (#2230)", async () => {
-    const gateway = await startGatewayProcess();
-    gateways.push(gateway);
+  it("settles one streamed reply exactly once across fresh-connection reads, a duplicate submit and a process restart, and an old settings file that says install telemetry on sends no attribution header (#2230, D2)", async () => {
     const prompt = "Reply once to this exact prompt.";
     const head = "PARTIAL-ALPHA ";
     const tail = "OMEGA-COMPLETE.";
@@ -94,6 +93,9 @@ describe("prompt journeys across the real Gateway process", () => {
     const reached = new Promise<void>((resolve) => { reach = resolve; });
     const released = new Promise<void>((resolve) => { release = resolve; });
     let lookupPid: number | undefined;
+    const prior = gateway.provider.requests.length;
+    const sent = () => gateway.provider.requests.slice(prior);
+    const priorErrors = gateway.provider.errors.length;
     gateway.provider.script([() => ({ chunks: [head, async () => { reach(); await released; }, tail] })]);
 
     try {
@@ -124,18 +126,19 @@ describe("prompt journeys across the real Gateway process", () => {
       expectExactlyOnce(await freshSnapshot(gateway, sessionId));
       const status = await phone.request("command.status", { method: "session.prompt", commandId: "prompt-once-command" });
       expect(status.result).toEqual({ status: "completed", result: { operationId: admitted.result.operationId } });
-      const requestLog = (await readFile(join(gateway.tronHome, "logs", "requests.jsonl"), "utf8")).trimEnd().split("\n").map((line) => JSON.parse(line));
+      const requests = (await readFile(join(gateway.tronHome, "logs", "requests.jsonl"), "utf8")).trimEnd().split("\n").map((line) => JSON.parse(line));
+      const requestLog = requests.filter((record) => record.sessionId === sessionId);
       expect(requestLog).toHaveLength(1);
-      const sent = JSON.parse(gateway.provider.requests[0]!.body) as Record<string, unknown> & { messages: Array<Record<string, unknown>>; tools?: unknown[] };
+      const request = JSON.parse(sent()[0]!.body) as Record<string, unknown> & { messages: Array<Record<string, unknown>>; tools?: unknown[] };
       const size = (units: readonly unknown[]) => units.reduce<number>((bytes, unit) => bytes + Buffer.byteLength(JSON.stringify(unit)), 0);
-      const toolBytes = size(sent.tools ?? []);
-      const messageBytes = size(sent.messages.flatMap((message) => {
+      const toolBytes = size(request.tools ?? []);
+      const messageBytes = size(request.messages.flatMap((message) => {
         if (!Array.isArray(message.content)) return [message];
         const { content, ...envelope } = message;
         return [envelope, ...content as unknown[]];
       }));
-      const { tools: _tools, messages: _messages, ...params } = sent;
-      expect(sent.messages.map((message) => message.role)).toEqual(expect.arrayContaining(["system", "user"]));
+      const { tools: _tools, messages: _messages, ...params } = request;
+      expect(request.messages.map((message) => message.role)).toEqual(expect.arrayContaining(["system", "user"]));
       expect(toolBytes).toBeGreaterThan(0);
       expect(requestLog[0]).toMatchObject({ sessionId, kind: "ordinary", api: "openai-completions", stop: "stop", marks: [], system: [],
         tools: { bytes: toolBytes }, request: { bytes: toolBytes + messageBytes },
@@ -143,20 +146,17 @@ describe("prompt journeys across the real Gateway process", () => {
       expect(Date.parse(requestLog[0].timestamp)).toBeGreaterThan(0);
       expect(new Set([requestLog[0].tools.hash, requestLog[0].request.hash, requestLog[0].params.hash]).size).toBe(3);
       expect(JSON.stringify(requestLog[0])).not.toContain(prompt);
-      const observed = JSON.parse(await readFile(join(gateway.tronHome, "logs", "observations", `${new Date(requestLog[0].timestamp).toISOString().slice(0, 10)}.json`), "utf8"));
-      expect(observed.kinds.ordinary).toMatchObject({ requests: 1 });
+      const day = new Date(requestLog[0].timestamp).toISOString().slice(0, 10);
+      const observed = JSON.parse(await readFile(join(gateway.tronHome, "logs", "observations", `${day}.json`), "utf8"));
+      expect(observed.kinds.ordinary).toMatchObject({ requests: requests.filter((record) => record.kind === "ordinary"
+        && new Date(record.timestamp).toISOString().startsWith(day)).length });
       expect(JSON.stringify(observed)).not.toContain(prompt);
+      const headers = sent()[0]!.headers;
+      expect(headers["user-agent"]).toMatch(/^pi\//);
+      expect(headers["http-referer"]).toBeUndefined();
+      expect(headers["x-openrouter-title"]).toBeUndefined();
+      expect(headers["x-openrouter-categories"]).toBeUndefined();
       await phone.close();
-
-      const normalRestartStarted = performance.now();
-      await gateway.restart({ whileStopped: async () => {
-        console.info("normal Gateway shutdown ms", performance.now() - normalRestartStarted);
-      } });
-      console.info("normal Gateway process restart ms", performance.now() - normalRestartStarted);
-      expectExactlyOnce(await freshSnapshot(gateway, sessionId));
-      expect(gateway.provider.requests).toHaveLength(1);
-      expect(withoutTurnFrame(gateway.provider.requests[0]!.messages).filter((message) => message.role === "user")).toHaveLength(1);
-      expect(gateway.provider.errors).toEqual([]);
 
       const bin = join(gateway.root, "bin");
       const pidFile = join(gateway.root, "npm.pid");
@@ -165,6 +165,9 @@ describe("prompt journeys across the real Gateway process", () => {
       await writeFile(join(bin, "npm"), `#!${process.execPath}\nconst fs = require("node:fs"); fs.appendFileSync(${JSON.stringify(callers)}, fs.fstatSync(0).isSocket() ? "async\\n" : "sync\\n"); fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);\n`, { mode: 0o755 });
       await gateway.restart({ environment: { PATH: `${bin}${delimiter}${process.env.PATH ?? ""}` } });
       expectExactlyOnce(await freshSnapshot(gateway, sessionId));
+      expect(sent()).toHaveLength(1);
+      expect(withoutTurnFrame(sent()[0]!.messages).filter((message) => message.role === "user")).toHaveLength(1);
+      expect(gateway.provider.errors.slice(priorErrors)).toEqual([]);
       lookupPid = await waitFor(async () => {
         try { return Number(await readFile(pidFile, "utf8")) || undefined; } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -180,7 +183,7 @@ describe("prompt journeys across the real Gateway process", () => {
       } });
       console.info("npm discovery process restart ms", performance.now() - restartStarted);
       expectExactlyOnce(await freshSnapshot(gateway, sessionId));
-      expect(gateway.provider.requests).toHaveLength(1);
+      expect(sent()).toHaveLength(1);
     } finally {
       release();
       if (lookupPid !== undefined) {
@@ -192,30 +195,7 @@ describe("prompt journeys across the real Gateway process", () => {
     }
   });
 
-  it("an old settings file that says install telemetry on cannot re-enable it: the real SDK sends no attribution header to a provider (D2)", async () => {
-    const gateway = await startGatewayProcess({ providerName: "openrouter", settings: { enableInstallTelemetry: true } });
-    gateways.push(gateway);
-    gateway.provider.script([() => ({ chunks: ["quiet reply"] })]);
-    const phone = await gateway.connect();
-    try {
-      const sessionId = await createSession(gateway, phone, "telemetry-create");
-      const admitted = await phone.request("session.prompt", { commandId: "telemetry-prompt", sessionId, text: "Reply quietly." });
-      expect(admitted.ok, JSON.stringify(admitted)).toBe(true);
-      expect(messages(await settled(gateway, sessionId), "assistant")).toEqual(["quiet reply"]);
-    } finally {
-      await phone.close();
-    }
-    expect(gateway.provider.requests).toHaveLength(1);
-    const headers = gateway.provider.requests[0]!.headers;
-    expect(headers["user-agent"]).toMatch(/^pi\//);
-    expect(headers["http-referer"]).toBeUndefined();
-    expect(headers["x-openrouter-title"]).toBeUndefined();
-    expect(headers["x-openrouter-categories"]).toBeUndefined();
-  });
-
   it("sends each canonical transcript item to a subscribed phone once per tool call, and a phone off the base resyncs from one full snapshot (#2473)", async () => {
-    const gateway = await startGatewayProcess();
-    gateways.push(gateway);
     const tools = 10;
     gateway.provider.script([
       ...Array.from({ length: tools }, (_, index) => () => ({

@@ -42,7 +42,7 @@ export async function loadSessionFreeExtensions(
       ? false
       : (await trust.inspect(cwd)).effectiveDecision === true,
   });
-  await managedSubagents?.completeLoad(settings, cwd, agentDir, loader.getExtensions().extensions);
+  await managedSubagents?.completeLoad(settings, projectDir, agentDir, loader.getExtensions().extensions);
   const loaded = loader.getExtensions();
   return { extensions: loaded.extensions, errors: loaded.errors, warnings: loaded.warnings ?? [] };
 }

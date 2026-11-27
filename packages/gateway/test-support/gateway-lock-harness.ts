@@ -217,10 +217,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   const outside = new OutsideChanges(TEST_SETTINGS_SCHEMA, tronHome, agentDir, settingsRecord, settingsModel.owner.observedReaders);
   settingsModel.owner.observeOutside(outside);
   const settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, {
-    setTrust: async (project, decision) => trust.setAndApply(project, decision,
-      async (inspection) => { await registry.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false); },
-      async (inspection) => { await registry.commitProjectReload(inspection.projectDir); },
-      async (inspection) => { await registry.abortProjectReload(inspection.projectDir); }),
+    setTrust: (project, decision) => registry.setProjectTrust(project, decision),
   });
   settingsAccess = { model: settingsModel, changes: settingsChanges };
   registry.setSettings(settingsModel, settingsChanges, settingsInventorySource({ agentDir, trust, modules: registry.moduleHost, mcp: new McpAdminService(agentDir, piCliBundle()) }));
