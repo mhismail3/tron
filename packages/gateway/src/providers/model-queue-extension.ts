@@ -19,7 +19,10 @@ export function readWorkerQueueSelection(entries: readonly SessionEntry[], after
 }
 export type ModelQueueRole = "worker" | "subagent" | "background";
 
-import { UPSTREAM_USAGE_LIMIT } from "../util/upstream-error.js";
+import { UPSTREAM_USAGE_LIMIT, upstreamErrorInfo } from "../util/upstream-error.js";
+import { isContextOverflow } from "../kernel/pi/ai.js";
+
+const PROVIDER_ERROR_WAIT_MS = 60_000;
 
 export function isUsageLimitError(text: string | undefined): boolean {
   return typeof text === "string" && UPSTREAM_USAGE_LIMIT.test(text);
@@ -37,9 +40,23 @@ export function exhaustedText(role: ModelQueueRole, models: readonly QueueModelS
   return `All ${role} models are unavailable: ${models.map(entry => `${entry.model} — ${entry.reason ?? "unavailable"}`).join("; ")}.`;
 }
 
-export function usageLimitReason(message: string): string {
+function brief(message: string): string {
   const text = message.replace(/\s+/gu, " ").trim();
-  return `usage-limit error: ${text.length > 200 ? `${text.slice(0, 199)}…` : text}`;
+  return text.length > 200 ? `${text.slice(0, 199)}…` : text;
+}
+
+export function usageLimitReason(message: string): string {
+  return `usage-limit error: ${brief(message)}`;
+}
+
+function pause(ms: number, signal: AbortSignal | undefined): Promise<boolean> {
+  return new Promise(resolve => {
+    if (signal?.aborted) return resolve(false);
+    const done = (waited: boolean) => { clearTimeout(timer); signal?.removeEventListener("abort", stop); resolve(waited); };
+    const stop = () => done(false);
+    const timer = setTimeout(() => done(true), ms);
+    signal?.addEventListener("abort", stop, { once: true });
+  });
 }
 
 export function isUsageLimitReason(reason: string | undefined): boolean {
@@ -80,6 +97,7 @@ const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as 
 interface QueueOptions {
   virtualModel?: boolean;
   guidance?: () => boolean;
+  stopSignal?: () => AbortSignal | undefined;
 }
 
 export const SUBAGENT_MODELS_GUIDANCE = `Explicit eligible subagent model choices in your brief take precedence over the default queue: pass the chosen provider/model to the subagent launch. Otherwise, launch subagents with model ${SUBAGENT_QUEUE_MODEL.provider}/${SUBAGENT_QUEUE_MODEL.id}: it runs the first available one of the turn frame's Subagent models and moves along that queue on a usage-limit error. If an explicit choice is unavailable or hits a usage limit, disclose the reason and the chosen fallback; do not silently substitute the queue default.`;
@@ -120,17 +138,26 @@ export function createModelQueueExtension(role: ModelQueueRole, source: ModelQue
       });
     }
 
+    let waited = false;
     pi.on("agent_before_settle", async (event, ctx) => {
       if (event.outcome !== "error") return undefined;
       const branch = ctx.sessionManager.getBranch();
       const failed = branch.findLast(entry => entry.type === "message" && entry.message.role === "assistant");
-      if (failed?.type !== "message" || failed.message.role !== "assistant" || failed.message.stopReason !== "error"
-        || !isUsageLimitError(failed.message.errorMessage)) return undefined;
+      if (failed?.type !== "message" || failed.message.role !== "assistant" || failed.message.stopReason !== "error") return undefined;
+      const error = failed.message.errorMessage ?? "";
+      const limited = isUsageLimitError(error);
+      if (!limited && (role !== "worker" || isContextOverflow(failed.message))) return undefined;
       const virtual = isQueueModel(ctx.model);
       if (role === "subagent" && !virtual) return undefined;
       const failedModel = `${failed.message.provider}/${failed.message.model}`;
-      const reason = usageLimitReason(failed.message.errorMessage!);
-      source.record(role, failedModel, reason);
+      const reason = limited ? usageLimitReason(error) : `provider error (${upstreamErrorInfo(error, failed.message.provider).category}): ${brief(error)}`;
+      const retry = { type: "context_edit" as const, targetId: failed.id, replacement: null };
+      if (!limited && !waited) {
+        waited = true;
+        if (!await pause(PROVIDER_ERROR_WAIT_MS, options.stopSignal?.())) return undefined;
+        return { entries: [{ type: "custom" as const, customType: MODEL_QUEUE_ENTRY, data: { role, waitedMs: PROVIDER_ERROR_WAIT_MS, reason, next: failedModel } }, retry], continue: true };
+      }
+      if (limited) source.record(role, failedModel, reason);
       const models = await source.availability(role);
       const states = models.map(entry => entry.model === failedModel ? { model: entry.model, available: false, reason } : entry);
       const start = states.findIndex(entry => entry.model === failedModel) + 1;
@@ -139,7 +166,7 @@ export function createModelQueueExtension(role: ModelQueueRole, source: ModelQue
         return {
           entries: [
             { type: "custom" as const, customType: MODEL_QUEUE_ENTRY, data: { role, skipped: failedModel, reason, next: next.model } },
-            { type: "context_edit" as const, targetId: failed.id, replacement: null },
+            retry,
           ],
           continue: true,
         };
