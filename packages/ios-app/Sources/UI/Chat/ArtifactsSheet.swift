@@ -224,6 +224,12 @@ extension ArtifactEntry {
         try data.write(to: file)
         return file
     }
+
+    static func activityController(sharing file: URL) -> UIActivityViewController {
+        let controller = UIActivityViewController(activityItems: [file], applicationActivities: nil)
+        controller.completionWithItemsHandler = { _, _, _, _ in try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        return controller
+    }
 }
 
 private struct ArtifactViewer: View {
@@ -254,10 +260,10 @@ private struct ArtifactViewer: View {
             defer { sharing = false }
             do {
                 let file = try await entry.sharedFile()
+                let controller = ArtifactEntry.activityController(sharing: file)
                 guard var presenter = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first?.rootViewController
-                else { throw URLError(.cannotOpenFile) }
+                else { controller.completionWithItemsHandler?(nil, false, nil, nil); throw URLError(.cannotOpenFile) }
                 while let next = presenter.presentedViewController, !next.isBeingDismissed { presenter = next }
-                let controller = UIActivityViewController(activityItems: [file], applicationActivities: nil)
                 controller.popoverPresentationController?.sourceView = presenter.view
                 presenter.present(controller, animated: true)
             } catch {

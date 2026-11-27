@@ -30,4 +30,19 @@ final class ArtifactShareViewTests: ShuffledTestCase {
         XCTAssertEqual(file.lastPathComponent, "Q3-Q4 report- draft.html")
         XCTAssertEqual(try Data(contentsOf: file), Data("<title>Q3</title>".utf8))
     }
+
+    func testFinishedShareRemovesItsTemporaryCopy() async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let page = folder.appending(path: "index.html")
+        try Data("<title>Q4</title>".utf8).write(to: page)
+        let file = try await ArtifactEntry(name: "2026-11-27_q4", title: "Q4", updatedAt: "", url: page).sharedFile()
+        let copy = file.deletingLastPathComponent()
+        defer { try? FileManager.default.removeItem(at: copy) }
+        let controller = ArtifactEntry.activityController(sharing: file)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "The copy stays while the share sheet holds it")
+        controller.completionWithItemsHandler?(nil, false, nil, nil)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: copy.path), "A finished share leaves no temporary copy behind")
+    }
 }
