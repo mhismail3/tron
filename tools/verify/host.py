@@ -125,6 +125,12 @@ def remote(job: dict) -> int:
             if installed.returncode:
                 return no_result(f'npm ci failed: {installed.stdout[-2000:]}{installed.stderr[-2000:]}')
             stamp.write_text(inputs)
+        secret = Path.home() / '.tron-signing/keychain.pass'
+        if secret.is_file():
+            unlocked = run('security', 'unlock-keychain', '-p', secret.read_text().strip(),
+                           str(Path.home() / 'Library/Keychains/tron-signing.keychain-db'))
+            if unlocked.returncode:
+                return no_result('cannot unlock the signing keychain')
         child = subprocess.Popen([str(checkout / 'scripts/tron'), 'test', lane, *job['args']], cwd=checkout, env=env,
                                  stdin=subprocess.DEVNULL, start_new_session=True)
         running.append(child)
