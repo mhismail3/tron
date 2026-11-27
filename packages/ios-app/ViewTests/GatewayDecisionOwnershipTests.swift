@@ -162,6 +162,12 @@ final class GatewayDecisionOwnershipTests: XCTestCase {
     }
 
     @MainActor
+    private func until(_ what: String, _ condition: @MainActor () -> Bool) async throws {
+        for _ in 0..<500 where !condition() { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(condition(), what)
+    }
+
+    @MainActor
     func testTheMountedChatAppliesDeltasInOrderAndResynchronizesFromOneFullSnapshotWhenOffBase() async throws {
         let gateway = SnapshotCacheFixtureGateway(offline: false)
         let root = FileManager.default.temporaryDirectory.appending(path: "transcript-delta-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -176,10 +182,6 @@ final class GatewayDecisionOwnershipTests: XCTestCase {
         await model.start()
         _ = await model.refreshSessions()
         _ = try await model.openSessionPresentation("cache-live")
-        let until = { (what: String, condition: () -> Bool) async throws in
-            for _ in 0..<500 where !condition() { try await Task.sleep(for: .milliseconds(10)) }
-            XCTAssertTrue(condition(), what)
-        }
         let base = SnapshotCacheFixtureGateway.snapshot()
         try await until("the full snapshot mounts") { model.selectedSnapshot?.eventSequence == base.eventSequence }
 
