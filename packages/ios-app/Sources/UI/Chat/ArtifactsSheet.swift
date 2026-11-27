@@ -210,20 +210,58 @@ struct ArtifactsSheet: View {
     }
 }
 
+extension ArtifactEntry {
+    func sharedFile() async throws -> URL {
+        let (data, response) = try await URLSession.shared.data(from: url)
+        if let status = (response as? HTTPURLResponse)?.statusCode, !(200..<300).contains(status) {
+            throw URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey: "The Mac answered HTTP \(status)."])
+        }
+        let name = title.components(separatedBy: CharacterSet(charactersIn: "/\\:")).joined(separator: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appending(path: "\(name.isEmpty || name.hasPrefix(".") ? self.name : name).html")
+        try data.write(to: file)
+        return file
+    }
+}
+
 private struct ArtifactViewer: View {
     let entry: ArtifactEntry
     @Environment(\.openURL) private var openURL
-    @PresentationState private var failure: String?
+    @PresentationState private var failure: (title: String, detail: String)?
+    @PresentationState private var sharing = false
 
     var body: some View {
-        TronDocumentSheet(title: entry.title, leadingAction: TronDocumentSheetAction(
-            systemImage: "safari", accessibilityLabel: "Open in Safari", action: { openURL(entry.url) })) {
+        TronDocumentSheet(title: entry.title, leadingActions: [
+            TronDocumentSheetAction(systemImage: "safari", accessibilityLabel: "Open in Safari", action: { openURL(entry.url) }),
+            TronDocumentSheetAction(systemImage: "square.and.arrow.up", accessibilityLabel: "Share", action: share),
+        ]) {
             if let failure {
-                TronPlaceholderState(title: "The page could not be opened", detail: failure, icon: "exclamationmark.triangle")
+                TronPlaceholderState(title: failure.title, detail: failure.detail, icon: "exclamationmark.triangle")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ArtifactWebView(url: entry.url, external: { openURL($0) }) { failure = $0 }
+                ArtifactWebView(url: entry.url, external: { openURL($0) }) { failure = ("The page could not be opened", $0) }
                     .tronDocumentTopBlurSurface()
+            }
+        }
+    }
+
+    private func share() {
+        guard !sharing else { return }
+        sharing = true
+        Task {
+            defer { sharing = false }
+            do {
+                let file = try await entry.sharedFile()
+                guard var presenter = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first?.rootViewController
+                else { throw URLError(.cannotOpenFile) }
+                while let next = presenter.presentedViewController, !next.isBeingDismissed { presenter = next }
+                let controller = UIActivityViewController(activityItems: [file], applicationActivities: nil)
+                controller.popoverPresentationController?.sourceView = presenter.view
+                presenter.present(controller, animated: true)
+            } catch {
+                failure = ("The page could not be shared", error.localizedDescription)
             }
         }
     }
