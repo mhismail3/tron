@@ -370,7 +370,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     expect(entries.filter(entry => entry.type === "custom" && entry.customType === "tron.model-queue").map(entry => entry.type === "custom" ? entry.data : undefined))
       .toEqual([{ role: "worker", waitedMs: 60_000, reason, next: first }, { role: "worker", skipped: first, reason, next: second }]);
     const queue = await queueOwnerOf(f.registry)!.availability("worker", undefined, [first]);
-    expect(queue.models, "a provider error skips the model for this operation only").toEqual([{ model: first, available: true }]);
+    expect(queue.models, "a provider error never marks the model in the shared usage ledger").toEqual([{ model: first, available: true }]);
   });
 
   it("ends a worker's provider-error wait at once on Stop (#2697)", async () => {
