@@ -19,6 +19,18 @@ function requireField<T>(value: T | undefined, name: string): T {
   return value;
 }
 
+function expectedRevision(request: ScheduleToolRequest, current: AutomationRecord, required = true): number {
+  const revision = current.revision;
+  if (request.expectedRevision === undefined) {
+    if (!required) return revision;
+    throw new GatewayError("invalid_request", `expectedRevision is required; current revision is ${revision}`, false, { currentRevision: revision });
+  }
+  if (request.expectedRevision !== revision) {
+    throw new GatewayError("conflict", `Automation changed; current revision is ${revision}`, true, { expectedRevision: request.expectedRevision, currentRevision: revision });
+  }
+  return revision;
+}
+
 const HOME_INTERVAL_GRID_MS = 10 * 60_000;
 
 function automationTrigger(request: ScheduleToolRequest, now: number, home: boolean): AutomationTrigger {
@@ -142,7 +154,7 @@ export class GatewayScheduleToolOperations implements ScheduleToolOperations {
       const hasTrigger = [request.at, request.everyMinutes, request.timezone, request.localTime, request.weekdays].some(value => value !== undefined);
       const hasAction = request.prompt !== undefined || request.notificationMessage !== undefined;
       const target = request.target === undefined ? current.target : await this.target(sessionId, request.target);
-      const updated = await this.service.update(id, requireField(request.expectedRevision, "expectedRevision"), {
+      const updated = await this.service.update(id, expectedRevision(request, current), {
         name: request.name ?? current.name, ...(current.description === undefined ? {} : { description: current.description }),
         target,
         trigger: hasTrigger ? automationTrigger(request, this.now(), this.home(target)) : current.trigger,
@@ -152,7 +164,7 @@ export class GatewayScheduleToolOperations implements ScheduleToolOperations {
       return { message: `Updated automation “${updated.name}”.`, details: updated as unknown as JsonValue };
     }
     if (request.action === "enable" || request.action === "pause" || request.action === "delete") {
-      const revision = requireField(request.expectedRevision, "expectedRevision");
+      const revision = expectedRevision(request, current, request.action === "delete");
       if (request.action === "delete") {
         await this.service.delete(id, revision);
         return { message: `Deleted automation “${current.name}”.`, details: { automationId: id, deleted: true } };
@@ -163,7 +175,7 @@ export class GatewayScheduleToolOperations implements ScheduleToolOperations {
       return { message: `${request.action === "enable" ? "Enabled" : "Paused"} automation “${updated.name}”.`, details: updated as unknown as JsonValue };
     }
     if (request.action === "runNow") {
-      const run = await this.service.runNow(id, requireField(request.expectedRevision, "expectedRevision"));
+      const run = await this.service.runNow(id, expectedRevision(request, current));
       return { message: `Queued automation “${current.name}” to run now.`, details: run as unknown as JsonValue };
     }
     if (request.action === "cancel") {
@@ -173,7 +185,7 @@ export class GatewayScheduleToolOperations implements ScheduleToolOperations {
     const resolved = await this.service.resolve(
       id,
       requireField(request.runId, "runId"),
-      requireField(request.expectedRevision, "expectedRevision"),
+      expectedRevision(request, current),
       requireField(request.outcome, "outcome"),
       { kind: "assistant", sessionId, sourceId: toolCallId },
     );
