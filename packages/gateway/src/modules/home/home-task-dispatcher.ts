@@ -100,7 +100,7 @@ interface LiveOperation {
   taskId: string; sessionId: string; operationId: string; reports: HomeTaskReportOwner;
   heavy: boolean; heavyClaim: boolean; heavyDone: number; waitBaseline: number; waitSince: number; stalledSince?: string;
 }
-export const HOME_TASK_STALL_MS = 45 * 60 * 1000;
+const HOME_TASK_STALL_MS = 45 * 60 * 1000;
 const HOME_TASK_STALL_SWEEP_MS = 60_000;
 
 function editDistance(a: string, b: string): number {
