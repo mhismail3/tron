@@ -133,6 +133,7 @@ interface PackageProvidesRequest {
   managedSubagents?: ManagedSubagents;
   trust: TrustService;
   cwd: string;
+  projectDir: string;
   settingsManager: SettingsManager;
   packages: InstalledPackage[];
   resources: ResolvedPaths;
@@ -173,7 +174,7 @@ export async function loadPackageProvides(request: PackageProvidesRequest): Prom
   }
   const catalog = await loadSubagentCatalog({
     agentDir: request.agentDir,
-    cwd: request.cwd,
+    cwd: request.projectDir,
     settingsManager: request.settingsManager,
     ...(request.managedSubagents ? { managedSubagents: request.managedSubagents } : {}),
     ...(request.loadDiscovery ? { loadDiscovery: request.loadDiscovery } : {}),

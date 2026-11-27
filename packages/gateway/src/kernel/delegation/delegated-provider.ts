@@ -1,7 +1,8 @@
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { mkdir } from "node:fs/promises";
-import { isAbsolute, join, resolve, sep } from "node:path";
+import { extname, isAbsolute, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Extension, ToolDefinition } from "../pi/coding-agent.js";
 import { piHostPackageRoot } from "../pi/packages.js";
 import type { ExtensionToolOrigin } from "../../protocol/types.js";
@@ -20,6 +21,8 @@ export const DELEGATED_PROVIDER_ROOT_ENV = "PI_SUBAGENTS_TEMP_ROOT";
 
 const PI_HOST_PACKAGE_ROOT = piHostPackageRoot();
 
+const SKILLS_RENDERER_MODULE = fileURLToPath(new URL(`../resources/context-index${extname(fileURLToPath(import.meta.url))}`, import.meta.url));
+
 export function delegatedArtifactRoot(tronHome: string): string {
   return tronHomePath(resolve(tronHome), "state/subagents");
 }
@@ -29,6 +32,7 @@ export function delegatedProviderEnvironment(root: string, environment: NodeJS.P
   if (!isAbsolute(canonicalRoot) || canonicalRoot === sep) throw new Error("delegated artifact root must be absolute");
   environment[DELEGATED_PROVIDER_ROOT_ENV] = canonicalRoot;
   environment.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT = PI_HOST_PACKAGE_ROOT;
+  environment.PI_SUBAGENTS_SKILLS_RENDERER_MODULE = SKILLS_RENDERER_MODULE;
 }
 
 function rejectSymlinkPath(path: string): void {
@@ -106,7 +110,7 @@ export function delegatedProviderOrigin(extensions: readonly Extension[]): Exten
   return { source: DELEGATED_PROVIDER_SOURCE };
 }
 
-const REVIEWED_HOME_TASK_PROVIDER_VERSION = "0.76.1-tron.20";
+const REVIEWED_HOME_TASK_PROVIDER_VERSION = "0.76.1-tron.21";
 
 export function isVerifiedDelegatedProviderTool(extensions: readonly Extension[], toolName: string): boolean {
   return MANAGED_SUBAGENTS_VERSION === REVIEWED_HOME_TASK_PROVIDER_VERSION

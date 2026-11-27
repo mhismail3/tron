@@ -30,6 +30,10 @@ export function skillsIndex(skills: ReadonlyArray<{ name: string; description: s
   return items.length === 0 ? { text: "", diagnostics: [] } : renderIndex({ name: "skills", open, kind: "procedure", budget: 10_000, items });
 }
 
+export function renderSkills(skills: ReadonlyArray<{ name: string; description: string; filePath: string; disableModelInvocation: boolean }>, tool: string): string {
+  return skillsIndex(skills, tool === "bash" ? "bash" : "read").text;
+}
+
 const DOCS = [
   ["extensions", "extensions"], ["themes", "themes"], ["skills", "skills"], ["prompt-templates", "prompt templates"], ["tui", "TUI components"],
   ["keybindings", "keybindings"], ["sdk", "SDK integrations"], ["custom-provider", "custom providers"], ["models", "adding models"],
