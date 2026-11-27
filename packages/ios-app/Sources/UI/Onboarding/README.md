@@ -42,7 +42,8 @@ workspace browser, the model picker and the provider authentication prompt sheet
   Onboarding surface, so an underlying sheet never defers a login prompt. Each row's nested-sheet
   visibility is presentation-scoped and keyed by provider and catalog target. Only actual dismissal
   retires its owned login; foreground content reconstruction and socket recovery retain the operation
-  and unsent input. Manual callback syntax and state/PKCE checks remain provider-owned.
+  and unsent input. An `info` event's message and links stay beside a pending `text` or `manual_code`
+  prompt of the same operation. Manual callback syntax and state/PKCE checks remain provider-owned.
 
 ## Invariants
 

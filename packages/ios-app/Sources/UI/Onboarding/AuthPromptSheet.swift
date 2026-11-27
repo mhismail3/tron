@@ -128,7 +128,8 @@ struct ProviderAuthFlowContent: View {
                 )
             }
             if let event = model.authEvent,
-               event.kind == .authURL || model.authPrompt == nil {
+               event.kind == .authURL || model.authPrompt == nil
+                || (event.kind == .info && ProviderAuthBrowserPolicy.supportsManualCallback(event: event, prompt: model.authPrompt)) {
                 AuthEventContent(event: event)
             }
             if let prompt = model.authPrompt, trail.replayAnswer(for: prompt) == nil {
