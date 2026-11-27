@@ -229,9 +229,12 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 ## Exact review presentation
 
 `ChangeReviewSheet` (`UI/Components/ChangeReviewSheet.swift`) is the one plaintext before/after
-review. It opens at its content height (see Detents) and composes standard sections: a summary row (title, reason), one
-Before/After group per item with its detail caption, an always-visible monospaced Exact values
-section, and, for intent `provider-api-key`, one `SecureField` for the provider's API key; Approve
+review. It opens at its content height (see Detents) and composes standard sections: a summary card (a
+plain-language title from `ChangeReviewPresentation`, the reason in `settingsRowSubtext`), one Before/After group per
+item with readable values (short commit hashes, package names; full values when shortening would make them equal) and
+its explanatory notes as caption, a Technical details row opening a `TronDocumentSheet` with the raw title, digest,
+full before/after, scope lines and exact values in `TronTechnicalMetadataSection`s, and, for intent
+`provider-api-key`, one `SecureField` for the provider's API key; Approve
 stays disabled until it holds text, and the approving answer alone carries it (`secret`), never
 shown again. Approve (check, `tronPrimary`) and Cancel (red) are toolbar actions; the native
 interaction adds a grey leading close that leaves the review undecided. An agent, Home or worker

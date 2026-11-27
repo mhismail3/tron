@@ -29,6 +29,7 @@ enum TronTypography {
     static var display: Font { sans(size: sizeDisplay, weight: .semibold) }
     static var largeTitle: Font { sans(size: sizeLargeTitle, weight: .bold) }
     static var headline: Font { sans(size: sizeTitle, weight: .semibold) }
+    static var summaryHeadline: Font { sans(size: sizeXL, weight: .bold) }
     static var subheadline: Font { sans(size: sizeBody) }
     static var body: Font { sans(size: sizeBody) }
     static var bodySM: Font { sans(size: sizeBodySM) }
@@ -1796,12 +1797,13 @@ struct TronInfoCard: View {
 
 struct TronSettingsDivider: View {
     var accent: Color = .tronPrimary
+    var leadingPadding = TronSettingsLayoutPolicy.dividerLeadingPadding
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     var body: some View {
         Divider()
             .overlay((settingsTheme?.accent ?? accent).opacity(0.14))
-            .padding(.leading, TronSettingsLayoutPolicy.dividerLeadingPadding)
+            .padding(.leading, leadingPadding)
     }
 }
 

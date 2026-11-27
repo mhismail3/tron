@@ -37,9 +37,10 @@ The Tron menu and the Automations sheet (list, detail, run detail, create/edit) 
   presented.
 - **Styling.** Automations follow the user's primary theme; only attention and failure read
   red and success green. Detail and run detail open with a header card (name, status pill,
-  context) and read their facts as titled settings groups of title-over-value rows, named as
-  the editor's sections are (Basics, Action, Target, Schedule, Behavior); controls are standard
-  action rows with Delete last and red. The editor uses the same rows, with text entries under
+  context) and read their facts as titled settings groups of rows without an icon gutter. Detail
+  reads Schedule, the Prompt or Message as a text block, Controls, Recent Runs, then Delivery;
+  identifiers, revision and created/updated sit in a Technical details sheet behind the info
+  button. Controls are standard action rows with Delete last and red. The editor uses the same rows, with text entries under
   their row title. Its sections are not lazy: scrolling a lazy stack of these mixed-height
   editor cards looped layout on the main thread.
 - **Expiry.** Every automation may have an expiry, displayed in detail. Expired

@@ -78,8 +78,8 @@ struct AutomationRunDetailView: View {
 
     private var executionSection: AutomationFactSection {
         AutomationFactSection(title: "Execution Session", facts: [
-            AutomationFact(icon: "arrow.turn.down.right", title: "Target", value: run.targetSnapshot.displayName),
-            AutomationFact(icon: "bubble.left.and.bubble.right", title: "Session ID",
+            AutomationFact(title: "Target", value: run.targetSnapshot.displayName),
+            AutomationFact(title: "Session ID",
                            value: run.executionSessionId ?? "Awaiting Home delivery", isIdentifier: run.executionSessionId != nil),
         ])
     }
@@ -104,50 +104,50 @@ struct AutomationRunDetailView: View {
         func date(_ value: String?) -> String { AutomationDateFormatting.date(value) }
         var sections = [
             AutomationFactSection(title: "Timing", facts: [
-                AutomationFact(icon: "calendar.badge.clock", title: "Scheduled", value: date(run.scheduledFor)),
-                AutomationFact(icon: "calendar", title: "Created", value: date(run.createdAt)),
-                AutomationFact(icon: "hand.raised", title: "Claimed", value: date(run.claimedAt)),
-                AutomationFact(icon: "play.circle", title: "Started", value: date(run.startedAt)),
-                AutomationFact(icon: "flag.checkered", title: "Finished", value: date(run.terminalAt)),
-                AutomationFact(icon: "arrow.clockwise", title: "Attempts", value: "\(run.preAdmissionAttemptCount)"),
+                AutomationFact(title: "Scheduled", value: date(run.scheduledFor)),
+                AutomationFact(title: "Created", value: date(run.createdAt)),
+                AutomationFact(title: "Claimed", value: date(run.claimedAt)),
+                AutomationFact(title: "Started", value: date(run.startedAt)),
+                AutomationFact(title: "Finished", value: date(run.terminalAt)),
+                AutomationFact(title: "Attempts", value: "\(run.preAdmissionAttemptCount)"),
             ]),
             AutomationFactSection(title: "Trigger Snapshot", facts: [
-                AutomationFact(icon: "repeat", title: "Repeats", value: run.triggerSnapshot.summary),
-                AutomationFact(icon: "globe", title: "Timezone", value: run.triggerSnapshot.timezone ?? TimeZone.current.identifier),
+                AutomationFact(title: "Repeats", value: run.triggerSnapshot.summary),
+                AutomationFact(title: "Timezone", value: run.triggerSnapshot.timezone ?? TimeZone.current.identifier),
             ]),
         ]
         let kind = run.actionSnapshot.typedKind ?? .sessionPrompt
-        var action = [AutomationFact(icon: kind.icon, title: kind == .notification ? "Message" : "Prompt", value: run.actionSnapshot.content)]
+        var action = [AutomationFact(title: kind == .notification ? "Message" : "Prompt", value: run.actionSnapshot.content)]
         if let invocation = run.actionSnapshot.resourceInvocation {
-            action.append(AutomationFact(icon: "sparkles", title: invocation.source.rawValue.capitalized, value: invocation.name))
+            action.append(AutomationFact(title: invocation.source.rawValue.capitalized, value: invocation.name))
         }
         sections.append(AutomationFactSection(title: "Action Snapshot", facts: action))
         if let error = run.error {
             sections.append(AutomationFactSection(title: "Result", facts: [
-                AutomationFact(icon: "exclamationmark.triangle", title: "Error", value: error.message),
-                AutomationFact(icon: "number", title: "Code", value: error.code, isIdentifier: true),
-                AutomationFact(icon: "arrow.clockwise", title: "Retryable", value: error.retryable ? "Yes" : "No"),
+                AutomationFact(title: "Error", value: error.message),
+                AutomationFact(title: "Code", value: error.code, isIdentifier: true),
+                AutomationFact(title: "Retryable", value: error.retryable ? "Yes" : "No"),
             ]))
         }
         if let reason = run.reason {
-            sections.append(AutomationFactSection(title: "Reason", facts: [AutomationFact(icon: "text.alignleft", title: "Reason", value: reason)]))
+            sections.append(AutomationFactSection(title: "Reason", facts: [AutomationFact(title: "Reason", value: reason)]))
         }
         if let status = run.notificationAdmissionStatus {
-            sections.append(AutomationFactSection(title: "Notification", facts: [AutomationFact(icon: "bell", title: "Admission", value: status)]))
+            sections.append(AutomationFactSection(title: "Notification", facts: [AutomationFact(title: "Admission", value: status)]))
         }
         if let settled = run.resolution {
             sections.append(AutomationFactSection(title: "Resolution", facts: [
-                AutomationFact(icon: "checkmark.seal", title: "Outcome", value: settled.outcome.capitalized),
-                AutomationFact(icon: "calendar", title: "Resolved", value: date(settled.resolvedAt)),
-                AutomationFact(icon: "person", title: "Resolved by", value: settled.provenance.kind == "mobile" ? "iPhone" : settled.provenance.kind),
+                AutomationFact(title: "Outcome", value: settled.outcome.capitalized),
+                AutomationFact(title: "Resolved", value: date(settled.resolvedAt)),
+                AutomationFact(title: "Resolved by", value: settled.provenance.kind == "mobile" ? "iPhone" : settled.provenance.kind),
             ]))
         }
         sections.append(AutomationFactSection(title: "Technical Details", facts: [
-            AutomationFact(icon: "number", title: "Operation", value: run.operationId ?? "—", isIdentifier: true),
-            AutomationFact(icon: "number", title: "Invocation", value: run.invocationId ?? "—", isIdentifier: true),
-            AutomationFact(icon: "number", title: "Completion", value: run.assistantCompletionId ?? "—", isIdentifier: true),
-            AutomationFact(icon: "number", title: "Host epoch", value: run.hostEpoch ?? "—", isIdentifier: true),
-            AutomationFact(icon: "number", title: "Run", value: run.runId, isIdentifier: true),
+            AutomationFact(title: "Operation", value: run.operationId ?? "—", isIdentifier: true),
+            AutomationFact(title: "Invocation", value: run.invocationId ?? "—", isIdentifier: true),
+            AutomationFact(title: "Completion", value: run.assistantCompletionId ?? "—", isIdentifier: true),
+            AutomationFact(title: "Host epoch", value: run.hostEpoch ?? "—", isIdentifier: true),
+            AutomationFact(title: "Run", value: run.runId, isIdentifier: true),
         ]))
         return sections
     }
