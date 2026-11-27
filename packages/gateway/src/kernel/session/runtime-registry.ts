@@ -2635,6 +2635,13 @@ export class RuntimeRegistry implements SessionOperations {
     }
   }
 
+  setProjectTrust(project: string, decision: boolean | null) {
+    return this.options.trust.setAndApply(project, decision,
+      inspection => this.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false),
+      inspection => this.commitProjectReload(inspection.projectDir),
+      inspection => this.abortProjectReload(inspection.projectDir));
+  }
+
   async reloadProject(projectDirInput: string, projectTrusted?: boolean, publish = true): Promise<void> {
     const projectDir = await this.options.trust.canonicalDirectory(projectDirInput);
     const transactional = !publish;
