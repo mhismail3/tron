@@ -183,7 +183,7 @@ struct PairingInfoStep: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 Button {
-                    copy(value, field: field)
+                    WizardCopyFeedback.copy(value, mark: $copiedField, as: field, clearTo: nil)
                 } label: {
                     Image(systemName: copiedField == field ? "checkmark" : "doc.on.doc")
                         .font(.system(size: 15, weight: .semibold))
@@ -384,25 +384,6 @@ struct PairingInfoStep: View {
         }
         return nil
     }
-
-    @MainActor
-    private func copy(_ value: String, field: PairingCopyField) {
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.setString(value, forType: .string)
-
-        withAnimation(.snappy(duration: PairingInfoStepLayout.copyCheckInAnimationSeconds)) {
-            copiedField = field
-        }
-
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: PairingInfoStepLayout.copyCheckHoldNanoseconds)
-            guard copiedField == field else { return }
-            withAnimation(.snappy(duration: PairingInfoStepLayout.copyCheckOutAnimationSeconds)) {
-                copiedField = nil
-            }
-        }
-    }
 }
 
 private enum PairingCopyField: Hashable {
@@ -452,9 +433,6 @@ enum PairingInfoStepLayout {
             .combined(with: .offset(y: 8))
     }
     static let initialResolveDelayNanoseconds: UInt64 = 500_000_000
-    static let copyCheckInAnimationSeconds = 0.06
-    static let copyCheckOutAnimationSeconds = 0.12
-    static let copyCheckHoldNanoseconds: UInt64 = 2_000_000_000
 }
 
 struct PairingInfoWindowView: View {

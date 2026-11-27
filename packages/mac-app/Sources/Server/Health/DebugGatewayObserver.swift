@@ -144,11 +144,9 @@ enum DebugGatewayObserver {
               observedSupervisorStartIdentity == lifecycle.supervisorStartIdentity,
               observedChildStartIdentity == lifecycle.childStartIdentity,
               listenerPIDs == Set([lifecycle.childPid]),
-              let sourceRevision = selected.manifest.sourceRevision,
-              let runtimeEpoch = selected.manifest.runtimeEpoch,
               selected.manifest.channel == TronGatewayProfile.debug.channel,
-              lifecycle.epoch == runtimeEpoch,
-              lifecycle.sourceRevision == sourceRevision,
+              lifecycle.epoch == selected.manifest.runtimeEpoch,
+              lifecycle.sourceRevision == selected.manifest.sourceRevision,
               lifecycle.buildFingerprint == selected.manifest.payloadFingerprint,
               StableGatewayObserver.authenticatedIdentity(
                 info,

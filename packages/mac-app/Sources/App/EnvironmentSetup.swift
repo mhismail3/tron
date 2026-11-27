@@ -95,10 +95,10 @@ struct EnvironmentSetup: Sendable {
         MacAppVersionIdentity.current()
     }
     var readRecordedAppVersion: @Sendable () -> MacAppVersionIdentity? = {
-        MacAppVersionMarkerStore.read(at: TronPaths.macAppVersionMarkerPath)
+        MacAppVersionMarkerStore.read(at: TronPaths.macAppVersionMarkerPath(profile: .stable))
     }
     var writeRecordedAppVersion: @Sendable (MacAppVersionIdentity) throws -> Void = { version in
-        try MacAppVersionMarkerStore.write(version, at: TronPaths.macAppVersionMarkerPath)
+        try MacAppVersionMarkerStore.write(version, at: TronPaths.macAppVersionMarkerPath(profile: .stable))
     }
 
     func resolvedStartupMode(
@@ -115,12 +115,18 @@ struct EnvironmentSetup: Sendable {
     static let live = makeLive(profile: .stable)
     static let debug = makeDebugObserver()
 
+    private static func paths(for profile: TronGatewayProfile) -> (home: URL, bearer: URL, enrollment: URL, cache: URL, marker: URL) {
+        (
+            TronPaths.tronHome(profile: profile),
+            TronPaths.bearerTokenPath(profile: profile),
+            TronPaths.enrollmentCodePath(profile: profile),
+            TronPaths.networkCachePath(profile: profile),
+            TronPaths.onboardedMarkerPath(profile: profile)
+        )
+    }
+
     private static func makeLive(profile: TronGatewayProfile) -> EnvironmentSetup {
-        let home = TronPaths.tronHome(profile: profile)
-        let bearer = TronPaths.bearerTokenPath(profile: profile)
-        let enrollment = TronPaths.enrollmentCodePath(profile: profile)
-        let cache = TronPaths.networkCachePath(profile: profile)
-        let marker = TronPaths.onboardedMarkerPath(profile: profile)
+        let (home, bearer, enrollment, cache, marker) = paths(for: profile)
         let plist = TronPaths.launchAgentPlistPath(profile: profile)
         let resolveHost: @Sendable () async -> String? = {
             await TailscaleHostResolution.resolveLive(
@@ -311,11 +317,7 @@ struct EnvironmentSetup: Sendable {
 
     private static func makeDebugObserver() -> EnvironmentSetup {
         let profile = TronGatewayProfile.debug
-        let home = TronPaths.tronHome(profile: profile)
-        let bearer = TronPaths.bearerTokenPath(profile: profile)
-        let enrollment = TronPaths.enrollmentCodePath(profile: profile)
-        let cache = TronPaths.networkCachePath(profile: profile)
-        let marker = TronPaths.onboardedMarkerPath(profile: profile)
+        let (home, bearer, enrollment, cache, marker) = paths(for: profile)
         return EnvironmentSetup(
             profile: profile,
             runtimeVariant: .xcodeDebug,

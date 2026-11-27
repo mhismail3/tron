@@ -69,8 +69,6 @@ enum TronPaths {
             .appendingPathComponent("Contents/MacOS", isDirectory: true)
             .appendingPathComponent("tron", isDirectory: false)
     }
-    static var serverHelperBundle: URL { serverHelperBundle(profile: activeProfile) }
-    static var serverHelperBinary: URL { serverHelperBinary(profile: activeProfile) }
 
     static var nativeHostBundle: URL {
         applicationBundle.appendingPathComponent(NativeHostTrust.relativeBundlePath, isDirectory: true)
@@ -90,33 +88,18 @@ enum TronPaths {
     static func macAppVersionMarkerPath(profile: TronGatewayProfile) -> URL {
         macStateDirectory(profile: profile).appendingPathComponent("mac-app-version.json", isDirectory: false)
     }
-    static var macAppVersionMarkerPath: URL { macAppVersionMarkerPath(profile: activeProfile) }
 
     static func macWrapperLockPath(profile: TronGatewayProfile) -> URL {
         macStateDirectory(profile: profile).appendingPathComponent(macWrapperLockFileName(bundleIdentifier: Bundle.main.bundleIdentifier), isDirectory: false)
     }
-    static var macWrapperLockPath: URL { macWrapperLockPath(profile: activeProfile) }
 
     static func launchAgentPlistPath(profile: TronGatewayProfile) -> URL {
         applicationBundle.appendingPathComponent("Contents/Library/LaunchAgents", isDirectory: true)
             .appendingPathComponent("\(profile.launchAgentLabel).plist", isDirectory: false)
     }
-    static var launchAgentPlistPath: URL { launchAgentPlistPath(profile: activeProfile) }
-
-    static var serverHelperBundleProgram: String {
-        serverHelperBundleProgram(profile: activeProfile)
-    }
 
     static func serverHelperBundleProgram(profile: TronGatewayProfile) -> String {
         "Contents/Library/LoginItems/\(profile.agentBundleName).app/Contents/MacOS/tron"
-    }
-
-    static var launchAgentLabel: String { activeProfile.launchAgentLabel }
-
-    static var defaultServerPort: Int { activeProfile.port }
-
-    static var launchAgentEnvironmentVariables: [String: String] {
-        launchAgentEnvironmentVariables(profile: activeProfile)
     }
 
     static func launchAgentEnvironmentVariables(profile: TronGatewayProfile) -> [String: String] {
@@ -132,10 +115,6 @@ enum TronPaths {
         return values
     }
 
-    static var canManageLaunchAgent: Bool {
-        canManageLaunchAgent(profile: activeProfile)
-    }
-
     static func canManageLaunchAgent(profile: TronGatewayProfile) -> Bool {
         guard profile == .stable,
               MacRuntimeVariant.detect().canManageLaunchAgent(profile: profile, isIsolatedInstallMode: false) else { return false }
@@ -145,17 +124,9 @@ enum TronPaths {
             && (environment[piCodingAgentDirEnv]?.isEmpty != false || environment[piCodingAgentDirEnv]!.hasPrefix("/"))
     }
 
-    static var agentBundleName: String { activeProfile.agentBundleName }
-
-    static var associatedWrapperBundleIDs: [String] {
-        associatedWrapperBundleIDs(profile: activeProfile)
-    }
-
     static func associatedWrapperBundleIDs(profile: TronGatewayProfile) -> [String] {
         profile == .stable ? [MacRuntimeVariant.releaseBundleIdentifier] : []
     }
-
-    static let activeProfile: TronGatewayProfile = .stable
 
     static func macWrapperLockFileName(bundleIdentifier: String?) -> String {
         let rawIdentifier = bundleIdentifier?.isEmpty == false ? bundleIdentifier! : "unknown"

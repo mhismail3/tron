@@ -149,12 +149,10 @@ enum StableGatewayObserver {
         matches manifest: GatewayPayloadManifest,
         channel: String
     ) -> Bool {
-        guard let sourceRevision = manifest.sourceRevision,
-              let runtimeEpoch = manifest.runtimeEpoch else { return false }
-        return info.version == manifest.gatewayVersion
+        info.version == manifest.gatewayVersion
             && info.gatewayChannel == channel
-            && info.sourceRevision == sourceRevision
-            && info.runtimeEpoch == runtimeEpoch
+            && info.sourceRevision == manifest.sourceRevision
+            && info.runtimeEpoch == manifest.runtimeEpoch
             && info.buildFingerprint == manifest.payloadFingerprint
     }
 

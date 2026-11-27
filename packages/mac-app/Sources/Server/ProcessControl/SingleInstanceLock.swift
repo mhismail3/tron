@@ -6,7 +6,7 @@ final class SingleInstanceLock: @unchecked Sendable {
     private var fileDescriptor: Int32 = -1
     private let mutex = NSLock()
 
-    init(lockFileURL: URL = TronPaths.macWrapperLockPath) {
+    init(lockFileURL: URL) {
         self.lockFileURL = lockFileURL
     }
 

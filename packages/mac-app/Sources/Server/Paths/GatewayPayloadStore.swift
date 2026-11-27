@@ -141,10 +141,10 @@ struct GatewayPayloadManifest: Codable, Equatable, Sendable {
     let protocolVersion: String
     let minProtocolVersion: String
     let nodeVersion: String
-    let sourceRevision: String?
-    let runtimeEpoch: String?
+    let sourceRevision: String
+    let runtimeEpoch: String
     let payloadFingerprint: String
-    let dependencyTreeCoverage: String?
+    let dependencyTreeCoverage: String
 
     init(
         schema: Int = GatewayPayloadStore.schema,
@@ -155,10 +155,10 @@ struct GatewayPayloadManifest: Codable, Equatable, Sendable {
         protocolVersion: String = String(TronGatewayProtocolContract.protocolVersion),
         minProtocolVersion: String = String(TronGatewayProtocolContract.minimumProtocolVersion),
         nodeVersion: String,
-        sourceRevision: String? = nil,
-        runtimeEpoch: String? = nil,
+        sourceRevision: String,
+        runtimeEpoch: String,
         payloadFingerprint: String,
-        dependencyTreeCoverage: String? = nil
+        dependencyTreeCoverage: String
     ) {
         self.schema = schema
         self.kind = kind
@@ -292,8 +292,8 @@ enum GatewayPayloadValidator {
               manifest.protocolVersion == String(TronGatewayProtocolContract.protocolVersion),
               manifest.minProtocolVersion == String(TronGatewayProtocolContract.minimumProtocolVersion),
               GatewayPayloadStore.validComponent(manifest.nodeVersion, maximumLength: GatewayPayloadStore.nodeVersionComponentLimit),
-              manifest.sourceRevision.map(GatewayPayloadStore.validSourceRevision) == true,
-              manifest.runtimeEpoch.map(GatewayPayloadStore.validRuntimeEpoch) == true,
+              GatewayPayloadStore.validSourceRevision(manifest.sourceRevision),
+              GatewayPayloadStore.validRuntimeEpoch(manifest.runtimeEpoch),
               manifest.dependencyTreeCoverage == GatewayPayloadStore.fingerprintCoverage,
               isFingerprint(manifest.payloadFingerprint) else {
             return .failure(.invalidManifest("manifest identity"))
