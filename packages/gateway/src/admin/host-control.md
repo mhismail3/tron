@@ -21,8 +21,8 @@ development](../../../mac-app/docs/development.md).
   `gateway.update.config` stores only a trusted absolute non-symlinked `sourceRoot`
   and optional `artifactRoot` in `state/update-config.json`; `gateway-update.v1`
   is advertised when the update helper is available (a source need not yet be configured).
-- Quick Rebuild uses one repository-identity admission in `document-admission.ts` for
-  Gateway and device source roots; Mac replacement reads the Gateway root through
+- Gateway update and device rebuild use one repository-identity admission in
+  `document-admission.ts` for their source roots; Mac replacement reads the Gateway root through
   that same admission. Identity requires regular, non-linked `packages/gateway/package.json`,
   `packages/ios-app/project.yml` and `scripts/tron`, not implementation helpers that
   an installed Gateway may outlive. Operation-specific build prerequisites remain
