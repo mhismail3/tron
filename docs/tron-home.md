@@ -157,7 +157,8 @@ Admission requires a stopped home: the Gateway runtime lease is absent or stale,
 the Mac wrapper's whole-file kernel locks are released, and same-user kernel process
 arguments, environment and open-file owners do not bind any process to the target.
 Unreadable ownership refuses as `stopped_proof_unavailable`; a live owner refuses as
-`gateway_running`, `mac_wrapper_running` or `home_process_present`. These probes are
+`gateway_running`, `mac_wrapper_running` or `home_process_present`; the home's own SSH launchd job
+(verified by label, plist and arguments) is not an owner, since layout retires and restarts it itself. These probes are
 target-scoped, not a production-global process-name grep: a private copy may be
 rehearsed while another home is running. Apply reclaims only stale runtime leases
 after the stopped proof, holds Gateway leases and existing Mac wrapper kernel locks

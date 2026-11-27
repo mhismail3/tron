@@ -221,7 +221,7 @@ for (const enabled of [true, false]) it(`restores previously ${enabled ? "enable
     if (enabled) {
       await expect(migrate("--apply", true)).rejects.toThrow(/exit=93/u);
       expect(await absent(old)).toBe(true);
-      for (const path of [join(home, "agent/.tron-gateway-runtime.lock.lock"), join(user, ".tron-dev/agent/.tron-gateway-runtime.lock.lock"), `${old.root}.lock`, join(home, "gateway/mac-terminal.lock")]) await rmdir(path);
+      for (const path of [join(home, "agent/.tron-gateway-runtime.lock.lock"), `${old.root}.lock`, join(home, "gateway/mac-terminal.lock")]) await rmdir(path);
       await migrate("--rollback");
       await until(async () => (await old.status()).serviceState === "running");
       expect(await digest(old.hostKeyPath)).toBe(key);
