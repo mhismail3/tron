@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../../test-support/gateway-process.js";
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 import { withoutTurnFrame } from "../../../test-support/turn-frame.js";
+import { applyTranscriptDelta } from "../../protocol/transcript-delta.js";
+import { decodeSessionTranscriptDelta, type SessionSnapshot } from "../../protocol/types.js";
 
 const gateways: GatewayProcess[] = [];
 afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
@@ -43,6 +45,41 @@ async function settled(gateway: GatewayProcess, sessionId: string): Promise<Snap
     const snapshot = await freshSnapshot(gateway, sessionId);
     return snapshot.phase === "idle" && !snapshot.operation ? snapshot : undefined;
   }, "the session settled idle");
+}
+
+
+type StatedFrame = { topic: string; payload: unknown; bytes: number; transcript: unknown[] };
+
+const bytesOf = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
+const itemBytes = (items: readonly unknown[]) => items.reduce<number>((total, item) => total + bytesOf(item), 0);
+
+function replay(base: SessionSnapshot, events: ReadonlyArray<{ topic: string; payload: any }>, tolerateRefusal = false): { snapshot: SessionSnapshot; frames: StatedFrame[]; refused: boolean } {
+  let snapshot = base;
+  const frames: StatedFrame[] = [];
+  for (const event of events) {
+    const payload = event.payload;
+    if (event.topic === "session.snapshot" || event.topic === "session.rebaseline") {
+      const next = (event.topic === "session.rebaseline" ? payload.snapshot : payload) as SessionSnapshot;
+      frames.push({ topic: event.topic, payload, bytes: bytesOf(payload), transcript: next.transcript });
+      if (next.runtimeGeneration !== snapshot.runtimeGeneration || next.eventSequence > snapshot.eventSequence) snapshot = next;
+      continue;
+    }
+    if (typeof payload?.eventSequence !== "number" || payload.runtimeGeneration !== snapshot.runtimeGeneration
+      || payload.eventSequence <= snapshot.eventSequence) continue;
+    if (event.topic !== "session.transcriptDelta") {
+      snapshot = { ...snapshot, eventSequence: payload.eventSequence };
+      continue;
+    }
+    const delta = decodeSessionTranscriptDelta(payload.data);
+    frames.push({ topic: event.topic, payload, bytes: bytesOf(payload), transcript: [...delta.replaced.map(({ item }) => item), ...delta.snapshot.transcript] });
+    const applied = applyTranscriptDelta(snapshot, delta);
+    if (!applied) {
+      if (tolerateRefusal) return { snapshot, frames, refused: true };
+      throw new Error(`delta ${payload.eventSequence} does not extend the replayed transcript`);
+    }
+    snapshot = applied;
+  }
+  return { snapshot, frames, refused: false };
 }
 
 describe("prompt journeys across the real Gateway process", () => {
@@ -174,5 +211,71 @@ describe("prompt journeys across the real Gateway process", () => {
     expect(headers["http-referer"]).toBeUndefined();
     expect(headers["x-openrouter-title"]).toBeUndefined();
     expect(headers["x-openrouter-categories"]).toBeUndefined();
+  });
+
+  it("sends each canonical transcript item to a subscribed phone once per tool call, and a phone off the base resyncs from one full snapshot (#2473)", async () => {
+    const gateway = await startGatewayProcess();
+    gateways.push(gateway);
+    const tools = 10;
+    gateway.provider.script([
+      ...Array.from({ length: tools }, (_, index) => () => ({
+        chunks: [`Step ${index + 1}.`],
+        toolCalls: [{ id: `delta_call_${index + 1}`, name: "bash", arguments: { command: `seq -f 'step ${index + 1} line %04g of deterministic tool output' 1 80` } }],
+      })),
+      () => ({ chunks: ["All ten steps finished."] }),
+      () => ({ chunks: ["Resynchronized reply."] }),
+    ]);
+    const phone = await gateway.connect();
+    try {
+      const sessionId = await createSession(gateway, phone, "delta-create");
+      const opened = await phone.request("session.open", { sessionId });
+      expect((await phone.request("session.sync", { sessionId, syncToken: opened.result.syncToken })).ok).toBe(true);
+      const base = opened.result.session as SessionSnapshot;
+      const start = phone.events.length;
+      const admitted = await phone.request("session.prompt", { commandId: "delta-prompt", sessionId, text: "Run the ten steps." });
+      expect(admitted.ok, JSON.stringify(admitted)).toBe(true);
+      const replayed = await waitFor(() => {
+        const state = replay(base, phone.events.slice(start).filter((event) => event.sessionId === sessionId));
+        return state.snapshot.phase === "idle" && !state.snapshot.operation
+          && messages(state.snapshot as unknown as Snapshot, "assistant").at(-1) === "All ten steps finished." ? state : undefined;
+      }, "the phone's own stream to settle the ten steps");
+      const final = await freshSnapshot(gateway, sessionId) as unknown as SessionSnapshot;
+      expect(replayed.snapshot.transcript).toEqual(final.transcript);
+
+      const stated = replayed.frames;
+      const transcriptBytes = stated.reduce((total, frame) => total + itemBytes(frame.transcript), 0);
+      const appended = final.transcript.slice(base.transcriptTotal - final.transcriptStart);
+      const settledPrompt = appended.find((item) => item.kind === "message" && item.role === "user")!;
+      console.info("#2473 per tool call", JSON.stringify({
+        frames: stated.length / tools,
+        bytes: stated.reduce((total, frame) => total + frame.bytes, 0) / tools,
+        transcriptBytes: transcriptBytes / tools,
+        full: stated.filter((frame) => frame.topic !== "session.transcriptDelta").length,
+      }));
+      expect(stated.length / tools, "transcript-bearing frames per tool call").toBeLessThanOrEqual(3);
+      expect(transcriptBytes, "each canonical item crosses the wire once; the prompt row again when its lifecycle settles").toBeLessThanOrEqual(itemBytes(appended) + bytesOf(settledPrompt));
+
+      const deltas = stated.filter((frame) => frame.topic === "session.transcriptDelta" && frame.transcript.length > 0);
+      expect(deltas.length).toBeGreaterThan(1);
+      const skipped = deltas.at(-2)!;
+      const behind = replay(base, phone.events.slice(start).filter((event) => event.sessionId === sessionId && event.payload !== skipped.payload), true);
+      expect(behind.refused, "a delta whose base the phone does not hold is refused, never guessed").toBe(true);
+
+      const reopened = await phone.request("session.open", { sessionId });
+      expect((await phone.request("session.sync", { sessionId, syncToken: reopened.result.syncToken })).ok).toBe(true);
+      const resynced = reopened.result.session as SessionSnapshot;
+      expect(resynced.transcript).toEqual(final.transcript);
+      const after = phone.events.length;
+      expect((await phone.request("session.prompt", { commandId: "delta-after-resync", sessionId, text: "Once more." })).ok).toBe(true);
+      const continued = await waitFor(() => {
+        const state = replay(resynced, phone.events.slice(after).filter((event) => event.sessionId === sessionId));
+        return state.snapshot.phase === "idle" && !state.snapshot.operation
+          && messages(state.snapshot as unknown as Snapshot, "assistant").at(-1) === "Resynchronized reply." ? state : undefined;
+      }, "deltas to continue from the resynchronized snapshot");
+      expect(continued.frames.every((frame) => frame.topic === "session.transcriptDelta")).toBe(true);
+      expect(continued.snapshot.transcript).toEqual((await freshSnapshot(gateway, sessionId) as unknown as SessionSnapshot).transcript);
+    } finally {
+      await phone.close();
+    }
   });
 });

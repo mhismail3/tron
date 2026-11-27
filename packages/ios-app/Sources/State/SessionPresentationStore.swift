@@ -2269,6 +2269,12 @@ extension SessionPresentationStore {
            case .sessionSnapshot(let incoming) = event.preparation {
             return reduceSnapshotEvent(event, incoming: incoming)
         }
+        if event.topic == "session.transcriptDelta",
+           let current = snapshot,
+           case .transcriptDelta(let delta)? = event.preparedSessionEvent?.data,
+           let incoming = delta.applied(to: current) {
+            return reduceSnapshotEvent(event, incoming: incoming)
+        }
         guard var current = snapshot else {
             if event.topic == "session.listChanged" { delegate?.sessionPresentationStoreDidRequestCatalogRefresh() }
             return nil
@@ -2398,8 +2404,15 @@ extension SessionPresentationStore {
             break
         case "session.listChanged":
             effects.append(.catalogRefresh)
-        case "session.snapshot":
-            guard case .sessionSnapshot(let incoming) = event.preparation else {
+        case "session.snapshot", "session.transcriptDelta":
+            let incoming: SessionSnapshot
+            if case .sessionSnapshot(let full) = event.preparation {
+                incoming = full
+            } else if admitEnvelope(event, snapshot: snapshot) != nil,
+                      case .transcriptDelta(let delta)? = event.preparedSessionEvent?.data,
+                      let applied = delta.applied(to: snapshot) {
+                incoming = applied
+            } else {
                 return resyncIfNeeded(event, snapshot: snapshot)
             }
             switch SessionSnapshotEventAdmission.evaluate(

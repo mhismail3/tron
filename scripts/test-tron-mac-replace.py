@@ -549,7 +549,7 @@ server.on("connection", (ws, request) => {
     if (scenario === "timeout") return;
     if (scenario === "handshake-error") return ws.send(JSON.stringify({ type: "error", error: { code: "unauthorized", message: "fixture handshake refused" } }));
     if (scenario === "error") return ws.send(JSON.stringify({ type: "response", id: frame.id, ok: false, error: { code: "conflict", message: "fixture task list refused" } }));
-    // The installed protocol-9 Gateway returns history even when nothing is
+    // The installed protocol-10 Gateway returns history even when nothing is
     // active. Make stdout backpressure inevitable, including multibyte text.
     const items = Array.from({ length: 50 }, (_, i) => ({ taskId: `task-${i}`, sessionId: `session-${i}`,
       lifecycle: "terminal", title: "history 🦊 ".repeat(4096) + `tail-${i}` }));
@@ -561,7 +561,7 @@ server.on("connection", (ws, request) => {
 
 
 def rpc_journey():
-    """Real Node child/stdout pipe and protocol-9 socket, never the live install."""
+    """Real Node child/stdout pipe and protocol-10 socket, never the live install."""
     evidence, started, passed = [], time.time(), False
     report = REPO / 'test-results/mac-replace-rpc-e2e.json'
     try:

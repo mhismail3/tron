@@ -1651,6 +1651,30 @@ package struct ModelPage: Hashable, Sendable {
     return "{" + String(s.dropFirst()) + "}"
   }
 }
+package struct SessionTranscriptDeltaCut: Hashable, Sendable {
+  package let baseTranscriptStart: Int
+  package let baseLeafEntryId: Nullable<String>
+  package let transcriptStart: Int
+  package init(baseTranscriptStart: Int, baseLeafEntryId: Nullable<String>, transcriptStart: Int) {
+    self.baseTranscriptStart = baseTranscriptStart
+    self.baseLeafEntryId = baseLeafEntryId
+    self.transcriptStart = transcriptStart
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> SessionTranscriptDeltaCut {
+    let o = try wObj(v, p)
+    let f_baseTranscriptStart: Int = wAbsent(o.value("baseTranscriptStart")) ? 0 : try wInt(o.value("baseTranscriptStart")!, p + ".baseTranscriptStart", nat: false)
+    let f_baseLeafEntryId: Nullable<String> = o.value("baseLeafEntryId") == nil ? .null : try wNullable(o.value("baseLeafEntryId")!) { x in try wStr(x, p + ".baseLeafEntryId") }
+    let f_transcriptStart: Int = wAbsent(o.value("transcriptStart")) ? 0 : try wInt(o.value("transcriptStart")!, p + ".transcriptStart", nat: false)
+    return SessionTranscriptDeltaCut(baseTranscriptStart: f_baseTranscriptStart, baseLeafEntryId: f_baseLeafEntryId, transcriptStart: f_transcriptStart)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"baseTranscriptStart\":" + String(self.baseTranscriptStart)
+    s += ",\"baseLeafEntryId\":" + self.baseLeafEntryId.encode { wEscape($0) }
+    s += ",\"transcriptStart\":" + String(self.transcriptStart)
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
 package enum CommandInfoSource: String, CaseIterable, Hashable, Sendable {
   case skill = "skill"
   case prompt = "prompt"

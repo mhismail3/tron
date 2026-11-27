@@ -2,7 +2,7 @@ import Foundation
 
 package enum GatewayDiagnosticTopicAdmission {
     static let recognizedTopics: Set<String> = [
-        "session.snapshot", "session.rebaseline", "session.summary", "session.listChanged",
+        "session.snapshot", "session.transcriptDelta", "session.rebaseline", "session.summary", "session.listChanged",
         "session.message", "session.progress", "session.toolProgress", "session.extensionActivity",
         "session.extensionPresentation", "session.compaction", "session.processActivity",
         "session.closed", "session.operationFailed", "session.extensionError",

@@ -38,6 +38,7 @@ export const UNKNOWN_OUTBOUND_TOPIC = "other";
 
 const SNAPSHOT_STATED_TOPICS: ReadonlySet<string> = new Set([
   "session.snapshot",
+  "session.transcriptDelta",
   "session.rebaseline",
   "session.progress",
   "session.configuration",

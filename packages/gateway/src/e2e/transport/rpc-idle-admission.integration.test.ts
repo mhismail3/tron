@@ -17,6 +17,7 @@ import { GatewayServer } from "../../transport/server.js";
 import { settingsDependencies } from "../../../test-support/settings-dependencies.js";
 import { sessionSettingChange, changedRevision, type SessionSetting } from "../../../test-support/session-settings-change.js";
 import { waitFor } from "../../../test-support/wait-for.js";
+import { sessionStates } from "../../../test-support/session-states.js";
 import { PROTOCOL_VERSION } from "../../version.js";
 
 const REPORT_PATH = join(process.cwd(), "test-results", "rpc-idle-admission.integration.json");
@@ -573,15 +574,14 @@ describe("receipt-backed mutations against their own session work entry", () => 
       }),
     }));
     try {
-      await waitFor(() => client.frames.some((frame: any) => frame.topic === "session.snapshot"
-        && frame.payload?.sessionId === session.id && frame.payload.phase === "idle"
-        && frame.payload.queuedItems.length === 0
-        && frame.payload.transcript.filter((item: any) => item.kind === "message" && item.role === "user"
+      await waitFor(() => sessionStates(client.frames, session.id).some(({ snapshot }) => snapshot.phase === "idle"
+        && snapshot.queuedItems.length === 0
+        && snapshot.transcript.filter((item: any) => item.kind === "message" && item.role === "user"
           && item.content?.some((part: any) => expectedTexts.some((text) => part.text?.startsWith(text)))).length === steerCount),
       "the stopped prompt and queued steers consumed and idle");
     } catch (error) {
-      const latest = client.frames.filter((frame: any) => frame.topic === "session.snapshot" && frame.payload?.sessionId === session.id).at(-1);
-      throw new Error(`${String(error)}\n${JSON.stringify(latest?.payload)}`);
+      const latest = sessionStates(client.frames, session.id).at(-1);
+      throw new Error(`${String(error)}\n${JSON.stringify(latest?.snapshot)}`);
     }
     const stopSignals = f.logRecords.filter(({ metadata }) => metadata.event === "session.stop-steering-continuation");
     expect(stopSignals.map(({ metadata }) => metadata.outcome)).toEqual(["started", "completed"]);
@@ -590,9 +590,9 @@ describe("receipt-backed mutations against their own session work entry", () => 
       .map((entry: any) => entry.message.content.map((part: any) => part.text ?? "").join(""));
     expect(users.filter((text: string) => text.includes("queued steer")).map((text: string) => text.split("\n")[0]))
       .toEqual(expectedTexts);
-    const snapshots = client.frames.slice(acceptedSteerFrameIndex)
-      .filter((frame: any) => frame.topic === "session.snapshot" && frame.payload?.sessionId === session.id)
-      .map((frame: any) => frame.payload);
+    const snapshots: any[] = sessionStates(client.frames, session.id)
+      .filter(({ index }) => index >= acceptedSteerFrameIndex && client.frames[index].type === "event" && client.frames[index].topic !== "session.rebaseline")
+      .map(({ snapshot }) => snapshot);
     for (const snapshot of snapshots) {
       const queuedIDs = new Set(snapshot.queuedItems.map((item: any) => item.id));
       const users = snapshot.transcript.filter((item: any) => item.role === "user");
@@ -748,7 +748,7 @@ describe("receipt-backed mutations against their own session work entry", () => 
             && ["steer before stop", "steer during stop"].some((text) => item.content?.some((part: any) => part.text?.startsWith(text)))).length === 2;
       }, "both stop-racing steers admitted and consumed once");
     } catch (error) {
-      const snapshot = client.frames.filter((frame: any) => frame.topic === "session.snapshot" && frame.payload?.sessionId === session.id).at(-1)?.payload;
+      const snapshot = sessionStates(client.frames, session.id).at(-1)?.snapshot;
       throw new Error(`${String(error)}\n${JSON.stringify({snapshot, queued:(slot as any).runQueue.queuedMessages, held:(slot as any).heldQueue.entries, recovery:[...(slot as any).runAbort.stopSteeringRecoveryIDs], closed:(slot as any).runAbort.stopRecoveryQueueClosed})}`);
     }
     expect(continuationInputs).toHaveLength(1);
@@ -814,9 +814,9 @@ describe("receipt-backed mutations against their own session work entry", () => 
       sessionId: session.id, commandId: "normal-completion", text: "Complete normally",
     });
     expect(prompted.ok).toBe(true);
-    await waitFor(() => client.frames.slice(start).some(frame => frame.topic === "session.snapshot"
-      && frame.payload.phase === "idle" && frame.payload.transcript.some((item: any) => item.role === "assistant")), "completed assistant snapshot");
-    const settledIndex = client.frames.findLastIndex(frame => frame.topic === "session.snapshot" && frame.payload.phase === "idle");
+    await waitFor(() => sessionStates(client.frames, session.id).some(({ index, snapshot }) => index >= start
+      && snapshot.phase === "idle" && snapshot.transcript.some((item: any) => item.role === "assistant")), "completed assistant snapshot");
+    const settledIndex = sessionStates(client.frames, session.id).findLast(({ snapshot }) => snapshot.phase === "idle")!.index;
     await waitFor(() => client.frames.slice(settledIndex + 1).some(frame => frame.topic === "session.configuration"
       && frame.payload.data.configurationBlocker === null), "normal completion ready event");
     record("normal assistant retirement publishes readiness", { readyWithoutReopen: true });

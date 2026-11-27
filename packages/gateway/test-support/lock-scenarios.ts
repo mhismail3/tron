@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { statedSnapshot } from "./session-states.js";
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fauxAssistantMessage, fauxThinking, fauxToolCall, getCurrentSystemPrompt } from "@earendil-works/pi-ai";
@@ -402,15 +403,13 @@ export async function notificationsPushScenario(own: (release: () => Promise<voi
   await waitFor(() => slot.snapshot().configurationBlocker === null, "the initial session ownership to retire");
   const initialEvents = phone.events.length;
   slot.publishSnapshot();
-  await waitFor(() => phone.events.slice(initialEvents).some((event) => event.sessionId === sessionId && event.topic === "session.snapshot"
-    && (event.payload as { configurationBlocker?: unknown }).configurationBlocker === null),
+  await waitFor(() => phone.events.slice(initialEvents).some((event) => event.sessionId === sessionId && event.topic !== "session.rebaseline"
+    && statedSnapshot(event)?.configurationBlocker === null),
   "the initial ordinary idle snapshot to reach the phone");
   const prompt = (text: string) => phone.send("session.prompt", { commandId: gateway.commandId(), sessionId, text });
   const answerSelect = async (client: LockClient, answered: number) => {
     const pending = await waitFor(() => {
-      const shown = client.events.flatMap((event) => (event.payload as {
-        extensionPresentation?: { pendingInteractions?: Array<{ id: string; hostEpoch: string; presentationRevision: number }> };
-      })?.extensionPresentation?.pendingInteractions ?? []);
+      const shown = client.events.flatMap((event) => statedSnapshot(event)?.extensionPresentation?.pendingInteractions ?? []);
       return shown.filter((interaction, index) => shown.findIndex((other) => other.id === interaction.id) === index)[answered];
     }, "the pending select to reach the phone");
     return pending;
@@ -643,8 +642,7 @@ export async function extensionUiScenario(session: LockSession) {
   const running = session.prompt("ask me which path");
   const pending = await waitFor(() => {
     for (const event of session.client.events) {
-      const shown = (event.payload as { extensionPresentation?: { pendingInteractions?: Array<{ id: string; hostEpoch: string; presentationRevision: number }> } })
-        ?.extensionPresentation?.pendingInteractions?.[0];
+      const shown = statedSnapshot(event)?.extensionPresentation?.pendingInteractions?.[0];
       if (shown) return shown;
     }
     return undefined;

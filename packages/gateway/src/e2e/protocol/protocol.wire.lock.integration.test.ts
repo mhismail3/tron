@@ -50,7 +50,7 @@ describe("gateway/protocol wire contract locks", () => {
 
   });
 
-  it("protocol 9: handshake, refusal and the method shapes clients use", async () => {
+  it("protocol 10: handshake, refusal and the method shapes clients use", async () => {
     vi.stubEnv("TRON_GATEWAY_SOURCE_REVISION", "");
     vi.stubEnv("TRON_GATEWAY_BUILD_FINGERPRINT", "");
     vi.stubEnv("TRON_GATEWAY_RUNTIME_EPOCH", "");
@@ -101,10 +101,10 @@ describe("gateway/protocol wire contract locks", () => {
     await call("no.such.method", {});
 
     const result = (method: string) => calls.find((entry) => entry.method === method)!.response.result as Record<string, unknown>;
-    const snapshots = client.events.filter((event) => event.topic === "session.snapshot").map((event) => event.payload);
+    const deltas = client.events.filter((event) => event.topic === "session.transcriptDelta").map((event) => (event.payload as { data: unknown }).data);
     const typed: Array<[string, (value: unknown) => unknown, unknown[]]> = [
       ["session.open session", Protocol.decodeSessionSnapshot, [result("session.open").session]],
-      ["session.snapshot", Protocol.decodeSessionSnapshot, snapshots],
+      ["session.transcriptDelta", Protocol.decodeSessionTranscriptDelta, deltas],
       ["session.transcript items", Protocol.decodeTranscriptItem, result("session.transcript").items as unknown[]],
       ["session.list sessions", Protocol.decodeSessionSummary, result("session.list").sessions as unknown[]],
       ["session.commands commands", Protocol.decodeCommandInfo, result("session.commands").commands as unknown[]],

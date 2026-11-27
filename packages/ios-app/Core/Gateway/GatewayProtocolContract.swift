@@ -1,8 +1,8 @@
 import Foundation
 
 package enum TronGatewayProtocolContract {
-    package static let protocolVersion = 9
-    package static let minimumProtocolVersion = 9
+    package static let protocolVersion = 10
+    package static let minimumProtocolVersion = 10
 }
 
 package enum GatewayProtocolMismatchClose {

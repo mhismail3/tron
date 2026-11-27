@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline/promises";
 import { resolveBindHost } from "../config.js";
 import { resolveTronHome } from "../tron-home.js";
-import type { ContentPart, HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, HomeTaskStatusResult, JsonValue, SessionSnapshot, TranscriptItem } from "../protocol/types.js";
+import type { ContentPart, HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, HomeTaskStatusResult, JsonValue, SessionSnapshot, SessionTranscriptDelta, TranscriptItem } from "../protocol/types.js";
+import { applyTranscriptDelta } from "../protocol/transcript-delta.js";
 import { GatewayClientError, GatewayProtocolClient } from "./gateway-client.js";
 import { readLocalCredential } from "./local-credential.js";
 import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../kernel/receipts/invocation-receipts.js";
@@ -527,7 +528,7 @@ async function runTerminalChat(): Promise<void> {
           if (envelope.runtimeGeneration !== cursor.runtimeGeneration || envelope.eventSequence !== cursor.eventSequence + 1) {
             const topic = ["session.progress", "session.toolProgress", "session.configuration", "session.operationFailed",
               "session.retry", "session.diagnostic", "session.extensionError", "session.extensionActivity",
-              "session.resourcesChanged", "session.structureChanged", "session.contextChanged", "session.rebaseline"].includes(event.topic)
+              "session.resourcesChanged", "session.structureChanged", "session.contextChanged", "session.rebaseline", "session.transcriptDelta"].includes(event.topic)
               ? event.topic : "unknown";
             const received = Number.isSafeInteger(envelope.eventSequence) ? envelope.eventSequence : "unknown";
             process.stderr.write(`[Tron resync required: reason=event-gap topic=${topic} expected=${cursor.eventSequence + 1} received=${received}]\n`);
@@ -535,7 +536,15 @@ async function runTerminalChat(): Promise<void> {
             return;
           }
           cursor.eventSequence = envelope.eventSequence;
-          if (event.topic === "session.progress") {
+          if (event.topic === "session.transcriptDelta") {
+            const applied = applyTranscriptDelta(snapshot, envelope.data as unknown as SessionTranscriptDelta);
+            if (!applied) {
+              process.stderr.write("[Tron resync required: reason=transcript-delta-base]\n");
+              void reconnect("event-gap");
+              return;
+            }
+            snapshot = applied;
+          } else if (event.topic === "session.progress") {
             const data = envelope.data as Record<string, JsonValue>;
             if (data.message) snapshot.streaming = data.message as unknown as TranscriptItem;
           } else if (event.topic === "session.toolProgress") {

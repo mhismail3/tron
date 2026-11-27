@@ -33,7 +33,7 @@ describe("gateway/protocol client event schemas", () => {
         const start = session.client.events.length;
         (await session.gateway.registry.acquire(session.sessionId)).publishSnapshot();
         await waitFor(() => session.client.events.slice(start).some((event) =>
-          event.topic === "session.snapshot" && event.sessionId === session.sessionId), "the settled thinking snapshot to reach the schema recorder");
+          (event.topic === "session.snapshot" || event.topic === "session.transcriptDelta") && event.sessionId === session.sessionId), "the settled thinking snapshot to reach the schema recorder");
       }
       record(session.gateway);
     }

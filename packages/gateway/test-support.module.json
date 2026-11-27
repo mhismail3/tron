@@ -39,6 +39,7 @@
     "test-support/profile-v1-fixture.ts",
     "test-support/runtime-registry-fixture.ts",
     "test-support/scenario-lock.ts",
+    "test-support/session-states.ts",
     "test-support/session-settings-change.ts",
     "test-support/settings-dependencies.ts",
     "test-support/settings-record-entries.ts",

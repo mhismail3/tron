@@ -2311,6 +2311,48 @@ export function encodeSessionSnapshot(v: SessionSnapshot): string {
   return "{" + (',"sessionId":' + JSON.stringify(v.sessionId) + ',"runtimeGeneration":' + JSON.stringify(v.runtimeGeneration) + ',"revision":' + encNum(v.revision) + ',"eventSequence":' + encNum(v.eventSequence) + ',"phase":' + encodeSessionPhase(v.phase) + ',"acceptsQueuedPrompts":' + JSON.stringify(v.acceptsQueuedPrompts) + ',"configurationBlocker":' + (v.configurationBlocker === null ? "null" : encodeSessionConfigurationBlocker(v.configurationBlocker)) + (v.forkBoundary === undefined ? "" : ',"forkBoundary":' + encodeTranscriptForkBoundary(v.forkBoundary)) + (v.name === undefined ? "" : ',"name":' + JSON.stringify(v.name)) + ',"cwd":' + JSON.stringify(v.cwd) + (v.parentSessionId === undefined ? "" : ',"parentSessionId":' + JSON.stringify(v.parentSessionId)) + (v.model === undefined ? "" : ',"model":' + encodeModelRef(v.model)) + ',"thinkingLevel":' + JSON.stringify(v.thinkingLevel) + ',"availableThinkingLevels":' + "[" + v.availableThinkingLevels.map((x) => JSON.stringify(x)).join(",") + "]" + (v.contextUsage === undefined ? "" : ',"contextUsage":' + encodeSessionSnapshotContextUsage(v.contextUsage)) + (v.contextWindowPolicy === undefined ? "" : ',"contextWindowPolicy":' + encodeContextWindowPolicy(v.contextWindowPolicy)) + (v.compactionPolicy === undefined ? "" : ',"compactionPolicy":' + encodeCompactionPolicyProjection(v.compactionPolicy)) + ',"stats":' + encodeSessionStats(v.stats) + ',"queueRevision":' + encNum(v.queueRevision) + ',"queuedItems":' + "[" + v.queuedItems.map((x) => encodeQueuedMessageState(x)).join(",") + "]" + (v.pendingPrompt === undefined ? "" : ',"pendingPrompt":' + encodePendingPromptState(v.pendingPrompt)) + (v.compactionQueued === undefined ? "" : ',"compactionQueued":' + JSON.stringify(v.compactionQueued)) + ',"automaticCompactionEnabled":' + JSON.stringify(v.automaticCompactionEnabled) + ',"transcript":' + "[" + v.transcript.map((x) => encodeTranscriptItem(x)).join(",") + "]" + ',"transcriptStart":' + encNum(v.transcriptStart) + ',"transcriptTotal":' + encNum(v.transcriptTotal) + (v.streaming === undefined ? "" : ',"streaming":' + encodeTranscriptItem(v.streaming)) + (v.leafEntryId === undefined ? "" : ',"leafEntryId":' + JSON.stringify(v.leafEntryId)) + (v.operation === undefined ? "" : ',"operation":' + encodeSessionOperationState(v.operation)) + (v.retry === undefined ? "" : ',"retry":' + encodeRetryState(v.retry)) + (v.activeToolSegmentId === undefined ? "" : ',"activeToolSegmentId":' + JSON.stringify(v.activeToolSegmentId)) + ',"toolExecutions":' + "[" + v.toolExecutions.map((x) => encodeToolExecutionState(x)).join(",") + "]" + (v.extensionActivities === undefined ? "" : ',"extensionActivities":' + "[" + v.extensionActivities.map((x) => encodeExtensionRunActivity(x)).join(",") + "]") + (v.extensionActivityOmissions === undefined ? "" : ',"extensionActivityOmissions":' + encodeSessionProcessOverviewOmissions(v.extensionActivityOmissions)) + ',"liveActivityRevision":' + encNum(v.liveActivityRevision) + ',"extensionActivityAsOf":' + JSON.stringify(v.extensionActivityAsOf) + (v.processActivities === undefined ? "" : ',"processActivities":' + "[" + v.processActivities.map((x) => encodeSessionProcessActivity(x)).join(",") + "]") + (v.processOverview === undefined ? "" : ',"processOverview":' + encodeSessionProcessOverview(v.processOverview)) + ',"extensionPresentation":' + encodeExtensionPresentationState(v.extensionPresentation) + ',"diagnostics":' + "[" + v.diagnostics.map((x) => encodeSessionSnapshotDiagnosticsItem(x)).join(",") + "]" + (v.archivedAt === undefined ? "" : ',"archivedAt":' + JSON.stringify(v.archivedAt))).slice(1) + "}";
 }
 /**
+ * The subscriber state a `session.transcriptDelta` extends, besides the preceding event sequence and
+ * `snapshot.transcriptStart`, which is the base transcript total. A subscriber whose state differs
+ * resynchronizes with one full snapshot.
+ */
+export interface SessionTranscriptDeltaCut {
+  baseTranscriptStart: number;
+  baseLeafEntryId: string | null;
+  /** Start of the new retained window; its items before the base total come from the base. */
+  transcriptStart: number;
+}
+export function decodeSessionTranscriptDeltaCut(v: unknown, p = "$"): SessionTranscriptDeltaCut {
+  const o = obj(v, p);
+  only(o, p, ["baseTranscriptStart","baseLeafEntryId","transcriptStart"]);
+  return { baseTranscriptStart: int(own(o, "baseTranscriptStart"), p + ".baseTranscriptStart"), baseLeafEntryId: (own(o, "baseLeafEntryId") === null ? null : str(own(o, "baseLeafEntryId"), p + ".baseLeafEntryId")), transcriptStart: int(own(o, "transcriptStart"), p + ".transcriptStart") };
+}
+export function encodeSessionTranscriptDeltaCut(v: SessionTranscriptDeltaCut): string {
+  return "{" + (',"baseTranscriptStart":' + encNum(v.baseTranscriptStart) + ',"baseLeafEntryId":' + (v.baseLeafEntryId === null ? "null" : JSON.stringify(v.baseLeafEntryId)) + ',"transcriptStart":' + encNum(v.transcriptStart)).slice(1) + "}";
+}
+/** A retained base item the Gateway re-projected in place (a prompt's lifecycle settling); same `id`. */
+export interface SessionTranscriptDeltaReplacement { index: number; item: TranscriptItem }
+export function decodeSessionTranscriptDeltaReplacement(v: unknown, p = "$"): SessionTranscriptDeltaReplacement {
+  const o = obj(v, p);
+  only(o, p, ["index","item"]);
+  return { index: int(own(o, "index"), p + ".index"), item: decodeTranscriptItem(own(o, "item"), p + ".item") };
+}
+export function encodeSessionTranscriptDeltaReplacement(v: SessionTranscriptDeltaReplacement): string {
+  return "{" + (',"index":' + encNum(v.index) + ',"item":' + encodeTranscriptItem(v.item)).slice(1) + "}";
+}
+/**
+ * `session.transcriptDelta` data: the complete session state at the event, whose transcript carries only
+ * the canonical items appended after the base, plus at most 16 retained items replaced in place.
+ */
+export interface SessionTranscriptDelta { cut: SessionTranscriptDeltaCut; replaced: SessionTranscriptDeltaReplacement[]; snapshot: SessionSnapshot }
+export function decodeSessionTranscriptDelta(v: unknown, p = "$"): SessionTranscriptDelta {
+  const o = obj(v, p);
+  only(o, p, ["cut","replaced","snapshot"]);
+  return { cut: decodeSessionTranscriptDeltaCut(own(o, "cut"), p + ".cut"), replaced: seq(own(o, "replaced"), p + ".replaced", (x, q) => decodeSessionTranscriptDeltaReplacement(x, q)), snapshot: decodeSessionSnapshot(own(o, "snapshot"), p + ".snapshot") };
+}
+export function encodeSessionTranscriptDelta(v: SessionTranscriptDelta): string {
+  return "{" + (',"cut":' + encodeSessionTranscriptDeltaCut(v.cut) + ',"replaced":' + "[" + v.replaced.map((x) => encodeSessionTranscriptDeltaReplacement(x)).join(",") + "]" + ',"snapshot":' + encodeSessionSnapshot(v.snapshot)).slice(1) + "}";
+}
+/**
  * `usage` is Pi's model-attributed usage record (cache warming): canonical
  * evidence with no chat row, published under its own declared kind.
  */

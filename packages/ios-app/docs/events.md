@@ -115,6 +115,10 @@ transcript paging and session-keyed context/tree/commands.
   same runtime and exactly the next sequence. Duplicates are no-ops; gaps, runtime replacement and
   missing baselines resynchronize; route or payload mismatch is discarded. Unknown sequenced topics
   still advance the cursor. Revocation synchronously rejects every later sequenced topic.
+- **Transcript delta.** `session.transcriptDelta` (protocol 10) is the sequenced form of a snapshot:
+  `SessionTranscriptDelta.applied(to:)` rebuilds the full snapshot only from its exact base (runtime,
+  window start and total, leaf, same-identity replacements), then it installs like a snapshot. Any
+  other base, malformed data or an unknown field resynchronizes with one full `session.open`.
 - **Rebaseline.** Quarantine overflow, or a Gateway outbound queue that superseded unsent state,
   arrives as `session.rebaseline`, installed as a fresh baseline without another open. Snapshots
   must not regress the authority or live-activity revisions; malformed frames, tails over 512 items

@@ -110,6 +110,7 @@ package enum PreparedSessionEventData: Sendable, Equatable {
     case progress(TranscriptItem)
     case compaction(TranscriptItem)
     case toolProgress(ToolExecutionState)
+    case transcriptDelta(SessionTranscriptDelta)
     case extensionActivity(ExtensionActivityDelta)
     case processActivity(PresentedProcessDelta)
     case extensionPresentation(ExtensionPresentationMutation)
@@ -332,6 +333,14 @@ package struct GatewayEvent: Decodable, Sendable, Equatable {
                 } else {
                     preparedData = .invalid
                 }
+            case "session.transcriptDelta":
+                if let delta = try? SessionTranscriptDelta.decode(envelope.data),
+                   delta.snapshot.runtimeGeneration == envelope.runtimeGeneration,
+                   delta.snapshot.eventSequence == envelope.eventSequence,
+                   delta.snapshot.revision == envelope.revision,
+                   (delta.replaced.map(\.item) + delta.snapshot.transcript).allSatisfy(SessionSnapshotTranscriptAdmissionPolicy.admitsItem) {
+                    preparedData = .transcriptDelta(delta)
+                } else { preparedData = .invalid }
             case "session.toolProgress":
                 if let tool = try? envelope.data.decode(ToolExecutionState.self),
                    ExtensionActivityAdmissionPolicy.admitsToolFacts(tool) { preparedData = .toolProgress(tool) }
