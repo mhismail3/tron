@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { expect, it } from "vitest";
 import { createTestRegistry } from "../../../../test-support/gateway-registry.js";
@@ -53,6 +53,51 @@ it("a subdirectory chat lists and launches only Project-root agents, and the chi
     expect(childContexts[0]).toContain('<index name=\\"skills\\"');
     expect(childContexts[0]).toContain("Review a change.");
     expect(childContexts[0]).not.toContain("available_skills");
+  } finally {
+    await registry?.dispose();
+    for (const [key, value] of previous) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("project agents load only while the Project root is trusted, and a trust change reloads the open chat", async () => {
+  const root = await realpath(await mkdtemp("/tmp/cpt-"));
+  const agentDir = join(root, "agent"); const project = join(root, "project"); const tronHome = join(root, "tron");
+  const envKeys = ["PI_CODING_AGENT_DIR", DELEGATED_PROVIDER_ROOT_ENV, "PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT", "PI_SUBAGENTS_SKILLS_RENDERER_MODULE", "PI_SUBAGENT_CHILD"];
+  const previous = new Map(envKeys.map(key => [key, process.env[key]]));
+  let registry: RuntimeRegistry | undefined;
+  try {
+    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(join(project, ".pi", "agents"), { recursive: true })]);
+    await promisify(execFile)("git", ["init", "-q", project]);
+    await writeFile(join(project, ".pi", "agents", "root-agent.md"), agent("root-agent"));
+    process.env.PI_CODING_AGENT_DIR = agentDir; delete process.env.PI_SUBAGENT_CHILD;
+    delegatedProviderEnvironment(delegatedArtifactRoot(tronHome));
+    const managedSubagents = ManagedSubagents.activateForStartup(tronHome);
+    const faux = fauxProvider({ provider: "tron-child-project", models: [{ id: "fixture" }], tokensPerSecond: 1000000 });
+    const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false }); runtime.registerNativeProvider(faux.provider);
+    const trust = new TrustService(agentDir); await trust.set(project, false);
+    registry = await createTestRegistry({ agentDir, tronHome, trust, managedSubagents, modelRuntimeFactory: async () => runtime,
+      idleRuntimeMs: 60000, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {} });
+    await registry.initialize(); const slot = await registry.create(project); await slot.setModel("tron-child-project", "fixture");
+    const projectAgents = async () => ((await slot.resources()) as unknown as { subagents: Array<{ name: string; source: string }> }).subagents.filter(row => row.source === "project").map(row => row.name);
+    const launch = async () => {
+      faux.setResponses([
+        () => fauxAssistantMessage(fauxToolCall("subagent", { agent: "root-agent", task: "Return ROOT.", async: false, acceptance: { level: "none", reason: "probe" } })),
+        ...Array.from({ length: 3 }, () => fauxAssistantMessage("DONE")),
+      ]);
+      await slot.prompt("Launch the root agent");
+      await waitFor(() => !slot.isBusy, "launch settled");
+      const entry = SessionManager.open(slot.sessionFile!).getEntries().findLast(item => item.type === "message" && item.message.role === "toolResult" && item.message.toolName === "subagent");
+      return entry?.type === "message" ? entry.message : undefined;
+    };
+    expect(await projectAgents()).toEqual([]);
+    expect(await launch()).toMatchObject({ toolName: "subagent", isError: true });
+    await registry.setProjectTrust(project, true);
+    expect(await projectAgents()).toEqual(["root-agent"]);
+    expect(await launch()).toMatchObject({ toolName: "subagent", isError: false });
+    await registry.setProjectTrust(project, false);
+    expect(await projectAgents()).toEqual([]);
+    expect(await launch()).toMatchObject({ toolName: "subagent", isError: true });
   } finally {
     await registry?.dispose();
     for (const [key, value] of previous) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
