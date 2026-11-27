@@ -70,7 +70,7 @@ The module exposes the `projects` agent tool and no RPC. The app has no project 
   canonical standalone Git/trust roots, linked worktrees and busy occupancy before trust is granted.
 - Existing-project trust and untrust are not lifecycle actions. Home changes
   `permissions.projectTrust` with a `project` qualifier through the `settings` tool, which
-  writes through `TrustService.setAndApply` with runtime reload and abort. That path has
+  writes through `RuntimeRegistry.setProjectTrust` (trust store, open-runtime reload, commit or abort). That path has
   no lifecycle eligibility preflight. Normal runtime mutation/reload fences still apply;
   creation's linked-worktree and occupancy eligibility rules are not additional Home settings rules.
 - Creation and existing-project trust grants use the shared `change` interaction answered by
