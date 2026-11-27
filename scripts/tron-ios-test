@@ -30,10 +30,10 @@ usage() {
 Usage: scripts/tron-ios-test COMMAND [--lane NAME [--device-type NAME]] [--keep-booted] [--only-testing OWNER ...]
 
 Commands:
-  checkpoint, prepare  Provision, generate, build, and run the smoke journeys.
+  checkpoint, prepare  Provision, generate, build, and run the minimal set.
   build                Provision, generate, and build reusable test products: the app and
                        the TronMobileUITests bundle (scheme Tron UI Validation).
-  run                  Run reusable products: the --only-testing journeys, or the smoke set.
+  run                  Run reusable products: the --only-testing journeys, or the minimal set.
   diagnose             Explicit verbose-diagnostics run with a larger finite deadline.
   status               Report toolchain, lane, owned simulator, lease, products, and the newest
                        run this worktree started in this lane.
@@ -67,8 +67,9 @@ Commands:
 
 Selectors:
   --only-testing OWNER  Repeat without shell-generated command fragments, for example:
-                        --only-testing TronMobileUITests/TronIntegrationSheetsUITests/testRetryConnectionRecoversUnreachableDetails
-                        Without a selector, run, checkpoint and prepare run the smoke set (SMOKE_ONLY_TESTING).
+                        --only-testing TronMobileUITests/TronIntegrationSheetsUITests/testEstablishedSocketLossThenOpenTimeoutsBecomeUnreachable
+                        Without a selector, run, checkpoint and prepare run the minimal set (MINIMAL_ONLY_TESTING):
+                        every in-process view test and the hosted reconnect journeys, no Gateway.
 
 Options:
   --all                 With `status`, list every simulator on this Mac (see above).
@@ -250,8 +251,9 @@ simulator_args=(
 
 test_scheme="Tron UI Validation"
 test_plan="UIValidation"
-SMOKE_ONLY_TESTING=(
-  "TronMobileUITests/TronIntegrationSheetsUITests/testRetryConnectionRecoversUnreachableDetails"
+MINIMAL_ONLY_TESTING=(
+  "TronMobileViewTests"
+  "TronMobileUITests/TronIntegrationSheetsUITests"
 )
 
 command="${1:-checkpoint}"
@@ -339,7 +341,7 @@ fi
 case "$command" in
   checkpoint|prepare|run|diagnose)
     if [[ -z "${selectors[0]-}" ]]; then
-      selectors=("${SMOKE_ONLY_TESTING[@]/#/-only-testing:}")
+      selectors=("${MINIMAL_ONLY_TESTING[@]/#/-only-testing:}")
     fi
     ;;
 esac
@@ -598,7 +600,6 @@ build_products() {
       -destination "$destination" \
       -derivedDataPath "$DERIVED_DATA" \
       -parallel-testing-enabled NO \
-      -enableCodeCoverage YES \
       -resultBundlePath "$build_result_bundle" \
       ONLY_ACTIVE_ARCH=YES \
       -showBuildTimingSummary || build_status=$?
@@ -610,28 +611,6 @@ build_products() {
   printf '%s\n' "$source_identity" \
     | python3 "$IDENTITY" write --worktree "$ROOT" --derived-data "$DERIVED_DATA" \
     || die "cannot stamp the built test products with their source identity"
-}
-
-write_coverage() {
-  local report="$run_dir/coverage.json"
-  if xcrun xccov view --report --json "$result_bundle" 2>"$run_dir/coverage-extraction.log" \
-    | TRON_ROOT="$ROOT" python3 -c '
-import json, os, sys
-root = os.path.realpath(os.environ["TRON_ROOT"]) + "/"
-files = {}
-for target in json.load(sys.stdin).get("targets", []):
-    for item in target.get("files", []):
-        path = os.path.realpath(item["path"])
-        if path.startswith(root):
-            entry = files.setdefault(path[len(root):], {"covered": 0, "executable": 0})
-            entry["covered"] += item.get("coveredLines", 0)
-            entry["executable"] += item.get("executableLines", 0)
-json.dump({"schema": "tron.ios-test-coverage.v1", "files": files}, sys.stdout, indent=2, sort_keys=True)
-' >"$report"; then
-    echo "iOS coverage: $report"
-  else
-    echo "warning: no coverage report (module execution unknown): $run_dir/coverage-extraction.log" >&2
-  fi
 }
 
 validate_test_summary() {
@@ -712,7 +691,6 @@ run_tests() {
     -resultBundlePath "$result_bundle"
     -parallel-testing-enabled NO
     -collect-test-diagnostics "$diagnostics"
-    -enableCodeCoverage YES
   )
   if [[ -n "${selectors[0]-}" ]]; then
     test_command+=("${selectors[@]}")
@@ -754,7 +732,6 @@ run_tests() {
   fi
   write_metadata complete "$test_status" || echo "warning: could not finalize run metadata: $metadata_path" >&2
   if ((test_status == 0)); then
-    write_coverage
     echo "iOS test run complete: $run_dir"
   else
     python3 "$FAILURES" --tests --root "$ROOT" "$result_bundle" >&2 || true

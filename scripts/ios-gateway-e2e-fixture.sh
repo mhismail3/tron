@@ -77,27 +77,11 @@ const faux = fauxProvider({
   provider: "tron-e2e",
   models: [
     { id: "e2e-model", name: "Tron E2E Model", reasoning: true, input: ["text", "image"], contextWindow: 32768, maxTokens: 4096 },
-    { id: "e2e-alternate", name: "Tron E2E Alternate", reasoning: false, input: ["text"], contextWindow: 32768, maxTokens: 4096 },
   ],
   tokensPerSecond: 8,
 });
-// A prompt carrying the codemode journey marker asks its question from inside codemode
-// (#929); its turns are decided by what the model sees, not by a script position.
-const CODEMODE_MARKER = "CODEMODE-ASK-USER-JOURNEY";
 const textOf = (message) => typeof message?.content === "string" ? message.content
   : (message?.content ?? []).map((part) => part.type === "text" ? part.text : "").join("");
-const codemodeTurn = (context) => {
-  const last = context.messages.at(-1);
-  if (last?.role === "toolResult" && last.toolName === "codemode") {
-    const output = textOf(last);
-    const choice = ["Approve it", "Hold it"].find((label) => output.includes('"' + label + '"'));
-    return fauxAssistantMessage("Codemode question answered: " + (choice ?? "no answer in: " + output.replace(/[ \n\t]+/g, " ").slice(-200)));
-  }
-  if (last?.role === "user" && textOf(last).includes(CODEMODE_MARKER)) {
-    return fauxAssistantMessage([fauxToolCall("codemode", { code: 'text(await tools.ask_user({ title: "Codemode approval", questions: [{ header: "Approve", question: "Approve the codemode step?", options: [{ label: "Approve it" }, { label: "Hold it" }] }] }));' }, { id: "e2e-codemode-ask" })], { stopReason: "toolUse" });
-  }
-  return undefined;
-};
 // Ordinary prompts consume this script in order. A prompt carrying the ask
 // journey marker consumes its own script instead, so the real-UI ask journey
 // (#935) cannot shift the responses every other journey and boundary case expects.
@@ -182,24 +166,10 @@ const settingsCardTurn = (context) => {
     { key: "permissions.budget.task", layer: "session", op: "set", value: { outputTokens } },
   ] }, { id: "e2e-settings-card-" + outputTokens })], { stopReason: "toolUse" });
 };
-// The native settings journey (#2233) reads which model actually served a prompt.
-const MODEL_PROBE_MARKER = "MODEL-PROBE-JOURNEY";
 const scripted = (context, options, state, model) => {
   if (latestUserText(context).includes(SETTINGS_CARD_MARKER)) return settingsCardTurn(context);
-  if (latestUserText(context).includes(MODEL_PROBE_MARKER)) return fauxAssistantMessage("Model probe answered by " + model.id + ".");
   if (latestUserText(context).includes(RESTART_MARKER)) return restartTurn(context);
-  if (latestUserText(context).includes("Review the fixture queue. This message is not approval.")) {
-    return fauxAssistantMessage("Home automation message received without approval authority.");
-  }
   if (latestUserText(context).includes("HOME-AUTOMATION-JOURNEY:")) return fauxAssistantMessage("Home automation fixture ready.");
-  if (latestUserText(context).includes(CODEMODE_MARKER)) return codemodeTurn(context) ?? fauxAssistantMessage("", { stopReason: "error", errorMessage: "Unexpected codemode journey turn" });
-  if (latestUserText(context).includes("historical sheet replay") && context.messages.at(-1)?.role === "toolResult"
-      && context.messages.at(-1)?.toolName === "ask_user") {
-    // The cold replay journey alternates a custom answer sheet with an
-    // ordinary file tool, whose native detent belongs to each presentation.
-    return fauxAssistantMessage([fauxText("Reading the durable project rules."),
-      fauxToolCall("read", { path: "AGENTS.md" }, { id: "e2e-replay-read" })], { stopReason: "toolUse" });
-  }
   if (lastUserHasImage(context)) return fauxAssistantMessage("Steer journey saw the photo.");
   if (latestUserText(context).includes(steerJourneyMarker)) return holdUntilSteerQueued();
   const step = (latestUserText(context).includes(askJourneyMarker) ? askJourney : ordinary).shift();

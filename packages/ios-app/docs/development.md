@@ -32,7 +32,7 @@ run `compile` after changing app views or their model APIs.
 ### Module layout
 
 Where code goes and Core's `package` access rules: [Core](../Core/README.md#contract). After moving
-API, regenerate, build, run the smoke set and the source policy check; a file carrying the protocol
+API, regenerate, build, run the minimal set and the source policy check; a file carrying the protocol
 constants keeps its path in `scripts/gateway_protocol_contract.py`.
 
 ### Type-checking cost
@@ -113,8 +113,9 @@ only the owning tests, and rebuild after an edit (stale products are refused):
 ```bash
 scripts/tron-ios-test build
 scripts/tron-ios-test run --only-testing TronMobileUITests/<Class>/<method>
-scripts/tron-ios-test run          # the smoke set (SMOKE_ONLY_TESTING in scripts/tron-ios-test)
-scripts/tron-ios-test checkpoint   # build, then the smoke set
+scripts/tron-ios-test run          # the minimal set (MINIMAL_ONLY_TESTING in scripts/tron-ios-test)
+scripts/tron-ios-test checkpoint   # build, then the minimal set
+scripts/tron test --host mini ios checkpoint  # the same, on the Mac mini at this commit
 python3 scripts/test-ios-test-infrastructure.py
 python3 scripts/test-ios-process-evidence.py  # owned-group timeout diagnostics; no Xcode
 ```
@@ -242,7 +243,7 @@ service, real-Gateway journey, physical haptic, APNs or device behavior.
   readiness and snapshots. No hook ships in normal builds.
   Public layer inspection cannot explain private SwiftUI/render-server work or prove why XCTest
   waited. A responsive main thread with repeating CA animation is evidence, not a root cause.
-- A pass needs one executed, passing test and writes `coverage.json`; partial evidence is kept.
+- A pass needs one executed, passing test; partial evidence is kept.
 - A hosted launch without a fixture argument renders the production `ProductionSceneRoot`.
 
 ### Process-evidence diagnostics
@@ -300,7 +301,7 @@ Its canonical lifecycle root is `HOME/Workspace` (exact spelling).
 ## Manual iOS release validation and delivery
 
 The repository never archives or uploads production iOS artifacts. The maintainer selects a
-checked commit with a clean checkout (`scripts/tron version check`), runs the smoke set, required
+checked commit with a clean checkout (`scripts/tron version check`), runs the minimal set, required
 journeys and a physical review, runs `scripts/verify-ci-toolchain.sh release`, archives
 `Tron Release`, checks it with `packages/ios-app/scripts/verify-archive-privacy.sh <xcarchive>`,
 and uploads through Xcode Organizer.

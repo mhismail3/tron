@@ -123,9 +123,6 @@ providers, models, extensions, MCP servers, connected services, paired Macs and 
 ```bash
 scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronIntegrationSheetsUITests
-scripts/ios-gateway-e2e-test run-ui \
-  --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testOutsideMcpAdditionReachesTheOpenMcpScreen \
-  --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSourcesTextDoneAndRoutes
 ```
 
 Gateway `native-change.e2e.test.ts` owns agent numeric-map changes, next-Pi-session admission, spend-card

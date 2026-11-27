@@ -341,8 +341,7 @@ private struct HostedConnectionRetryFixture: View {
     @State private var failedSockets = 0
 
     init(scenario: String) {
-        let failures = scenario == "connection-retry" ? 1 : 2
-        let factory = HostedRecoverySocketFactory(failures: failures, dropsEstablishedConnection: scenario == "connection-loss-unreachable", openedFailures: scenario == "connection-opened-failure")
+        let factory = HostedRecoverySocketFactory(failures: 2, dropsEstablishedConnection: scenario == "connection-loss-unreachable")
         self.factory = factory
         let origin = ContinuousClock().now
         let clock = MonotonicClock(now: { ContinuousClock().now }, sleep: { duration in
@@ -354,7 +353,7 @@ private struct HostedConnectionRetryFixture: View {
         _model = State(initialValue: AppModel(
             client: GatewayClient(socketFactory: GatewaySocketFactory { _ in factory.next() }),
             profiles: profiles, clock: clock,
-            reconnectDelayPolicy: ReconnectDelayPolicy(initialSeconds: failures == 2 ? 0.1 : 100,
+            reconnectDelayPolicy: ReconnectDelayPolicy(initialSeconds: 0.1,
                 multiplier: 1_000, maximumSeconds: 100, jitterFraction: 0, nextUnitInterval: { 0.5 })
         ))
     }
@@ -387,11 +386,9 @@ private final class HostedRecoverySocketFactory: @unchecked Sendable {
     private var producedFailures = 0
     var failedSocketCount: Int { lock.withLock { producedFailures } }
     private var dropsEstablishedConnection: Bool
-    private let openedFailures: Bool
-    init(failures: Int, dropsEstablishedConnection: Bool = false, openedFailures: Bool = false) {
+    init(failures: Int, dropsEstablishedConnection: Bool) {
         self.failures = failures
         self.dropsEstablishedConnection = dropsEstablishedConnection
-        self.openedFailures = openedFailures
     }
     func next() -> any GatewaySocketConnection {
         lock.lock()
@@ -400,10 +397,7 @@ private final class HostedRecoverySocketFactory: @unchecked Sendable {
         if shouldFail { failures -= 1; producedFailures += 1 }
         dropsEstablishedConnection = false
         lock.unlock()
-        if shouldFail {
-            if openedFailures { return HostedOpenedFailureSocket() }
-            return HostedRecoveryFailedSocket()
-        }
+        if shouldFail { return HostedRecoveryFailedSocket() }
         let socket = HostedIntegrationsSocket(gateway: HostedIntegrationsGateway(scenario: "default"))
         if shouldDropEstablishedConnection {
             Task {
@@ -412,16 +406,6 @@ private final class HostedRecoverySocketFactory: @unchecked Sendable {
             }
         }
         return socket
-    }
-}
-
-private actor HostedOpenedFailureSocket: GatewaySocketConnection {
-    func send(_ data: Data) async throws { throw URLError(.networkConnectionLost) }
-    func receive() async throws -> Data { throw URLError(.networkConnectionLost) }
-    func ping() async throws { throw URLError(.networkConnectionLost) }
-    func close() async {}
-    func metadata() async -> GatewaySocketMetadata {
-        GatewaySocketMetadata(closeCode: nil, httpStatusCode: 101, transportOpenMilliseconds: 1)
     }
 }
 

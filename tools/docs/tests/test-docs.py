@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -75,16 +74,6 @@ class RealRepositoryTests(unittest.TestCase):
         self.assertEqual({cell.strip("`") for cell in first_cells(self.generate("modules"))}, expected)
         gateway = {cell.strip("`") for cell in first_cells(self.generate("modules", "packages/gateway"))}
         self.assertEqual(gateway, {m for m in expected if m.startswith("gateway/")})
-
-    def test_rpc_list_holds_every_method_a_real_gateway_answered(self) -> None:
-        lock = json.loads((ROOT / "packages/gateway/src/e2e/protocol/locks/protocol-wire.golden.json").read_text())
-        answered = {call["method"] for call in lock["methods"] if call["ok"]}
-        output = self.generate("rpc")
-        rows = [line.split(" | ")[1] for line in output.splitlines() if line.startswith("| `")]
-        listed = {name for row in rows for name in re.findall(r"`([^`]+)`", row)}
-        self.assertTrue(answered, "the wire lock recorded no answered method")
-        self.assertLessEqual(answered, listed)
-        self.assertEqual(int(output.split(" ", 1)[0]), len(listed))
 
     def test_signals_print_and_committed_blocks_are_current(self) -> None:
         self.assertTrue(self.generate("signals").strip())

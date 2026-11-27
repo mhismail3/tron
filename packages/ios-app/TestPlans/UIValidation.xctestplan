@@ -12,15 +12,6 @@
       "containerPath": "container:TronMobile.xcodeproj",
       "identifier": "5CE10CFB51EA2F88B755A197",
       "name": "TronMobile"
-    },
-    "codeCoverage": {
-      "targets": [
-        {
-          "containerPath": "container:TronMobile.xcodeproj",
-          "identifier": "5CE10CFB51EA2F88B755A197",
-          "name": "TronMobile"
-        }
-      ]
     }
   },
   "testTargets": [

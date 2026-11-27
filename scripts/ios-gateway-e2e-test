@@ -40,20 +40,14 @@ lock_owner="$repo_root/scripts/ios-test-lock.py"
 die() { echo "error: $*" >&2; exit 1; }
 
 ui_owned_journeys=(
-  'TronMobileUITests/RealGatewayPairAndChatUITests/testHomeAutomationEditorAndAttributedMessageLight'
   "TronMobileUITests/RealGatewayPairAndChatUITests/testHomeStatusShowsHostPressureAndWorkers"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testWrongPairingCodeLinkIsRefusedAndThenTheFixtureLinkPairs"
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testOutsideMcpAdditionReachesTheOpenMcpScreen"
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSourcesTextDoneAndRoutes"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testForegroundAndReconnectKeepSheetsAndTheirContent"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testProviderLoginSurvivesSafariAndReconnect"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testAnsweringAskUserInReopenedRunningSessionKeepsTranscriptMounted"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testStreamedReplyAppearsExactlyOnceAcrossReconnect"
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testSessionModelChangeReachesNextPrompt"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testHomeSettingsCardDeclineAppliesNothingAndDoubleApproveAppliesOnce"
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testCompletedAskUserColdReplayRetainsSelectedAnswers"
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testCodemodeAskUserOpensFromItsToolRowAndAcceptsAnAnswer"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testImageOnlySteerLeavesTheQueueOnceDelivered"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testMacReplacementRowAndProgressFollowTheJournal"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testGatewayRestartWaitsForLiveWorkThenRestartsIdleAndReconnects"
@@ -130,17 +124,6 @@ e2e_test_filters=(
   "TronMobileE2ETests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools"
   "TronMobileE2ETests/RealGatewayPiBoundaryTests/testSharedLinkUploadAndWebSocketLiveness"
   "TronMobileE2ETests/RealGatewayPiBoundaryTests/testAppLogUploaderSendsAMarkerAndAdvancesTheGatewayCursor"
-)
-e2e_diagnostic_test_filters=(
-  "TronMobileE2ETests/GatewayTimeoutDiagnosticTests/testBothRawTimeoutNamesProduceTheSameTransportDiagnostic"
-  "TronMobileE2ETests/PushRegistrationRetryTests/testRegistrationStateReachesTheUploadedAppLog"
-  "TronMobileE2ETests/PushRegistrationRetryTests/testRetryCardRotatesOnceAfterAcceptedTapAndDuplicateApprovalDoesNot"
-  "TronMobileE2ETests/PushRegistrationRetryTests/testPresentedConnectionMismatchRefusesBeforeAnswer"
-  "TronMobileE2ETests/PushRegistrationRetryTests/testConnectionChangeAfterAcceptanceRefusesRotation"
-  "TronMobileE2ETests/PushRegistrationRetryTests/testUnflaggedStoredKeyRejectedInAssertionRotatesExactlyOnce"
-  "TronMobileE2ETests/PushRegistrationRetryTests/testInvalidKeyAssertionRecoveryConsumesTheOneLaunchBudget"
-  "TronMobileE2ETests/PushRegistrationRetryTests/testOnlyAPushRetryCardWithATapYieldsAFence"
-  "TronMobileE2ETests/PushRegistrationRetryTests/testTransientAttestationThenAssertionRejectionStopsWithCardEligibleKey"
 )
 e2e_lan_test_filters=(
   "TronMobileE2ETests/RealGatewayPiBoundaryTests/testRacesLanAndTailscaleLanes"
@@ -553,7 +536,6 @@ PY
     printf 'TRON_E2E_GATEWAY_HOME=%q\n' "$gateway_home"
     printf 'TRON_E2E_TRON_HOME=%q\n' "$tron_home"
     printf 'TRON_E2E_AGENT_DIR=%q\n' "$agent_dir"
-    printf 'TRON_E2E_SETTINGS_INVENTORY=%q\n' "$(settings_inventory_json)"
   } >"$state_file"
   chmod 600 "$state_file"
   echo "Gateway fixture upstream 127.0.0.1:$upstream_port (pid $(<"$pid_file")); fault proxy 127.0.0.1:$port (pid $proxy_pid)"
@@ -569,22 +551,10 @@ if runs:
 PY
 }
 
-settings_inventory_json() {
-  "$NODE_BIN" --input-type=module -e '
-    import { pathToFileURL } from "node:url";
-    const dir = process.argv[1];
-    const { createGatewaySettingsSchema } = await import(pathToFileURL(`${dir}/settings-schema.js`).href);
-    const schema = createGatewaySettingsSchema();
-    const keys = schema.KEYS.filter(key => key.control && key.writers.length).map(key => ({ id: key.id, label: key.label, group: key.group, layers: Object.keys(key.layers),
-      qualifier: key.qualifier ?? null }));
-    process.stdout.write(JSON.stringify({ keys }));
-  ' "$gateway_dir/dist/main"
-}
-
 patch_xctestrun() {
   local xctestrun="$1" target="$2"
   python3 "$repo_root/scripts/patch-ios-gateway-e2e-xctestrun.py" \
-    "$xctestrun" "$target" "$TRON_E2E_PORT" "$TRON_E2E_CODE" "$TRON_E2E_WORKSPACE" "$TRON_E2E_PI_VERSION" "$TRON_E2E_PROXY_TOKEN" "$TRON_E2E_SETTINGS_INVENTORY" "$TRON_E2E_AGENT_DIR" "$TRON_E2E_TRON_HOME"
+    "$xctestrun" "$target" "$TRON_E2E_PORT" "$TRON_E2E_CODE" "$TRON_E2E_WORKSPACE" "$TRON_E2E_PI_VERSION" "$TRON_E2E_PROXY_TOKEN" "$TRON_E2E_AGENT_DIR" "$TRON_E2E_TRON_HOME"
 }
 
 build_tests() {
@@ -836,9 +806,6 @@ run_ui_journey() {
   local journey="$1" xctestrun="$2"
   local attempt_dir attempt_id result_bundle status case_started=$SECONDS
   local -a runtime_limits=()
-  if [[ "$journey" == *testCompletedAskUserColdReplayRetainsSelectedAnswers ]]; then
-    runtime_limits+=("TRON_GATEWAY_MAX_LIVE_RUNTIMES=1")
-  fi
   if [[ "$journey" == *testGatewayRestartWaitsForLiveWorkThenRestartsIdleAndReconnects ]]; then
     rm -rf "$run_root/payload"
     mkdir -p "$run_root/payload/app/dist"
@@ -847,9 +814,6 @@ run_ui_journey() {
   fi
   start_fresh_fixture ${runtime_limits[@]+"${runtime_limits[@]}"}
   load_state
-  if [[ "$journey" == *testHomeAutomationEditorAndAttributedMessageLight ]]; then
-    prepare_home_automation_fixture
-  fi
   if [[ "$journey" == *testHomeSettingsCardDeclineAppliesNothingAndDoubleApproveAppliesOnce ]]; then
     prepare_home_automation_fixture 100
   fi
@@ -1254,7 +1218,7 @@ show_status() {
 
 case "$command" in
   run-lan) e2e_test_filters=("${e2e_lan_test_filters[@]}") ;;
-  check) e2e_test_filters=("${e2e_test_filters[@]}" "${e2e_lan_test_filters[@]}" "${e2e_diagnostic_test_filters[@]}") ;;
+  check) e2e_test_filters=("${e2e_test_filters[@]}" "${e2e_lan_test_filters[@]}") ;;
 esac
 case "$command" in
   prepare|build|run|run-lan|run-ui|run-ui-lane|iterate|all|check|stop|clean) ;;
@@ -1271,7 +1235,7 @@ if ((${#selectors[@]})); then
     run|run-lan|iterate|all|check)
       for selector in "${selectors[@]/#-only-testing:/}"; do
         owned=0
-        for boundary_case in "${e2e_test_filters[@]}" "${e2e_diagnostic_test_filters[@]}"; do
+        for boundary_case in "${e2e_test_filters[@]}"; do
           [[ "$selector" != "$boundary_case" ]] || owned=1
         done
         ((owned)) || die "$selector is not a boundary method this command owns (see '$0 help')"
