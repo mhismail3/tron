@@ -796,7 +796,7 @@ describe("Tron Home research tools", () => {
     expect((await rebuilt!).results.map(hit => hit.entryId)).toContain(anchor.id);
     expect((await f.search.search({ query: "ZEBRAQUOKKA" })).results.map(hit => hit.entryId)).toContain(anchor.id);
     recordCase("search-rekey-dirty", { currentPassageKept: true });
-  }, 60_000);
+  });
 
   it("reads every exported source revision and citation through the existing Home file tool", async () => {
     const f = await fixture("plain-source-citation");
