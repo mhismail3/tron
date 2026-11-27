@@ -121,7 +121,6 @@ boot_simulator() {
     if [[ "$line" != *"(Booted)"* ]]; then
         xcrun simctl boot "$simulator_id"
     fi
-    open -a Simulator --args -CurrentDeviceUDID "$simulator_id"
     xcrun simctl bootstatus "$simulator_id" -b
 }
 
