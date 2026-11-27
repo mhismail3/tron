@@ -57,7 +57,7 @@ export class CuaComputerClient {
   private desktopObserved = false;
   private pixelObserved = false;
   private refreshEndpoint = false;
-  private windowReferences: { pid: number; window: number; tokens: Set<string> } | undefined;
+  private windowReferences: { pid: number; window: number; snapshot: string } | undefined;
   private readonly activity = new DisplayActivity();
 
   constructor(private readonly binding: NativeCaptureBinding, private readonly admit: () => Promise<void>) {}
@@ -86,8 +86,8 @@ export class CuaComputerClient {
     if (!observation && arguments_.from_zoom === true) throw new Error("Use the current full-window screenshot, not an unowned zoom context");
     if (!observation && ("element_token" in arguments_ || "element_index" in arguments_)) {
       const token = typeof arguments_.element_token === "string" ? arguments_.element_token : `${arguments_.snapshot_id}:${arguments_.element_index}`;
-      const refs = this.windowReferences;
-      if (!refs || !refs.tokens.has(token) || (pid !== undefined && pid !== refs.pid)
+      const refs = this.windowReferences, [snapshot, row, extra] = token.split(":");
+      if (!refs || snapshot !== refs.snapshot || extra !== undefined || !/^\d+$/u.test(row ?? "") || (pid !== undefined && pid !== refs.pid)
         || (window !== undefined && window !== refs.window) || target?.kind === "desktop") throw new Error("stale_element_token: the element reference does not belong to this session's latest window observation; call get_window_state again");
     }
     const foreground = arguments_.delivery_mode === "foreground" || arguments_.scope === "desktop" || target?.kind === "desktop" || tool === "bring_to_front";
@@ -199,10 +199,8 @@ export class CuaComputerClient {
         if (tool === "get_desktop_state" && image) this.desktopObserved = true;
         if (tool === "get_window_state") {
           this.pixelObserved = image !== undefined;
-          this.windowReferences = typeof output.pid === "number" && typeof output.window_id === "number"
-            ? { pid: output.pid, window: output.window_id, tokens: new Set((Array.isArray(output.elements) ? output.elements : []).slice(0, 200).flatMap((value) =>
-                value && typeof value === "object" && typeof value.element_token === "string" ? [value.element_token] : [])) }
-            : undefined;
+          this.windowReferences = typeof output.pid === "number" && typeof output.window_id === "number" && typeof output.snapshot_id === "string"
+            ? { pid: output.pid, window: output.window_id, snapshot: output.snapshot_id } : undefined;
         }
       }
       return { ...result, ...(image ? { image } : {}) };

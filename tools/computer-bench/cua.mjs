@@ -38,7 +38,7 @@ export function cua(options) {
     return found.window_id;
   }
   async function observe(target, extra = {}) {
-    return call("get_window_state", { pid: target.pid, window_id: target.window, include_screenshot: false, max_elements: 160, max_depth: 12, ...extra });
+    return call("get_window_state", { pid: target.pid, window_id: target.window, include_screenshot: false, tree_format: "elements", max_elements: 160, max_depth: 12, ...extra });
   }
   async function token(target, role, label) {
     const snapshot = await observe(target, target === chrome?.target ? { query: label } : {});
@@ -149,9 +149,13 @@ export function cua(options) {
       async "native-modal"() {
         const open = await act("click", native(), { element_token: await token(native(), "AXButton", "Show Alert") });
         await waitFor(() => state().alertOpen, 2000);
-        const approve = await act("click", native(), { element_token: await token(native(), "AXButton", "Approve") });
+        const stale = await token(native(), "AXButton", "Approve"), fresh = await token(native(), "AXButton", "Approve");
+        const refusals = await Promise.all([act("click", native(), { element_token: stale }), act("click", { pid: native().pid, window: native().window + 1 }, { element_token: fresh })]
+          .map((attempt) => attempt.then(() => "accepted", (error) => /refused/u.test(error.message) ? "refused" : "error")));
+        const approve = await act("click", native(), { element_token: fresh });
         await waitFor(() => state().approved, 2000);
-        return report(state().approved, `approved ${state().approved}`, [open, approve]);
+        const ok = state().approved && refusals.every((refusal) => refusal === "refused");
+        return report(ok, `approved ${state().approved}; stale and foreign-window sheet tokens ${refusals.join("/")}`, [open, approve]);
       },
       async screenshot(ctx) {
         const file = join(ctx.workdir, `cua-window-${ctx.rep}.png`);

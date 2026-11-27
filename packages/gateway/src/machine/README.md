@@ -101,7 +101,7 @@ The iPhone pins the private host identity at enrollment
   with the same uncertain result;
   `close()` gives up after 10 s. Help strips the reserved
   fields from the driver schema; driver and adapter staleness both say
-  `stale_element_token`. Actions need fresh observations from the same load. Observation images come from
+  `stale_element_token`. An element token must name the snapshot of the latest window observation (`<snapshot_id>:<row>`, as the driver's default markdown tree prints it). Actions need fresh observations from the same load. Observation images come from
   disposable files removed before publication. Cua telemetry is off; missing Cua
   assets disable only this tool. Before foreground input, inspect the whole desktop
   for system dialogs; the agent handles permission prompts itself under the operating
