@@ -104,7 +104,7 @@ def remote(job: dict) -> int:
         if (checkout / '.git').exists():
             steps = [('git', '-C', str(checkout), 'checkout', '--quiet', '--detach', '--force', sha),
                      ('git', '-C', str(checkout), 'clean', '-ffdxq', '-e', '/packages/gateway/node_modules',
-                      '-e', '/packages/mac-app/build')]
+                      '-e', '/packages/mac-app/build', '-e', '/packages/ios-app/TronMobile.xcodeproj')]
         else:
             steps = [('git', '--git-dir', str(base / 'tron.git'), 'worktree', 'prune'),
                      ('git', '--git-dir', str(base / 'tron.git'), 'worktree', 'add', '--quiet', '--detach', str(checkout), sha)]
