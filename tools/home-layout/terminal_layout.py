@@ -42,6 +42,7 @@ def read(l, r, path):
 
 
 RETIRE_DEADLINE = 30
+CONFIG = "state/mac-terminal/sshd_config"
 
 
 def command(l, arguments, timeout=3):
@@ -205,7 +206,7 @@ def retire(l, r, report, layout, journal, journal_path, reverse, fence):
         raise l.LayoutError("terminal_destination_exists")
     if source == destination:
         return
-    if reverse and saved["enabled"] and not any("state/mac-terminal/sshd_config" in layout[phase] for phase in ("inverse", "rewrites")):
+    if reverse and saved["enabled"] and not any(CONFIG in layout[phase] for phase in ("inverse", "rewrites")):
         raise l.LayoutError("terminal_config_missing")
     if sys.platform == "darwin" and l.observed(str(source)) is not None:
         retire_job(l, source, before, fence)
@@ -214,7 +215,7 @@ def retire(l, r, report, layout, journal, journal_path, reverse, fence):
         before.unlink()
         l.fsync_directory(str(before.parent))
     if saved["enabled"] and l.observed(str(source / "sshd_config")) is not None:
-        key = "state/mac-terminal/sshd_config"
+        key = CONFIG
         record = (layout["inverse"] if reverse else layout["rewrites"]).get(key)
         if record is None:
             raise l.LayoutError("terminal_config_not_backed_up")
@@ -246,7 +247,7 @@ def finish(l, r, report, layout, reverse):
         return
     root = r.backup_root(report, layout, reverse)
     if reverse and l.observed(str(destination / "sshd_config")) is None:
-        key = "state/mac-terminal/sshd_config"
+        key = CONFIG
         inverse = layout["inverse"].get(key)
         forward = layout["rewrites"].get(key)
         if inverse is not None:

@@ -13,6 +13,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import terminal_layout
+
 
 class Flock(ctypes.Structure):
     _fields_ = [("start", ctypes.c_longlong), ("length", ctypes.c_longlong), ("pid", ctypes.c_int),
@@ -56,7 +58,7 @@ def process_arguments(pid, libc, buffer):
     return None if error else buffer.raw[:size.value]
 
 
-def process_owners(home):
+def process_owners(home, exempt=frozenset()):
     if sys.platform != "darwin":
         raise OSError("stopped_proof_unavailable")
     libc = ctypes.CDLL(None, use_errno=True)
@@ -75,7 +77,7 @@ def process_owners(home):
     if used <= 0 or used >= ctypes.sizeof(pids):
         raise OSError("process_inventory_unavailable")
     for pid in pids[:used // 4]:
-        if pid <= 0 or pid == os.getpid():
+        if pid <= 0 or pid == os.getpid() or pid in exempt:
             continue
         data = process_arguments(pid, libc, buffer)
         if data is None:
@@ -103,7 +105,7 @@ def process_owners(home):
     for line in result.stdout.splitlines():
         if line.startswith(b"p"):
             pid = int(line[1:])
-        elif pid != os.getpid() and line.startswith(b"n") and within(os.fsdecode(line[1:]), home):
+        elif pid != os.getpid() and pid not in exempt and line.startswith(b"n") and within(os.fsdecode(line[1:]), home):
             owners.add(pid)
     return owners
 
@@ -134,6 +136,16 @@ def wrapper_fd(l, path):
     return fd
 
 
+def terminal_pids(l, home):
+    pids = set()
+    for name in ("mac-terminal", "state/mac-terminal"):
+        root = Path(home) / name
+        current = terminal_layout.job(l, root, Path(os.path.expanduser("~")) / "Library/LaunchAgents" / (terminal_layout.label(root) + ".plist"))
+        if current and current["pid"]:
+            pids.add(current["pid"])
+    return pids
+
+
 def probe(l, home, owned=None):
     for path in wrapper_paths(l, home):
         info = os.lstat(path)
@@ -148,7 +160,7 @@ def probe(l, home, owned=None):
         finally:
             os.close(fd)
     try:
-        owners = process_owners(home)
+        owners = process_owners(home, terminal_pids(l, home))
         if owners:
             return {"reason": "home_process_present", "pid": min(owners)}
     except (OSError, ValueError, subprocess.SubprocessError) as failure:

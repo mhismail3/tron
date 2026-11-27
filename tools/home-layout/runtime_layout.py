@@ -137,7 +137,8 @@ def receipt(record):
 def reserve_journal(l, report, registry, journal, layout, reverse):
     planned = {canonical_record(record["file"], report["home"], registry): receipt(record)
                for record, _ in rewrites(l, report, registry, reverse, layout)}
-    if reverse and (layout["rewrites"].keys() | layout["inverse"].keys()) - planned.keys():
+    retired = {terminal_layout.CONFIG} if layout["terminal"].get("forward", {}).get("enabled") else set()
+    if reverse and (layout["rewrites"].keys() | layout["inverse"].keys()) - planned.keys() - retired:
         raise l.LayoutError("rewrite_selection_changed")
     forward = layout["rewrites"] if reverse else {**layout["rewrites"], **planned}
     inverse = {**layout["inverse"], **planned} if reverse else {**forward, **layout["inverse"]}
