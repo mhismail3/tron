@@ -3,6 +3,7 @@ import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
 import { Type } from "../kernel/pi/ai.js";
 import type { SessionContext } from "../kernel/host/module-host.js";
 import type { JsonValue } from "../protocol/types.js";
+import { GatewayError } from "../errors.js";
 
 export interface ScheduleToolRequest {
   action: "list" | "show" | "create" | "update" | "enable" | "pause" | "delete" | "runNow" | "cancel" | "resolve";
@@ -64,7 +65,7 @@ export function createTronScheduleExtension(input: {
       name: "schedule",
       annotations: { openWorldHint: false },
       label: "Schedule",
-      description: "Create and manage durable Gateway-owned automations for this Tron session. Update requires automationId and expectedRevision, changes only supplied definition fields, and preserves activation and expiry. Create accepts exactly one trigger: at, everyMinutes, or timezone + localTime + weekdays; optional expiresAt is an ISO expiry timestamp. Provide either prompt or notificationMessage, not both. Prompt automations may target the current session, create a new session in its workspace per run, or send an attributed message to Home. Home messages never grant maintainer authority and wake at most once per automation per 60 seconds. show with automationId and runId reads that run’s original prompt or notification text in UTF-8 byte pages: offset defaults to 0, limit to 4096 (maximum 4096), and nextOffset is null at the end.",
+      description: "Create and manage durable Gateway-owned automations for this Tron session. Update, delete, runNow and resolve require automationId and expectedRevision; pause and enable take the current revision when expectedRevision is omitted. A required revision that is missing, or any stale revision, is refused with the current revision in the text and details.currentRevision. Update changes only supplied definition fields and preserves activation and expiry. Create accepts exactly one trigger: at, everyMinutes, or timezone + localTime + weekdays; optional expiresAt is an ISO expiry timestamp. Provide either prompt or notificationMessage, not both. Prompt automations may target the current session, create a new session in its workspace per run, or send an attributed message to Home. Home messages never grant maintainer authority and wake at most once per automation per 60 seconds. show with automationId and runId reads that run’s original prompt or notification text in UTF-8 byte pages: offset defaults to 0, limit to 4096 (maximum 4096), and nextOffset is null at the end.",
       promptSnippet: "Create and manage durable schedules and reminders for the current Tron session",
       promptGuidelines: [
         "Use schedule for authorized durable automations. Home may manage them directly; interactive sessions require user confirmation; delegated workers cannot mutate them.",
@@ -88,7 +89,12 @@ export function createTronScheduleExtension(input: {
             return { content: [{ type: "text", text: "Automation change cancelled by the user." }], details: { cancelled: true } };
           }
         }
-        const result = await input.operations.execute(input.session.sessionId(), toolCallId, request);
+        let result: ScheduleToolResult;
+        try { result = await input.operations.execute(input.session.sessionId(), toolCallId, request); }
+        catch (error) {
+          if (!(error instanceof GatewayError) || error.details === undefined) throw error;
+          return { content: [{ type: "text", text: error.message }], details: error.details as JsonValue, isError: true };
+        }
         return {
           content: [{ type: "text", text: result.message }],
           details: result.details,
