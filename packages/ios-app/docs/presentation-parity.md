@@ -72,10 +72,16 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   managed presentation modifiers (`tronManagedSheet`, progressive links); `packages/ios-app/scripts/test-source-policy.sh`
   rejects raw native sheet calls. Their state rules are in
   [Presentation-scoped state](#presentation-scoped-state).
-- **Sheet direction.** All progressive disclosure (pickers, skill/command containers, custom chat
-  UI, default sheets) moves to one generic content-sized custom sheet, built ground-up as the
-  managed-sheet owner. Until it lands, every managed sheet is sized by `tronContentFitSheet`
-  (see Detents; `TronPadSheetMode` on iPadOS 27); a surface never gets its own sheet patch.
+- **Sheet presenter.** On iPhone every managed sheet is drawn by `TronSheetStage`
+  (`Components/TronSheetPresentation.swift`): SwiftUI still presents and dismisses it (as its own
+  transparent full-screen cover, so bindings, `onDismiss`, `@Environment(\.dismiss)` and
+  `interactiveDismissDisabled` keep their SwiftUI owner), and the stage's transition animators put
+  the content on one card that matches the iOS 26 sheet: Liquid Glass, 8 pt side and bottom insets,
+  continuous 38 pt top and 54 pt bottom corners, no grabber, no dimming, safe area 0 top and the
+  device's bottom inset. The content lays out at the full container width and the card scales it
+  to its own width, as the native floating sheet does. System presentations (share sheet, photo
+  picker, file importer, Safari, popovers) and iPad (`TronPadSheetMode`) stay native. All
+  progressive disclosure moves onto this one presenter; a surface never gets its own sheet patch.
 - **Presentation haptics.** Managed sheets (including nested sheets)
   and system pickers play one medium, full-intensity impact through `TronHaptics`, respecting System Haptics.
   Semantic interaction patterns and exclusions are in the [UI haptic map](../Sources/UI/README.md#haptic-map).
@@ -122,22 +128,23 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   standard groups: a summary row, then per occurrence (newest first) a details group (model, type,
   time, request ID, HTTP status rows) and a Message group with the full selectable text; runs add
   the Breakdown list. No disclosures or a lone container.
-- **Detents.** The managed-sheet presenter applies `tronContentFitSheet` once; no surface sets
-  detents. Each `tronScrollEdgeChrome` scroll that carries a sheet inset reports its top inset plus
-  content height (never its bottom inset, which animates while a sheet presents), and the sheet
-  takes one `.height` detent at that size, or `.large` when it overflows or at accessibility text
-  sizes. With the keyboard up the sheet stays fitted and grows by the keyboard's height above the
-  bottom safe area, so a field that expands (the ask_user "Other" answer) grows the sheet smoothly. While a `TronSheetLoadingState` is shown the sheet holds its last
-  settled height; a sheet that is loading before it has ever settled opens at `.large` and stays there,
-  so its detent and native style are decided up front and never swap when content arrives. The sizer owns the
-  native detent: every change after presentation goes through
-  `UISheetPresentationController.animateChanges` (the system sheet spring), including growth to and
-  from full height; Reduce Motion applies it instantly. A sheet's height preference never reaches
-  the sheet that presented it.
-  Opening a child never changes its parent's detent, and a nested sheet never opens shorter than the
-  sheet it covers (the detent driver floors a child at its presenter's applied detent), so UIKit never tucks the parent down behind it and an interactive
-  swipe-dismiss of the child leaves the parent nothing to catch up on. A covered sheet never
-  drives its detent; it reapplies its own height once uncovered. The drag indicator is hidden.
+- **Sizing and stacking.** The presenter applies `tronContentFitSheet` once; no surface sizes
+  itself. Each `tronScrollEdgeChrome` scroll that carries a sheet inset reports its top inset plus
+  content height (never its bottom inset), and the card takes that height, or the full height below
+  the status bar and its deck when it overflows or at accessibility text sizes. Every height change
+  after the open (content, push/pop, loading to loaded, Dynamic Type) runs on the stage's one spring;
+  Reduce Motion applies it instantly. While a `TronSheetLoadingState` is shown the sheet holds its last
+  settled height; a sheet that is loading before it has ever settled opens full height and stays
+  there. A sheet's height never reaches the sheet that presented it. A pushed sheet is measured
+  before it rises, so it opens at its final height.
+  A child sheet opens over its parent at its own fitted height whatever the parent's size; the
+  sheets behind step back as a deck (`SheetDeck`: each card 10 pt narrower per side and peeking
+  12 pt above the one in front, each step back 0.62 of the one before, more than 6 back not drawn).
+  A parent only scales and moves as a card; its laid-out size never changes, it is never tucked
+  under the child, and closing the child springs it back. Dragging the front sheet down follows the
+  finger at its own height and steps the deck forward with it; a short slow drag springs back, a
+  flick or a drag past half the sheet closes only that sheet. The keyboard lifts the front sheet
+  above it at its own height on the keyboard's curve, capping it below the status bar.
   The measured scroll extends under the bottom safe area; a fitted sheet adds no bottom content
   margin, so content never exceeds its frame and the sheet cannot scroll or bounce; it also does not clip, so
   while a fitted sheet rises or resizes its content and bottom card are clipped once, by the sheet's own
@@ -153,8 +160,8 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   Scrolls that fill their viewport (`TronFeedEmptyState`) or are nested opt out through
   `tronSheetMeasuresContent`. `ContentFitSheetViewTests` samples the presented frame per display
   frame and fails on any overshoot or post-open move.
-- **iPad sheets.** On iPadOS 27 `TronPadSheetMode` replaces every managed sheet's detents (iPhone
-  and earlier iPadOS keep them). A scene at least 1100 pt wide (every full-screen landscape iPad)
+- **iPad sheets.** On iPad managed sheets stay native system sheets; on iPadOS 27 `TronPadSheetMode`
+  sets their geometry. A scene at least 1100 pt wide (every full-screen landscape iPad)
   shows a full-height 420 pt trailing column without dimming; the scene or route surface that
   presented it reflows beside it, so the chat keeps taking taps and text, and a sheet opened from
   the column stacks on it in the same column. A narrower scene (portrait, split, windowed) shows
@@ -229,7 +236,7 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 ## Exact review presentation
 
 `ChangeReviewSheet` (`UI/Components/ChangeReviewSheet.swift`) is the one plaintext before/after
-review. It opens at its content height (see Detents) and composes standard sections: a summary card (a
+review. It opens at its content height (see Sizing and stacking) and composes standard sections: a summary card (a
 plain-language title from `ChangeReviewPresentation`, the reason in `settingsRowSubtext`), one Before/After group per
 item with readable values (short commit hashes, package names; full values when shortening would make them equal) and
 its explanatory notes as caption, a Technical details row opening a `TronDocumentSheet` with the raw title, digest,
@@ -256,8 +263,8 @@ selected primary theme; semantic statuses keep their colors.
   section keeps its category tint instead of the primary identity. Feeds (Memory, Tasks, Session History, Subagent History) are a
   `TronFeed` of `TronFeedCard`s, with the next page loaded by `FeedStore` while 5 rows remain.
   A feed lays its rows out lazily, except while its content-fit sheet is fitted: a fitted feed is
-  shorter than its maximum detent, so its rows are laid out eagerly and its content height never depends on
-  how much of it is in view; a lazy tail re-estimated under the sheet's edge would move the detent it
+  shorter than its maximum height, so its rows are laid out eagerly and its content height never depends on
+  how much of it is in view; a lazy tail re-estimated under the sheet's edge would move the height it
   sizes, and the sheet would chase it. The chip overlays the feed's scroll chrome, so it rests at the
   sheet's bottom on every frame.
   A feed whose content overflows its viewport overlays a bottom-centred position chip whose 44-pt
@@ -269,7 +276,7 @@ selected primary theme; semantic statuses keep their colors.
   current scoped list's loaded row count, marked `+` (VoiceOver: “at least”) until its final
   page; Memory's RPC message count is not a row total. The capsule keeps an elevated surface
   behind its glass so scrolling text cannot show through the label, and wraps at large type.
-  A sheet iOS draws shrunk (a stacked medium detent measured about 0.96) grows the chip's layout
+  A sheet drawn shrunk (the card scales its full-width layout by about 0.96) grows the chip's layout
   height by its measured scale so the target stays 44 screen points; unshrunk sheets are unchanged.
   Chapter topics need no explanatory subtitle; sheet toolbar titles remain single-line.
   An empty feed (and an empty

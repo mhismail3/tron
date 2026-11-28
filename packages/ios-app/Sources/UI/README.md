@@ -14,7 +14,8 @@ reusable components. Its binding rules are [presentation parity](../../docs/pres
   `TronSafariView`.
 - `Components/`: `TronDocumentSheet`, `TronList` (the list standard), `TronTextEntrySheet`, `StructuredJSONView`,
   `TechnicalDetailPresentation`, `TronNativeSheetCanvas` (surface-level native containment for
-  State-scoped `RetainedNativeSheetHost` graphs), `TronPadSheetPresentation` (`TronPadSheetMode`: iPad
+  State-scoped `RetainedNativeSheetHost` graphs), `TronSheetPresentation` (`TronSheetStage`: the iPhone
+  managed-sheet card, deck stacking, sizing, keyboard lift and drag), `TronPadSheetPresentation` (`TronPadSheetMode`: iPad
   side-column and centered sheet geometry), `InAppNoticePresentation` (`InAppNoticeHost`),
   `ProcessActivityOrb`, `ResourceTagLabel`, `ThinkingLevelPresentation`, `TronHaptics` (the app's one
   haptic seam; hosted journeys read `TronHapticsProbe`).

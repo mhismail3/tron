@@ -25,78 +25,8 @@ struct SheetDeck: Equatable, Sendable {
 }
 
 @MainActor
-final class TronSheetContainer: UIViewController {
-    let content: UIViewController
-    fileprivate let nativeController: UIPresentationController?
-    fileprivate weak var bridge: (any UIAdaptivePresentationControllerDelegate)?
-    private var applyingSafeArea = false
-
-    init(wrapping content: UIViewController) {
-        self.content = content
-        nativeController = content.presentationController
-        bridge = nativeController?.delegate
-        super.init(nibName: nil, bundle: nil)
-        modalPresentationStyle = .custom
-        transitioningDelegate = TronSheetTransitioningDelegate.shared
-        content.removeFromParent()
-        addChild(content)
-    }
-
-    required init?(coder: NSCoder) { nil }
-
-    override func loadView() {
-        view = UIView()
-        content.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        view.addSubview(content.view)
-        content.didMove(toParent: self)
-    }
-
-
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        content.view.frame = view.bounds
-    }
-
-    override func viewSafeAreaInsetsDidChange() {
-        super.viewSafeAreaInsetsDidChange()
-        guard !applyingSafeArea else { return }
-        let inherited = UIEdgeInsets(top: view.safeAreaInsets.top - additionalSafeAreaInsets.top, left: 0,
-                                     bottom: view.safeAreaInsets.bottom - additionalSafeAreaInsets.bottom, right: 0)
-        let wanted = UIEdgeInsets(top: -inherited.top, left: 0, bottom: TronSheetPresentationController.bottomSafeArea - inherited.bottom, right: 0)
-        guard wanted != additionalSafeAreaInsets else { return }
-        applyingSafeArea = true
-        additionalSafeAreaInsets = wanted
-        applyingSafeArea = false
-    }
-
-    override func viewWillDisappear(_ animated: Bool) {
-        if isBeingDismissed { content.willMove(toParent: nil) }
-        super.viewWillDisappear(animated)
-    }
-
-    override func viewDidDisappear(_ animated: Bool) {
-        super.viewDidDisappear(animated)
-        guard isBeingDismissed else { return }
-        content.view.removeFromSuperview()
-        content.removeFromParent()
-    }
-
-    override var isModalInPresentation: Bool {
-        get { content.isModalInPresentation }
-        set { content.isModalInPresentation = newValue }
-    }
-
-    override var childForStatusBarStyle: UIViewController? { content }
-}
-
-@MainActor
 final class TronSheetTransitioningDelegate: NSObject, UIViewControllerTransitioningDelegate {
     static let shared = TronSheetTransitioningDelegate()
-
-    func presentationController(forPresented presented: UIViewController, presenting: UIViewController?,
-                                source: UIViewController) -> UIPresentationController? {
-        TronSheetPresentationController(presentedViewController: presented, presenting: presenting)
-    }
 
     func animationController(forPresented presented: UIViewController, presenting: UIViewController,
                              source: UIViewController) -> (any UIViewControllerAnimatedTransitioning)? {
@@ -115,15 +45,16 @@ private final class TronSheetTransition: NSObject, UIViewControllerAnimatedTrans
     init(presenting: Bool) { self.presenting = presenting }
 
     func transitionDuration(using context: (any UIViewControllerContextTransitioning)?) -> TimeInterval {
-        TronSheetPresentationController.response
+        TronSheetStage.response
     }
 
     func animateTransition(using context: any UIViewControllerContextTransitioning) {
-        let controller = context.viewController(forKey: presenting ? .to : .from)
-        guard let sheet = controller?.presentationController as? TronSheetPresentationController else {
+        guard let controller = context.viewController(forKey: presenting ? .to : .from),
+              let stage = TronSheetStage.stage(of: controller) else {
+            if presenting, let view = context.view(forKey: .to) { context.containerView.addSubview(view) }
             return context.completeTransition(!context.transitionWasCancelled)
         }
-        if presenting { sheet.open(context) } else { sheet.close(context) }
+        if presenting { stage.open(context) } else { stage.close(context) }
     }
 }
 
@@ -132,38 +63,23 @@ private final class TronSheetCardView: UIView {
     override func accessibilityPerformEscape() -> Bool { escape?() ?? false }
 }
 
-private final class TronSheetHostView: UIView {
-    let card = TronSheetCardView()
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        addSubview(card)
-    }
-
-    required init?(coder: NSCoder) { nil }
-
-    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        card.point(inside: convert(point, to: card), with: event)
-    }
-}
-
 @MainActor
-final class TronSheetPresentationController: UIPresentationController, UIGestureRecognizerDelegate {
+final class TronSheetStage: NSObject, UIGestureRecognizerDelegate {
     private enum Phase { case measuring, shown, dismissing }
-    private final class Weak { weak var value: TronSheetPresentationController?; init(_ value: TronSheetPresentationController) { self.value = value } }
 
     static let response: TimeInterval = 0.45
     private static let inset: CGFloat = 8
     private static let deck = SheetDeck()
-    private static var live: [Weak] = []
+    private static var live: [TronSheetStage] = []
     private static var keyboardTop = CGFloat.infinity
 
+    static var isEnabled: Bool { UIDevice.current.userInterfaceIdiom == .phone }
+
     var dismissAction: DismissAction?
-    private var container: TronSheetContainer? { presentedViewController as? TronSheetContainer }
-    private var bridge: (any UIAdaptivePresentationControllerDelegate)? { container?.bridge }
-    private var bridged: UIPresentationController { container?.nativeController ?? self }
-    private let host = TronSheetHostView()
-    private var card: TronSheetCardView { host.card }
+    var animates = true
+    private weak var presentedViewController: UIViewController?
+    private weak var containerView: UIView?
+    private let card = TronSheetCardView()
     private let glass = UIVisualEffectView(effect: UIGlassEffect())
     private let backdrop = UIView()
     private let pan = UIPanGestureRecognizer()
@@ -173,15 +89,27 @@ final class TronSheetPresentationController: UIPresentationController, UIGesture
     private var lastTranslation: CGFloat = 0
     private weak var dragScroll: UIScrollView?
     private var releaseVelocity: CGFloat = 0
-    private var laidOut = CGRect.zero
     private var below = 0
     private var opening: (any UIViewControllerContextTransitioning)?
     private var openedAt: CFTimeInterval = 0
     private var measured: TronSheetTarget?
 
-    override init(presentedViewController: UIViewController, presenting presentingViewController: UIViewController?) {
-        super.init(presentedViewController: presentedViewController, presenting: presentingViewController)
-        traitOverrides.userInterfaceLevel = .elevated
+    static func adopt(_ presented: UIViewController, animated: Bool) {
+        let stage = stage(of: presented) ?? TronSheetStage(presented)
+        stage.animates = animated
+        if !live.contains(where: { $0 === stage }) { live.append(stage) }
+        presented.transitioningDelegate = TronSheetTransitioningDelegate.shared
+    }
+
+    static func stage(of controller: UIViewController) -> TronSheetStage? {
+        live.removeAll { $0.presentedViewController == nil }
+        return live.first { $0.presentedViewController === controller }
+    }
+
+    private init(_ presented: UIViewController) {
+        presentedViewController = presented
+        super.init()
+        presented.traitOverrides.userInterfaceLevel = .elevated
         let corners = UICornerConfiguration.corners(topLeftRadius: .fixed(38), topRightRadius: .fixed(38),
                                                     bottomLeftRadius: .fixed(54), bottomRightRadius: .fixed(54))
         card.cornerConfiguration = corners
@@ -201,59 +129,43 @@ final class TronSheetPresentationController: UIPresentationController, UIGesture
                                                name: UIResponder.keyboardWillHideNotification, object: nil)
         #if HOSTED_TEST
         HostedPresentationProbe.sheetDrag = { controller, state, translation, velocity in
-            (controller.presentationController as? TronSheetPresentationController)?
-                .drag(state, translation: translation, velocity: velocity)
+            TronSheetStage.stage(of: controller)?.drag(state, translation: translation, velocity: velocity)
         }
         #endif
     }
 
-    override var presentedView: UIView? { host }
-
-    override var frameOfPresentedViewInContainerView: CGRect { containerView?.bounds ?? .zero }
-
-    override func presentationTransitionWillBegin() {
-        super.presentationTransitionWillBegin()
-        guard let containerView else { return }
-        backdrop.frame = containerView.bounds
-        backdrop.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        containerView.addSubview(backdrop)
-        host.frame = containerView.bounds
-        host.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        containerView.addSubview(host)
-        card.addSubview(presentedViewController.view)
-        below = Self.stack(in: containerView.window).count
-        laidOut = containerView.bounds
-        Self.live.append(Weak(self))
-        place(offscreen(restRect))
-    }
-
-    override func presentationTransitionDidEnd(_ completed: Bool) {
-        super.presentationTransitionDidEnd(completed)
-        guard completed else { return retire() }
-        guard phase == .measuring else { return }
-        opening = nil
+    func presentationDidEnd() {
+        guard card.superview == nil, let presented = presentedViewController,
+              let container = presented.view.superview else { return }
+        install(in: container, content: presented.view)
         phase = .shown
-        presentedViewController.view.layoutIfNeeded()
-        Self.layoutStack(in: containerView?.window)
+        UIView.performWithoutAnimation { Self.layoutStack(in: container.window) }
     }
 
-    override func dismissalTransitionDidEnd(_ completed: Bool) {
-        super.dismissalTransitionDidEnd(completed)
-        guard completed else { phase = .shown; return }
+    func dismissalDidEnd() {
+        guard Self.live.contains(where: { $0 === self }) else { return }
         retire()
     }
 
-    override func containerViewDidLayoutSubviews() {
-        super.containerViewDidLayoutSubviews()
-        guard let containerView, phase == .shown, containerView.bounds != laidOut, isFront else { return }
-        laidOut = containerView.bounds
-        Self.layoutStack(in: containerView.window)
+    private func install(in containerView: UIView, content: UIView) {
+        guard card.superview == nil else { return }
+        self.containerView = containerView
+        backdrop.frame = containerView.bounds
+        backdrop.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        containerView.addSubview(backdrop)
+        containerView.addSubview(card)
+        content.autoresizingMask = []
+        card.addSubview(content)
+        below = Self.stack(in: containerView.window).count
+        place(offscreen(restRect))
     }
 
     private func retire() {
-        host.removeFromSuperview()
+        let window = containerView?.window
+        card.removeFromSuperview()
         backdrop.removeFromSuperview()
-        Self.live.removeAll { $0.value == nil || $0.value === self }
+        Self.live.removeAll { $0 === self }
+        UIView.performWithoutAnimation { Self.layoutStack(in: window) }
     }
 
     func contentTarget(_ next: TronSheetTarget) {
@@ -261,7 +173,7 @@ final class TronSheetPresentationController: UIPresentationController, UIGesture
         target = next
         switch phase {
         case .measuring:
-            if host.superview != nil { place(offscreen(restRect)) }
+            if card.superview != nil { place(offscreen(restRect)) }
         case .shown:
             let window = containerView?.window
             if UIAccessibility.isReduceMotionEnabled { Self.layoutStack(in: window) } else { animate { Self.layoutStack(in: window) } }
@@ -271,7 +183,10 @@ final class TronSheetPresentationController: UIPresentationController, UIGesture
     }
 
     fileprivate func open(_ context: any UIViewControllerContextTransitioning) {
-        guard containerView != nil else { return context.completeTransition(false) }
+        guard let content = context.view(forKey: .to) ?? presentedViewController?.view else {
+            return context.completeTransition(false)
+        }
+        install(in: context.containerView, content: content)
         card.layoutIfNeeded()
         opening = context
         openedAt = CACurrentMediaTime()
@@ -281,7 +196,7 @@ final class TronSheetPresentationController: UIPresentationController, UIGesture
 
     private func measureTick() {
         guard let context = opening else { return }
-        presentedViewController.view.layoutIfNeeded()
+        presentedViewController?.view.layoutIfNeeded()
         let fitted = if case .fit = target { true } else { false }
         guard (fitted && measured == target) || CACurrentMediaTime() - openedAt > 0.12 else {
             measured = target
@@ -294,7 +209,17 @@ final class TronSheetPresentationController: UIPresentationController, UIGesture
         opening = nil
         phase = .shown
         let window = containerView?.window
-        animate({ Self.layoutStack(in: window) }) { _ in context.completeTransition(!context.transitionWasCancelled) }
+        let finish = {
+            let completed = !context.transitionWasCancelled
+            if !completed { self.retire() }
+            context.completeTransition(completed)
+        }
+        if UIAccessibility.isReduceMotionEnabled || !animates {
+            UIView.performWithoutAnimation { Self.layoutStack(in: window) }
+            finish()
+        } else {
+            animate({ Self.layoutStack(in: window) }) { _ in finish() }
+        }
     }
 
     fileprivate func close(_ context: any UIViewControllerContextTransitioning) {
@@ -304,17 +229,27 @@ final class TronSheetPresentationController: UIPresentationController, UIGesture
         let velocity = releaseVelocity / max(away.minY - rest.minY, 1)
         phase = .dismissing
         releaseVelocity = 0
-        animate(velocity: velocity, {
+        let finish = { (_: Bool) in
+            let completed = !context.transitionWasCancelled
+            if completed { self.retire() } else { self.phase = .shown; Self.layoutStack(in: window) }
+            context.completeTransition(completed)
+        }
+        let changes = {
             self.place(away)
             Self.layoutStack(in: window)
-        }) { _ in context.completeTransition(!context.transitionWasCancelled) }
+        }
+        guard animates, !UIAccessibility.isReduceMotionEnabled else {
+            UIView.performWithoutAnimation(changes)
+            return finish(true)
+        }
+        animate(velocity: velocity, changes, completion: finish)
     }
 
     private var isFront: Bool { Self.stack(in: containerView?.window).last === self }
 
-    private static func stack(in window: UIWindow?) -> [TronSheetPresentationController] {
-        live.removeAll { $0.value == nil }
-        return live.compactMap(\.value).filter { $0.containerView?.window === window && $0.phase == .shown }
+    private static func stack(in window: UIWindow?) -> [TronSheetStage] {
+        live.removeAll { $0.presentedViewController == nil }
+        return live.filter { $0.containerView?.window === window && $0.phase == .shown }
     }
 
     private static func layoutStack(in window: UIWindow?) {
@@ -374,7 +309,7 @@ final class TronSheetPresentationController: UIPresentationController, UIGesture
     }
 
     private func place(_ rect: CGRect) {
-        guard let containerView else { return }
+        guard let containerView, let presented = presentedViewController else { return }
         let bounds = containerView.bounds
         let height = layoutHeight
         card.bounds = CGRect(x: 0, y: 0, width: bounds.width, height: height)
@@ -382,7 +317,11 @@ final class TronSheetPresentationController: UIPresentationController, UIGesture
         let scale = rect.width / max(bounds.width, 1)
         card.transform = CGAffineTransform(scaleX: scale, y: scale)
         glass.frame = card.bounds
-        presentedViewController.view.frame = card.bounds
+        presented.view.frame = card.bounds
+        let current = presented.additionalSafeAreaInsets
+        let inherited = (top: presented.view.safeAreaInsets.top - current.top, bottom: presented.view.safeAreaInsets.bottom - current.bottom)
+        let wanted = UIEdgeInsets(top: -inherited.top, left: 0, bottom: Self.bottomSafeArea - inherited.bottom, right: 0)
+        if abs(wanted.top - current.top) > 0.5 || abs(wanted.bottom - current.bottom) > 0.5 { presented.additionalSafeAreaInsets = wanted }
     }
 
     private func animate(velocity: CGFloat = 0, _ changes: @escaping () -> Void, completion: ((Bool) -> Void)? = nil) {
@@ -391,13 +330,14 @@ final class TronSheetPresentationController: UIPresentationController, UIGesture
     }
 
     private func requestDismiss(velocity: CGFloat) {
-        guard phase == .shown, isFront else { return }
-        if presentedViewController.isModalInPresentation || bridge?.presentationControllerShouldDismiss?(bridged) == false {
-            bridge?.presentationControllerDidAttemptToDismiss?(bridged)
+        guard phase == .shown, isFront, let presented = presentedViewController else { return }
+        if presented.isModalInPresentation {
+            if let controller = presented.presentationController { controller.delegate?.presentationControllerDidAttemptToDismiss?(controller) }
             settle(velocity: velocity)
             return
         }
         releaseVelocity = max(velocity, 0)
+        animates = true
         dismissAction?()
     }
 

@@ -26,7 +26,7 @@ private struct TronContentFitSheetModifier: ViewModifier {
         guard !opensLarge, padScene?.mode == nil, !dynamicTypeSize.isAccessibilitySize else { return nil }
         guard let content = loading ? settled : measured else { return nil }
         let height = content.rounded(.up)
-        return height < TronSheetPresentationController.maximumHeight ? height : nil
+        return height < TronSheetStage.maximumHeight ? height : nil
     }
 
     private func update(_ change: () -> Void) {
@@ -56,7 +56,17 @@ private struct TronContentFitSheetModifier: ViewModifier {
                 }
             }
             .background { TronSheetTargetReporter(target: fitHeight.map { .fit($0) } ?? .large, dismiss: dismiss) }
-            .presentationDragIndicator(.hidden)
+            .modifier(TronSheetCover())
+    }
+}
+
+private struct TronSheetCover: ViewModifier {
+    func body(content: Content) -> some View {
+        if TronSheetStage.isEnabled {
+            content.presentationCompactAdaptation(.fullScreenCover).presentationBackground(.clear)
+        } else {
+            content.presentationDragIndicator(.hidden)
+        }
     }
 }
 
@@ -81,9 +91,9 @@ private struct TronSheetTargetReporter: UIViewControllerRepresentable {
         func report() {
             var root: UIViewController = self
             while let parent = root.parent { root = parent }
-            guard root.presentingViewController != nil,
-                  let sheet = root.presentationController as? TronSheetPresentationController else { return }
+            guard root.presentingViewController != nil, let sheet = TronSheetStage.stage(of: root) else { return }
             sheet.dismissAction = dismiss
+            sheet.presentationDidEnd()
             sheet.contentTarget(target)
         }
     }
@@ -112,7 +122,7 @@ struct TronSheetFitScrollModifier: ViewModifier {
             content
                 .environment(\.tronSheetMeasuresContent, false)
                 .ignoresSafeArea(.container, edges: .bottom)
-                .contentMargins(.bottom, fits ? 0 : TronSheetPresentationController.bottomSafeArea)
+                .contentMargins(.bottom, fits ? 0 : TronSheetStage.bottomSafeArea)
                 .scrollBounceBehavior(.basedOnSize, axes: .vertical)
                 .scrollClipDisabled(fits)
                 .onScrollGeometryChange(for: CGFloat?.self) { geometry in
