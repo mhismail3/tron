@@ -204,8 +204,12 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
             drag(child, .began, 0, 0)
             drag(child, .changed, 40, 0)
             await MountedFixture.nextFrame()
+            weak var stage = TronSheetStage.stage(of: child)
+            XCTAssertNotNil(stage, "the top sheet is drawn by a stage")
             drag(child, .ended, 40, 1800)
             try await app.until("a flick dismisses the top sheet") { sheetChain(app).count == 1 }
+            for _ in 0..<30 { await MountedFixture.nextFrame() }
+            XCTAssertNil(stage, "A closed sheet's stage is freed")
             try await app.waitForTopSheetToSettle()
             XCTAssertTrue(sheetChain(app).first === parent, "Only the top sheet closes; its parent stays presented")
             XCTAssertEqual(rendered(parent).minY, parentStart.minY, accuracy: 0.5, "The parent is restored where it rested")
@@ -340,10 +344,10 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
                 .map { "\($0.offset):\(Int($0.element))" }.joined(separator: " ")
             print(trace)
             let close = try XCTUnwrap(closedAt, "the subsheet closed")
-            let opening = zip(ys[..<close], ys[..<close].dropFirst()).map { $1 - $0 }
-            let closing = zip(ys[close...], ys[close...].dropFirst()).map { $1 - $0 }
-            XCTAssertTrue(opening.allSatisfy { $0 <= 0.5 }, "The sheet under a subsheet only steps back up, never tucked down\n\(trace)")
-            XCTAssertTrue(closing.allSatisfy { $0 >= -0.5 }, "The sheet under a subsheet returns down in one move, never up-down-up\n\(trace)")
+            let opening = ys[..<close].indices.allSatisfy { index in ys[index] <= ys[..<close][...index].min()! + 0.5 }
+            let closing = ys[close...].indices.allSatisfy { index in ys[index] >= ys[close...index].max()! - 0.5 }
+            XCTAssertTrue(opening, "The sheet under a subsheet only steps back up, never tucked down\n\(trace)")
+            XCTAssertTrue(closing, "The sheet under a subsheet returns down in one move, never up-down-up\n\(trace)")
             XCTAssertTrue(sizes.allSatisfy { abs($0.height - laidOutSize.height) <= 0.5 && abs($0.width - laidOutSize.width) <= 0.5 },
                           "The sheet under a subsheet never resizes: \(Set(sizes.map { "\(Int($0.width))x\(Int($0.height))" }))")
             XCTAssertEqual(ys.last!, ys.first!, accuracy: 0.5, "The sheet under a subsheet returns to its own height\n\(trace)")
@@ -447,7 +451,18 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         let covered = rendered(parent)
         XCTAssertLessThan(covered.width, child.width - 10, "\(name): the parent steps back narrower than the sheet over it, a deck card: \(covered) under \(child)")
         XCTAssertLessThanOrEqual(covered.minY, child.minY - 11.5, "\(name): the parent's top peeks above the sheet over it: \(covered) under \(child)")
+        let window = app.window.bounds
+        let keyboard = CGRect(x: 0, y: window.maxY - 336, width: window.width, height: 336)
+        let covered = sizes.count
         UIView.setAnimationsEnabled(true)
+        NotificationCenter.default.post(name: UIResponder.keyboardWillShowNotification, object: nil,
+                                        userInfo: [UIResponder.keyboardFrameEndUserInfoKey: NSValue(cgRect: keyboard)])
+        for _ in 0..<60 { sample(); await MountedFixture.nextFrame() }
+        XCTAssertLessThanOrEqual(sheetFrame(app).maxY, keyboard.minY - 7.5, "\(name): the keyboard lifts the nested sheet above it")
+        XCTAssertTrue(sizes[covered...].allSatisfy { abs($0.height - model.height) <= 0.5 },
+                      "\(name): the keyboard never resizes the covered parent: \(Set(sizes[covered...].map { Int($0.height) }))")
+        NotificationCenter.default.post(name: UIResponder.keyboardWillHideNotification, object: nil)
+        for _ in 0..<60 { sample(); await MountedFixture.nextFrame() }
         _ = sheetChain(app).last?.presentingViewController?.dismiss(animated: true)
         for _ in 0..<90 { sample(); await MountedFixture.nextFrame() }
         UIView.setAnimationsEnabled(false)
@@ -458,7 +473,7 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         XCTAssertTrue(frames.allSatisfy { abs($0.width / $0.height - start.width / start.height) <= 0.005 },
                       "\(name): the parent only scales as a card, never reflows\n\(log)")
         XCTAssertTrue(frames.allSatisfy { $0.minY <= start.minY + 0.5 }, "\(name): the parent is never tucked down under the nested sheet\n\(log)")
-        XCTAssertTrue(frames.allSatisfy { $0.minY >= min(start.minY, child.minY - 32) - 0.5 },
+        XCTAssertTrue(frames.allSatisfy { $0.minY >= min(start.minY, child.minY - 12) - 0.5 },
                       "\(name): the parent rises no further than its deck peek above the nested sheet\n\(log)")
         try await app.waitForTopSheetToSettle()
         XCTAssertEqual(rendered(parent).minY, start.minY, accuracy: 0.5, "\(name): closing the nested sheet restores its parent")
