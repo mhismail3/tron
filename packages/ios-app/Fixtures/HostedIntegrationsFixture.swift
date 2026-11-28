@@ -51,7 +51,9 @@ struct HostedIntegrationsFixtureView: View {
                 if scenario.hasPrefix("artifacts") {
                     NavigationStack {
                         Button("Artifacts") { showingArtifacts = true }
-                            .tronManagedSheet(isPresented: $showingArtifacts, identity: "dashboard.artifacts") { ArtifactsSheet() }
+                            .tronManagedSheet(isPresented: $showingArtifacts, identity: "dashboard.artifacts") {
+                                ArtifactsSheet().padding(.bottom, HostedLaunch.arguments.drop(while: { $0 != "-artifacts-scroll-above-home-indicator" }).dropFirst().first.flatMap { Double($0) } ?? 0)
+                            }
                     }
                     .environment(model)
                     .tronPresentation()
@@ -205,8 +207,15 @@ actor HostedIntegrationsGateway {
                 return String(format: "%04d-%02d-%02d_%@", calendar.component(.year, from: date), calendar.component(.month, from: date), calendar.component(.day, from: date), slug)
             }
             if let count = HostedLaunch.arguments.drop(while: { $0 != "-artifacts-reports" }).dropFirst().first.flatMap({ Int($0) }) {
-                let reports = (0..<count).map { entry("reports", dated($0 / 3, "report-\($0)"), "Report \($0 + 1)", at(days: $0 / 3, hours: Double($0 % 3)), day: true) }
-                return (.object(["tools": .array([]), "reports": .array(reports)]), nil)
+                func argument(_ name: String) -> Int? { HostedLaunch.arguments.drop(while: { $0 != name }).dropFirst().first.flatMap { Int($0) } }
+                let toolCount = argument("-artifacts-tools") ?? 0
+                let days = HostedLaunch.arguments.drop(while: { $0 != "-artifacts-report-days" }).dropFirst().first?.split(separator: ",").compactMap { Int($0) }
+                let reports = (0..<count).map { index in
+                    let day = days?[index] ?? index / 3
+                    return entry("reports", dated(day, "report-\(index)"), "Report \(index + 1)", at(days: day, hours: Double(index % 3)), day: true)
+                }
+                let tools = (0..<toolCount).map { entry("artifacts", "tool-\($0)", "Tool \($0 + 1)", at(days: $0, hours: 1), day: false) }
+                return (.object(["tools": .array(tools), "reports": .array(reports)]), nil)
             }
             let tools = [entry("artifacts", "ios-dev-builds", "Tron iOS development builds", at(days: 0, hours: 2), day: false),
                          entry("artifacts", "usage-dashboard", "Provider usage dashboard", at(days: 3, hours: 0), day: false)]
