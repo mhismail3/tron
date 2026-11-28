@@ -142,7 +142,9 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   the front sheet's frame, its top 12 pt above the front sheet's and 10 pt narrower per side, each further
   card adding 0.62 of the step before (the whole deck peeks under 32 pt; more than 6 back are not drawn),
   and every card's glass ends at the front sheet's bottom edge. So a covered sheet shows only its top band,
-  whatever its own height.
+  whatever its own height, and that band is blank glass: a sheet's content fades out over the back
+  half of its way into the deck (opacity `1 − smoothstep(0.55, 1, depth)`) and back in as it comes
+  forward, staying mounted so its scroll position and fields survive.
   A parent only scales, moves and is clipped as a card; its laid-out size never changes, and closing
   the child springs it back to its own place. Dragging the front sheet down follows the
   finger at its own height and steps the deck forward with it; a short slow drag springs back, a

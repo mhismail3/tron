@@ -16,6 +16,11 @@ struct SheetDeck: Equatable, Sendable {
         depth > 0 ? (1 - pow(falloff, depth)) / (1 - falloff) : 0
     }
 
+    func contentOpacity(_ depth: CGFloat) -> CGFloat {
+        let t = min(max((depth - 0.55) / 0.45, 0), 1)
+        return 1 - t * t * (3 - 2 * t)
+    }
+
     func card(behind front: CGRect, depth: CGFloat) -> CGRect {
         let back = steps(depth)
         let dx = min(inset * back, front.width * 0.25)
@@ -266,6 +271,7 @@ final class TronSheetStage: NSObject, UIGestureRecognizerDelegate {
             let card = deck.card(behind: frontRect, depth: max(back, 1))
             sheet.place(depth == 0 ? frontRect : back >= 1 ? card : sheet.restRect.blend(to: card, back))
             sheet.card.alpha = depth > deck.visibleDepth ? 0 : 1
+            sheet.presentedViewController?.view.alpha = deck.contentOpacity(max(back, 0))
             sheet.backdrop.backgroundColor = index == 0 ? UIColor.black.withAlphaComponent(dimming) : .clear
         }
     }
