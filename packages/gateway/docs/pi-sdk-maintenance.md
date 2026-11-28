@@ -109,6 +109,14 @@ question, `enumNames` labels with `enum` values) for 15 minutes. Dismissal, time
 is cached client-side; the server owns saved approvals. `mcp-elicitation.integration.test.ts` proves
 the direct and codemode paths, the retry binding and decline.
 
+A tool definition's `settleAborted(toolCallId, params)` reports the result a call already reached
+when the response that issued it ended aborted. Pi still executes no call of an aborted response;
+at that turn's end it records each settled result in the session (and `turn_end`), leaves calls
+without one interrupted, and `convertToLlm` drops results of aborted or failed responses, which are
+never replayed. Providers that run their own tools (the Antigravity ACP provider's display-only
+`antigravity_tool`) use it so a cancel keeps finished calls completed or failed as reported, instead
+of every card reading failed. `aborted-display-only-outcome.test.ts` proves it.
+
 `createAgentSession` and `createAgentSessionFromServices` accept a host `preamble` that replaces
 Pi's generic identity without suppressing tool snippets, tool guidelines or docs; a custom system
 prompt then renders as a separate `role` section. The Gateway supplies its common core this way.
