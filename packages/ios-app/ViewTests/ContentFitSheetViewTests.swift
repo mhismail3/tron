@@ -138,6 +138,24 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         }
     }
 
+    func testFittedArtifactsMeasureTheSameContentWhateverTheirViewport() async throws {
+        for (tools, days) in [(1, [1, 1, 2, 3]), (2, [1, 1, 2, 3, 3, 4])] {
+            var measured: [String: Int] = [:]
+            for band in ["0", "34", "120", "300"] {
+                try await mounted(["-tron-integrations-fixture", "-integrations-scenario", "artifacts", "-artifacts-tools", "\(tools)",
+                                   "-artifacts-scroll-above-home-indicator", band,
+                                   "-artifacts-reports", "\(days.count)", "-artifacts-report-days", days.map(String.init).joined(separator: ",")]) { app in
+                    try await app.activate("Artifacts")
+                    try await app.until("the listing") { MountedFixture.elements(in: app.top).contains { (MountedFixture.identifier($0) ?? "").hasSuffix("_report-0-container") } }
+                    try await settle(app, "band \(band)")
+                    XCTAssertGreaterThan(sheetFrame(app).minY, 120, "band \(band): the sheet is fitted")
+                    measured[band] = Int(try XCTUnwrap(mainScroll(app)).contentSize.height.rounded())
+                }
+            }
+            XCTAssertEqual(Set(measured.values).count, 1, "\(tools) tools, reports on days \(days): a fitted feed's content height must not depend on how much of it is in view, or the sheet's detent chases it: \(measured)")
+        }
+    }
+
     func testNestedSheetNeverTucksItsParentAndClosingRestoresIt() async throws {
         try await mounted(["-tron-settings-fixture", "-settings-nested", "-settings-expanded-review"]) { app in
             try await app.activate("Open Settings")
