@@ -98,11 +98,8 @@ private struct TronSheetDetentDriver: UIViewControllerRepresentable {
         }
 
         private func floored(_ target: Target, under presenter: Target?) -> Target {
-            switch (target, presenter) {
-            case (.fit(let height), .fit(let floor)): .fit(max(height, floor))
-            case (.fit, .large): .large
-            default: target
-            }
+            guard case .fit(let height) = target, case .fit(let floor) = presenter else { return target }
+            return .fit(max(height, floor))
         }
 
         func apply() {

@@ -134,9 +134,10 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   `UISheetPresentationController.animateChanges` (the system sheet spring), including growth to and
   from full height; Reduce Motion applies it instantly. A sheet's height preference never reaches
   the sheet that presented it.
-  Opening a child never changes its parent's detent, and a nested sheet never opens shorter than the
-  sheet it covers (the detent driver floors a child at its presenter's applied detent), so UIKit never tucks the parent down behind it and an interactive
-  swipe-dismiss of the child leaves the parent nothing to catch up on. A covered sheet never
+  Opening a child never changes its parent's detent. UIKit tucks a fitted parent down to a shorter child's
+  height and never tucks a `.large` one, so a child over a `.large` parent fits its own content, while a child
+  over a fitted parent never opens shorter than it (the detent driver floors it at the presenter's fitted
+  height): the parent never tucks and an interactive swipe-dismiss of the child leaves it nothing to catch up on. A covered sheet never
   drives its detent; it reapplies its own height once uncovered. The drag indicator is hidden.
   The measured scroll extends under the bottom safe area; a fitted sheet adds no bottom content
   margin, so content never exceeds its frame and the sheet cannot scroll or bounce; it also does not clip, so
