@@ -6,6 +6,7 @@ import UIKit
     static var record: (@MainActor (String, String) -> Void)?
     static var nativeView: (@MainActor (String) -> AnyView)?
     static var questionPageDrag: (@MainActor (UIGestureRecognizer.State, CGFloat, CGFloat) -> Void)?
+    static var sheetDrag: (@MainActor (UIViewController, UIGestureRecognizer.State, CGFloat, CGFloat) -> Void)?
 }
 #endif
 

@@ -156,7 +156,7 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         }
     }
 
-    func testNestedSheetNeverTucksItsParentAndClosingRestoresIt() async throws {
+    func testNestedSheetFitsItsOwnContentWhileItsParentStepsBackUnresized() async throws {
         try await mounted(["-tron-settings-fixture", "-settings-nested", "-settings-expanded-review"]) { app in
             try await app.activate("Open Settings")
             _ = try await revealed(app, "settings-link-Connections")
@@ -166,6 +166,51 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
             try await openManageHome(app)
             try await app.until("the Disable Home toolbar control") { app.element("home-manage-disable") != nil }
             try await assertNested(app, "manage-home-disable-confirmation") { try await app.activate("home-manage-disable") }
+        }
+        try await mounted(["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-browser-loading"]) { app in
+            try await openManageHome(app)
+            try await app.activate("home-manage-memory-browser")
+            try await app.until("the memory list loads") { app.element("home-memory-row-39") != nil }
+            try await app.waitForTopSheetToSettle()
+            XCTAssertLessThan(sheetFrame(app).minY, 120, "the memory list is a full-height parent")
+            try await assertNested(app, "memory-item-over-large-list") { try await app.activate("home-memory-row-39") }
+        }
+    }
+
+    func testSwipeDownDismissesOnlyTheTopSheet() async throws {
+        try await mounted(["-tron-settings-fixture", "-settings-nested", "-settings-expanded-review"]) { app in
+            try await app.activate("Open Settings")
+            try await app.waitForTopSheetToSettle()
+            _ = try await revealed(app, "settings-link-Connections")
+            try await app.activate("settings-link-Connections")
+            try await app.until("Connections over Settings") { sheetChain(app).count == 2 }
+            try await app.waitForTopSheetToSettle()
+            let drag = try XCTUnwrap(HostedPresentationProbe.sheetDrag, "the sheet presenter takes drags")
+            let parent = sheetChain(app)[0], child = sheetChain(app)[1]
+            let parentStart = rendered(parent), childStart = rendered(child)
+            UIView.setAnimationsEnabled(true)
+            defer { UIView.setAnimationsEnabled(false) }
+            drag(child, .began, 0, 0)
+            for step in 1...6 {
+                drag(child, .changed, CGFloat(step) * 8, 0)
+                await MountedFixture.nextFrame()
+            }
+            XCTAssertEqual(rendered(child).minY, childStart.minY + 48, accuracy: 1, "The top sheet follows the finger down")
+            XCTAssertEqual(rendered(child).height, childStart.height, accuracy: 0.5, "A dragged sheet keeps its height")
+            drag(child, .ended, 48, 0)
+            try await app.until("a short slow drag springs back") { sheetChain(app).count == 2 && abs(rendered(child).minY - childStart.minY) <= 0.5 }
+            drag(child, .began, 0, 0)
+            drag(child, .changed, 40, 0)
+            await MountedFixture.nextFrame()
+            drag(child, .ended, 40, 1800)
+            try await app.until("a flick dismisses the top sheet") { sheetChain(app).count == 1 }
+            try await app.waitForTopSheetToSettle()
+            XCTAssertTrue(sheetChain(app).first === parent, "Only the top sheet closes; its parent stays presented")
+            XCTAssertEqual(rendered(parent).minY, parentStart.minY, accuracy: 0.5, "The parent is restored where it rested")
+            XCTAssertEqual(rendered(parent).width, parentStart.width, accuracy: 0.5, "The parent is restored to its width")
+            UIView.setAnimationsEnabled(false)
+            try await app.activate("settings-link-Connections")
+            try await app.until("the swiped-away sheet opens again") { sheetChain(app).count == 2 }
         }
     }
 
@@ -221,7 +266,7 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         }
     }
 
-    func testKeyboardKeepsTheSheetFittedAboveIt() async throws {
+    func testKeyboardLiftsTheFittedSheetAboveIt() async throws {
         try await mounted(["-tron-ask-user-fixture"]) { app in
             try await app.until("the form") { app.element("Submit all answers") != nil }
             try await app.waitForTopSheetToSettle()
@@ -236,10 +281,11 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
                 NotificationCenter.default.post(name: UIResponder.keyboardWillShowNotification, object: nil,
                                                 userInfo: [UIResponder.keyboardFrameEndUserInfoKey: NSValue(cgRect: keyboard)])
             })
-            let lift = keyboard.height - app.window.safeAreaInsets.bottom
-            XCTAssertTrue(shown.samples.allSatisfy { $0.minY > 120 }, "With the keyboard up the sheet stays fitted, never large\n\(shown)")
-            XCTAssertEqual(try XCTUnwrap(mainScroll(app)).bounds.height, idle + lift, accuracy: 0.5,
-                           "The fitted sheet grows by exactly the keyboard's height above the safe area\n\(shown)")
+            let height = sheetFrame(app).height
+            XCTAssertLessThanOrEqual(sheetFrame(app).maxY, keyboard.minY, "The sheet rests above the keyboard\n\(shown)")
+            XCTAssertGreaterThanOrEqual(sheetFrame(app).maxY, keyboard.minY - 16, "The sheet sits on the keyboard\n\(shown)")
+            XCTAssertEqual(try XCTUnwrap(mainScroll(app)).bounds.height, idle, accuracy: 0.5, "The lifted sheet keeps its fitted height\n\(shown)")
+            XCTAssertTrue(shown.samples.allSatisfy { abs($0.height - height) <= 0.5 }, "The sheet lifts without resizing\n\(shown)")
             shown.assertStill("The sheet rises above the keyboard in one move", against: app)
             let hidden = try await SheetTrace.record(app, frames: 90, each: { index in
                 if index == 0 { NotificationCenter.default.post(name: UIResponder.keyboardWillHideNotification, object: nil) }
@@ -303,17 +349,13 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
             try await app.activate("home-manage-memory-browser")
             var loadingAtOpen = false
             var loadedAt: Int?
-            var detents: [String] = []
             let trace = try await SheetTrace.record(app, frames: 420, ready: { app.element("home-sheet-done-memory") != nil }) { index in
                 if index == 0 { loadingAtOpen = app.element("sheet-loading") != nil }
                 if index == 20 { capture(app, "memory-loading") }
                 if loadedAt == nil, app.element("home-memory-row-39") != nil { loadedAt = index; capture(app, "memory-loaded") }
-                let detent = sheetChain(app).last?.sheetPresentationController?.detents.map(\.identifier.rawValue).joined(separator: ",") ?? "none"
-                if detents.last != detent { detents.append(detent) }
             }
             XCTAssertTrue(loadingAtOpen, "The memory sheet opens while its first page is still loading\n\(app.tree())")
             let loaded = try XCTUnwrap(loadedAt, "The first memory page arrives during the trace\n\(trace)")
-            XCTAssertEqual(detents.count, 1, "Loading and loaded share one detent: \(detents)\n\(trace)")
             XCTAssertEqual(trace.samples[loaded].minY, trace.final.minY, accuracy: 0.5,
                            "The sheet already stands at its loaded height when the first page arrives\n\(trace)")
             trace.assertStill("The memory sheet opens once, at the height it loads into", against: app)
@@ -366,37 +408,50 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         return chain
     }
 
+    private func rendered(_ controller: UIViewController) -> CGRect {
+        let layer = controller.view.layer.presentation() ?? controller.view.layer
+        return layer.convert(layer.bounds, to: nil)
+    }
+
     private func assertNested(_ app: MountedFixture, _ name: String, open: () async throws -> Void) async throws {
-        try await app.until("\(name) parent settles") { true }
+        try await app.waitForTopSheetToSettle()
         let parent = try XCTUnwrap(sheetChain(app).last)
-        @MainActor func parentFrame() -> CGRect { parent.view.convert(parent.view.bounds, to: nil) }
-        let parentStart = parentFrame()
         let depth = sheetChain(app).count
+        let start = rendered(parent)
+        let model = parent.view.bounds.size
+        var frames: [CGRect] = [], sizes: [CGSize] = []
+        @MainActor func sample() {
+            frames.append(rendered(parent))
+            sizes.append((parent.view.layer.presentation() ?? parent.view.layer).bounds.size)
+        }
         UIView.setAnimationsEnabled(true)
         try await open()
-        let context = DetentContext(traits: parent.traitCollection, maximum: app.window.bounds.height)
-        @MainActor func parentDetents() -> [CGFloat?] {
-            parent.sheetPresentationController?.detents.map { $0.resolvedValue(in: context) } ?? []
-        }
-        let detentsStart = parentDetents()
-        var detents: [[CGFloat?]] = []
-        var parentYs: [CGFloat] = []
-        let trace = try await SheetTrace.record(app, frames: 120, ready: { sheetChain(app).count == depth + 1 }) { _ in
-            detents.append(parentDetents())
-            let layer = parent.view.layer.presentation() ?? parent.view.layer
-            parentYs.append(layer.convert(layer.bounds, to: nil).minY)
-        }
-        XCTAssertTrue(parentYs.allSatisfy { abs($0 - parentStart.minY) <= 0.5 },
-                      "\(name): the parent keeps its own height under the nested sheet, never tucked: \(Set(parentYs.map { Int($0) }).sorted())")
-        XCTAssertFalse(detentsStart.isEmpty, "\(name): the parent has a detent")
-        XCTAssertTrue(detents.allSatisfy { $0 == detentsStart }, "\(name): opening a nested sheet changed its parent's detent from \(detentsStart) to \(Set(detents.map { "\($0)" }))")
+        let trace = try await SheetTrace.record(app, frames: 120, ready: { sheetChain(app).count == depth + 1 }) { _ in sample() }
         trace.assertStill("\(name): the nested sheet opens at its final height", against: app)
         try await assertFitted(app, "\(name)-over-parent")
+        let child = sheetFrame(app)
+        let scroll = try XCTUnwrap(mainScroll(app))
+        let needed = scroll.contentSize.height + scroll.adjustedContentInset.top + scroll.adjustedContentInset.bottom
+        XCTAssertGreaterThanOrEqual(needed, scroll.bounds.height - 1,
+            "\(name): the nested sheet is sized by its own content, not its parent (content \(needed), sheet \(scroll.bounds.height))")
+        let covered = rendered(parent)
+        XCTAssertLessThan(covered.width, child.width - 10, "\(name): the parent steps back narrower than the sheet over it, a deck card: \(covered) under \(child)")
+        XCTAssertLessThanOrEqual(covered.minY, child.minY - 11.5, "\(name): the parent's top peeks above the sheet over it: \(covered) under \(child)")
+        UIView.setAnimationsEnabled(true)
         _ = sheetChain(app).last?.presentingViewController?.dismiss(animated: true)
+        for _ in 0..<90 { sample(); await MountedFixture.nextFrame() }
+        UIView.setAnimationsEnabled(false)
         try await app.until("\(name) closes") { sheetChain(app).count == depth }
+        let log = "\(name) parent frames: " + frames.map { "\(Int($0.minY))/\(Int($0.width))x\(Int($0.height))" }.joined(separator: " ")
+        XCTAssertTrue(sizes.allSatisfy { abs($0.height - model.height) <= 0.5 && abs($0.width - model.width) <= 0.5 },
+                      "\(name): the parent never resizes while a nested sheet comes and goes: \(Set(sizes.map { "\(Int($0.width))x\(Int($0.height))" }))")
+        XCTAssertTrue(frames.allSatisfy { abs($0.width / $0.height - start.width / start.height) <= 0.005 },
+                      "\(name): the parent only scales as a card, never reflows\n\(log)")
+        XCTAssertTrue(frames.allSatisfy { $0.minY <= start.minY + 0.5 }, "\(name): the parent is never tucked down under the nested sheet\n\(log)")
         try await app.waitForTopSheetToSettle()
-        XCTAssertEqual(parentFrame().minY, parentStart.minY, accuracy: 0.5, "\(name): closing the nested sheet restores its parent")
-        XCTAssertEqual(parentFrame().height, parentStart.height, accuracy: 0.5, "\(name): closing the nested sheet restores its parent")
+        XCTAssertEqual(rendered(parent).minY, start.minY, accuracy: 0.5, "\(name): closing the nested sheet restores its parent")
+        XCTAssertEqual(rendered(parent).width, start.width, accuracy: 0.5, "\(name): closing the nested sheet restores its parent")
+        XCTAssertEqual(rendered(parent).height, start.height, accuracy: 0.5, "\(name): closing the nested sheet restores its parent")
     }
 
     func testHeightChangesAfterOpeningAnimateWithTheContent() async throws {
@@ -467,12 +522,6 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         let shot = XCTAttachment(image: app.render())
         shot.name = "sheet-\(name)"; shot.lifetime = .keepAlways; add(shot)
     }
-}
-
-final class DetentContext: NSObject, UISheetPresentationControllerDetentResolutionContext {
-    let containerTraitCollection: UITraitCollection
-    let maximumDetentValue: CGFloat
-    init(traits: UITraitCollection, maximum: CGFloat) { containerTraitCollection = traits; maximumDetentValue = maximum }
 }
 
 struct SheetTrace: CustomStringConvertible {

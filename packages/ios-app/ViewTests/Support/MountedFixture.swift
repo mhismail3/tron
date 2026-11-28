@@ -115,16 +115,10 @@ final class MountedFixture {
     func waitForTopSheetToSettle() async throws {
         var controller: UIViewController = host
         while let next = controller.presentedViewController { controller = next }
-        guard let detent = controller.sheetPresentationController?.detents.last else {
-            throw FixtureNotReady(description: "the top controller is not a sheet")
-        }
-        if detent.identifier == .large {
-            try await until("the sheet reaches its large detent") { controller.view.convert(controller.view.bounds, to: nil).minY < 120 }
-        } else {
-            try await until("the sheet rests at its one content-fit detent") {
-                let frame = controller.view.convert(controller.view.bounds, to: nil)
-                return frame.minY > 0 && frame.maxY <= window.bounds.maxY + 0.5 && window.bounds.maxY - frame.maxY <= 12
-            }
+        guard controller !== host else { throw FixtureNotReady(description: "no sheet is presented") }
+        try await until("the top sheet rests on the bottom edge") {
+            let frame = controller.view.convert(controller.view.bounds, to: nil)
+            return frame.minY > 0 && frame.maxY <= window.bounds.maxY + 0.5 && window.bounds.maxY - frame.maxY <= 12
         }
     }
 
