@@ -180,6 +180,7 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
     func testSwipeDownDismissesOnlyTheTopSheet() async throws {
         try await mounted(["-tron-settings-fixture", "-settings-nested", "-settings-expanded-review"]) { app in
             try await app.activate("Open Settings")
+            try await app.until("Settings opens") { sheetChain(app).count == 1 }
             try await app.waitForTopSheetToSettle()
             _ = try await revealed(app, "settings-link-Connections")
             try await app.activate("settings-link-Connections")
